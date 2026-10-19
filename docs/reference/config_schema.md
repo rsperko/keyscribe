@@ -589,8 +589,10 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   fails to load as a whole and the last good copy stays in effect (surfaced like any malformed config file).
 - **Matching order**, first hit wins: a place's spoken name exactly; a running app's name exactly; a
   contiguous run of words in a running app's name ("chrome" → Google Chrome); the same partial rule on
-  place names; then installed apps (exact, then partial). Only if nothing matches is a near-miss snapped,
-  using the dictionary's fuzzy rule, against places and running apps (never installed-only apps).
+  place names; an installed app's name exactly; then an **open window's title**, exactly and then as a
+  contiguous run of words; then installed apps partially. Only if nothing matches is a near-miss snapped,
+  using the dictionary's fuzzy rule, against places and running apps (never installed-only apps or
+  windows).
   Different targets tied at the winning step are offered as a numbered choice and nothing runs until one
   is chosen; above `VoiceCommandChoice.displayLimit` targets the command fails and asks for more of the
   name. Places and actions keep their configured order in the choice, apps are sorted by name. A
@@ -599,6 +601,23 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   listed in. Places or actions may share a spoken name on purpose — that is how to get the choice — so a
   shared name is an advisory in Settings, never a load error; primary names must still be unique. The
   advisory compares names the way each family is matched: places ignoring spaces, actions word by word.
+- **Window titles** are read over Accessibility on this Mac, and only when no place or app name matched
+  first, so an exact app name (`open Slack`) never looks at windows. A title matches exactly when the
+  spoken target equals the whole title or one of its parts: apps put the document, project, and app name
+  in one title between separators such as a spaced dash or a pipe (`WindowTitle.segments` holds the
+  rule). Only standard windows with a title are matched, minimized ones and those of hidden apps included; sheets,
+  panels, and dialogs are not, nor are this app's own windows. macOS lists only the windows on the
+  current desktop, so a window on another desktop or in another full-screen app cannot be found from
+  here, though its app's name still works. A browser window is matched by its current tab's title, since
+  that is the window's title; a page in a background tab is reached with a web place. A choice between
+  windows names each one's app, and the document or site when two titles are the same.
+- **If any app does not answer when its windows are read**, the command fails without opening anything
+  (`Could not check all open windows. Nothing was opened. Try again.`) rather than choosing from the
+  windows that did answer. When Accessibility is off, the command says so and offers its settings.
+- **A window is brought forward by identity, never by title.** The choice made when the command was
+  heard is re-found in the same process just before it moves; if it has closed, the command says so and
+  brings nothing else forward, and if the app does not answer it fails without trying anything else. A
+  step already taken (a window unminimized, say) is not undone when a later one fails.
 - **Tab matching** ignores the scheme, a leading `www.`, the host's case, and trailing slashes, and respects
   path boundaries (`mail.example.com` never matches `mail.example.community`). The path, query, and fragment
   keep their case: `example.com/Project` does not match a tab on `example.com/project`. Only browsers whose
@@ -618,11 +637,15 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   the tab inside its own windows, but it is never brought forward: only an answer in time does that.
 - **A take whose microphone stopped never runs a command**, including a loss that arrives while the command
   is being looked up or while a tab is being focused. Nothing further is opened or brought forward.
-- `go back` returns to the app that was frontmost before the last app switch by voice, not to a browser tab
-  or window. Running a script or shortcut does not change that destination. It is kept in memory only,
-  so it is lost when the app quits. Repeating `go back` switches back again.
+- `go back` returns to the window that was in front before the last switch by voice, even within the same
+  app, or to its app when that window has closed or is no longer on this desktop. It never opens another
+  copy of an app that has quit since, and an app that does not answer leaves the destination in place for
+  another try. A command whose target was already in front keeps the earlier destination. Running a
+  script or shortcut does not change it. It is kept in memory only, so it is lost when the app quits.
+  Repeating `go back` switches back again.
 - **Try it** in Settings never runs a command, script, or shortcut, but previewing a web place reads the open tabs,
-  so it can be what first asks macOS for permission to control a browser.
+  so it can be what first asks macOS for permission to control a browser, and previewing a phrase no app or
+  place matches reads the open windows' titles. Reading windows never asks for a permission.
 
 ### Replacement matching & output
 

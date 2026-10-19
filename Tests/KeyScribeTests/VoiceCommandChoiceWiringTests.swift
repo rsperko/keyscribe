@@ -484,6 +484,6 @@ struct VoiceCommandChoiceWiringTests {
         h.system.running.append(VoiceCommandCatalog.App(name: "TextEdit", bundleId: "com.apple.TextEdit"))
         await h.dictate("switch to mail")
         await h.dictate("two")
-        #expect(h.runner.backTarget == VoiceCommandOrigin(bundleId: "com.apple.TextEdit"))
+        #expect(h.runner.backTarget == VoiceCommandOrigin(bundleId: "com.apple.TextEdit", pid: 1))
     }
 }

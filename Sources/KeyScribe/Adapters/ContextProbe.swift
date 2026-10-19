@@ -2,10 +2,6 @@ import AppKit
 import ApplicationServices
 import KeyScribeKit
 
-// Private AX SPI for the CGWindowID backing an AXUIElement window.
-@_silgen_name("_AXUIElementGetWindow")
-private func _AXUIElementGetWindow(_ element: AXUIElement, _ windowID: UnsafeMutablePointer<CGWindowID>) -> AXError
-
 @MainActor
 enum ContextProbe {
     static func initialSnapshot() -> TargetSnapshot {
@@ -123,8 +119,7 @@ enum ContextProbe {
     }
 
     nonisolated private static func cgWindowID(of window: AXUIElement) -> CGWindowID? {
-        var windowID = CGWindowID(0)
-        return _AXUIElementGetWindow(window, &windowID) == .success && windowID != 0 ? windowID : nil
+        AXWindowID.of(window)
     }
 
     nonisolated private static func windowIdString(of window: AXUIElement) -> String? {

@@ -1,14 +1,23 @@
 import AppKit
+import ApplicationServices
 import KeyScribeKit
 
 struct VoiceCommandOrigin: Equatable, Sendable {
     let bundleId: String
+    var pid: Int32?
+    var windowId: String?
+
+    init(bundleId: String, pid: Int32? = nil, windowId: String? = nil) {
+        self.bundleId = bundleId
+        self.pid = pid
+        self.windowId = windowId.flatMap { $0.hasPrefix("cg:") ? $0 : nil }
+    }
 }
 
 enum VoiceCommandOutcome: Equatable, Sendable {
     case done(summary: String, command: String)
     case started(summary: String, command: String)
-    case failed(message: String, command: String? = nil)
+    case failed(message: String, command: String? = nil, action: HUDErrorAction? = nil)
     case needsChoice(VoiceCommandPendingChoice)
     case abandoned
 }
@@ -80,6 +89,10 @@ protocol VoiceCommandSystem: AnyObject {
     func isInstalled(bundleId: String) -> Bool
     func openApp(bundleId: String) async -> Bool
     func focusTab(_ tab: VoiceCommandCatalog.Tab) async -> TabFocusResult
+    func windows() async -> VoiceCommandCatalog.WindowScan
+    func focusWindow(_ window: VoiceCommandCatalog.Window, stillWanted: @MainActor () -> Bool) async -> WindowFocusResult
+    func isRunning(pid: Int32, bundleId: String) -> Bool
+    func activate(pid: Int32) -> Bool
     func openURL(_ url: String, browser: String?) async -> Bool
     func runScript(
         _ script: VoiceCommandScript, arguments: [String], onLateFinish: @escaping @MainActor (ScriptRun) -> Void
@@ -165,11 +178,22 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     func resolve(
         _ transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = []
     ) async -> VoiceCommandResolution {
-        let withoutApps = VoiceCommandResolver.resolve(transcript, catalog: VoiceCommandCatalog(scripts: scripts))
+        let withoutApps = VoiceCommandResolver.resolve(
+            transcript, catalog: VoiceCommandCatalog(scripts: scripts, windows: .complete([])))
         guard case .noMatch = withoutApps else { return withoutApps }
         let catalog = VoiceCommandCatalog(
             places: places, scripts: scripts, runningApps: system.runningApps(), installedApps: await system.installedApps())
-        return await readingTabs(catalog) { VoiceCommandResolver.resolve(transcript, catalog: $0) }
+        return await readingWindows(catalog) { VoiceCommandResolver.resolve(transcript, catalog: $0) }
+    }
+
+    private func readingWindows(
+        _ catalog: VoiceCommandCatalog, _ resolve: (VoiceCommandCatalog) -> VoiceCommandResolution
+    ) async -> VoiceCommandResolution {
+        let first = await readingTabs(catalog, resolve)
+        guard case .needsWindows = first else { return first }
+        var catalog = catalog
+        catalog.windows = await system.windows()
+        return await readingTabs(catalog, resolve)
     }
 
     private func readingTabs(
@@ -320,7 +344,11 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         case .scriptNotFound(let target):
             return .failed(message: Self.notFoundMessage(target))
         case .noMatch(let target):
-            return .failed(message: "No app or place called \u{201C}\(target)\u{201D}.")
+            return .failed(message: Self.noMatchMessage(target))
+        case .needsWindows, .windowsIncomplete:
+            return .failed(message: Self.windowsIncompleteMessage)
+        case .windowsNeedAccessibility:
+            return .failed(message: Self.windowsNeedAccessibilityMessage, action: .openAccessibilitySettings)
         case .ambiguous(let choice):
             return .failed(message: choice.tooManyMessage)
         case .unavailable(let name):
@@ -346,14 +374,23 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         let succeeded: Bool
         switch action {
         case .goBack:
-            guard let back = backTarget, system.isRunning(bundleId: back.bundleId) else {
-                return .failed(message: "Nothing to go back to.")
+            return await goBack(to: origin, stillWanted: stillWanted)
+        case .window(let window):
+            switch await system.focusWindow(window, stillWanted: stillWanted) {
+            case .focused:
+                succeeded = true
+            case .alreadyFrontmost:
+                return .done(summary: summary, command: command)
+            case .gone:
+                return .failed(message: Self.windowGoneMessage, command: command)
+            case .elsewhere:
+                return .failed(message: Self.windowElsewhereMessage, command: command)
+            case .noResponse, .failed:
+                return .failed(message: Self.windowNotForwardMessage(window.appName), command: command)
+            case .cancelled:
+                return .abandoned
             }
-            let name = system.appName(forBundleId: back.bundleId) ?? summary
-            command = "Returns to \(name)."
-            succeeded = await system.openApp(bundleId: back.bundleId)
-            if succeeded { backTarget = origin }
-            return succeeded ? .done(summary: name, command: command) : .failed(message: "Could not go back.", command: command)
+            guard stillWanted() else { return .abandoned }
         case .app(let app):
             succeeded = await system.openApp(bundleId: app.bundleId)
         case .place(_, .app(let bundleId)):
@@ -388,6 +425,57 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         guard succeeded else { return .failed(message: "Could not switch to \(summary).", command: command) }
         if let origin { backTarget = origin }
         return .done(summary: summary, command: command)
+    }
+
+    private func goBack(to origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool) async -> VoiceCommandOutcome {
+        let nothing = VoiceCommandOutcome.failed(message: "Nothing to go back to.")
+        guard let back = backTarget else { return nothing }
+        let name = system.appName(forBundleId: back.bundleId) ?? back.bundleId
+        let command = "Returns to \(name)."
+        let failure = VoiceCommandOutcome.failed(message: "Could not go back.", command: command)
+        if let pid = back.pid, let windowId = back.windowId {
+            let window = VoiceCommandCatalog.Window(bundleId: back.bundleId, appName: name, pid: pid, id: windowId, title: "")
+            switch await system.focusWindow(window, stillWanted: stillWanted) {
+            case .focused:
+                guard stillWanted() else { return .abandoned }
+                backTarget = origin
+                return .done(summary: name, command: command)
+            case .alreadyFrontmost:
+                return .done(summary: name, command: command)
+            case .gone, .elsewhere:
+                break
+            case .noResponse, .failed:
+                return failure
+            case .cancelled:
+                return .abandoned
+            }
+        }
+        let succeeded: Bool
+        if let pid = back.pid {
+            guard system.isRunning(pid: pid, bundleId: back.bundleId) else { return nothing }
+            guard stillWanted() else { return .abandoned }
+            succeeded = system.activate(pid: pid)
+        } else {
+            guard system.isRunning(bundleId: back.bundleId) else { return nothing }
+            succeeded = await system.openApp(bundleId: back.bundleId)
+        }
+        guard succeeded else { return failure }
+        backTarget = origin
+        return .done(summary: name, command: command)
+    }
+
+    nonisolated static func noMatchMessage(_ target: String) -> String {
+        "No matching app, place, or window found for \u{201C}\(target)\u{201D}."
+    }
+
+    nonisolated static let windowsIncompleteMessage = "Could not check all open windows. Nothing was opened. Try again."
+    nonisolated static let windowsNeedAccessibilityMessage =
+        "Accessibility is off, so open windows could not be checked. Nothing was opened."
+    nonisolated static let windowGoneMessage = "That window is no longer open."
+    nonisolated static let windowElsewhereMessage = "That window is now on another desktop, so it was not brought forward."
+
+    nonisolated static func windowNotForwardMessage(_ app: String) -> String {
+        "Could not bring that window forward in \(app). Try again."
     }
 
     static func unavailableMessage(_ name: String) -> String {
@@ -439,6 +527,8 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     private var installedCache: (apps: [VoiceCommandCatalog.App], loadedAt: Date)?
     private static let installedTTL: TimeInterval = 60
     private static let scripts = DeadlineQueue(label: "com.keyscribe.voice-commands.applescript")
+    private static let accessibility = DeadlineQueue(label: "com.keyscribe.voice-commands.accessibility")
+    private static let windowReadDeadline: TimeInterval = 1
     private static let tabReadDeadline: TimeInterval = 1.5
     private static let focusDeadline: TimeInterval = 2
 
@@ -640,6 +730,82 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
         case .finished(true):
             return .focused
         }
+    }
+
+    func windows() async -> VoiceCommandCatalog.WindowScan {
+        let processes = AppWindows.processes(excluding: ProcessInfo.processInfo.processIdentifier)
+        let trusted = AXIsProcessTrusted()
+        let started = DispatchTime.now()
+        guard case .finished(let scan) = await Self.accessibility.run(within: Self.windowReadDeadline, { isCurrent in
+            AppWindows.collect(processes, trusted: trusted, isCurrent: isCurrent) { AppWindows.read(pid: $0.pid, isCurrent: isCurrent) }
+        }) else {
+            Log.context.error("voice command: open windows could not be read in time (\(processes.count, privacy: .public) apps)")
+            return .incomplete
+        }
+        let ms = (DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
+        switch scan {
+        case .complete(let windows):
+            Log.context.debug("voice command: read \(windows.count, privacy: .public) windows from \(processes.count, privacy: .public) apps in \(ms, privacy: .public)ms")
+        case .incomplete:
+            Log.context.error("voice command: an app did not list its windows (\(processes.count, privacy: .public) apps, \(ms, privacy: .public)ms)")
+        case .needsAccessibility:
+            Log.context.error("voice command: open windows need Accessibility")
+        }
+        return scan
+    }
+
+    func focusWindow(_ window: VoiceCommandCatalog.Window, stillWanted: @MainActor () -> Bool) async -> WindowFocusResult {
+        guard let app = NSRunningApplication(processIdentifier: window.pid), !app.isTerminated,
+              app.bundleIdentifier == window.bundleId else { return .gone }
+        let deadline = Date().addingTimeInterval(Self.focusDeadline)
+        func withinDeadline<T: Sendable>(_ work: @escaping @Sendable (_ isCurrent: () -> Bool) -> T) async -> DeadlineResult<T> {
+            let left = deadline.timeIntervalSinceNow
+            guard left > 0 else { return .expired }
+            return await Self.accessibility.run(within: left, work)
+        }
+        guard case .finished(let location) = await withinDeadline({ AppWindows.locate(window, isCurrent: $0) }) else {
+            Log.context.error("voice command: \(window.bundleId, privacy: .public) did not answer the window focus in time")
+            return .noResponse
+        }
+        guard stillWanted() else { return .cancelled }
+        switch location {
+        case .absent: return .gone
+        case .elsewhere: return .elsewhere
+        case .noResponse:
+            Log.context.error("voice command: \(window.bundleId, privacy: .public) did not list its windows for focus")
+            return .noResponse
+        case .found(let handle, let minimized, let focused):
+            if focused, !minimized, !app.isHidden, NSWorkspace.shared.frontmostApplication?.processIdentifier == window.pid {
+                return .alreadyFrontmost
+            }
+            guard let number = CGWindowID(window.id.dropFirst(3)) else { return .failed }
+            let steps = AppWindows.liveSteps(
+                handle, number: number, app: app, withinDeadline: { deadline.timeIntervalSinceNow > 0 }
+            ) { work in
+                guard case .finished(let step) = await withinDeadline(work) else { return .noResponse }
+                return step
+            }
+            let result = await AppWindows.bringForward(
+                isHidden: app.isHidden, isMinimized: minimized, steps: steps, stillWanted: stillWanted)
+            if result == .noResponse || result == .failed {
+                Log.context.error("voice command: \(window.bundleId, privacy: .public) window could not be confirmed in front")
+            }
+            return result
+        }
+    }
+
+    func isRunning(pid: Int32, bundleId: String) -> Bool {
+        guard let app = NSRunningApplication(processIdentifier: pid) else { return false }
+        return !app.isTerminated && app.bundleIdentifier == bundleId
+    }
+
+    func activate(pid: Int32) -> Bool {
+        guard let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return false }
+        if app.isHidden { app.unhide() }
+        let element = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(element, AppWindows.messagingTimeout)
+        if AXUIElementSetAttributeValue(element, kAXFrontmostAttribute as CFString, kCFBooleanTrue) == .success { return true }
+        return app.activate()
     }
 
     func frontTab(ofBrowser bundleId: String) async -> (url: String, title: String)? {

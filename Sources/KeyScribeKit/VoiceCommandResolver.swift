@@ -25,21 +25,63 @@ public struct VoiceCommandCatalog: Equatable, Sendable {
         }
     }
 
+    public struct Window: Equatable, Hashable, Sendable {
+        public var bundleId: String
+        public var appName: String
+        public var pid: Int32
+        public var id: String
+        public var title: String
+        public var isMinimized: Bool
+        public var document: String?
+        public init(
+            bundleId: String, appName: String, pid: Int32, id: String, title: String, isMinimized: Bool = false,
+            document: String? = nil
+        ) {
+            self.bundleId = bundleId
+            self.appName = appName
+            self.pid = pid
+            self.id = id
+            self.title = title
+            self.isMinimized = isMinimized
+            self.document = document
+        }
+    }
+
+    public enum WindowScan: Equatable, Sendable {
+        case complete([Window])
+        case incomplete
+        case needsAccessibility
+    }
+
     public var places: [VoiceCommandPlace]
     public var scripts: [VoiceCommandScript]
     public var runningApps: [App]
     public var installedApps: [App]
     public var tabs: [Tab]?
+    public var windows: WindowScan?
 
     public init(
         places: [VoiceCommandPlace] = [], scripts: [VoiceCommandScript] = [], runningApps: [App] = [],
-        installedApps: [App] = [], tabs: [Tab]? = nil
+        installedApps: [App] = [], tabs: [Tab]? = nil, windows: WindowScan? = nil
     ) {
         self.places = places
         self.scripts = scripts
         self.runningApps = runningApps
         self.installedApps = installedApps
         self.tabs = tabs
+        self.windows = windows
+    }
+}
+
+public enum WindowTitle {
+    static let separators = [" \u{2014} ", " \u{2013} ", " - ", " | ", " \u{00B7} ", " \u{2022} ", ": "]
+
+    public static func segments(_ title: String) -> [String] {
+        var parts = [" \(title) "]
+        for separator in separators {
+            parts = parts.flatMap { $0.components(separatedBy: separator) }
+        }
+        return parts.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 }
 
@@ -53,11 +95,13 @@ public enum VoiceCommandAction: Equatable, Sendable {
     case app(VoiceCommandCatalog.App)
     case place(VoiceCommandPlace, PlaceTarget)
     case script(VoiceCommandScript, arguments: [String])
+    case window(VoiceCommandCatalog.Window)
     case goBack
 
     public func summary(appName: (String) -> String?) -> String {
         switch self {
         case .app(let app): return app.name
+        case .window(let window): return "\(window.title) \u{00B7} \(window.appName)"
         case .goBack: return "Back"
         case .place(let place, .tab(let tab)):
             return appName(tab.browserBundleId).map { "\(place.name) · \($0)" } ?? place.name
@@ -69,7 +113,9 @@ public enum VoiceCommandAction: Equatable, Sendable {
     public func detail(appName: (String) -> String?) -> String {
         switch self {
         case .app(let app): return "Brings \(app.name) to the front, opening it if needed."
-        case .goBack: return "Returns to the app you were in before your last command."
+        case .window(let window):
+            return "Brings the window \u{201C}\(window.title)\u{201D} in \(window.appName) to the front."
+        case .goBack: return "Returns to the window or app you were in before your last command."
         case .place(_, .app(let bundleId)):
             return "Brings \(appName(bundleId) ?? bundleId) to the front, opening it if needed."
         case .place(_, .tab(let tab)):
@@ -96,6 +142,9 @@ public enum VoiceCommandResolution: Equatable, Sendable {
     case unavailable(String)
     case noMatch(String)
     case needsTabs(browser: String?)
+    case needsWindows
+    case windowsIncomplete
+    case windowsNeedAccessibility
     case browserNotAllowed(String)
     case scriptNeedsText(String)
     case scriptNotFound(String)
@@ -150,14 +199,33 @@ public enum VoiceCommandResolver {
         let places = catalog.places.map(VoiceCommandCandidate.place)
         let running = Self.ordered(catalog.runningApps).map(VoiceCommandCandidate.app)
         let installed = Self.ordered(catalog.installedApps).map(VoiceCommandCandidate.app)
-        let tiers: [([VoiceCommandCandidate], Match)] = [
-            (places, .exact), (running, .exact), (running, .partial), (places, .partial),
-            (installed, .exact), (installed, .partial),
+        let named: [([VoiceCommandCandidate], Match)] = [
+            (places, .exact), (running, .exact), (running, .partial), (places, .partial), (installed, .exact),
         ]
-        if let resolution = firstTier(tiers, target: target, catalog: catalog) { return resolution }
+        if let resolution = firstTier(named, target: target, catalog: catalog) { return resolution }
 
-        return nearestMiss(target, among: places + running, tiers: Array(tiers.prefix(4)), catalog: catalog)
+        let windows: [VoiceCommandCandidate]
+        switch catalog.windows {
+        case nil: return .needsWindows
+        case .incomplete: return .windowsIncomplete
+        case .needsAccessibility: return .windowsNeedAccessibility
+        case .complete(let listed): windows = Self.ordered(listed).map(VoiceCommandCandidate.window)
+        }
+        let rest: [([VoiceCommandCandidate], Match)] = [(windows, .exact), (windows, .partial), (installed, .partial)]
+        if let resolution = firstTier(rest, target: target, catalog: catalog) { return resolution }
+
+        return nearestMiss(target, among: places + running, tiers: Array(named.prefix(4)), catalog: catalog)
             ?? .noMatch(target)
+    }
+
+    private static func ordered(_ windows: [VoiceCommandCatalog.Window]) -> [VoiceCommandCatalog.Window] {
+        windows.enumerated().sorted { a, b in
+            let byName = a.element.appName.localizedStandardCompare(b.element.appName)
+            if byName != .orderedSame { return byName == .orderedAscending }
+            if a.element.bundleId != b.element.bundleId { return a.element.bundleId < b.element.bundleId }
+            if a.element.pid != b.element.pid { return a.element.pid < b.element.pid }
+            return a.offset < b.offset
+        }.map(\.element)
     }
 
     private static func nearestMiss(
@@ -218,6 +286,8 @@ public enum VoiceCommandResolver {
         switch candidate {
         case .app(let app):
             return .action(.app(app))
+        case .window(let window):
+            return .action(.window(window))
         case .place(let chosen):
             guard let current = catalog.places.first(where: { $0.hasSameDestination(as: chosen) }) else {
                 return .unavailable(chosen.name)
@@ -254,6 +324,8 @@ public enum VoiceCommandResolver {
             return .action(.app(app))
         case .script(let script):
             return .unavailable(script.name)
+        case .window(let window):
+            return .action(.window(window))
         case .place(let place):
             switch place.target {
             case .app(let bundleId):

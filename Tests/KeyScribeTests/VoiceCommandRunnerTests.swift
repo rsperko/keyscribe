@@ -56,6 +56,22 @@ struct VoiceCommandRunnerTests {
             return focusResult
         }
         func openURL(_ url: String, browser: String?) async -> Bool { openedURLs.append((url, browser)); return openSucceeds }
+        var windowScan: VoiceCommandCatalog.WindowScan = .complete([])
+        var windowFocusResults: [WindowFocusResult] = []
+        var whileFocusingWindow: () -> Void = {}
+        var runningPids: [Int32: String] = [:]
+        private(set) var windowReads = 0
+        private(set) var focusedWindows: [VoiceCommandCatalog.Window] = []
+        private(set) var activatedPids: [Int32] = []
+        func windows() async -> VoiceCommandCatalog.WindowScan { windowReads += 1; return windowScan }
+        func focusWindow(_ window: VoiceCommandCatalog.Window, stillWanted: @MainActor () -> Bool) async -> WindowFocusResult {
+            focusedWindows.append(window)
+            whileFocusingWindow()
+            guard stillWanted() else { return .cancelled }
+            return windowFocusResults.isEmpty ? .focused : windowFocusResults.removeFirst()
+        }
+        func isRunning(pid: Int32, bundleId: String) -> Bool { runningPids[pid] == bundleId }
+        func activate(pid: Int32) -> Bool { activatedPids.append(pid); return openSucceeds }
         func runScript(
             _ script: VoiceCommandScript, arguments: [String], onLateFinish: @escaping @MainActor (ScriptRun) -> Void
         ) async -> ScriptRun {
@@ -354,7 +370,7 @@ struct VoiceCommandRunnerTests {
         #expect(await runner.run(transcript: "hello", places: [], origin: nil)
                 == .failed(message: "Not a command. Say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}."))
         #expect(await runner.run(transcript: "switch to banana", places: [], origin: nil)
-                == .failed(message: "No app or place called \u{201C}banana\u{201D}."))
+                == .failed(message: "No matching app, place, or window found for \u{201C}banana\u{201D}."))
     }
 
     @Test func anAppThatWillNotOpenFails() async {

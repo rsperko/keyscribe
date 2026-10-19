@@ -12,7 +12,8 @@ struct VoiceCommandScriptTests {
         running: [VoiceCommandCatalog.App] = []
     ) -> VoiceCommandResolution {
         VoiceCommandResolver.resolve(
-            transcript, catalog: VoiceCommandCatalog(places: places, scripts: scripts, runningApps: running))
+            transcript, catalog: VoiceCommandCatalog(
+                places: places, scripts: scripts, runningApps: running, windows: .complete([])))
     }
 
     @Test func decodesScriptsBesidePlaces() throws {

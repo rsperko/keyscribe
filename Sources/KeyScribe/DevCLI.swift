@@ -85,6 +85,10 @@ public enum DevCLI {
                                       the saved places and scripts, print what it resolved to, run it, and exit. Exits
                                       non-zero when it does not resolve or does not run.
                 --dry-run               Print the resolution without running it.
+              --windows-probe         List every regular app's Accessibility windows (subrole, id, minimized,
+                                      whether a document is reported, title) with per-app read latency, then
+                                      exit. Read-only; prints window titles to this terminal only.
+                --focus <pid>:cg:<id>   Instead, bring that one window forward the way a voice command does.
               --list-engines          Print each shipped catalog engine and whether it is installed
                                       (installed / missing / system), then exit — coverage for the release gate.
               --mlx-smoke             Run a tiny MLX computation on the GPU, then exit 0. A missing or unloadable
@@ -227,6 +231,16 @@ public enum DevCLI {
             let dryRun = CommandLine.arguments.contains("--dry-run")
             Task { @MainActor in
                 exit(await VoiceCommandCLI.run(transcript: transcript, dryRun: dryRun))
+            }
+            dispatchMain()
+        }
+
+        if CommandLine.arguments.contains("--windows-probe") {
+            let args = CommandLine.arguments
+            let focus: String? = args.firstIndex(of: "--focus").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+            Task { @MainActor in
+                if let focus { exit(await WindowsProbe.focus(focus)) }
+                exit(WindowsProbe.list())
             }
             dispatchMain()
         }

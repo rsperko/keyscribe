@@ -995,7 +995,9 @@ final class DictationController {
         }
         guard machine.beginInserting() else { return }
         hud?.relinquishKeyFocus()
-        let origin = capturedSnapshot?.bundleId.map(VoiceCommandOrigin.init(bundleId:))
+        let origin = capturedSnapshot.flatMap { snapshot in
+            snapshot.bundleId.map { VoiceCommandOrigin(bundleId: $0, pid: snapshot.pid, windowId: snapshot.focusedWindowId) }
+        }
         let start = DispatchTime.now()
         let transcript = plan.voiceCommandText(heard: heard, mode: activeMode)
         let late = LateCommandResult()
@@ -1063,8 +1065,8 @@ final class DictationController {
             CommandPresentation(state: .commandDone(summary: summary, detail: HUDState.commandStillRunningDetail),
                                 cue: .success, hideAfter: 1.5, outcome: .commandStarted, result: resultPrefix + command,
                                 failure: nil)
-        case .failed(let message, let command):
-            CommandPresentation(state: .error(message: message, action: nil), cue: .error, hideAfter: 3,
+        case .failed(let message, let command, let action):
+            CommandPresentation(state: .error(message: message, action: action), cue: .error, hideAfter: 3,
                                 outcome: .commandFailed, result: resultPrefix + (command ?? ""), failure: message)
         case .needsChoice, .abandoned:
             nil
@@ -1121,7 +1123,8 @@ final class DictationController {
         let shortcut = plan.modes.first { $0.runsVoiceCommands }?.triggerKeys.first
             .flatMap { try? KeyDescriptor(parsing: $0.key) }?.displayString
         let use = shortcut.map { "Use \($0)" } ?? "Use your Voice Commands shortcut"
-        let hint = "\(use) and say \u{201C}two\u{201D} or \u{201C}the second one\u{201D}. "
+        let hint = (pending.choice.note.map { "\($0) " } ?? "")
+            + "\(use) and say \u{201C}two\u{201D} or \u{201C}the second one\u{201D}. "
             + "Say \u{201C}cancel\u{201D} to dismiss, or give a new command."
         return VoiceCommandChoicePrompt(id: pending.id, title: pending.choice.title, rows: pending.rows, hint: hint)
     }
@@ -1316,7 +1319,7 @@ final class DictationController {
         late.applied = true
         let failure: String?
         switch outcome {
-        case .failed(let message, _): failure = message
+        case .failed(let message, _, _): failure = message
         case .done: failure = nil
         case .started, .needsChoice, .abandoned: return
         }

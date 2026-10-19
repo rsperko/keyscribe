@@ -48,8 +48,8 @@ struct VoiceCommandsEditorView: View {
 
             Section("What it does") {
                 phraseRow("\u{201C}switch to …\u{201D}  \u{201C}open …\u{201D}",
-                          "Brings an app or saved place to the front, opening it if needed. App names work without setup.")
-                phraseRow("\u{201C}go back\u{201D}", "Returns to the app you were using before your last voice app switch. Say it again to switch back.")
+                          "Brings an app or saved place to the front, opening it if needed. App names work without setup. Say \u{2018}switch to Budget\u{2019} to bring an open window named Budget forward.")
+                phraseRow("\u{201C}go back\u{201D}", "Returns to the window or app you were using before your last switch by voice. Say it again to switch back.")
                 phraseRow("\u{201C}run …\u{201D}",
                           "Runs a script or shortcut below. Say its name after \u{201C}run\u{201D}, followed by any words it accepts.")
                 SettingRow(
@@ -291,7 +291,7 @@ struct VoiceCommandsEditorView: View {
                     }
                 }
             }
-            Text("Previews a command without opening anything or running an action. Checking open tabs reads their addresses and titles, and may ask to control your browser.")
+            Text("Previews a command without opening anything or running an action. Checking open tabs reads their addresses and titles, and may ask to control your browser. A phrase no app or place matches reads the titles of open windows.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

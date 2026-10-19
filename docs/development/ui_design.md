@@ -234,8 +234,8 @@ not to its label.
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
 | Stopped at the limit | “Stopped at the [limit] limit” (e.g. “5-minute”) | “Inserted without rewriting — dictate again to continue” when the mode rewrites, “Inserted — dictate again to continue” when it does not, or the copied explanation | Paste last dictation when copied |
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
-| Voice command ran (Voice Commands mode, experimental) | Where it went — the app, or the place and its browser (“Gmail · Google Chrome”) — or the script or shortcut it ran (“Deploy”) | “Voice command”, or “Started, still running” when the action has not finished; if it later fails, an Error naming the failure follows unless a dictation is in progress or a voice command choice is on screen, in which case History alone records it | None; dismiss automatically |
-| Voice command needs a choice (Voice Commands mode) | “Which one?” for apps and places, “Which action?” for `run` | Numbered rows, each a name over a detail that tells it apart (app, browser and host, app identity where names repeat, or Script/Shortcut), then how to answer with the actual Voice Commands shortcut | Click a row; Cancel. Stays until answered, dismissed, or idle for the timeout |
+| Voice command ran (Voice Commands mode, experimental) | Where it went — the app, the place and its browser (“Gmail · Google Chrome”), or the window and its app (“Budget — Numbers · Numbers”) — or the script or shortcut it ran (“Deploy”) | “Voice command”, or “Started, still running” when the action has not finished. A window that closed, moved to another desktop, or could not be confirmed in front, and a search where some app did not list its windows, show an Error saying so (Accessibility off adds **Open Accessibility Settings**); if an action later fails, an Error naming the failure follows unless a dictation is in progress or a voice command choice is on screen, in which case History alone records it | None; dismiss automatically |
+| Voice command needs a choice (Voice Commands mode) | “Which one?” for apps and places, “Which action?” for `run` | Numbered rows, each a name over a detail that tells it apart (app, browser and host, app identity where names repeat, a window's app plus its document or site when two titles are the same, or Script/Shortcut), then how to answer with the actual Voice Commands shortcut, led by one line when window rows still read the same (“Same name; the lower number is further forward.” within one app instance, else “Same name; these windows can’t be told apart.”) | Click a row; Cancel. Stays until answered, dismissed, or idle for the timeout |
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
@@ -846,8 +846,9 @@ Its sections are, in order:
    enabled mode uses (or giving another mode this one's) is refused with an Error at the top of the pane
    naming that mode, and a shared shortcut written by hand shows a red caption here (“… also uses this
    shortcut, so it does not start Voice Commands”) and marks the list row as never firing.
-2. **What it does** — four primary patterns: “switch to …” and “open …” for apps and places, “run …”
-   for scripts and shortcuts, and “go back”. Other app-switching verbs are also accepted
+2. **What it does** — four primary patterns: “switch to …” and “open …” for apps, places, and open
+   windows (“Say ‘switch to Budget’ to bring an open window named Budget forward.”), “run …”
+   for scripts and shortcuts, and “go back”, which returns to the window or app you left. Other app-switching verbs are also accepted
    (`VoiceCommandGrammar.focusVerbs`). Actions require “run”; neither a bare name nor an app-switching phrase runs one.
    Each pattern has one line on what it does, then the same **Recognition
    and replacements** summary and help as other modes, with **Edit Vocabulary…** opening Vocabulary on
@@ -858,7 +859,8 @@ Its sections are, in order:
    since a preview creates no question to answer. It sits beside the phrases it
    tests and re-checks the typed phrase whenever a place, an action, or the vocabulary changes. When the mode's vocabulary changed the
    phrase, it shows `Read as “…”` above the result. Its caption says that checking open tabs reads their
-   addresses and titles and may ask to control the browser.
+   addresses and titles and may ask to control the browser, and that a phrase no app or place matches reads
+   the titles of open windows.
 4. **Places** — nicknames for an app or a web page. The empty state explains that app names already work
    without one. Each row leads with an icon: the app's own for an app place, the chosen browser's for a web
    page (a globe for **Any browser**), and a generic symbol when that app is not on this Mac. Icons come

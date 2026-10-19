@@ -25,7 +25,7 @@ enum VoiceCommandCLI {
             print("started:    \(summary) (still running)")
             print("command:    \(command)")
             return 0
-        case .failed(let message, _):
+        case .failed(let message, _, _):
             print("failed:     \(message)")
             return 1
         case .needsChoice, .abandoned:
@@ -36,7 +36,9 @@ enum VoiceCommandCLI {
     private static func describe(_ resolution: VoiceCommandResolution, system: LiveVoiceCommandSystem) -> String {
         switch resolution {
         case .notACommand: return "not a command"
-        case .noMatch(let target): return "no match for \u{201C}\(target)\u{201D}"
+        case .noMatch(let target): return VoiceCommandRunner.noMatchMessage(target)
+        case .needsWindows, .windowsIncomplete: return VoiceCommandRunner.windowsIncompleteMessage
+        case .windowsNeedAccessibility: return VoiceCommandRunner.windowsNeedAccessibilityMessage
         case .ambiguous(let choice):
             guard choice.isOffered else { return choice.tooManyMessage }
             let rows = choice.candidates.enumerated().map { index, candidate in

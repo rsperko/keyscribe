@@ -248,7 +248,11 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         case .scriptNotFound(let target):
             return TryResult(heard: heard, summary: "No matching action", detail: VoiceCommandRunner.notFoundMessage(target), resolved: false)
         case .noMatch(let target):
-            return TryResult(heard: heard, summary: "No match", detail: "No running or installed app, and no place, is called \u{201C}\(target)\u{201D}.", resolved: false)
+            return TryResult(heard: heard, summary: "No match", detail: VoiceCommandRunner.noMatchMessage(target), resolved: false)
+        case .needsWindows, .windowsIncomplete:
+            return TryResult(heard: heard, summary: "Could not check all windows", detail: VoiceCommandRunner.windowsIncompleteMessage, resolved: false)
+        case .windowsNeedAccessibility:
+            return TryResult(heard: heard, summary: "Accessibility is off", detail: VoiceCommandRunner.windowsNeedAccessibilityMessage, resolved: false)
         case .ambiguous(let choice):
             guard choice.isOffered else {
                 return TryResult(heard: heard, summary: "Too many matches", detail: choice.tooManyMessage, resolved: false)

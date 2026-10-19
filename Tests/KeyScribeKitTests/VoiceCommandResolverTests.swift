@@ -14,9 +14,10 @@ struct VoiceCommandResolverTests {
 
     private func resolve(
         _ transcript: String, places: [VoiceCommandPlace] = [], running: [App] = [], installed: [App] = [],
-        tabs: [Tab]? = nil
+        tabs: [Tab]? = nil, windows: VoiceCommandCatalog.WindowScan? = .complete([])
     ) -> VoiceCommandResolution {
-        let catalog = VoiceCommandCatalog(places: places, runningApps: running, installedApps: installed, tabs: tabs)
+        let catalog = VoiceCommandCatalog(
+            places: places, runningApps: running, installedApps: installed, tabs: tabs, windows: windows)
         return VoiceCommandResolver.resolve(transcript, catalog: catalog)
     }
 

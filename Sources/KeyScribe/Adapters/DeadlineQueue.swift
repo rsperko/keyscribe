@@ -19,16 +19,46 @@ final class DeadlineQueue: Sendable {
     func run<T: Sendable>(
         within seconds: TimeInterval, _ work: @escaping @Sendable (_ isCurrent: () -> Bool) -> T
     ) async -> DeadlineResult<T> {
-        await withCheckedContinuation { (continuation: CheckedContinuation<DeadlineResult<T>, Never>) in
-            let gate = Gate()
-            queue.async {
-                guard gate.isOpen else { return }
-                let value = work { gate.isOpen }
-                if gate.close() { continuation.resume(returning: .finished(value)) }
+        let gate = Gate()
+        let reply = Reply<T>()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<DeadlineResult<T>, Never>) in
+                reply.attach(continuation)
+                if Task.isCancelled, gate.close() { reply.send(.expired) }
+                queue.async {
+                    guard gate.isOpen else { return }
+                    let value = work { gate.isOpen }
+                    if gate.close() { reply.send(.finished(value)) }
+                }
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + seconds) {
+                    if gate.close() { reply.send(.expired) }
+                }
             }
-            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + seconds) {
-                if gate.close() { continuation.resume(returning: .expired) }
+        } onCancel: {
+            if gate.close() { reply.send(.expired) }
+        }
+    }
+
+    private final class Reply<T: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<DeadlineResult<T>, Never>?
+        private var early: DeadlineResult<T>?
+
+        func attach(_ continuation: CheckedContinuation<DeadlineResult<T>, Never>) {
+            let ready: DeadlineResult<T>? = lock.withLock {
+                guard let early else { self.continuation = continuation; return nil }
+                return early
             }
+            if let ready { continuation.resume(returning: ready) }
+        }
+
+        func send(_ result: DeadlineResult<T>) {
+            let waiting: CheckedContinuation<DeadlineResult<T>, Never>? = lock.withLock {
+                guard let continuation else { early = result; return nil }
+                self.continuation = nil
+                return continuation
+            }
+            waiting?.resume(returning: result)
         }
     }
 

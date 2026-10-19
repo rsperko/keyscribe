@@ -143,8 +143,12 @@ shortcut when you want to speak a command:
   it uses a matching open tab when possible.
 - **“run journal buy milk”** runs an action you have added under **Actions**. A script or macOS
   shortcut receives the extra words only when you have configured it to accept them.
-- **“go back”** returns to the app you were using before your last app switch by voice. Say it again
-  to switch back. Running an action does not change that destination.
+- **“switch to budget”** brings forward an open window whose title says Budget. With two editor
+  windows or two terminals open, say a word from the title of the one you want. Only windows on the
+  current desktop can be found, and a browser window answers to its current tab's title; reach a page in
+  a background tab with a place instead.
+- **“go back”** returns to the window you were using before your last switch by voice, even in the
+  same app. Say it again to switch back. Running an action does not change that destination.
 
 Commands never type your words. An unrecognized command shows an explanation and runs nothing, and a
 command that matches more than one place, app, or action asks which one (below). **Try it** previews

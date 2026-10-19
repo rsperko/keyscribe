@@ -67,4 +67,44 @@ struct DeadlineQueueTests {
         #expect(value == 1)
         #expect(steps.count < 20)
     }
+
+    @Test func cancellingTheCallerEndsTheWaitAndStopsTheWork() async {
+        let queue = DeadlineQueue(label: "test.deadline.cancel")
+        let steps = Counter()
+        let call = Task {
+            await queue.run(within: 5) { isCurrent in
+                for _ in 0..<100 {
+                    guard isCurrent() else { break }
+                    steps.bump()
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+                return 0
+            }
+        }
+        while steps.count == 0 { try? await Task.sleep(for: .milliseconds(5)) }
+        let cancelledAt = Date()
+        call.cancel()
+        guard case .expired = await call.value else {
+            Issue.record("expected the cancelled call to end as expired")
+            return
+        }
+        #expect(Date().timeIntervalSince(cancelledAt) < 0.5)
+        _ = await queue.run(within: 1) { 0 }
+        #expect(steps.count < 100)
+    }
+
+    @Test func aCallerCancelledBeforeItStartsNeverRunsTheWork() async {
+        let queue = DeadlineQueue(label: "test.deadline.precancelled")
+        let ran = Counter()
+        let call = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await queue.run(within: 5) { ran.bump(); return 1 }
+        }
+        guard case .expired = await call.value else {
+            Issue.record("expected expiry")
+            return
+        }
+        _ = await queue.run(within: 1) { 0 }
+        #expect(ran.count == 0)
+    }
 }

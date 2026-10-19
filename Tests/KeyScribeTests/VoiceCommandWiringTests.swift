@@ -110,10 +110,10 @@ struct VoiceCommandWiringTests {
             insert: { _, _, _, text, _ in captured.insertedText = text; return true },
             submitKey: { _ in },
             pressSnapshot: { TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1) },
-            snapshot: { TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1, isSecureField: secureField) },
+            snapshot: { TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1, focusedWindowId: "cg:77", isSecureField: secureField) },
             snapshotAsync: {
                 focusMoves ? TargetSnapshot(bundleId: "com.example.other", pid: 2)
-                    : TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1, isSecureField: secureField)
+                    : TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1, focusedWindowId: "cg:77", isSecureField: secureField)
             },
             micStatus: { .granted },
             accessibilityGranted: { true },
@@ -150,7 +150,7 @@ struct VoiceCommandWiringTests {
         let result = try await run(transcript: "Switch to Ghostty.", places: [place])
         #expect(result.runner.calls.map(\.transcript) == ["Switch to Ghostty."])
         #expect(result.runner.calls.first?.places == [place])
-        #expect(result.runner.calls.first?.origin == VoiceCommandOrigin(bundleId: "com.apple.TextEdit"))
+        #expect(result.runner.calls.first?.origin == VoiceCommandOrigin(bundleId: "com.apple.TextEdit", pid: 1, windowId: "cg:77"))
         #expect(result.inserted == nil)
         #expect(result.hud.states.last == .commandDone(summary: "Ghostty"))
     }
@@ -225,12 +225,12 @@ struct VoiceCommandWiringTests {
     }
 
     @Test func aCommandThatMatchedNothingIsRecordedWithNoCommand() async throws {
-        let result = try await run(transcript: "switch to banana", outcome: .failed(message: "No app or place called “banana”."))
+        let result = try await run(transcript: "switch to banana", outcome: .failed(message: "No matching app, place, or window found for “banana”."))
         let entry = try #require(result.history.first)
         #expect(entry.heard == "switch to banana")
         #expect(entry.result == "")
         #expect(entry.outcome == .commandFailed)
-        #expect(entry.failureReason == "No app or place called “banana”.")
+        #expect(entry.failureReason == "No matching app, place, or window found for “banana”.")
     }
 
     @Test func aCommandIsNotRecordedWhileHistoryIsOff() async throws {
@@ -268,9 +268,29 @@ struct VoiceCommandWiringTests {
     }
 
     @Test func aFailedCommandShowsItsMessageAndInsertsNothing() async throws {
-        let result = try await run(transcript: "switch to banana", outcome: .failed(message: "No app or place called “banana”."))
+        let result = try await run(transcript: "switch to banana", outcome: .failed(message: "No matching app, place, or window found for “banana”."))
         #expect(result.inserted == nil)
-        #expect(result.hud.states.last == .error(message: "No app or place called “banana”.", action: nil))
+        #expect(result.hud.states.last == .error(message: "No matching app, place, or window found for “banana”.", action: nil))
+    }
+
+    @Test func aWindowCheckThatNeedsAccessibilityOffersTheSettings() async throws {
+        let result = try await run(transcript: "switch to budget", outcome: .failed(
+            message: VoiceCommandRunner.windowsNeedAccessibilityMessage, action: .openAccessibilitySettings))
+        #expect(result.inserted == nil)
+        #expect(result.hud.states.last == .error(
+            message: VoiceCommandRunner.windowsNeedAccessibilityMessage, action: .openAccessibilitySettings))
+    }
+
+    @Test func aWindowResultIsRecordedAsTheCommandThatRan() async throws {
+        let window = VoiceCommandCatalog.Window(
+            bundleId: "com.microsoft.VSCode", appName: "Visual Studio Code", pid: 20, id: "cg:1", title: "plan.md \u{2014} keyscribe")
+        let action = VoiceCommandAction.window(window)
+        let result = try await run(transcript: "switch to keyscribe", outcome: .done(
+            summary: action.summary(appName: { _ in nil }), command: action.command(appName: { _ in nil })))
+        #expect(result.history.map(\.result) == [
+            "Brings the window \u{201C}plan.md \u{2014} keyscribe\u{201D} in Visual Studio Code to the front.",
+        ])
+        #expect(result.hud.states.last == .commandDone(summary: "plan.md \u{2014} keyscribe \u{00B7} Visual Studio Code"))
     }
 
     @Test func aSpokenSuffixNeverReroutesACommand() async throws {

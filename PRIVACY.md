@@ -87,8 +87,11 @@ words, and every Add Place sheet explains that a place can bring an app's window
 a notice before first enabling Voice Commands explains that an unintended app's windows can become
 visible and receive your next keystrokes.
 
+To find a window you name, Voice Commands reads the titles of your open windows on this Mac, only when
+no app or place matched what you said. The titles are not sent anywhere or written to diagnostic logs.
+
 When history is on, each voice command is saved there like a dictation: what you said, the command it
-ran with those words, and, if it failed, the error message, which can include the last line the script
+ran with those words (for a window, its title and app, and the titles in a list it offered you), and, if it failed, the error message, which can include the last line the script
 or shortcut wrote to its error output. An action still running when it is saved is updated with its
 final result when it finishes. Turning history off stops this along with everything else; to keep only voice
 commands out, turn on **Do not save this mode in history** in the Voice Commands settings.

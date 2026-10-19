@@ -4,12 +4,14 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
     case place(VoiceCommandPlace)
     case app(VoiceCommandCatalog.App)
     case script(VoiceCommandScript)
+    case window(VoiceCommandCatalog.Window)
 
     public var identity: String {
         switch self {
         case .place(let place): "place:\(VoiceCommandText.key(place.name))"
         case .app(let app): "app:\(app.bundleId)"
         case .script(let script): "script:\(VoiceCommandText.key(script.name))"
+        case .window(let window): "window:\(window.bundleId):\(window.pid):\(window.id)"
         }
     }
 
@@ -18,14 +20,18 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
         case .place(let place): place.name
         case .app(let app): app.name
         case .script(let script): script.name
+        case .window(let window): window.title
         }
     }
 
     var spokenForms: [String] {
         switch self {
-        case .place(let place): place.spokenForms
-        case .app(let app): [app.name]
-        case .script(let script): script.spokenForms
+        case .place(let place): return place.spokenForms
+        case .app(let app): return [app.name]
+        case .script(let script): return script.spokenForms
+        case .window(let window):
+            let segments = WindowTitle.segments(window.title)
+            return segments.contains(window.title) ? segments : segments + [window.title]
         }
     }
 
@@ -51,7 +57,26 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
                 return shortcut.name == script.name ? "Shortcut" : "Shortcut \u{00B7} \(shortcut.name)"
             }
             return "Script \u{00B7} \((script.program as NSString).lastPathComponent)"
+        case .window(let window):
+            let tied = others.contains { other in
+                if case .window(let peer) = other {
+                    return peer != window && VoiceCommandText.key(peer.title) == VoiceCommandText.key(window.title)
+                }
+                return false
+            }
+            guard tied, let document = window.document.flatMap(Self.documentLabel) else { return window.appName }
+            return "\(window.appName) \u{00B7} \(document)"
         }
+    }
+
+    static func documentLabel(_ document: String) -> String? {
+        guard let url = URL(string: document) else { return nil }
+        if url.isFileURL {
+            let parts = url.standardizedFileURL.pathComponents.filter { $0 != "/" }
+            return parts.isEmpty ? nil : parts.suffix(2).joined(separator: "/")
+        }
+        guard let host = url.host?.lowercased(), !host.isEmpty else { return nil }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 }
 
@@ -88,6 +113,21 @@ public struct VoiceCommandChoice: Equatable, Sendable {
         case .navigation: "Which one?"
         case .action: "Which action?"
         }
+    }
+
+    public var note: String? {
+        var groups: [String: Set<Int32>] = [:]
+        var counts: [String: Int] = [:]
+        for candidate in candidates {
+            guard case .window(let window) = candidate else { return nil }
+            let row = "\(VoiceCommandText.key(candidate.name))|\(candidate.detail(appName: { _ in nil }, among: candidates))"
+            groups[row, default: []].insert(window.pid)
+            counts[row, default: 0] += 1
+        }
+        let tied = groups.filter { counts[$0.key, default: 0] > 1 }
+        guard !tied.isEmpty else { return nil }
+        guard tied.values.allSatisfy({ $0.count == 1 }) else { return "Same name; these windows can\u{2019}t be told apart." }
+        return "Same name; the lower number is further forward."
     }
 
     public var retryMessage: String {
