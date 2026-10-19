@@ -76,6 +76,26 @@ struct HistoryPaneModelTests {
         model.selection = model.groups.first?.rows.first?.id
         #expect(model.selected?.result == "older-search-result")
     }
+    @Test func theSelectedCommandStaysSelectedWhenItFinishesLate() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var started = entry("~/bin/deploy staging")
+        started.outcome = .commandStarted
+        try store.append(started, today: "2026-07-10")
+        let model = model(store)
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.selection = model.groups.first?.rows.first?.id
+        var finished = started
+        finished.outcome = .command
+        #expect(store.replace(started, with: finished))
+        model.reload()
+        for _ in 0..<80 where model.groups.first?.rows.first?.entry.outcome != .command {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(model.selected?.outcome == .command)
+    }
+
     private func tempStore() -> (HistoryStore, URL) {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-history-pane-\(UUID().uuidString)", isDirectory: true)

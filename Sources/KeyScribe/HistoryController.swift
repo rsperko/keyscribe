@@ -39,7 +39,8 @@ struct HistoryRow: Identifiable, Sendable {
 
     private static func identity(_ entry: HistoryEntry) -> String {
         var hash: UInt64 = 14_695_981_039_346_656_037
-        for byte in "\(entry.modeName)\u{1F}\(entry.heard)\u{1F}\(entry.result)\u{1F}\(entry.outcome.rawValue)".utf8 {
+        let outcome = entry.outcome.isCommand ? HistoryEntry.Outcome.command.rawValue : entry.outcome.rawValue
+        for byte in "\(entry.modeName)\u{1F}\(entry.heard)\u{1F}\(entry.result)\u{1F}\(outcome)".utf8 {
             hash ^= UInt64(byte)
             hash &*= 1_099_511_628_211
         }
@@ -940,5 +941,6 @@ private func outcomeLabel(_ outcome: HistoryEntry.Outcome) -> String {
     case .failed: "Failed"
     case .command: "Command"
     case .commandFailed: "Command failed"
+    case .commandStarted: "Command started"
     }
 }

@@ -44,6 +44,53 @@ struct ScriptLauncherTests {
         #expect(await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 0.3) == .stillRunning)
     }
 
+    @Test func inputArrivesOnStandardInput() async throws {
+        let (dir, file) = try script("cat > \"$(dirname \"$0\")/in\"")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(await ScriptLauncher.run(program: file.path, arguments: [], input: "buy milk; $(rm -rf ~)", reportWithin: 20)
+            == .finished(status: 0, lastError: nil))
+        #expect(try String(contentsOf: dir.appendingPathComponent("in"), encoding: .utf8) == "buy milk; $(rm -rf ~)")
+    }
+
+    @Test func aProgramThatIgnoresItsInputStillFinishes() async throws {
+        let (dir, file) = try script("exit 0")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let large = String(repeating: "x", count: 1_000_000)
+        #expect(await ScriptLauncher.run(program: file.path, arguments: [], input: large, reportWithin: 20)
+            == .finished(status: 0, lastError: nil))
+    }
+
+    @Test func aLongRunningScriptReportsItsResultWhenItFinishes() async throws {
+        let (dir, file) = try script("sleep 1\necho 'gave up' >&2\nexit 5")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let late = AsyncStream<ScriptRun>.makeStream()
+        let run = await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 0.2) { result in
+            late.continuation.yield(result)
+            late.continuation.finish()
+        }
+        #expect(run == .stillRunning)
+        var results: [ScriptRun] = []
+        for await result in late.stream { results.append(result) }
+        #expect(results == [.finished(status: 5, lastError: "gave up")])
+    }
+
+    @Test func aScriptThatFinishesInTimeHasNoLateResult() async throws {
+        let (dir, file) = try script("exit 0")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let calls = LockedCount()
+        #expect(await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 20) { _ in calls.increment() }
+            == .finished(status: 0, lastError: nil))
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(calls.value == 0)
+    }
+
+    private final class LockedCount: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        func increment() { lock.withLock { count += 1 } }
+        var value: Int { lock.withLock { count } }
+    }
+
     @Test func aScriptThatExitsWhileAChildHoldsItsErrorOutputStillReportsItsStatus() async throws {
         let (dir, file) = try script("sleep 10 &\nexit 4")
         defer { try? FileManager.default.removeItem(at: dir) }

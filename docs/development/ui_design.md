@@ -234,7 +234,7 @@ not to its label.
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
 | Stopped at the limit | “Stopped at the [limit] limit” (e.g. “5-minute”) | “Inserted without rewriting — dictate again to continue” when the mode rewrites, “Inserted — dictate again to continue” when it does not, or the copied explanation | Paste last dictation when copied |
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
-| Voice command ran (Voice Commands mode, experimental) | Where it went — the app, or the place and its browser (“Gmail · Google Chrome”) — or the script it started (“Deploy”) | “Voice command” | None; dismiss automatically |
+| Voice command ran (Voice Commands mode, experimental) | Where it went — the app, or the place and its browser (“Gmail · Google Chrome”) — or the script or shortcut it ran (“Deploy”) | “Voice command”, or “Started, still running” when the action has not finished; if it later fails, an Error naming the failure follows unless a dictation is in progress | None; dismiss automatically |
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
@@ -462,9 +462,9 @@ Editable fields preserve the typed draft while invalid and explain the correctio
 fields give a neutral hint; entered invalid values show an inline error. Names, phrases, identifiers,
 endpoints, and regular expressions reject empty, multi-line, malformed, or unreasonably large values;
 multiline writing instructions remain supported with a visible size limit.
-Editable textual input explicitly uses leading alignment. A field may sit in a trailing form-value
-column, but its content does not become trailing-aligned; that alignment is reserved for form labels
-and comparable numeric scalar values.
+Editable textual input uses leading alignment, so a trailing space stays visible as it is typed. A field
+may sit in a trailing form-value column, but its content does not become trailing-aligned; that
+alignment is reserved for form labels and comparable numeric scalar values.
 
 For OpenAI-shaped connections, KeyScribe automatically selects the compatible request format from the endpoint's
 own response. The setup flow never asks people to choose an API protocol, and detection never infers from a
@@ -786,32 +786,59 @@ sections:
 7. **Result handling** — history exclusion, trim trailing punctuation, ending spacing, and read-only
    notes when TOML-only behavior such as a custom insertion method or submit key is active.
 
-Plain Dictation stays deliberately small: **How to start Plain Dictation**, **Spoken editing**, and **Result handling**.
+Plain Dictation stays deliberately small: the same header card as other modes (name, **Built in**, its
+shortcut), then **How to start Plain Dictation**, **What it does**, and **Result handling**.
 Its spoken-editing control explicitly names phrases such as “insert new line” and “scratch that”; it
-does not imply an AI rewrite or a separate expert mode.
+does not imply an AI rewrite or a separate expert mode. What it does also carries the vocabulary row,
+which says Plain Dictation uses Global vocabulary and whose **Edit Vocabulary…** opens Global.
 
 **Voice Commands** (experimental, shown only while its flag is on) is a built-in mode. It ships
 with no shortcut, and its list row reads `Off — no shortcut` until one is set. Speech on its shortcut is
 never typed: a command it understands runs, and anything else shows an Error naming what was wrong
-(not a command, no match, or more than one match) and changes nothing. Its editor has, in order:
+(not a command, no match, or more than one match) and changes nothing.
+
+Before first enabling Voice Commands in Maintenance, an app-switching notice explains:
+“Voice recognition can make mistakes and open or switch to an unintended app. Its open windows may
+become visible, and your next keystrokes will go there. Keep this in mind when sharing your screen.”
+**Enable Voice Commands** accepts it; **Cancel** leaves the feature off. App names already work without
+adding a place, so this notice does not wait for **Add Place…**. If the feature was enabled by editing
+the config, assigning a shortcut shows the same notice before applying the shortcut. That acknowledgment
+is remembered for this configuration across launches; resetting onboarding or configuration clears it.
+
+Every **Add Place**, **Add Script**, and **Add Shortcut** sheet opens with its own warning expanded,
+each time, written for what that kind of entry can do (`VoiceCommandNotices.Kind`): a place can bring an
+app and its windows forward or load a page, and take your next keystrokes; a script runs with your
+account's permissions and can change or delete files; a shortcut can send messages, change or delete
+files, or send its input to online services, depending on its steps. Each also says a misheard name can
+start it. Editing an existing entry shows the same warning collapsed.
+
+The editor uses the same grouped form, shortcut controls, vocabulary row, and Result handling vocabulary
+as other mode panels. Add actions sit in normal form rows before saved entries, matching Triggers and
+Where it works. Vocabulary likewise puts its composer before saved words and replacements. Persistent
+master lists (Your Modes and Your Services) keep their bottom action bar.
+Its sections are, in order:
 
 1. **How to start Voice Commands** — the same shortcut structure as Plain Dictation, plus one caption
    saying speech on the shortcut is never typed and commands are recognized on this Mac. Its shortcut can never be shared with another mode: recording one that another
    enabled mode uses (or giving another mode this one's) is refused with an Error at the top of the pane
    naming that mode, and a shared shortcut written by hand shows a red caption here (“… also uses this
    shortcut, so it does not start Voice Commands”) and marks the list row as never firing.
-2. **What you can say** — the phrases (“switch to …”, “go to …”, “open …”, “focus …”, “go back”, and a
-   script's name followed by anything) with one line each on what they do, then the same **Recognition
+2. **What it does** — four primary patterns: “switch to …” and “open …” for apps and places, “run …”
+   for scripts and shortcuts, and “go back”. Other app-switching verbs are also accepted
+   (`VoiceCommandGrammar.focusVerbs`). Actions require “run”; neither a bare name nor an app-switching phrase runs one.
+   Each pattern has one line on what it does, then the same **Recognition
    and replacements** summary and help as other modes, with **Edit Vocabulary…** opening Vocabulary on
    Voice Commands. Its help adds that the words and replacements apply before a command is read.
 3. **Try it** — a field that shows what a typed phrase would do, live, without running anything (a script
-   shows the exact command line it would run). It sits beside the phrases it tests and re-checks the typed
-   phrase whenever a place, a script, or the vocabulary changes. When the mode's vocabulary changed the
+   shows the exact command line it would run, a shortcut its name and input). It sits beside the phrases it
+   tests and re-checks the typed phrase whenever a place, an action, or the vocabulary changes. When the mode's vocabulary changed the
    phrase, it shows `Read as “…”` above the result. Its caption says that checking open tabs reads their
    addresses and titles and may ask to control the browser.
 4. **Places** — nicknames for an app or a web page. The empty state explains that app names already work
-   without one. Each row's `Say:` line shows complete phrases that work (“switch to Mail”, “open Gmail”),
-   never a bare name. **Add Place** offers **Current App (name)** and, when that app is a browser, **Current
+   without one. Each row leads with an icon: the app's own for an app place, the chosen browser's for a web
+   page (a globe for **Any browser**), and a generic symbol when that app is not on this Mac. Icons come
+   from the installed apps only; no site icon is fetched. Each row's `Say:` line shows complete phrases that work (“switch to Mail”, “open Gmail”),
+   never a bare name. **Add Place…** offers **Current App (name)** and, when that app is a browser, **Current
    Browser Tab** (both read from the app that was frontmost when Settings opened), then **App…** and
    **Web Page…**. Each opens a sheet that starts with the destination: the app, chosen with the same app
    chooser as a mode's **Where it works** (running apps with their icons, **Choose from Applications…**,
@@ -822,20 +849,38 @@ never typed: a command it understands runs, and anything else shows an Error nam
    trailing edge, with a confirmation. The sheet says that **Any browser** looks through every running
    browser that can list its tabs, in all its windows (which can include private ones), and that finding an
    open tab asks macOS for permission to control the browser the first time.
-5. **Scripts** — programs to run by name. The empty state says a script runs in the background, so the
-   current app stays in front, and can be passed what is said after its name. Each row shows the spoken
-   names (with `…` when the script takes words), the command line, a `Script` badge, and an orange
-   advisory when the program is missing or not executable. **Add Script** opens a sheet with the name,
+5. **Actions** — scripts and shortcuts to run with “run” and their spoken name, in one list. The empty
+   state explains how to add an action and say “run” followed by its name, with optional spoken input.
+   Actions start in the background; their own steps may open another app. Each row leads with its kind's icon (a terminal for a script, the Shortcuts app
+   icon for a shortcut), then the spoken phrases (`run {name}`, with `…` when it takes words), what it runs,
+   and a `Script` or `Shortcut` badge. A script row shows its command line and an orange advisory when the
+   program is missing or not executable; a shortcut row shows the shortcut's name and input, and an orange
+   advisory when that shortcut is no longer in Shortcuts. **Add Action…** offers **Script…** and
+   **Shortcut…**.
+
+   **Shortcut…** opens a sheet that starts with the shortcut, picked from the user's shortcuts (stored by
+   identifier, so renaming it in Shortcuts keeps it working); the name follows the chosen shortcut until
+   the user types their own, then other spoken names, then an optional **Input** where `{text}` marks the
+   spoken words. A live example uses the configured spoken name and shows the actual input, with and
+   without spoken words. The picker includes
+   **Refresh List** and **Open Shortcuts…**; empty and unavailable states explain how to recover. A caption
+   says a shortcut may open another app or ask a question, is shown as started while waiting, and has
+   its final result saved when History is on. An existing
+   shortcut's sheet holds the red **Delete Shortcut** action, with a confirmation saying the shortcut
+   itself stays in Shortcuts.
+
+   **Script…** opens a sheet with the name,
    other spoken names, the program (a path field plus **Choose…**), and the arguments, one per line, with
    `{text}` marking where the spoken words go. Beside the arguments it says they never pass through a
    shell but a program that runs its arguments as code will; the finer rules (blank lines, when words are
    needed) sit in a collapsed **How arguments are passed** section. The sheet says the program runs
-   directly without a shell and with a minimal PATH, and that scripts run as the user and can be started by
-   a misheard command. An existing script's sheet holds the red **Delete Script** action at its trailing
-   edge, with a confirmation.
+   directly without a shell and with a minimal PATH. **Add Script** and **Save** stay disabled until
+   the name, program, and arguments are valid; an incomplete or conflicting entry explains what prevents
+   saving. A program that is not installed yet remains an advisory. An existing script's sheet holds the
+   red **Delete Script** action at its trailing edge, with a confirmation.
 6. **Result handling** — the same **Do not save this mode in history** toggle as other modes, off by
-   default. Its help says each saved command keeps what was said, what ran (including the words passed to
-   a script), and why it failed, which can include the last line a script wrote to its error output.
+   default. Its help says saved commands include what was said, what ran (including input), and any
+   error message, which may include text from a script or shortcut.
 
 When privacy is enabled, context controls remain visible but disabled with the exact reason:
 `Privacy mode sends only the redacted dictation. Context is off.` The user should not have to
@@ -946,7 +991,10 @@ not used. Redaction maps are never shown or persisted.
 
 A **voice command** entry reuses the same detail: the comparison reads **Heard → Command**, where
 Command is what ran — a script's exact command line, quoted the way a shell would so it can be copied
-into a terminal, or what a switch did. A failed command adds a **Why it failed** row in Details with the
+into a terminal, the shortcut and its input, or what a switch did. An action still running when it was
+recorded reads **Command started** until it finishes, when the entry is updated to **Command** or
+**Command failed**. An open History pane refreshes when that happens and keeps the entry selected, and
+the entry can be deleted whether or not the pane saw the update. A failed command adds a **Why it failed** row in Details with the
 message the HUD showed. **Paste Result** is hidden for commands, since there is nothing to insert;
 **Copy Result** stays. **Add to Dictionary** and **Create Replacement** on a command entry write to the
 Voice Commands vocabulary, not the global one, since that is what reads commands. The Voice Commands

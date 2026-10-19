@@ -2,6 +2,7 @@ import Foundation
 
 public enum VoiceCommandIntent: Equatable, Sendable {
     case focus(target: String)
+    case runScript(target: String)
     case goBack
 }
 
@@ -65,15 +66,6 @@ public enum VoiceCommandGrammar {
         return words
     }
 
-    static func focusVerbLength(_ words: [SpokenWord]) -> Int? {
-        let keys = words.map(\.key)
-        for verb in focusVerbs {
-            let verbWords = verb.split(separator: " ").map(String.init)
-            if keys.count > verbWords.count, Array(keys.prefix(verbWords.count)) == verbWords { return verbWords.count }
-        }
-        return nil
-    }
-
     private static let textEdges = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ",;:.!?\u{2026}"))
 
     static func cleanedText(_ text: Substring) -> String {
@@ -83,6 +75,9 @@ public enum VoiceCommandGrammar {
     public static func parse(_ transcript: String) -> VoiceCommandIntent? {
         let words = VoiceCommandText.key(transcript)
         if words == goBack { return .goBack }
+        if words.hasPrefix("run ") {
+            return .runScript(target: String(words.dropFirst(4)))
+        }
         for verb in focusVerbs {
             guard words.hasPrefix(verb + " ") else { continue }
             var target = String(words.dropFirst(verb.count + 1))

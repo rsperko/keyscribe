@@ -415,18 +415,23 @@ mode identity: the pipeline branches on the output kind. Such a take skips Phase
 suffix never re-routes a command into a dictation mode), and skips the rewrite and insertion; History
 records it as a command (Result is what it ran, plus why it failed) under the usual History rules —
 the heard transcript, after the mode's own replacements and dictionary clean it (its vocabulary leaves out
-the global one unless it opts in), is matched against the user's scripts and then parsed as a closed set of
-focus verbs and resolved against apps and the user's places (`config_schema.md` "`voice_commands.toml`").
+the global one unless it opts in), is parsed as a closed set of commands. **Run** resolves only against
+the user's configured scripts and shortcuts; focus verbs resolve only against apps and the user's places, and **go back**
+returns to the previous app (`config_schema.md` "`voice_commands.toml`"). A bare script name never runs it.
 It never inserts, pastes, copies, submits, or touches the clipboard. Recognition and resolution are local
 and the transcript is never sent to an AI service; the only network effect of its own is that opening a
 saved web place loads that site in the browser. It opens only apps and URLs the system or the user's file
-names, never a URL built from speech. **Spoken text reaches exactly one place: a script argument the user
-marked with `{text}`**, passed as a single argv element to a program started directly (`Process`, no shell),
-so speech can never become shell syntax or extra arguments. The program is the user's own code and runs as
-the user; what it does with the text is outside KeyScribe's invariants, which is why `PRIVACY.md` says so.
-A script is never matched by a near-miss, its text is never fuzzy-corrected, and a dictionary correction
-that would make a script match is discarded, because a guess here runs code rather than focusing the wrong
-window. It is never the Direct fallback and is
+names, never a URL built from speech. **Spoken text reaches only an action's input the user marked with
+`{text}`**: for a script, a single argv element of a program started directly (`Process`, no shell), so speech
+can never become shell syntax or extra arguments; for a macOS shortcut, the standard input of
+`/usr/bin/shortcuts run`, with the shortcut named by identifier as one argv element. The script or shortcut
+is the user's own and runs as the user; what it does with the text, including sending it to online
+services, is outside KeyScribe's invariants, which is why `PRIVACY.md` says so. An action still running
+after the short report window is shown as started and never killed; its later result updates the History
+entry it wrote.
+A script is never matched by a near-miss, and its name and arguments are never fuzzy-corrected by the
+dictionary. Dictionary correction applies only to an app or place target, so a guess cannot turn an
+app-switching command into script execution. It is never the Direct fallback and is
 reachable only by its own shortcut.
 
 **Phase B — known only after STT (trigger-phrase routing):**

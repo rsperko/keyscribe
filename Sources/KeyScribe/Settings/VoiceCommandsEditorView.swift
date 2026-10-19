@@ -10,7 +10,9 @@ struct VoiceCommandsEditorView: View {
     var onEditVocabulary: () -> Void = {}
     @State private var editing: PlaceDraft?
     @State private var editingScript: ScriptDraft?
+    @State private var editingShortcut: ShortcutDraft?
     @State private var tryText = ""
+    @State private var pendingShortcut: Mode?
 
     private var trigger: ModeTrigger { ModeTrigger(mode: mode, allModes: allModes, onUpdate: onUpdate) }
 
@@ -28,7 +30,7 @@ struct VoiceCommandsEditorView: View {
             }
 
             Section("How to start Voice Commands") {
-                ModeTriggerRow(mode: mode, onUpdate: onUpdate, label: "Shortcut")
+                ModeTriggerRow(mode: mode, onUpdate: updateShortcut, label: "Shortcut")
                 PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
                 if let clash = VoiceCommandTriggers.clash(for: mode, in: trigger.allModes) {
                     IssueText("\(clash.name) also uses this shortcut, so it does not start \(mode.name). Choose one no other mode uses.")
@@ -44,12 +46,12 @@ struct VoiceCommandsEditorView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("What you can say") {
-                phraseRow("\u{201C}switch to …\u{201D}  \u{201C}go to …\u{201D}  \u{201C}open …\u{201D}  \u{201C}focus …\u{201D}",
-                          "Any running app, or one in your Applications folders, by name, or a place below. Brings it to the front, opening it if needed.")
-                phraseRow("\u{201C}go back\u{201D}", "Returns to the app you were in before your last command.")
-                phraseRow("A script\u{2019}s name, then anything else",
-                          "Runs a script below. Words you say after its name can be passed to it.")
+            Section("What it does") {
+                phraseRow("\u{201C}switch to …\u{201D}  \u{201C}open …\u{201D}",
+                          "Brings an app or saved place to the front, opening it if needed. App names work without setup.")
+                phraseRow("\u{201C}go back\u{201D}", "Returns to the app you were using before your last voice app switch. Say it again to switch back.")
+                phraseRow("\u{201C}run …\u{201D}",
+                          "Runs a script or shortcut below. Say its name after \u{201C}run\u{201D}, followed by any words it accepts.")
                 SettingRow(
                     title: "Recognition and replacements",
                     result: VocabularyScopePicker.summary(for: mode),
@@ -65,12 +67,12 @@ struct VoiceCommandsEditorView: View {
 
             placesSection
 
-            scriptsSection
+            actionsSection
 
             Section("Result handling") {
                 SettingRow(
                     title: "Do not save this mode in history",
-                    help: "When on, this mode's commands are never written to local history. Otherwise each command records per your History setting: what you said, what ran, including the words passed to a script, and why it failed, which can include the last line a script wrote to its error output.")
+                    help: "Keeps voice commands out of History. Otherwise, when History is on, it saves what you said, what ran (including any input), and any error message. Errors may include text from the script or shortcut.")
                 {
                     Toggle("", isOn: Binding(
                         get: { mode.excludeFromHistory },
@@ -88,6 +90,35 @@ struct VoiceCommandsEditorView: View {
         .sheet(item: $editingScript) { draft in
             ScriptEditorSheet(draft: draft, model: model) { editingScript = nil }
         }
+        .sheet(item: $editingShortcut) { draft in
+            ShortcutEditorSheet(draft: draft, model: model) { editingShortcut = nil }
+        }
+        .alert(VoiceCommandNotices.Kind.apps.title, isPresented: Binding(
+            get: { pendingShortcut != nil },
+            set: { if !$0 { pendingShortcut = nil } }))
+        {
+            Button("Set Shortcut") {
+                if let updated = pendingShortcut {
+                    model.notices.acknowledge(.apps)
+                    onUpdate(updated)
+                }
+                pendingShortcut = nil
+            }
+            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.appNoticeConfirm)
+            Button("Cancel", role: .cancel) { pendingShortcut = nil }
+                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.appNoticeCancel)
+        } message: {
+            Text(VoiceCommandNotices.Kind.apps.message)
+        }
+    }
+
+    private func updateShortcut(_ updated: Mode) {
+        if !updated.triggerKeys.isEmpty, model.notices.needsAcknowledgment(.apps),
+           VoiceCommandTriggers.clash(for: updated, in: allModes) == nil {
+            pendingShortcut = updated
+        } else {
+            onUpdate(updated)
+        }
     }
 
     private func phraseRow(_ phrase: String, _ meaning: String) -> some View {
@@ -98,10 +129,11 @@ struct VoiceCommandsEditorView: View {
     }
 
     private var placesSection: some View {
-        Section {
+        Section("Places") {
             if let loadError = model.loadError {
                 IssueText(loadError)
             }
+            addMenu
             if model.places.isEmpty {
                 Text("No places yet. App names already work on their own — add a place to give an app a nickname, or to jump to a web page, using an open tab when there is one.")
                     .font(.callout).foregroundStyle(.secondary)
@@ -109,17 +141,14 @@ struct VoiceCommandsEditorView: View {
             ForEach(model.places, id: \.name) { place in
                 placeRow(place)
             }
-        } header: {
-            HStack {
-                Text("Places")
-                Spacer()
-                addMenu
-            }
+            VoiceCommandNoticeRow(kind: .apps, needsAcknowledgment: false)
+                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.appNotice)
         }
     }
 
     private func placeRow(_ place: VoiceCommandPlace) -> some View {
         HStack(alignment: .firstTextBaseline) {
+            PlaceKindIcon(place: place)
             VStack(alignment: .leading, spacing: 2) {
                 Text(place.name)
                 Text("Say: " + place.spokenExamples.map { "\u{201C}\($0)\u{201D}" }.joined(separator: ", "))
@@ -134,45 +163,59 @@ struct VoiceCommandsEditorView: View {
         }
     }
 
-    private var scriptsSection: some View {
-        Section {
+    private var actionsSection: some View {
+        Section("Actions") {
+            Menu("Add Action\u{2026}") {
+                Button("Script\u{2026}") { editingScript = ScriptDraft() }
+                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addScript)
+                Button("Shortcut\u{2026}") { editingShortcut = ShortcutDraft() }
+                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addShortcut)
+            }
+            .fixedSize()
+            .disabled(model.loadError != nil)
+            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addAction)
             if model.scripts.isEmpty {
-                Text("No scripts yet. A script runs a program on this Mac when you say its name, in the background, so the app you are in stays in front. Words you say after the name can be passed to it.")
+                Text("No actions yet. Add a script or macOS shortcut, then say \u{201C}run\u{201D} and its name. You can also pass it words you say after the name.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             ForEach(model.scripts, id: \.name) { script in
-                scriptRow(script)
+                actionRow(script)
             }
-        } header: {
-            HStack {
-                Text("Scripts")
-                Spacer()
-                Button("Add Script") { editingScript = ScriptDraft() }
-                    .buttonStyle(.borderless)
-                    .disabled(model.loadError != nil)
-                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addScript)
-            }
+        }
+        .task(id: model.scripts.contains(where: \.isShortcut)) {
+            if model.scripts.contains(where: \.isShortcut) { await model.loadShortcutChoices() }
         }
     }
 
-    private func scriptRow(_ script: VoiceCommandScript) -> some View {
+    private func actionRow(_ script: VoiceCommandScript) -> some View {
         HStack(alignment: .firstTextBaseline) {
+            ActionKindIcon(isShortcut: script.isShortcut)
             VStack(alignment: .leading, spacing: 2) {
                 Text(script.name)
                 Text("Say: " + script.spokenForms.map { form in
-                    "\u{201C}\(form)\(script.takesText ? " \u{2026}" : "")\u{201D}"
+                    "\u{201C}run \(form)\(script.takesText ? " \u{2026}" : "")\u{201D}"
                 }.joined(separator: ", "))
                     .font(.caption).foregroundStyle(.secondary)
-                Text(script.run.joined(separator: " ")).font(.caption.monospaced()).foregroundStyle(.secondary)
-                    .lineLimit(1).truncationMode(.middle)
-                if let issue = VoiceCommandsSettingsModel.programIssue(script.program) {
-                    IssueText(issue, severity: .advisory)
+                if let shortcut = script.shortcut {
+                    Text(ShortcutDraft.description(shortcut)).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    if model.shortcutIsMissing(shortcut) {
+                        IssueText("This shortcut is no longer in Shortcuts.", severity: .advisory)
+                    }
+                } else {
+                    Text(script.run.joined(separator: " ")).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    if let issue = VoiceCommandsSettingsModel.programIssue(script.program) {
+                        IssueText(issue, severity: .advisory)
+                    }
                 }
             }
             Spacer()
-            PaneBadge("Script")
-            Button("Edit\u{2026}") { editingScript = ScriptDraft(script) }
-                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptEdit(VoiceCommandText.key(script.name).replacingOccurrences(of: " ", with: "-")))
+            PaneBadge(script.isShortcut ? "Shortcut" : "Script")
+            Button("Edit\u{2026}") {
+                if script.isShortcut { editingShortcut = ShortcutDraft(script) } else { editingScript = ScriptDraft(script) }
+            }
+            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptEdit(VoiceCommandText.key(script.name).replacingOccurrences(of: " ", with: "-")))
         }
     }
 
@@ -185,7 +228,7 @@ struct VoiceCommandsEditorView: View {
     }
 
     private var addMenu: some View {
-        Menu("Add Place") {
+        Menu("Add Place…") {
             if let app = model.currentApp {
                 Button("Current App (\(app.name))") {
                     editing = PlaceDraft(name: app.name, kind: .app, bundleId: app.bundleId)
@@ -212,7 +255,6 @@ struct VoiceCommandsEditorView: View {
             Button("Web Page…") { editing = PlaceDraft(name: "", kind: .webPage) }
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addWebPage)
         }
-        .menuStyle(.borderlessButton)
         .fixedSize()
         .disabled(model.loadError != nil)
         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addPlace)
@@ -228,10 +270,10 @@ struct VoiceCommandsEditorView: View {
     private var trySection: some View {
         Section("Try it") {
             TextField("Type what you would say", text: $tryText, prompt: Text("switch to mail"))
-                .multilineTextAlignment(.leading)
                 .onSubmit { model.tryIt(tryText) }
                 .onChange(of: tryText) { _, value in model.tryIt(value) }
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.tryIt)
+                .formFieldLabel("Type what you would say")
             if let result = model.tryResult, result.heard == tryText.trimmingCharacters(in: .whitespacesAndNewlines) {
                 VStack(alignment: .leading, spacing: 2) {
                     if let readAs = result.readAs {
@@ -247,7 +289,7 @@ struct VoiceCommandsEditorView: View {
                     }
                 }
             }
-            Text("Shows what a command would do without doing it, and never runs a script. Checking open tabs reads their addresses and titles, and may ask to control your browser.")
+            Text("Previews a command without opening anything or running an action. Checking open tabs reads their addresses and titles, and may ask to control your browser.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -345,6 +387,8 @@ private struct PlaceEditorSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(draft.originalName == nil ? "Add Place" : "Edit Place").font(.title2.bold())
             Form {
+                VoiceCommandNoticeRow(kind: .places, needsAcknowledgment: draft.originalName == nil)
+                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeNotice)
                 Picker("Goes to", selection: $draft.kind) {
                     Text("An app").tag(PlaceDraft.Kind.app)
                     Text("A web page").tag(PlaceDraft.Kind.webPage)
@@ -356,8 +400,8 @@ private struct PlaceEditorSheet: View {
                 } else {
                     VStack(alignment: .leading, spacing: 4) {
                         TextField("Web page", text: $draft.url, prompt: Text("https://mail.google.com/"))
-                            .multilineTextAlignment(.leading)
                             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeURL)
+                            .formFieldLabel("Web page")
                         if let urlIssue { IssueText(urlIssue) }
                         Text("An open tab whose address starts with this is brought to the front. With no such tab, the page opens.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -377,14 +421,14 @@ private struct PlaceEditorSheet: View {
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     TextField("Name", text: $draft.name, prompt: Text("What would you like to call it?"))
-                        .multilineTextAlignment(.leading)
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeName)
+                        .formFieldLabel("Name")
                     if let nameIssue { IssueText(nameIssue) }
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     TextField("Also say", text: $draft.say, prompt: Text("Optional, such as inbox, email"))
-                        .multilineTextAlignment(.leading)
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSay)
+                        .formFieldLabel("Also say")
                     if let sayIssue { IssueText(sayIssue) }
                     Text("Other names for this place, separated by commas. Say any of them after \u{201C}switch to\u{201D} or \u{201C}open\u{201D}.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -486,7 +530,7 @@ private struct PlaceEditorSheet: View {
         guard !name.isEmpty else { return nil }
         if let issue = UserInputValidation.nameIssue(name) { return issue.message }
         return model.nameTaken(name, except: draft.originalName.map(VoiceCommandText.key))
-            ? "Another place or script already uses this name." : nil
+            ? "Another place or action already uses this name." : nil
     }
 
     private var sayIssue: String? {
@@ -561,29 +605,31 @@ private struct ScriptEditorSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(draft.originalName == nil ? "Add Script" : "Edit Script").font(.title2.bold())
             Form {
+                VoiceCommandNoticeRow(kind: .scripts, needsAcknowledgment: draft.originalName == nil)
+                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptNotice)
                 VStack(alignment: .leading, spacing: 4) {
                     TextField("Name", text: $draft.name, prompt: Text("deploy"))
-                        .multilineTextAlignment(.leading)
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptName)
-                    Text("Say this to run the script. Anything you say after it is the text passed to the script.")
+                        .formFieldLabel("Name")
+                    Text("Say \u{201C}run\u{201D} followed by this name. To pass words after its name, put \(VoiceCommandScript.textPlaceholder) in an argument below.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     TextField("Also say", text: $draft.say, prompt: Text("ship, release"))
-                        .multilineTextAlignment(.leading)
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptSay)
-                    Text("Other names you might say, separated by commas. The name always works.")
+                        .formFieldLabel("Also say")
+                    Text("Other names for this script, separated by commas. Say any of them after \u{201C}run\u{201D}.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
                         TextField("Program", text: $draft.program, prompt: Text("~/bin/deploy"))
-                            .multilineTextAlignment(.leading)
                             .font(.body.monospaced())
                             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptProgram)
                         Button("Choose\u{2026}") { chooseProgram() }
                             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptChooseProgram)
                     }
+                    .formFieldLabel("Program")
                     if let programIssue = VoiceCommandsSettingsModel.programIssue(draft.program) {
                         IssueText(programIssue, severity: .advisory)
                     }
@@ -611,7 +657,7 @@ private struct ScriptEditorSheet: View {
                         DisclosureSection(isExpanded: $argumentDetailsExpanded) {
                             DisclosureSummaryLabel(title: "How arguments are passed", summary: "Blank lines, and when words are needed")
                         } content: {
-                            Text("Each line is passed exactly as written, including blank lines between them, and the words you say always stay within the one argument that holds \(VoiceCommandScript.textPlaceholder). With \(VoiceCommandScript.textPlaceholder), the script needs words after its name; without it, saying only the name runs it.")
+                            Text("Each line is passed exactly as written, including blank lines between them, and the words you say always stay within the one argument that holds \(VoiceCommandScript.textPlaceholder). With \(VoiceCommandScript.textPlaceholder), the script needs words after its name; without it, say \u{201C}run\u{201D} and the name with no words after it.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptArgumentDetails)
@@ -619,8 +665,9 @@ private struct ScriptEditorSheet: View {
                 }
             }
             .formStyle(.grouped)
-            Text("Scripts run as you, with everything your account can do. A misheard command can run one, so keep scripts that change or delete things hard to say by accident, and check them in Try it.")
-                .font(.caption).foregroundStyle(.secondary)
+            if let validationIssue, !draft.name.isEmpty || !draft.program.isEmpty {
+                IssueText(validationIssue)
+            }
             if let issue { IssueText(issue) }
             HStack {
                 if draft.originalName != nil {
@@ -628,6 +675,7 @@ private struct ScriptEditorSheet: View {
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptCancel)
                     Button("Save") { save() }
                         .keyboardShortcut(.defaultAction)
+                        .disabled(validationIssue != nil)
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptSave)
                     Spacer()
                     PaneDeleteButton(title: "Delete Script") { confirmingDelete = true }
@@ -638,6 +686,7 @@ private struct ScriptEditorSheet: View {
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptCancel)
                     Button("Add Script") { save() }
                         .keyboardShortcut(.defaultAction)
+                        .disabled(validationIssue != nil)
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptSave)
                 }
             }
@@ -654,7 +703,7 @@ private struct ScriptEditorSheet: View {
             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptDeleteConfirm)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Saying its name will no longer run it. The program itself is not deleted.")
+            Text("Its \u{201C}run\u{201D} commands will no longer work. The program itself is not deleted.")
         }
     }
 
@@ -666,6 +715,259 @@ private struct ScriptEditorSheet: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         draft.program = url.path.hasPrefix(home + "/") ? "~" + url.path.dropFirst(home.count) : url.path
+    }
+
+    private var validationIssue: String? {
+        model.scriptIssue(draft.script, replacing: draft.originalName)
+    }
+
+    private func save() {
+        issue = model.saveScript(draft.script, replacing: draft.originalName)
+        if issue == nil { onDone() }
+    }
+}
+
+struct ActionKindIcon: View {
+    static let shortcutsBundleId = "com.apple.shortcuts"
+    let isShortcut: Bool
+
+    var body: some View {
+        Group {
+            if isShortcut, let icon = InstalledApps.menuIcon(forBundleId: Self.shortcutsBundleId) {
+                Image(nsImage: icon)
+            } else {
+                Image(systemName: isShortcut ? "square.stack.3d.up" : "terminal")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+            }
+        }
+        .accessibilityLabel(isShortcut ? "Shortcut" : "Script")
+    }
+}
+
+struct PlaceKindIcon: View {
+    let place: VoiceCommandPlace
+
+    private var appBundleId: String? {
+        switch place.target {
+        case .app(let bundleId): bundleId
+        case .url: place.browser
+        }
+    }
+
+    var body: some View {
+        Group {
+            if let appBundleId, let icon = InstalledApps.menuIcon(forBundleId: appBundleId) {
+                Image(nsImage: icon)
+            } else {
+                Image(systemName: place.isWebPage ? "globe" : "app.dashed")
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+struct ShortcutDraft: Identifiable, Equatable {
+    let id = UUID()
+    let originalName: String?
+    var name: String
+    var say: String
+    var shortcut: VoiceCommandShortcut?
+    var input: String
+    private var suggestion: String?
+
+    init() {
+        originalName = nil
+        name = ""
+        say = ""
+        shortcut = nil
+        input = ""
+    }
+
+    init(_ script: VoiceCommandScript) {
+        originalName = script.name
+        name = script.name
+        say = script.say.joined(separator: ", ")
+        shortcut = script.shortcut.map { VoiceCommandShortcut(name: $0.name, identifier: $0.identifier) }
+        input = script.shortcut?.input ?? ""
+    }
+
+    mutating func choose(_ chosen: VoiceCommandShortcut) {
+        shortcut = VoiceCommandShortcut(name: chosen.name, identifier: chosen.identifier)
+        let current = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard current.isEmpty || current == suggestion else { return }
+        name = chosen.name
+        suggestion = chosen.name
+    }
+
+    var script: VoiceCommandScript {
+        let forms = say.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        let trimmedInput = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        return VoiceCommandScript(
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines), say: forms,
+            shortcut: VoiceCommandShortcut(
+                name: shortcut?.name ?? "", identifier: shortcut?.identifier,
+                input: trimmedInput.isEmpty ? nil : trimmedInput))
+    }
+
+    static func description(_ shortcut: VoiceCommandShortcut) -> String {
+        let input = shortcut.input.map { ", given \u{201C}\($0)\u{201D}" } ?? ""
+        return "Shortcut \u{201C}\(shortcut.name)\u{201D}\(input)"
+    }
+
+    var example: String? {
+        let action = script
+        guard action.issue == nil, let shortcut = action.shortcut else { return nil }
+        let phrase = "run \(action.name)" + (action.takesText ? " buy milk" : "")
+        let result = action.arguments(text: "buy milk").first.map {
+            "pass \u{201C}\($0)\u{201D} to \u{201C}\(shortcut.name)\u{201D}"
+        } ?? "run \u{201C}\(shortcut.name)\u{201D} with no input"
+        return "Say \u{201C}\(phrase)\u{201D} to \(result)."
+    }
+}
+
+private struct ShortcutEditorSheet: View {
+    @State var draft: ShortcutDraft
+    @ObservedObject var model: VoiceCommandsSettingsModel
+    let onDone: () -> Void
+    @State private var issue: String?
+    @State private var confirmingDelete = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(draft.originalName == nil ? "Add Shortcut" : "Edit Shortcut").font(.title2.bold())
+            Form {
+                VoiceCommandNoticeRow(kind: .shortcuts, needsAcknowledgment: draft.originalName == nil)
+                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutNotice)
+                shortcutRow
+                VStack(alignment: .leading, spacing: 4) {
+                    TextField("Name", text: $draft.name, prompt: Text("What would you like to call it?"))
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutName)
+                        .formFieldLabel("Name")
+                    Text("Say \u{201C}run\u{201D} followed by this name.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    TextField("Also say", text: $draft.say, prompt: Text("Optional, such as log, note"))
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutSay)
+                        .formFieldLabel("Also say")
+                    Text("Other names for this shortcut, separated by commas. Say any of them after \u{201C}run\u{201D}.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    TextField("Input", text: $draft.input, prompt: Text("Optional, such as \(VoiceCommandScript.textPlaceholder)"))
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutInput)
+                        .formFieldLabel("Input")
+                    Text("Leave empty for no input, or enter \(VoiceCommandScript.textPlaceholder) to pass the words you say after the name. You can also enter fixed text.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let example = draft.example {
+                        Text(example).font(.caption).foregroundStyle(.secondary)
+                            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutExample)
+                    }
+                }
+                Text("The shortcut may open an app or ask you a question. While it waits, it is shown as started. Its final result is saved when History is on.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .formStyle(.grouped)
+            if let validationIssue, !draft.name.isEmpty || draft.shortcut != nil {
+                IssueText(validationIssue)
+            }
+            if let issue { IssueText(issue) }
+            HStack {
+                if draft.originalName != nil {
+                    Button("Cancel", role: .cancel, action: onDone)
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutCancel)
+                    Button("Save") { save() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(validationIssue != nil)
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutSave)
+                    Spacer()
+                    PaneDeleteButton(title: "Delete Shortcut") { confirmingDelete = true }
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutDelete)
+                } else {
+                    Spacer()
+                    Button("Cancel", role: .cancel, action: onDone)
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutCancel)
+                    Button("Add Shortcut") { save() }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(validationIssue != nil)
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutSave)
+                }
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
+        .task { await model.loadShortcutChoices() }
+        .confirmationDialog("Delete \u{201C}\(draft.originalName ?? draft.name)\u{201D}?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete", role: .destructive) {
+                if let name = draft.originalName {
+                    issue = model.deleteScript(named: name)
+                    if issue == nil { onDone() }
+                }
+            }
+            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutDeleteConfirm)
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Its \u{201C}run\u{201D} commands will no longer work. The shortcut itself stays in Shortcuts.")
+        }
+    }
+
+    private var shortcutRow: some View {
+        LabeledContent("Shortcut") {
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack(spacing: 6) {
+                    if let shortcut = draft.shortcut {
+                        ActionKindIcon(isShortcut: true)
+                        Text(shortcut.name)
+                    } else {
+                        Text("None chosen").foregroundStyle(.secondary)
+                    }
+                    Menu(draft.shortcut == nil ? "Choose Shortcut" : "Change") {
+                        switch model.shortcutChoices {
+                        case .loading:
+                            Text("Loading\u{2026}")
+                        case .unavailable:
+                            Text("Your shortcuts could not be listed")
+                        case .loaded(let choices) where choices.isEmpty:
+                            Text("No shortcuts yet")
+                        case .loaded(let choices):
+                            ForEach(choices, id: \.target) { choice in
+                                Button(choice.name) { draft.choose(choice) }
+                                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutOption(choice.target))
+                            }
+                        }
+                        Divider()
+                        Button("Refresh List") { Task { await model.loadShortcutChoices() } }
+                            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutRefresh)
+                        Button("Open Shortcuts\u{2026}") {
+                            guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: ActionKindIcon.shortcutsBundleId) else { return }
+                            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+                        }
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutOpenApp)
+                    }
+                    .fixedSize()
+                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutChoice)
+                }
+                switch model.shortcutChoices {
+                case .unavailable:
+                    IssueText("Could not load your shortcuts. Open Shortcuts, then choose Refresh List.", severity: .advisory)
+                case .loaded(let choices) where choices.isEmpty:
+                    Text("Create a shortcut in Shortcuts, then choose Refresh List.")
+                        .font(.caption).foregroundStyle(.secondary)
+                default:
+                    EmptyView()
+                }
+                if let shortcut = draft.shortcut, model.shortcutIsMissing(shortcut) {
+                    IssueText("This shortcut is no longer in Shortcuts. Choose another.", severity: .advisory)
+                }
+            }
+        }
+    }
+
+    private var validationIssue: String? {
+        model.scriptIssue(draft.script, replacing: draft.originalName)
     }
 
     private func save() {

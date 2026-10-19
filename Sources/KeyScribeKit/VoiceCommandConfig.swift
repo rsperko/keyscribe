@@ -69,28 +69,91 @@ public struct VoiceCommandPlace: Codable, Equatable, Sendable {
     }
 }
 
+public struct VoiceCommandShortcut: Equatable, Sendable {
+    public var name: String
+    public var identifier: String?
+    public var input: String?
+
+    public init(name: String, identifier: String? = nil, input: String? = nil) {
+        self.name = name
+        self.identifier = identifier
+        self.input = input
+    }
+
+    public var target: String { identifier ?? name }
+
+    public static func parseList(_ output: String) -> [VoiceCommandShortcut] {
+        output.split(whereSeparator: \.isNewline).compactMap { line in
+            let line = line.trimmingCharacters(in: .whitespaces)
+            guard !line.isEmpty else { return nil }
+            if line.hasSuffix(")"), let open = line.range(of: " (", options: .backwards) {
+                let identifier = String(line[open.upperBound..<line.index(before: line.endIndex)])
+                if UUID(uuidString: identifier) != nil {
+                    return VoiceCommandShortcut(name: String(line[..<open.lowerBound]), identifier: identifier)
+                }
+            }
+            return VoiceCommandShortcut(name: line)
+        }
+    }
+}
+
 public struct VoiceCommandScript: Codable, Equatable, Sendable {
     public static let textPlaceholder = "{text}"
 
+    public enum Action: Equatable, Sendable {
+        case program([String])
+        case shortcut(VoiceCommandShortcut)
+    }
+
     public var name: String
     public var say: [String]
-    public var run: [String]
+    public var action: Action
 
     public init(name: String, say: [String] = [], run: [String]) {
         self.name = name
         self.say = say
-        self.run = run
+        action = .program(run)
     }
+
+    public init(name: String, say: [String] = [], shortcut: VoiceCommandShortcut) {
+        self.name = name
+        self.say = say
+        action = .shortcut(shortcut)
+    }
+
+    public var run: [String] {
+        if case .program(let run) = action { return run }
+        return []
+    }
+
+    public var shortcut: VoiceCommandShortcut? {
+        if case .shortcut(let shortcut) = action { return shortcut }
+        return nil
+    }
+
+    public var isShortcut: Bool { shortcut != nil }
 
     public var program: String { run.first ?? "" }
 
-    public var takesText: Bool { run.dropFirst().contains { $0.contains(Self.textPlaceholder) } }
+    public var takesText: Bool {
+        switch action {
+        case .program(let run): run.dropFirst().contains { $0.contains(Self.textPlaceholder) }
+        case .shortcut(let shortcut): shortcut.input?.contains(Self.textPlaceholder) ?? false
+        }
+    }
 
     public func arguments(text: String) -> [String] {
-        run.dropFirst().map { $0.replacingOccurrences(of: Self.textPlaceholder, with: text) }
+        switch action {
+        case .program(let run): run.dropFirst().map { $0.replacingOccurrences(of: Self.textPlaceholder, with: text) }
+        case .shortcut(let shortcut): shortcut.input.map { [$0.replacingOccurrences(of: Self.textPlaceholder, with: text)] } ?? []
+        }
     }
 
     public func commandLine(arguments: [String]) -> String {
+        if let shortcut {
+            let input = arguments.first.map { " with \u{201C}\($0)\u{201D} as its input" } ?? ""
+            return "Runs the shortcut \u{201C}\(shortcut.name)\u{201D}\(input)."
+        }
         let shownProgram = program.hasPrefix("~/") && !Self.isShellSafe(program.dropFirst(2))
             ? "~/" + Self.shellQuoted(program.dropFirst(2))
             : Self.shellQuoted(program, allowingHome: true)
@@ -115,15 +178,20 @@ public struct VoiceCommandScript: Codable, Equatable, Sendable {
 
     public var issue: String? {
         if let issue = UserInputValidation.nameIssue(name) { return "Name: \(issue.message)" }
-        if let word = Self.commandWord(name) { return "Name: \(word)" }
         for form in say {
             if let issue = UserInputValidation.phraseIssue(form) { return "Spoken name: \(issue.message)" }
-            if let word = Self.commandWord(form) { return "Spoken name: \(word)" }
         }
-        let program = program.trimmingCharacters(in: .whitespaces)
+        switch action {
+        case .program(let run): return Self.programIssue(run)
+        case .shortcut(let shortcut): return Self.shortcutIssue(shortcut)
+        }
+    }
+
+    private static func programIssue(_ run: [String]) -> String? {
+        let program = (run.first ?? "").trimmingCharacters(in: .whitespaces)
         if program.isEmpty { return "Program: Choose a program to run." }
         if let issue = UserInputValidation.identifierIssue(program, required: true) { return "Program: \(issue.message)" }
-        if program.contains(Self.textPlaceholder) { return "Program: \(Self.textPlaceholder) can only be used in an argument." }
+        if program.contains(textPlaceholder) { return "Program: \(textPlaceholder) can only be used in an argument." }
         guard program.hasPrefix("/") || program.hasPrefix("~/") else {
             return "Program: Use a full path, such as /usr/local/bin/tool or ~/bin/tool."
         }
@@ -133,28 +201,54 @@ public struct VoiceCommandScript: Codable, Equatable, Sendable {
         return nil
     }
 
-    enum CodingKeys: String, CodingKey { case name, say, run }
+    private static func shortcutIssue(_ shortcut: VoiceCommandShortcut) -> String? {
+        if shortcut.name.trimmingCharacters(in: .whitespaces).isEmpty { return "Shortcut: Choose a shortcut to run." }
+        if let issue = UserInputValidation.identifierIssue(shortcut.name, required: true) { return "Shortcut: \(issue.message)" }
+        if let identifier = shortcut.identifier, let issue = UserInputValidation.identifierIssue(identifier, required: true) {
+            return "Shortcut: \(issue.message)"
+        }
+        if let input = shortcut.input, let issue = UserInputValidation.identifierIssue(input) { return "Input: \(issue.message)" }
+        return nil
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, say, run, shortcut, input
+        case shortcutId = "shortcut_id"
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = try c.decode(String.self, forKey: .name)
         say = try c.decodeIfPresent([String].self, forKey: .say) ?? []
-        run = try c.decode([String].self, forKey: .run)
+        let run = try c.decodeIfPresent([String].self, forKey: .run)
+        let shortcut = try c.decodeIfPresent(String.self, forKey: .shortcut)
+        let identifier = try c.decodeIfPresent(String.self, forKey: .shortcutId)
+        let input = try c.decodeIfPresent(String.self, forKey: .input)
+        switch (run, shortcut) {
+        case (let run?, nil):
+            guard identifier == nil, input == nil else {
+                throw ConfigError.invalid("script \"\(name)\": shortcut_id and input apply only to a shortcut")
+            }
+            action = .program(run)
+        case (nil, let shortcut?):
+            action = .shortcut(VoiceCommandShortcut(name: shortcut, identifier: identifier, input: input))
+        default:
+            throw ConfigError.invalid("script \"\(name)\": set exactly one of run or shortcut")
+        }
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(name, forKey: .name)
         if !say.isEmpty { try c.encode(say, forKey: .say) }
-        try c.encode(run, forKey: .run)
-    }
-
-    private static func commandWord(_ form: String) -> String? {
-        let words = VoiceCommandText.key(form).split(separator: " ")
-        guard !words.isEmpty else { return nil }
-        let phrases = (VoiceCommandGrammar.focusVerbs + [VoiceCommandGrammar.goBack]).map { $0.split(separator: " ") }
-        guard phrases.contains(where: { $0.starts(with: words) }) else { return nil }
-        return "\u{201C}\(form)\u{201D} is already a command word. Choose another spoken name."
+        switch action {
+        case .program(let run):
+            try c.encode(run, forKey: .run)
+        case .shortcut(let shortcut):
+            try c.encode(shortcut.name, forKey: .shortcut)
+            try c.encodeIfPresent(shortcut.identifier, forKey: .shortcutId)
+            try c.encodeIfPresent(shortcut.input, forKey: .input)
+        }
     }
 }
 

@@ -49,7 +49,7 @@ enum HUDState: Equatable {
     case rewriting(connection: String, mode: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
     case localFallback(outcome: DictationOutcome, mode: String)
     case complete(outcome: DictationOutcome, mode: String)
-    case commandDone(summary: String)
+    case commandDone(summary: String, detail: String = HUDState.commandDetail)
     case stoppedAtLimit(outcome: DictationOutcome, limit: String, rewriteSkipped: Bool)
     case error(message: String, action: HUDErrorAction?)
 }
@@ -109,7 +109,7 @@ extension HUDState {
             return "Inserted without rewriting"
         case .complete(let outcome, _):
             return Self.completePrimary(outcome)
-        case .commandDone(let summary):
+        case .commandDone(let summary, _):
             return summary
         case .stoppedAtLimit(_, let limit, _):
             return "Stopped at the \(limit) limit"
@@ -146,8 +146,8 @@ extension HUDState {
                 : "Inserted — dictate again to continue"
         case .complete(_, let mode):
             return mode
-        case .commandDone:
-            return "Voice command"
+        case .commandDone(_, let detail):
+            return detail
         case .localFallback:
             return "Rewrite could not be completed"
         case .error, .hidden:
@@ -258,4 +258,9 @@ protocol HUDPresenting: AnyObject {
 
 extension HUDPresenting {
     func relinquishKeyFocus() {}
+}
+
+extension HUDState {
+    static let commandDetail = "Voice command"
+    static let commandStillRunningDetail = "Started, still running"
 }

@@ -31,6 +31,14 @@ struct ModeEditorView: View {
 
     private var systemBody: some View {
         Form {
+            Section {
+                PaneDetailHeader(
+                    systemImage: "square.stack.3d.up",
+                    title: mode.name,
+                    subtitle: ModeSummary.whenRuns(mode),
+                    badges: { PaneBadge("Built in") })
+            }
+
             Section("How to start Plain Dictation") {
                 ModeTriggerRow(mode: mode, onUpdate: onUpdate, label: "Shortcut")
                 PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
@@ -43,13 +51,22 @@ struct ModeEditorView: View {
                 Text("Plain Dictation also runs whenever no other mode matches on a shortcut it owns. A shortcut it does not own stays with the modes you gave it.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section("Spoken editing") {
+            Section("What it does") {
                 SettingRow(
                     title: "Turn spoken editing phrases into edits",
                     help: "Turns phrases you say into edits: \u{201C}insert new line\u{201D}, \u{201C}insert new paragraph\u{201D}, \u{201C}insert tab character\u{201D}, \u{201C}insert clipboard contents\u{201D}, \u{201C}scratch that\u{201D}, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
                 {
                     Toggle("", isOn: bind.commandsBinding(\.liveEdits)).labelsHidden()
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.liveEdits)
+                }
+                SettingRow(
+                    title: "Recognition and replacements",
+                    result: "Uses your global vocabulary",
+                    help: "Plain Dictation always uses the words and replacements in Global vocabulary. To give dictation its own words, add a mode.",
+                    combinesAccessibilityChildren: false)
+                {
+                    Button("Edit Vocabulary…", action: onEditVocabulary)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Recognition.editVocabulary)
                 }
             }
             Section("Result handling") {

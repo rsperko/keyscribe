@@ -20,6 +20,7 @@ struct ReplacementValueField: View {
     var body: some View {
         TextField("", text: $text, prompt: Text(placeholder), axis: .vertical)
             .lineLimit(1...4)
+            .labelsHidden()
             .multilineTextAlignment(.leading)
             .textFieldStyle(.roundedBorder)
             .accessibilityLabel(title)

@@ -65,6 +65,7 @@ struct ResetTool {
     private func clearOnboarding() -> [String] {
         defaults.removeObject(forKey: Self.firstRunKey)
         defaults.removeObject(forKey: Self.accessibilityAtLastLaunchKey)
+        VoiceCommandNotices(supportDir: supportDir, defaults: defaults).clear()
         return ["Cleared onboarding flag (\(Self.firstRunKey))."]
     }
 

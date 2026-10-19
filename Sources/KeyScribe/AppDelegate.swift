@@ -297,6 +297,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() },
             onEraseAllData: { [weak self] in self?.eraseAllDataAndRelaunch() },
             clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
+        controller.onHistoryUpdated = { [weak self] in self?.settingsController.historyDidChange() }
         settingsController.recordingState.onChange = { [weak self] recording in
             self?.hotkey?.isSuspended = recording
         }

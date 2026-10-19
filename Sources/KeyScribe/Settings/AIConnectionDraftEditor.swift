@@ -227,7 +227,8 @@ struct AIConnectionDraftEditor: View {
                 HStack {
                     Text("API key")
                     Spacer()
-                    SecureField("Paste API key", text: apiKeyBinding)
+                    SecureField("API key", text: apiKeyBinding, prompt: Text("Paste API key"))
+                        .labelsHidden()
                         .multilineTextAlignment(.leading)
                         .textFieldStyle(.plain)
                         .frame(maxWidth: 260)
@@ -257,7 +258,8 @@ struct AIConnectionDraftEditor: View {
                     HStack {
                         Text("API key")
                         Spacer()
-                        SecureField("", text: apiKeyBinding, prompt: Text("Paste API key"))
+                        SecureField("API key", text: apiKeyBinding, prompt: Text("Paste API key"))
+                            .labelsHidden()
                             .multilineTextAlignment(.leading)
                             .textFieldStyle(.plain)
                             .frame(maxWidth: 360)
@@ -396,6 +398,8 @@ struct AIConnectionDraftEditor: View {
                         get: { value },
                         set: { update($0); commit(nil) }
                     ), prompt: prompt.map(Text.init))
+                        .labelsHidden()
+                        .accessibilityLabel(title)
                         .multilineTextAlignment(.leading)
                         .textFieldStyle(.plain)
                         .frame(maxWidth: 260)

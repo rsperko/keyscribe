@@ -78,6 +78,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
             let inBrowser = browser.map { " in \(appName($0) ?? $0)" } ?? ""
             return "No open tab matches, so it opens \(url)\(inBrowser)."
         case .script(let script, let arguments):
+            if script.isShortcut { return script.commandLine(arguments: arguments) }
             return "Runs \(script.commandLine(arguments: arguments)) in the background."
         }
     }
@@ -96,6 +97,7 @@ public enum VoiceCommandResolution: Equatable, Sendable {
     case needsTabs(browser: String?)
     case browserNotAllowed(String)
     case scriptNeedsText(String)
+    case scriptNotFound(String)
 }
 
 public enum VoiceCommandResolver {
@@ -103,22 +105,19 @@ public enum VoiceCommandResolver {
 
     public static func resolve(_ transcript: String, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
         let intent = VoiceCommandGrammar.parse(transcript)
-        if intent != .goBack, let script = resolveScript(transcript, scripts: catalog.scripts) { return script }
         switch intent {
         case nil: return .notACommand
         case .goBack: return .action(.goBack)
         case .focus(let target): return resolve(target: target, catalog: catalog)
+        case .runScript(let target):
+            return resolveScript(transcript, scripts: catalog.scripts) ?? .scriptNotFound(target)
         }
     }
 
     public static func resolveScript(_ transcript: String, scripts: [VoiceCommandScript]) -> VoiceCommandResolution? {
-        guard !scripts.isEmpty else { return nil }
+        guard !scripts.isEmpty, case .runScript = VoiceCommandGrammar.parse(transcript) else { return nil }
         let words = VoiceCommandGrammar.spokenWords(transcript)
-        let starts = [0] + (VoiceCommandGrammar.focusVerbLength(words).map { [$0] } ?? [])
-        for start in starts {
-            if let resolution = resolveScript(transcript, words: words, from: start, scripts: scripts) { return resolution }
-        }
-        return nil
+        return resolveScript(transcript, words: words, from: 1, scripts: scripts)
     }
 
     private static func resolveScript(

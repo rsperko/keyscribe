@@ -49,4 +49,14 @@ struct VocabularyScopePickerTests {
         #expect(navigation.destination == .vocabulary)
         #expect(navigation.vocabularyScope == .mode("email"))
     }
+
+    @MainActor @Test func openingPlainDictationVocabularySelectsGlobal() {
+        let navigation = SettingsNavigationModel()
+        navigation.vocabularyScope = .mode("email")
+
+        navigation.openVocabulary(for: Mode.directId)
+
+        #expect(navigation.destination == .vocabulary)
+        #expect(navigation.vocabularyScope == .global)
+    }
 }

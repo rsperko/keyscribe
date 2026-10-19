@@ -179,6 +179,11 @@ enum AccessibilityID {
         }
 
         enum VoiceCommands {
+            static let appNotice = "mode.voiceCommands.appNotice"
+            static let appNoticeConfirm = "mode.voiceCommands.appNotice.confirm"
+            static let appNoticeCancel = "mode.voiceCommands.appNotice.cancel"
+            static let placeNotice = "mode.voiceCommands.place.notice"
+            static let scriptNotice = "mode.voiceCommands.scriptNotice"
             static let addPlace = "mode.voiceCommands.addPlace"
             static let addCurrentApp = "mode.voiceCommands.addCurrentApp"
             static let addCurrentTab = "mode.voiceCommands.addCurrentTab"
@@ -204,6 +209,21 @@ enum AccessibilityID {
             static let placeDeleteConfirm = "mode.voiceCommands.place.deleteConfirm.confirm"
             static func placeEdit(_ placeKey: String) -> String { "mode.voiceCommands.place.edit.\(placeKey)" }
             static let addScript = "mode.voiceCommands.addScript"
+            static let addAction = "mode.voiceCommands.addAction"
+            static let addShortcut = "mode.voiceCommands.addShortcut"
+            static let shortcutNotice = "mode.voiceCommands.shortcut.notice"
+            static let shortcutChoice = "mode.voiceCommands.shortcut.choice"
+            static func shortcutOption(_ target: String) -> String { "mode.voiceCommands.shortcut.option.\(target)" }
+            static let shortcutRefresh = "mode.voiceCommands.shortcut.refresh"
+            static let shortcutOpenApp = "mode.voiceCommands.shortcut.openApp"
+            static let shortcutName = "mode.voiceCommands.shortcut.name"
+            static let shortcutSay = "mode.voiceCommands.shortcut.say"
+            static let shortcutInput = "mode.voiceCommands.shortcut.input"
+            static let shortcutExample = "mode.voiceCommands.shortcut.example"
+            static let shortcutSave = "mode.voiceCommands.shortcut.save"
+            static let shortcutCancel = "mode.voiceCommands.shortcut.cancel"
+            static let shortcutDelete = "mode.voiceCommands.shortcut.delete"
+            static let shortcutDeleteConfirm = "mode.voiceCommands.shortcut.deleteConfirm.confirm"
             static let scriptName = "mode.voiceCommands.script.name"
             static let scriptSay = "mode.voiceCommands.script.say"
             static let scriptProgram = "mode.voiceCommands.script.program"
@@ -385,6 +405,8 @@ enum AccessibilityID {
     // button's AXMenuBarItem exposes no identifier at all — those items are addressed by title instead.
 
     static let all: [String] = [
+        Mode.VoiceCommands.appNotice, Mode.VoiceCommands.appNoticeConfirm, Mode.VoiceCommands.appNoticeCancel,
+        Mode.VoiceCommands.scriptNotice, Mode.VoiceCommands.placeNotice,
         Mode.VoiceCommands.addPlace, Mode.VoiceCommands.addCurrentApp, Mode.VoiceCommands.addCurrentTab,
         Mode.VoiceCommands.addApp, Mode.VoiceCommands.addWebPage, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.editVocabulary,
         Mode.VoiceCommands.placeName, Mode.VoiceCommands.placeSay, Mode.VoiceCommands.placeKind,
@@ -397,6 +419,13 @@ enum AccessibilityID {
         Mode.VoiceCommands.scriptProgram, Mode.VoiceCommands.scriptChooseProgram, Mode.VoiceCommands.scriptArguments,
         Mode.VoiceCommands.scriptSave, Mode.VoiceCommands.scriptCancel, Mode.VoiceCommands.scriptDelete,
         Mode.VoiceCommands.scriptDeleteConfirm,
+        Mode.VoiceCommands.addAction, Mode.VoiceCommands.addShortcut, Mode.VoiceCommands.excludeFromHistory,
+        Mode.VoiceCommands.shortcutNotice, Mode.VoiceCommands.shortcutChoice,
+        Mode.VoiceCommands.shortcutRefresh, Mode.VoiceCommands.shortcutOpenApp,
+        Mode.VoiceCommands.shortcutName, Mode.VoiceCommands.shortcutSay, Mode.VoiceCommands.shortcutInput,
+        Mode.VoiceCommands.shortcutExample,
+        Mode.VoiceCommands.shortcutSave, Mode.VoiceCommands.shortcutCancel,
+        Mode.VoiceCommands.shortcutDelete, Mode.VoiceCommands.shortcutDeleteConfirm,
         Settings.Sidebar.general, Settings.Sidebar.speechModels, Settings.Sidebar.vocabulary,
         Settings.Sidebar.aiServices, Settings.Sidebar.modes, Settings.Sidebar.history, Settings.Sidebar.permissions,
         Settings.Sidebar.advanced,

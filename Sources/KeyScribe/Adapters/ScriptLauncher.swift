@@ -12,7 +12,10 @@ enum ScriptLauncher {
         (program as NSString).expandingTildeInPath
     }
 
-    static func run(program: String, arguments: [String], reportWithin window: TimeInterval = reportWindow) async -> ScriptRun {
+    static func run(
+        program: String, arguments: [String], input: String? = nil, reportWithin window: TimeInterval = reportWindow,
+        onLateFinish: @escaping @Sendable (ScriptRun) -> Void = { _ in }
+    ) async -> ScriptRun {
         let path = expandedPath(program)
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), !isDirectory.boolValue,
@@ -22,13 +25,14 @@ enum ScriptLauncher {
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
         process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
-        process.standardInput = FileHandle.nullDevice
+        let stdin = input.map { _ in Pipe() }
+        process.standardInput = stdin ?? FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         let errors = Pipe()
         process.standardError = errors
 
         return await withCheckedContinuation { continuation in
-            let report = Report(continuation)
+            let report = Report(continuation, onLateFinish: onLateFinish)
             errors.fileHandleForReading.readabilityHandler = { handle in
                 let data = handle.availableData
                 if data.isEmpty {
@@ -50,6 +54,14 @@ enum ScriptLauncher {
                 errors.fileHandleForReading.readabilityHandler = nil
                 report.failedToStart(error.localizedDescription)
                 return
+            }
+            if let stdin, let input {
+                let writer = stdin.fileHandleForWriting
+                _ = fcntl(writer.fileDescriptor, F_SETNOSIGPIPE, 1)
+                DispatchQueue.global().async {
+                    try? writer.write(contentsOf: Data(input.utf8))
+                    try? writer.close()
+                }
             }
             DispatchQueue.global().asyncAfter(deadline: .now() + window) { report.windowClosed() }
         }
@@ -73,12 +85,15 @@ enum ScriptLauncher {
     private final class Report: @unchecked Sendable {
         private let lock = NSLock()
         private var continuation: CheckedContinuation<ScriptRun, Never>?
+        private var onLateFinish: (@Sendable (ScriptRun) -> Void)?
+        private var reportedRunning = false
         private var errorOutput = Data()
         private var status: Int32?
         private var closed = false
 
-        init(_ continuation: CheckedContinuation<ScriptRun, Never>) {
+        init(_ continuation: CheckedContinuation<ScriptRun, Never>, onLateFinish: @escaping @Sendable (ScriptRun) -> Void) {
             self.continuation = continuation
+            self.onLateFinish = onLateFinish
         }
 
         func append(_ data: Data) {
@@ -97,7 +112,7 @@ enum ScriptLauncher {
         func exited(_ status: Int32) {
             lock.withLock { self.status = status }
             finishIfExited()
-            DispatchQueue.global().asyncAfter(deadline: .now() + ScriptLauncher.errorGrace) { self.windowClosed() }
+            DispatchQueue.global().asyncAfter(deadline: .now() + ScriptLauncher.errorGrace) { self.graceEnded() }
         }
 
         func failedToStart(_ reason: String) {
@@ -111,6 +126,13 @@ enum ScriptLauncher {
             resume(result)
         }
 
+        private func graceEnded() {
+            let result: ScriptRun? = lock.withLock {
+                status.map { .finished(status: $0, lastError: ScriptLauncher.lastLine(of: errorOutput)) }
+            }
+            if let result { resume(result) }
+        }
+
         private func finishIfExited() {
             let result: ScriptRun? = lock.withLock {
                 guard closed, let status else { return nil }
@@ -120,11 +142,18 @@ enum ScriptLauncher {
         }
 
         private func resume(_ result: ScriptRun) {
-            let pending: CheckedContinuation<ScriptRun, Never>? = lock.withLock {
-                defer { continuation = nil }
-                return continuation
+            let (pending, late): (CheckedContinuation<ScriptRun, Never>?, (@Sendable (ScriptRun) -> Void)?) = lock.withLock {
+                if let continuation {
+                    self.continuation = nil
+                    if result == .stillRunning { reportedRunning = true } else { onLateFinish = nil }
+                    return (continuation, nil)
+                }
+                guard reportedRunning, result != .stillRunning, let handler = onLateFinish else { return (nil, nil) }
+                onLateFinish = nil
+                return (nil, handler)
             }
             pending?.resume(returning: result)
+            late?(result)
         }
     }
 }

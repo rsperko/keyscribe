@@ -104,6 +104,7 @@ public enum HistoryExport {
         case .failed: "Failed"
         case .command: "Command"
         case .commandFailed: "Command failed"
+        case .commandStarted: "Command started"
         }
     }
 }

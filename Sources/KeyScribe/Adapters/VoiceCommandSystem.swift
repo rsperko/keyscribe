@@ -7,6 +7,7 @@ struct VoiceCommandOrigin: Equatable, Sendable {
 
 enum VoiceCommandOutcome: Equatable, Sendable {
     case done(summary: String, command: String)
+    case started(summary: String, command: String)
     case failed(message: String, command: String? = nil)
     case abandoned
 }
@@ -49,14 +50,16 @@ protocol VoiceCommandSystem: AnyObject {
     func openApp(bundleId: String) async -> Bool
     func focusTab(_ tab: VoiceCommandCatalog.Tab) async -> TabFocusResult
     func openURL(_ url: String, browser: String?) async -> Bool
-    func runScript(program: String, arguments: [String]) async -> ScriptRun
+    func runScript(
+        _ script: VoiceCommandScript, arguments: [String], onLateFinish: @escaping @MainActor (ScriptRun) -> Void
+    ) async -> ScriptRun
 }
 
 @MainActor
 protocol VoiceCommandRunning: AnyObject {
     func run(
         transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript], origin: VoiceCommandOrigin?,
-        stillWanted: @MainActor () -> Bool
+        stillWanted: @MainActor () -> Bool, onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
     ) async -> VoiceCommandOutcome
 }
 
@@ -91,21 +94,25 @@ final class VoiceCommandRunner: VoiceCommandRunning {
 
     func run(
         transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = [],
-        origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool = { true }
+        origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool = { true },
+        onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void = { _ in }
     ) async -> VoiceCommandOutcome {
         let resolution = await resolve(transcript, places: places, scripts: scripts)
         guard stillWanted() else { return .abandoned }
-        return await run(resolution, origin: origin, stillWanted: stillWanted)
+        return await run(resolution, origin: origin, stillWanted: stillWanted, onLateResult: onLateResult)
     }
 
     func run(
         _ resolution: VoiceCommandResolution, origin: VoiceCommandOrigin?,
-        stillWanted: @MainActor () -> Bool = { true }
+        stillWanted: @MainActor () -> Bool = { true },
+        onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void = { _ in }
     ) async -> VoiceCommandOutcome {
         let origin = origin.flatMap { $0.bundleId == system.ownBundleId ? nil : $0 }
         switch resolution {
         case .notACommand:
-            return .failed(message: "Not a command. Say \u{201C}switch to\u{201D} an app or place, \u{201C}go back\u{201D}, or a script\u{2019}s name.")
+            return .failed(message: "Not a command. Say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}.")
+        case .scriptNotFound(let target):
+            return .failed(message: Self.notFoundMessage(target))
         case .noMatch(let target):
             return .failed(message: "No app or place called \u{201C}\(target)\u{201D}.")
         case .ambiguous(let names):
@@ -118,12 +125,13 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         case .scriptNeedsText(let name):
             return .failed(message: Self.needsTextMessage(script: name))
         case .action(let action):
-            return await execute(action, origin: origin, stillWanted: stillWanted)
+            return await execute(action, origin: origin, stillWanted: stillWanted, onLateResult: onLateResult)
         }
     }
 
     private func execute(
-        _ action: VoiceCommandAction, origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool
+        _ action: VoiceCommandAction, origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool,
+        onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
     ) async -> VoiceCommandOutcome {
         let summary = action.summary(appName: system.appName(forBundleId:))
         var command = action.command(appName: system.appName(forBundleId:))
@@ -164,8 +172,10 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             if let refusal = browserRefusal(browser, place: place) { return refusal }
             succeeded = await system.openURL(url, browser: browser)
         case .script(let script, let arguments):
-            return Self.outcome(
-                of: await system.runScript(program: script.program, arguments: arguments), script: script, command: command)
+            let run = await system.runScript(script, arguments: arguments) { late in
+                onLateResult(Self.outcome(of: late, script: script, command: command))
+            }
+            return Self.outcome(of: run, script: script, command: command)
         }
         guard succeeded else { return .failed(message: "Could not switch to \(summary).", command: command) }
         if let origin { backTarget = origin }
@@ -176,13 +186,21 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         "Say what to pass to \(script) after its name."
     }
 
+    static func notFoundMessage(_ target: String) -> String {
+        "No script or shortcut is called \u{201C}\(target)\u{201D}."
+    }
+
     static func outcome(of run: ScriptRun, script: VoiceCommandScript, command: String) -> VoiceCommandOutcome {
         switch run {
-        case .finished(0, _), .stillRunning:
+        case .finished(0, _):
             return .done(summary: script.name, command: command)
+        case .stillRunning:
+            return .started(summary: script.name, command: command)
         case .finished(let status, let lastError):
-            return .failed(
-                message: "\(script.name) failed (exit \(status))" + (lastError.map { ": \($0)" } ?? "."), command: command)
+            let exit = script.isShortcut ? "" : " (exit \(status))"
+            return .failed(message: "\(script.name) failed\(exit)" + (lastError.map { ": \($0)" } ?? "."), command: command)
+        case .notRunnable where script.isShortcut:
+            return .failed(message: "Shortcuts could not be started from \(Branding.appName) on this Mac.", command: command)
         case .notRunnable:
             return .failed(
                 message: "\(script.program) is not a program that can be run. Check the path, and that the file is executable.",
@@ -311,8 +329,60 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
         }
     }
 
-    func runScript(program: String, arguments: [String]) async -> ScriptRun {
-        await ScriptLauncher.run(program: program, arguments: arguments)
+    nonisolated static let shortcutsTool = "/usr/bin/shortcuts"
+
+    func runScript(
+        _ script: VoiceCommandScript, arguments: [String], onLateFinish: @escaping @MainActor (ScriptRun) -> Void
+    ) async -> ScriptRun {
+        let late: @Sendable (ScriptRun) -> Void = { run in Task { @MainActor in onLateFinish(run) } }
+        guard let shortcut = script.shortcut else {
+            return await ScriptLauncher.run(program: script.program, arguments: arguments, onLateFinish: late)
+        }
+        let input = arguments.first
+        return await ScriptLauncher.run(
+            program: Self.shortcutsTool, arguments: Self.shortcutArguments(shortcut, input: input), input: input,
+            onLateFinish: late)
+    }
+
+    nonisolated static func shortcutArguments(_ shortcut: VoiceCommandShortcut, input: String?) -> [String] {
+        ["run", shortcut.target] + (input == nil ? [] : ["--input-path", "-"])
+    }
+
+    nonisolated static let shortcutListDeadline: TimeInterval = 10
+
+    func shortcuts() async -> [VoiceCommandShortcut]? {
+        await Task.detached {
+            guard let output = Self.readOutput(
+                program: Self.shortcutsTool, arguments: ["list", "--show-identifiers"], within: Self.shortcutListDeadline)
+            else { return nil }
+            return VoiceCommandShortcut.parseList(output)
+                .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }.value
+    }
+
+    nonisolated static func readOutput(program: String, arguments: [String], within seconds: TimeInterval) -> String? {
+        let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-output-\(UUID().uuidString)")
+        guard FileManager.default.createFile(atPath: outputURL.path, contents: nil),
+              let output = try? FileHandle(forWritingTo: outputURL) else { return nil }
+        defer {
+            try? output.close()
+            try? FileManager.default.removeItem(at: outputURL)
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: program)
+        process.arguments = arguments
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
+        do { try process.run() } catch { return nil }
+        guard exited.wait(timeout: .now() + seconds) == .success else {
+            process.terminate()
+            return nil
+        }
+        guard process.terminationStatus == 0, let data = try? Data(contentsOf: outputURL) else { return nil }
+        return String(decoding: data, as: UTF8.self)
     }
 
     func browserTabs(in browser: String?) async -> TabRead? {

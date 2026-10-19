@@ -597,6 +597,7 @@ struct VocabularyComposer: View {
                     "",
                     text: $heard,
                     prompt: Text(regex ? "Regular expression" : "e.g. Kubernetes"))
+                    .labelsHidden()
                     .multilineTextAlignment(.leading)
                     .textFieldStyle(.roundedBorder)
                     .focused($focus, equals: .heard)

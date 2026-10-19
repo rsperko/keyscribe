@@ -39,7 +39,7 @@ struct VoiceCommandsSettingsModelTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         _ = model.save(mail, replacing: nil)
         let other = VoiceCommandPlace(name: "mail", target: .app(bundleId: "com.apple.mail"))
-        #expect(model.save(other, replacing: nil) == "Another place or script already uses this name.")
+        #expect(model.save(other, replacing: nil) == "Another place or action already uses this name.")
         #expect(model.places == [mail])
     }
 
@@ -186,9 +186,9 @@ struct VoiceCommandsSettingsModelTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         _ = model.save(mail, replacing: nil)
         let clash = VoiceCommandScript(name: "Mail", run: ["/usr/bin/true"])
-        #expect(model.saveScript(clash, replacing: nil) == "Another place or script already uses this name.")
+        #expect(model.saveScript(clash, replacing: nil) == "Another place or action already uses this name.")
         #expect(model.save(VoiceCommandPlace(name: "deploy", target: .app(bundleId: "com.example")), replacing: nil) == nil)
-        #expect(model.saveScript(deploy, replacing: nil) == "Another place or script already uses this name.")
+        #expect(model.saveScript(deploy, replacing: nil) == "Another place or action already uses this name.")
     }
 
     @Test func anInvalidScriptIsRefusedWithItsIssue() throws {
@@ -197,6 +197,20 @@ struct VoiceCommandsSettingsModelTests {
         #expect(model.saveScript(VoiceCommandScript(name: "X", run: ["deploy"]), replacing: nil)
             == "Program: Use a full path, such as /usr/local/bin/tool or ~/bin/tool.")
         #expect(model.scripts.isEmpty)
+    }
+
+    @Test func scriptValidationExplainsWhatPreventsSavingWithoutWriting() {
+        let (model, dir) = make()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(model.scriptIssue(deploy, replacing: nil) == nil)
+        #expect(model.scriptIssue(VoiceCommandScript(name: "", run: ["/bin/tool"]), replacing: nil) != nil)
+        #expect(model.scriptIssue(VoiceCommandScript(name: "Tool", run: ["tool"]), replacing: nil)
+            == "Program: Use a full path, such as /usr/local/bin/tool or ~/bin/tool.")
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent(VoiceCommandStore.fileName).path))
+
+        _ = model.saveScript(deploy, replacing: nil)
+        #expect(model.scriptIssue(deploy, replacing: nil) == "Another place or action already uses this name.")
+        #expect(model.scriptIssue(deploy, replacing: deploy.name) == nil)
     }
 
     @Test func theProgramCheckNamesWhatIsWrong() throws {
@@ -242,5 +256,47 @@ struct VoiceCommandsSettingsModelTests {
     @Test func onlyArgumentsTheEditorCannotShowAreHeldFixed() {
         #expect(ScriptDraft(VoiceCommandScript(name: "T", run: ["/bin/t", "one", "", "three"])).fixedArguments == nil)
         #expect(ScriptDraft(VoiceCommandScript(name: "T", run: ["/bin/t", "a", ""])).fixedArguments == ["a", ""])
+    }
+
+    @Test func aShortcutDraftNamesItselfAfterTheChosenShortcutUntilRenamed() {
+        var draft = ShortcutDraft()
+        draft.choose(VoiceCommandShortcut(name: "Journal Entry", identifier: "6E98"))
+        #expect(draft.name == "Journal Entry")
+        draft.choose(VoiceCommandShortcut(name: "Share Wi-Fi", identifier: "CADB"))
+        #expect(draft.name == "Share Wi-Fi")
+        draft.name = "Wi-Fi"
+        draft.choose(VoiceCommandShortcut(name: "Journal Entry", identifier: "6E98"))
+        #expect(draft.name == "Wi-Fi")
+        #expect(draft.script.shortcut == VoiceCommandShortcut(name: "Journal Entry", identifier: "6E98"))
+    }
+
+    @Test func aShortcutDraftKeepsInputOnlyWhenGiven() {
+        var draft = ShortcutDraft(VoiceCommandScript(
+            name: "Journal", say: ["log"], shortcut: VoiceCommandShortcut(name: "Journal Entry", identifier: "6E98", input: "{text}")))
+        #expect(draft.script == VoiceCommandScript(
+            name: "Journal", say: ["log"], shortcut: VoiceCommandShortcut(name: "Journal Entry", identifier: "6E98", input: "{text}")))
+        draft.input = "  "
+        #expect(draft.script.shortcut?.input == nil)
+        #expect(!draft.script.takesText)
+    }
+
+    @Test func eachListHasItsOwnWarning() {
+        let kinds: [VoiceCommandNotices.Kind] = [.places, .scripts, .shortcuts]
+        #expect(Set(kinds.map(\.title)).count == kinds.count)
+        #expect(Set(kinds.map(\.message)).count == kinds.count)
+        #expect(VoiceCommandNotices.Kind.shortcuts.message.contains("send messages"))
+        #expect(VoiceCommandNotices.Kind.shortcuts.message.contains("online services"))
+    }
+
+    @Test func aShortcutExampleUsesItsActualSpokenNameAndInput() {
+        var draft = ShortcutDraft()
+        #expect(draft.example == nil)
+        draft.choose(VoiceCommandShortcut(name: "Journal Entry"))
+        #expect(draft.example == "Say “run Journal Entry” to run “Journal Entry” with no input.")
+        draft.name = "journal"
+        draft.input = "Note: {text}"
+        #expect(draft.example == "Say “run journal buy milk” to pass “Note: buy milk” to “Journal Entry”.")
+        draft.input = "Daily check-in"
+        #expect(draft.example == "Say “run journal” to pass “Daily check-in” to “Journal Entry”.")
     }
 }

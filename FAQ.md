@@ -131,29 +131,75 @@ words (Mike and "make"). A dictionaried compound also snaps its spoken form ("te
 dictionary terms are shared with your own AI service — marked as intended spellings, not typos, so it
 does not "fix" them — including in privacy modes, which turn context off but still send that term hint.
 
+### Can I switch apps or run actions by voice?
+
+Yes, with the experimental **Voice Commands** mode. Turn it on in **Settings ▸ Maintenance ▸
+Experimental features**, then assign a shortcut in **Settings ▸ Modes ▸ Voice Commands**. Use that
+shortcut when you want to speak a command:
+
+- **“switch to Mail”** or **“open Safari”** brings the app forward, opening it if needed. App names
+  work without setup.
+- **“open inbox”** goes to an app or web page you have named `inbox` under **Places**. For a web page,
+  it uses a matching open tab when possible.
+- **“run journal buy milk”** runs an action you have added under **Actions**. A script or macOS
+  shortcut receives the extra words only when you have configured it to accept them.
+- **“go back”** returns to the app you were using before your last app switch by voice. Say it again
+  to switch back. Running an action does not change that destination.
+
+Commands never type your words. An unrecognized or ambiguous command shows an explanation and runs
+nothing. **Try it** previews what a typed command would do without running it.
+
+Before enabling the feature, a notice explains that a recognition mistake can bring an unintended
+app and its windows forward, including while sharing your screen. Cancel leaves the feature off.
+The explanation remains available under Places in the mode panel.
+
 ### A voice command keeps being misheard.
 
 With the experimental voice commands, open **Settings ▸ Vocabulary ▸ Voice Commands**. Words and
 replacements there apply only to commands, and run before KeyScribe reads what you said:
 
-- **A name that comes out wrong:** add the app's real spelling (`herdr`) to the dictionary, and a
-  near-miss of the name ("herder") lands on it. The dictionary only ever changes the name, never the
-  "switch to" or "go back" around it.
-- **A phrase that always comes out wrong:** add a replacement — say your accent turns "switch to" into
-  "which to".
+- **A name that sometimes comes out wrong:** add the app's real spelling, such as `Spotify`, to the
+  dictionary. This is a best-effort spelling hint, not an explicit mapping from one word to another.
+  Dictionary correction applies only to app and place names, never command words or script names and
+  arguments. Its fuzzy correction excludes dictionary terms shorter than four characters.
+- **A phrase that consistently comes out wrong:** add a replacement for the complete command. For
+  example, if you say "switch to Mail" but your speech model hears "switch to male", use these fields:
+
+  | Field | Value |
+  |---|---|
+  | Word or heard phrase | `switch to male` |
+  | Use instead | `switch to Mail` |
+  | Match heard phrase as a regular expression (under Pattern matching) | Off |
+
+  Another example: if "open Zoom" is consistently heard as "open soon", replace `open soon` with
+  `open Zoom`. A replacement can also fix the command words: `which to Mail` → `switch to Mail`.
+  Prefer the complete command over replacing a common word everywhere: mode replacements also apply to
+  words passed to scripts and shortcuts.
+
+- **A name that needs to work with several commands:** add an app under **Settings ▸ Modes ▸ Voice
+  Commands ▸ Places ▸ Add Place… ▸ App…**, choose Mail, and enter `male` in **Also say**. Both "switch to
+  male" and "open male" then go to Mail, without rewriting other uses of the word. This is also useful
+  for a preferred nickname, such as `email` for Mail.
 - **Your own spoken shortcuts:** a replacement for a whole phrase becomes the command, so `code` →
   `switch to Visual Studio Code` lets you say just "code".
 
 To check a phrase, open **Settings ▸ Modes ▸ Voice Commands** and type it into **Try it**: it shows what
-the phrase is read as and what it would do. Global vocabulary is left out by default, so your prose fixes
-do not change a command.
+the phrase is read as and what it would do, without opening an app or running a script or shortcut.
+For the example above, type `switch to male` and check that it resolves to Mail.
+
+Keep these corrections scoped to **Voice Commands**. Global words and replacements apply here only if
+you explicitly include them for this mode; they are left out by default. A Global replacement for a
+common word such as `male` could also change ordinary dictation in modes that include it.
 
 ### Can a voice command run my own script?
 
-Yes, with the experimental voice commands. In **Settings ▸ Modes ▸ Voice Commands ▸ Scripts**, choose
-**Add Script**, give it a name to say, and pick the program. Arguments go one per line, and `{text}`
+Yes, with the experimental voice commands. In **Settings ▸ Modes ▸ Voice Commands ▸ Actions**, choose
+**Add Action ▸ Script**, give it a name to say, and pick the program. Arguments go one per line, and `{text}`
 stands for whatever you say after the name: a script named "deploy" with the arguments `--env` and
-`{text}` turns "deploy staging" into `deploy --env staging`. Saying "switch to deploy staging" works too.
+`{text}` turns "run deploy staging" into `deploy --env staging`. Scripts require **run**; a bare name
+or an app-switching phrase never runs a script. If a replacement used to turn something you say into a
+script's bare name, such as "ship it" into "deploy prod", change it to produce "run deploy prod". The spoken name can differ from the file name: a script
+named "foo" can run `~/bin/bar.sh` when you say "run foo".
 
 For example, save this as `~/bin/note` and run `chmod +x ~/bin/note` so it can run:
 
@@ -163,19 +209,34 @@ printf '%s\n' "$1" >> "$HOME/notes.txt"
 ```
 
 Then add a script named "note" with the program `~/bin/note` and one argument, `{text}`. Saying
-"note buy milk" appends "buy milk" to `notes.txt`.
+"run note buy milk" appends "buy milk" to `notes.txt`.
 
-The script runs in the background, so the app you are in stays in front. KeyScribe waits a moment: if
+KeyScribe starts the script in the background. The script itself may open another app. KeyScribe waits a moment: if
 the script fails by then, the error shows what it printed last. A script still running after that is
-reported as started and left to finish, so a later failure goes unnoticed. It runs without a shell and
+shown as started and left to finish. When History is on, its entry updates when it finishes. Later
+failures also appear on screen unless you are dictating. It runs without a shell and
 with a minimal `PATH`, so call other tools by their full path or set `PATH` at the top of the script.
 Use **Try it** to see the exact command a phrase would run, without running it.
 
-The dictionary never changes a script's name or the words you pass it. If a name keeps coming out
+The dictionary never changes a script or shortcut's name or the words you pass it. If a name keeps coming out
 wrong, add the misheard form as another spoken name.
 
-A script runs as you and can be started by a misheard command, so give anything that changes or deletes
-things a name you will not say by accident.
+Every Add Script sheet warns that recognition mistakes can start an unintended script or pass it
+different words. A script runs with your account's permissions; for actions that cannot be undone, use
+a script that asks for confirmation.
+
+### Can a voice command run a Shortcut?
+
+Yes. Choose **Add Action ▸ Shortcut**, pick one of your shortcuts, and give it a name to say. To hand it
+what you say after the name, set **Input** to `{text}`: a shortcut named "journal" with that input turns
+"run journal buy milk" into the shortcut receiving "buy milk" as text. It runs in the background like a
+script. A shortcut that asks you something, such as Ask for Input or Choose from Menu, waits for your
+answer; KeyScribe shows it as started and records its final result when History is on. A shortcut may
+also open another app.
+If the picker is empty, create a shortcut in Shortcuts, then choose **Refresh List** from the picker.
+
+Every Add Shortcut sheet warns that a misheard name can start the shortcut or give it different words,
+and that its steps can send messages, change files, or send your words to online services.
 
 ### Can I edit text I've already written?
 

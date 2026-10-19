@@ -71,7 +71,7 @@ final class SettingsNavigationModel: ObservableObject {
     @Published var vocabularyScope: VocabularyScopeDestination = .global
 
     func openVocabulary(for modeID: String) {
-        vocabularyScope = .mode(modeID)
+        vocabularyScope = modeID == Mode.directId ? .global : .mode(modeID)
         destination = .vocabulary
     }
 }
@@ -136,7 +136,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
         model = SettingsModel(
             settings: settings, onChange: onChange, onReload: onReload,
             onResetHUDPosition: onResetHUDPosition, onPreviewSound: onPreviewSound,
-            onEraseAllData: onEraseAllData)
+            onEraseAllData: onEraseAllData,
+            voiceCommandNotices: VoiceCommandNotices(supportDir: repository.supportDir))
         self.speechModels = speechModels
         dictionary = DictionarySettingsModel(repository: repository)
         replacements = ReplacementsSettingsModel(repository: repository)
@@ -268,6 +269,12 @@ final class SettingsController: NSObject, NSWindowDelegate {
             history.releaseForClose()
             loadedHistorySignature = nil
         }
+    }
+
+    func historyDidChange() {
+        guard window?.isVisible == true, navigation.destination == .history else { return }
+        history.reload()
+        loadedHistorySignature = history.storeSignature()
     }
 
     private func reloadHistoryIfNeeded() {
@@ -531,6 +538,14 @@ private struct MaintenanceSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                .alert(VoiceCommandNotices.Kind.apps.title, isPresented: $model.confirmingVoiceCommands) {
+                    Button("Enable Voice Commands") { model.confirmVoiceCommands() }
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.appNoticeConfirm)
+                    Button("Cancel", role: .cancel) {}
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.appNoticeCancel)
+                } message: {
+                    Text(VoiceCommandNotices.Kind.apps.message)
+                }
             }
             Section("Reset \(Branding.appName)") {
                 Button(role: .destructive) { confirmingErase = true } label: {
@@ -570,6 +585,8 @@ final class SettingsModel: ObservableObject {
     @Published var pasteLastShortcut: String { didSet { persist() } }
     // Feature-flag enabled state, keyed by Feature.id, populated for every Feature.allCases. One toggle each.
     @Published var featureStates: [String: Bool] { didSet { persist() } }
+    @Published var confirmingVoiceCommands = false
+    let voiceCommandNotices: VoiceCommandNotices
     @Published private(set) var diagnosticsStatus: String?
     private var diagnosticsStatusTask: Task<Void, Never>?
     // Empty string = follow the system default input; any other value is a CoreAudio device UID.
@@ -680,9 +697,11 @@ final class SettingsModel: ObservableObject {
         settings: Settings, onChange: @escaping (Settings) -> Void,
         onReload: @escaping () -> Void, onResetHUDPosition: @escaping () -> Void,
         onPreviewSound: @escaping (Int) -> Void = { _ in },
-        onEraseAllData: @escaping () -> Void = {}
+        onEraseAllData: @escaping () -> Void = {},
+        voiceCommandNotices: VoiceCommandNotices? = nil
     ) {
         self.settings = settings
+        self.voiceCommandNotices = voiceCommandNotices ?? VoiceCommandNotices(supportDir: KeyScribePaths.supportDir)
         self.onChange = onChange
         self.onReload = onReload
         self.onResetHUDPosition = onResetHUDPosition
@@ -711,7 +730,19 @@ final class SettingsModel: ObservableObject {
     func binding(for feature: Feature) -> Binding<Bool> {
         Binding(
             get: { self.featureStates[feature.id] ?? false },
-            set: { self.featureStates[feature.id] = $0 })
+            set: { enabled in
+                if enabled, feature == .voiceCommands, self.voiceCommandNotices.needsAcknowledgment(.apps) {
+                    self.confirmingVoiceCommands = true
+                } else {
+                    self.featureStates[feature.id] = enabled
+                }
+            })
+    }
+
+    func confirmVoiceCommands() {
+        voiceCommandNotices.acknowledge(.apps)
+        confirmingVoiceCommands = false
+        featureStates[Feature.voiceCommands.id] = true
     }
 
     func apply(_ settings: Settings) {

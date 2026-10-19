@@ -9,6 +9,13 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     @Published private(set) var loadError: String?
     @Published private(set) var tryResult: TryResult?
     @Published private(set) var appChoices: [VoiceCommandCatalog.App] = []
+    @Published private(set) var shortcutChoices: ShortcutChoices = .loading
+
+    enum ShortcutChoices: Equatable {
+        case loading
+        case loaded([VoiceCommandShortcut])
+        case unavailable
+    }
 
     struct TryResult: Equatable {
         let heard: String
@@ -25,6 +32,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     }
 
     var previousApp: () -> NSRunningApplication? = { nil }
+    let notices: VoiceCommandNotices
 
     private let repository: ConfigRepository
     private let system: LiveVoiceCommandSystem
@@ -34,6 +42,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     init(repository: ConfigRepository, system: LiveVoiceCommandSystem = .shared) {
         self.repository = repository
         self.system = system
+        notices = VoiceCommandNotices(supportDir: repository.supportDir)
         reload()
         repository.addChangeObserver { [weak self] in self?.reload() }
     }
@@ -49,7 +58,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             scripts = config.scripts
             loadError = nil
         case .failed(let error):
-            loadError = "\(VoiceCommandStore.fileName) could not be read (\(Self.describe(error))). Fix or remove the file to edit places and scripts here."
+            loadError = "\(VoiceCommandStore.fileName) could not be read (\(Self.describe(error))). Fix or remove the file to edit places and actions here."
         }
         if !lastTried.isEmpty { tryIt(lastTried) }
     }
@@ -66,7 +75,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         guard loadError == nil else { return loadError }
         if let issue = place.issue { return issue }
         let originalKey = originalName.map(VoiceCommandText.key)
-        if nameTaken(place.name, except: originalKey) { return "Another place or script already uses this name." }
+        if nameTaken(place.name, except: originalKey) { return "Another place or action already uses this name." }
         do {
             try repository.mutateVoiceCommands { config in
                 if let originalKey, let index = config.places.firstIndex(where: { VoiceCommandText.key($0.name) == originalKey }) {
@@ -82,11 +91,17 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         }
     }
 
-    func saveScript(_ script: VoiceCommandScript, replacing originalName: String?) -> String? {
+    func scriptIssue(_ script: VoiceCommandScript, replacing originalName: String?) -> String? {
         guard loadError == nil else { return loadError }
         if let issue = script.issue { return issue }
         let originalKey = originalName.map(VoiceCommandText.key)
-        if nameTaken(script.name, except: originalKey) { return "Another place or script already uses this name." }
+        if nameTaken(script.name, except: originalKey) { return "Another place or action already uses this name." }
+        return nil
+    }
+
+    func saveScript(_ script: VoiceCommandScript, replacing originalName: String?) -> String? {
+        if let issue = scriptIssue(script, replacing: originalName) { return issue }
+        let originalKey = originalName.map(VoiceCommandText.key)
         do {
             try repository.mutateVoiceCommands { config in
                 if let originalKey, let index = config.scripts.firstIndex(where: { VoiceCommandText.key($0.name) == originalKey }) {
@@ -170,6 +185,17 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
+    func loadShortcutChoices() async {
+        shortcutChoices = (await system.shortcuts()).map(ShortcutChoices.loaded) ?? .unavailable
+    }
+
+    func shortcutIsMissing(_ shortcut: VoiceCommandShortcut) -> Bool {
+        guard case .loaded(let choices) = shortcutChoices else { return false }
+        return !choices.contains { choice in
+            shortcut.identifier.map { $0 == choice.identifier } ?? (choice.name == shortcut.name)
+        }
+    }
+
     func appName(_ bundleId: String) -> String {
         system.appName(forBundleId: bundleId) ?? bundleId
     }
@@ -193,7 +219,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     }
 
     func readAs(_ heard: String) -> String {
-        repository.resolved.voiceCommandText(heard: heard, scripts: scripts)
+        repository.resolved.voiceCommandText(heard: heard)
     }
 
     static func describe(
@@ -209,7 +235,9 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         case .action(let action):
             return TryResult(heard: heard, summary: action.summary(appName: appName), detail: action.detail(appName: appName), resolved: true)
         case .notACommand:
-            return TryResult(heard: heard, summary: "Not a command", detail: "Start with \u{201C}switch to\u{201D}, \u{201C}go to\u{201D}, \u{201C}open\u{201D}, or \u{201C}focus\u{201D}, start with a script\u{2019}s name, or say \u{201C}go back\u{201D}.", resolved: false)
+            return TryResult(heard: heard, summary: "Not a command", detail: "Say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}.", resolved: false)
+        case .scriptNotFound(let target):
+            return TryResult(heard: heard, summary: "No matching action", detail: VoiceCommandRunner.notFoundMessage(target), resolved: false)
         case .noMatch(let target):
             return TryResult(heard: heard, summary: "No match", detail: "No running or installed app, and no place, is called \u{201C}\(target)\u{201D}.", resolved: false)
         case .ambiguous(let names):

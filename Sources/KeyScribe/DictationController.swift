@@ -216,6 +216,8 @@ final class DictationController {
 
     var onBecameIdle: (() -> Void)?
 
+    var onHistoryUpdated: (() -> Void)?
+
     var isBusy: Bool { machine.isBusy }
     var hasResult: Bool { lastResult != nil }
 
@@ -986,13 +988,18 @@ final class DictationController {
         hud?.relinquishKeyFocus()
         let origin = capturedSnapshot?.bundleId.map(VoiceCommandOrigin.init(bundleId:))
         let start = DispatchTime.now()
-        let transcript = plan.voiceCommandText(heard: heard, mode: activeMode, scripts: config.voiceCommands.scripts)
+        let transcript = plan.voiceCommandText(heard: heard, mode: activeMode)
+        let late = LateCommandResult()
         let outcome = await voiceCommands.run(
             transcript: transcript,
             places: config.voiceCommands.places, scripts: config.voiceCommands.scripts, origin: origin,
             stillWanted: { [weak self] in
                 guard let self, !Task.isCancelled else { return false }
                 return !self.captureWasLost
+            },
+            onLateResult: { [weak self] outcome in
+                late.outcome = outcome
+                self?.applyLateCommandResult(late)
             })
         building.stageMillis[.insert] = elapsedMs(since: start)
         switch outcome {
@@ -1003,12 +1010,55 @@ final class DictationController {
                    hideAfter: 1.5, record: (.command, nil),
                    history: HistoryWrite(heard: heard, transformed: transcript, result: command, insertion: .inserted,
                                          rewrite: nil))
+        case .started(let summary, let command):
+            var write = HistoryWrite(heard: heard, transformed: transcript, result: command, insertion: .inserted,
+                                     rewrite: nil)
+            write.commandStillRunning = true
+            write.onRecorded = { [weak self] entry in
+                late.entry = entry
+                self?.applyLateCommandResult(late)
+            }
+            finish(machine: .finish(.inserted), cue: .success,
+                   state: .commandDone(summary: summary, detail: HUDState.commandStillRunningDetail),
+                   hideAfter: 1.5, record: (.command, nil), history: write)
+            late.started = true
+            applyLateCommandResult(late)
         case .failed(let message, let command):
             finish(machine: .finish(.failed), cue: .error, state: .error(message: message, action: nil),
                    hideAfter: 3, record: (.failed, "voice command did not run"),
                    history: HistoryWrite(heard: heard, transformed: transcript, result: command ?? "", insertion: .failed,
                                          rewrite: nil, failureReason: message))
         }
+    }
+
+    private final class LateCommandResult {
+        var started = false
+        var entry: HistoryEntry?
+        var outcome: VoiceCommandOutcome?
+        var applied = false
+    }
+
+    private func applyLateCommandResult(_ late: LateCommandResult) {
+        guard late.started, !late.applied, let outcome = late.outcome else { return }
+        late.applied = true
+        let failure: String?
+        switch outcome {
+        case .failed(let message, _): failure = message
+        case .done: failure = nil
+        case .started, .abandoned: return
+        }
+        if let entry = late.entry, let history {
+            var updated = entry
+            updated.outcome = failure == nil ? .command : .commandFailed
+            updated.failureReason = failure
+            historyWriteQueue.async { [weak self] in
+                guard history.replace(entry, with: updated) else { return }
+                Task { @MainActor in self?.onHistoryUpdated?() }
+            }
+        }
+        guard let failure, !isBusy else { return }
+        hud?.render(.error(message: failure, action: nil))
+        scheduleHide(after: 4)
     }
 
     private func finishCommandCaptureLost() {
@@ -1832,7 +1882,8 @@ final class DictationController {
     @discardableResult
     private func recordHistory(
         heard: String, transformed: String?, result: String, insertion: DictationOutcome,
-        rewrite: RewriteDetails?, failureReason: String? = nil, confirmWrite: Bool = false
+        rewrite: RewriteDetails?, failureReason: String? = nil, confirmWrite: Bool = false,
+        commandStillRunning: Bool = false, onRecorded: ((HistoryEntry) -> Void)? = nil
     ) -> Bool {
         // A secure-field dictation is never persisted, regardless of the history setting or the mode —
         // the spoken text is a password (design.md §4.4). An unconfirmed target (focus moved before the
@@ -1851,7 +1902,7 @@ final class DictationController {
         let isCommand = activeMode?.runsVoiceCommands == true
         switch insertion {
         case .noSpeech: return false
-        case .inserted: outcome = isCommand ? .command : keptLocal ? .localFallback : .inserted
+        case .inserted: outcome = isCommand ? (commandStillRunning ? .commandStarted : .command) : keptLocal ? .localFallback : .inserted
         case .copied: outcome = keptLocal ? .localFallback : .copied
         case .failed: outcome = isCommand ? .commandFailed : .failed
         }
@@ -1871,6 +1922,7 @@ final class DictationController {
             stoppedAtLimit: session?.stoppedAtLimit == true ? true : nil,
             failureReason: failureReason)
         guard let history else { return false }
+        onRecorded?(entry)
         let retentionDays = settings.history.retentionDays
         let today = HistoryStore.todayString()
         let sweepRetention = lastRetentionSweepDay != today
@@ -2383,6 +2435,8 @@ final class DictationController {
         let insertion: DictationOutcome
         let rewrite: RewriteDetails?
         var failureReason: String?
+        var commandStillRunning = false
+        var onRecorded: ((HistoryEntry) -> Void)?
     }
 
     // The one terminal tail every dictation exits through. The fixed order is load-bearing: finalizeRecord
@@ -2415,7 +2469,8 @@ final class DictationController {
         if let history {
             recordHistory(heard: history.heard, transformed: history.transformed, result: history.result,
                           insertion: history.insertion, rewrite: history.rewrite,
-                          failureReason: history.failureReason)
+                          failureReason: history.failureReason, commandStillRunning: history.commandStillRunning,
+                          onRecorded: history.onRecorded)
         }
         let engineUsed = activeEngine
         releaseCapturedPlan()

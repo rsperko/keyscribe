@@ -15,7 +15,7 @@
   connections.toml         # named LLM connections (BYOK)
   dictionary.toml          # global dictionary
   replacements.toml        # global replacements
-  voice_commands.toml      # places and scripts for the Voice Commands mode (experimental)
+  voice_commands.toml      # places and actions for the Voice Commands mode (experimental)
   fragments/               # shared prompt fragments (one file per fragment)
     my-voice.md            #   markdown body + YAML frontmatter
   modes/                   # one file per mode; filename stem = mode id
@@ -462,10 +462,10 @@ replace = "the"
 regex = false
 ```
 
-### `voice_commands.toml` — places and scripts for Voice Commands (experimental)
+### `voice_commands.toml` — places and actions for Voice Commands (experimental)
 
 Read only while the `voice_commands` flag is on. The Voice Commands mode understands
-`switch to | go to | focus | focus on | open | launch <target>` and `go back`, matched against the whole
+an app-switching verb followed by a target (`VoiceCommandGrammar.focusVerbs`), `run <action> [words]`, and `go back`, matched against the whole
 utterance (case, punctuation, and a leading "the" are ignored). A target is a running app, an app installed
 in an Applications folder (or one folder down inside it), or a place from this file:
 
@@ -473,9 +473,9 @@ in an Applications folder (or one folder down inside it), or a place from this f
 schema_version = 1
 
 [[place]]
-name = "VS Code"                 # display name; also always a spoken name. Unique, ignoring case.
-say = ["vscode", "editor"]       # optional extra spoken names
-app = "com.microsoft.VSCode"     # bring this app forward, opening it if needed
+name = "Mail"                    # display name; also always a spoken name. Unique, ignoring case.
+say = ["male", "email"]          # optional misheard form or preferred nickname
+app = "com.apple.mail"           # bring this app forward, opening it if needed
 
 [[place]]
 name = "Gmail"
@@ -486,34 +486,53 @@ browser = "com.google.Chrome"    # optional: only look in, and open with, this b
 name = "Deploy"                  # display name; also always a spoken name. Unique among places and scripts.
 say = ["ship"]                   # optional extra spoken names
 run = ["~/bin/deploy", "--env", "{text}"]  # program, then its arguments
+
+[[script]]
+name = "Journal"                 # a macOS Shortcut: same naming and matching as a program
+shortcut = "Journal Entry"       # the shortcut's name in Shortcuts
+shortcut_id = "6E982466-2036-4362-BDEC-983051029F6A"  # optional: run by identifier, so a rename still works
+input = "{text}"                 # optional text given as the shortcut's input
 ```
 
-**Scripts** run a program when you say their name, and can be handed what you say after it:
+Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly one** of `run` (a program) or
+`shortcut` (a shortcut from the Shortcuts app); `shortcut_id` and `input` apply only to a shortcut.
+
+**Scripts** run a program when you say **run** followed by their name, and can be handed what you say after it:
 
 - `run` is the program followed by its arguments. The program is a full path (`/…` or `~/…`); it is run
   directly, never through a shell, from the home folder, with standard input, output, and error not
   connected to anything you see and the app's own minimal `PATH`. Each argument is passed exactly as
   written, except that `{text}` is replaced by the spoken text — always inside that one argument, so
   spoken words can never become shell syntax or extra arguments. `{text}` may not appear in the program.
-- **Matching** happens before the focus verbs and before apps and places, so a script wins over an app of
-  the same name. The utterance must start with one of the script's spoken names, in whole words (case and
-  punctuation ignored), optionally after a focus verb (`switch to deploy staging`). A script whose
-  arguments use `{text}` needs words after its name; saying only the name fails with a message and runs
-  nothing. A script without `{text}` runs only when its name is the whole utterance. The longest spoken
-  name the utterance starts with is chosen first, and only then are its words checked, so "ticket new"
+- **Matching** requires **run** (`run deploy staging`), followed by one of the script's spoken names in
+  whole words (case and punctuation ignored). A bare name or an app-switching phrase never runs a script;
+  **run** never opens an app or place. The spoken name is independent of the executable's filename:
+  `name = "Foo"` can point at `~/bin/bar.sh`. A script whose arguments use `{text}` needs words after its
+  name; saying only `run {name}` fails with a message and runs nothing. A script without `{text}` runs
+  only when `run {name}` is the whole utterance. The longest spoken name after **run** is chosen first,
+  and only then are its words checked, so "run ticket new"
   asks for text for a `Ticket new` script rather than running `Ticket` with "new"; a longer name without
   `{text}` that has more words after it is skipped. Two scripts tied for the longest name are ambiguous.
-  A script is never matched by a near-miss, and the dictionary never turns a phrase into a script: when its
-  correction would be what makes a script match, the phrase is left as heard. `go back` is never a script,
-  and a spoken name that is a command phrase or its first words (`open`, `go`, `switch`, `focus on`) is
-  refused so a script cannot take over the built-in phrases; a longer name that starts with one, such as
-  `open ticket`, is allowed.
+  A script is never matched by a near-miss, and the dictionary never corrects its name or arguments.
+  These matching rules apply after mode replacements, which can explicitly produce a **run** command.
+  `go back` returns to the
+  previous app; a script named `Go back` instead requires `run go back`. Command words can be script names
+  because the **run** prefix separates script execution from app switching.
 - **The text** is what follows the spoken name, in the cleaned transcript's own case and punctuation, with
   leading and trailing spaces and the `, ; : . ! ? …` that speech recognition adds at the edges removed.
   The voice-commands dictionary never corrects it.
-- **Running:** the command waits up to about a second and a half. A script that exits with status 0, or is
-  still running then, counts as done and is left to finish: done means started, and a failure after that
-  window is not seen. A nonzero exit within it fails the command, showing the exit status and the last
+- **Shortcuts** run through `/usr/bin/shortcuts run`, by `shortcut_id` when it is set and by name
+  otherwise. `input`, with `{text}` replaced by the spoken text, is written to the shortcut's standard input,
+  which the shortcut receives as text; without `input` it receives nothing. An `input` containing `{text}`
+  needs words after the name, exactly like a program argument. A failure shows the shortcut's last error
+  line, without an exit status. A shortcut can wait on a question (Ask for Input, Choose from Menu, an
+  alert, or a first-run permission prompt), so the late reporting below matters most for shortcuts.
+- **Running:** the command waits up to about a second and a half. An action that exits with status 0 then
+  is done. One still running is shown as started (*Started, still running* in the HUD, *Command started*
+  in History) and is left to finish, with no time limit, so a shortcut waiting on your answer is never
+  stopped. When it does finish, its History entry is updated to the final result, and a failure is shown in
+  the HUD unless a dictation is in progress. A result arriving after KeyScribe quits is not seen, so that
+  entry stays *Command started*. A nonzero exit fails the command, showing the exit status and the last
   line the script wrote to standard error. A program that is missing or not executable fails without
   starting. The script's arguments and output are never logged. Standard output is never kept; with history on,
   History saves the command line, arguments included, and a failure's message, which can carry the last line
@@ -537,19 +556,28 @@ run = ["~/bin/deploy", "--env", "{text}"]  # program, then its arguments
   run = ["~/bin/note", "{text}"]
   ```
 
-  turns "note buy milk" into `~/bin/note "buy milk"`, which appends `buy milk` to `~/notes.txt`.
+  turns "run note buy milk" into `~/bin/note "buy milk"`, which appends `buy milk` to `~/notes.txt`.
 
 - **What is matched is the cleaned transcript.** Before anything is matched, the Voice Commands mode's own
-  replacements run over the whole utterance, so one can repair a misheard verb (`bitch to` → `switch to`).
+  replacements run over the whole utterance, so one can repair a misheard verb (`which to` → `switch to`).
   Then its dictionary fixes near-misses in the **target only** — never in the command words, so a term like
   `Lunch` cannot turn "launch Safari" into something that no longer parses — which lets a target keep its
-  real spelling (`herdr`, not `herder`). A replacement that owns the whole utterance becomes the command,
+  real spelling (such as `Spotify`). Dictionary correction is best-effort and excludes terms shorter
+  than four normalized characters. A replacement that owns the whole utterance becomes the command,
   which makes custom spoken shortcuts (`code` → `switch to Visual Studio Code`). A terminal `<CR>` on a
   regex replacement is dropped, since a command never presses Return; a literal replacement keeps `<CR>`
   as written, as everywhere else. On a speech model that can steer recognition, the dictionary steers it
   too. When the file has no `[dictionary]` or `[replacements]` table, or one without `include_global`,
   global vocabulary is left out.
-- A place sets **exactly one** of `app` or `url`; `url` must be `http`/`https`. A script sets `run`. A file that breaks a rule
+- **A repeatable mishearing** can be repaired in **Settings ▸ Vocabulary ▸ Voice Commands** with a
+  literal replacement: **Word or heard phrase** `switch to male`, **Use instead** `switch to Mail`,
+  with **Match heard phrase as a regular expression** off under **Pattern matching**.
+  A full-command rule avoids changing the common word `male` elsewhere, including in words passed to
+  scripts and shortcuts. Alternatively, the Mail place above accepts `male` and `email` as spoken names, so both
+  `switch to male` and `open email` reach Mail without rewriting the transcript. Keep these fixes in the
+  mode's vocabulary unless you deliberately want other modes to use them. See the
+  [worked examples in the FAQ](../../FAQ.md#a-voice-command-keeps-being-misheard).
+- A place sets **exactly one** of `app` or `url`; `url` must be `http`/`https`. A script sets `run` or `shortcut`. A file that breaks a rule
   fails to load as a whole and the last good copy stays in effect (surfaced like any malformed config file).
 - **Matching order**, first hit wins: a place's spoken name exactly; a running app's name exactly; a
   contiguous run of words in a running app's name ("chrome" → Google Chrome); the same partial rule on
@@ -577,9 +605,10 @@ run = ["~/bin/deploy", "--env", "{text}"]  # program, then its arguments
   the tab inside its own windows, but it is never brought forward: only an answer in time does that.
 - **A take whose microphone stopped never runs a command**, including a loss that arrives while the command
   is being looked up or while a tab is being focused. Nothing further is opened or brought forward.
-- `go back` returns to the app that was frontmost before the last command that ran, not to a browser tab or
-  window. It is kept in memory only, so it is lost when the app quits, and a second `go back` returns again.
-- **Try it** in Settings never runs a command or a script, but previewing a web place reads the open tabs,
+- `go back` returns to the app that was frontmost before the last app switch by voice, not to a browser tab
+  or window. Running a script or shortcut does not change that destination. It is kept in memory only,
+  so it is lost when the app quits. Repeating `go back` switches back again.
+- **Try it** in Settings never runs a command, script, or shortcut, but previewing a web place reads the open tabs,
   so it can be what first asks macOS for permission to control a browser.
 
 ### Replacement matching & output

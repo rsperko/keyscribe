@@ -9,7 +9,7 @@ enum VoiceCommandCLI {
         let commands = VoiceCommandStore.loadOrDefault(supportDir: KeyScribePaths.supportDir)
         let config = ConfigCache(supportDir: KeyScribePaths.supportDir)
         config.voiceCommandsEnabled = true
-        let readAs = config.resolved.voiceCommandText(heard: transcript, scripts: commands.scripts)
+        let readAs = config.resolved.voiceCommandText(heard: transcript)
         let resolution = await runner.resolve(readAs, places: commands.places, scripts: commands.scripts)
         print("heard:      \(transcript)")
         if readAs != transcript { print("read as:    \(readAs)") }
@@ -19,6 +19,10 @@ enum VoiceCommandCLI {
         switch await runner.run(resolution, origin: nil) {
         case .done(let summary, let command):
             print("ran:        \(summary)")
+            print("command:    \(command)")
+            return 0
+        case .started(let summary, let command):
+            print("started:    \(summary) (still running)")
             print("command:    \(command)")
             return 0
         case .failed(let message, _):
@@ -37,6 +41,7 @@ enum VoiceCommandCLI {
         case .needsTabs: return "needs browser tabs"
         case .browserNotAllowed(let browser): return "not allowed to control \(browser)"
         case .scriptNeedsText(let name): return "\(name) needs words after its name"
+        case .scriptNotFound(let target): return "no script or shortcut matches \u{201C}\(target)\u{201D}"
         case .action(let action):
             return "\(action.summary(appName: system.appName(forBundleId:))) — \(action.detail(appName: system.appName(forBundleId:)))"
         }

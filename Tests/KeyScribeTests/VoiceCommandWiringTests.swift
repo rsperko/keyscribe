@@ -42,11 +42,13 @@ struct VoiceCommandWiringTests {
         private(set) var calls: [(
             transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript], origin: VoiceCommandOrigin?
         )] = []
+        private(set) var lateResult: (@MainActor (VoiceCommandOutcome) -> Void)?
         func run(
             transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript], origin: VoiceCommandOrigin?,
-            stillWanted: @MainActor () -> Bool
+            stillWanted: @MainActor () -> Bool, onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
         ) async -> VoiceCommandOutcome {
             calls.append((transcript, places, scripts, origin))
+            lateResult = onLateResult
             whileResolving()
             return stillWanted() ? outcome : .abandoned
         }
@@ -62,13 +64,14 @@ struct VoiceCommandWiringTests {
         let inserted: String?
         let history: [HistoryEntry]
         let record: DictationRecord?
+        var historyUpdates = 0
     }
 
     private func run(
         transcript: String, outcome: VoiceCommandOutcome = .done(summary: "Ghostty", command: "Brings Ghostty to the front, opening it if needed."),
         places: [VoiceCommandPlace] = [], scripts: [VoiceCommandScript] = [], otherModes: [Mode] = [], useVoiceCommands: Bool = true,
         flagOn: Bool = true, historyEnabled: Bool = true, secureField: Bool = false, focusMoves: Bool = false,
-        loss: Loss = .none,
+        loss: Loss = .none, late: VoiceCommandOutcome? = nil,
         vocabulary: (inout Mode) -> Void = { _ in }
     ) async throws -> Run {
         let supportDir = FileManager.default.temporaryDirectory
@@ -123,8 +126,15 @@ struct VoiceCommandWiringTests {
         controller.handleCommit()
         await controller.dictationTask?.value
         controller.waitForHistoryWrites()
+        var historyUpdates = 0
+        controller.onHistoryUpdated = { historyUpdates += 1 }
+        if let late {
+            runner.lateResult?(late)
+            controller.waitForHistoryWrites()
+            try await Task.sleep(for: .milliseconds(50))
+        }
         return Run(runner: runner, hud: hud, inserted: captured.insertedText, history: history.entries(),
-                   record: controller.lastRecord)
+                   record: controller.lastRecord, historyUpdates: historyUpdates)
     }
 
     @Test func theCommandIsReadAfterTheModesOwnVocabularyCleansIt() async throws {
@@ -143,6 +153,51 @@ struct VoiceCommandWiringTests {
         #expect(result.runner.calls.first?.origin == VoiceCommandOrigin(bundleId: "com.apple.TextEdit"))
         #expect(result.inserted == nil)
         #expect(result.hud.states.last == .commandDone(summary: "Ghostty"))
+    }
+
+    @Test func aScriptStillRunningIsShownAndRecordedAsStarted() async throws {
+        let result = try await run(
+            transcript: "run deploy staging", outcome: .started(summary: "Deploy", command: "~/bin/deploy staging"))
+        #expect(result.hud.states.last == .commandDone(summary: "Deploy", detail: HUDState.commandStillRunningDetail))
+        let entry = try #require(result.history.first)
+        #expect(entry.outcome == .commandStarted)
+        #expect(entry.result == "~/bin/deploy staging")
+        #expect(result.record?.outcome == .command)
+    }
+
+    @Test func aLateFailureUpdatesHistoryAndIsShown() async throws {
+        let result = try await run(
+            transcript: "run deploy staging", outcome: .started(summary: "Deploy", command: "~/bin/deploy staging"),
+            late: .failed(message: "Deploy failed (exit 2): no such environment", command: "~/bin/deploy staging"))
+        #expect(result.history.count == 1)
+        let entry = try #require(result.history.first)
+        #expect(entry.outcome == .commandFailed)
+        #expect(entry.failureReason == "Deploy failed (exit 2): no such environment")
+        #expect(entry.result == "~/bin/deploy staging")
+        #expect(result.hud.states.last == .error(message: "Deploy failed (exit 2): no such environment", action: nil))
+    }
+
+    @Test func aLateResultTellsAnOpenHistoryToRefresh() async throws {
+        let result = try await run(
+            transcript: "run deploy staging", outcome: .started(summary: "Deploy", command: "~/bin/deploy staging"),
+            late: .done(summary: "Deploy", command: "~/bin/deploy staging"))
+        #expect(result.historyUpdates == 1)
+    }
+
+    @Test func aLateSuccessQuietlyCompletesTheHistoryEntry() async throws {
+        let result = try await run(
+            transcript: "run deploy staging", outcome: .started(summary: "Deploy", command: "~/bin/deploy staging"),
+            late: .done(summary: "Deploy", command: "~/bin/deploy staging"))
+        #expect(result.history.map(\.outcome) == [.command])
+        #expect(result.hud.states.last == .commandDone(summary: "Deploy", detail: HUDState.commandStillRunningDetail))
+    }
+
+    @Test func aLateResultWithHistoryOffIsStillShown() async throws {
+        let result = try await run(
+            transcript: "run deploy staging", outcome: .started(summary: "Deploy", command: "~/bin/deploy staging"),
+            historyEnabled: false, late: .failed(message: "Deploy failed (exit 1).", command: "~/bin/deploy staging"))
+        #expect(result.history.isEmpty)
+        #expect(result.hud.states.last == .error(message: "Deploy failed (exit 1).", action: nil))
     }
 
     @Test func aVoiceCommandIsRecordedWithTheCommandItRan() async throws {
@@ -205,7 +260,7 @@ struct VoiceCommandWiringTests {
 
     @Test func theSavedScriptsReachTheRunner() async throws {
         let script = VoiceCommandScript(name: "Deploy", run: ["/usr/bin/true", "{text}"])
-        let result = try await run(transcript: "deploy staging", outcome: .done(summary: "Deploy", command: "/usr/bin/true staging"), scripts: [script])
+        let result = try await run(transcript: "run deploy staging", outcome: .done(summary: "Deploy", command: "/usr/bin/true staging"), scripts: [script])
         #expect(result.runner.calls.first?.scripts == [script])
         #expect(result.inserted == nil)
         #expect(result.history.map(\.result) == ["/usr/bin/true staging"])

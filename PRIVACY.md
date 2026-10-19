@@ -71,18 +71,26 @@ KeyScribe only reaches the network for these things, and never to send your audi
 
 There is no background phone-home or license check.
 
-## Programs you run by voice
+## Programs and shortcuts you run by voice
 
-With the experimental voice commands you can name a script that KeyScribe runs when you say its
-name, and pass it the words you say after the name. KeyScribe starts that program on your Mac and
-hands it those words as an argument; it does not send them anywhere itself. What the program does
-with them, including any network use, is up to the program you chose. KeyScribe runs it as you, with
-everything your account can do, and a misheard command can run it, so choose what you connect this
+With the experimental voice commands you can name a script or a macOS shortcut that KeyScribe runs
+when you say **run** followed by its name, and pass it the words you say after the name. A bare name or
+an app-switching phrase never runs one. KeyScribe starts a script on your Mac and hands it those words
+as an argument, or runs a shortcut and hands them over as its input; it does not send them anywhere
+itself. What the script or shortcut does with them is up to what you chose: a shortcut can send
+messages, change files, or send its input to online services, depending on its steps. Both run as you, with
+everything your account can do, and a misheard command can run them, so choose what you connect this
 way with care.
+
+Every Add Script and Add Shortcut sheet explains these consequences before saving, each in its own
+words, and every Add Place sheet explains that a place can bring an app's windows forward. Separately,
+a notice before first enabling Voice Commands explains that an unintended app's windows can become
+visible and receive your next keystrokes.
 
 When history is on, each voice command is saved there like a dictation: what you said, the command it
 ran with those words, and, if it failed, the error message, which can include the last line the script
-wrote to its error output. Turning history off stops this along with everything else; to keep only voice
+or shortcut wrote to its error output. An action still running when it is saved is updated with its
+final result when it finishes. Turning history off stops this along with everything else; to keep only voice
 commands out, turn on **Do not save this mode in history** in the Voice Commands settings.
 
 ## The redaction wedge — and its limits

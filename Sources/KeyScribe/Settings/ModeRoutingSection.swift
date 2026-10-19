@@ -51,10 +51,10 @@ struct ModeRoutingSection: View {
                     .font(.subheadline.weight(.semibold))
                 HStack {
                     TextField("Window title regex, e.g. (?i)pull request", text: $newWindowTitlePattern)
-                        .multilineTextAlignment(.leading)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(commitWindowTitleConstraint)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.windowTitle)
+                        .formFieldLabel("Window title regex, e.g. (?i)pull request")
                     Button("Add", action: commitWindowTitleConstraint)
                         .disabled(windowTitleIssue != nil)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.windowTitleAdd)
@@ -68,10 +68,10 @@ struct ModeRoutingSection: View {
                     .font(.subheadline.weight(.semibold)).padding(.top, 4)
                 HStack {
                     TextField("URL regex, e.g. github\\.com", text: $newURLPattern)
-                        .multilineTextAlignment(.leading)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(commitURLConstraint)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.urlPattern)
+                        .formFieldLabel("URL regex, e.g. github\\.com")
                     Button("Add", action: commitURLConstraint)
                         .disabled(urlPatternIssue != nil)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.urlPatternAdd)
@@ -102,10 +102,10 @@ struct ModeRoutingSection: View {
             if enteringPhrase {
                 HStack {
                     TextField("Spoken phrase, e.g. as a note", text: $newPhrase)
-                        .multilineTextAlignment(.leading)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(commitPhrase)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phrase)
+                        .formFieldLabel("Spoken phrase, e.g. as a note")
                     Button("Add", action: commitPhrase)
                         .disabled(phraseIssue != nil)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.phraseAdd)
@@ -157,10 +157,10 @@ struct ModeRoutingSection: View {
             if enteringBundleId {
                 HStack {
                     TextField("Bundle ID, e.g. com.apple.Safari", text: $manualBundleId)
-                        .multilineTextAlignment(.leading)
                         .textFieldStyle(.roundedBorder)
                         .onSubmit(commitManualBundleId)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.bundleID)
+                        .formFieldLabel("Bundle ID, e.g. com.apple.Safari")
                     Button("Add", action: commitManualBundleId)
                         .disabled(bundleIDIssue != nil)
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.bundleIDAdd)
@@ -175,10 +175,10 @@ struct ModeRoutingSection: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
                         TextField("Website domain, e.g. github.com", text: $newDomain)
-                            .multilineTextAlignment(.leading)
                             .textFieldStyle(.roundedBorder)
                             .onSubmit(commitDomainConstraint)
                             .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.websitePattern)
+                            .formFieldLabel("Website domain, e.g. github.com")
                         Button("Add", action: commitDomainConstraint)
                             .disabled(HostPattern.regex(forDomain: newDomain) == nil)
                             .accessibilityIdentifier(AccessibilityID.Mode.Editor.Routing.websitePatternAdd)

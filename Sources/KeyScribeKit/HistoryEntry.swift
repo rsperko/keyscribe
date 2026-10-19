@@ -12,8 +12,9 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case failed
         case command
         case commandFailed = "command_failed"
+        case commandStarted = "command_started"
 
-        public var isCommand: Bool { self == .command || self == .commandFailed }
+        public var isCommand: Bool { self == .command || self == .commandFailed || self == .commandStarted }
     }
 
     public var timestamp: Date
