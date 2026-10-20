@@ -245,9 +245,45 @@ struct FuzzyCorrectorTests {
         #expect(fix("open Gravena now", ["Grafana"]) == "open Grafana now")
     }
 
-    @Test func knownLimitationOneEditOnAShortSameKeyWordSnaps() {
+    @Test(arguments: [
+        ("make sure it works", "Mike"), ("join the call", "John"), ("dive into it", "Dave"),
+        ("ring the bell", "Bill"), ("paint the wall", "Will"), ("fly a kite", "Kate"),
+        ("in June", "Jane"), ("a stiff neck", "Nick"), ("the server rack", "Rick"),
+        ("leave a mark", "Marc"), ("take a rest", "Rust"), ("ask Yuka", "Yuki"),
+    ])
+    func aWordUnderFiveLettersIsNeverNearMatched(text: String, term: String) {
+        #expect(fix(text, [term]) == text)
+    }
+
+    @Test(arguments: [
+        ("that is handy", "Andy"), ("a broad view", "Brad"), ("send an email", "Emil"),
+        ("come early", "Earl"), ("hit the marks", "Mark"), ("raise your voice", "Vice"),
+    ])
+    func aTermUnderFiveLettersIsNeverNearMatched(text: String, term: String) {
+        #expect(fix(text, [term]) == text)
+    }
+
+    @Test func aShortTermStillSnapsCasingSpacingAndAccents() {
+        #expect(fix("ask mike now", ["Mike"]) == "ask Mike now")
+        #expect(fix("we use rust", ["Rust"]) == "we use Rust")
+        #expect(fix("ask Jose now", ["José"]) == "ask José now")
+    }
+
+    @Test func aFiveLetterWordStillGetsOneEdit() {
+        #expect(fix("the rediz cache", ["Redis"]) == "the Redis cache")
+        #expect(fix("ask Rajes now", ["Rajesh"]) == "ask Rajesh now")
+    }
+
+    @Test func knownLimitationAShortMishearingIsNotRecovered() {
+        #expect(fix("ask Quen now", ["Qwen"]) == "ask Quen now")
+        #expect(fix("ask Enya now", ["Anya"]) == "ask Enya now")
+        #expect(fix("ask Pria now", ["Priya"]) == "ask Pria now")
+    }
+
+    @Test func knownLimitationOneEditOnAFiveLetterSameKeyWordSnaps() {
+        #expect(fix("check the logs", ["Chuck"]) == "Chuck the logs")
+        #expect(fix("hurry up", ["Harry"]) == "Harry up")
+        #expect(fix("every time", ["Avery"]) == "Avery time")
         #expect(fix("rebake the branch", ["rebase"]) == "rebase the branch")
-        #expect(fix("take a rest", ["Rust"]) == "take a Rust")
-        #expect(fix("ask Yuka", ["Yuki"]) == "ask Yuki")
     }
 }

@@ -124,7 +124,7 @@ public enum FuzzyCorrector {
         if let exact = prepared.byNorm[norm] { return exact }                       // casing/spacing only
         guard allowFuzzy, let latin = latinized(norm) else { return nil }
         let latinKey = phoneticKey(latin)
-        let allowed = latin.count >= 7 ? 2 : 1
+        let allowed = latin.count < shortestNearMatch ? 0 : latin.count >= 7 ? 2 : 1
         var candidateIndices: [Int] = []
         for len in (latin.count - allowed)...(latin.count + allowed) where len >= 0 {
             if let bucket = prepared.byLength[len] { candidateIndices.append(contentsOf: bucket) }
@@ -136,12 +136,15 @@ public enum FuzzyCorrector {
             let term = prepared.terms[idx]
             guard let termLatin = term.latin, term.key == latinKey else { continue }
             let distance = levenshtein(latin, termLatin)
-            guard distance <= allowed, distance < bestDistance else { continue }
+            let termAllowed = termLatin.count < shortestNearMatch ? 0 : allowed
+            guard distance <= termAllowed, distance < bestDistance else { continue }
             bestDistance = distance
             best = term
         }
         return best
     }
+
+    private static let shortestNearMatch = 5
 
     private static let lettersWithoutAnAccentForm: [Character: String] = ["ß": "ss", "æ": "ae", "œ": "oe", "ø": "o", "ł": "l"]
 

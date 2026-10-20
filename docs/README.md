@@ -22,6 +22,8 @@ Start with the shortest path that matches what you are trying to do.
 ## Compare Speech Models
 
 - [STT Benchmarks](reference/stt_benchmarks.md) — reference model numbers and how to read them.
+- [Dictionary Findings](reference/dictionary_findings.md) — what has been measured about
+  dictionary recovery and term hints, and the rules the measurements support.
 - [Speech Corpus](../corpus/README.md) — reproducible recording manifests and harnesses.
 - [STT Corpus Guide](../corpus/stt/README.md) — record your own clips and rank models against your
   voice.

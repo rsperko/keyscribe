@@ -77,6 +77,20 @@ not decline a sound-alike hint from sentence context, so the hint is never sent.
 "Yuga Bite" → Yugabyte with no hint at all, from the prompt's ordinary cleanup. Keep the negatives
 when trying any other candidate rule: they are the cases a candidate channel has to pass.
 
+## Why the `dictionary` cases exist: a dictionary list in the prompt was measured and rejected
+
+The `dictionary` cases are a dropped-letter form ("UGBte" → Yugabyte), a split form of an invented
+term no model can know ("fluid blue" → FluidBloo), and the same words used as ordinary prose ("a
+fluid blue sheen"). Variants sent the user's whole dictionary, or only the terms sharing a consonant
+key with something in the text, under a rule to write a term where the text is a garbled version of
+it and to leave words that already make sense, and separately under MacWhisper's "strongly prefer
+if they match" wording. Each was compared against production's own term handling (the local stage
+first, then verbatim-present terms). Measured 2026-10-20, `--repeat 3`: Gemini Flash Lite (latest)
+recovered the split and dropped-letter forms and also wrote every sound-alike as the term on every
+wording ("a FluidBloo sheen", "Datadog is done"); Qwen3-Coder 30B declined the sound-alikes but
+dropped a protected token under two of the three wordings. No list is sent. Any future term hint has to pass
+these cases and the `split-word` negatives. Full tables: `docs/reference/dictionary_findings.md`.
+
 ## Authoring gotcha: `maxWer` is meaningless for CJK
 
 `BenchmarkScoring.tokens` maps every non-alphanumeric scalar to a space and splits — but CJK

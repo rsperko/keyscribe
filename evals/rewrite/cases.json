@@ -514,6 +514,38 @@
       "checks": {
         "mustNotContain": ["Datadog"]
       }
+    },
+    {
+      "id": "dict-ugbte",
+      "tags": ["dictionary"],
+      "promptId": "polish",
+      "transcript": "the UGBte cluster is down again after the deploy",
+      "screenTerms": ["Yugabyte"],
+      "checks": {
+        "mustContain": ["Yugabyte"],
+        "mustNotContain": ["UGBte"]
+      }
+    },
+    {
+      "id": "dict-fluidbloo",
+      "tags": ["dictionary"],
+      "promptId": "polish",
+      "transcript": "ship the fluid blue build to the testers today",
+      "screenTerms": ["FluidBloo"],
+      "checks": {
+        "mustContain": ["FluidBloo"],
+        "mustNotContain": ["fluid blue"]
+      }
+    },
+    {
+      "id": "dict-neg-fluid-blue",
+      "tags": ["dictionary"],
+      "promptId": "polish",
+      "transcript": "the paint dried to a fluid blue sheen by morning",
+      "screenTerms": ["FluidBloo"],
+      "checks": {
+        "mustNotContain": ["FluidBloo"]
+      }
     }
   ]
 }
