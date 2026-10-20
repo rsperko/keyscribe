@@ -144,29 +144,6 @@ struct FuzzyCorrectorTests {
     @Test func candidatesSkipsWindowTouchingANonce() {
         #expect(candidates("in spring \(SentinelText.open)V:1⟧ camp", ["Spring Boot"]).isEmpty)
     }
-    @Test func recoversVowelOnlyCollapseOfALongTerm() {
-        #expect(fix("the UGBte cluster is down again", ["Yugabyte"]) == "the Yugabyte cluster is down again")
-        #expect(fix("we store orders in UGBte.", ["Yugabyte"]) == "we store orders in Yugabyte.")
-    }
-
-    @Test func candidatesReportsVowelOnlyCollapse() {
-        #expect(candidates("the UGBte cluster", ["Yugabyte"])
-            == [.init(heard: "UGBte", canonical: "Yugabyte")])
-    }
-
-    @Test func vowelOnlyCollapseNeverDropsAConsonant() {
-        #expect(fix("the centre of the room", ["Accenture"]) == "the centre of the room")
-        #expect(fix("put the crate here", ["Accurate"]) == "put the crate here")
-        #expect(fix("the ugbye cluster", ["Yugabyte"]) == "the ugbye cluster")
-    }
-
-    @Test func vowelOnlyCollapseNeedsAUniqueTerm() {
-        #expect(fix("the UGBte cluster", ["Yugabyte", "Yugabute"]) == "the UGBte cluster")
-    }
-
-    @Test func vowelOnlyCollapseNeedsALongTerm() {
-        #expect(fix("the UGBte cluster", ["Ugabyte"]) == "the UGBte cluster")
-    }
 
     @Test func adversarialPhrasesAreNotRewritten() {
         let pairs: [(phrase: String, term: String)] = [
@@ -191,9 +168,36 @@ struct FuzzyCorrectorTests {
         }
     }
 
-    @Test func knownExactJoinRewrites() {
+    @Test func exactJoinOfTwoCommonWordsStillRewrites() {
         #expect(fix("the red is bright", ["Redis"]) == "the Redis bright")
         #expect(fix("a work day", ["Workday"]) == "a Workday")
         #expect(fix("the key chain", ["Keychain"]) == "the Keychain")
+    }
+
+    @Test func everydayWordsNearALongTermAreLeftAlone() {
+        let pairs: [(phrase: String, term: String)] = [
+            ("we took photos during the golden hour", "GoldenEye"),
+            ("there is a silver lining", "Silvereye"),
+            ("we will grant access tomorrow", "Guaranty"),
+            ("we held a rally yesterday", "Aerially"),
+            ("we drove to Bolton yesterday", "Abolition"),
+            ("a sprat swam past the boat", "Separate"),
+            ("a sprat swam past the boat", "Aspirate"),
+        ]
+        for pair in pairs {
+            #expect(fix(pair.phrase, [pair.term]) == pair.phrase)
+            #expect(candidates(pair.phrase, [pair.term]).isEmpty)
+        }
+    }
+
+    @Test func droppedLettersBeyondTheEditCapAreNotRecovered() {
+        #expect(fix("the UGBte cluster", ["Yugabyte"]) == "the UGBte cluster")
+    }
+
+    @Test func replacementOutputIsNotRewrittenByFuzzyStage() {
+        var ctx = PipelineContext(text: "We scheduled a meeting yesterday.")
+        ReplacementsStage(rules: [ReplacementRule(heard: "meeting", replace: "rally", isRegex: false)]).apply(&ctx)
+        FuzzyStage(terms: ["Aerially"]).apply(&ctx)
+        #expect(ctx.text == "We scheduled a rally yesterday.")
     }
 }
