@@ -124,7 +124,7 @@ public enum FuzzyCorrector {
         if let exact = prepared.byNorm[norm] { return exact }                       // casing/spacing only
         guard allowFuzzy, let latin = latinized(norm) else { return nil }
         let latinKey = phoneticKey(latin)
-        let allowed = latin.count >= 6 ? 2 : 1
+        let allowed = latin.count >= 7 ? 2 : 1
         var candidateIndices: [Int] = []
         for len in (latin.count - allowed)...(latin.count + allowed) where len >= 0 {
             if let bucket = prepared.byLength[len] { candidateIndices.append(contentsOf: bucket) }

@@ -234,4 +234,20 @@ struct FuzzyCorrectorTests {
         #expect(fix("his oeuvre grew", ["Œuvre"]) == "his Œuvre grew")
         #expect(fix("we flew to Lodz", ["Łódź"]) == "we flew to Łódź")
     }
+
+    @Test func aSixLetterWordGetsOnlyOneEdit() {
+        #expect(fix("a cloudy morning", ["Claude"]) == "a cloudy morning")
+        #expect(fix("grant access now", ["Chess"]) == "grant access now")
+        #expect(fix("ask Sophia now", ["Sofia"]) == "ask Sophia now")
+    }
+
+    @Test func aSevenLetterWordStillGetsTwoEdits() {
+        #expect(fix("open Gravena now", ["Grafana"]) == "open Grafana now")
+    }
+
+    @Test func knownLimitationOneEditOnAShortSameKeyWordSnaps() {
+        #expect(fix("rebake the branch", ["rebase"]) == "rebase the branch")
+        #expect(fix("take a rest", ["Rust"]) == "take a Rust")
+        #expect(fix("ask Yuka", ["Yuki"]) == "ask Yuki")
+    }
 }
