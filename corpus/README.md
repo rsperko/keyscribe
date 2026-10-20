@@ -66,6 +66,11 @@ content hash against known human takes and by the ffmpeg encoder signature); eve
 `tts:<engine>[:voice]`. `human:capture-archive` is a real recording taken from the app's own capture
 archive rather than `record.sh` — no ffmpeg tag, identified by the CoreAudio writer's header instead.
 
+Generating `tts:say` clips: `say -o` silently renders some voice names with the system default voice
+(measured 2026-10-19: Eddy, Flo, Grandma, Grandpa, Reed, Rocko, Sandy, Shelley all produced Samantha's
+audio). Hash the generated files and drop duplicates before counting voices; a clip's `source` must
+name the voice that actually rendered it.
+
 `stt/` and `voices/` have their own READMEs; `commands/` is documented alongside its manifest.
 
 ## Recording

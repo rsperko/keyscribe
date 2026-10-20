@@ -65,6 +65,18 @@ never pair to ClaudeCode and a 3-word split can never pair at all — `recall-cl
 exists to keep that limit visible in results. When adding term-recall cases, pick mishearings the
 channel can actually deliver, or you are measuring nothing.
 
+## Why the `split-word` cases exist: split-word candidates were measured and rejected
+
+The `split-word` cases pair an engine's split, misspelled term ("Yuga Bite" → Yugabyte) with ordinary
+phrases one edit from a term ("fast app" / FastAPI, "air flaw" / Airflow). A looser candidate finder
+offered the model every two-word window within one edit of a term (equal phonetic key, not an exact
+join), and separately within two. Measured 2026-10-19, `--repeat 3`: Gemini 3.1 Flash Lite (preview) accepted
+every negative it was offered, on every attempt ("Please OpenAPI settings", "Datadog is done"), and
+also took `distractor-chargefee`; Qwen3-Coder 30B accepted "fast app" and "air flaw". The model does
+not decline a sound-alike hint from sentence context, so the hint is never sent. Gemini restored
+"Yuga Bite" → Yugabyte with no hint at all, from the prompt's ordinary cleanup. Keep the negatives
+when trying any other candidate rule: they are the cases a candidate channel has to pass.
+
 ## Authoring gotcha: `maxWer` is meaningless for CJK
 
 `BenchmarkScoring.tokens` maps every non-alphanumeric scalar to a space and splits — but CJK

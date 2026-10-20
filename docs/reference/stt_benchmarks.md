@@ -69,7 +69,8 @@ Apple rows were measured on the same corpus on 2026-09-25, with the fallback for
 > **As measured, 2026-06-30.** This run used recognition-time dictionary bias only for the **Whisper
 > and Qwen3** models; Parakeet and Apple bias had been removed because they could substitute
 > dictionary terms that were never spoken. Which models can bias is a per-model capability that can
-> change — Settings ▸ Speech Models is current. The dictionary still
+> change — Settings ▸ Speech Models is current. Parakeet bias was re-measured on 2026-10-19 and
+> stays off for the same reason. The dictionary still
 > lifts recall on **every** engine via after-transcription recovery; on the bias-capable models
 > recognition bias lifts it further. So the recall gap between the two columns below is the
 > dictionary's whole effect, and it is largest on the bias-capable models.

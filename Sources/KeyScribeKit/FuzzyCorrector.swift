@@ -139,7 +139,37 @@ public enum FuzzyCorrector {
             bestDistance = distance
             best = term
         }
-        return best
+        return best ?? vowelOnlyCollapseMatch(norm, key: normKey, in: prepared)
+    }
+
+    private static func vowelOnlyCollapseMatch(_ norm: String, key: String, in prepared: Prepared) -> Term? {
+        let matches = prepared.terms.filter {
+            $0.norm.count >= 8 && $0.key == key && isVowelOnlyCollapse(heard: norm, of: $0.norm)
+        }
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    private static let collapsibleVowels: Set<Character> = ["a", "e", "i", "o", "u", "y"]
+
+    private static func isVowelOnlyCollapse(heard: String, of term: String) -> Bool {
+        let heard = Array(heard), term = Array(term)
+        guard (1...3).contains(term.count - heard.count) else { return false }
+        var aligned = [[Bool?]](repeating: [Bool?](repeating: nil, count: term.count + 1), count: heard.count + 1)
+        func align(_ h: Int, _ t: Int) -> Bool {
+            if let known = aligned[h][t] { return known }
+            let result: Bool
+            if h == heard.count {
+                result = term[t...].allSatisfy(collapsibleVowels.contains)
+            } else if t == term.count {
+                result = false
+            } else {
+                result = (heard[h] == term[t] && align(h + 1, t + 1))
+                    || (collapsibleVowels.contains(term[t]) && align(h, t + 1))
+            }
+            aligned[h][t] = result
+            return result
+        }
+        return align(0, 0)
     }
 
     private static func normalize(_ s: String) -> String {

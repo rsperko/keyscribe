@@ -976,6 +976,17 @@ dictionary snapping spacing/casing ("text field" → "TextField"), which is the 
 intended behavior — after-transcription recovery does the same by design. The bar and the
 counter-example: Qwen3 native context = 0 substitution fires (kept); the removed Parakeet CTC-WS
 spotter substituted on 53% of ordinary sentences (removed).
+**Re-measured 2026-10-19 on FluidAudio 0.17.7, verdict unchanged.** Every configuration failed the
+gate on both Parakeet TDT v3 and Parakeet Ultra: the July pairing reproduced; the SDK defaults with the
+documented CTC 110M companion were worse; the acoustic rescue off and the documented short-term floors
+and taper still substituted into a quarter to a third of ordinary sentences; and a verify-only policy
+over the SDK's non-mutating candidate-evidence API, accepting a candidate only when the acoustic
+comparison AND the text gate both passed, was clean on distractors but recovered nothing the text
+rules do not already recover — its only gains and all of its new substitutions were multi-word
+phrases ("Yuga Bite" → Yugabyte vs "fast app" → FastAPI), and the acoustic margins favored the wrong
+ones. The failure lives in the CTC comparison and candidate discovery, not in which Parakeet model
+transcribes, so do not re-run it per model; re-open only for a mechanism that is not a CTC
+comparison against a sound-alike phrase.
 The `supportsRecognitionBias` seam, the `biasTerms` plumbing through the pipeline, and this corpus ARE
 the re-entry path for a future engine that biases cleanly — nothing else is kept for that purpose; the
 removed spotter lives in git history only.
@@ -1001,7 +1012,8 @@ The STT deps, and which of them is forked; the fork works live and costs nothing
   was **removed** (2026-07-09) — it false-fired a dictionary term into a majority of ordinary
   sentences; Parakeet now transcribes **TDT-only** and ignores
   `biasTerms` (`supportsRecognitionBias = false`), with the companion CTC download and disk footprint
-  gone. It also supplies Parakeet Unified through a DIFFERENT manager (`UnifiedAsrManager`, not
+  gone. Re-measured 2026-10-19 on 0.17.7 (rescue off, short-term controls, and the non-mutating
+  candidate-evidence API included): unchanged — see the recognition-bias gate above. It also supplies Parakeet Unified through a DIFFERENT manager (`UnifiedAsrManager`, not
   `AsrModels`) — see the STT engines section. FluidAudio is the only dep that supplies BOTH Parakeet
   and the Silero VAD behind the no-speech gate, so **a bump moves the gate unless the VAD artifact is
   pinned separately — which it now is.**

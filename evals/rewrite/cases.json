@@ -431,6 +431,89 @@
       "checks": {
         "regexAbsent": ["\\b(the|and|is|are|to|for|with|please|meeting|next|week)\\b"]
       }
+    },
+    {
+      "id": "split-yuga-bite-postgres",
+      "tags": ["split-word"],
+      "promptId": "polish",
+      "transcript": "I prefer Yuga Bite over Postgres for this.",
+      "screenTerms": ["Yugabyte", "Postgres"],
+      "checks": {
+        "mustContain": ["Yugabyte"],
+        "mustNotContain": ["Yuga Bite"]
+      }
+    },
+    {
+      "id": "split-uka-byte",
+      "tags": ["split-word"],
+      "promptId": "polish",
+      "transcript": "Uka byte handles the writes.",
+      "screenTerms": ["Yugabyte"],
+      "checks": {
+        "mustContain": ["Yugabyte"],
+        "mustNotContain": ["Uka byte"]
+      }
+    },
+    {
+      "id": "split-yuga-bite-queue",
+      "tags": ["split-word"],
+      "promptId": "polish",
+      "transcript": "we are moving the queue to Yuga Bite next week",
+      "screenTerms": ["Yugabyte"],
+      "checks": {
+        "mustContain": ["Yugabyte"],
+        "mustNotContain": ["Yuga Bite"]
+      }
+    },
+    {
+      "id": "split-neg-fast-app",
+      "tags": ["split-word"],
+      "promptId": "polish",
+      "transcript": "this is a fast app for small teams",
+      "screenTerms": ["FastAPI"],
+      "checks": {
+        "mustNotContain": ["FastAPI"]
+      }
+    },
+    {
+      "id": "split-neg-open-app",
+      "tags": ["split-word"],
+      "promptId": "polish",
+      "transcript": "please open app settings and check the toggle",
+      "screenTerms": ["OpenAPI"],
+      "checks": {
+        "mustNotContain": ["OpenAPI"]
+      }
+    },
+    {
+      "id": "split-neg-sales-farce",
+      "tags": ["split-word"],
+      "promptId": "polish",
+      "transcript": "the sales farce continued into the afternoon",
+      "screenTerms": ["Salesforce"],
+      "checks": {
+        "mustNotContain": ["Salesforce"]
+      }
+    },
+    {
+      "id": "split-neg-air-flaw",
+      "tags": ["split-word"],
+      "promptId": "polish",
+      "transcript": "there is an air flaw in the design",
+      "screenTerms": ["Airflow"],
+      "checks": {
+        "mustNotContain": ["Airflow"]
+      }
+    },
+    {
+      "id": "split-neg-data-dig",
+      "tags": ["split-word"],
+      "promptId": "polish",
+      "transcript": "the data dig is done and the numbers are in",
+      "screenTerms": ["Datadog"],
+      "checks": {
+        "mustNotContain": ["Datadog"]
+      }
     }
   ]
 }

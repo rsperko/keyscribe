@@ -144,4 +144,56 @@ struct FuzzyCorrectorTests {
     @Test func candidatesSkipsWindowTouchingANonce() {
         #expect(candidates("in spring \(SentinelText.open)V:1⟧ camp", ["Spring Boot"]).isEmpty)
     }
+    @Test func recoversVowelOnlyCollapseOfALongTerm() {
+        #expect(fix("the UGBte cluster is down again", ["Yugabyte"]) == "the Yugabyte cluster is down again")
+        #expect(fix("we store orders in UGBte.", ["Yugabyte"]) == "we store orders in Yugabyte.")
+    }
+
+    @Test func candidatesReportsVowelOnlyCollapse() {
+        #expect(candidates("the UGBte cluster", ["Yugabyte"])
+            == [.init(heard: "UGBte", canonical: "Yugabyte")])
+    }
+
+    @Test func vowelOnlyCollapseNeverDropsAConsonant() {
+        #expect(fix("the centre of the room", ["Accenture"]) == "the centre of the room")
+        #expect(fix("put the crate here", ["Accurate"]) == "put the crate here")
+        #expect(fix("the ugbye cluster", ["Yugabyte"]) == "the ugbye cluster")
+    }
+
+    @Test func vowelOnlyCollapseNeedsAUniqueTerm() {
+        #expect(fix("the UGBte cluster", ["Yugabyte", "Yugabute"]) == "the UGBte cluster")
+    }
+
+    @Test func vowelOnlyCollapseNeedsALongTerm() {
+        #expect(fix("the UGBte cluster", ["Ugabyte"]) == "the UGBte cluster")
+    }
+
+    @Test func adversarialPhrasesAreNotRewritten() {
+        let pairs: [(phrase: String, term: String)] = [
+            ("this is a fast app", "FastAPI"),
+            ("please open app settings", "OpenAPI"),
+            ("get lab results", "GitLab"),
+            ("the sales farce continued", "Salesforce"),
+            ("there is an air flaw in the design", "Airflow"),
+            ("a grey log fell in the river", "Graylog"),
+            ("the mail chump arrived", "Mailchimp"),
+            ("the data dig is done", "Datadog"),
+            ("the fire bass was loud", "Firebase"),
+            ("the centre of the room", "Accenture"),
+            ("put the crate here", "Accurate"),
+            ("cabernets are on sale", "Kubernetes"),
+            ("the post grass was cut", "Postgres"),
+            ("we met at Deutsche Bank", "Deutsche Bank"),
+        ]
+        for pair in pairs {
+            #expect(fix(pair.phrase, [pair.term]) == pair.phrase)
+            #expect(candidates(pair.phrase, [pair.term]).isEmpty)
+        }
+    }
+
+    @Test func knownExactJoinRewrites() {
+        #expect(fix("the red is bright", ["Redis"]) == "the Redis bright")
+        #expect(fix("a work day", ["Workday"]) == "a Workday")
+        #expect(fix("the key chain", ["Keychain"]) == "the Keychain")
+    }
 }
