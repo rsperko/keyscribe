@@ -200,4 +200,38 @@ struct FuzzyCorrectorTests {
         FuzzyStage(terms: ["Aerially"]).apply(&ctx)
         #expect(ctx.text == "We scheduled a rally yesterday.")
     }
+
+    @Test func neverFuzzesAWordThePhoneticKeyCannotSee() {
+        let pairs: [(phrase: String, term: String)] = [
+            ("мы были в Москве", "Москва"),
+            ("я перевёл деньги в Сбербанка", "Сбербанк"),
+            ("это собака", "соната"),
+            ("он привез подарок", "привет"),
+            ("ο φίλος μου", "φιλος"),
+            ("クバネテス を使う", "クバネティス"),
+        ]
+        for pair in pairs {
+            #expect(fix(pair.phrase, [pair.term]) == pair.phrase)
+            #expect(candidates(pair.phrase, [pair.term]).isEmpty)
+        }
+    }
+
+    @Test func nonLatinTermsStillSnapCasingAndSpacing() {
+        #expect(fix("мы были в москва", ["Москва"]) == "мы были в Москва")
+        #expect(fix("клиенты сбер банк", ["Сбербанк"]) == "клиенты Сбербанк")
+    }
+
+    @Test func accentedLatinTermsStillRecover() {
+        #expect(fix("the cafe opens", ["Café"]) == "the Café opens")
+        #expect(fix("ask Jose now", ["José"]) == "ask José now")
+    }
+
+    @Test func latinLettersWithoutAnAccentFormStillRecover() {
+        #expect(fix("we met on Strasse road", ["Straße"]) == "we met on Straße road")
+        #expect(fix("we met on Strase road", ["Straße"]) == "we met on Straße road")
+        #expect(fix("ask Bjorn now", ["Bjørn"]) == "ask Bjørn now")
+        #expect(fix("the Aesir saga", ["Æsir"]) == "the Æsir saga")
+        #expect(fix("his oeuvre grew", ["Œuvre"]) == "his Œuvre grew")
+        #expect(fix("we flew to Lodz", ["Łódź"]) == "we flew to Łódź")
+    }
 }

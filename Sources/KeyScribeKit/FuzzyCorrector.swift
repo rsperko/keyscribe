@@ -24,7 +24,7 @@ public enum FuzzyCorrector {
         var byLength: [Int: [Int]] = [:]
         for (i, term) in canonical.enumerated() {
             byNorm[term.norm] = term
-            byLength[term.norm.count, default: []].append(i)
+            if let latin = term.latin { byLength[latin.count, default: []].append(i) }
         }
         return Prepared(terms: canonical, byNorm: byNorm, byLength: byLength)
     }
@@ -105,7 +105,7 @@ public enum FuzzyCorrector {
         }
     }
 
-    fileprivate struct Term: Sendable { let canonical: String; let norm: String; let key: String }
+    fileprivate struct Term: Sendable { let canonical: String; let norm: String; let latin: String?; let key: String }
 
     private static func canonicalize(_ terms: [String]) -> [Term] {
         var seen = Set<String>()
@@ -114,18 +114,19 @@ public enum FuzzyCorrector {
             let canonical = term.trimmingCharacters(in: .whitespaces)
             let norm = normalize(canonical)
             guard norm.count >= 4, seen.insert(norm).inserted else { continue }
-            result.append(Term(canonical: canonical, norm: norm, key: phoneticKey(norm)))
+            let latin = latinized(norm)
+            result.append(Term(canonical: canonical, norm: norm, latin: latin, key: latin.map(phoneticKey) ?? ""))
         }
         return result
     }
 
     private static func bestMatch(_ norm: String, in prepared: Prepared, allowFuzzy: Bool) -> Term? {
         if let exact = prepared.byNorm[norm] { return exact }                       // casing/spacing only
-        guard allowFuzzy else { return nil }
-        let normKey = phoneticKey(norm)
-        let allowed = norm.count >= 6 ? 2 : 1
+        guard allowFuzzy, let latin = latinized(norm) else { return nil }
+        let latinKey = phoneticKey(latin)
+        let allowed = latin.count >= 6 ? 2 : 1
         var candidateIndices: [Int] = []
-        for len in (norm.count - allowed)...(norm.count + allowed) where len >= 0 {
+        for len in (latin.count - allowed)...(latin.count + allowed) where len >= 0 {
             if let bucket = prepared.byLength[len] { candidateIndices.append(contentsOf: bucket) }
         }
         candidateIndices.sort()
@@ -133,13 +134,22 @@ public enum FuzzyCorrector {
         var bestDistance = Int.max
         for idx in candidateIndices {
             let term = prepared.terms[idx]
-            guard term.key == normKey else { continue }
-            let distance = levenshtein(norm, term.norm)
+            guard let termLatin = term.latin, term.key == latinKey else { continue }
+            let distance = levenshtein(latin, termLatin)
             guard distance <= allowed, distance < bestDistance else { continue }
             bestDistance = distance
             best = term
         }
         return best
+    }
+
+    private static let lettersWithoutAnAccentForm: [Character: String] = ["ß": "ss", "æ": "ae", "œ": "oe", "ø": "o", "ł": "l"]
+
+    private static func latinized(_ norm: String) -> String? {
+        let spelled = norm.folding(options: .diacriticInsensitive, locale: nil)
+            .map { lettersWithoutAnAccentForm[$0] ?? String($0) }.joined()
+        let isLatin = spelled.unicodeScalars.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) }
+        return isLatin ? spelled : nil
     }
 
     private static func normalize(_ s: String) -> String {
