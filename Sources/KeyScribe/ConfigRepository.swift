@@ -1,6 +1,10 @@
 import Foundation
 import KeyScribeKit
 
+extension Notification.Name {
+    static let replacementUsageDidChange = Notification.Name("KeyScribe.replacementUsageDidChange")
+}
+
 // The single owner of on-disk config writes (dictionary, replacements, modes, connections). Every mutation
 // is a fresh read-modify-write from disk (so a concurrent write from another surface — the global
 // Add-to-Vocabulary hotkey while a Settings pane is open — is never clobbered by stale in-memory state),
@@ -17,16 +21,27 @@ final class ConfigRepository {
     let supportDir: URL
     private let config: ConfigCache
     private let selfWriteGate: ConfigSelfWriteGate
+    let replacementUsage: ReplacementUsageStore?
     var onChange: (() -> Void)?
     // In-app observers (beyond the host's `onChange`) that re-read from disk when any surface writes config —
     // notably the Settings pane models, whose drafts would otherwise clobber a term the correction panel
     // routed into a mode while the pane was open.
     private var changeObservers: [() -> Void] = []
 
-    init(supportDir: URL, config: ConfigCache, selfWriteGate: ConfigSelfWriteGate = ConfigSelfWriteGate()) {
+    init(
+        supportDir: URL, config: ConfigCache, selfWriteGate: ConfigSelfWriteGate = ConfigSelfWriteGate(),
+        replacementUsage: ReplacementUsageStore? = nil
+    ) {
         self.supportDir = supportDir
         self.config = config
         self.selfWriteGate = selfWriteGate
+        self.replacementUsage = replacementUsage
+    }
+
+    func reconcileReplacementUsage() {
+        guard let replacementUsage, config.configFileError == nil else { return }
+        replacementUsage.reconcile(
+            keys: ReplacementUsage.configuredKeys(global: config.replacements, modes: config.modes))
     }
 
     func addChangeObserver(_ observer: @escaping () -> Void) {
@@ -37,10 +52,12 @@ final class ConfigRepository {
     // `onChange` effects itself: refresh only the in-app observers so an open Settings pane re-reads a
     // file edited outside the app.
     func notifyExternalChange() {
+        reconcileReplacementUsage()
         for observer in changeObservers { observer() }
     }
 
     private func notifyChange() {
+        reconcileReplacementUsage()
         onChange?()
         for observer in changeObservers { observer() }
     }
@@ -190,6 +207,7 @@ final class ConfigRepository {
                     throw error
                 }
             }
+            replacementUsage?.renameMode(mode.id, to: newId)
         }
     }
 

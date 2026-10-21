@@ -23,6 +23,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsController: SettingsController!
     private var notices = NoticesController()
     private var history: HistoryStore!
+    private var replacementUsage: ReplacementUsageStore!
     private var correctionPanel: CorrectionPanelController!
     private var configRepository: ConfigRepository!
     // Legacy crash recovery for audio state markers written by earlier builds.
@@ -138,8 +139,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             loadSettings()
         }
         config = ConfigCache(supportDir: KeyScribePaths.supportDir)
+        replacementUsage = ReplacementUsageStore(
+            supportDir: KeyScribePaths.supportDir,
+            onChange: {
+                Task { @MainActor in NotificationCenter.default.post(name: .replacementUsageDidChange, object: nil) }
+            },
+            onWriteFailure: { error in
+                Log.config.error("replacement usage not saved: \(error.localizedDescription, privacy: .public)")
+            },
+            onUnreadableFile: { aside in
+                Log.config.error("replacement usage file was unreadable; moved to \(aside.lastPathComponent, privacy: .public) and started fresh")
+            })
         configRepository = ConfigRepository(
-            supportDir: KeyScribePaths.supportDir, config: config, selfWriteGate: selfWriteGate)
+            supportDir: KeyScribePaths.supportDir, config: config, selfWriteGate: selfWriteGate,
+            replacementUsage: replacementUsage)
+        configRepository.reconcileReplacementUsage()
         configRepository.onChange = { [weak self] in
             // A mode write can change enable state or trigger key, so re-register bindings. The FSEvents
             // watcher skips in-app writes (self-write echoes), so without this a mode's trigger never
@@ -161,7 +175,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         CaptureArchive.publish(settings.audio)
         CaptureArchive.applyRetention()
         controller = DictationController(
-            settings: settings, provider: provider, config: config, history: history, hud: hud,
+            settings: settings, provider: provider, config: config, history: history,
+            replacementUsage: replacementUsage, hud: hud,
             permits: AIServiceCatalog.permits,
             pressSnapshot: ContextProbe.initialSnapshot,
             snapshot: { [hud] in ContextProbe.snapshot(excludingWindow: hud.hudWindowID) },

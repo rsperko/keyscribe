@@ -6,7 +6,7 @@ import Foundation
 // Without this filter every dictation re-reads all config, recompiles stages, and rebuilds the hotkey
 // monitor, defeating "a normal dictation does zero config I/O".
 public enum ConfigWatchFilter {
-    public static let ignoredSubdirectories: Set<String> = ["history", "lkg", "models"]
+    public static let ignoredSubdirectories: Set<String> = ["history", "usage", "lkg", "models"]
 
     // True if a change at `changedPath` (absolute) is relevant to configuration, given the watched
     // `supportDir` (absolute). A path under an ignored first-level subdirectory is not relevant.

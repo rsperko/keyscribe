@@ -264,4 +264,48 @@ struct ConfigRepositoryTests {
         let ids = ModeStore.loadAll(in: repo.modesDir).map(\.id)
         #expect(ids == ["new"])
     }
+
+    @Test func addingAReplacementStartsTrackingItsUseAndRemovingItDropsIt() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let usage = ReplacementUsageStore(supportDir: dir)
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir), replacementUsage: usage)
+        #expect(repo.addReplacement(heard: "teh", replace: "the"))
+        usage.flush()
+        #expect(usage.snapshot().rules["global|l|teh"]?.count == 0)
+        _ = try repo.mutateReplacements { $0 = ReplacementsSet() }
+        usage.flush()
+        #expect(usage.snapshot().rules.isEmpty)
+    }
+
+    @Test func renamingAModeKeepsTheUseOfItsReplacements() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let usage = ReplacementUsageStore(supportDir: dir)
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir), replacementUsage: usage)
+        var mode = Mode(id: "code", name: "Code")
+        mode.replacements = .init(rules: [.init(heard: "teh", replace: "the", regex: false)])
+        try repo.writeMode(mode)
+        usage.record([ReplacementRule(heard: "teh", replace: "the", isRegex: false, origin: .mode("code"))])
+        try repo.renameMode(mode, to: "coding")
+        usage.flush()
+        #expect(usage.snapshot().rules["mode:coding|l|teh"]?.count == 1)
+        #expect(usage.snapshot().rules["mode:code|l|teh"] == nil)
+    }
+
+    @Test func aBrokenReplacementsFileDoesNotWipeTrackedUse() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let usage = ReplacementUsageStore(supportDir: dir)
+        let config = ConfigCache(supportDir: dir)
+        let repo = ConfigRepository(supportDir: dir, config: config, replacementUsage: usage)
+        #expect(repo.addReplacement(heard: "teh", replace: "the"))
+        usage.record([ReplacementRule(heard: "teh", replace: "the", isRegex: false, origin: .global)])
+        try "not = [valid".write(
+            to: dir.appendingPathComponent(ReplacementsStore.fileName), atomically: true, encoding: .utf8)
+        config.invalidate()
+        repo.notifyExternalChange()
+        usage.flush()
+        #expect(usage.snapshot().rules["global|l|teh"]?.count == 1)
+    }
 }

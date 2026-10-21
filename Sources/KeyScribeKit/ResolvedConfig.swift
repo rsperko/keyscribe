@@ -98,8 +98,8 @@ public final class ResolvedConfig: @unchecked Sendable {
         var stages: [any PipelineStage] = []
         if mode?.commands.liveEdits ?? true { stages.append(LiveEditsStage()) }
         let rules = VocabularyMerge.rules(
-            global: replacements.toRules(),
-            local: mode?.replacements.toRules() ?? [],
+            global: replacements.toRules().map { $0.from(.global) },
+            local: mode.map { m in m.replacements.toRules().map { $0.from(.mode(m.id)) } } ?? [],
             includeGlobal: mode?.replacements.includeGlobal ?? true)
         stages.append(ReplacementsStage(rules: rules))
         if mode?.commands.numbers ?? false { stages.append(NumbersStage()) }

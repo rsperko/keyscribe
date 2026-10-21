@@ -117,4 +117,16 @@ struct ResolvedConfigTests {
         _ = rc.recognitionBiasTerms(for: mode)
         #expect(rc.mergedDictionary(for: mode) == ["Postgres", "Kubernetes", "ChargeBee"])
     }
+
+    @Test func textStagesTagEachRuleWithTheScopeItCameFrom() throws {
+        var mode = Mode(id: "code", name: "Code")
+        mode.replacements = .init(includeGlobal: true, rules: [.init(heard: "teh", replace: "THE", regex: false)])
+        let rc = resolved(modes: [mode], replacements: [
+            .init(heard: "Teh", replace: "the", regex: false), .init(heard: "pipe", replace: "|", regex: false),
+        ])
+        let stage = try #require(rc.postSTTTextStages(for: mode).compactMap { $0 as? ReplacementsStage }.first)
+        #expect(stage.rules.map(\.origin) == [.mode("code"), .global])
+        #expect(try #require(rc.postSTTTextStages(for: nil).compactMap { $0 as? ReplacementsStage }.first)
+            .rules.map(\.origin) == [.global, .global])
+    }
 }

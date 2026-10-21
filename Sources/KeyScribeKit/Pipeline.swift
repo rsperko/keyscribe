@@ -36,6 +36,7 @@ public struct BareReplacement: Sendable, Equatable {
 public struct PipelineContext: Sendable {
     public var text: String
     public var bareReplacement: BareReplacement?
+    public var firedReplacements: [ReplacementRule] = []
     public init(text: String) { self.text = text }
 }
 
@@ -61,11 +62,16 @@ public struct TokenizedPayload: Sendable {
     public let text: String
     public let issuedTokens: [String]
     public let bareReplacement: BareReplacement?
+    public let firedReplacements: [ReplacementRule]
 
-    init(text: String, issuedTokens: [String], bareReplacement: BareReplacement? = nil) {
+    init(
+        text: String, issuedTokens: [String], bareReplacement: BareReplacement? = nil,
+        firedReplacements: [ReplacementRule] = []
+    ) {
         self.text = text
         self.issuedTokens = issuedTokens
         self.bareReplacement = bareReplacement
+        self.firedReplacements = firedReplacements
     }
 }
 
@@ -84,7 +90,8 @@ public struct Pipeline: Sendable {
         return TokenizedPayload(
             text: context.text,
             issuedTokens: stages.flatMap { $0.issuedTokens },
-            bareReplacement: context.bareReplacement)
+            bareReplacement: context.bareReplacement,
+            firedReplacements: context.firedReplacements)
     }
 
     public func restore(_ text: String) -> String {

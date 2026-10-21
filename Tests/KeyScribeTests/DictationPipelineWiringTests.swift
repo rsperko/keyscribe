@@ -143,6 +143,7 @@ struct DictationPipelineWiringTests {
         let historyEntry: HistoryEntry?
         let lastHUD: HUDState?
         let recordedBiasTerms: [String]
+        let usage: ReplacementUsage
     }
 
     private func run(
@@ -172,6 +173,7 @@ struct DictationPipelineWiringTests {
         recognitionBiasEnabled: Bool? = nil,
         engineSupportsRecognitionBias: Bool = false,
         insertSucceeds: Bool = true,
+        historyEnabled: Bool = true,
         snapshotProvider: (@MainActor () -> TargetSnapshot)? = nil,
         updateSettingsAfterStart: ((inout Settings) -> Void)? = nil
     ) async -> Result {
@@ -192,17 +194,19 @@ struct DictationPipelineWiringTests {
             settings.stt.recognitionBiasDisabledEngines = recognitionBiasEnabled ? [] : ["fixed"]
         }
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
+        settings.history.enabled = historyEnabled
 
         let engine = FixedEngine(text: transcript, supportsRecognitionBias: engineSupportsRecognitionBias)
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "fixed")
         let history = HistoryStore(supportDir: supportDir)
+        let usage = ReplacementUsageStore(supportDir: supportDir)
         let insertSpy = InsertSpy()
         let submitSpy = SubmitSpy()
         let hudSpy = HUDSpy()
         let clipboardReads = ClipboardReads()
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: history, hud: hudSpy, permits: permits,
+            history: history, replacementUsage: usage, hud: hudSpy, permits: permits,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, method, paste, text, _ in await insertSpy.record(method, paste, text); return insertSucceeds },
             submitKey: { await submitSpy.record($0) },
@@ -222,13 +226,14 @@ struct DictationPipelineWiringTests {
         await controller.captureBringUpTask?.value
         controller.handleCommit()
         await controller.dictationTask?.value
-        let entry = await firstHistoryEntry(in: history)
+        let entry = historyEnabled ? await firstHistoryEntry(in: history) : nil
+        usage.flush()
         return Result(
             lastResult: controller.lastResult, clipboardReadCount: clipboardReads.count, outcome: entry?.outcome,
             insertedText: await insertSpy.text, insertionMethod: await insertSpy.method,
             insertedPaste: await insertSpy.paste,
             submits: await submitSpy.keys, llm: llm, historyEntry: entry,
-            lastHUD: hudSpy.states.last, recordedBiasTerms: engine.lastBiasTerms)
+            lastHUD: hudSpy.states.last, recordedBiasTerms: engine.lastBiasTerms, usage: usage.snapshot())
     }
 
     private func firstHistoryEntry(in history: HistoryStore) async -> HistoryEntry? {
@@ -258,6 +263,38 @@ struct DictationPipelineWiringTests {
         return m
     }
 
+
+    @Test func aDeliveredDictationCountsEachReplacementThatChangedItOnce() async {
+        let m = mode(id: "code", replacements: [
+            ReplacementsSet.Rule(heard: "cat", replace: "dog", regex: false),
+            ReplacementsSet.Rule(heard: "unused", replace: "x", regex: false),
+        ])
+        let out = await run(transcript: "a cat and a cat", mode: m)
+        #expect(out.lastResult == "a dog and a dog")
+        #expect(out.usage.rules["mode:code|l|cat"]?.count == 1)
+        #expect(out.usage.rules["mode:code|l|unused"] == nil)
+    }
+
+    @Test func replacementUseIsCountedWithHistoryOff() async {
+        let m = mode(id: "code", replacements: [ReplacementsSet.Rule(heard: "cat", replace: "dog", regex: false)])
+        let out = await run(transcript: "a cat", modes: [m], defaultModeId: m.id, historyEnabled: false)
+        #expect(out.historyEntry == nil)
+        #expect(out.usage.rules["mode:code|l|cat"]?.count == 1)
+    }
+
+    @Test func aWholeUtteranceReplacementCountsItsRule() async {
+        let m = mode(id: "code", replacements: [ReplacementsSet.Rule(heard: "slash resume", replace: "/resume", regex: false)])
+        let out = await run(transcript: "Slash resume.", mode: m)
+        #expect(out.lastResult == "/resume")
+        #expect(out.usage.rules["mode:code|l|slash resume"]?.count == 1)
+    }
+
+    @Test func aDictationThatFailedToLandCountsNothing() async {
+        let m = mode(id: "code", replacements: [ReplacementsSet.Rule(heard: "cat", replace: "dog", regex: false)])
+        let out = await run(transcript: "a cat", modes: [m], defaultModeId: m.id, insertSucceeds: false)
+        #expect(out.outcome == .failed)
+        #expect(out.usage.rules.isEmpty)
+    }
 
     @Test func verbatimSurvivesTheTextStagesOnTheNoLLMPath() async {
         let m = mode(id: "code", liveEdits: true,

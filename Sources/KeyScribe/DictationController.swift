@@ -20,6 +20,7 @@ final class DictationController {
     private let provider: SpeechEngineProvider
     private let config: ConfigCache
     private let history: HistoryStore?
+    private let replacementUsage: ReplacementUsageStore?
     private let historyWriteQueue = DispatchQueue(label: "com.keyscribe.history.write", qos: .utility)
     private let audio: AudioCapturing
     private let presenceDetector: SpeechPresenceDetecting
@@ -91,6 +92,8 @@ final class DictationController {
         var recordingDeadline: ContinuousClock.Instant?
         var stoppedAtLimit = false
         var rewriteSkippedAtLimit = false
+        var firedReplacements: [ReplacementRule] = []
+        var replacementUsageEpoch: Int?
         var modeResolveTask: Task<Void, Never>?
         var snapshotAdoptionTask: Task<Void, Never>?
         var captureBringUpTask: Task<Void, Never>?
@@ -235,7 +238,8 @@ final class DictationController {
 
     init(
         settings: Settings, provider: SpeechEngineProvider,
-        config: ConfigCache, history: HistoryStore?, hud: HUDPresenting?,
+        config: ConfigCache, history: HistoryStore?, replacementUsage: ReplacementUsageStore? = nil,
+        hud: HUDPresenting?,
         permits: @escaping @Sendable (Connection) -> Bool,
         audio: AudioCapturing? = nil,
         presenceDetector: SpeechPresenceDetecting? = nil,
@@ -267,6 +271,7 @@ final class DictationController {
         self.provider = provider
         self.config = config
         self.history = history
+        self.replacementUsage = replacementUsage
         self.hud = hud
         self.audio = audio ?? AudioCapture()
         self.presenceDetector = presenceDetector ?? SpeechPresenceDetector(modelsDir: KeyScribePaths.modelsDir)
@@ -576,6 +581,7 @@ final class DictationController {
         adoptFullSnapshot()
         building.targetBundleId = capturedSnapshot?.bundleId
         session?.capturedPlan = config.resolved
+        session?.replacementUsageEpoch = replacementUsage?.renameEpoch()
         session?.capturedRecognitionBias = settings.stt.recognitionBiasEnabled(
             engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias)
 
@@ -1716,6 +1722,9 @@ final class DictationController {
         case .noSpeech, .failed: false
         }
         let stoppedAtLimit = session?.stoppedAtLimit == true && textLanded
+        if textLanded, let fired = session?.firedReplacements {
+            replacementUsage?.record(fired, capturedAt: session?.replacementUsageEpoch)
+        }
         let completedState: HUDState
         if stoppedAtLimit {
             completedState = .stoppedAtLimit(
@@ -1943,6 +1952,7 @@ final class DictationController {
         let localStart = DispatchTime.now()
         let payload = pipeline.forward(transcript)
         let tokenized = payload.text
+        session?.firedReplacements = payload.firedReplacements
 
         // Whole-utterance replacement: one rule owned the entire utterance, so insert its generated
         // value verbatim — bypassing the LLM (the model never sees it; redaction is moot) and the

@@ -660,6 +660,8 @@ Silence-based auto-stop is a non-goal (§1) and stays one: the limit is the only
   - **History → `history/` directory, one JSONL file per day** (append-only) — greppable, streamable;
     retention drops old day-files.
   - **Global dictionary & replacements → TOML.**
+  - **Replacement use counts → `usage/replacements.json`** — per-rule counts and day-level dates, no
+    dictation text, kept regardless of the History setting (`config_schema.md` "Replacement usage").
   - **Shared prompt fragments → `fragments/` directory, markdown + YAML frontmatter.**
   - **LLM connections → TOML** (key material in Keychain, referenced by id; command-generated
     tokens in memory only).

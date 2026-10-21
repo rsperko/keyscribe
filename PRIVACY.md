@@ -100,6 +100,9 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
 
 - **Config** (modes, connections, dictionary, replacements) as TOML.
 - **History** as JSONL, one file per day.
+- **Replacement use counts** under `usage/`: for each of your replacements, how many dictations it
+  changed and the day it was last used. No dictation text is stored there, and it is kept whether or
+  not History is on.
 - **Downloaded speech model weights** under `models/`.
 
 You can inspect, back up, or delete any of it with the Finder or a text editor. Deleting the history

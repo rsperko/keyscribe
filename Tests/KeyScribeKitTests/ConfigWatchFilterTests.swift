@@ -21,6 +21,11 @@ final class ConfigWatchFilterTests: XCTestCase {
             changedPath: base + "/models/whisper-small/Model.mlmodelc/coremldata.bin", supportDir: base))
     }
 
+    func testReplacementUsageWriteIsIgnored() {
+        XCTAssertFalse(ConfigWatchFilter.isConfigRelevant(
+            changedPath: base + "/usage/replacements.json", supportDir: base))
+    }
+
     func testModeWriteInvalidates() {
         XCTAssertTrue(ConfigWatchFilter.isConfigRelevant(
             changedPath: base + "/modes/x.toml", supportDir: base))

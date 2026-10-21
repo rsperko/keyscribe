@@ -181,4 +181,41 @@ struct ReplacementsStageTests {
         let stage = ReplacementsStage(rules: [ReplacementRule(heard: "go", replace: "x<CR>", isRegex: true)])
         #expect(stage.droppedForReturnMarker.isEmpty)
     }
+
+    @Test func reportsEachRuleThatChangedTheTextOnce() {
+        let teh = ReplacementRule(heard: "teh", replace: "the", isRegex: false, origin: .global)
+        let pipe = ReplacementRule(heard: "pipe", replace: "|", isRegex: false, origin: .global)
+        let unused = ReplacementRule(heard: "cat", replace: "dog", isRegex: false, origin: .global)
+        var ctx = PipelineContext(text: "teh pipe and teh end")
+        ReplacementsStage(rules: [unused, pipe, teh]).apply(&ctx)
+        #expect(ctx.firedReplacements == [teh, pipe])
+    }
+
+    @Test func aWholeUtteranceReplacementReportsOnlyTheRuleThatOwnsIt() {
+        let owner = ReplacementRule(heard: "slash resume", replace: "/resume", isRegex: false, origin: .global)
+        let inner = ReplacementRule(heard: "slash", replace: "/", isRegex: false, origin: .global)
+        var ctx = PipelineContext(text: "Slash resume.")
+        ReplacementsStage(rules: [inner, owner]).apply(&ctx)
+        #expect(ctx.bareReplacement?.text == "/resume")
+        #expect(ctx.firedReplacements == [owner])
+    }
+
+    @Test func aRuleInsideAProtectedTokenDoesNotFire() {
+        let rule = ReplacementRule(heard: "CLIP", replace: "x", isRegex: false, origin: .global)
+        var ctx = PipelineContext(text: "paste ⟦SN:CLIP:1⟧ here")
+        ReplacementsStage(rules: [rule]).apply(&ctx)
+        #expect(ctx.firedReplacements.isEmpty)
+    }
+
+    @Test func noMatchReportsNothing() {
+        var ctx = PipelineContext(text: "nothing to see")
+        ReplacementsStage(rules: [ReplacementRule(heard: "teh", replace: "the", isRegex: false)]).apply(&ctx)
+        #expect(ctx.firedReplacements.isEmpty)
+    }
+
+    @Test func theForwardPayloadCarriesTheFiredRules() {
+        let teh = ReplacementRule(heard: "teh", replace: "the", isRegex: false, origin: .global)
+        let payload = Pipeline([ReplacementsStage(rules: [teh])]).forward("teh cat")
+        #expect(payload.firedReplacements == [teh])
+    }
 }

@@ -23,6 +23,8 @@
     pig-latin.toml
   history/                 # append-only local history, one JSONL file per day
     2026-06-20.jsonl
+  usage/                   # replacement use counts (see "Replacement usage")
+    replacements.json
   lkg/                     # last-known-good mode copies + seed-ledger.toml (design.md §5.1)
   models/                  # downloaded STT weights, one dir per model (design.md §4.1)
     parakeet-tdt-0.6b-v3/
@@ -61,6 +63,34 @@ models are system-managed** when available and have no entry here.
 - The `models/` dir is **not** versioned config and carries no `schema_version`.
 
 ---
+
+
+## Replacement usage
+
+`usage/replacements.json` records how often each configured replacement changed a dictation that
+reached its destination. It is app-written state, not config: it carries a JSON `schemaVersion`, it is
+never hand-edited, and a write to it does not reload configuration.
+
+- One entry per rule, keyed by scope (`global` or `mode:<id>`), kind (`l` literal, `r` regex), and the
+  heard text — lowercased for a literal, verbatim for a regex. The replacement output is not part of
+  the key, so rewording **Use instead** keeps a rule's count; changing the heard text or the regex flag
+  starts a new one. Renaming a mode carries its rules' entries to the new id.
+- The file stores `trackingSince`, the day counting began. Each entry stores `count` (dictations, not
+  matches — a rule matching twice in one dictation counts once), `lastUsed`, and `since`: the day the
+  rule first appeared, or absent for a rule that already existed when counting began, whose real add
+  date is unknown. Dates are local days (`yyyy-MM-dd`), never timestamps, and no dictation text is
+  stored.
+- A rule counts only when the dictation was inserted or copied; a cancelled, empty, or failed one
+  never counts. A whole-utterance replacement counts only the rule that owns the utterance. A count
+  lands only on a rule that is still configured when the dictation finishes: one removed mid-dictation
+  is not brought back, and one whose mode was renamed mid-dictation counts under the new id.
+- A failed write is logged and retried on the next change; the in-memory counts are never discarded.
+- Counting is independent of the History setting. Entries for rules that are no longer configured are
+  dropped whenever configuration loads cleanly; a config file that fails to load leaves the counts
+  untouched. A usage file that cannot be read (corrupt, or written by a newer version) is moved aside
+  to `replacements.json.unreadable`, logged, and counting starts fresh — it is never silently
+  overwritten. Only the most recent unreadable copy is kept; if it cannot be moved, counts are kept in
+  memory only until the next launch rather than written over it.
 
 ## Mode file — annotated example
 

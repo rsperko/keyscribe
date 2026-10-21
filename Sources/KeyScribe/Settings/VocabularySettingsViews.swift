@@ -107,6 +107,7 @@ struct ReplacementRows: View {
     let onUpdate: (ReplacementsSet.Rule, ReplacementsSet.Rule) -> Bool
     let onMove: (IndexSet, Int) -> Void
     let onRemove: (Int) -> Void
+    var usageCaption: (ReplacementsSet.Rule) -> String? = { _ in nil }
     @State private var editingRule: ReplacementsSet.Rule?
     @State private var tableHeight: CGFloat = 76
 
@@ -139,8 +140,17 @@ struct ReplacementRows: View {
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
+                    Spacer(minLength: 12)
+                    if let caption = usageCaption(rule) {
+                        Text(caption)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                 }
                 Text(rule.heard)
+                    .font(rule.regex ? .body.monospaced() : .body)
                     .textSelection(.enabled)
                     .lineLimit(2)
                 Text("Use instead")
@@ -149,7 +159,6 @@ struct ReplacementRows: View {
                 Text(ReplacementAuthoring.preview(for: rule.replace).text)
                     .textSelection(.enabled)
                     .lineLimit(1)
-                    .foregroundStyle(.secondary)
             }
             Spacer()
             Button { editingRule = rule } label: {
@@ -180,8 +189,11 @@ struct ReplacementRows: View {
         }
         .padding(.leading, 2)
         .padding(.trailing, 10)
-        .padding(.vertical, 4)
+        .padding(.vertical, 8)
         .fixedSize(horizontal: false, vertical: true)
+        .overlay(alignment: .top) {
+            if index > rules.startIndex { Divider() }
+        }
         .contextMenu {
             Button("Move up") { onMove(IndexSet(integer: index), index - 1) }
                 .disabled(index == rules.startIndex)
@@ -846,7 +858,8 @@ struct VocabularySettingsView: View {
                 onAddReplacement: { replacements.add(heard: $0, replace: $1, regex: $2) },
                 onUpdateReplacement: replacements.update,
                 onMoveReplacement: replacements.move,
-                onRemoveReplacement: replacements.remove(at:))
+                onRemoveReplacement: replacements.remove(at:),
+                replacementUsageCaption: { replacements.usageCaption(for: $0, in: .global) })
         case let .mode(id):
             if let mode = modes.modes.first(where: { $0.id == id && !$0.isSystem }) {
                 modeDetail(mode)
@@ -916,7 +929,8 @@ struct VocabularySettingsView: View {
                 var updated = mode
                 updated.replacements.rules.remove(at: index)
                 modes.update(updated)
-            })
+            },
+            replacementUsageCaption: { replacements.usageCaption(for: $0, in: .mode(mode.id)) })
     }
 
     private func modeScopeDescription(_ mode: Mode) -> String {
@@ -946,6 +960,7 @@ private struct VocabularyEditor: View {
     let onUpdateReplacement: (ReplacementsSet.Rule, ReplacementsSet.Rule) -> Bool
     let onMoveReplacement: (IndexSet, Int) -> Void
     let onRemoveReplacement: (Int) -> Void
+    var replacementUsageCaption: (ReplacementsSet.Rule) -> String? = { _ in nil }
     @State private var recognitionHelpExpanded = false
     @State private var selectedWord: String?
     @State private var discovery: HistoryReplacementsModel?
@@ -1020,7 +1035,8 @@ private struct VocabularyEditor: View {
                     analyzeEdit: analyzeReplacementEdit,
                     onUpdate: onUpdateReplacement,
                     onMove: onMoveReplacement,
-                    onRemove: onRemoveReplacement)
+                    onRemove: onRemoveReplacement,
+                    usageCaption: replacementUsageCaption)
                 if let addedMessage {
                     Label(addedMessage, systemImage: "checkmark.circle.fill")
                         .font(.caption.weight(.medium))
@@ -1130,10 +1146,12 @@ final class DictionarySettingsModel: ObservableObject {
 @MainActor
 final class ReplacementsSettingsModel: ObservableObject {
     @Published private(set) var rules: [ReplacementsSet.Rule] = []
+    @Published private(set) var usage = ReplacementUsage()
     @Published private(set) var error: String?
 
     private let repository: ConfigRepository
     private var isApplyingLocalMutation = false
+    private var usageObserver: NSObjectProtocol?
 
     init(repository: ConfigRepository) {
         self.repository = repository
@@ -1145,11 +1163,27 @@ final class ReplacementsSettingsModel: ObservableObject {
             guard let self, !self.isApplyingLocalMutation else { return }
             self.reload()
         }
+        usageObserver = NotificationCenter.default.addObserver(
+            forName: .replacementUsageDidChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshUsage() }
+        }
+    }
+
+    func refreshUsage() {
+        usage = repository.replacementUsage?.snapshot() ?? ReplacementUsage()
     }
 
     func reload() {
         rules = repository.replacementRules()
+        usage = repository.replacementUsage?.snapshot() ?? ReplacementUsage()
         error = nil
+    }
+
+    func usageCaption(for rule: ReplacementsSet.Rule, in origin: ReplacementOrigin) -> String? {
+        ReplacementUsageCaption.text(
+            for: usage.entry(for: rule, in: origin), trackingSince: usage.trackingSince,
+            today: HistoryStore.todayString())
     }
 
     func add(heard: String, replace: String, regex: Bool) {

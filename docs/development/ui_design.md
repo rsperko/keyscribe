@@ -645,7 +645,10 @@ composer and lists do not live inside the mode editor.
   after transcription whenever the mode's dictionary is non-empty — that is always on, so never
   present it as something the user can turn off — and dictionary terms always help the optional
   rewrite. Never imply guaranteed recognition.
-- Replacements: human-readable `When heard`/`Use instead` rows. The `Use instead` value shows as
+- Replacements: human-readable `When heard`/`Use instead` rows, separated by a hairline divider. The
+  heard phrase and the `Use instead` value are both primary text (a one-character value such as `.`
+  must not read as a disabled hint); a regex pattern is shown monospaced so backslashes, brackets, and
+  punctuation stay inspectable. The `Use instead` value shows as
   exactly **one bounded preview line** (line breaks and tabs rendered as `\n`/`\r`/`\t`, a
   whitespace-only value showing its spaces as `␣` so it never looks empty, capped so a row
   never grows with the replacement body); the full value stays available in the larger editor. Regex
@@ -665,6 +668,13 @@ composer and lists do not live inside the mode editor.
   the popover stays open and explains that it must be reopened instead of pretending the stale edit saved.
   Mode rules with the same identity override their included Global counterpart. Reordering changes only
   the tie priority between rules in the displayed scope.
+  Each row's label line carries a right-aligned, single-line secondary-text usage caption (it truncates
+  rather than wrapping, so it never adds height) so the user can see which rules earn their place:
+  `Used 14 times · last used Oct 19` (`today`/`yesterday` when recent), `Not used since added Aug 2`, or
+  `Added today`. A rule that already existed when counting began has no known add date, so it never
+  claims one: it reads `No uses recorded since <the day counting began>` (`No uses recorded yet` on that
+  day). It counts dictations that reached their destination, independent of History. It is read-only:
+  rows keep the user's order because order is tie priority, and nothing is ever removed automatically.
 - **The composer says what Add will do before it is pressed in Settings, mode settings, and the standalone panel.** A live status directly below the relevant fields covers
   the non-obvious cases: a duplicate word ("Already in Words to Recognize", or "…already included from
   your global vocabulary" in a mode), an identical replacement, and an update — the button relabels to
