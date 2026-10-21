@@ -83,6 +83,7 @@ public enum DevCLI {
                                       States: ready, recording, loading-model, transcribing, rewriting,
                                       redacted-rewrite, rewriting-with-local-transcript, inserted, copied,
                                       no-speech, failed, rewrite-fallback, microphone-error, accessibility-error.
+              --hud-appearance <a>   With --hud-preview: render under system, opposite, light, or dark.
                 --seconds <n>           Record for n seconds (default 5).
                 --tone <hz>             Expected input tone in Hz (default 440).
               --mem-probe             Measure each installed engine's in-memory footprint (phys_footprint) on the

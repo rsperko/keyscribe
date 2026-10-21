@@ -529,6 +529,7 @@ final class SettingsModel: ObservableObject {
     @Published var soundVolume: Double { didSet { if !draggingSoundVolume { persist() } } }
     @Published var keepDisplayAwake: Bool { didSet { persist() } }
     @Published var otherAudio: OtherAudio { didSet { persist() } }
+    @Published var hudAppearance: HUDAppearance { didSet { persist() } }
     @Published var loadOnLogin: Bool { didSet { persist() } }
     @Published var historyEnabled: Bool { didSet { persist() } }
     @Published var retentionDays: Int { didSet { persist() } }
@@ -659,6 +660,7 @@ final class SettingsModel: ObservableObject {
         soundVolume = Double(settings.duringDictation.soundVolumePercent) / 100
         keepDisplayAwake = settings.duringDictation.keepDisplayAwake
         otherAudio = settings.duringDictation.otherAudio
+        hudAppearance = settings.hud.appearance
         loadOnLogin = settings.loadOnLogin
         historyEnabled = settings.history.enabled
         retentionDays = settings.history.retentionDays
@@ -687,6 +689,7 @@ final class SettingsModel: ObservableObject {
         soundVolume = Double(settings.duringDictation.soundVolumePercent) / 100
         keepDisplayAwake = settings.duringDictation.keepDisplayAwake
         otherAudio = settings.duringDictation.otherAudio
+        hudAppearance = settings.hud.appearance
         loadOnLogin = settings.loadOnLogin
         historyEnabled = settings.history.enabled
         retentionDays = settings.history.retentionDays
@@ -750,6 +753,7 @@ final class SettingsModel: ObservableObject {
         settings.duringDictation = .init(
             otherAudio: otherAudio, keepDisplayAwake: keepDisplayAwake,
             sounds: sounds, soundVolumePercent: soundVolumePercent)
+        settings.hud.appearance = hudAppearance
         settings.loadOnLogin = loadOnLogin
         settings.history = .init(enabled: historyEnabled, retentionDays: retentionDays)
         settings.stt.eviction = Eviction(rawValue: eviction) ?? .fastest

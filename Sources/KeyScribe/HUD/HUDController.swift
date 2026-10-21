@@ -21,6 +21,10 @@ final class HUDController: HUDPresenting {
     private let model = HUDModel()
     private let levelModel = HUDLevel()
     private var panel: NSPanel?
+    var panelAppearance: NSAppearance? { panel?.appearance }
+    var appearance: HUDAppearance = .system {
+        didSet { if appearance != oldValue { applyAppearance() } }
+    }
 
     // Lets the focus-change guard distinguish our own overlay from the dictation target when inserting
     // into our own window (the onboarding trial). Nil until the panel is realized.
@@ -74,6 +78,9 @@ final class HUDController: HUDPresenting {
             // Follow the focused window's screen only on hidden→visible, not on every level tick, so
             // recording never hops the HUD mid-dictation.
             if wasHidden, let panel { reposition(panel, to: focusedWindowScreen()) }
+            // Re-resolved per appearance rather than observed, so Opposite tracks a system flip from the next
+            // dictation on.
+            if wasHidden { applyAppearance() }
             // The HUD must hold key focus in every cancellable state so ESC-to-cancel reaches it as a local
             // keystroke — but synthesized ⌘C/⌘V/Return target whatever window IS key, so the controller
             // relinquishes focus momentarily around each one (see relinquishKeyFocus()).
@@ -127,7 +134,12 @@ final class HUDController: HUDPresenting {
         self.panel = panel
         observeMoves(panel)
         reposition(panel)
+        applyAppearance()
         installLocalKeyMonitor()
+    }
+
+    private func applyAppearance() {
+        panel?.appearance = appearance.nsAppearance()
     }
 
     private func resize(_ panel: NSPanel, to state: HUDState) {
@@ -334,6 +346,8 @@ private struct HUDView: View {
     let onInsertLocalTranscript: () -> Void
     let onPasteLast: () -> Void
     let onErrorAction: (HUDErrorAction) -> Void
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(spacing: 8) {
@@ -367,8 +381,11 @@ private struct HUDView: View {
         .padding(.vertical, 10)
         .frame(width: 280, alignment: .leading)
         .frame(minHeight: model.state.contentHeight, alignment: .leading)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.separator))
+        // A light card usually floats over dark content, which bleeds through the standard material as grey.
+        .background(colorScheme == .light ? .thickMaterial : .regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(
+            Color.primary.opacity(contrast == .increased ? 0.5 : 0.2),
+            lineWidth: contrast == .increased ? 1.5 : 1))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityIdentifier(AccessibilityID.HUD.panel)
@@ -507,6 +524,7 @@ private struct HUDActionButtonStyle: ButtonStyle {
 
 private struct ProcessingIcon: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
     @State private var rotation = false
 
     var body: some View {
@@ -524,7 +542,7 @@ private struct ProcessingIcon: View {
                         gradient: Gradient(colors: [
                             Color.accentColor.opacity(0.18),
                             Color.accentColor.opacity(0.95),
-                            Color.white.opacity(0.72)
+                            colorScheme == .dark ? Color.white.opacity(0.72) : Color.accentColor.opacity(0.55)
                         ]),
                         center: .center
                     ),
@@ -564,19 +582,21 @@ private struct RecordingIcon: View {
 private struct LevelIndicator: View {
     let level: Float
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let l = CGFloat(min(1, max(0, level)))
+        let tint = Color.recording(in: colorScheme)
         ZStack {
             // Reduce Motion (ui_design.md §4/§9): geometry stays fixed and the level is carried by fill
             // intensity alone — the dot must not grow/shrink per audio buffer.
             if reduceMotion {
-                Circle().fill(.red.opacity(0.16 + l * 0.34)).frame(width: 30, height: 30)
-                Circle().fill(.red).frame(width: 16, height: 16)
+                Circle().fill(tint.opacity(0.16 + l * 0.34)).frame(width: 30, height: 30)
+                Circle().fill(tint).frame(width: 16, height: 16)
             } else {
-                Circle().fill(.red.opacity(0.14 + l * 0.34))
+                Circle().fill(tint.opacity(0.14 + l * 0.34))
                     .frame(width: 16 + l * 14, height: 16 + l * 14)
-                Circle().fill(.red)
+                Circle().fill(tint)
                     .frame(width: 7 + l * 17, height: 7 + l * 17)
             }
         }

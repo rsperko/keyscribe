@@ -18,6 +18,7 @@ public struct Settings: Codable, Equatable, Sendable {
     public var shortcuts: Shortcuts
     public var audio: Audio
     public var insertion: Insertion
+    public var hud: HUD
     public var features: Features
 
     enum CodingKeys: String, CodingKey {
@@ -29,6 +30,7 @@ public struct Settings: Codable, Equatable, Sendable {
         case shortcuts
         case audio
         case insertion
+        case hud
         case features
     }
 
@@ -42,6 +44,7 @@ public struct Settings: Codable, Equatable, Sendable {
         shortcuts = try c.decodeIfPresent(Shortcuts.self, forKey: .shortcuts) ?? Settings.defaults.shortcuts
         audio = try c.decodeIfPresent(Audio.self, forKey: .audio) ?? Settings.defaults.audio
         insertion = try c.decodeIfPresent(Insertion.self, forKey: .insertion) ?? Settings.defaults.insertion
+        hud = try c.decodeIfPresent(HUD.self, forKey: .hud) ?? Settings.defaults.hud
         features = try c.decodeIfPresent(Features.self, forKey: .features) ?? Settings.defaults.features
     }
 
@@ -49,7 +52,7 @@ public struct Settings: Codable, Equatable, Sendable {
         schemaVersion: Int, loadOnLogin: Bool,
         stt: STT, duringDictation: DuringDictation, history: History,
         shortcuts: Shortcuts = Shortcuts(), audio: Audio = Audio(), insertion: Insertion = Insertion(),
-        features: Features = Features()
+        hud: HUD = HUD(), features: Features = Features()
     ) {
         self.schemaVersion = schemaVersion
         self.loadOnLogin = loadOnLogin
@@ -59,6 +62,7 @@ public struct Settings: Codable, Equatable, Sendable {
         self.shortcuts = shortcuts
         self.audio = audio
         self.insertion = insertion
+        self.hud = hud
         self.features = features
     }
 
@@ -123,6 +127,19 @@ public struct Settings: Codable, Equatable, Sendable {
             var set = Set(ids)
             if included { set.insert(id) } else { set.remove(id) }
             ids = set.sorted()
+        }
+    }
+
+    public struct HUD: Codable, Equatable, Sendable {
+        public var appearance: HUDAppearance
+
+        public init(appearance: HUDAppearance = .system) {
+            self.appearance = appearance
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            appearance = try c.decodeIfPresent(HUDAppearance.self, forKey: .appearance) ?? HUD().appearance
         }
     }
 
@@ -370,6 +387,7 @@ public struct Settings: Codable, Equatable, Sendable {
         shortcuts: Shortcuts(),
         audio: Audio(),
         insertion: Insertion(),
+        hud: HUD(),
         features: Features()
     )
 

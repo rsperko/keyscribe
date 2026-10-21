@@ -56,6 +56,27 @@ struct SettingsTests {
         #expect(throws: ConfigError.self) { try SettingsStore.decode(from: toml) }
     }
 
+    @Test func hudAppearanceDefaultsToSystemWhenAbsent() throws {
+        #expect(try SettingsStore.decode(from: "schema_version = 1").hud.appearance == .system)
+    }
+
+    @Test(arguments: [HUDAppearance.system, .light, .dark, .opposite])
+    func hudAppearanceRoundTrips(_ appearance: HUDAppearance) throws {
+        var s = Settings.defaults
+        s.hud.appearance = appearance
+        #expect(try SettingsStore.decode(from: SettingsStore.encode(s)).hud.appearance == appearance)
+    }
+
+    @Test func hudAppearanceDecodesFromItsTable() throws {
+        let toml = "schema_version = 1\n[hud]\nappearance = \"opposite\"\n"
+        #expect(try SettingsStore.decode(from: toml).hud.appearance == .opposite)
+    }
+
+    @Test func invalidHUDAppearanceIsRejected() {
+        let toml = "schema_version = 1\n[hud]\nappearance = \"inverted\"\n"
+        #expect(throws: ConfigError.self) { try SettingsStore.decode(from: toml) }
+    }
+
     @Test func defaultsRoundTrip() throws {
         let encoded = try SettingsStore.encode(Settings.defaults)
         #expect(try SettingsStore.decode(from: encoded) == Settings.defaults)

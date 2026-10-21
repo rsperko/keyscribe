@@ -17,6 +17,16 @@ enum HUDPreview {
         return state(named: arguments[index + 1])
     }
 
+    static func appearance(
+        from arguments: [String], isDevelopmentBuild: Bool = KeyScribePaths.variant.isDev
+    ) -> HUDAppearance? {
+        guard isDevelopmentBuild,
+              let index = arguments.firstIndex(of: "--hud-appearance"), index + 1 < arguments.count else {
+            return nil
+        }
+        return HUDAppearance(rawValue: arguments[index + 1])
+    }
+
     static func state(named name: String) -> HUDState? {
         switch name {
         case "ready":

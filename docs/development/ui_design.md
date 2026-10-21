@@ -168,6 +168,14 @@ the only signal.
 
 - Default states use the system label hierarchy and accent color.
 - Recording uses a clear active accent plus motion; processing uses a neutral progress state.
+- The recording accent is red on a dark HUD and a darker burgundy on a light one, so the dot keeps
+  its weight against a light material instead of reading as a warning light.
+- Every window — Settings, History, Add to Vocabulary, first run, About — follows the Mac's
+  appearance. Only the HUD, the transient surface that floats over the user's app, takes the
+  **HUD appearance** setting (Match System, Opposite of System, Light, Dark; default Match System).
+  Opposite of System exists because an overlay sharing the app's appearance loses its edge against
+  it. The HUD card also carries a visible hairline border in every appearance, heavier under
+  Increase Contrast, and a pinned Light or Dark keeps the high-contrast variant.
 - Local/cloud/redaction/context states use the `Data boundary badge` vocabulary. Do not invent
   a competing set of shields, locks, colors, or phrases per screen.
 - Symbols support labels. A microphone alone does not mean “recording”, and a shield alone does
@@ -479,6 +487,8 @@ Show the few choices a new user is most likely to need:
   crossed-out speaker at zero, where sounds are on but silent; at zero the start cue is skipped outright,
   so recording begins as immediately as it does with sounds switched off (the cue hold exists to fence an
   audible cue out of the take, and there is nothing to fence).
+- **HUD** holds the HUD appearance picker (Match System, Opposite of System, Light, Dark). Its footer
+  says that every window, Settings included, still follows the Mac.
 - **During dictation** groups keeping the Mac awake and muting other audio. Its footer makes clear that
   both apply only while the user dictates.
 - Microphone choice, with a short explanation of following the Mac’s current input

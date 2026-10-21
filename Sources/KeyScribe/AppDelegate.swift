@@ -108,6 +108,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationDidFinishLaunching(_: Notification) {
         if let hudPreview {
+            hud.appearance = HUDPreview.appearance(from: CommandLine.arguments) ?? .system
             hud.render(hudPreview)
             return
         }
@@ -170,6 +171,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     && (self?.speechModels?.isEngineUsable(engine.id) ?? true)
             })
         controller.preloadActiveEngineIfNeeded()
+        hud.appearance = settings.hud.appearance
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }
         hud.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
@@ -649,6 +651,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             CaptureArchive.applyRetention()
         }
         controller.updateSettings(updated)
+        hud.appearance = updated.hud.appearance
         rebuildHotkeyMonitor()
         applyLoginItem(updated.loadOnLogin)
         settingsController.update(settings: updated)

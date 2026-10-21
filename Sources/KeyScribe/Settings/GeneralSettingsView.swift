@@ -128,6 +128,21 @@ struct GeneralSettingsView: View {
                 Text("These settings apply only while you dictate. Quiet turns other audio down instead of silencing it, so you can still hear a call or a video.")
             }
 
+            Section {
+                Picker("Appearance", selection: $model.hudAppearance) {
+                    Text("Match System").tag(HUDAppearance.system)
+                    Text("Opposite of System").tag(HUDAppearance.opposite)
+                    Divider()
+                    Text("Light").tag(HUDAppearance.light)
+                    Text("Dark").tag(HUDAppearance.dark)
+                }
+                .accessibilityIdentifier(AccessibilityID.Settings.General.hudAppearance)
+            } header: {
+                Text("HUD")
+            } footer: {
+                Text("Opposite of System keeps the HUD easy to spot over apps that match your Mac’s appearance. Every window, including Settings, follows your Mac.")
+            }
+
             Section("Startup") {
                 Toggle("Open \(Branding.appName) when you log in", isOn: $model.loadOnLogin)
                     .accessibilityIdentifier(AccessibilityID.Settings.General.loadOnLogin)

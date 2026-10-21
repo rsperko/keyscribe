@@ -565,6 +565,10 @@ sound_volume = 100             # relative dictation-sound level; 100 = full cue 
 enabled = true
 retention_days = 7              # default; delete day-files older than this
 
+[hud]
+appearance = "system"           # "system" | "opposite" | "light" | "dark"; the HUD only — every
+                                #   window follows the Mac
+
 [shortcuts]                                 # global shortcuts for menu-bar actions
 add_vocabulary = "control+option+shift+v"        # canonical chord; "" = off
 paste_last_dictation = ""                        # canonical chord; "" = off (default)

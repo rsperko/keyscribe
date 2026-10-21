@@ -22,6 +22,24 @@ struct SettingsModelTests {
         #expect(saved == [.mute, .unchanged])
     }
 
+    @Test func pickingAHUDAppearancePersistsImmediately() {
+        var saved: [HUDAppearance] = []
+        let model = model { saved.append($0.hud.appearance) }
+
+        model.hudAppearance = .opposite
+
+        #expect(saved == [.opposite])
+    }
+
+    @Test func applyingSettingsLoadsTheHUDAppearance() {
+        let model = model { _ in }
+        var incoming = Settings.defaults
+        incoming.hud.appearance = .light
+        model.apply(incoming)
+
+        #expect(model.hudAppearance == .light)
+    }
+
     @Test func loadingSettingsIntoTheModelDoesNotWriteBack() {
         var writes = 0
         let model = model { _ in writes += 1 }
