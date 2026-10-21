@@ -46,6 +46,8 @@ corpus/silence-lead/*.wav
 # blips/ no-speech admission corpus: empty trigger presses + short real utterances, both pulled from
 # the capture archive (your own voice/mic/room) stay local; manifest.json + README.md IS committed
 corpus/blips/*.wav
+# aliases/ held-out History phrase-finder corpus: your own voice stays local; manifest.json IS committed
+corpus/aliases/*.wav
 
 # rewrite-prompt eval (`KeyScribe --rewrite-eval`): cases.json + README ARE committed; per-run
 # attempt dumps (model outputs, connection/model identity) stay local

@@ -88,6 +88,25 @@ enum AccessibilityID {
             static func replacementRemove(_ index: Int) -> String { "settings.vocabulary.replacements.remove.\(index)" }
             static let replacementDeleteConfirmConfirm = "settings.vocabulary.replacements.deleteConfirm.confirm"
             static let replacementDeleteConfirmCancel = "settings.vocabulary.replacements.deleteConfirm.cancel"
+            static func dictionaryWord(_ word: String) -> String { "settings.vocabulary.dictionary.word.\(word)" }
+            static let findReplacements = "settings.vocabulary.dictionary.findReplacements"
+            static let replacementsAdded = "settings.vocabulary.replacements.added"
+        }
+
+        enum HistoryReplacements {
+            static let sheet = "settings.historyReplacements.sheet"
+            static let scopeDisclosure = "settings.historyReplacements.scope"
+            static let period = "settings.historyReplacements.scope.period"
+            static let speechModel = "settings.historyReplacements.scope.speechModel"
+            static let issue = "settings.historyReplacements.issue"
+            static let cancel = "settings.historyReplacements.cancel"
+            static let back = "settings.historyReplacements.back"
+            static let find = "settings.historyReplacements.find"
+            static let review = "settings.historyReplacements.review"
+            static let reviewAgain = "settings.historyReplacements.reviewAgain"
+            static let add = "settings.historyReplacements.add"
+            static let widenPeriod = "settings.historyReplacements.widen.period"
+            static func phrase(_ key: String) -> String { "settings.historyReplacements.phrase.\(key)" }
         }
 
         enum AI {
@@ -338,6 +357,13 @@ enum AccessibilityID {
         Settings.Speech.list, Settings.Speech.deleteConfirmConfirm, Settings.Speech.deleteConfirmCancel,
         Settings.Speech.eviction, Settings.Speech.advancedModelBehavior,
         Settings.Vocabulary.scopeList, Settings.Vocabulary.global,
+        Settings.Vocabulary.findReplacements, Settings.Vocabulary.replacementsAdded,
+        Settings.HistoryReplacements.sheet, Settings.HistoryReplacements.scopeDisclosure,
+        Settings.HistoryReplacements.period,
+        Settings.HistoryReplacements.speechModel, Settings.HistoryReplacements.issue,
+        Settings.HistoryReplacements.cancel, Settings.HistoryReplacements.back, Settings.HistoryReplacements.find,
+        Settings.HistoryReplacements.review, Settings.HistoryReplacements.reviewAgain, Settings.HistoryReplacements.add,
+        Settings.HistoryReplacements.widenPeriod,
         Settings.Vocabulary.composerTerm, Settings.Vocabulary.composerUseInstead,
         Settings.Vocabulary.composerUseInsteadExpand, Settings.Vocabulary.composerUseInsteadEditor,
         Settings.Vocabulary.composerUseInsteadEditorDone,

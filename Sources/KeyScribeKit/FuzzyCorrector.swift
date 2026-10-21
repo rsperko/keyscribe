@@ -148,14 +148,14 @@ public enum FuzzyCorrector {
 
     private static let lettersWithoutAnAccentForm: [Character: String] = ["ß": "ss", "æ": "ae", "œ": "oe", "ø": "o", "ł": "l"]
 
-    private static func latinized(_ norm: String) -> String? {
+    static func latinized(_ norm: String) -> String? {
         let spelled = norm.folding(options: .diacriticInsensitive, locale: nil)
             .map { lettersWithoutAnAccentForm[$0] ?? String($0) }.joined()
         let isLatin = spelled.unicodeScalars.allSatisfy { ("a"..."z").contains($0) || ("0"..."9").contains($0) }
         return isLatin ? spelled : nil
     }
 
-    private static func normalize(_ s: String) -> String {
+    static func normalize(_ s: String) -> String {
         String(s.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
     }
 

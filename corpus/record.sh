@@ -18,6 +18,7 @@
 #   bash corpus/record.sh --commands [--status]    # command-case corpus (progress / record)
 #   bash corpus/record.sh --commands vb01 np_period # (re)record specific command ids
 #   bash corpus/record.sh --voices [--status]      # your human takes for the voice study
+#   bash corpus/record.sh --aliases [--status]     # held-out clips for the History phrase finder
 #
 # Find your mic's avfoundation index:  ffmpeg -f avfoundation -list_devices true -i ""
 set -euo pipefail
@@ -28,6 +29,7 @@ TIER=""
 STATUS_ONLY=0
 COMMANDS=0
 VOICES=0
+ALIASES=0
 WANT=()   # explicit ids to (re)record; non-empty = overwrite those, ignore tier/skip
 
 while [ $# -gt 0 ]; do
@@ -35,6 +37,7 @@ while [ $# -gt 0 ]; do
     --status)   STATUS_ONLY=1; shift ;;
     --commands) COMMANDS=1; shift ;;
     --voices)   VOICES=1; shift ;;
+    --aliases)  ALIASES=1; shift ;;
     --tier)     TIER="$2"; shift 2 ;;
     --device)   DEVICE="$2"; shift 2 ;;
     :*)         DEVICE="$1"; shift ;;          # bare ":N" still means device (back-compat)
@@ -51,6 +54,8 @@ if [ "$COMMANDS" -eq 1 ]; then
   MODE="commands"; MANIFEST="commands/manifest.json"; OUTDIR="commands"
 elif [ "$VOICES" -eq 1 ]; then
   MODE="voices"; MANIFEST="voices/manifest.json"; OUTDIR="voices"
+elif [ "$ALIASES" -eq 1 ]; then
+  MODE="aliases"; MANIFEST="aliases/manifest.json"; OUTDIR="aliases"
 else
   MODE="stt"; MANIFEST="stt/manifest.json"; OUTDIR="stt"
 fi
@@ -202,6 +207,10 @@ case "$MODE" in
     echo "Progress: bash corpus/record.sh --commands --status"
     echo "Then replay the command cases through the real no-LLM pipeline:"
     echo "  KeyScribe --commands-check corpus/commands" ;;
+  aliases)
+    echo "Progress: bash corpus/record.sh --aliases --status"
+    echo "Then measure the History phrase finder over these recordings:"
+    echo "  KeyScribe --alias-discovery corpus/aliases" ;;
   voices)
     echo "Progress: bash corpus/record.sh --voices --status"
     echo "Then dump raw transcripts across engines:"

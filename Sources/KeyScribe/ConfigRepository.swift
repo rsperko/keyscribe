@@ -110,6 +110,41 @@ final class ConfigRepository {
         return set
     }
 
+    enum BatchOutcome: Equatable {
+        enum StaleReason: Equatable { case rulesChanged, wordRemoved, destinationMissing }
+        case saved
+        case stale(StaleReason)
+    }
+
+    func saveReplacementBatch(
+        to destination: ReplacementPreview.Destination, expected: [ReplacementsSet.Rule],
+        proposed: [ReplacementsSet.Rule], requiringWord word: String?
+    ) throws -> BatchOutcome {
+        func contains(_ words: [String]) -> Bool {
+            guard let word else { return true }
+            return words.contains { $0.caseInsensitiveCompare(word) == .orderedSame }
+        }
+        switch destination {
+        case .global:
+            guard contains(try loadDictionaryForMutation().words) else { return .stale(.wordRemoved) }
+            guard try loadReplacementsForMutation().rules == expected else { return .stale(.rulesChanged) }
+            try commit(touching: [supportDir.appendingPathComponent(ReplacementsStore.fileName)]) {
+                try ReplacementsStore.write(ReplacementsSet(rules: proposed), to: supportDir)
+            }
+        case .mode(let id):
+            guard FileManager.default.fileExists(atPath: modeFileURL(id: id).path) else {
+                return .stale(.destinationMissing)
+            }
+            var mode = try loadModeForMutation(id: id)
+            guard !mode.isSystem else { return .stale(.destinationMissing) }
+            guard contains(mode.dictionary.words) else { return .stale(.wordRemoved) }
+            guard mode.replacements.rules == expected else { return .stale(.rulesChanged) }
+            mode.replacements.rules = proposed
+            try writeMode(mode)
+        }
+        return .saved
+    }
+
     func writeMode(_ mode: Mode) throws {
         try commit(touching: [modeFileURL(id: mode.id)]) { try ModeStore.write(mode, to: modesDir) }
     }

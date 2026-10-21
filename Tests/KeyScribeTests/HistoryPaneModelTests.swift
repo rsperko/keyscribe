@@ -5,6 +5,56 @@ import Testing
 
 @MainActor
 struct HistoryPaneModelTests {
+    @Test func storedHistoryAvailabilityFollowsTheFirstSaveAndLastDeletion() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = model(store)
+
+        await model.refreshHistoryAvailability()
+        #expect(!model.hasStoredHistory)
+
+        let saved = entry("retained dictation")
+        try store.append(saved)
+        await model.refreshHistoryAvailability()
+        #expect(model.hasStoredHistory)
+
+        store.delete(saved)
+        await model.refreshHistoryAvailability()
+        #expect(!model.hasStoredHistory)
+    }
+
+    @Test func availabilityFindsOlderHistoryPastEmptyAndUnreadableDayFiles() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: store.dir, withIntermediateDirectories: true)
+        try Data().write(to: store.dir.appendingPathComponent("2026-10-21.jsonl"))
+        try Data("{not json}\n".utf8).write(to: store.dir.appendingPathComponent("2026-10-20.jsonl"))
+        let model = model(store)
+
+        await model.refreshHistoryAvailability()
+        #expect(!model.hasStoredHistory)
+
+        try store.append(entry("older dictation"), today: "2026-09-01")
+        await model.refreshHistoryAvailability()
+        #expect(model.hasStoredHistory)
+    }
+
+    @Test func availabilityDoesNotDependOnSearchOrRetainParsedHistory() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try store.append(entry("retained dictation"))
+        let model = model(store)
+        model.query = "a phrase that is not stored"
+
+        await model.refreshHistoryAvailability()
+        #expect(model.hasStoredHistory)
+        #expect(!model.hasEntries)
+
+        model.releaseForClose()
+        await model.refreshHistoryAvailability()
+        #expect(model.hasStoredHistory)
+    }
+
     @Test func searchResultOutsideInitialLoadIsSelectable() async throws {
         let (store, dir) = tempStore()
         defer { try? FileManager.default.removeItem(at: dir) }

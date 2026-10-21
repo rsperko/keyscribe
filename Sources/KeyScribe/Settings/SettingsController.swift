@@ -115,6 +115,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     // Shared with the recorders and the app, which suspends the global hotkey monitor while a recorder is
     // capturing so the chord can't fire an existing shortcut.
     let recordingState = HotkeyRecordingState()
+    private var historyReplacementsLauncher: HistoryReplacementsLauncher?
 
     init(
         settings: Settings, speechModels: SpeechModelsModel, repository: ConfigRepository,
@@ -150,6 +151,25 @@ final class SettingsController: NSObject, NSWindowDelegate {
             addReplacement: { repository.addReplacement(heard: $0, replace: $1) },
             openSettings: { _ in })
         super.init()
+        historyReplacementsLauncher = HistoryReplacementsLauncher { [weak self] word, destination, name, onSaved in
+            HistoryReplacementsModel(
+                word: word, destination: destination, destinationName: name,
+                historyEnabled: self?.model.historyEnabled ?? true,
+                dependencies: .init(
+                    loadSnapshot: { try historyStore.snapshot() },
+                    fingerprint: { historyStore.fingerprint() },
+                    vocabulary: {
+                        .init(
+                            global: ReplacementsSet(rules: repository.replacementRules()),
+                            globalWords: repository.dictionaryWords(),
+                            modes: ModeStore.loadAll(in: repository.modesDir))
+                    },
+                    save: { destination, expected, proposed, word in
+                        try repository.saveReplacementBatch(
+                            to: destination, expected: expected, proposed: proposed, requiringWord: word)
+                    }),
+                onSaved: onSaved)
+        }
         history.openSettings = { [weak self] destination in self?.navigation.destination = destination }
         history.copyText = { TextInserter.copyToClipboard($0) }
         history.pasteText = { [weak self] in self?.pasteHistoryResult($0) }
@@ -196,7 +216,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
             replacements: replacements, aiServices: aiServices, modes: modes, history: history,
             problems: problems, navigation: navigation, recordingState: recordingState,
             accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch,
-            onHistoryPaneChange: { [weak self] active in self?.handleHistoryPaneChange(active: active) })
+            onHistoryPaneChange: { [weak self] active in self?.handleHistoryPaneChange(active: active) },
+            historyReplacements: historyReplacementsLauncher)
         let hosting = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: hosting)
         window.title = "\(Branding.appName) Settings"
@@ -228,6 +249,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
         // Dictations may have landed (or retention changed) while Settings was open in the background — the
         // signature-gated reload is cheap, so re-check when the window regains focus while History is showing.
         if navigation.destination == .history { reloadHistoryIfNeeded() }
+        if navigation.destination == .vocabulary {
+            Task { await history.refreshHistoryAvailability() }
+        }
     }
 
     // Reload on entering the History pane; release on leaving — no parsed transcripts stay retained while
@@ -307,6 +331,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
                 try? await Task.sleep(for: .seconds(2))
                 guard let self, !Task.isCancelled else { return }
                 self.refreshProblems()
+                if self.navigation.destination == .vocabulary {
+                    await self.history.refreshHistoryAvailability()
+                }
             }
         }
     }
@@ -326,6 +353,7 @@ struct SettingsRootView: View {
     var accessibilityTapActive: () -> Bool = { true }
     var onRelaunch: () -> Void = {}
     var onHistoryPaneChange: (Bool) -> Void = { _ in }
+    var historyReplacements: HistoryReplacementsLauncher? = nil
     // The sidebar selection is mirrored through local @State so SwiftUI's selection write never mutates the
     // navigation ObservableObject during a view update (which logs "Publishing changes from within view
     // updates" and re-enters the backing NSTableView). navigation.destination is synced in `.onChange`,
@@ -378,7 +406,11 @@ struct SettingsRootView: View {
             case .vocabulary:
                 VocabularySettingsView(
                     dictionary: dictionary, replacements: replacements, modes: modes,
-                    navigationSelection: $navigation.vocabularyScope)
+                    navigationSelection: $navigation.vocabularyScope,
+                    historyReplacements: history.hasStoredHistory ? historyReplacements : nil)
+                    .task {
+                        if historyReplacements != nil { await history.refreshHistoryAvailability() }
+                    }
             case .aiServices:
                 AIServiceSettingsView(model: aiServices)
             case .modes:

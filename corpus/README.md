@@ -21,6 +21,7 @@ flat and are organized by **semantic id prefix**, not subfolders. A clip needed 
 | `commands/` | Spoken-command regression on real transcripts | `manifest.json` | `KeyScribe --commands-check corpus/commands` |
 | `voices/` | Multi-voice TTS/human studies of command phrasing | `manifest.json` | `KeyScribe --benchmark corpus/voices --raw` |
 | `silence-lead/` | Leading-silence empty-transcript regression (derived clips via `silence-lead/gen.sh` + real repro takes) | `manifest.json` | `KeyScribe --benchmark corpus/silence-lead --raw` |
+| `aliases/` | Held-out real-voice clips for the History phrase finder (dictionary-word mishearings, sound-alike distractors, controls) | `manifest.json` | `KeyScribe --alias-discovery corpus/aliases` |
 | `blips/` | No-speech admission gate: empty trigger presses vs. genuine short utterances, pulled from the app capture archive | `manifest.json` | `KeyScribe --vad-probe corpus/blips [--chunks]` |
 
 ## Manifest schema (unified, `schemaVersion: 1`)

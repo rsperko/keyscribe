@@ -6,7 +6,7 @@ public struct HistoryStore: Sendable {
 
     // Serializes append and delete-rewrite so a background append and main-actor delete cannot interleave.
     // HistoryStore is a value type shared by both writers, so the queue is a shared static.
-    private static let mutationQueue = DispatchQueue(label: "com.keyscribe.history.mutation")
+    static let mutationQueue = DispatchQueue(label: "com.keyscribe.history.mutation")
 
     public init(supportDir: URL) {
         dir = supportDir.appendingPathComponent("history", isDirectory: true)

@@ -1,0 +1,771 @@
+{
+  "schemaVersion": 1,
+  "corpus": "aliases",
+  "description": "Held-out real-voice clips for measuring the History phrase finder that suggests replacements for a dictionary word. Frozen before scoring: do not edit sentences after a scored run.",
+  "clips": [
+    {
+      "id": "a_supabase1",
+      "file": "a_supabase1.wav",
+      "text": "We moved the auth tables into Supabase last week.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Supabase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_supabase2",
+      "file": "a_supabase2.wav",
+      "text": "Supabase handles our row level security policies.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Supabase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_supabase3",
+      "file": "a_supabase3.wav",
+      "text": "Can you check whether the Supabase project hit its storage limit?",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Supabase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_supabase4",
+      "file": "a_supabase4.wav",
+      "text": "Point the staging app at the new Supabase URL.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Supabase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "d_supabase1",
+      "file": "d_supabase1.wav",
+      "text": "The super base model is cheaper than the pro tier.",
+      "source": "human",
+      "tags": [
+        "distractor",
+        "Supabase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_supabase2",
+      "file": "d_supabase2.wav",
+      "text": "Their soup was based on an old family recipe.",
+      "source": "human",
+      "tags": [
+        "distractor",
+        "Supabase"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "a_ollama1",
+      "file": "a_ollama1.wav",
+      "text": "Pull the smaller model with Ollama before the demo.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Ollama"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_ollama2",
+      "file": "a_ollama2.wav",
+      "text": "Ollama keeps crashing when I load the larger weights.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Ollama"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_ollama3",
+      "file": "a_ollama3.wav",
+      "text": "Is the Ollama server still listening on its default port?",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Ollama"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_ollama4",
+      "file": "a_ollama4.wav",
+      "text": "Restart Ollama and try the prompt again.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Ollama"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "d_ollama1",
+      "file": "d_ollama1.wav",
+      "text": "We saw a llama at the farm on Sunday.",
+      "source": "human",
+      "tags": [
+        "distractor",
+        "Ollama"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_ollama2",
+      "file": "d_ollama2.wav",
+      "text": "The old llama wandered across the field.",
+      "source": "human",
+      "tags": [
+        "distractor",
+        "Ollama"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "a_vercel1",
+      "file": "a_vercel1.wav",
+      "text": "The preview deploy on Vercel failed again.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Vercel"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_vercel2",
+      "file": "a_vercel2.wav",
+      "text": "Vercel picked up the new environment variables.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Vercel"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_vercel3",
+      "file": "a_vercel3.wav",
+      "text": "Ask whether the Vercel bill went up this month.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Vercel"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_vercel4",
+      "file": "a_vercel4.wav",
+      "text": "Roll back the Vercel deployment to yesterday's build.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Vercel"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "d_vercel1",
+      "file": "d_vercel1.wav",
+      "text": "The vessel left the harbor before dawn.",
+      "source": "human",
+      "tags": [
+        "distractor",
+        "Vercel"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_vercel2",
+      "file": "d_vercel2.wav",
+      "text": "This knife is versatile enough for camping.",
+      "source": "human",
+      "tags": [
+        "distractor",
+        "Vercel"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "a_siobhan1",
+      "file": "a_siobhan1.wav",
+      "text": "Siobhan is reviewing the pull request this afternoon.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Siobhan"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_siobhan2",
+      "file": "a_siobhan2.wav",
+      "text": "Can you forward the notes to Siobhan?",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Siobhan"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_siobhan3",
+      "file": "a_siobhan3.wav",
+      "text": "I told Siobhan the launch moved to Thursday.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Siobhan"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_siobhan4",
+      "file": "a_siobhan4.wav",
+      "text": "Siobhan and I will pair on the migration.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Siobhan"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "d_siobhan1",
+      "file": "d_siobhan1.wav",
+      "text": "She ordered a warm bun with her coffee.",
+      "source": "human",
+      "tags": [
+        "distractor",
+        "Siobhan"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_siobhan2",
+      "file": "d_siobhan2.wav",
+      "text": "She found the shovel behind the shed.",
+      "source": "human",
+      "tags": [
+        "distractor",
+        "Siobhan"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "a_joaquin1",
+      "file": "a_joaquin1.wav",
+      "text": "Joaquin owns the billing service now.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Joaquin"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_joaquin2",
+      "file": "a_joaquin2.wav",
+      "text": "Send Joaquin the updated design file.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Joaquin"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_joaquin3",
+      "file": "a_joaquin3.wav",
+      "text": "Joaquin said the tests pass locally.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Joaquin"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "a_joaquin4",
+      "file": "a_joaquin4.wav",
+      "text": "Let's ask Joaquin before we change the schema.",
+      "source": "human",
+      "tags": [
+        "alias",
+        "Joaquin"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "alias"
+        }
+      },
+      "note": "Normal dictation pace; do not slow down or stress the name."
+    },
+    {
+      "id": "d_joaquin1",
+      "file": "d_joaquin1.wav",
+      "text": "We were walking in the park after lunch.",
+      "source": "human",
+      "tags": [
+        "distractor",
+        "Joaquin"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "d_joaquin2",
+      "file": "d_joaquin2.wav",
+      "text": "Walk in quietly so you do not wake the baby.",
+      "source": "human",
+      "tags": [
+        "distractor",
+        "Joaquin"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "distractor"
+        }
+      }
+    },
+    {
+      "id": "c_control1",
+      "file": "c_control1.wav",
+      "text": "Please remind me to call the dentist tomorrow morning.",
+      "source": "human",
+      "tags": [
+        "control"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "control"
+        }
+      }
+    },
+    {
+      "id": "c_control2",
+      "file": "c_control2.wav",
+      "text": "The quarterly report is due at the end of next week.",
+      "source": "human",
+      "tags": [
+        "control"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "control"
+        }
+      }
+    },
+    {
+      "id": "c_control3",
+      "file": "c_control3.wav",
+      "text": "Let's grab lunch after the planning meeting.",
+      "source": "human",
+      "tags": [
+        "control"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "control"
+        }
+      }
+    },
+    {
+      "id": "c_control4",
+      "file": "c_control4.wav",
+      "text": "I think we should simplify the onboarding flow.",
+      "source": "human",
+      "tags": [
+        "control"
+      ],
+      "checks": {
+        "stt": {
+          "biasTerms": [
+            "Supabase",
+            "Ollama",
+            "Vercel",
+            "Siobhan",
+            "Joaquin"
+          ],
+          "tier": "control"
+        }
+      }
+    }
+  ]
+}

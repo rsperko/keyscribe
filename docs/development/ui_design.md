@@ -611,6 +611,32 @@ composer and lists do not live inside the mode editor.
   behind **How recognition works** inline help. Dictionary and replacement rows use the shared red
   trash action; deleting either opens an item-specific confirmation that distinguishes global entries
   from mode-only entries.
+- **Find replacements in History.** Words to Recognize
+  offers discovery only when there is at least one readable saved dictation. With empty History the
+  discovery instruction, action, helper text, and word-selection affordance are hidden; ordinary word
+  rows and their trash controls remain. Availability follows saved records, independently of the
+  History recording toggle, search filters, or whether the History pane has been opened, and refreshes
+  while Vocabulary is visible so the first save or last deletion updates the controls.
+  When available, it says **Select a word to find possible mishearings in History.** Clicking a word's text selects it
+  (single selection, none on entry). The selected word area has an accent-tinted background and a
+  checkmark; the trailing trash stays outside that highlight and only deletes, through its usual
+  confirmation, without selecting. Below the list, **Find Mishearings of “{word}”…** names the selected
+  word (disabled **Find Mishearings…** with no selection, or **Add a word to Words to Recognize first.**
+  with no words), followed by **Review phrases, then create automatic replacements.** Changing scope,
+  or the word disappearing, clears
+  the selection. The action opens one sheet with three steps, one primary action each:
+  **Find** (search summary with a **Search** disclosure for period and speech model; discovery always
+  searches across modes, independently of the launching vocabulary scope; the
+  dictation count with `On this Mac`; where the replacements will be added and where they apply),
+  **Choose phrases** (unchecked rows `“heard phrase” → word` with a count and one highlighted Heard
+  sentence, closest match first; no Select All; phrases today's replacements or dictionary recovery
+  already fix are counted, not listed) and **Review** (the real replacement stage run over all stored
+  Heard text: places and dictations changed, matches outside the search listed first, existing or
+  conflicting rules called out and left out of Add). **Add {n} Replacements** saves exactly the reviewed
+  rules in one write to the launching scope only; if History, the word or that scope's replacements
+  changed since the review, nothing is saved and the sheet asks for a fresh review. On success the sheet
+  closes and Automatic Replacements shows **Added {n} replacements**. Searching never contacts a network
+  service and never changes History or the dictionary word.
 - **Set expectations honestly in the Dictionary copy** (do not overstate — say what actually
   happens). Recognition bias is a best-effort hint that only some models can take, so let each
   model's own capability drive the copy rather than naming engines here. A model that supports it

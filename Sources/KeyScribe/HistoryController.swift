@@ -55,6 +55,7 @@ final class HistoryPaneModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var statusMessage: String?
     @Published private(set) var statsLine: String?
+    @Published private(set) var hasStoredHistory = false
 
     private static let loadLimit = 1000
     private var rows: [HistoryRow] = []
@@ -107,6 +108,16 @@ final class HistoryPaneModel: ObservableObject {
 
     func storeSignature() -> String { store.signature() }
 
+    func refreshHistoryAvailability() async {
+        let generation = loadGeneration
+        let store = store
+        let available = await Task.detached(priority: .utility) {
+            !store.entries(limit: 1).isEmpty
+        }.value
+        guard generation == loadGeneration, !Task.isCancelled else { return }
+        hasStoredHistory = available
+    }
+
     // Drop everything held for the visible window so a closed History window retains no parsed
     // transcripts or the full-store search cache; the next open re-reads from disk.
     func releaseForClose() {
@@ -141,6 +152,7 @@ final class HistoryPaneModel: ObservableObject {
     private func applyLoaded(_ loaded: [HistoryEntry], generation: Int) {
         guard generation == loadGeneration else { return }
         rows = loaded.map { HistoryRow(entry: $0, day: Self.dayFormatter.string(from: $0.timestamp)) }
+        hasStoredHistory = !loaded.isEmpty
         entryIndex = Dictionary(rows.map { ($0.id, $0.entry) }, uniquingKeysWith: { first, _ in first })
         statsLine = Self.statsSummary(HistoryStats.compute(from: loaded))
         recomputeGroups()

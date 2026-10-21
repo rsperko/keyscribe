@@ -41,6 +41,15 @@ public enum DevCLI {
                                         engine cleans fewer clips than its baseline (a command-pipeline
                                         regression) or the clip count changed (re-baseline). Ground truth, not
                                         an absolute pass-rate — the clips are transcription-sensitive.
+              --alias-discovery <path> Measure the History phrase finder that suggests replacements for a dictionary
+                                      word, then exit. <path> is a recordings dir (manifest.json; each clip is
+                                      transcribed by every installed engine) or a JSONL of {heard, reference,
+                                      terms} transcripts. Each clip's terms are the dictionary; the reference
+                                      text labels which Heard phrases were misses. Reports occurrence and form
+                                      recall, wrong suggestions per 100 negatives, and top-three precision.
+                --engines <a,b,...>     Limit a recordings run to these engine ids.
+                --threshold <x>         Score cutoff (default \(AliasDiscovery.defaultThreshold)).
+                --cohort <a,b,...>      Limit a JSONL run to rows whose `cohort` is listed.
               --rewrite-eval <dir>    Run the LLM rewrite-prompt eval over the text cases in <dir>/cases.json
                                       against a saved BYOK connection, score each output with the corpus's
                                       deterministic checks, and print a baseline-vs-variant report split by
@@ -268,6 +277,25 @@ public enum DevCLI {
             }
             done.wait()
             exit(ok.load(ordering: .relaxed) ? 0 : 1)
+        }
+
+        if let i = CommandLine.arguments.firstIndex(of: "--alias-discovery"), i + 1 < CommandLine.arguments.count {
+            let args = CommandLine.arguments
+            func value(_ flag: String) -> String? {
+                guard let j = args.firstIndex(of: flag), j + 1 < args.count else { return nil }
+                return args[j + 1]
+            }
+            let path = URL(fileURLWithPath: args[i + 1])
+            let only = value("--engines").map { Set($0.split(separator: ",").map(String.init)) }
+            let cohorts = value("--cohort").map { Set($0.split(separator: ",").map(String.init)) }
+            let threshold = value("--threshold").flatMap(Double.init) ?? AliasDiscovery.defaultThreshold
+            let done = DispatchSemaphore(value: 0)
+            Task.detached {
+                await AliasDiscoveryRunner.run(path: path, only: only, cohorts: cohorts, threshold: threshold)
+                done.signal()
+            }
+            done.wait()
+            exit(0)
         }
 
         if let i = CommandLine.arguments.firstIndex(of: "--vad-probe"), i + 1 < CommandLine.arguments.count {

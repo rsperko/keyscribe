@@ -38,19 +38,55 @@ struct VocabularyRemovalCopy {
     }
 }
 
+struct HistoryReplacementsLauncher {
+    let make: (
+        _ word: String, _ destination: ReplacementPreview.Destination, _ destinationName: String,
+        _ onSaved: @escaping (Int) -> Void
+    ) -> HistoryReplacementsModel
+}
+
 struct DictionaryRows: View {
     let words: [String]
     let removeID: (String) -> String
     let deletionScope: VocabularyRemovalScope
     let deleteConfirmConfirmID: String
     let deleteConfirmCancelID: String
+    var selection: Binding<String?>? = nil
+    var selectID: (String) -> String = { _ in "" }
     let onRemove: (String) -> Void
 
     var body: some View {
         ForEach(words, id: \.self) { word in
             HStack {
-                Text(word)
-                Spacer()
+                if let selection {
+                    let isSelected = selection.wrappedValue == word
+                    Button {
+                        selection.wrappedValue = word
+                    } label: {
+                        HStack {
+                            Text(word)
+                            Spacer()
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(Color.accentColor)
+                                .opacity(isSelected ? 1 : 0)
+                                .accessibilityHidden(true)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            isSelected ? Color.accentColor.opacity(0.2) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 6))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+                    .accessibilityHint("Selects this word to find possible mishearings in History")
+                    .accessibilityIdentifier(selectID(word))
+                } else {
+                    Text(word)
+                    Spacer()
+                }
                 RemoveButton(
                     confirmation: VocabularyRemovalCopy.dictionary(word, scope: deletionScope),
                     accessibilityLabel: "Delete word",
@@ -693,6 +729,7 @@ struct VocabularySettingsView: View {
     @ObservedObject var replacements: ReplacementsSettingsModel
     @ObservedObject var modes: ModesSettingsModel
     @Binding var navigationSelection: VocabularyScopeDestination
+    var historyReplacements: HistoryReplacementsLauncher? = nil
     @State private var selection: VocabularyScopeDestination = .global
 
     var body: some View {
@@ -801,6 +838,9 @@ struct VocabularySettingsView: View {
                 dictionaryAdvice: dictionary.words.count >= Self.dictionaryAdviceThreshold
                     ? "You have \(dictionary.words.count) entries. That is fine — but a phrase \(Branding.appName) always mishears the same way works better as a Replacement, which changes it exactly."
                     : nil,
+                historyReplacements: historyReplacements.map { launcher in
+                    { word, onSaved in launcher.make(word, .global, "Global", onSaved) }
+                },
                 onAddWord: dictionary.add,
                 onRemoveWord: dictionary.remove,
                 onAddReplacement: { replacements.add(heard: $0, replace: $1, regex: $2) },
@@ -835,6 +875,9 @@ struct VocabularySettingsView: View {
             words: mode.dictionary.words,
             rules: mode.replacements.rules,
             deletionScope: .mode,
+            historyReplacements: historyReplacements.map { launcher in
+                { word, onSaved in launcher.make(word, .mode(mode.id), mode.name, onSaved) }
+            },
             onAddWord: { word in
                 var updated = mode
                 updated.dictionary.words = DictionarySet(words: mode.dictionary.words).adding(word: word).words
@@ -896,6 +939,7 @@ private struct VocabularyEditor: View {
     var dictionaryError: String? = nil
     var replacementsError: String? = nil
     var dictionaryAdvice: String? = nil
+    var historyReplacements: ((String, @escaping (Int) -> Void) -> HistoryReplacementsModel)? = nil
     let onAddWord: (String) -> Void
     let onRemoveWord: (String) -> Void
     let onAddReplacement: (String, String, Bool) -> Void
@@ -903,6 +947,9 @@ private struct VocabularyEditor: View {
     let onMoveReplacement: (IndexSet, Int) -> Void
     let onRemoveReplacement: (Int) -> Void
     @State private var recognitionHelpExpanded = false
+    @State private var selectedWord: String?
+    @State private var discovery: HistoryReplacementsModel?
+    @State private var addedMessage: String?
 
     var body: some View {
         Form {
@@ -924,14 +971,24 @@ private struct VocabularyEditor: View {
                         .foregroundStyle(.secondary)
                 }
                 .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.recognitionHelp)
+                if historyReplacements != nil, !words.isEmpty {
+                    Text("Select a word to find possible mishearings in History.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 DictionaryRows(
                     words: words,
                     removeID: AccessibilityID.Settings.Vocabulary.dictionaryRemove,
                     deletionScope: deletionScope,
                     deleteConfirmConfirmID: AccessibilityID.Settings.Vocabulary.dictionaryDeleteConfirmConfirm,
                     deleteConfirmCancelID: AccessibilityID.Settings.Vocabulary.dictionaryDeleteConfirmCancel,
+                    selection: historyReplacements == nil ? nil : $selectedWord,
+                    selectID: AccessibilityID.Settings.Vocabulary.dictionaryWord,
                     onRemove: onRemoveWord)
+                    .accessibilityElement(children: .contain)
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.dictionaryList)
+                if let historyReplacements {
+                    findReplacementsRow(historyReplacements)
+                }
                 if let dictionaryAdvice {
                     Label(dictionaryAdvice, systemImage: "info.circle")
                         .font(.caption).foregroundStyle(.secondary)
@@ -964,6 +1021,12 @@ private struct VocabularyEditor: View {
                     onUpdate: onUpdateReplacement,
                     onMove: onMoveReplacement,
                     onRemove: onRemoveReplacement)
+                if let addedMessage {
+                    Label(addedMessage, systemImage: "checkmark.circle.fill")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.green)
+                        .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.replacementsAdded)
+                }
                 if let replacementsError {
                     IssueText(replacementsError)
                 }
@@ -971,6 +1034,41 @@ private struct VocabularyEditor: View {
         }
         .formStyle(.grouped)
         .padding(16)
+        .onChange(of: words) { _, current in
+            if let selectedWord, !current.contains(selectedWord) { self.selectedWord = nil }
+        }
+        .onChange(of: historyReplacements != nil) { _, available in
+            if !available { selectedWord = nil }
+        }
+        .sheet(item: $discovery, onDismiss: { discovery?.close() }) { model in
+            HistoryReplacementsSheet(model: model) {
+                model.close()
+                discovery = nil
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func findReplacementsRow(
+        _ make: @escaping (String, @escaping (Int) -> Void) -> HistoryReplacementsModel
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button(selectedWord.map { "Find Mishearings of “\($0)”…" } ?? "Find Mishearings…") {
+                guard let word = selectedWord else { return }
+                addedMessage = nil
+                discovery = make(word) { count in
+                    discovery?.close()
+                    discovery = nil
+                    addedMessage = count == 1 ? "Added 1 replacement" : "Added \(count) replacements"
+                }
+            }
+            .disabled(selectedWord == nil)
+            .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.findReplacements)
+            Text(words.isEmpty
+                 ? "Add a word to Words to Recognize first."
+                 : "Review phrases, then create automatic replacements.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
     }
 
     private func analyzeReplacementEdit(
