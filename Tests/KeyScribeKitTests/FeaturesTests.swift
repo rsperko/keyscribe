@@ -88,4 +88,25 @@ struct FeaturesTests {
         let toml = try SettingsStore.encode(s)
         #expect(!toml.contains("streaming_transcription"))
     }
+
+    @Test func voiceCommandsDefaultsOff() {
+        #expect(!Settings.defaults.features.isEnabled(.voiceCommands))
+    }
+
+    @Test func voiceCommandsOverridePersists() throws {
+        var s = Settings.defaults
+        s.features.setEnabled(true, for: .voiceCommands)
+        let toml = try SettingsStore.encode(s)
+        #expect(toml.contains("voice_commands = true"))
+        let decoded = try SettingsStore.decode(from: toml)
+        #expect(decoded.features.isEnabled(.voiceCommands))
+    }
+
+    @Test func voiceCommandsOffIsElided() throws {
+        var s = Settings.defaults
+        s.features.setEnabled(true, for: .voiceCommands)
+        s.features.setEnabled(false, for: .voiceCommands)
+        #expect(s.features == Settings.Features())
+        #expect(try !SettingsStore.encode(s).contains("voice_commands"))
+    }
 }

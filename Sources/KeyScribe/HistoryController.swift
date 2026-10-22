@@ -38,8 +38,10 @@ struct HistoryRow: Identifiable, Sendable {
     }
 
     private static func identity(_ entry: HistoryEntry) -> String {
+        if let id = entry.id { return "id|\(id)" }
         var hash: UInt64 = 14_695_981_039_346_656_037
-        for byte in "\(entry.modeName)\u{1F}\(entry.heard)\u{1F}\(entry.result)\u{1F}\(entry.outcome.rawValue)".utf8 {
+        let outcome = entry.outcome.isCommand ? HistoryEntry.Outcome.command.rawValue : entry.outcome.rawValue
+        for byte in "\(entry.modeName)\u{1F}\(entry.heard)\u{1F}\(entry.result)\u{1F}\(outcome)".utf8 {
             hash ^= UInt64(byte)
             hash &*= 1_099_511_628_211
         }
@@ -75,9 +77,9 @@ final class HistoryPaneModel: ObservableObject {
     private var loadGeneration = 0
 
     private let store: HistoryStore
-    let addDictionaryWord: (String) -> Bool
-    let analyzeDictionaryWord: (String) -> VocabularyAnalysis
-    let addReplacement: (String, String) -> Bool
+    private let saveWord: (String, CorrectionDestination.Scope) -> Bool
+    private let analyzeWord: (String, CorrectionDestination.Scope) -> VocabularyAnalysis
+    private let saveReplacement: (String, String, CorrectionDestination.Scope) -> Bool
     var openSettings: (SettingsDestination) -> Void
     var copyText: ((String) -> Void)?
     var pasteText: ((String) -> Void)?
@@ -94,15 +96,15 @@ final class HistoryPaneModel: ObservableObject {
 
     init(
         store: HistoryStore,
-        addDictionaryWord: @escaping (String) -> Bool,
-        analyzeDictionaryWord: @escaping (String) -> VocabularyAnalysis,
-        addReplacement: @escaping (String, String) -> Bool,
+        addDictionaryWord: @escaping (String, CorrectionDestination.Scope) -> Bool,
+        analyzeDictionaryWord: @escaping (String, CorrectionDestination.Scope) -> VocabularyAnalysis,
+        addReplacement: @escaping (String, String, CorrectionDestination.Scope) -> Bool,
         openSettings: @escaping (SettingsDestination) -> Void
     ) {
         self.store = store
-        self.addDictionaryWord = addDictionaryWord
-        self.analyzeDictionaryWord = analyzeDictionaryWord
-        self.addReplacement = addReplacement
+        self.saveWord = addDictionaryWord
+        self.analyzeWord = analyzeDictionaryWord
+        self.saveReplacement = addReplacement
         self.openSettings = openSettings
     }
 
@@ -297,6 +299,15 @@ final class HistoryPaneModel: ObservableObject {
     func copyResult() { if let r = selected?.result, !r.isEmpty { copyText?(r) } }
     func copyHeard() { if let h = selected?.heard, !h.isEmpty { copyText?(h) } }
     func pasteResult() { if let r = selected?.result, !r.isEmpty { pasteText?(r) } }
+
+    var voiceCommandsEnabled: () -> Bool = { true }
+    var correctsCommands: Bool { selected?.outcome.isCommand == true }
+    var canCorrect: Bool { !correctsCommands || voiceCommandsEnabled() }
+    private var correctionScope: CorrectionDestination.Scope { correctsCommands ? .mode(Mode.voiceCommandsId) : .global }
+
+    func addDictionaryWord(_ word: String) -> Bool { canCorrect && saveWord(word, correctionScope) }
+    func analyzeDictionaryWord(_ word: String) -> VocabularyAnalysis { analyzeWord(word, correctionScope) }
+    func addReplacement(_ heard: String, _ replace: String) -> Bool { canCorrect && saveReplacement(heard, replace, correctionScope) }
 
     func deleteSelected() {
         guard let entry = selected else { return }
@@ -623,7 +634,7 @@ private struct HistoryDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     stageContent
-                    if stage != .details {
+                    if stage != .details, model.canCorrect {
                         Divider()
                         corrections
                     }
@@ -655,7 +666,7 @@ private struct HistoryDetailView: View {
         .sheet(isPresented: $showReplacementSheet) {
             CreateReplacementSheet(initialSource: replacementSource) { heard, replace in
                 if model.addReplacement(heard, replace) {
-                    model.flash("Future dictations will replace \u{201C}\(heard)\u{201D} with \u{201C}\(replace.isEmpty ? "nothing" : ReplacementAuthoring.preview(for: replace).text)\u{201D}.")
+                    model.flash("\(model.correctsCommands ? "Future voice commands" : "Future dictations") will replace \u{201C}\(heard)\u{201D} with \u{201C}\(replace.isEmpty ? "nothing" : ReplacementAuthoring.preview(for: replace).text)\u{201D}.")
                 } else {
                     model.flash(HistoryPaneModel.saveFailedMessage)
                 }
@@ -670,9 +681,9 @@ private struct HistoryDetailView: View {
             }) { term, action in
                 if model.addDictionaryWord(term) {
                     if case let .updateWord(currentWord) = action {
-                        model.flash("Updated \u{201C}\(currentWord)\u{201D} to \u{201C}\(term)\u{201D} in your dictionary — a recognition hint for future dictations.")
+                        model.flash("Updated \u{201C}\(currentWord)\u{201D} to \u{201C}\(term)\u{201D} in \(dictionaryDestination)")
                     } else {
-                        model.flash("Added \u{201C}\(term)\u{201D} to your dictionary — a recognition hint for future dictations.")
+                        model.flash("Added \u{201C}\(term)\u{201D} to \(dictionaryDestination)")
                     }
                 } else {
                     model.flash(HistoryPaneModel.saveFailedMessage)
@@ -718,12 +729,13 @@ private struct HistoryDetailView: View {
             for: selected, heard: entry.heard, transformed: entry.transformed, result: entry.result)
         switch selected {
         case .heardInserted:
+            let to = entry.outcome.isCommand ? "Command" : "Inserted"
             return ComparisonSection(
                 id: "heard-inserted",
-                title: "Heard -> Inserted",
+                title: "Heard -> \(to)",
                 context: entry.cloudInvolved ? "Includes AI rewrite" : "No cloud rewrite",
                 from: .init(title: "Heard", role: .heard, text: texts.from),
-                to: .init(title: "Inserted", role: .result, text: texts.to))
+                to: .init(title: to, role: .result, text: texts.to))
         case .onThisMac:
             return ComparisonSection(
                 id: "on-this-mac",
@@ -758,6 +770,12 @@ private struct HistoryDetailView: View {
 
     private var selectionIsHeard: Bool { selectedRole == .heard }
 
+    private var dictionaryDestination: String {
+        model.correctsCommands
+            ? "the Voice Commands dictionary."
+            : "your dictionary — a recognition hint for future dictations."
+    }
+
     private var replacementSource: String {
         HistoryCorrectionSource.replacement(selection: selectedText, selectionIsHeard: selectionIsHeard)
     }
@@ -789,9 +807,11 @@ private struct HistoryDetailView: View {
             Button { model.copyResult() } label: { Label("Copy Result", systemImage: "doc.on.doc") }
                 .disabled(!canReuseResult)
                 .accessibilityIdentifier(AccessibilityID.History.copyResult)
-            Button { model.pasteResult() } label: { Label("Paste Result", systemImage: "arrow.down.doc") }
-                .disabled(!canReuseResult)
-                .accessibilityIdentifier(AccessibilityID.History.pasteResult)
+            if !entry.outcome.isCommand {
+                Button { model.pasteResult() } label: { Label("Paste Result", systemImage: "arrow.down.doc") }
+                    .disabled(!canReuseResult)
+                    .accessibilityIdentifier(AccessibilityID.History.pasteResult)
+            }
             if canCopyHeard {
                 Button { model.copyHeard() } label: { Label("Copy Heard", systemImage: "text.quote") }
                     .accessibilityIdentifier(AccessibilityID.History.copyHeard)
@@ -860,6 +880,9 @@ private struct HistoryDetailView: View {
                 if entry.outcome == .localFallback, let reason = entry.fallbackReason {
                     detailRow("Why local was kept", reason)
                 }
+                if let reason = entry.failureReason {
+                    detailRow("Why it failed", reason)
+                }
                 detailRow("Best-effort redaction", entry.redaction ? "Applied" : "Not applied")
                 detailRow("Speech", entry.engine.map { "On-device · \($0)" } ?? "On-device")
                 if let device = entry.device {
@@ -919,5 +942,10 @@ private func outcomeLabel(_ outcome: HistoryEntry.Outcome) -> String {
     case .copied: "Copied instead of inserted"
     case .localFallback: "Local fallback"
     case .failed: "Failed"
+    case .command: "Command"
+    case .commandFailed: "Command failed"
+    case .commandStarted: "Command started"
+    case .commandNeedsChoice: "Needs a choice"
+    case .commandCancelled: "Choice cancelled"
     }
 }

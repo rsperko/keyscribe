@@ -32,11 +32,13 @@ not a legal privacy policy.
   prints a bearer token. KeyScribe keeps generated tokens in memory only, honoring reported expiry
   when present.
 
-## The only thing that can leave your Mac
+## The only thing KeyScribe itself sends
 
-The single outbound network path is an **optional, bring-your-own-key (BYOK) LLM cleanup** that
-rewrites a transcript (removing filler, fixing grammar, reformatting). It is off unless you configure
-a provider and enable it for a mode.
+The only path on which KeyScribe itself sends your words off your Mac is an **optional,
+bring-your-own-key (BYOK) LLM cleanup** that rewrites a transcript (removing filler, fixing grammar,
+reformatting). It is off unless you configure a provider and enable it for a mode. A script or
+shortcut you set up to run by voice can send what you said wherever it is built to; see
+[Programs and shortcuts you run by voice](#programs-and-shortcuts-you-run-by-voice).
 
 When it runs:
 
@@ -45,8 +47,8 @@ When it runs:
   a command-generated bearer token. KeyScribe has no LLM service of its own.
 - Before the request is sent, recognizable sensitive spans may be **tokenized out** of the
   transcript (the redaction wedge, below) and restored locally in the response.
-- Turn the cleanup off and KeyScribe makes no network calls at all after the initial one-time model
-  downloads.
+- Turn the cleanup off and KeyScribe itself makes no network calls after the initial one-time model
+  downloads, apart from the update check below.
 
 ## Network use, in full
 
@@ -70,6 +72,31 @@ KeyScribe only reaches the network for these things, and never to send your audi
    verified before they run.
 
 There is no background phone-home or license check.
+
+## Programs and shortcuts you run by voice
+
+With the experimental voice commands you can name a script or a macOS shortcut that KeyScribe runs
+when you say **run** followed by its name, and pass it the words you say after the name. A bare name or
+an app-switching phrase never runs one. KeyScribe starts a script on your Mac and hands it those words
+as an argument, or runs a shortcut and hands them over as its input; it does not send them anywhere
+itself. What the script or shortcut does with them is up to what you chose: a shortcut can send
+messages, change files, or send its input to online services, depending on its steps. Both run as you, with
+everything your account can do, and a misheard command can run them, so choose what you connect this
+way with care.
+
+Every Add Script and Add Shortcut sheet explains these consequences before saving, each in its own
+words, and every Add Place sheet explains that a place can bring an app's windows forward. Separately,
+a notice before first enabling Voice Commands explains that an unintended app's windows can become
+visible and receive your next keystrokes.
+
+To find a window you name, Voice Commands reads the titles of your open windows on this Mac, only when
+no app or place matched what you said. The titles are not sent anywhere or written to diagnostic logs.
+
+When history is on, each voice command is saved there like a dictation: what you said, the command it
+ran with those words (for a window, its title and app, and the titles in a list it offered you), and, if it failed, the error message, which can include the last line the script
+or shortcut wrote to its error output. An action still running when it is saved is updated with its
+final result when it finishes. Turning history off stops this along with everything else; to keep only voice
+commands out, turn on **Do not save this mode in history** in the Voice Commands settings.
 
 ## The redaction wedge — and its limits
 

@@ -120,6 +120,35 @@ public struct HistoryStore: Sendable {
         return .notFound
     }
 
+    // Rewrites the first matching line in place, keeping its position in the day file.
+    @discardableResult
+    public func replace(_ entry: HistoryEntry, with replacement: HistoryEntry) -> Bool {
+        let entry = (try? HistoryEntry(jsonLine: entry.jsonLine())) ?? entry
+        let derived = "\(HistoryStore.todayString(date: entry.timestamp)).jsonl"
+        return ([derived] + dayFiles().filter { $0 != derived }).contains { rewrite(entry, with: replacement, inFile: $0) }
+    }
+
+    private func rewrite(_ entry: HistoryEntry, with replacement: HistoryEntry, inFile file: String) -> Bool {
+        Self.mutationQueue.sync {
+            let url = dir.appendingPathComponent(file)
+            guard let content = try? String(contentsOf: url, encoding: .utf8),
+                  let line = try? replacement.jsonLine() else { return false }
+            var lines = content.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+            guard let index = lines.firstIndex(where: { (try? HistoryEntry(jsonLine: $0)) == entry }) else { return false }
+            lines[index] = line
+            return (try? Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)) != nil
+        }
+    }
+
+    private static func isSameRecord(_ a: HistoryEntry, _ b: HistoryEntry) -> Bool {
+        if let first = a.id, let second = b.id { return first == second }
+        guard a.outcome.isCommand, b.outcome.isCommand else { return a == b }
+        var a = a, b = b
+        a.outcome = .command; a.failureReason = nil
+        b.outcome = .command; b.failureReason = nil
+        return a == b
+    }
+
     private func deleteEntry(_ entry: HistoryEntry, fromFile file: String) -> DeleteOutcome {
         Self.mutationQueue.sync {
             let url = dir.appendingPathComponent(file)
@@ -127,7 +156,7 @@ public struct HistoryStore: Sendable {
             var kept: [String] = []
             var removed = false
             for line in content.split(separator: "\n", omittingEmptySubsequences: true).map(String.init) {
-                if !removed, let decoded = try? HistoryEntry(jsonLine: line), decoded == entry {
+                if !removed, let decoded = try? HistoryEntry(jsonLine: line), Self.isSameRecord(decoded, entry) {
                     removed = true
                 } else {
                     kept.append(line)

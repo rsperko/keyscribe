@@ -31,6 +31,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public enum Output: String, Codable, Sendable {
         case cursor
         case replaceSelection = "replace_selection"
+        case voiceCommand = "voice_command"
     }
     public enum Insertion: String, Codable, Sendable { case paste, insert, type }
 
@@ -335,9 +336,25 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         try c.encode(excludeFromHistory, forKey: .excludeFromHistory)
     }
 
-    public static let systemIdPrefix = "_"
     public static let directId = "_direct"
-    public var isSystem: Bool { id == Mode.directId }
+    public static let voiceCommandsId = "_voice_commands"
+    public var isSystem: Bool { id == Mode.directId || id == Mode.voiceCommandsId }
+    public var isDirect: Bool { id == Mode.directId }
+    public var runsVoiceCommands: Bool { output == .voiceCommand }
+    public var hasOwnVocabulary: Bool { !isDirect }
+
+    public static var voiceCommands: Mode {
+        var mode = Mode(id: voiceCommandsId, name: "Voice Commands")
+        mode.output = .voiceCommand
+        mode.dictionary = ModeDictionary(includeGlobal: false, words: [])
+        mode.replacements = ModeReplacements(includeGlobal: false, rules: [])
+        mode.trailing = .none
+        return mode
+    }
+
+    public static func visible(_ modes: [Mode], voiceCommands: Bool) -> [Mode] {
+        voiceCommands ? modes : modes.filter { $0.id != voiceCommandsId }
+    }
 
     public static var direct: Mode {
         var mode = Mode(id: directId, name: "Plain Dictation")
@@ -349,6 +366,15 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     }
 
     public func systemNormalized() -> Mode {
+        if id == Mode.voiceCommandsId {
+            var mode = Mode.voiceCommands
+            mode.triggerKeys = triggerKeys
+            mode.enabled = enabled
+            mode.dictionary = dictionary
+            mode.replacements = replacements
+            mode.excludeFromHistory = excludeFromHistory
+            return mode
+        }
         guard id == Mode.directId else { return self }
         var mode = Mode.direct
         mode.triggerKeys = triggerKeys
@@ -425,8 +451,16 @@ public enum ModeStore {
     ] }
 
     public static func decode(from toml: String, id: String) throws -> Mode {
-        var mode = try ConfigDecode.table(toml, supportedVersion: currentSchemaVersion, migrations: migrations) {
-            try TOMLDecoder().decode(Mode.self, from: $0)
+        var mode = try ConfigDecode.table(toml, supportedVersion: currentSchemaVersion, migrations: migrations) { table in
+            var mode = try TOMLDecoder().decode(Mode.self, from: table)
+            if id == Mode.voiceCommandsId {
+                if table["dictionary"]?["include_global"] == nil { mode.dictionary.includeGlobal = false }
+                if table["replacements"]?["include_global"] == nil { mode.replacements.includeGlobal = false }
+            }
+            return mode
+        }
+        if mode.output == .voiceCommand && id != Mode.voiceCommandsId {
+            throw ConfigError.invalid("output = \"voice_command\" belongs to the built-in Voice Commands mode")
         }
         mode.id = id
         return mode
@@ -696,15 +730,22 @@ public enum ModeStore {
     }
 
     // The Direct file also marks the completed Plain Dictation migration.
-    public static func ensureSystemModes(in dir: URL) {
+    public static func ensureSystemModes(in dir: URL, voiceCommands: Bool = false) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let url = fileURL(for: .direct, in: dir)
-        guard let current = try? String(contentsOf: url, encoding: .utf8) else {
-            try? encode(migratedDirect(in: dir)).write(to: url, atomically: true, encoding: .utf8)
+        if voiceCommands {
+            ensureSystemMode(.voiceCommands, in: dir) { .voiceCommands }
+        }
+        ensureSystemMode(.direct, in: dir) { migratedDirect(in: dir) }
+    }
+
+    private static func ensureSystemMode(_ seed: Mode, in dir: URL, missing initial: () -> Mode) {
+        let url = fileURL(for: seed, in: dir)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            try? encode(initial()).write(to: url, atomically: true, encoding: .utf8)
             return
         }
-
-        guard let decoded = try? decode(from: current, id: Mode.directId) else { return }
+        guard let current = try? String(contentsOf: url, encoding: .utf8) else { return }
+        guard let decoded = try? decode(from: current, id: seed.id) else { return }
         let resolved = decoded.systemNormalized()
         guard resolved != decoded, unknownKeys(in: current).isEmpty,
               let encoded = try? encode(resolved) else { return }

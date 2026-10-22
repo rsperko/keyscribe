@@ -32,6 +32,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // System sleep suspends CoreAudio, so the resident capture engine's cached device binding is stale on
     // wake. Refresh it while idle (off the hot path) so the first post-wake dictation binds cleanly.
     private var wakeObserver: NSObjectProtocol?
+    private var sleepObserver: NSObjectProtocol?
     private var lockMonitor: SessionLockMonitor?
 
     // Optional extension seams, nil by default — a build injects these (e.g. from main.swift) before
@@ -131,7 +132,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         provider = resolveProvider(engines: engines, activeId: launchEngineId)
         ModeStore.recordStarterOffersIfFresh(in: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir)
-        ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir)
+        ensureSystemModes()
         let reconciled = ModeStore.reconcileSeeds(
             modesDir: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir,
             settingsDir: KeyScribePaths.supportDir)
@@ -151,6 +152,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             onUnreadableFile: { aside in
                 Log.config.error("replacement usage file was unreadable; moved to \(aside.lastPathComponent, privacy: .public) and started fresh")
             })
+        config.voiceCommandsEnabled = settings.features.isEnabled(.voiceCommands)
         configRepository = ConfigRepository(
             supportDir: KeyScribePaths.supportDir, config: config, selfWriteGate: selfWriteGate,
             replacementUsage: replacementUsage)
@@ -161,6 +163,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // rebinds until relaunch.
             self?.rebuildHotkeyMonitor()
             self?.refreshStatus()
+            self?.controller.voiceCommandConfigurationChanged()
             // Off the write path, so saving never pays it and the next press does not either.
             Task { @MainActor [weak self] in self?.config.prewarm() }
         }
@@ -191,6 +194,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         hud.appearance = settings.hud.appearance
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
         hud.onPasteLast = { [weak self] in self?.controller.pasteLast() }
+        hud.onChooseVoiceCommand = { [weak self] id, identity in
+            self?.controller.chooseVoiceCommand(choice: id, candidate: identity)
+        }
+        hud.onCancelVoiceCommandChoice = { [weak self] id in self?.controller.cancelVoiceCommandChoice(choice: id) }
         hud.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
         hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
         hud.onEscapeCancel = { [weak self] in
@@ -208,23 +215,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     case .replacement: return VocabularyAnalysis(action: .addReplacement)
                     }
                 }
-                return VocabularyAdvisor.analyze(proposal, in: self.vocabularyScope(for: destination))
+                return VocabularyAdvisor.analyze(proposal, in: self.configRepository.vocabularyScope(for: destination.scope))
             },
             addDictionaryWord: { [weak self] word, destination in
-                switch destination.scope {
-                case .global:
-                    return self?.configRepository.addDictionaryWord(word) ?? false
-                case .mode(let id):
-                    return self?.configRepository.addDictionaryWord(word, toMode: id) ?? false
-                }
+                self?.configRepository.addDictionaryWord(word, to: destination.scope) ?? false
             },
             addReplacement: { [weak self] heard, replace, regex, destination in
-                switch destination.scope {
-                case .global:
-                    return self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex) ?? false
-                case .mode(let id):
-                    return self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex, toMode: id) ?? false
-                }
+                self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex, to: destination.scope) ?? false
             },
             clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
 
@@ -309,6 +306,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() },
             onEraseAllData: { [weak self] in self?.eraseAllDataAndRelaunch() },
             clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
+        controller.onHistoryUpdated = { [weak self] in self?.settingsController.historyDidChange() }
         settingsController.recordingState.onChange = { [weak self] recording in
             self?.hotkey?.isSuspended = recording
         }
@@ -382,6 +380,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.controller.refreshCaptureBinding() }
+        }
+        sleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.controller.handleSystemSleep() }
         }
 
         lockMonitor = SessionLockMonitor { [weak self] in self?.controller.handleScreenLocked() }
@@ -504,6 +506,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                       bundleId != Bundle.main.bundleIdentifier,
                       bundleId != self.frontBundleId else { return }
                 self.frontBundleId = bundleId
+                self.controller.noteAppActivated(bundleId: bundleId)
                 // Most switches change nothing — no scoped mode, or the same ones stay claimable — and a
                 // rebuild tears down and re-registers every Carbon hot key, so only act on a real change.
                 guard self.claimableModes().map(\.id) != self.registeredClaimIds else { return }
@@ -561,7 +564,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     func reloadConfig() {
         // Re-seed/normalize the system Direct floor before reloading, so an external delete or hand-edit
         // of `_direct.toml` heals immediately (and Fn re-registers) instead of waiting for relaunch.
-        ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir)
+        ensureSystemModes()
         // Adopt the post-heal state BEFORE the reads below so this reload does not echo into a second one;
         // an edit landing after is caught by the next fire, never absorbed unread.
         selfWriteGate.adopt(ConfigTreeSnapshot.capture(supportDir: KeyScribePaths.supportDir))
@@ -586,6 +589,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if !newProblems.isEmpty {
             controller.announceConfigProblem(newProblems.joined(separator: " · "))
         }
+        controller.voiceCommandConfigurationChanged()
         configRepository.notifyExternalChange()
         // Rebuild the frozen plan off this path so the first press after an edit doesn't pay the
         // modes/dictionary/fragments realization invalidate() just discarded (mirrors the launch warm).
@@ -650,11 +654,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             supportDir: KeyScribePaths.supportDir)
     }
 
+    private func ensureSystemModes() {
+        ModeStore.ensureSystemModes(
+            in: KeyScribePaths.modesDir, voiceCommands: settings.features.isEnabled(.voiceCommands))
+    }
+
     // Apply the runtime consequences of a settings change WITHOUT writing to disk. `applySettings` calls
     // this then persists; `reloadConfig` calls it after re-reading an external edit off disk (no write,
     // so an externally-changed field isn't round-tripped and clobbered).
     private func applySettingsEffects(_ updated: Settings) {
         let previousHistory = settings.history
+        let voiceCommandsChanged = updated.features.isEnabled(.voiceCommands) != settings.features.isEnabled(.voiceCommands)
         let previousAudio = settings.audio
         // Compared against the provider, not the old setting: launch already activated a replacement for a
         // retired saved id, and persisting it must not evict the engine that preload is warming.
@@ -674,6 +684,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if updated.audio != previousAudio {
             CaptureArchive.publish(updated.audio)
             CaptureArchive.applyRetention()
+        }
+        if voiceCommandsChanged {
+            ensureSystemModes()
+            selfWriteGate.adopt(ConfigTreeSnapshot.capture(supportDir: KeyScribePaths.supportDir))
+            config.voiceCommandsEnabled = updated.features.isEnabled(.voiceCommands)
         }
         controller.updateSettings(updated)
         hud.appearance = updated.hud.appearance
@@ -763,21 +778,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         CorrectionDestination.list(for: config.modes)
     }
 
-    private func vocabularyScope(for destination: CorrectionDestination) -> VocabularyScope {
-        let globalWords = configRepository.dictionaryWords()
-        let globalRules = configRepository.replacementRules()
-        guard case .mode(let id) = destination.scope,
-              let mode = config.modes.first(where: { $0.id == id }) else {
-            return VocabularyScope(globalWords: globalWords, globalRules: globalRules)
-        }
-        return VocabularyScope(
-            globalWords: globalWords, globalRules: globalRules,
-            local: VocabularyScope.Local(
-                words: mode.dictionary.words, rules: mode.replacements.rules,
-                includeGlobalWords: mode.dictionary.includeGlobal,
-                includeGlobalRules: mode.replacements.includeGlobal))
-    }
-
     // Relaunch into guided setup so the new process reads the just-granted Accessibility verdict fresh
     // (it is cached at launch). First reset any denied ListenEvent record: a pre-fix build calling
     // tapCreate before the grant could leave one that permanently suppresses the modifier tap even after
@@ -863,7 +863,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // menuWillOpen rather than on every refreshStatus — the latter fires after each dictation, which
     // otherwise reallocated every submenu item while the menu was closed.
     private func rebuildMenuItems() {
-        let modes = config.modes.filter(\.enabled)
+        let modes = config.modes.filter { $0.enabled && !$0.runsVoiceCommands }
         let automatic = modes.first { $0.id == Mode.directId } ?? modes.first
         var inertReasons: [String: String] = [:]
         for mode in modes where connectionUnavailable(for: mode) {
@@ -906,7 +906,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // must not blink on and off as the user switches apps.
             hotkeyConflict: Self.hotkeyConflictDetected(
                 shadowed: shadowedHotkeyIds(in: config.modes.filter(\.enabled))),
-            modeTriggerUnreachable: TriggerKeyConflicts.hasUnreachableTrigger(in: config.modes))
+            modeTriggerUnreachable: TriggerKeyConflicts.hasUnreachableTrigger(in: config.modes) || config.voiceCommandsShutOut)
     }
 
     private func connectionUnavailable(for mode: Mode) -> Bool {

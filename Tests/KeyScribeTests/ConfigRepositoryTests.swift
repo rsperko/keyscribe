@@ -30,6 +30,81 @@ struct ConfigRepositoryTests {
         #expect(notified == 1)
     }
 
+    @Test func writingSeveralModesNotifiesOnce() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let config = ConfigCache(supportDir: dir)
+        let repo = ConfigRepository(supportDir: dir, config: config)
+        var notified = 0
+        repo.onChange = { notified += 1 }
+        try repo.writeModes([Mode(id: "a", name: "A"), Mode(id: "b", name: "B")], restoring: [])
+        #expect(config.modes.contains { $0.id == "a" } && config.modes.contains { $0.id == "b" })
+        #expect(notified == 1)
+    }
+
+    @Test func aFailedMultiModeWriteRestoresWhatItAlreadyWrote() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        var a = Mode(id: "a", name: "A")
+        a.triggerKeys = [.init(key: "f12")]
+        try repo.writeMode(a)
+        var movedA = a
+        movedA.triggerKeys = []
+        #expect(throws: (any Error).self) {
+            try repo.writeModes([movedA, Mode(id: "b", name: "B")], restoring: [a, Mode(id: "b", name: "B")]) { mode in
+                guard mode.id == "a" else { throw ConfigError.invalid("disk full") }
+                try ModeStore.write(mode, to: repo.modesDir)
+            }
+        }
+        let onDisk = try ModeStore.decode(
+            from: String(contentsOf: repo.modesDir.appendingPathComponent("a.toml"), encoding: .utf8), id: "a")
+        #expect(onDisk.triggerKeys == a.triggerKeys)
+    }
+
+    @Test func aMultiModeWriteRefusesToReplaceAModeFileThatDoesNotLoad() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        try repo.writeMode(Mode(id: "a", name: "A"))
+        let broken = "schema_version = 2\nname = \"B\"\ntrigger_keys = [\n"
+        let bURL = repo.modesDir.appendingPathComponent("b.toml")
+        try broken.write(to: bURL, atomically: true, encoding: .utf8)
+        var movedA = Mode(id: "a", name: "A")
+        movedA.triggerKeys = [.init(key: "f12")]
+        #expect(throws: ConfigRepository.UnreadableModeFile.self) {
+            try repo.writeModes([movedA, Mode(id: "b", name: "B")], restoring: [])
+        }
+        #expect(try String(contentsOf: bURL, encoding: .utf8) == broken)
+        let a = try ModeStore.decode(
+            from: String(contentsOf: repo.modesDir.appendingPathComponent("a.toml"), encoding: .utf8), id: "a")
+        #expect(a.triggerKeys.isEmpty)
+    }
+
+    @Test func aRestoreThatAlsoFailsIsReportedAndStillRefreshesTheCache() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let config = ConfigCache(supportDir: dir)
+        let repo = ConfigRepository(supportDir: dir, config: config)
+        var notified = 0
+        repo.onChange = { notified += 1 }
+        let a = Mode(id: "a", name: "A")
+        let b = Mode(id: "b", name: "B")
+        var calls = 0
+        do {
+            try repo.writeModes([a, b], restoring: [a, b]) { mode in
+                calls += 1
+                if calls == 1 { try ModeStore.write(mode, to: repo.modesDir); return }
+                throw ConfigError.invalid("disk full")
+            }
+            Issue.record("expected a failure")
+        } catch let error as ConfigRepository.IncompleteRestore {
+            #expect(error.unrestored == ["A"])
+        }
+        #expect(notified == 1)
+        #expect(config.modes.contains { $0.id == "a" })
+    }
+
     @Test func recordingAFragmentSelfWriteInvalidatesResolvedAndNotifies() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

@@ -60,6 +60,7 @@ public enum HistoryExport {
                 out += "\n"
                 if !e.heard.isEmpty, e.heard != e.result { out += "  - Heard: \(e.heard)\n" }
                 out += "  - Result: \(e.result.isEmpty ? "(no text)" : e.result)\n"
+                if let reason = e.failureReason { out += "  - Why it failed: \(reason)\n" }
             }
         }
         return out
@@ -76,6 +77,7 @@ public enum HistoryExport {
                 out += "\n"
                 if !e.heard.isEmpty, e.heard != e.result { out += "    Heard:  \(e.heard)\n" }
                 out += "    Result: \(e.result.isEmpty ? "(no text)" : e.result)\n"
+                if let reason = e.failureReason { out += "    Why it failed: \(reason)\n" }
             }
         }
         return out
@@ -100,6 +102,11 @@ public enum HistoryExport {
         case .copied: "Copied instead of inserted"
         case .localFallback: "Local fallback"
         case .failed: "Failed"
+        case .command: "Command"
+        case .commandFailed: "Command failed"
+        case .commandStarted: "Command started"
+        case .commandNeedsChoice: "Needs a choice"
+        case .commandCancelled: "Choice cancelled"
         }
     }
 }
@@ -129,7 +136,7 @@ public struct HistoryStats: Equatable, Sendable {
             byOutcome[e.outcome, default: 0] += 1
             if e.cloudInvolved { cloud += 1 }
             if e.redaction { redaction += 1 }
-            words += e.result.split(whereSeparator: \.isWhitespace).count
+            if !e.outcome.isCommand { words += e.result.split(whereSeparator: \.isWhitespace).count }
             first = first.map { Swift.min($0, e.timestamp) } ?? e.timestamp
             last = last.map { Swift.max($0, e.timestamp) } ?? e.timestamp
         }

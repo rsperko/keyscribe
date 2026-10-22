@@ -94,6 +94,22 @@ public final class ResolvedConfig: @unchecked Sendable {
         }
     }
 
+    public func voiceCommandText(heard: String) -> String {
+        guard let mode = modes.first(where: { $0.id == Mode.voiceCommandsId }) else { return heard }
+        return voiceCommandText(heard: heard, mode: mode)
+    }
+
+    public func voiceCommandText(heard: String, mode: Mode?) -> String {
+        let stages = postSTTTextStages(for: mode)
+        let pipeline = Pipeline(stages.filter { !($0 is FuzzyStage) })
+        let payload = pipeline.forward(heard)
+        let replaced = payload.bareReplacement?.text ?? pipeline.restore(payload.text)
+        guard let target = VoiceCommandGrammar.targetRange(in: replaced) else { return replaced }
+        var context = PipelineContext(text: String(replaced[target]))
+        for stage in stages where stage is FuzzyStage { stage.apply(&context) }
+        return String(replaced[..<target.lowerBound]) + context.text
+    }
+
     private func buildTextStages(for mode: Mode?) -> [any PipelineStage] {
         var stages: [any PipelineStage] = []
         if mode?.commands.liveEdits ?? true { stages.append(LiveEditsStage()) }

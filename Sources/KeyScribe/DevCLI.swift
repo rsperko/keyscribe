@@ -80,6 +80,15 @@ public enum DevCLI {
                                       dictation outcomes) and exit. Paste it into a bug report. Contains no
                                       transcript text, clipboard contents, or API keys.
                 --dictations <n>        How many recent dictation outcomes to include (default 10, 0 for none).
+              --voice-command <text>  Resolve <text> as a spoken voice command ("switch to ghostty", "go back")
+                                      against this Mac's running and installed apps, open browser tabs, and
+                                      the saved places and scripts, print what it resolved to, run it, and exit. Exits
+                                      non-zero when it does not resolve or does not run.
+                --dry-run               Print the resolution without running it.
+              --windows-probe         List every regular app's Accessibility windows (subrole, id, minimized,
+                                      whether a document is reported, title) with per-app read latency, then
+                                      exit. Read-only; prints window titles to this terminal only.
+                --focus <pid>:cg:<id>   Instead, bring that one window forward the way a voice command does.
               --list-engines          Print each shipped catalog engine and whether it is installed
                                       (installed / missing / system), then exit — coverage for the release gate.
               --mlx-smoke             Run a tiny MLX computation on the GPU, then exit 0. A missing or unloadable
@@ -215,6 +224,25 @@ public enum DevCLI {
             }
             print(DiagnosticsCollector.collect(dictationLimit: limit).render(), terminator: "")
             exit(0)
+        }
+
+        if let i = CommandLine.arguments.firstIndex(of: "--voice-command"), i + 1 < CommandLine.arguments.count {
+            let transcript = CommandLine.arguments[i + 1]
+            let dryRun = CommandLine.arguments.contains("--dry-run")
+            Task { @MainActor in
+                exit(await VoiceCommandCLI.run(transcript: transcript, dryRun: dryRun))
+            }
+            dispatchMain()
+        }
+
+        if CommandLine.arguments.contains("--windows-probe") {
+            let args = CommandLine.arguments
+            let focus: String? = args.firstIndex(of: "--focus").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+            Task { @MainActor in
+                if let focus { exit(await WindowsProbe.focus(focus)) }
+                exit(WindowsProbe.list())
+            }
+            dispatchMain()
         }
 
         if CommandLine.arguments.contains("--list-engines") {

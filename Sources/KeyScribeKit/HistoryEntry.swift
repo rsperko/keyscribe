@@ -10,8 +10,23 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case copied
         case localFallback = "local_fallback"
         case failed
+        case command
+        case commandFailed = "command_failed"
+        case commandStarted = "command_started"
+        case commandNeedsChoice = "command_needs_choice"
+        case commandCancelled = "command_cancelled"
+
+        public var isCommand: Bool {
+            switch self {
+            case .command, .commandFailed, .commandStarted, .commandNeedsChoice, .commandCancelled: true
+            case .inserted, .copied, .localFallback, .failed: false
+            }
+        }
     }
 
+    // Stable across in-place updates (a late command result, a clicked choice), so a row and a delete
+    // keep pointing at the same record. nil on older entries.
+    public var id: String?
     public var timestamp: Date
     public var modeName: String
     // Display name of the STT engine that produced `heard`. nil on older entries (detail shows "On-device").
@@ -47,8 +62,10 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     // Provider error text or a fixed local string, never user content. nil on non-fallback and older rows.
     public var fallbackReason: String?
     public var stoppedAtLimit: Bool?
+    public var failureReason: String?
 
     enum CodingKeys: String, CodingKey {
+        case id
         case timestamp
         case modeName = "mode"
         case engine
@@ -69,17 +86,20 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case triggerKey = "trigger_key"
         case fallbackReason = "fallback_reason"
         case stoppedAtLimit = "stopped_at_limit"
+        case failureReason = "failure_reason"
     }
 
     public init(
-        timestamp: Date, modeName: String, engine: String? = nil, device: String? = nil,
+        id: String? = nil, timestamp: Date, modeName: String, engine: String? = nil, device: String? = nil,
         heard: String, transformed: String? = nil,
         result: String, outcome: Outcome,
         cloudInvolved: Bool, redaction: Bool, contextCategories: [String],
         connection: String? = nil, model: String? = nil, prompt: String? = nil, received: String? = nil,
         modeChoice: ModeChoiceReason? = nil, routedPhrase: String? = nil,
-        triggerKey: String? = nil, fallbackReason: String? = nil, stoppedAtLimit: Bool? = nil
+        triggerKey: String? = nil, fallbackReason: String? = nil, stoppedAtLimit: Bool? = nil,
+        failureReason: String? = nil
     ) {
+        self.id = id
         self.timestamp = timestamp
         self.modeName = modeName
         self.engine = engine
@@ -100,6 +120,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         self.triggerKey = triggerKey
         self.fallbackReason = fallbackReason
         self.stoppedAtLimit = stoppedAtLimit
+        self.failureReason = failureReason
     }
 
     private static let encoder: JSONEncoder = {

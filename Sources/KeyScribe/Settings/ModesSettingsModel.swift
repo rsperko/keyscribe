@@ -16,6 +16,16 @@ final class ModesSettingsModel: ObservableObject {
     private var noticeResolvesOnLoad = false
     @Published private(set) var loadFailures: [ModeStore.LoadFailure] = []
     @Published private(set) var unknownKeys: [String: [UnknownConfigKey]] = [:]
+    @Published private(set) var pendingMove: ShortcutMove?
+    @Published private var appliedMove: AppliedShortcutMove?
+    private var pendingMoveBase: Mode?
+    private var pendingClaim: [Mode.TriggerKey] = []
+
+    struct AppliedShortcutMove: Equatable {
+        let move: ShortcutMove
+        let destinationBefore: Mode
+        let modesBefore: [Mode]
+    }
 
     private let repository: ConfigRepository
     private var modesDir: URL { repository.modesDir }
@@ -28,8 +38,13 @@ final class ModesSettingsModel: ObservableObject {
     // External writes run with this false and do reload.
     private var isApplyingLocalMutation = false
 
-    init(repository: ConfigRepository) {
+    private(set) var voiceCommandsEnabled: Bool
+    let voiceCommands: VoiceCommandsSettingsModel
+
+    init(repository: ConfigRepository, voiceCommandsEnabled: Bool = false) {
         self.repository = repository
+        self.voiceCommandsEnabled = voiceCommandsEnabled
+        voiceCommands = VoiceCommandsSettingsModel(repository: repository)
         reload()
         // Refresh from disk on any external config write (e.g. a mode-scoped term from the correction
         // panel) so it survives the pane's next full-file save. `reload` is signature-guarded.
@@ -37,6 +52,12 @@ final class ModesSettingsModel: ObservableObject {
             guard let self, !self.isApplyingLocalMutation else { return }
             self.reload()
         }
+    }
+
+    func setVoiceCommandsEnabled(_ enabled: Bool) {
+        guard enabled != voiceCommandsEnabled else { return }
+        voiceCommandsEnabled = enabled
+        reload(force: true)
     }
 
     private func applyingLocalMutation<T>(_ body: () throws -> T) rethrows -> T {
@@ -51,9 +72,9 @@ final class ModesSettingsModel: ObservableObject {
     func reload(force: Bool = false) {
         guard force || configSignature() != loadedSignature else { return }
         let lkgModesDir = supportDir.appendingPathComponent("lkg", isDirectory: true).appendingPathComponent("modes", isDirectory: true)
-        ModeStore.ensureSystemModes(in: modesDir)
+        ModeStore.ensureSystemModes(in: modesDir, voiceCommands: voiceCommandsEnabled)
         let result = ModeStore.load(in: modesDir, previous: modes, lkgDir: lkgModesDir)
-        modes = result.modes
+        modes = Mode.visible(result.modes, voiceCommands: voiceCommandsEnabled)
         loadFailures = result.failures
         unknownKeys = loadUnknownKeys()
         connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
@@ -66,6 +87,7 @@ final class ModesSettingsModel: ObservableObject {
             selectedID = modes.contains { !$0.isSystem } ? modes.first?.id : nil
         }
         loadedSignature = configSignature()
+        appliedMove = nil
         if noticeResolvesOnLoad, let subject = noticeSubject, loadFailure(for: subject) == nil { resolve(subject) }
     }
 
@@ -165,6 +187,24 @@ final class ModesSettingsModel: ObservableObject {
     // later renames keep the file so external references stay stable.
     @discardableResult
     func update(_ mode: Mode) -> Bool {
+        let previous = modes.first { $0.id == mode.id }
+        if let other = VoiceCommandTriggers.clash(for: mode, in: modes) {
+            if let previous {
+                let added = mode.triggerKeys.filter { key in !previous.triggerKeys.contains { $0.key == key.key } }
+                if let move = VoiceCommandTriggers.move(normalized(mode), claiming: added, in: modes) {
+                    propose(move, base: previous, claiming: added)
+                    return false
+                }
+            }
+            if let previous, VoiceCommandTriggers.clash(for: previous, in: modes) != nil {
+                return save(mode)
+            }
+            let reason = mode.runsVoiceCommands
+                ? "\(other.name) already uses that shortcut. \(mode.name) needs one no other mode uses."
+                : "\(other.name) already uses that shortcut, and it cannot share one with another mode."
+            report(PaneNotice(title: "Changes to \(mode.name) weren’t saved", message: reason), about: mode.id)
+            return false
+        }
         if mode.id == awaitingInitialName {
             let newId = ModeStore.newID(for: mode.name, existing: modes.filter { $0.id != mode.id }.map(\.id))
             if newId != mode.id {
@@ -173,6 +213,100 @@ final class ModesSettingsModel: ObservableObject {
             }
         }
         return save(mode)
+    }
+
+    func proposeMove(to mode: Mode) {
+        guard let move = VoiceCommandTriggers.move(normalized(mode), in: modes) else { return }
+        propose(move, base: mode, claiming: mode.triggerKeys)
+    }
+
+    private func propose(_ move: ShortcutMove, base: Mode, claiming keys: [Mode.TriggerKey]) {
+        pendingMove = move
+        pendingMoveBase = base
+        pendingClaim = keys
+        resolve(base.id)
+        resolve(Self.moveSubject)
+    }
+
+    func cancelMove() {
+        pendingMove = nil
+        pendingMoveBase = nil
+        pendingClaim = []
+    }
+
+    func confirmMove() {
+        guard let pending = pendingMove, let base = pendingMoveBase else { return }
+        let claim = pendingClaim
+        cancelMove()
+        reload()
+        guard modes.first(where: { $0.id == base.id }) == base,
+              let move = VoiceCommandTriggers.move(pending.destination, claiming: claim, in: modes), move == pending else {
+            report(
+                PaneNotice(title: "Shortcut wasn’t moved", message: "The modes using that shortcut changed. Try again."),
+                about: Self.moveSubject)
+            return
+        }
+        let modesBefore = modes
+        guard apply(move.writes, restoring: [base] + move.losses.map(\.before), failure: "Shortcut wasn’t moved")
+        else { return }
+        appliedMove = AppliedShortcutMove(move: move, destinationBefore: base, modesBefore: modesBefore)
+    }
+
+    var undoableMove: AppliedShortcutMove? {
+        guard let appliedMove, appliedMove.move.writes.allSatisfy(modes.contains) else { return nil }
+        return appliedMove
+    }
+
+    func undoMove() {
+        guard let applied = undoableMove else { return }
+        appliedMove = nil
+        reload()
+        let restores = applied.move.losses.map(\.before) + [applied.destinationBefore]
+        let restored = modes.map { mode in restores.first { $0.id == mode.id } ?? mode }
+        guard applied.move.writes.allSatisfy(modes.contains),
+              restores.allSatisfy({ Self.clashers($0, in: restored).isSubset(of: Self.clashers($0, in: applied.modesBefore)) }) else {
+            report(
+                PaneNotice(title: "Undo didn’t change anything", message: "Those shortcuts changed since the move."),
+                about: Self.moveSubject)
+            return
+        }
+        _ = apply(restores, restoring: applied.move.writes, failure: "Undo didn’t change anything")
+    }
+
+    private static func clashers(_ mode: Mode, in modes: [Mode]) -> Set<String> {
+        Set(VoiceCommandTriggers.move(mode, in: modes)?.losses.map(\.before.id) ?? [])
+    }
+
+    private static let moveSubject = "shortcut-move"
+
+    private func apply(_ writes: [Mode], restoring originals: [Mode], failure title: String) -> Bool {
+        do {
+            try applyingLocalMutation { try repository.writeModes(writes, restoring: originals) }
+        } catch let incomplete as ConfigRepository.IncompleteRestore {
+            reload(force: true)
+            let names = incomplete.unrestored.joined(separator: ", ")
+            report(
+                PaneNotice(
+                    title: "Shortcuts were only partly changed",
+                    message: "\(names) couldn’t be put back: \(incomplete.underlying.localizedDescription). Check their shortcuts."),
+                about: Self.moveSubject)
+            return false
+        } catch {
+            if error is ConfigRepository.UnreadableModeFile { reload(force: true) }
+            report(PaneNotice(title: title, message: error.localizedDescription), about: Self.moveSubject)
+            return false
+        }
+        for mode in writes {
+            if let index = modes.firstIndex(where: { $0.id == mode.id }) { modes[index] = mode }
+            unknownKeys[mode.id] = nil
+            resolve(mode.id)
+        }
+        resolve(Self.moveSubject)
+        return true
+    }
+
+    private func normalized(_ mode: Mode) -> Mode {
+        mode.isSystem ? mode.systemNormalized() : mode
     }
 
     private func rename(_ mode: Mode, to newId: String) -> Bool {
@@ -291,7 +425,7 @@ final class ModesSettingsModel: ObservableObject {
 
     @discardableResult
     private func save(_ mode: Mode) -> Bool {
-        let mode = mode.isSystem ? mode.systemNormalized() : mode
+        let mode = normalized(mode)
         do {
             try applyingLocalMutation { try repository.writeMode(mode) }
             if let index = modes.firstIndex(where: { $0.id == mode.id }) {

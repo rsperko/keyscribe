@@ -19,7 +19,7 @@ struct ModesSettingsModelTests {
         let urls = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
         return Set(urls.filter { $0.pathExtension == "toml" }
             .map { $0.deletingPathExtension().lastPathComponent }
-            .filter { !$0.hasPrefix(Mode.systemIdPrefix) })
+            .filter { !$0.hasPrefix("_") })
     }
 
     @Test func aModeWhoseFileIsBrokenCannotBeSavedOverFromSettings() throws {

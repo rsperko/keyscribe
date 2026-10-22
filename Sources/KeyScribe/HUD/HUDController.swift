@@ -17,7 +17,6 @@ final class HUDLevel: ObservableObject {
 
 @MainActor
 final class HUDController: HUDPresenting {
-    private static let panelWidth: CGFloat = 280
     private let model = HUDModel()
     private let levelModel = HUDLevel()
     private var panel: NSPanel?
@@ -36,6 +35,8 @@ final class HUDController: HUDPresenting {
     var onPasteLast: (() -> Void)?
     var onOpenSpeechModels: (() -> Void)?
     var onEscapeCancel: (() -> Void)?
+    var onChooseVoiceCommand: ((Int, String) -> Void)?
+    var onCancelVoiceCommandChoice: ((Int) -> Void)?
     var canCancel: (() -> Bool)?
     private var localKeyMonitor: Any?
     private var anchor: HUDAnchor = HUDAnchorStore.load()
@@ -57,13 +58,23 @@ final class HUDController: HUDPresenting {
             }
             return
         }
+        if case .choice(let prompt, .listening(let latched), let level) = state,
+           case .choice(let current, .listening(let currentLatched), _) = model.state,
+           prompt == current, latched == currentLatched {
+            levelModel.level = level
+            return
+        }
         guard model.state != state else { return }
-        let wasHidden: Bool = { if case .hidden = model.state { return true } else { return false } }()
+        let previous = model.state
+        let wasHidden: Bool = { if case .hidden = previous { return true } else { return false } }()
         if case .recording(_, let level, _, _) = state {
             levelModel.level = level
         }
+        if case .choice(_, .listening, let level) = state {
+            levelModel.level = level
+        }
         model.state = state
-        announce(state)
+        announce(state, after: previous)
         if case .hidden = state {
             if panel?.isKeyWindow == true { relinquishKeyFocus() }
             fadeOutPanel()
@@ -114,12 +125,14 @@ final class HUDController: HUDPresenting {
                 case .openAccessibilitySettings: Permissions.openSettings(.accessibility)
                 case .openSpeechModels: self?.onOpenSpeechModels?()
                 }
-            }))
+            },
+            onChoose: { [weak self] id, identity in self?.onChooseVoiceCommand?(id, identity) },
+            onCancelChoice: { [weak self] id in self?.onCancelVoiceCommandChoice?(id) }))
         // Let the panel grow to the content's intrinsic height (badges wrap, text never ellipsizes); the
-        // fixed 280 width is unchanged. `resize` reads fittingSize and grows upward.
+        // width comes from the state. `resize` reads fittingSize and grows upward.
         hosting.sizingOptions = [.intrinsicContentSize]
         let panel = KeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: Self.panelWidth, height: HUDState.hidden.contentHeight),
+            contentRect: NSRect(x: 0, y: 0, width: HUDState.hidden.panelWidth, height: HUDState.hidden.contentHeight),
             styleMask: [.nonactivatingPanel, .borderless],
             backing: .buffered, defer: false)
         panel.isFloatingPanel = true
@@ -131,6 +144,8 @@ final class HUDController: HUDPresenting {
         panel.hasShadow = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = hosting
+        // A waiting question must never take key focus, even when one of its rows is clicked.
+        panel.allowsKey = { [weak self] in self?.model.state.isWaitingForChoice != true }
         self.panel = panel
         observeMoves(panel)
         reposition(panel)
@@ -150,7 +165,7 @@ final class HUDController: HUDPresenting {
         panel.contentView?.layoutSubtreeIfNeeded()
         let fittingHeight = panel.contentView?.fittingSize.height ?? 0
         let height = max(state.contentHeight, fittingHeight)
-        let size = CGSize(width: Self.panelWidth, height: height)
+        let size = CGSize(width: state.panelWidth, height: height)
         guard panel.frame.size != size else { return }
         isRepositioning = true
         let screen = panel.screen ?? NSScreen.main
@@ -164,8 +179,9 @@ final class HUDController: HUDPresenting {
     // The HUD panel is non-activating and usually not the focused element, so a changed accessibilityLabel
     // isn't read automatically — an explicit announcement is the only reliable VoiceOver cue for a state
     // change (ui_design.md §9). Level ticks never reach here (render early-returns on those).
-    private func announce(_ state: HUDState) {
-        guard let text = state.voiceOverAnnouncement, !text.isEmpty else { return }
+    private func announce(_ state: HUDState, after previous: HUDState? = nil) {
+        guard let text = previous.map(state.voiceOverAnnouncement(after:)) ?? state.voiceOverAnnouncement,
+              !text.isEmpty else { return }
         let element: Any = panel ?? NSApp as Any
         NSAccessibility.post(
             element: element,
@@ -175,6 +191,10 @@ final class HUDController: HUDPresenting {
                 .priority: NSAccessibilityPriorityLevel.high.rawValue,
             ])
     }
+
+    var panelCanBecomeKey: Bool { panel?.canBecomeKey ?? false }
+    var panelFrame: NSRect? { panel?.frame }
+    var panelContentView: NSView? { panel?.contentView }
 
     func relinquishKeyFocus() {
         guard let panel, panel.isKeyWindow else { return }
@@ -296,7 +316,8 @@ final class HUDController: HUDPresenting {
 }
 
 private final class KeyablePanel: NSPanel {
-    override var canBecomeKey: Bool { true }
+    var allowsKey: () -> Bool = { true }
+    override var canBecomeKey: Bool { allowsKey() }
 }
 
 // A minimal flow layout: wraps to a new row when the next subview would exceed the proposed width. Used
@@ -346,20 +367,96 @@ private struct HUDView: View {
     let onInsertLocalTranscript: () -> Void
     let onPasteLast: () -> Void
     let onErrorAction: (HUDErrorAction) -> Void
+    let onChoose: (Int, String) -> Void
+    let onCancelChoice: (Int) -> Void
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
+        if case .choice(let prompt, _, _) = model.state {
+            card(choiceBody(prompt))
+        } else {
+            card(standardBody)
+        }
+    }
+
+    private func card(_ content: some View) -> some View {
+        content
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .frame(width: model.state.panelWidth, alignment: .leading)
+            .frame(minHeight: model.state.contentHeight, alignment: .leading)
+            // A light card usually floats over dark content, which bleeds through the standard material as grey.
+            .background(colorScheme == .light ? .thickMaterial : .regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(
+                Color.primary.opacity(contrast == .increased ? 0.5 : 0.2),
+                lineWidth: contrast == .increased ? 1.5 : 1))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityIdentifier(AccessibilityID.HUD.panel)
+    }
+
+    private func choiceBody(_ prompt: VoiceCommandChoicePrompt) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            header
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(prompt.rows, id: \.identity) { row in
+                    Button { onChoose(prompt.id, row.identity) } label: {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("\(row.number)")
+                                .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                                .frame(minWidth: 14, alignment: .trailing)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(row.name).font(.system(size: 13))
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text(row.detail).font(.system(size: 11)).foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 4).padding(.horizontal, 6)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(HUDChoiceRowButtonStyle())
+                    .accessibilityLabel("\(row.number), \(row.name), \(row.detail)")
+                    .accessibilityIdentifier(AccessibilityID.HUD.choiceRow)
+                }
+            }
+            Text(prompt.hint).font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button { onCancelChoice(prompt.id) } label: { Text("Cancel") }
+                .buttonStyle(HUDActionButtonStyle())
+                .accessibilityIdentifier(AccessibilityID.HUD.choiceCancel)
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            icon
+            VStack(alignment: .leading, spacing: 2) {
+                Text(primary).font(.system(size: 13, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let secondary { secondaryText(secondary) }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func secondaryText(_ text: String) -> some View {
+        Text(text).font(.system(size: 11)).foregroundStyle(.secondary)
+            .lineLimit(model.state.secondaryIsHeardExcerpt ? 2 : nil)
+            .truncationMode(.tail)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var standardBody: some View {
         VStack(spacing: 8) {
             HStack(spacing: 10) {
                 icon
                 VStack(alignment: .leading, spacing: 2) {
                     Text(primary).font(.system(size: 13, weight: .semibold))
                         .fixedSize(horizontal: false, vertical: true)
-                    if let secondary {
-                        Text(secondary).font(.system(size: 11)).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    if let secondary { secondaryText(secondary) }
                     if !model.state.dataBoundaryBadges.isEmpty {
                         // Wrap to as many rows as needed so badges never clip; each is `.fixedSize()` so a
                         // label never ellipsizes.
@@ -377,18 +474,6 @@ private struct HUDView: View {
                     .buttonStyle(HUDActionButtonStyle())
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(width: 280, alignment: .leading)
-        .frame(minHeight: model.state.contentHeight, alignment: .leading)
-        // A light card usually floats over dark content, which bleeds through the standard material as grey.
-        .background(colorScheme == .light ? .thickMaterial : .regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(
-            Color.primary.opacity(contrast == .increased ? 0.5 : 0.2),
-            lineWidth: contrast == .increased ? 1.5 : 1))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(accessibilityLabel)
-        .accessibilityIdentifier(AccessibilityID.HUD.panel)
     }
 
     private var hasAction: Bool {
@@ -420,6 +505,11 @@ private struct HUDView: View {
         switch model.state.indicator {
         case .ready:
             Image(systemName: "mic").foregroundStyle(.secondary)
+        case .choice:
+            Image(systemName: "list.number")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 30, height: 30)
         case .preparing:
             PreparingIcon()
         case .recording:
@@ -431,6 +521,11 @@ private struct HUDView: View {
                 Image(systemName: outcomeSymbol(outcome))
                     .font(.system(size: outcomeIconSize(outcome), weight: .semibold))
                     .foregroundStyle(outcomeStyle(outcome))
+                    .frame(width: 30, height: 30)
+            } else if case .commandDone = model.state {
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.green)
                     .frame(width: 30, height: 30)
             }
         case .error:
@@ -506,6 +601,13 @@ private struct PreparingIcon: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulse)
         .onAppear { pulse = true }
         .accessibilityLabel("Loading speech model")
+    }
+}
+
+private struct HUDChoiceRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(Color.primary.opacity(configuration.isPressed ? 0.12 : 0.04), in: RoundedRectangle(cornerRadius: 7))
     }
 }
 

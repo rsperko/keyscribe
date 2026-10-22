@@ -21,7 +21,17 @@ struct ModesSettingsView: View {
                 ModeLoadFailureBanner(failures: model.loadFailures)
                 Divider()
             }
-            PaneNoticeBanner(notices: [model.notice].compactMap { $0 })
+            ModesPaneNotices(model: model, voiceCommands: model.voiceCommands)
+            if model.notice == nil, let applied = model.undoableMove {
+                HStack {
+                    Text(ShortcutMoveCopy(applied.move, notice: nil).done).font(.caption)
+                    Spacer()
+                    Button("Undo") { model.undoMove() }
+                        .accessibilityIdentifier(AccessibilityID.Mode.List.moveShortcutUndo)
+                }
+                .padding(10)
+                Divider()
+            }
             paneBody
         }
     }
@@ -57,22 +67,31 @@ struct ModesSettingsView: View {
                             mode: mode, failure: model.loadFailure(for: mode.id),
                             unknownKeys: model.unknownKeys[mode.id] ?? [],
                             onReveal: { model.revealModeFile(mode.id) })
-                        ModeEditorView(
-                            mode: mode, allModes: model.modes,
-                            connections: model.connections, fragmentIds: model.fragmentIds,
-                            fragmentNames: model.fragmentNames,
-                            autofocusName: model.lastCreatedId == mode.id,
-                            onUpdate: { model.update($0) },
-                            onAddFragmentFile: model.addFragmentFile(named:),
-                            onLoadFragmentBody: model.fragmentBody,
-                            onSaveFragmentBody: model.saveFragmentBody,
-                            onCloseFragment: model.closeFragment(_:fromMode:),
-                            onRevealFragment: model.revealFragment,
-                            onConsumeFocus: model.consumeCreated,
-                            onDuplicate: { model.duplicate(mode) },
-                            onEditVocabulary: { onEditVocabulary(mode.id) },
-                            onDelete: { modePendingDelete = mode })
-                            .disabled(model.loadFailure(for: mode.id) != nil)
+                        Group {
+                            if mode.runsVoiceCommands {
+                                VoiceCommandsEditorView(
+                                    mode: mode, allModes: model.modes, onUpdate: { model.update($0) },
+                                    onMoveShortcut: model.proposeMove(to:), model: model.voiceCommands,
+                                    onEditVocabulary: { onEditVocabulary(mode.id) })
+                            } else {
+                                ModeEditorView(
+                                    mode: mode, allModes: model.modes,
+                                    connections: model.connections, fragmentIds: model.fragmentIds,
+                                    fragmentNames: model.fragmentNames,
+                                    autofocusName: model.lastCreatedId == mode.id,
+                                    onUpdate: { model.update($0) },
+                                    onAddFragmentFile: model.addFragmentFile(named:),
+                                    onLoadFragmentBody: model.fragmentBody,
+                                    onSaveFragmentBody: model.saveFragmentBody,
+                                    onCloseFragment: model.closeFragment(_:fromMode:),
+                                    onRevealFragment: model.revealFragment,
+                                    onConsumeFocus: model.consumeCreated,
+                                    onDuplicate: { model.duplicate(mode) },
+                                    onEditVocabulary: { onEditVocabulary(mode.id) },
+                                    onDelete: { modePendingDelete = mode })
+                            }
+                        }
+                        .disabled(model.loadFailure(for: mode.id) != nil)
                     }
                     .id(mode.id)
                 } else {
@@ -99,6 +118,20 @@ struct ModesSettingsView: View {
                 },
                 onCancel: { showingAddMode = false })
         }
+        .alert(moveCopy?.title ?? "", isPresented: Binding(
+            get: { model.pendingMove != nil },
+            set: { if !$0 { model.cancelMove() } }))
+        {
+            Button("Move Shortcut") {
+                if moveNotice != nil { model.voiceCommands.notices.acknowledge(.apps) }
+                model.confirmMove()
+            }
+            .accessibilityIdentifier(AccessibilityID.Mode.List.moveShortcutConfirm)
+            Button("Cancel", role: .cancel) { model.cancelMove() }
+                .accessibilityIdentifier(AccessibilityID.Mode.List.moveShortcutCancel)
+        } message: {
+            Text(moveCopy?.message ?? "")
+        }
         .confirmationDialog(
             "Delete this mode?", isPresented: Binding(
                 get: { modePendingDelete != nil },
@@ -117,11 +150,24 @@ struct ModesSettingsView: View {
         }
     }
 
+    private var moveNotice: String? {
+        guard model.pendingMove?.destination.runsVoiceCommands == true,
+              model.voiceCommands.notices.needsAcknowledgment(.apps) else { return nil }
+        return VoiceCommandNotices.Kind.apps.message
+    }
+
+    private var moveCopy: ShortcutMoveCopy? {
+        model.pendingMove.map { ShortcutMoveCopy($0, notice: moveNotice) }
+    }
+
     private func issue(for mode: Mode) -> ModeSummaryIssue? {
         guard mode.enabled else { return nil }
         // A trigger the shadowing pass drops means this mode can never start — worth saying in the list,
         // since the trigger row that explains it is only visible once this mode is selected.
         if TriggerKeyConflicts.conflict(for: mode, in: model.modes)?.kind == .unreachable {
+            return .triggerUnreachable
+        }
+        if mode.runsVoiceCommands, VoiceCommandTriggers.isShutOut(model.modes) {
             return .triggerUnreachable
         }
         guard let rewrite = mode.aiRewrite else { return nil }
@@ -395,7 +441,8 @@ enum ModeSummary {
     static func whenRuns(_ mode: Mode) -> String {
         let constrained = !mode.constraints.isEmpty
         // The Direct floor: shortcut first (it owns Fn), plus its fallback role.
-        if mode.isSystem { return triggerDisplay(mode) ?? "Fallback" }
+        if mode.runsVoiceCommands { return triggerDisplay(mode) ?? "Off — no shortcut" }
+        if mode.isDirect { return triggerDisplay(mode) ?? "Fallback" }
         // A constrained mode with no shortcut/phrase never auto-runs (Fn goes to Plain Dictation) — it's
         // menu-reachable, so don't imply it's automatic.
         if let shortcuts = triggerDisplay(mode) {
@@ -413,5 +460,15 @@ enum ModeSummary {
         mode.constraints.isEmpty
             ? "Available in every app and website. Add a place to limit this mode to it."
             : "Available only in these places."
+    }
+}
+
+private struct ModesPaneNotices: View {
+    @ObservedObject var model: ModesSettingsModel
+    @ObservedObject var voiceCommands: VoiceCommandsSettingsModel
+
+    var body: some View {
+        let fileNotice = model.selected?.runsVoiceCommands == true ? voiceCommands.fileNotice : nil
+        PaneNoticeBanner(notices: [model.notice, fileNotice].compactMap { $0 })
     }
 }

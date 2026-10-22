@@ -38,6 +38,7 @@ final class DictationController {
     private let activeEngineUsable: @MainActor (any SpeechEngine) -> Bool
     private let isSessionLocked: @MainActor () -> Bool
     private let llmClient: any LLMClient
+    private let voiceCommands: VoiceCommandRunning
     private let permits: @Sendable (Connection) -> Bool
     private let recordModelLoadFailure: @MainActor (_ engineId: String, _ timedOut: Bool, _ error: String) -> Void
     private let effects: DuringDictationEffects
@@ -78,6 +79,7 @@ final class DictationController {
         var capturedRecognitionBias: Bool?
         var activeMode: Mode?
         var eligibleModes: [Mode] = []
+        var choiceId: Int?
         var routingContext = RoutingContext()
         var modeChoice: ModeChoiceReason = .fallback
         var routedPhrase: String?
@@ -137,6 +139,11 @@ final class DictationController {
     func transcribeGateBusy() async -> Bool { await transcribeGate.isBusy }
 
     private var hideTask: Task<Void, Never>?
+    private var choicePrompt: VoiceCommandChoicePrompt?
+    private var choiceEntry: HistoryEntry?
+    private var choiceExpiryTask: Task<Void, Never>?
+    private var clickedChoiceTask: Task<Void, Never>?
+    private var dictationStarts = 0
     private var idleEvictionTask: Task<Void, Never>?
     private var preconnectTask: Task<Void, Never>?
     private var idleEvictionEngine: (any SpeechEngine)?
@@ -155,6 +162,7 @@ final class DictationController {
     }
     private(set) var lastRecord: DictationRecord?
     private(set) var nextModeOverrideID: String?
+    private var screenLocks = 0
 
     private let maxRecordingSeconds: Double
     private let limitWarningSeconds: Double
@@ -192,7 +200,7 @@ final class DictationController {
         guard case .recording = machine.state else { return }
         let quantized = (level * 20).rounded() / 20
         lastRenderedLevel = quantized
-        hud?.render(recordingHUD(level: quantized))
+        present(recordingHUD(level: quantized))
     }
 
     private func recordingHUD(level: Float) -> HUDState {
@@ -214,6 +222,8 @@ final class DictationController {
     var onRecordingChanged: ((Bool) -> Void)?
 
     var onBecameIdle: (() -> Void)?
+
+    var onHistoryUpdated: (() -> Void)?
 
     var isBusy: Bool { machine.isBusy }
     var hasResult: Bool { lastResult != nil }
@@ -260,6 +270,7 @@ final class DictationController {
         },
         isSessionLocked: @escaping @MainActor () -> Bool = { SessionLockMonitor.isSessionLocked() },
         llmClient: any LLMClient = HTTPLLMClient(),
+        voiceCommands: VoiceCommandRunning? = nil,
         recordModelLoadFailure: @escaping @MainActor (String, Bool, String) -> Void = {
             ModelLoadDiagnosticsWriter.record(engineId: $0, timedOut: $1, error: $2)
         },
@@ -290,6 +301,7 @@ final class DictationController {
         self.activeEngineUsable = activeEngineUsable
         self.isSessionLocked = isSessionLocked
         self.llmClient = llmClient
+        self.voiceCommands = voiceCommands ?? VoiceCommandRunner()
         self.permits = permits
         self.recordModelLoadFailure = recordModelLoadFailure
         self.maxRecordingSeconds = maxRecordingSeconds
@@ -334,6 +346,7 @@ final class DictationController {
     func updateSettings(_ settings: Settings) {
         let previousEviction = self.settings.stt.eviction
         self.settings = settings
+        if !settings.features.isEnabled(.voiceCommands) { stopVoiceCommandChoice() }
         audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         if !isBusy, let engine = idleEvictionEngine {
             scheduleIdleEviction(after: 0, engine: engine)
@@ -535,7 +548,8 @@ final class DictationController {
 
     func acknowledgeNextMode() {
         guard !isBusy, let name = nextModeOverrideName else { return }
-        hud?.render(.ready(mode: name))
+        dismissVoiceCommandChoice()
+        present(.ready(mode: name))
         scheduleHide()
     }
 
@@ -551,6 +565,7 @@ final class DictationController {
         // A wake key can reach the tap while the login window still owns the console.
         guard !isSessionLocked() else { return }
         guard machine.beginArming() else { playBusyPressCue(); return }
+        dictationStarts += 1
         activeStartTrigger = triggerKey
         latchedTriggerName = (pressStyle == .tapToToggle)
             ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
@@ -601,7 +616,7 @@ final class DictationController {
                 guard !Task.isCancelled else { return }
                 // A late resolution must not show the HUD before admission opens.
                 if self.machine.state == .recording {
-                    self.hud?.render(self.recordingHUD(level: max(0, self.lastRenderedLevel)))
+                    self.present(self.recordingHUD(level: max(0, self.lastRenderedLevel)))
                 }
             }
         } else {
@@ -612,7 +627,7 @@ final class DictationController {
         }
 
         // Keep the HUD hidden until audio admission opens; showing it earlier invites discarded speech.
-        hud?.render(.hidden)
+        present(.hidden)
 
         warmActiveEngine()
         prepareActiveEngineForDictation()
@@ -800,7 +815,7 @@ final class DictationController {
             self.onRecordingChanged?(true)
             self.startRecordingLimit()
             self.pollLevelWhileRecording()
-            self.hud?.render(self.recordingHUD(level: 0))
+            self.present(self.recordingHUD(level: 0))
         }
     }
 
@@ -874,7 +889,7 @@ final class DictationController {
         machine.beginTranscribing()
         // Flip the HUD to transcribing now so the tail-drain (commit-on-release flush, ~one buffer) is
         // invisible; finishDraining keeps the engine running just long enough to capture the final word.
-        hud?.render(.transcribing(mode: currentModeName))
+        present(.transcribing(mode: currentModeName))
         let drainStart = DispatchTime.now()
         dictationTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -970,6 +985,391 @@ final class DictationController {
         let clearing = SpeechPresenceGate.chunksClearingGate(reading.chunkProbabilities)
         Log.audio.debug("vad \(reading.presence.rawValue, privacy: .public) clearing=\(clearing, privacy: .public)/\(reading.chunkProbabilities.count, privacy: .public) need=\(SpeechPresenceGate.minSpeechChunks, privacy: .public) maxP=\(reading.maxProbability, privacy: .public) peak=\(reading.peak, privacy: .public) model=\(reading.modelUsed, privacy: .public) speechStart=\(reading.speechStart ?? -1, privacy: .public) \(reading.latencyMs, privacy: .public)ms")
         return reading
+    }
+
+    private func finishVoiceCommand(heard: String) async {
+        guard settings.features.isEnabled(.voiceCommands) else {
+            finishError("Voice commands are turned off.")
+            return
+        }
+        if captureWasLost {
+            finishCommandCaptureLost()
+            return
+        }
+        guard heard.contains(where: { !$0.isWhitespace }) else {
+            finishNoSpeech()
+            return
+        }
+        let excerpt = targetMayHoldSecureText ? nil : HeardExcerpt(heard: heard)
+        let origin = capturedSnapshot.flatMap { snapshot in
+            snapshot.bundleId.map { VoiceCommandOrigin(bundleId: $0, pid: snapshot.pid, windowId: snapshot.focusedWindowId) }
+        }
+        let start = DispatchTime.now()
+        let transcript = plan.voiceCommandText(heard: heard, mode: activeMode)
+        let late = LateCommandResult()
+        let commands = config.voiceCommands
+        let locksAtStart = screenLocks
+        // Lookup stays cancellable (still transcribing); the first check that passes is where acting begins.
+        let stillWanted: @MainActor () -> Bool = { [weak self] in
+            guard let self, !Task.isCancelled, !self.captureWasLost, self.screenLocks == locksAtStart,
+                  self.settings.features.isEnabled(.voiceCommands) else { return false }
+            if self.machine.state == .transcribing {
+                guard self.machine.beginInserting() else { return false }
+                self.hud?.relinquishKeyFocus()
+            }
+            return self.machine.state == .inserting
+        }
+        let onLateResult: @MainActor (VoiceCommandOutcome) -> Void = { [weak self] outcome in
+            late.outcome = outcome
+            self?.applyLateCommandResult(late)
+        }
+        let reply: VoiceCommandAnswer
+        if let id = session?.choiceId {
+            reply = await voiceCommands.answer(
+                transcript, choice: id, places: commands.places, scripts: commands.scripts, origin: origin,
+                stillWanted: stillWanted, onLateResult: onLateResult)
+        } else {
+            reply = .command(await voiceCommands.run(
+                transcript: transcript, places: commands.places, scripts: commands.scripts, origin: origin,
+                stillWanted: stillWanted, onLateResult: onLateResult))
+        }
+        if Task.isCancelled { return }
+        building.stageMillis[.insert] = elapsedMs(since: start)
+        if voiceCommands.pendingChoice == nil { clearVoiceCommandChoice() }
+        switch reply {
+        case .command(let outcome):
+            finishCommand(outcome, heard: heard, transcript: transcript, late: late, excerpt: excerpt)
+        case .selected(let selection):
+            finishCommand(selection.outcome, heard: heard, transcript: transcript, late: late,
+                          resultPrefix: Self.selectionPrefix(selection))
+        case .cancelled(let request):
+            finish(machine: .finish(.inserted), cue: .cancel, state: .hidden, record: (.command, nil),
+                   history: HistoryWrite(heard: heard, transformed: transcript,
+                                         result: "Cancelled the choice for \u{201C}\(request)\u{201D}.", insertion: .inserted,
+                                         rewrite: nil, outcome: .commandCancelled))
+        case .retry(let message, let reason):
+            let shown = reason == .unrecognizedAnswer ? excerpt : nil
+            let status: VoiceCommandChoiceStatus = shown.map { .waiting(note: nil, heard: $0) } ?? .waiting(note: message)
+            let state: HUDState = choicePrompt.map { .choice($0, status: status) } ?? .error(message: message, action: nil)
+            finish(machine: .finish(.inserted), cue: nil, endsQuietly: true, state: state,
+                   hideAfter: choicePrompt == nil ? 3 : nil, record: (.command, nil),
+                   history: HistoryWrite(heard: heard, transformed: transcript, result: message, insertion: .inserted,
+                                         rewrite: nil, outcome: .commandNeedsChoice))
+        }
+    }
+
+    private static func selectionPrefix(_ selection: VoiceCommandSelection) -> String {
+        "Selected \(selection.name) for \u{201C}\(selection.request)\u{201D}: "
+    }
+
+    private struct CommandPresentation {
+        let state: HUDState
+        let cue: DuringDictationEffects.EndCue
+        let hideAfter: Double
+        let outcome: HistoryEntry.Outcome
+        let result: String
+        let failure: String?
+    }
+
+    private static let unrecognizedCommandTitle = "Command not recognized"
+
+    private static func presentation(
+        of outcome: VoiceCommandOutcome, resultPrefix: String, excerpt: HeardExcerpt? = nil
+    ) -> CommandPresentation? {
+        switch outcome {
+        case .done(let summary, let command):
+            CommandPresentation(state: .commandDone(summary: summary), cue: .success, hideAfter: 1.5, outcome: .command,
+                                result: resultPrefix + command, failure: nil)
+        case .started(let summary, let command):
+            CommandPresentation(state: .commandDone(summary: summary, detail: HUDState.commandStillRunningDetail),
+                                cue: .success, hideAfter: 1.5, outcome: .commandStarted, result: resultPrefix + command,
+                                failure: nil)
+        case .failed(let message, let command, let action, let kind):
+            CommandPresentation(state: kind == .unrecognizedCommand
+                                    ? .error(message: unrecognizedCommandTitle, action: action, heard: excerpt)
+                                    : .error(message: message, action: action),
+                                cue: .error, hideAfter: 3,
+                                outcome: .commandFailed, result: resultPrefix + (command ?? ""), failure: message)
+        case .needsChoice, .abandoned:
+            nil
+        }
+    }
+
+    private func finishCommand(
+        _ outcome: VoiceCommandOutcome, heard: String, transcript: String, late: LateCommandResult, resultPrefix: String = "",
+        excerpt: HeardExcerpt? = nil
+    ) {
+        if let shown = Self.presentation(of: outcome, resultPrefix: resultPrefix, excerpt: excerpt) {
+            let failed = shown.failure != nil
+            var write = HistoryWrite(heard: heard, transformed: transcript, result: shown.result,
+                                     insertion: failed ? .failed : .inserted, rewrite: nil, failureReason: shown.failure,
+                                     outcome: shown.outcome)
+            let started = shown.outcome == .commandStarted
+            if started {
+                write.onRecorded = { [weak self] entry in
+                    late.entry = entry
+                    self?.applyLateCommandResult(late)
+                }
+            }
+            finish(machine: .finish(failed ? .failed : .inserted), cue: shown.cue, state: shown.state,
+                   hideAfter: shown.hideAfter, record: failed ? (.failed, "voice command did not run") : (.command, nil),
+                   history: write)
+            if started {
+                late.started = true
+                applyLateCommandResult(late)
+            }
+            return
+        }
+        switch outcome {
+        case .done, .started, .failed:
+            break
+        case .abandoned:
+            if captureWasLost {
+                finishCommandCaptureLost()
+            } else if machine.isBusy {
+                finish(machine: .cancel, cue: .cancel, state: .hidden)
+            }
+        case .needsChoice(let pending):
+            let prompt = choicePrompt(for: pending)
+            choicePrompt = prompt
+            choiceEntry = nil
+            let rows = pending.rows.map { "\($0.number). \($0.name)" }.joined(separator: ", ")
+            var write = HistoryWrite(heard: heard, transformed: transcript, result: "Asked to choose: \(rows)",
+                                     insertion: .inserted, rewrite: nil, outcome: .commandNeedsChoice)
+            write.onRecorded = { [weak self] entry in
+                guard let self, self.choicePrompt?.id == pending.id else { return }
+                self.choiceEntry = entry
+            }
+            finish(machine: .finish(.inserted), cue: nil, endsQuietly: true,
+                   state: .choice(prompt, status: .waiting(note: nil)), record: (.command, nil), history: write)
+            scheduleChoiceExpiry(pending.id)
+        }
+    }
+
+    private func choicePrompt(for pending: VoiceCommandPendingChoice) -> VoiceCommandChoicePrompt {
+        let shortcut = plan.modes.first { $0.runsVoiceCommands }?.triggerKeys.first
+            .flatMap { try? KeyDescriptor(parsing: $0.key) }?.displayString
+        let use = shortcut.map { "Use \($0)" } ?? "Use your Voice Commands shortcut"
+        let hint = (pending.choice.note.map { "\($0) " } ?? "")
+            + "\(use) and say \u{201C}two\u{201D} or \u{201C}the second one\u{201D}. "
+            + "Say \u{201C}cancel\u{201D} to dismiss, or give a new command."
+        return VoiceCommandChoicePrompt(id: pending.id, title: pending.choice.title, rows: pending.rows, hint: hint)
+    }
+
+    private static func choiceWaiting(after state: HUDState?) -> VoiceCommandChoiceStatus {
+        switch state {
+        case .error(let message, _, _): .waiting(note: message)
+        case .complete(.noSpeech, _): .waiting(note: "No speech detected")
+        case .choice(_, .waiting(let note, let heard), _): .waiting(note: note, heard: heard)
+        default: .waiting(note: nil)
+        }
+    }
+
+    private var answeringChoicePrompt: VoiceCommandChoicePrompt? {
+        if session != nil, session?.modeReady != true, let prompt = pendingVoiceCommandChoice { return prompt }
+        guard let id = session?.choiceId, let prompt = choicePrompt, prompt.id == id,
+              voiceCommands.pendingChoice?.id == id else { return nil }
+        return prompt
+    }
+
+    private func present(_ state: HUDState) {
+        if let prompt = answeringChoicePrompt {
+            switch state {
+            case .recording(_, let level, let latched, _):
+                hud?.render(.choice(prompt, status: .listening(latchedTrigger: latched), level: level))
+                return
+            case .transcribing, .loadingModel:
+                hud?.render(.choice(prompt, status: .working))
+                return
+            case .hidden:
+                hud?.render(.choice(prompt, status: .waiting(note: nil)))
+                return
+            default:
+                break
+            }
+        } else if case .hidden = state, let prompt = pendingVoiceCommandChoice {
+            hud?.render(.choice(prompt, status: .waiting(note: nil)))
+            return
+        }
+        hud?.render(state)
+    }
+
+    private func claimOrDismissVoiceCommandChoice() {
+        guard voiceCommands.pendingChoice != nil else { return }
+        guard activeMode?.runsVoiceCommands == true, settings.features.isEnabled(.voiceCommands) else {
+            dismissVoiceCommandChoice()
+            return
+        }
+        choiceExpiryTask?.cancel()
+        session?.choiceId = voiceCommands.claimChoice()
+        if session?.choiceId == nil { dismissVoiceCommandChoice() }
+    }
+
+    private func scheduleChoiceExpiry(_ id: Int) {
+        choiceExpiryTask?.cancel()
+        guard let seconds = voiceCommands.choiceSecondsLeft(id) else { return }
+        choiceExpiryTask = Task { @MainActor [weak self, sleep = choiceExpirySleep] in
+            await sleep(seconds)
+            guard let self, !Task.isCancelled else { return }
+            if self.voiceCommands.expireChoice(id) {
+                self.clearVoiceCommandChoice()
+                if !self.isBusy { self.hud?.render(.hidden) }
+            } else if self.voiceCommands.choiceSecondsLeft(id) != nil {
+                self.scheduleChoiceExpiry(id)
+            }
+        }
+    }
+
+    var choiceExpirySleep: @MainActor (Double) async -> Void = { try? await Task.sleep(for: .seconds($0)) }
+
+    private func clearVoiceCommandChoice() {
+        choiceExpiryTask?.cancel()
+        choiceExpiryTask = nil
+        choicePrompt = nil
+        choiceEntry = nil
+    }
+
+    var pendingVoiceCommandChoice: VoiceCommandChoicePrompt? {
+        guard let prompt = choicePrompt, voiceCommands.pendingChoice?.id == prompt.id else { return nil }
+        return prompt
+    }
+
+    func dismissVoiceCommandChoice() {
+        let shown = choicePrompt != nil
+        if let pending = voiceCommands.pendingChoice { voiceCommands.dismissChoice(pending.id) }
+        clearVoiceCommandChoice()
+        guard shown, !isBusy || machine.state == .arming else { return }
+        hud?.render(.hidden)
+    }
+
+    private func stopVoiceCommandChoice() {
+        clickedChoiceTask?.cancel()
+        clickedChoiceTask = nil
+        dismissVoiceCommandChoice()
+    }
+
+    func noteAppActivated(bundleId: String) {
+        guard let pending = voiceCommands.pendingChoice, bundleId != pending.origin?.bundleId else { return }
+        dismissVoiceCommandChoice()
+    }
+
+    func voiceCommandConfigurationChanged() {
+        guard let pending = voiceCommands.pendingChoice else { return }
+        let current = config.voiceCommands
+        let available = settings.features.isEnabled(.voiceCommands)
+            && config.modes.contains { $0.runsVoiceCommands && $0.enabled }
+        guard !available || current.places != pending.places || current.scripts != pending.scripts else { return }
+        dismissVoiceCommandChoice()
+    }
+
+    func chooseVoiceCommand(choice id: Int, candidate identity: String) {
+        guard settings.features.isEnabled(.voiceCommands), let pending = voiceCommands.takeChoice(id) else { return }
+        let wasAnswering = session?.choiceId == id
+        let entry = choiceEntry
+        clearVoiceCommandChoice()
+        if wasAnswering { cancel() }
+        let commands = config.voiceCommands
+        let late = LateCommandResult()
+        let startsAtClick = dictationStarts
+        clickedChoiceTask?.cancel()
+        clickedChoiceTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let stillWanted: @MainActor () -> Bool = { [weak self] in
+                !Task.isCancelled && self?.dictationStarts == startsAtClick
+                    && self?.settings.features.isEnabled(.voiceCommands) == true
+            }
+            guard let selection = await self.voiceCommands.runChoice(
+                pending, candidate: identity, places: commands.places, scripts: commands.scripts,
+                stillWanted: stillWanted,
+                onLateResult: { [weak self] outcome in
+                    late.outcome = outcome
+                    self?.applyLateCommandResult(late)
+                })
+            else { return }
+            self.finishClickedChoice(selection, entry: entry, late: late, startsAtClick: startsAtClick)
+        }
+    }
+
+    private func finishClickedChoice(
+        _ selection: VoiceCommandSelection, entry: HistoryEntry?, late: LateCommandResult, startsAtClick: Int
+    ) {
+        guard let shown = Self.presentation(of: selection.outcome, resultPrefix: Self.selectionPrefix(selection)) else { return }
+        if let entry, let history {
+            var updated = entry
+            updated.outcome = shown.outcome
+            updated.result = shown.result
+            updated.failureReason = shown.failure
+            late.entry = updated
+            historyWriteQueue.async { [weak self] in
+                guard history.replace(entry, with: updated) else { return }
+                Task { @MainActor in self?.onHistoryUpdated?() }
+            }
+        }
+        let show = { [weak self] in
+            guard let self, self.dictationStarts == startsAtClick, !self.isBusy,
+                  self.voiceCommands.pendingChoice == nil else { return }
+            self.effects.alert(self.settings.duringDictation, cue: shown.cue)
+            self.hud?.render(shown.state)
+            self.scheduleHide(after: shown.hideAfter)
+        }
+        runWhenIdle(show)
+        if shown.outcome == .commandStarted {
+            late.started = true
+            applyLateCommandResult(late)
+        }
+    }
+
+    func cancelVoiceCommandChoice(choice id: Int) {
+        guard voiceCommands.takeChoice(id) != nil else { return }
+        let wasAnswering = session?.choiceId == id
+        let entry = choiceEntry
+        clearVoiceCommandChoice()
+        if wasAnswering { cancel() }
+        if !isBusy { hud?.render(.hidden) }
+        guard let entry, let history else { return }
+        var updated = entry
+        updated.outcome = .commandCancelled
+        historyWriteQueue.async { [weak self] in
+            guard history.replace(entry, with: updated) else { return }
+            Task { @MainActor in self?.onHistoryUpdated?() }
+        }
+    }
+
+    private final class LateCommandResult {
+        var started = false
+        var entry: HistoryEntry?
+        var outcome: VoiceCommandOutcome?
+        var applied = false
+    }
+
+    private func applyLateCommandResult(_ late: LateCommandResult) {
+        guard late.started, !late.applied, let outcome = late.outcome else { return }
+        late.applied = true
+        let failure: String?
+        switch outcome {
+        case .failed(let message, _, _, _): failure = message
+        case .done: failure = nil
+        case .started, .needsChoice, .abandoned: return
+        }
+        if let entry = late.entry, let history {
+            var updated = entry
+            updated.outcome = failure == nil ? .command : .commandFailed
+            updated.failureReason = failure
+            historyWriteQueue.async { [weak self] in
+                guard history.replace(entry, with: updated) else { return }
+                Task { @MainActor in self?.onHistoryUpdated?() }
+            }
+        }
+        guard let failure, !isBusy, voiceCommands.pendingChoice == nil else { return }
+        present(.error(message: failure, action: nil))
+        scheduleHide(after: 4)
+    }
+
+    private func finishCommandCaptureLost() {
+        log.error("capture lost mid-recording — voice command not run")
+        finish(machine: .finish(.failed), cue: .error,
+               state: .error(message: "The microphone stopped, so the command did not run.", action: nil),
+               hideAfter: 8, record: (.failed, "capture lost mid-recording"))
     }
 
     private func finishNoSpeech() {
@@ -1112,7 +1512,7 @@ final class DictationController {
         // bring-up task unwinds first.
         machine.beginCancellingBringUp()
         if !silently { effects.end(settings.duringDictation, cue: .cancel) }
-        hud?.render(.hidden)
+        present(.hidden)
         clearRewriteEscapeHatch()
     }
 
@@ -1152,8 +1552,10 @@ final class DictationController {
         // A menu-picked one-shot mode is an explicit choice that bypasses the context gate — it is the
         // deliberate way to run a constrained mode outside its apps (design.md §4.3). It therefore also
         // outranks a "nothing can serve this press" verdict, so it is read BEFORE that verdict is acted on.
-        let override = nextModeOverrideID.flatMap { id in modes.first { $0.id == id && $0.enabled } }
-        nextModeOverrideID = nil
+        // The Voice Commands shortcut never speaks into a field, so it leaves the one-shot for the next dictation.
+        let commandPress = resolved?.reason == .triggerKey && resolved?.mode.runsVoiceCommands == true
+        let override = commandPress ? nil : nextModeOverrideID.flatMap { id in modes.first { $0.id == id && $0.enabled } }
+        if !commandPress { nextModeOverrideID = nil }
         let chosen: Mode
         let choice: ModeChoiceReason
         if let override {
@@ -1171,6 +1573,7 @@ final class DictationController {
             ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
         activeMode = securePolicyApplied(chosen)
         session?.modeReady = true
+        claimOrDismissVoiceCommandChoice()
         onModeAndSnapshotReady()
     }
 
@@ -1215,7 +1618,7 @@ final class DictationController {
     // secure-aware snapshot could not prove the field is safe because focus moved during the probe) is
     // treated identically — forced fully local (KS-01).
     private func securePolicyApplied(_ mode: Mode?) -> Mode? {
-        guard capturedSnapshot?.isSecureField == true || session?.targetUnconfirmed == true else { return mode }
+        guard targetMayHoldSecureText else { return mode }
         return mode?.localOnlyForSecureField()
     }
 
@@ -1488,7 +1891,7 @@ final class DictationController {
             loadingHUD.cancel()
             // Flip back to Transcribing for the inference that follows. A no-op (render dedupes) unless the
             // loading-model state was actually shown during a slow load.
-            hud?.render(.transcribing(mode: currentModeName))
+            present(.transcribing(mode: currentModeName))
             building.stageMillis[.modelWait] = elapsedMs(since: modelWaitStart)
 
             let transcribeStart = DispatchTime.now()
@@ -1555,6 +1958,20 @@ final class DictationController {
             return
         }
 
+        // Fold the commit-time probe in before anything reads the flag. Secure is sticky and only the flag is
+        // adopted: bundleId/pid must stay the PRESS-time target, since decideInsertion compares captured
+        // against current to detect focus moves.
+        let secureAtCommit = await commitSecureProbe.value
+        if Task.isCancelled { return }
+        if secureAtCommit, capturedSnapshot != nil {
+            capturedSnapshot?.isSecureField = true
+        }
+
+        if activeMode?.runsVoiceCommands == true {
+            await finishVoiceCommand(heard: raw)
+            return
+        }
+
         // Phase B (design.md §4.3): a trigger-phrase suffix re-routes to that mode's pipeline
         // and is stripped from the transcript; otherwise the Phase-A mode stands.
         let eligible = session?.eligibleModes ?? []
@@ -1562,12 +1979,6 @@ final class DictationController {
         if let phraseModeId = routed.routedModeId, eligible.contains(where: { $0.id == phraseModeId }) {
             session?.modeChoice = .spokenPhrase
             session?.routedPhrase = routed.matchedPhrase
-        }
-        // Fold the commit-time probe in before anything reads the flag. Secure is sticky and only the flag is
-        // adopted: bundleId/pid must stay the PRESS-time target, since decideInsertion compares captured
-        // against current to detect focus moves.
-        if await commitSecureProbe.value, capturedSnapshot != nil {
-            capturedSnapshot?.isSecureField = true
         }
         // Neuter the routed mode BEFORE it drives the rewrite: produceFinalText resolves the connection off
         // this mode, so a Phase-B re-route to a cloud mode from a secure field must be local-only here, not
@@ -1776,33 +2187,42 @@ final class DictationController {
     // Local history (design.md §4.7): one append per dictation that produced text, unless history is
     // off or the mode opts out. noSpeech is not recorded (nothing was said). Audio and the redaction
     // map are never written; the stored prompt carries tokens, not their originals.
+    func waitForHistoryWrites() { historyWriteQueue.sync {} }
+
+    private var targetMayHoldSecureText: Bool {
+        capturedSnapshot?.isSecureField == true || session?.targetUnconfirmed == true
+    }
+
     @discardableResult
     private func recordHistory(
         heard: String, transformed: String?, result: String, insertion: DictationOutcome,
-        rewrite: RewriteDetails?, confirmWrite: Bool = false
+        rewrite: RewriteDetails?, failureReason: String? = nil, confirmWrite: Bool = false,
+        commandStillRunning: Bool = false, outcome override: HistoryEntry.Outcome? = nil,
+        onRecorded: ((HistoryEntry) -> Void)? = nil
     ) -> Bool {
         // A secure-field dictation is never persisted, regardless of the history setting or the mode —
         // the spoken text is a password (design.md §4.4). An unconfirmed target (focus moved before the
         // secure-aware snapshot could vet the field) is treated the same way (KS-01). The diagnostics record
         // holds only fingerprints (hashes), never the transcript, so it is safe to keep; this guards the
         // verbatim history store.
-        guard settings.history.enabled, !(activeMode?.excludeFromHistory ?? false),
-              capturedSnapshot?.isSecureField != true, session?.targetUnconfirmed != true else { return false }
+        guard settings.history.enabled, !(activeMode?.excludeFromHistory ?? false), !targetMayHoldSecureText else { return false }
         // Last line of defense: a password field that stole focus after the commit-time probe is still caught
         // by the inserter, which diverts to a concealed copy. That verdict is the system classifying the text
         // as password-grade — it must veto history too (X-1).
         if case .copied(.secureField) = insertion { return false }
         let rewriteSkipped = session?.rewriteSkippedAtLimit == true
         let keptLocal = rewrite?.fellBack == true || rewriteSkipped
-        let outcome: HistoryEntry.Outcome
+        let base: HistoryEntry.Outcome
+        let isCommand = activeMode?.runsVoiceCommands == true
         switch insertion {
         case .noSpeech: return false
-        case .inserted: outcome = keptLocal ? .localFallback : .inserted
-        case .copied: outcome = keptLocal ? .localFallback : .copied
-        case .failed: outcome = .failed
+        case .inserted: base = isCommand ? (commandStillRunning ? .commandStarted : .command) : keptLocal ? .localFallback : .inserted
+        case .copied: base = keptLocal ? .localFallback : .copied
+        case .failed: base = isCommand ? .commandFailed : .failed
         }
+        let outcome = override ?? base
         let entry = HistoryEntry(
-            timestamp: Date(), modeName: currentModeName, engine: activeEngine.displayName,
+            id: UUID().uuidString, timestamp: Date(), modeName: currentModeName, engine: activeEngine.displayName,
             device: session?.capturedInputDevice,
             heard: heard, transformed: transformed,
             result: result, outcome: outcome,
@@ -1814,8 +2234,10 @@ final class DictationController {
             triggerKey: session?.triggerDisplay,
             fallbackReason: outcome == .localFallback
                 ? (rewriteSkipped ? Self.rewriteSkippedAtLimitReason : rewrite?.fallbackReason) : nil,
-            stoppedAtLimit: session?.stoppedAtLimit == true ? true : nil)
+            stoppedAtLimit: session?.stoppedAtLimit == true ? true : nil,
+            failureReason: failureReason)
         guard let history else { return false }
+        onRecorded?(entry)
         let retentionDays = settings.history.retentionDays
         let today = HistoryStore.todayString()
         let sweepRetention = lastRetentionSweepDay != today
@@ -2100,7 +2522,7 @@ final class DictationController {
             session?.pendingLocalIssuedTokens = issuedTokens
             scheduleRewriteEscapeHatch(connection: connection, mode: mode, contextCategories: request.contextCategories)
         }
-        hud?.render(.rewriting(
+        present(.rewriting(
             connection: connection.name, mode: mode.name, redacted: mode.commands.privacy,
             contextCategories: request.contextCategories, offerLocalTranscript: false))
 
@@ -2245,7 +2667,13 @@ final class DictationController {
 
     // The screen locked mid-dictation (lid close / hot corner). Cancel any in-flight capture so the
     // mic stops immediately and its temp WAV is deleted — no locked-screen audio survives.
+    func handleSystemSleep() {
+        stopVoiceCommandChoice()
+    }
+
     func handleScreenLocked() {
+        screenLocks += 1
+        stopVoiceCommandChoice()
         guard machine.isBusy else { return }
         cancel()
     }
@@ -2275,7 +2703,7 @@ final class DictationController {
         Task { @MainActor [weak self, delay = loadingModelHUDDelayOverride ?? Self.loadingModelHUDDelay] in
             try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled, self.machine.state == .transcribing else { return }
-            self.hud?.render(.loadingModel(mode: self.currentModeName))
+            self.present(.loadingModel(mode: self.currentModeName))
         }
     }
 
@@ -2285,7 +2713,7 @@ final class DictationController {
             try? await Task.sleep(for: .seconds(5))
             guard let self, !Task.isCancelled, self.session?.pendingLocalTranscript != nil,
                   self.machine.state == .transcribing else { return }
-            self.hud?.render(.rewriting(
+            self.present(.rewriting(
                 connection: connection.name, mode: mode.name, redacted: mode.commands.privacy,
                 contextCategories: contextCategories, offerLocalTranscript: true))
         }
@@ -2327,6 +2755,10 @@ final class DictationController {
         let result: String
         let insertion: DictationOutcome
         let rewrite: RewriteDetails?
+        var failureReason: String?
+        var commandStillRunning = false
+        var outcome: HistoryEntry.Outcome?
+        var onRecorded: ((HistoryEntry) -> Void)?
     }
 
     // The one terminal tail every dictation exits through. The fixed order is load-bearing: finalizeRecord
@@ -2339,6 +2771,7 @@ final class DictationController {
     private func finish(
         machine terminal: MachineTerminal,
         cue: DuringDictationEffects.EndCue?,
+        endsQuietly: Bool = false,
         state: HUDState?,
         hideAfter: Double? = nil,
         record: (outcome: DictationRecord.Outcome, error: String?)? = nil,
@@ -2350,15 +2783,34 @@ final class DictationController {
         case .finish(let outcome): machine.finish(outcome)
         case .alreadyTransitioned: break
         }
-        if let cue { effects.end(settings.duringDictation, cue: cue) }
+        if let cue {
+            effects.end(settings.duringDictation, cue: cue)
+        } else if endsQuietly {
+            effects.end(settings.duringDictation, cue: nil)
+        }
+        var state = state
+        var hideAfter = hideAfter
+        var resumedChoice: Int?
+        if let id = session?.choiceId, voiceCommands.resumeChoice(id) {
+            if let prompt = choicePrompt, prompt.id == id {
+                state = .choice(prompt, status: Self.choiceWaiting(after: state))
+                hideAfter = nil
+                resumedChoice = id
+            } else {
+                voiceCommands.dismissChoice(id)
+            }
+        }
         if let state {
-            hud?.render(state)
+            present(state)
             if let hideAfter { scheduleHide(after: hideAfter) }
         }
+        if let resumedChoice { scheduleChoiceExpiry(resumedChoice) }
         if let record { finalizeRecord(outcome: record.outcome, error: record.error) }
         if let history {
             recordHistory(heard: history.heard, transformed: history.transformed, result: history.result,
-                          insertion: history.insertion, rewrite: history.rewrite)
+                          insertion: history.insertion, rewrite: history.rewrite,
+                          failureReason: history.failureReason, commandStillRunning: history.commandStillRunning,
+                          outcome: history.outcome, onRecorded: history.onRecorded)
         }
         let engineUsed = activeEngine
         releaseCapturedPlan()
@@ -2397,8 +2849,8 @@ final class DictationController {
         hideTask?.cancel()
         hideTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(seconds))
-            guard !Task.isCancelled, !isBusy else { return }
-            hud?.render(.hidden)
+            guard !Task.isCancelled, !isBusy, voiceCommands.pendingChoice == nil else { return }
+            present(.hidden)
         }
     }
 }

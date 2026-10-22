@@ -1,3 +1,4 @@
+import AppKit
 import Testing
 @testable import KeyScribeApp
 @testable import KeyScribeKit
@@ -9,8 +10,9 @@ struct HUDStateTests {
             "ready", "recording", "recording-latched", "loading-model", "transcribing",
             "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
             "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
-            "microphone-error", "accessibility-error", "recording-countdown", "stopped-at-limit",
-            "stopped-at-limit-local",
+            "microphone-error", "command-not-recognized", "command-not-recognized-long", "accessibility-error",
+            "recording-countdown", "stopped-at-limit", "stopped-at-limit-local", "choice", "choice-five",
+            "choice-listening", "choice-retry", "choice-heard", "choice-heard-long",
         ])
         for name in HUDPreview.names {
             #expect(HUDPreview.state(named: name) != nil)
@@ -197,5 +199,111 @@ struct HUDStateTests {
         let state = HUDState.stoppedAtLimit(outcome: .copied(.focusChanged), limit: "5-minute", rewriteSkipped: true)
         #expect(state.secondaryText == "Focus changed while \(Branding.appName) was working")
         #expect(state.offersPasteLast)
+    }
+
+    @Test func aWaitingQuestionNeverTakesKeyFocusButAnsweringItDoes() {
+        let prompt = HUDPreview.choicePrompt
+        #expect(!HUDState.choice(prompt, status: .waiting(note: nil)).holdsKeyFocus)
+        #expect(HUDState.choice(prompt, status: .listening(latchedTrigger: nil)).holdsKeyFocus)
+        #expect(HUDState.choice(prompt, status: .working).holdsKeyFocus)
+    }
+
+    @Test func aQuestionIsAnnouncedOnceThenOnlyItsChanges() {
+        let prompt = HUDPreview.choicePrompt
+        let waiting = HUDState.choice(prompt, status: .waiting(note: nil))
+        #expect(waiting.voiceOverAnnouncement(after: .hidden)?.hasPrefix("Which one?. 1, Personal Mail, Safari") == true)
+        let listening = HUDState.choice(prompt, status: .listening(latchedTrigger: nil))
+        #expect(listening.voiceOverAnnouncement(after: waiting) == "Recording")
+        #expect(waiting.voiceOverAnnouncement(after: listening) == nil)
+        let retry = HUDState.choice(prompt, status: .waiting(note: "Choose 1\u{2013}2."))
+        #expect(retry.voiceOverAnnouncement(after: listening) == "Choose 1\u{2013}2.")
+    }
+
+    @Test func anUnrecognizedCommandShowsItsTitleThenTheHeardExcerptOnce() {
+        let state = HUDState.error(message: "Command not recognized", action: nil, heard: HeardExcerpt(heard: "stitch to Mail"))
+        #expect(state.primaryText == "Command not recognized")
+        #expect(state.secondaryText == "Heard \u{201C}stitch to Mail\u{201D}")
+        #expect(state.secondaryIsHeardExcerpt)
+        #expect(state.voiceOverAnnouncement == "Command not recognized. Heard \u{201C}stitch to Mail\u{201D}")
+        #expect(state.indicator == .error)
+        #expect(state.panelWidth == 280)
+        let plain = HUDState.error(message: "Command not recognized", action: nil)
+        #expect(plain.secondaryText == nil)
+        #expect(plain.voiceOverAnnouncement == "Command not recognized")
+        #expect(!plain.secondaryIsHeardExcerpt)
+        #expect(!HUDState.commandDone(summary: "Mail").secondaryIsHeardExcerpt)
+    }
+
+    @Test func aRetainedQuestionAnnouncesOnlyTheHeardExcerptThatReplacedItsNote() {
+        let prompt = HUDPreview.choicePrompt
+        let listening = HUDState.choice(prompt, status: .listening(latchedTrigger: nil))
+        let heard = HUDState.choice(prompt, status: .waiting(note: nil, heard: HeardExcerpt(heard: "tube")))
+        #expect(heard.secondaryText == "Heard \u{201C}tube\u{201D}")
+        #expect(heard.secondaryIsHeardExcerpt)
+        #expect(heard.voiceOverAnnouncement(after: listening) == "Heard \u{201C}tube\u{201D}")
+        #expect(!HUDState.choice(prompt, status: .waiting(note: "Choose 1\u{2013}2.")).secondaryIsHeardExcerpt)
+    }
+
+    @Test(arguments: [false, true])
+    func aHeardExcerptNeverGrowsPastTwoLines(_ inChoice: Bool) throws {
+        func height(_ heard: String) throws -> CGFloat {
+            let hud = HUDController()
+            let excerpt = HeardExcerpt(heard: heard)
+            hud.render(inChoice
+                ? .choice(HUDPreview.choicePrompt, status: .waiting(note: nil, heard: excerpt))
+                : .error(message: "Command not recognized", action: nil, heard: excerpt))
+            defer { hud.render(.hidden) }
+            return try #require(hud.panelFrame?.height)
+        }
+        let short = try height("tube")
+        let wide = try height(String(repeating: "\u{8A71}", count: HeardExcerpt.characterBudget))
+        let line = NSLayoutManager().defaultLineHeight(for: .systemFont(ofSize: 11))
+        #expect(wide > short)
+        #expect(wide - short < line * 1.5)
+    }
+
+    @Test func aWaitingPanelRefusesKeyFocusEvenWhenClicked() {
+        let hud = HUDController()
+        hud.render(.choice(HUDPreview.choicePrompt, status: .waiting(note: nil)))
+        #expect(hud.panelCanBecomeKey == false)
+        hud.render(.choice(HUDPreview.choicePrompt, status: .listening(latchedTrigger: nil)))
+        #expect(hud.panelCanBecomeKey == true)
+        hud.render(.hidden)
+    }
+
+    @Test func aQuestionRendersEveryRowWithinTheScreen() {
+        let hud = HUDController()
+        hud.render(HUDPreview.state(named: "choice-five")!)
+        let height = hud.panelFrame?.height ?? 0
+        #expect(height > 200)
+        #expect(height < 600)
+        #expect(hud.panelFrame?.width == 320)
+        hud.render(.hidden)
+    }
+
+    @Test func clickingAWaitingQuestionRunsEachRowWithoutTakingKeyFocus() throws {
+        let hud = HUDController()
+        var hits: [String] = []
+        hud.onChooseVoiceCommand = { _, identity in if hits.last != identity { hits.append(identity) } }
+        hud.onCancelVoiceCommandChoice = { _ in if hits.last != "cancel" { hits.append("cancel") } }
+        hud.render(.choice(HUDPreview.choicePrompt, status: .waiting(note: nil)))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        let view = try #require(hud.panelContentView)
+        let window = try #require(view.window)
+        var y = view.bounds.maxY - 2
+        while y > 0 {
+            for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                let event = NSEvent.mouseEvent(
+                    with: type, location: NSPoint(x: 40, y: y), modifierFlags: [],
+                    timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                    eventNumber: 0, clickCount: 1, pressure: 1)!
+                window.sendEvent(event)
+            }
+            y -= 4
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        #expect(hits == HUDPreview.choicePrompt.rows.map(\.identity) + ["cancel"])
+        #expect(!window.isKeyWindow)
+        hud.render(.hidden)
     }
 }

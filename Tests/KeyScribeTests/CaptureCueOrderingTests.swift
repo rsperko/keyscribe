@@ -27,7 +27,7 @@ struct CaptureCueOrderingTests {
         var sawVisibleHUD: Bool { states.contains { $0 != .hidden } }
         var sawRecording: Bool { states.contains { if case .recording = $0 { return true }; return false } }
         var errorMessage: String? {
-            for state in states { if case .error(let message, _) = state { return message } }
+            for state in states { if case .error(let message, _, _) = state { return message } }
             return nil
         }
     }

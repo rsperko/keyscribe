@@ -15,10 +15,12 @@
   connections.toml         # named LLM connections (BYOK)
   dictionary.toml          # global dictionary
   replacements.toml        # global replacements
+  voice_commands.toml      # places and actions for the Voice Commands mode (experimental)
   fragments/               # shared prompt fragments (one file per fragment)
     my-voice.md            #   markdown body + YAML frontmatter
   modes/                   # one file per mode; filename stem = mode id
     _direct.toml             # the Direct system floor (reserved `_` id)
+    _voice_commands.toml     # the Voice Commands system mode (experimental; seeded only while its flag is on)
     email.toml
     pig-latin.toml
   history/                 # append-only local history, one JSONL file per day
@@ -33,11 +35,23 @@
 - **Mode id = filename stem** (kebab-case). The id is stable; `name` is the display label and
   can change freely.
 - **System modes use a reserved `_`-prefixed id** (`_direct.toml` = the Direct floor, shown to users
-  as "Plain Dictation", `design.md` §4.3). The kebab-case slugger never emits a leading underscore, so user modes can't collide. The
+  as "Plain Dictation", `design.md` §4.3). The kebab-case slugger never emits a leading underscore, so user modes can't collide. Only the built-in ids are treated as system modes; any other `_`-prefixed file is an ordinary mode. The
   file is auto-seeded and re-normalized on load: only its editable fields (trigger keys, insertion,
   trailing, submit, clipboard modifier, live-edits, **and exclude-from-history**) are honored; the
   locked guarantees (no AI rewrite, dictation/cursor only, global vocabulary) are enforced regardless
   of edits. Direct owns Fn by default and records to history per the global setting unless turned off.
+- **`_voice_commands.toml`** is a built-in system mode, behind the `voice_commands` experimental flag.
+  It is seeded (with no shortcut) only while the flag is on; turning the flag off hides it but leaves the
+  file, so a later opt-in keeps the shortcut. Only `trigger_keys[]`, `enabled`, and its own vocabulary
+  (`[dictionary]` and `[replacements]`, which leave out global vocabulary unless `include_global` says
+  otherwise) are honored; everything else is forced (`output = "voice_command"`, no rewrite, no spoken
+  editing commands, no phrases or constraints). `exclude_from_history` is honored too and defaults to
+  `false`, so a voice command is recorded like a dictation: Heard is the transcript and Result is the
+  command it ran (a script's program and arguments, quoted the way a shell would), with the reason
+  when it failed. It is never the fallback: only its own shortcut starts it. **Its shortcut may not
+  be shared with any other enabled mode**, whatever that mode's context: Settings offers to move it, and a
+  shared press written by hand stays with the other mode — the Voice Commands binding is dropped, and the
+  Modes list and the menu-bar badge mark the mode's shortcut as never firing.
 - Config files are human-editable text. **Model weights** are downloaded at runtime (never
   committed) into `models/`, consolidated under the KeyScribe support dir.
 - **History records** (`history/<day>.jsonl`, one JSON object per line) are additive: each dictation
@@ -48,6 +62,19 @@
   `prompt`, never their originals) — behind History's "Show exactly what was received". Old rows
   lacking optional fields decode as absent — History renders without the corresponding line. Audio
   and the redaction map are never stored.
+  Each record also carries an optional `id`, fixed when it is written, which an in-place update (a late
+  command result, a clicked choice) keeps; History matches rows and deletes by it. Older rows without one
+  are matched by their content.
+  A **voice command** writes `outcome = "command"`, `"command_failed"`, or `"command_started"` (an
+  action still running, later rewritten to one of the first two). A command that matched more than one
+  destination writes `"command_needs_choice"`, its `result` listing the numbered choices; a spoken answer
+  is a separate entry whose `result` starts `Selected <name> for “<command>”:`, and a cancelled choice
+  writes `"command_cancelled"`. A choice answered by clicking rewrites the question's own entry. Its `heard` is the
+  transcript, `transformed` the text after the Voice Commands vocabulary, and `result` what ran: a
+  script's command line, quoted the way a shell would, or the description of a switch. A command that
+  matched nothing has an empty `result`. A failed command adds the optional `failure_reason` — the
+  message the HUD showed, which for a script can include the last line it wrote to standard error.
+  An app older than this change skips these rows rather than failing to load history.
 
 ### Model storage
 
@@ -220,7 +247,7 @@ context = { app = true, preceding_text = false }
 | `trigger_phrases` | string[] | Spoken phrases matched at the transcript end post-STT — case-insensitive, word-boundary-honored, trailing punctuation/space tolerated. Each is a regex, so power users can write one (`(?-i)` opts back into case-sensitivity). Zero or more. |
 | `constraints[]` | table[] | Any of `bundle_id`, `bundle_prefix`, `url_pattern`, `window_title` (ANDed). Empty ⇒ eligible everywhere. |
 | `source` | enum | `dictation` \| `selection`. |
-| `output` | enum | `cursor` \| `replace_selection`. |
+| `output` | enum | `cursor` \| `replace_selection` \| `voice_command`. `voice_command` is the Voice Commands system mode's output: the take is run as a command (`voice_commands.toml`) and nothing is inserted. Any other mode file that sets it fails to load. |
 | `commands.live_edits` | bool | Opt-in to the spoken-command list (insert new line, insert new paragraph, insert tab character, scratch that, **insert clipboard contents**, **begin/end verbatim**). |
 | `commands.privacy` | bool | Opt-in to best-effort redaction. When true, **context is forced off** — `ai_rewrite.context` is locked to all-false so only the redacted transcript leaves. |
 | `commands.numbers` | bool | Opt-in to inverse text normalization ("twenty five" → "25"); bails on ambiguous/year-like runs. |
@@ -441,6 +468,207 @@ heard = "teh"
 replace = "the"
 regex = false
 ```
+
+### `voice_commands.toml` — places and actions for Voice Commands (experimental)
+
+Read only while the `voice_commands` flag is on. The Voice Commands mode understands
+an app-switching verb followed by a target (`VoiceCommandGrammar.focusVerbs`), `run <action> [words]`, and `go back`, matched against the whole
+utterance (case, punctuation, and a leading "the" are ignored). The app-switching prefixes also accept
+`which to` and `witch to` for `switch to`, and `two` or `too` in place of `to` after `switch`, `which`,
+`witch`, or `go`. These are exact prefix alternatives, not transcript replacements: target names,
+action input, and the original heard text are preserved. They apply equally to live commands and
+**Try it**. Other command words, including `run` and `go back`, have no sound-alike alternatives.
+An app answers, in every tier, to the name shown in the Applications folder and to the name in its own
+menu bar when the two differ; the name KeyScribe shows and sorts by is the Applications-folder one.
+A target is a running app, an app installed in an Applications folder (or one folder down inside it),
+or a place from this file:
+
+```toml
+schema_version = 1
+
+[[place]]
+name = "Mail"                    # display name; also always a spoken name. Unique, ignoring case.
+say = ["male", "email"]          # optional misheard form or preferred nickname
+app = "com.apple.mail"           # bring this app forward, opening it if needed
+
+[[place]]
+name = "Gmail"
+url = "https://mail.google.com/" # focus an open tab whose address starts with this; else open it
+browser = "com.google.Chrome"    # optional: only look in, and open with, this browser
+
+[[script]]
+name = "Deploy"                  # display name; also always a spoken name. Unique among places and scripts.
+say = ["ship"]                   # optional extra spoken names
+run = ["~/bin/deploy", "--env", "{text}"]  # program, then its arguments
+
+[[script]]
+name = "Journal"                 # a macOS Shortcut: same naming and matching as a program
+shortcut = "Journal Entry"       # the shortcut's name in Shortcuts
+shortcut_id = "6E982466-2036-4362-BDEC-983051029F6A"  # optional: run by identifier, so a rename still works
+input = "{text}"                 # optional text given as the shortcut's input
+```
+
+Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly one** of `run` (a program) or
+`shortcut` (a shortcut from the Shortcuts app); `shortcut_id` and `input` apply only to a shortcut.
+
+**Scripts** run a program when you say **run** followed by their name, and can be handed what you say after it:
+
+- `run` is the program followed by its arguments. The program is a full path (`/…` or `~/…`); it is run
+  directly, never through a shell, from the home folder, with standard input, output, and error not
+  connected to anything you see and the app's own minimal `PATH`. Each argument is passed exactly as
+  written, except that `{text}` is replaced by the spoken text inside that argument: the words never
+  become extra arguments, and KeyScribe never evaluates them. `{text}` may not appear in the program.
+- **Matching** requires **run** (`run deploy staging`), followed by one of the script's spoken names in
+  whole words (case and punctuation ignored). A bare name or an app-switching phrase never runs a script;
+  **run** never opens an app or place. The spoken name is independent of the executable's filename:
+  `name = "Foo"` can point at `~/bin/bar.sh`. A script whose arguments use `{text}` needs words after its
+  name; saying only `run {name}` fails with a message and runs nothing. A script without `{text}` runs
+  only when `run {name}` is the whole utterance. The longest spoken name after **run** is chosen first,
+  and only then are its words checked, so "run ticket new"
+  asks for text for a `Ticket new` script rather than running `Ticket` with "new"; a longer name without
+  `{text}` that has more words after it is skipped. Scripts tied for the longest name are offered as a
+  numbered choice, and the words after the name are kept for whichever one is chosen.
+  A script is never matched by a near-miss, and the dictionary never corrects its name or arguments.
+  These matching rules apply after mode replacements, which can explicitly produce a **run** command.
+  `go back` returns to the
+  previous app; a script named `Go back` instead requires `run go back`. Command words can be script names
+  because the **run** prefix separates script execution from app switching.
+- **The text** is what follows the spoken name, in the cleaned transcript's own case and punctuation, with
+  leading and trailing spaces and the `, ; : . ! ? …` that speech recognition adds at the edges removed.
+  The voice-commands dictionary never corrects it.
+- **Shortcuts** run through `/usr/bin/shortcuts run`, by `shortcut_id` when it is set and by name
+  otherwise. `input`, with `{text}` replaced by the spoken text, is written to the shortcut's standard input,
+  which the shortcut receives as text; without `input` it receives nothing. An `input` containing `{text}`
+  needs words after the name, exactly like a program argument. A failure shows the shortcut's last error
+  line, without an exit status. A shortcut can wait on a question (Ask for Input, Choose from Menu, an
+  alert, or a first-run permission prompt), so the late reporting below matters most for shortcuts.
+- **Running:** the command waits up to about a second and a half. An action that exits with status 0 then
+  is done. One still running is shown as started (*Started, still running* in the HUD, *Command started*
+  in History) and is left to finish, with no time limit, so a shortcut waiting on your answer is never
+  stopped. When it does finish, its History entry is updated to the final result, and a failure is shown in
+  the HUD unless a dictation is in progress. A result arriving after KeyScribe quits is not seen, so that
+  entry stays *Command started*. A nonzero exit fails the command, showing the exit status and the last
+  line the script wrote to standard error. A program that is missing or not executable fails without
+  starting. The script's arguments and output are never logged. Standard output is never kept; with history on,
+  History saves the command line, arguments included, and a failure's message, which can carry the last line
+  the script wrote to standard error (see *History records* above). A newly written or edited file
+  can take longer to start the first time, while macOS checks it.
+- **Interpreters cannot take `{text}`.** A script whose program has a known interpreter file name, such
+  as `sh` or `env`, including a version suffix like `python3.12`, is refused when any of its arguments
+  contains `{text}`, because `/bin/sh -c {text}` would run spoken words as shell commands. The rule
+  checks only the program's file name, so it also refuses an interpreter given a script file
+  (`/bin/sh ~/bin/note.sh {text}`); instead, start that file with a `#!` line naming its interpreter and
+  any options it needs, make it executable, and choose the file itself as the program. An interpreter
+  without `{text}`, such as `osascript -e` with fixed code, is allowed. The rule prevents a common
+  mistake; it does not make other programs safe. A renamed interpreter, a wrapper, or a script that
+  runs its input as code (`eval "$1"`) can still run spoken words as code, so write scripts that treat
+  the text as data, as in `"$1"` below.
+- **An invalid entry rejects the whole file**, like any other validation error in it: when KeyScribe
+  starts with such a file, no saved places or actions are available until it is fixed (apps still open
+  by name), and while KeyScribe is running it keeps the last version that loaded. The Voice Commands
+  editor names the offending entry and why it is invalid. Fix or remove that entry in
+  `voice_commands.toml` and save; the file is read again automatically.
+- **A complete example.** A file `~/bin/note` containing
+
+  ```sh
+  #!/bin/sh
+  printf '%s\n' "$1" >> "$HOME/notes.txt"
+  ```
+
+  made executable with `chmod +x ~/bin/note`, and the entry
+
+  ```toml
+  [[script]]
+  name = "Note"
+  run = ["~/bin/note", "{text}"]
+  ```
+
+  turns "run note buy milk" into `~/bin/note "buy milk"`, which appends `buy milk` to `~/notes.txt`.
+
+- **What is matched is the cleaned transcript.** Before anything is matched, the Voice Commands mode's own
+  replacements run over the whole utterance, so one can repair other misheard verbs
+  (`stitch to Mail` → `switch to Mail`).
+  Then its dictionary fixes near-misses in the **target only** — never in the command words, so a term like
+  `Lunch` cannot turn "launch Safari" into something that no longer parses — which lets a target keep its
+  real spelling (such as `Spotify`). Dictionary correction is best-effort and excludes terms shorter
+  than four normalized characters. A replacement that owns the whole utterance becomes the command,
+  which makes custom spoken shortcuts (`code` → `switch to Visual Studio Code`). A terminal `<CR>` on a
+  regex replacement is dropped, since a command never presses Return; a literal replacement keeps `<CR>`
+  as written, as everywhere else. On a speech model that can steer recognition, the dictionary steers it
+  too. When the file has no `[dictionary]` or `[replacements]` table, or one without `include_global`,
+  global vocabulary is left out.
+- **A repeatable mishearing** can be repaired in **Settings ▸ Vocabulary ▸ Voice Commands** with a
+  literal replacement: **Word or heard phrase** `switch to male`, **Use instead** `switch to Mail`,
+  with **Match heard phrase as a regular expression** off under **Pattern matching**.
+  A full-command rule avoids changing the common word `male` elsewhere, including in words passed to
+  scripts and shortcuts. Alternatively, the Mail place above accepts `male` and `email` as spoken names, so both
+  `switch to male` and `open email` reach Mail without rewriting the transcript. Keep these fixes in the
+  mode's vocabulary unless you deliberately want other modes to use them. See the
+  [worked examples in the FAQ](../../FAQ.md#a-voice-command-keeps-being-misheard).
+- A place sets **exactly one** of `app` or `url`; `url` must be `http`/`https`. A script sets `run` or `shortcut`. A file that breaks a rule
+  fails to load as a whole and the last good copy stays in effect (surfaced like any malformed config file).
+- **Matching order**, first hit wins: a place's spoken name exactly; a running app's name exactly; a
+  contiguous run of words in a running app's name ("chrome" → Google Chrome); the same partial rule on
+  place names; an installed app's name exactly; then an **open window's title**, exactly and then as a
+  contiguous run of words; then installed apps partially. Only if nothing matches is a near-miss snapped,
+  using the dictionary's fuzzy rule, against places and running apps (never installed-only apps or
+  windows).
+  Different targets tied at the winning step are offered as a numbered choice and nothing runs until one
+  is chosen; above `VoiceCommandChoice.displayLimit` targets the command fails and asks for more of the
+  name. Places and actions keep their configured order in the choice, apps are sorted by name. A
+  near-miss picks the closest target; targets tied for closest go through the same order, so a place
+  still beats an app equally close, and two tied at the same step are offered whatever order they are
+  listed in. Places or actions may share a spoken name on purpose — that is how to get the choice — so a
+  shared name is an advisory in Settings, never a load error; primary names must still be unique. The
+  advisory compares names the way each family is matched: places ignoring spaces, actions word by word.
+- **Window titles** are read over Accessibility on this Mac, and only when no place or app name matched
+  first, so an exact app name (`open Slack`) never looks at windows. A title matches exactly when the
+  spoken target equals the whole title or one of its parts: apps put the document, project, and app name
+  in one title between separators such as a spaced dash or a pipe (`WindowTitle.segments` holds the
+  rule). Only standard windows with a title are matched, minimized ones and those of hidden apps included; sheets,
+  panels, and dialogs are not, nor are this app's own windows. macOS lists only the windows on the
+  current desktop, so a window on another desktop or in another full-screen app cannot be found from
+  here, though its app's name still works. A browser window is matched by its current tab's title, since
+  that is the window's title; a page in a background tab is reached with a web place. A choice between
+  windows names each one's app, and the document or site when two titles are the same.
+- **If any app does not answer when its windows are read**, the command fails without opening anything
+  (`Could not check all open windows. Nothing was opened. Try again.`) rather than choosing from the
+  windows that did answer. When Accessibility is off, the command says so and offers its settings.
+- **A window is brought forward by identity, never by title.** The choice made when the command was
+  heard is re-found in the same process just before it moves; if it has closed, the command says so and
+  brings nothing else forward, and if the app does not answer it fails without trying anything else. A
+  step already taken (a window unminimized, say) is not undone when a later one fails.
+- **Tab matching** ignores the scheme, a leading `www.`, the host's case, and trailing slashes, and respects
+  path boundaries (`mail.example.com` never matches `mail.example.community`). The path, query, and fragment
+  keep their case: `example.com/Project` does not match a tab on `example.com/project`. Only browsers whose
+  scripting dictionary describes tabs are asked; any other browser has its page opened directly, since its
+  tabs cannot be read. Which browsers can be asked is rechecked while KeyScribe runs, so a browser installed or
+  updated later is used without relaunching. Asking goes through Apple Events, so macOS asks once per browser for Automation
+  permission. The command waits for that answer, then reads the tabs; a prompt left unanswered for a
+  minute counts as a browser that could not list its tabs. If the browser that would open the page has refused, the command fails with a pointer to
+  that setting instead of opening a second copy. A place with no `browser` looks through the tabs of every
+  running browser that can list them, and if none has the page open, opens it in whichever browser macOS
+  opens that address with. If the tabs cannot be read in time, or the browser that would open the page could not list them, the command also fails
+  rather than open a second copy of a page that may already be open. Once the command gives up, no further
+  browser is asked, and a script already waiting stops on its own a few seconds later, so a browser that
+  hangs holds up a later command for a few seconds at most. A place with a `browser` reads only that browser's tabs, and if that
+  browser is not installed the command fails rather than opening another browser.
+- **Focusing a tab re-checks it first**: the tab must still show the address it had when it was found
+  (looked up again if it moved), compared case-sensitively like the match itself. If the tab is gone, the
+  page is opened instead. If the browser does not answer in time, the command fails and nothing else is
+  opened. An Apple Event already sent cannot be recalled, so a browser that answers late may still select
+  the tab inside its own windows, but it is never brought forward: only an answer in time does that.
+- **A take whose microphone stopped never runs a command**, including a loss that arrives while the command
+  is being looked up or while a tab is being focused. Nothing further is opened or brought forward.
+- `go back` returns to the window that was in front before the last switch by voice, even within the same
+  app, or to its app when that window has closed or is no longer on this desktop. It never opens another
+  copy of an app that has quit since, and an app that does not answer leaves the destination in place for
+  another try. A command whose target was already in front keeps the earlier destination. Running a
+  script or shortcut does not change it. It is kept in memory only, so it is lost when the app quits.
+  Repeating `go back` switches back again.
+- **Try it** in Settings never runs a command, script, or shortcut, but previewing a web place reads the open tabs,
+  so it can be what first asks macOS for permission to control a browser, and previewing a phrase no app or
+  place matches reads the open windows' titles. Reading windows never asks for a permission.
 
 ### Replacement matching & output
 

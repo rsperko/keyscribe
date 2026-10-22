@@ -228,10 +228,10 @@ struct CommittedTextField: View {
         VStack(alignment: .leading, spacing: 4) {
             if let prompt {
                 TextField(title, text: $draft, prompt: Text(prompt))
-                    .multilineTextAlignment(.leading)
+                    .formFieldLabel(title)
             } else {
                 TextField(title, text: $draft)
-                    .multilineTextAlignment(.leading)
+                    .formFieldLabel(title)
             }
             if let validationIssue {
                 IssueText(validationIssue.message)
@@ -563,5 +563,13 @@ struct PaneNoticeRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+extension View {
+    func formFieldLabel(_ title: String) -> some View {
+        LabeledContent(title) {
+            labelsHidden().multilineTextAlignment(.leading)
+        }
     }
 }

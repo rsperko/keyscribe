@@ -131,6 +131,163 @@ words (Mike and "make"). A dictionaried compound also snaps its spoken form ("te
 dictionary terms are shared with your own AI service — marked as intended spellings, not typos, so it
 does not "fix" them — including in privacy modes, which turn context off but still send that term hint.
 
+### Can I switch apps or run actions by voice?
+
+Yes, with the experimental **Voice Commands** mode. Turn it on in **Settings ▸ Maintenance ▸
+Experimental features**, then assign a shortcut in **Settings ▸ Modes ▸ Voice Commands**. It can't
+be shared with another mode: if you pick one that a dictation mode already uses, KeyScribe asks before
+moving it, names the modes that lose it, and offers **Undo** afterwards. Use that shortcut when you
+want to speak a command:
+
+- **“switch to Mail”** or **“open Safari”** brings the app forward, opening it if needed. App names
+  work without setup, and so does the name in an app's menu bar when it differs from the one in the
+  Applications folder (“switch to Code” for Visual Studio Code).
+- **“open inbox”** goes to an app or web page you have named `inbox` under **Places**. For a web page,
+  it uses a matching open tab when possible.
+- **“run journal buy milk”** runs an action you have added under **Actions**. A script or macOS
+  shortcut receives the extra words only when you have configured it to accept them.
+- **“switch to budget”** brings forward an open window whose title says Budget. With two editor
+  windows or two terminals open, say a word from the title of the one you want. Only windows on the
+  current desktop can be found, and a browser window answers to its current tab's title; reach a page in
+  a background tab with a place instead.
+- **“go back”** returns to the window you were using before your last switch by voice, even in the
+  same app. Say it again to switch back. Running an action does not change that destination.
+
+Commands never type your words. An unrecognized command shows an explanation and runs nothing, and a
+command that matches more than one place, app, or action asks which one (below). **Try it** previews
+what a typed command would do without running it.
+
+Before enabling the feature, a notice explains that a recognition mistake can bring an unintended
+app and its windows forward, including while sharing your screen. Cancel leaves the feature off.
+The explanation remains available under Places in the mode panel.
+
+### A voice command asked “Which one?”
+
+Two or more places, apps, or actions answered to what you said, so KeyScribe lists them, numbered,
+instead of guessing. Nothing runs and nothing is typed while the list is shown, and while it waits for
+your answer your keystrokes keep going to the app you were in.
+
+Say you have two places, **Personal Mail** and **Work Mail**, each with `mail` under **Also say**:
+
+1. Say **“switch to mail”** with your Voice Commands shortcut. A list of both appears.
+2. Use the same shortcut again and say **“two”**, **“number two”**, **“the second one”**, or
+   **“the last one”**. The list stays visible while you speak.
+3. Work Mail opens. **“go back”** later returns to the app you were in when you gave the first
+   command.
+
+Actions work the same way. If two actions answer to `ship`, **“run ship staging”** asks **Which
+action?**, and answering **“two”** runs the second one with `staging`, the words from your original
+command. The number you answer with is never passed to the action.
+
+You can also click a row. To dismiss the list, say **“cancel”** or **“never mind”**, or click
+**Cancel**. Saying a whole new command, such as **“open Work Mail”**, replaces the list. If what you say
+is neither a number in the list nor a command, the list stays and shows what was heard, so you can tell
+whether your answer was misheard. The list also goes
+away after 30 seconds without an answer, when you switch to another app or start a different mode, and
+when you change your places or actions; after that, a number means nothing. When more than five match,
+KeyScribe asks you to say more of the name instead of listing them.
+
+To get this question on purpose, give two places the same name under **Also say**: Settings explains
+that saying it will ask you to choose. If your answer is consistently misheard — “two” arriving as
+“tube”, say — add a replacement from `tube` to `two` under **Vocabulary ▸ Voice Commands**.
+
+### A voice command keeps being misheard.
+
+Some command-word mishearings work automatically: `which to Mail` and `witch to Mail` are understood
+as “switch to Mail”. The word `to` can also arrive as `two` or `too` after `switch`, `which`, `witch`,
+or `go`. These alternatives work in **Try it**, too, and leave the original words in History.
+
+When KeyScribe does not recognize a command, or an answer to “Which one?”, it briefly shows what it
+heard, such as **Heard “stitch to Mail”**. That is what your speech model wrote, before any of your
+replacements, and a long phrase is shortened. Other problems, such as a name that matches nothing, say
+what went wrong instead. The heard phrase is hidden, leaving only **Command not recognized**, when you
+were in a password field or KeyScribe could not confirm which field you were in. When the command is saved to History, its entry has the complete
+phrase.
+
+With the experimental voice commands, open **Settings ▸ Vocabulary ▸ Voice Commands**. Words and
+replacements there apply only to commands, and run before KeyScribe reads what you said:
+
+- **A name that sometimes comes out wrong:** add the app's real spelling, such as `Spotify`, to the
+  dictionary. This is a best-effort spelling hint, not an explicit mapping from one word to another.
+  Dictionary correction applies only to app and place names, never command words or script names and
+  arguments. Its fuzzy correction excludes dictionary terms shorter than four characters.
+- **A phrase that consistently comes out wrong:** add a replacement for the complete command. For
+  example, if you say "switch to Mail" but your speech model hears "switch to male", use these fields:
+
+  | Field | Value |
+  |---|---|
+  | Word or heard phrase | `switch to male` |
+  | Use instead | `switch to Mail` |
+  | Match heard phrase as a regular expression (under Pattern matching) | Off |
+
+  Another example: if "open Zoom" is consistently heard as "open soon", replace `open soon` with
+  `open Zoom`. A replacement can also fix other misheard command words: `stitch to Mail` → `switch to Mail`.
+  Prefer the complete command over replacing a common word everywhere: mode replacements also apply to
+  words passed to scripts and shortcuts.
+
+- **A name that needs to work with several commands:** add an app under **Settings ▸ Modes ▸ Voice
+  Commands ▸ Places ▸ Add Place… ▸ App…**, choose Mail, and enter `male` in **Also say**. Both "switch to
+  male" and "open male" then go to Mail, without rewriting other uses of the word. This is also useful
+  for a preferred nickname, such as `email` for Mail.
+- **Your own spoken shortcuts:** a replacement for a whole phrase becomes the command, so `code` →
+  `switch to Visual Studio Code` lets you say just "code".
+
+To check a phrase, open **Settings ▸ Modes ▸ Voice Commands** and type it into **Try it**: it shows what
+the phrase is read as after your replacements and what it would do. Try it reads what you type; it
+does not listen. It works without opening an app or running a script or shortcut.
+For the example above, type `switch to male` and check that it resolves to Mail.
+
+Keep these corrections scoped to **Voice Commands**. Global words and replacements apply here only if
+you explicitly include them for this mode; they are left out by default. A Global replacement for a
+common word such as `male` could also change ordinary dictation in modes that include it.
+
+### Can a voice command run my own script?
+
+Yes, with the experimental voice commands. In **Settings ▸ Modes ▸ Voice Commands ▸ Actions**, choose
+**Add Action ▸ Script**, give it a name to say, and pick the program. Arguments go one per line, and `{text}`
+stands for whatever you say after the name: a script named "deploy" with the arguments `--env` and
+`{text}` turns "run deploy staging" into `deploy --env staging`. Scripts require **run**; a bare name
+or an app-switching phrase never runs a script. If a replacement used to turn something you say into a
+script's bare name, such as "ship it" into "deploy prod", change it to produce "run deploy prod". The spoken name can differ from the file name: a script
+named "foo" can run `~/bin/bar.sh` when you say "run foo".
+
+For example, save this as `~/bin/note` and run `chmod +x ~/bin/note` so it can run:
+
+```sh
+#!/bin/sh
+printf '%s\n' "$1" >> "$HOME/notes.txt"
+```
+
+Then add a script named "note" with the program `~/bin/note` and one argument, `{text}`. Saying
+"run note buy milk" appends "buy milk" to `notes.txt`.
+
+KeyScribe starts the script in the background. The script itself may open another app. KeyScribe waits a moment: if
+the script fails by then, the error shows what it printed last. A script still running after that is
+shown as started and left to finish. When History is on, its entry updates when it finishes. Later
+failures also appear on screen unless you are dictating. It runs without a shell and
+with a minimal `PATH`, so call other tools by their full path or set `PATH` at the top of the script.
+Use **Try it** to see the exact command a phrase would run, without running it.
+
+The dictionary never changes a script or shortcut's name or the words you pass it. If a name keeps coming out
+wrong, add the misheard form as another spoken name.
+
+Every Add Script sheet warns that recognition mistakes can start an unintended script or pass it
+different words. A script runs with your account's permissions; for actions that cannot be undone, use
+a script that asks for confirmation.
+
+### Can a voice command run a Shortcut?
+
+Yes. Choose **Add Action ▸ Shortcut**, pick one of your shortcuts, and give it a name to say. To hand it
+what you say after the name, set **Input** to `{text}`: a shortcut named "journal" with that input turns
+"run journal buy milk" into the shortcut receiving "buy milk" as text. It runs in the background like a
+script. A shortcut that asks you something, such as Ask for Input or Choose from Menu, waits for your
+answer; KeyScribe shows it as started and records its final result when History is on. A shortcut may
+also open another app.
+If the picker is empty, create a shortcut in Shortcuts, then choose **Refresh List** from the picker.
+
+Every Add Shortcut sheet warns that a misheard name can start the shortcut or give it different words,
+and that its steps can send messages, change files, or send your words to online services.
+
 ### Can I edit text I've already written?
 
 Yes — select the text, trigger an edit-in-place mode, and speak an instruction. KeyScribe rewrites
@@ -183,9 +340,11 @@ Two for everyday dictation, granted in **System Settings ▸ Privacy & Security*
   transcribed text into the focused app. (A key+modifier trigger like ⌃⌥E is registered as a system
   hotkey and needs no permission.)
 
-A third, **Automation**, is requested only if you set up a mode that routes by website — that is the
-one case where KeyScribe has to ask your browser for the current URL. Modes that do not route by
-website never trigger the request.
+A third, **Automation**, is requested only when KeyScribe has to ask your browser something: the
+current tab's address for a mode that routes by website, or, with the experimental voice commands, the
+open tabs' addresses and titles (in every window, which can include private ones) so it can switch to a saved web
+page. Nothing it reads leaves your Mac.
+If you use neither, the request never appears.
 
 KeyScribe does **not** request Input Monitoring.
 

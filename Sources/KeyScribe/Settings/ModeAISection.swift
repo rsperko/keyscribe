@@ -116,8 +116,8 @@ struct ModeAISection: View {
         .accessibilityIdentifier(AccessibilityID.Mode.Editor.addInstruction)
         .alert("New reusable instruction", isPresented: $creatingFragment) {
             TextField("Name, e.g. Email style", text: $newFragmentName)
-                .multilineTextAlignment(.leading)
                 .accessibilityIdentifier(AccessibilityID.Mode.Editor.newInstructionName)
+                .formFieldLabel("Name, e.g. Email style")
             Button("Create", action: commitNewFragment)
                 .disabled(UserInputValidation.nameIssue(newFragmentName) != nil)
                 .accessibilityIdentifier(AccessibilityID.Mode.Editor.newInstructionCreate)

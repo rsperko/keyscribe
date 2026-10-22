@@ -157,7 +157,7 @@ struct ReturnSuffixInsertionTests {
         let out = await run(transcript: "slash resume", rules: rules, accessibilityGranted: false)
         #expect(out.insertedText == nil)
         #expect(out.submits.isEmpty)
-        guard case .error(let message, let action)? = terminalState(out) else {
+        guard case .error(let message, let action, _)? = terminalState(out) else {
             Issue.record("expected an error state, got \(String(describing: terminalState(out)))"); return
         }
         #expect(message.contains("Accessibility is off"))
@@ -169,7 +169,7 @@ struct ReturnSuffixInsertionTests {
         let out = await run(transcript: "slash resume", rules: rules, secureField: true)
         #expect(out.insertedText == nil)
         #expect(out.submits.isEmpty)
-        guard case .error(let message, let action)? = terminalState(out) else {
+        guard case .error(let message, let action, _)? = terminalState(out) else {
             Issue.record("expected an error state, got \(String(describing: terminalState(out)))"); return
         }
         #expect(message.contains("password field"))
@@ -180,7 +180,7 @@ struct ReturnSuffixInsertionTests {
         let rules = [ReplacementsSet.Rule(heard: "slash resume", replace: "<CR>", regex: true)]
         let out = await run(transcript: "slash resume", rules: rules, moveFocusBeforeCommit: true)
         #expect(out.submits.isEmpty)
-        guard case .error(let message, _)? = terminalState(out) else {
+        guard case .error(let message, _, _)? = terminalState(out) else {
             Issue.record("expected an error state, got \(String(describing: terminalState(out)))"); return
         }
         #expect(message.contains("target window changed"))

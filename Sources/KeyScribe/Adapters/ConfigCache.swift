@@ -18,11 +18,14 @@ final class ConfigCache {
     private var lastGoodReplacements: ReplacementsSet?
     private var lastGoodConnections: ConnectionSet?
     private var lastGoodDictionary: DictionarySet?
+    private var lastGoodVoiceCommands: VoiceCommandConfig?
 
     private var modesCache: [Mode]?
+    private var voiceCommandsShutOutCache = false
     private var replacementsCache: ReplacementsSet?
     private var connectionsCache: ConnectionSet?
     private var dictionaryCache: DictionarySet?
+    private var voiceCommandsCache: VoiceCommandConfig?
     private var resolvedCache: ResolvedConfig?
 
     // Per generation: present-but-undecodable files (malformed or newer schema after a downgrade). Recorded
@@ -30,6 +33,10 @@ final class ConfigCache {
     // settings.toml instead of silently disabling every replacement / connection. Reset by invalidate().
     private(set) var loadFailures: [ConfigFileIssue] = []
     private var fileWarningsCache: [ConfigFileIssue]?
+
+    var voiceCommandsEnabled = false {
+        didSet { if voiceCommandsEnabled != oldValue { invalidate() } }
+    }
 
     init(supportDir: URL) {
         self.supportDir = supportDir
@@ -40,6 +47,7 @@ final class ConfigCache {
         replacementsCache = nil
         connectionsCache = nil
         dictionaryCache = nil
+        voiceCommandsCache = nil
         resolvedCache = nil
         loadFailures = []
         fileWarningsCache = nil
@@ -54,6 +62,7 @@ final class ConfigCache {
 
     var fileFailures: [ConfigFileIssue] {
         _ = dictionary; _ = replacements; _ = connections; _ = modes
+        if voiceCommandsEnabled { _ = voiceCommands }
         return loadFailures
     }
 
@@ -70,6 +79,8 @@ final class ConfigCache {
             warning(DictionaryStore.fileName, in: supportDir, DictionaryStore.unknownKeys(in:)),
             warning(ReplacementsStore.fileName, in: supportDir, ReplacementsStore.unknownKeys(in:)),
             warning(ConnectionStore.fileName, in: supportDir, ConnectionStore.unknownKeys(in:)),
+            voiceCommandsEnabled
+                ? warning(VoiceCommandStore.fileName, in: supportDir, VoiceCommandStore.unknownKeys(in:)) : nil,
         ] + modeFiles.map { warning($0, in: modesDir, ModeStore.unknownKeys(in:)) }).compactMap { $0 }
         fileWarningsCache = warnings
         return warnings
@@ -149,9 +160,31 @@ final class ConfigCache {
                 error: failure.error, recovery: failure.usedLastKnownGood ? .previousVersion : .ignored)
             if !loadFailures.contains(issue) { loadFailures.append(issue) }
         }
-        modesCache = result.modes
+        let unguarded = Mode.visible(result.modes, voiceCommands: voiceCommandsEnabled)
+        let visible = VoiceCommandTriggers.guarded(unguarded)
+        voiceCommandsShutOutCache = VoiceCommandTriggers.isShutOut(unguarded)
+        modesCache = visible
         lastGoodModes = result.modes
-        return result.modes
+        return visible
+    }
+
+    var voiceCommandsShutOut: Bool {
+        _ = modes
+        return voiceCommandsShutOutCache
+    }
+
+    var voiceCommands: VoiceCommandConfig {
+        if let voiceCommandsCache { return voiceCommandsCache }
+        let loaded: VoiceCommandConfig
+        switch VoiceCommandStore.load(supportDir: supportDir) {
+        case .absent: loaded = VoiceCommandConfig(); lastGoodVoiceCommands = nil
+        case .loaded(let config): loaded = config; lastGoodVoiceCommands = config
+        case .failed(let error):
+            loaded = lastGoodVoiceCommands ?? VoiceCommandConfig()
+            recordLoadFailure(VoiceCommandStore.fileName, error, keptPrevious: lastGoodVoiceCommands != nil)
+        }
+        voiceCommandsCache = loaded
+        return loaded
     }
 
     var replacements: ReplacementsSet {

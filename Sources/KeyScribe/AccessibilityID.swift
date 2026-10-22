@@ -173,12 +173,75 @@ enum AccessibilityID {
             static let chooserCancel = "mode.chooser.cancel"
             static let deleteConfirmConfirm = "mode.list.deleteConfirm.confirm"
             static let deleteConfirmCancel = "mode.list.deleteConfirm.cancel"
+            static let moveShortcutConfirm = "mode.list.moveShortcut.confirm"
+            static let moveShortcutCancel = "mode.list.moveShortcut.cancel"
+            static let moveShortcutUndo = "mode.list.moveShortcut.undo"
             static func row(_ modeID: String) -> String { "mode.list.row.\(modeID)" }
             static func starterRow(_ seedID: String) -> String { "mode.list.starter.\(seedID)" }
         }
 
         enum Preview {
             static func add(_ seedID: String) -> String { "mode.preview.add.\(seedID)" }
+        }
+
+        enum VoiceCommands {
+            static let appNotice = "mode.voiceCommands.appNotice"
+            static let appNoticeConfirm = "mode.voiceCommands.appNotice.confirm"
+            static let appNoticeCancel = "mode.voiceCommands.appNotice.cancel"
+            static let moveShortcut = "mode.voiceCommands.moveShortcut"
+            static let placeNotice = "mode.voiceCommands.place.notice"
+            static let scriptNotice = "mode.voiceCommands.scriptNotice"
+            static let addPlace = "mode.voiceCommands.addPlace"
+            static let addCurrentApp = "mode.voiceCommands.addCurrentApp"
+            static let addCurrentTab = "mode.voiceCommands.addCurrentTab"
+            static let addApp = "mode.voiceCommands.addApp"
+            static let addWebPage = "mode.voiceCommands.addWebPage"
+            static let tryIt = "mode.voiceCommands.tryIt"
+            static let excludeFromHistory = "mode.voiceCommands.excludeFromHistory"
+            static let editVocabulary = "mode.voiceCommands.editVocabulary"
+            static let placeName = "mode.voiceCommands.place.name"
+            static let placeSay = "mode.voiceCommands.place.say"
+            static let placeKind = "mode.voiceCommands.place.kind"
+            static let placeApp = "mode.voiceCommands.place.app"
+            static func placeAppChoice(_ bundleId: String) -> String { "mode.voiceCommands.place.app.\(bundleId)" }
+            static let placeChooseFromApplications = "mode.voiceCommands.place.chooseFromApplications"
+            static let placeEnterBundleID = "mode.voiceCommands.place.enterBundleId"
+            static let placeBundleID = "mode.voiceCommands.place.bundleId"
+            static let placeExample = "mode.voiceCommands.place.example"
+            static let placeURL = "mode.voiceCommands.place.url"
+            static let placeBrowser = "mode.voiceCommands.place.browser"
+            static let placeSave = "mode.voiceCommands.place.save"
+            static let placeCancel = "mode.voiceCommands.place.cancel"
+            static let placeDelete = "mode.voiceCommands.place.delete"
+            static let placeDeleteConfirm = "mode.voiceCommands.place.deleteConfirm.confirm"
+            static func placeEdit(_ placeKey: String) -> String { "mode.voiceCommands.place.edit.\(placeKey)" }
+            static let addScript = "mode.voiceCommands.addScript"
+            static let addAction = "mode.voiceCommands.addAction"
+            static let addShortcut = "mode.voiceCommands.addShortcut"
+            static let shortcutNotice = "mode.voiceCommands.shortcut.notice"
+            static let shortcutChoice = "mode.voiceCommands.shortcut.choice"
+            static func shortcutOption(_ target: String) -> String { "mode.voiceCommands.shortcut.option.\(target)" }
+            static let shortcutRefresh = "mode.voiceCommands.shortcut.refresh"
+            static let shortcutOpenApp = "mode.voiceCommands.shortcut.openApp"
+            static let shortcutName = "mode.voiceCommands.shortcut.name"
+            static let shortcutSay = "mode.voiceCommands.shortcut.say"
+            static let shortcutInput = "mode.voiceCommands.shortcut.input"
+            static let shortcutExample = "mode.voiceCommands.shortcut.example"
+            static let shortcutSave = "mode.voiceCommands.shortcut.save"
+            static let shortcutCancel = "mode.voiceCommands.shortcut.cancel"
+            static let shortcutDelete = "mode.voiceCommands.shortcut.delete"
+            static let shortcutDeleteConfirm = "mode.voiceCommands.shortcut.deleteConfirm.confirm"
+            static let scriptName = "mode.voiceCommands.script.name"
+            static let scriptSay = "mode.voiceCommands.script.say"
+            static let scriptProgram = "mode.voiceCommands.script.program"
+            static let scriptChooseProgram = "mode.voiceCommands.script.chooseProgram"
+            static let scriptArguments = "mode.voiceCommands.script.arguments"
+            static let scriptArgumentDetails = "mode.voiceCommands.script.argumentDetails"
+            static let scriptSave = "mode.voiceCommands.script.save"
+            static let scriptCancel = "mode.voiceCommands.script.cancel"
+            static let scriptDelete = "mode.voiceCommands.script.delete"
+            static let scriptDeleteConfirm = "mode.voiceCommands.script.deleteConfirm.confirm"
+            static func scriptEdit(_ scriptKey: String) -> String { "mode.voiceCommands.script.edit.\(scriptKey)" }
         }
 
         enum Editor {
@@ -300,6 +363,8 @@ enum AccessibilityID {
         static let insertWithoutRewriting = "hud.action.insertWithoutRewriting"
         static let pasteLast = "hud.action.pasteLast"
         static let repairAction = "hud.action.repair"
+        static let choiceRow = "hud.choice.row"
+        static let choiceCancel = "hud.choice.cancel"
     }
 
     enum History {
@@ -351,6 +416,28 @@ enum AccessibilityID {
     // button's AXMenuBarItem exposes no identifier at all — those items are addressed by title instead.
 
     static let all: [String] = [
+        Mode.VoiceCommands.appNotice, Mode.VoiceCommands.appNoticeConfirm, Mode.VoiceCommands.appNoticeCancel,
+        Mode.VoiceCommands.moveShortcut,
+        Mode.VoiceCommands.scriptNotice, Mode.VoiceCommands.placeNotice,
+        Mode.VoiceCommands.addPlace, Mode.VoiceCommands.addCurrentApp, Mode.VoiceCommands.addCurrentTab,
+        Mode.VoiceCommands.addApp, Mode.VoiceCommands.addWebPage, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.editVocabulary,
+        Mode.VoiceCommands.placeName, Mode.VoiceCommands.placeSay, Mode.VoiceCommands.placeKind,
+        Mode.VoiceCommands.placeApp, Mode.VoiceCommands.placeURL, Mode.VoiceCommands.placeBrowser,
+        Mode.VoiceCommands.placeChooseFromApplications, Mode.VoiceCommands.placeEnterBundleID,
+        Mode.VoiceCommands.placeBundleID, Mode.VoiceCommands.placeExample, Mode.VoiceCommands.scriptArgumentDetails,
+        Mode.VoiceCommands.placeSave, Mode.VoiceCommands.placeCancel, Mode.VoiceCommands.placeDelete,
+        Mode.VoiceCommands.placeDeleteConfirm,
+        Mode.VoiceCommands.addScript, Mode.VoiceCommands.scriptName, Mode.VoiceCommands.scriptSay,
+        Mode.VoiceCommands.scriptProgram, Mode.VoiceCommands.scriptChooseProgram, Mode.VoiceCommands.scriptArguments,
+        Mode.VoiceCommands.scriptSave, Mode.VoiceCommands.scriptCancel, Mode.VoiceCommands.scriptDelete,
+        Mode.VoiceCommands.scriptDeleteConfirm,
+        Mode.VoiceCommands.addAction, Mode.VoiceCommands.addShortcut, Mode.VoiceCommands.excludeFromHistory,
+        Mode.VoiceCommands.shortcutNotice, Mode.VoiceCommands.shortcutChoice,
+        Mode.VoiceCommands.shortcutRefresh, Mode.VoiceCommands.shortcutOpenApp,
+        Mode.VoiceCommands.shortcutName, Mode.VoiceCommands.shortcutSay, Mode.VoiceCommands.shortcutInput,
+        Mode.VoiceCommands.shortcutExample,
+        Mode.VoiceCommands.shortcutSave, Mode.VoiceCommands.shortcutCancel,
+        Mode.VoiceCommands.shortcutDelete, Mode.VoiceCommands.shortcutDeleteConfirm,
         Settings.Sidebar.general, Settings.Sidebar.speechModels, Settings.Sidebar.vocabulary,
         Settings.Sidebar.aiServices, Settings.Sidebar.modes, Settings.Sidebar.history, Settings.Sidebar.permissions,
         Settings.Sidebar.advanced,
@@ -392,6 +479,7 @@ enum AccessibilityID {
         Settings.Advanced.eraseAllData, Settings.Advanced.eraseConfirmConfirm, Settings.Advanced.eraseConfirmCancel,
         Mode.List.list, Mode.List.add, Mode.List.addBlank, Mode.List.chooserCancel,
         Mode.List.deleteConfirmConfirm, Mode.List.deleteConfirmCancel,
+        Mode.List.moveShortcutConfirm, Mode.List.moveShortcutCancel, Mode.List.moveShortcutUndo,
         Mode.Editor.name, Mode.Editor.enabled, Mode.Editor.shortcutWell, Mode.Editor.pressStyle,
         Mode.Editor.extraTriggersNote,
         Mode.Editor.rewriteSelection, Mode.Editor.liveEdits, Mode.Editor.aiService, Mode.Editor.instruction,

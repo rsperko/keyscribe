@@ -12,7 +12,7 @@ struct VocabularyScopeSections {
 
 enum VocabularyScopePicker {
     static func sections(for modes: [Mode]) -> VocabularyScopeSections {
-        let editable = modes.filter { !$0.isSystem }
+        let editable = modes.filter(\.hasOwnVocabulary)
         return VocabularyScopeSections(
             enabled: editable.filter(\.enabled),
             disabled: editable.filter { !$0.enabled })
@@ -20,7 +20,7 @@ enum VocabularyScopePicker {
 
     static func resolved(_ selection: VocabularyScopeDestination, in modes: [Mode]) -> VocabularyScopeDestination {
         guard case let .mode(id) = selection else { return selection }
-        return modes.contains { $0.id == id && !$0.isSystem } ? selection : .global
+        return modes.contains { $0.id == id && $0.hasOwnVocabulary } ? selection : .global
     }
 
     static func summary(for mode: Mode) -> String {

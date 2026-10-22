@@ -409,6 +409,50 @@ inline outside that browser and the press is a silent no-op, while inside it the
 A `url_pattern` alone keeps the audible cancel; that is the cost of routing on something only knowable
 once dictation has started.
 
+**A mode whose output is a command (experimental).** The **Voice Commands** system mode
+(`_voice_commands`, behind the `voice_commands` flag) sets `output = "voice_command"`. That is data, not a
+mode identity: the pipeline branches on the output kind. Such a take skips Phase B entirely (a spoken
+suffix never re-routes a command into a dictation mode), and skips the rewrite and insertion; History
+records it as a command (Result is what it ran, plus why it failed) under the usual History rules —
+the heard transcript, after the mode's own replacements and dictionary clean it (its vocabulary leaves out
+the global one unless it opts in), is parsed as a closed set of commands. **Run** resolves only against
+the user's configured scripts and shortcuts; focus verbs resolve only against apps, the user's places, and open windows (titles are read over
+Accessibility on this Mac, and only when no app or place name matched), and **go back**
+returns to the previous window or app (`config_schema.md` "`voice_commands.toml`"). A bare script name never runs it.
+It never inserts, pastes, copies, submits, or touches the clipboard. Recognition and resolution are local
+and the transcript is never sent to an AI service; the only network effect of its own is that opening a
+saved web place loads that site in the browser. It opens only apps and URLs the system or the user's file
+names, never a URL built from speech. **Spoken text reaches only an action's input the user marked with
+`{text}`**: for a script, the argv elements of a program started directly (`Process`, no shell) that contain
+the placeholder, so speech keeps those argument boundaries, never becomes extra arguments, and is never
+evaluated by KeyScribe, though the program itself can still interpret it as code; for a macOS shortcut, the standard input of
+`/usr/bin/shortcuts run`, with the shortcut named by identifier as one argv element. The script or shortcut
+is the user's own. As an added guardrail, validation refuses a script whose program has a
+known interpreter file name (a shell, `env`, `osascript`, …) when any argument carries `{text}`, so the direct
+`sh -c {text}` setup cannot be saved or loaded; that is accident prevention by name, not proof that an accepted
+script is safe. Either runs as the user; what it does with the text, including sending it to online
+services, is outside KeyScribe's invariants, which is why `PRIVACY.md` says so. An action still running
+after the short report window is shown as started and never killed; its later result updates the History
+entry it wrote.
+A script is never matched by a near-miss, and its name and arguments are never fuzzy-corrected by the
+dictionary. Dictionary correction applies only to an app or place target, so a guess cannot turn an
+app-switching command into script execution. It is never the Direct fallback and is
+reachable only by its own shortcut.
+**Ambiguity asks; it never guesses.** Ties at the winning match step resolve to a typed
+`VoiceCommandChoice` (frozen candidate identities and order, the spoken target, any `{text}` input, and
+the full match count) rather than to a recency or intent tie-break, because a wrong switch can expose a
+window that "go back" cannot un-show. `VoiceCommandRunner` keeps the one live choice in memory beside
+`backTarget` — never persisted — with the original origin, and owns its validity and idle expiry on an
+injected monotonic clock. The Voice Commands trigger claims it when the mode resolves, before recording,
+so expiry is suspended for the whole answer; any other mode starting dismisses it. An answer is parsed by
+the pure `VoiceCommandChoiceAnswer` (an explicit table of digits, cardinals, ordinals, and STT homophones,
+whole-utterance only) after the mode's replacements; a number is never action input. A selection
+consumes the choice before any `await`, so a click and a voice answer cannot both run, and it resolves
+**only the chosen candidate** against the current configuration — re-reading browser tabs for a place,
+and reporting a removed or repointed entry as unavailable instead of re-searching by name. A row click,
+Cancel, a voice answer, and every timer carry the choice's id, so a stale one cannot affect a newer list.
+Numbers mean nothing outside a live choice.
+
 **Phase B — known only after STT (trigger-phrase routing):**
 - **Trigger phrase(s):** a mode may have **multiple** spoken phrases (e.g. *"as pig latin"*
   or *"pig latinize"* both route to the same mode). Because they depend on STT output they **cannot
@@ -460,7 +504,8 @@ A few fields *are* user-editable — its **trigger keys**, insertion method, tra
 and whether it **records to history** (it records per the global History setting by default; you can
 switch that off for Direct specifically). It occupies a reserved **system-mode id namespace** (a
 leading underscore, `_direct`) that the mode-name slugger can never produce, so a user-created mode can
-never collide with it; locked fields are re-enforced on load so a hand-edit can't weaken the floor. The
+never collide with it (only the built-in ids are system modes; a hand-made `_`-prefixed file is an ordinary
+mode); locked fields are re-enforced on load so a hand-edit can't weaken the floor. The
 recording HUD shows **Plain Dictation** while it runs, so a fallthrough is honest, not silent. This
 makes a key press a two-part promise: a constrained mode scopes only its *processing*, never your
 *ability to dictate* — when the recipe does not apply here, the floor still types your words.

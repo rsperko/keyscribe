@@ -76,6 +76,26 @@ struct HistoryPaneModelTests {
         model.selection = model.groups.first?.rows.first?.id
         #expect(model.selected?.result == "older-search-result")
     }
+    @Test func theSelectedCommandStaysSelectedWhenItFinishesLate() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var started = entry("~/bin/deploy staging")
+        started.outcome = .commandStarted
+        try store.append(started, today: "2026-07-10")
+        let model = model(store)
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.selection = model.groups.first?.rows.first?.id
+        var finished = started
+        finished.outcome = .command
+        #expect(store.replace(started, with: finished))
+        model.reload()
+        for _ in 0..<80 where model.groups.first?.rows.first?.entry.outcome != .command {
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        #expect(model.selected?.outcome == .command)
+    }
+
     private func tempStore() -> (HistoryStore, URL) {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-history-pane-\(UUID().uuidString)", isDirectory: true)
@@ -90,11 +110,64 @@ struct HistoryPaneModelTests {
             cloudInvolved: false, redaction: false, contextCategories: [])
     }
 
-    private func model(_ store: HistoryStore) -> HistoryPaneModel {
+    private final class Corrections {
+        var words: [(String, CorrectionDestination.Scope)] = []
+        var analyzed: [CorrectionDestination.Scope] = []
+        var replacements: [(String, String, CorrectionDestination.Scope)] = []
+    }
+
+    private func model(_ store: HistoryStore, corrections: Corrections = Corrections()) -> HistoryPaneModel {
         HistoryPaneModel(
-            store: store, addDictionaryWord: { _ in true },
-            analyzeDictionaryWord: { _ in VocabularyAnalysis(action: .addWord) },
-            addReplacement: { _, _ in true }, openSettings: { _ in })
+            store: store,
+            addDictionaryWord: { corrections.words.append(($0, $1)); return true },
+            analyzeDictionaryWord: { corrections.analyzed.append($1); return VocabularyAnalysis(action: .addWord) },
+            addReplacement: { corrections.replacements.append(($0, $1, $2)); return true }, openSettings: { _ in })
+    }
+
+    private func selectingOnly(_ value: HistoryEntry, corrections: Corrections) async throws -> HistoryPaneModel {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try store.append(value, today: "2026-07-10")
+        let model = model(store, corrections: corrections)
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.selection = model.groups.first?.rows.first?.id
+        return model
+    }
+
+    @Test func correctionsFromACommandGoToTheVoiceCommandsVocabulary() async throws {
+        var command = entry("~/bin/deploy prod")
+        command.outcome = .command
+        let corrections = Corrections()
+        let model = try await selectingOnly(command, corrections: corrections)
+        #expect(model.selected?.outcome == .command)
+        _ = model.analyzeDictionaryWord("Hydra")
+        #expect(model.addDictionaryWord("Hydra"))
+        #expect(model.addReplacement("hydro", "Hydra"))
+        #expect(corrections.analyzed == [.mode(Mode.voiceCommandsId)])
+        #expect(corrections.words.map(\.1) == [.mode(Mode.voiceCommandsId)])
+        #expect(corrections.replacements.map(\.2) == [.mode(Mode.voiceCommandsId)])
+    }
+
+    @Test func aCommandCannotBeCorrectedWhileVoiceCommandsIsOff() async throws {
+        var command = entry("~/bin/deploy prod")
+        command.outcome = .command
+        let corrections = Corrections()
+        let model = try await selectingOnly(command, corrections: corrections)
+        model.voiceCommandsEnabled = { false }
+        #expect(!model.canCorrect)
+        #expect(!model.addDictionaryWord("Hydra"))
+        #expect(!model.addReplacement("hydro", "Hydra"))
+        #expect(corrections.words.isEmpty && corrections.replacements.isEmpty)
+    }
+
+    @Test func correctionsFromADictationGoToTheGlobalVocabulary() async throws {
+        let corrections = Corrections()
+        let model = try await selectingOnly(entry("hello"), corrections: corrections)
+        #expect(model.addDictionaryWord("Hydra"))
+        #expect(model.addReplacement("hydro", "Hydra"))
+        #expect(corrections.words.map(\.1) == [.global])
+        #expect(corrections.replacements.map(\.2) == [.global])
     }
 
     @Test func releaseForCloseClearsAllInMemoryState() async throws {

@@ -67,6 +67,30 @@ struct ReplacementBatchSaveTests {
         #expect(repo.replacementRules().isEmpty)
     }
 
+    @Test func savesIntoVoiceCommandsWhichKeepsItsOwnVocabulary() throws {
+        let (repo, dir) = repository()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var commands = Mode.voiceCommands
+        commands.dictionary.words = ["Ghostty"]
+        try repo.writeMode(commands)
+        let outcome = try repo.saveReplacementBatch(
+            to: .mode(Mode.voiceCommandsId), expected: [], proposed: [rule("ghosty", "Ghostty")], requiringWord: "Ghostty")
+        #expect(outcome == .saved)
+        let saved = try ModeStore.decode(
+            from: String(contentsOf: repo.modesDir.appendingPathComponent("\(Mode.voiceCommandsId).toml"), encoding: .utf8),
+            id: Mode.voiceCommandsId)
+        #expect(saved.replacements.rules == [rule("ghosty", "Ghostty")])
+    }
+
+    @Test func directUsesOnlyGlobalVocabularySoItIsNeverABatchDestination() throws {
+        let (repo, dir) = repository()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try repo.writeMode(.direct)
+        let outcome = try repo.saveReplacementBatch(
+            to: .mode(Mode.directId), expected: [], proposed: [rule("Ugabyte")], requiringWord: nil)
+        #expect(outcome == .stale(.destinationMissing))
+    }
+
     @Test func aMissingModeIsReportedAndNeverFallsBackToGlobal() throws {
         let (repo, dir) = repository()
         defer { try? FileManager.default.removeItem(at: dir) }

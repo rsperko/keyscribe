@@ -178,7 +178,7 @@ struct CorrectionDestination: Hashable, Identifiable {
     // Global plus the user's enabled, non-system modes. A disabled mode is excluded: a term routed there
     // would do nothing until the mode is enabled, with no hint at the panel.
     static func list(for modes: [Mode]) -> [CorrectionDestination] {
-        [.global] + modes.filter { !$0.isSystem && $0.enabled }.map { .mode(id: $0.id, name: $0.name) }
+        [.global] + modes.filter { $0.hasOwnVocabulary && $0.enabled }.map { .mode(id: $0.id, name: $0.name) }
     }
 }
 

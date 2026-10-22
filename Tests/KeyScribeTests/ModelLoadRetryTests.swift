@@ -157,7 +157,7 @@ struct ModelLoadRetryTests {
 
     private func sawError(_ states: [HUDState], message: String) -> Bool {
         states.contains {
-            if case .error(let m, _) = $0 { return m == message }
+            if case .error(let m, _, _) = $0 { return m == message }
             return false
         }
     }

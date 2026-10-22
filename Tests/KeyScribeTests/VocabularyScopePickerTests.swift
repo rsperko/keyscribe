@@ -15,6 +15,14 @@ struct VocabularyScopePickerTests {
         #expect(sections.disabled.map(\.id) == ["notes"])
     }
 
+    @Test func voiceCommandsHasItsOwnVocabularyScope() {
+        let sections = VocabularyScopePicker.sections(for: [.direct, .voiceCommands])
+        let selection = VocabularyScopeDestination.mode(Mode.voiceCommandsId)
+
+        #expect(sections.enabled.map(\.id) == [Mode.voiceCommandsId])
+        #expect(VocabularyScopePicker.resolved(selection, in: [.direct, .voiceCommands]) == selection)
+    }
+
     @Test func fallsBackToGlobalWhenTheSelectedModeNoLongerExists() {
         let selection = VocabularyScopeDestination.mode("deleted-mode")
 
@@ -40,5 +48,15 @@ struct VocabularyScopePickerTests {
 
         #expect(navigation.destination == .vocabulary)
         #expect(navigation.vocabularyScope == .mode("email"))
+    }
+
+    @MainActor @Test func openingPlainDictationVocabularySelectsGlobal() {
+        let navigation = SettingsNavigationModel()
+        navigation.vocabularyScope = .mode("email")
+
+        navigation.openVocabulary(for: Mode.directId)
+
+        #expect(navigation.destination == .vocabulary)
+        #expect(navigation.vocabularyScope == .global)
     }
 }

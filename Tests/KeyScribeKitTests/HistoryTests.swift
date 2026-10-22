@@ -46,6 +46,27 @@ struct HistoryEntryCodecTests {
         #expect(decoded.triggerKey == nil)
     }
 
+    @Test func aVoiceCommandRoundTripsWithItsFailureReason() throws {
+        let entry = HistoryEntry(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            modeName: "Voice Commands", heard: "deploy staging", transformed: "deploy staging",
+            result: "~/bin/deploy staging", outcome: .commandFailed,
+            cloudInvolved: false, redaction: false, contextCategories: [],
+            failureReason: "Deploy failed (exit 2): no such environment")
+        let line = try entry.jsonLine()
+        #expect(line.contains("\"outcome\":\"command_failed\""))
+        #expect(line.contains("\"failure_reason\":\"Deploy failed (exit 2): no such environment\""))
+        #expect(try HistoryEntry(jsonLine: line) == entry)
+    }
+
+    @Test func onlyCommandOutcomesAreCommands() {
+        #expect(HistoryEntry.Outcome.command.isCommand)
+        #expect(HistoryEntry.Outcome.commandFailed.isCommand)
+        #expect(HistoryEntry.Outcome.commandStarted.isCommand)
+        #expect(!HistoryEntry.Outcome.inserted.isCommand)
+        #expect(!HistoryEntry.Outcome.failed.isCommand)
+    }
+
     @Test func triggerKeyRoundTrips() throws {
         let entry = HistoryEntry(
             timestamp: Date(timeIntervalSince1970: 1_700_000_000),
@@ -242,6 +263,12 @@ struct HistorySearchTests {
         #expect(filter("Meeting notes").count == 1)
         #expect(filter("absent").isEmpty)
     }
+
+    @Test func matchesWhyACommandFailed() {
+        var failed = sampleEntry(heard: "deploy prod", result: "~/bin/deploy prod", mode: "Voice Commands", outcome: .commandFailed)
+        failed.failureReason = "Deploy failed (exit 2): no such environment"
+        #expect(HistorySearch.matches(failed, query: "no such environment"))
+    }
 }
 
 struct CorrectionSurfaceTests {
@@ -387,6 +414,109 @@ struct HistoryStoreTests {
         let deleted = store.applyRetention(today: "2026-06-20", retentionDays: 7)
         #expect(deleted == ["2026-06-01.jsonl"])
         #expect(store.dayFiles() == ["2026-06-20.jsonl"])
+    }
+
+    @Test func replaceRewritesTheMatchingEntryInPlace() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        let started = sampleEntry(heard: "run deploy", mode: "Voice Commands", outcome: .commandStarted, at: 0)
+        let later = sampleEntry(heard: "later", at: 10)
+        try store.append(started, today: "2026-06-20")
+        try store.append(later, today: "2026-06-20")
+        var failed = started
+        failed.outcome = .commandFailed
+        failed.failureReason = "Deploy failed (exit 2)."
+        #expect(store.replace(started, with: failed))
+        #expect(store.entries().map(\.outcome) == [.inserted, .commandFailed])
+        #expect(store.entries().last?.failureReason == "Deploy failed (exit 2).")
+        #expect(!store.replace(started, with: failed))
+    }
+
+    @Test func anEntryCanStillBeDeletedAfterItsCommandFinished() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        let started = sampleEntry(heard: "run deploy", mode: "Voice Commands", outcome: .commandStarted, at: 0)
+        let later = sampleEntry(heard: "later", at: 10)
+        try store.append(started, today: "2026-06-20")
+        try store.append(later, today: "2026-06-20")
+        var failed = started
+        failed.outcome = .commandFailed
+        failed.failureReason = "Deploy failed (exit 2)."
+        #expect(store.replace(started, with: failed))
+        #expect(store.delete(started) == .deleted)
+        #expect(store.entries().map(\.heard) == ["later"])
+    }
+
+    @Test func aQuestionAnsweredByClickCanStillBeDeletedFromItsEarlierCopy() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        var asked = sampleEntry(heard: "switch to mail", result: "Asked to choose: 1. Personal Mail, 2. Work Mail",
+                                mode: "Voice Commands", outcome: .commandNeedsChoice)
+        asked.id = "question"
+        try store.append(asked, today: "2026-06-20")
+        var answered = asked
+        answered.outcome = .command
+        answered.result = "Selected Work Mail for \u{201C}switch to mail\u{201D}: Opens Work Mail."
+        #expect(store.replace(asked, with: answered))
+        #expect(store.delete(asked) == .deleted)
+        #expect(store.entries().isEmpty)
+    }
+
+    @Test func repeatedIdenticalCommandsAreDeletedOneAtATimeByTheirIds() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        var first = sampleEntry(heard: "go back", result: "Returns to Mail.", mode: "Voice Commands", outcome: .command)
+        first.id = "first"
+        var second = first
+        second.id = "second"
+        try store.append(first, today: "2026-06-20")
+        try store.append(second, today: "2026-06-20")
+        #expect(store.delete(second) == .deleted)
+        #expect(store.entries().map(\.id) == ["first"])
+    }
+
+    @Test func anEntryWithoutAnIdStillNeedsItsResultToMatch() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        let old = sampleEntry(heard: "run deploy", result: "~/bin/deploy", mode: "Voice Commands", outcome: .command)
+        var other = old
+        other.result = "~/bin/other"
+        try store.append(old, today: "2026-06-20")
+        #expect(store.delete(other) != .deleted)
+        #expect(store.entries().count == 1)
+    }
+
+    @Test func choiceOutcomesAreNeutralCommandsThatRoundTrip() throws {
+        for outcome in [HistoryEntry.Outcome.commandNeedsChoice, .commandCancelled] {
+            #expect(outcome.isCommand)
+            var entry = sampleEntry(mode: "Voice Commands", outcome: outcome)
+            entry.id = "abc"
+            #expect(try HistoryEntry(jsonLine: entry.jsonLine()) == entry)
+        }
+        #expect(HistoryEntry.Outcome.commandNeedsChoice.rawValue == "command_needs_choice")
+        #expect(HistoryEntry.Outcome.commandCancelled.rawValue == "command_cancelled")
+    }
+
+    @Test func deletingMatchesOnlyTheSameRecord() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        let started = sampleEntry(heard: "run deploy", mode: "Voice Commands", outcome: .commandStarted, at: 0)
+        try store.append(started, today: "2026-06-20")
+        var other = started
+        other.heard = "run backup"
+        #expect(store.delete(other) == .notFound)
+        #expect(store.entries().count == 1)
+    }
+
+    @Test func replaceFindsAnEntryWhoseTimestampHadFractionalSeconds() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        let started = sampleEntry(heard: "run deploy", outcome: .commandStarted, at: 0.75)
+        try store.append(started, today: "2026-06-20")
+        var done = started
+        done.outcome = .command
+        #expect(store.replace(started, with: done))
+        #expect(store.entries().map(\.outcome) == [.command])
     }
 
     @Test func deleteRemovesOnlyTheMatchingEntry() throws {

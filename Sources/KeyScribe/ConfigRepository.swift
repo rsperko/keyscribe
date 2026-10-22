@@ -81,6 +81,8 @@ final class ConfigRepository {
         notifyChange()
     }
 
+    var resolved: ResolvedConfig { config.resolved }
+    var voiceCommandsEnabled: Bool { config.voiceCommandsEnabled }
     var modesDir: URL { supportDir.appendingPathComponent("modes", isDirectory: true) }
 
     func dictionaryWords() -> [String] { DictionaryStore.loadOrDefault(supportDir: supportDir).words }
@@ -97,6 +99,34 @@ final class ConfigRepository {
             let set = DictionarySet(words: mode.dictionary.words).adding(word: word)
             mode.dictionary.words = set.words
         }) != nil
+    }
+
+    func addDictionaryWord(_ word: String, to scope: CorrectionDestination.Scope) -> Bool {
+        switch scope {
+        case .global: addDictionaryWord(word)
+        case .mode(let id): addDictionaryWord(word, toMode: id)
+        }
+    }
+
+    func addReplacement(heard: String, replace: String, regex: Bool = false, to scope: CorrectionDestination.Scope) -> Bool {
+        switch scope {
+        case .global: addReplacement(heard: heard, replace: replace, regex: regex)
+        case .mode(let id): addReplacement(heard: heard, replace: replace, regex: regex, toMode: id)
+        }
+    }
+
+    func vocabularyScope(for scope: CorrectionDestination.Scope) -> VocabularyScope {
+        let globalWords = dictionaryWords()
+        let globalRules = replacementRules()
+        guard case .mode(let id) = scope, let mode = resolved.modes.first(where: { $0.id == id }) else {
+            return VocabularyScope(globalWords: globalWords, globalRules: globalRules)
+        }
+        return VocabularyScope(
+            globalWords: globalWords, globalRules: globalRules,
+            local: VocabularyScope.Local(
+                words: mode.dictionary.words, rules: mode.replacements.rules,
+                includeGlobalWords: mode.dictionary.includeGlobal,
+                includeGlobalRules: mode.replacements.includeGlobal))
     }
 
     @discardableResult
@@ -162,7 +192,7 @@ final class ConfigRepository {
                 return .stale(.destinationMissing)
             }
             var mode = try loadModeForMutation(id: id)
-            guard !mode.isSystem else { return .stale(.destinationMissing) }
+            guard mode.hasOwnVocabulary else { return .stale(.destinationMissing) }
             guard contains(mode.dictionary.words) else { return .stale(.wordRemoved) }
             guard mode.replacements.rules == expected else { return .stale(.rulesChanged) }
             mode.replacements.rules = proposed
@@ -198,10 +228,41 @@ final class ConfigRepository {
         }
     }
 
+    struct IncompleteRestore: Error {
+        let underlying: Error
+        let unrestored: [String]
+    }
+
+    func writeModes(
+        _ modes: [Mode], restoring originals: [Mode], using write: ((Mode) throws -> Void)? = nil
+    ) throws {
+        for mode in modes { try requireReadableModeFile(id: mode.id) }
+        let write = write ?? { [modesDir] in try ModeStore.write($0, to: modesDir) }
+        try commit(touching: modes.map { modeFileURL(id: $0.id) }) {
+            var written: Set<String> = []
+            do {
+                for mode in modes {
+                    try write(mode)
+                    written.insert(mode.id)
+                }
+            } catch {
+                let unrestored = originals.filter { written.contains($0.id) }.compactMap { original -> String? in
+                    (try? write(original)) == nil ? original.name : nil
+                }
+                guard unrestored.isEmpty else {
+                    config.invalidate()
+                    notifyChange()
+                    throw IncompleteRestore(underlying: error, unrestored: unrestored)
+                }
+                throw error
+            }
+        }
+    }
+
     @discardableResult
     func mutateMode(id: String, _ transform: (inout Mode) -> Void) throws -> Mode {
         var mode = try loadModeForMutation(id: id)
-        guard !mode.isSystem else { throw ConfigError.invalid("system modes cannot hold local vocabulary") }
+        guard mode.hasOwnVocabulary else { throw ConfigError.invalid("Plain Dictation uses only global vocabulary") }
         transform(&mode)
         try writeMode(mode)
         return mode
@@ -270,6 +331,23 @@ final class ConfigRepository {
             try ConnectionStore.write(set, to: supportDir)
         }
         return set
+    }
+
+    @discardableResult
+    func mutateVoiceCommands(_ transform: (inout VoiceCommandConfig) throws -> Void) throws -> VoiceCommandConfig {
+        var config = try loadVoiceCommandsForMutation()
+        try transform(&config)
+        if let issue = config.issue { throw ConfigError.invalid(issue) }
+        try commit(touching: [supportDir.appendingPathComponent(VoiceCommandStore.fileName)]) {
+            try VoiceCommandStore.write(config, to: supportDir)
+        }
+        return config
+    }
+
+    private func loadVoiceCommandsForMutation() throws -> VoiceCommandConfig {
+        let file = supportDir.appendingPathComponent(VoiceCommandStore.fileName)
+        guard FileManager.default.fileExists(atPath: file.path) else { return VoiceCommandConfig() }
+        return try VoiceCommandStore.decode(from: readForMutation(file))
     }
 
     // On write success: record the touched files (suppress the watcher echo), invalidate the cache, then
