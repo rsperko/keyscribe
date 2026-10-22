@@ -244,7 +244,10 @@ not to its label.
 
 **Config problems.** The HUD names only problems an external edit just introduced — each new unreadable
 file or unread key once, never during a dictation. Settings → Maintenance keeps listing every current
-problem until it is fixed, and an unreadable file also stays in the menu status.
+problem until it is fixed, and an unreadable file also stays in the menu status. An unread key is an advisory, not a
+failure: it shows with an info icon rather than the error triangle, and a batch that includes an
+unreadable file shows as the failure. While a voice-command question is waiting, the announcement becomes
+the question's note instead of covering the list.
 
 **Recording limit.** A single take has a length limit (`design.md` §4.8). Reaching it ends the take
 the way a release does — the recording is transcribed and inserted, never discarded. The warning

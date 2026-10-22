@@ -585,10 +585,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             rebuildHotkeyMonitor()
         }
         refreshStatus()
-        let newProblems = configProblemAnnouncement.next(current: configProblems)
-        if !newProblems.isEmpty {
-            controller.announceConfigProblem(newProblems.joined(separator: " · "))
-        }
+        controller.announceConfigProblems(configProblemAnnouncement.next(current: configProblems))
         controller.voiceCommandConfigurationChanged()
         configRepository.notifyExternalChange()
         // Rebuild the frozen plan off this path so the first press after an edit doesn't pay the
@@ -839,7 +836,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let problems = currentProblems()
         menu.setErrorBadge(!problems.isEmpty)
         settingsController?.refreshProblems(problems)
-        settingsController?.refreshConfigIssues(configErrors + config.fileWarnings)
+        settingsController?.refreshConfigIssues(configProblems)
 
         if let summary = ConfigFileIssue.menuSummary(configErrors) {
             menu.setStatus(summary, opening: .advanced)
@@ -878,12 +875,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // settings.toml decode failures (owned by AppDelegate) plus any malformed vocabulary/connection/mode
     // file surfaced by the config cache — they light the Maintenance pane's malformed-config problem and
     // the menu status line so a broken config file is never silently swallowed.
+    private var configProblems: [ConfigFileIssue] { configErrors + config.fileWarnings }
+
     private var configErrors: [ConfigFileIssue] {
         [settingsIssue].compactMap { $0 } + config.fileFailures
-    }
-
-    private var configProblems: [String] {
-        (configErrors + config.fileWarnings).map(\.oneLine)
     }
 
     private func currentProblems() -> [SettingsProblem] {

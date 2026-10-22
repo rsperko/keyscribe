@@ -162,7 +162,8 @@ final class DictationController {
     }
     private(set) var lastRecord: DictationRecord?
     private(set) var nextModeOverrideID: String?
-    private var screenLocks = 0
+    // Bumped by anything that must stop voice-command work already under way; every action re-checks it.
+    private var voiceCommandStops = 0
 
     private let maxRecordingSeconds: Double
     private let limitWarningSeconds: Double
@@ -553,9 +554,10 @@ final class DictationController {
         scheduleHide()
     }
 
-    func announceConfigProblem(_ message: String) {
-        guard !isBusy else { return }
-        hud?.render(.error(message: message, action: nil))
+    func announceConfigProblems(_ issues: [ConfigFileIssue]) {
+        guard !isBusy, !issues.isEmpty else { return }
+        let message = issues.map(\.oneLine).joined(separator: " · ")
+        present(issues.contains(where: \.isError) ? .error(message: message, action: nil) : .advisory(message: message))
         scheduleHide(after: 8)
     }
 
@@ -1008,10 +1010,10 @@ final class DictationController {
         let transcript = plan.voiceCommandText(heard: heard, mode: activeMode)
         let late = LateCommandResult()
         let commands = config.voiceCommands
-        let locksAtStart = screenLocks
+        let stopsAtStart = voiceCommandStops
         // Lookup stays cancellable (still transcribing); the first check that passes is where acting begins.
         let stillWanted: @MainActor () -> Bool = { [weak self] in
-            guard let self, !Task.isCancelled, !self.captureWasLost, self.screenLocks == locksAtStart,
+            guard let self, !Task.isCancelled, !self.captureWasLost, self.voiceCommandStops == stopsAtStart,
                   self.settings.features.isEnabled(.voiceCommands) else { return false }
             if self.machine.state == .transcribing {
                 guard self.machine.beginInserting() else { return false }
@@ -1158,7 +1160,7 @@ final class DictationController {
 
     private static func choiceWaiting(after state: HUDState?) -> VoiceCommandChoiceStatus {
         switch state {
-        case .error(let message, _, _): .waiting(note: message)
+        case .error(let message, _, _), .advisory(let message): .waiting(note: message)
         case .complete(.noSpeech, _): .waiting(note: "No speech detected")
         case .choice(_, .waiting(let note, let heard), _): .waiting(note: note, heard: heard)
         default: .waiting(note: nil)
@@ -1172,26 +1174,30 @@ final class DictationController {
         return prompt
     }
 
+    // The only path to the HUD: a pending choice must stay readable, so anything that would cover it
+    // becomes its status instead.
     private func present(_ state: HUDState) {
+        hud?.render(keepingChoiceVisible(state))
+    }
+
+    private func keepingChoiceVisible(_ state: HUDState) -> HUDState {
         if let prompt = answeringChoicePrompt {
             switch state {
             case .recording(_, let level, let latched, _):
-                hud?.render(.choice(prompt, status: .listening(latchedTrigger: latched), level: level))
-                return
+                return .choice(prompt, status: .listening(latchedTrigger: latched), level: level)
             case .transcribing, .loadingModel:
-                hud?.render(.choice(prompt, status: .working))
-                return
-            case .hidden:
-                hud?.render(.choice(prompt, status: .waiting(note: nil)))
-                return
+                return .choice(prompt, status: .working)
             default:
                 break
             }
-        } else if case .hidden = state, let prompt = pendingVoiceCommandChoice {
-            hud?.render(.choice(prompt, status: .waiting(note: nil)))
-            return
         }
-        hud?.render(state)
+        guard let prompt = answeringChoicePrompt ?? pendingVoiceCommandChoice else { return state }
+        switch state {
+        case .hidden, .error, .advisory, .complete(.noSpeech, _):
+            return .choice(prompt, status: Self.choiceWaiting(after: state))
+        default:
+            return state
+        }
     }
 
     private func claimOrDismissVoiceCommandChoice() {
@@ -1213,7 +1219,7 @@ final class DictationController {
             guard let self, !Task.isCancelled else { return }
             if self.voiceCommands.expireChoice(id) {
                 self.clearVoiceCommandChoice()
-                if !self.isBusy { self.hud?.render(.hidden) }
+                if !self.isBusy { self.present(.hidden) }
             } else if self.voiceCommands.choiceSecondsLeft(id) != nil {
                 self.scheduleChoiceExpiry(id)
             }
@@ -1239,10 +1245,11 @@ final class DictationController {
         if let pending = voiceCommands.pendingChoice { voiceCommands.dismissChoice(pending.id) }
         clearVoiceCommandChoice()
         guard shown, !isBusy || machine.state == .arming else { return }
-        hud?.render(.hidden)
+        present(.hidden)
     }
 
     private func stopVoiceCommandChoice() {
+        voiceCommandStops += 1
         clickedChoiceTask?.cancel()
         clickedChoiceTask = nil
         dismissVoiceCommandChoice()
@@ -1271,11 +1278,13 @@ final class DictationController {
         let commands = config.voiceCommands
         let late = LateCommandResult()
         let startsAtClick = dictationStarts
+        let stopsAtClick = voiceCommandStops
         clickedChoiceTask?.cancel()
         clickedChoiceTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let stillWanted: @MainActor () -> Bool = { [weak self] in
                 !Task.isCancelled && self?.dictationStarts == startsAtClick
+                    && self?.voiceCommandStops == stopsAtClick
                     && self?.settings.features.isEnabled(.voiceCommands) == true
             }
             guard let selection = await self.voiceCommands.runChoice(
@@ -1309,7 +1318,7 @@ final class DictationController {
             guard let self, self.dictationStarts == startsAtClick, !self.isBusy,
                   self.voiceCommands.pendingChoice == nil else { return }
             self.effects.alert(self.settings.duringDictation, cue: shown.cue)
-            self.hud?.render(shown.state)
+            self.present(shown.state)
             self.scheduleHide(after: shown.hideAfter)
         }
         runWhenIdle(show)
@@ -1325,7 +1334,7 @@ final class DictationController {
         let entry = choiceEntry
         clearVoiceCommandChoice()
         if wasAnswering { cancel() }
-        if !isBusy { hud?.render(.hidden) }
+        if !isBusy { present(.hidden) }
         guard let entry, let history else { return }
         var updated = entry
         updated.outcome = .commandCancelled
@@ -2675,7 +2684,6 @@ final class DictationController {
     }
 
     func handleScreenLocked() {
-        screenLocks += 1
         stopVoiceCommandChoice()
         guard machine.isBusy else { return }
         cancel()

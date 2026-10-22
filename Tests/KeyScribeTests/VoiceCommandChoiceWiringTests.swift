@@ -321,6 +321,16 @@ struct VoiceCommandChoiceWiringTests {
         #expect(!h.hud.states.dropFirst(hiddenCount).contains { $0.isWaitingForChoice })
     }
 
+    @Test func aConfigProblemAnnouncedDuringAQuestionKeepsTheListAndShowsTheMessageAsItsNote() async throws {
+        let h = try Harness(places: [personal, work])
+        await h.dictate("switch to mail")
+        let prompt = try #require(h.prompt)
+        let issue = ConfigFileIssue.unreadable("modes/email.toml", error: .invalid("Expected a value"), recovery: .ignored)
+        h.controller.announceConfigProblems([issue])
+        #expect(h.hud.last == .choice(prompt, status: .waiting(note: issue.oneLine)))
+        #expect(h.prompt == prompt)
+    }
+
     @Test func aStaleTimerCannotHideANewerQuestion() async throws {
         let h = try Harness(places: [personal, work])
         await h.dictate("switch to mail")
@@ -415,6 +425,25 @@ struct VoiceCommandChoiceWiringTests {
             h.controller.handleSystemSleep()
         }
         gate.open()
+        try await h.settle()
+        #expect(h.system.openedURLs.isEmpty)
+        #expect(!h.hud.states.contains(.commandDone(summary: "Work Mail")))
+    }
+
+    @Test func aSpokenAnswerStillLookingUpTabsStopsWhenTheSystemSleeps() async throws {
+        let h = try Harness(places: [personal, work])
+        await h.dictate("switch to mail")
+        _ = try #require(h.prompt)
+        let gate = Gate()
+        h.system.whileReadingTabs = { await gate.wait() }
+        h.engine.text = "two"
+        await h.press()
+        h.controller.handleCommit()
+        for _ in 0..<500 where !gate.entered { await Task.yield() }
+        #expect(gate.entered)
+        h.controller.handleSystemSleep()
+        gate.open()
+        await h.controller.dictationTask?.value
         try await h.settle()
         #expect(h.system.openedURLs.isEmpty)
         #expect(!h.hud.states.contains(.commandDone(summary: "Work Mail")))

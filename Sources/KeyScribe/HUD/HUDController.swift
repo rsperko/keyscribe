@@ -530,6 +530,8 @@ private struct HUDView: View {
             }
         case .error:
             Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
+        case .advisory:
+            Image(systemName: "info.circle").foregroundStyle(.secondary)
         case .none:
             EmptyView()
         case .warning:

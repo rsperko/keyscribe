@@ -219,6 +219,15 @@ struct HUDStateTests {
         #expect(retry.voiceOverAnnouncement(after: listening) == "Choose 1\u{2013}2.")
     }
 
+    @Test func anAdvisoryReadsLikeAnErrorButIsMarkedAsAdvisory() {
+        let state = HUDState.advisory(message: "dictionary.toml — “termz” has no effect")
+        #expect(state.primaryText == "dictionary.toml — “termz” has no effect")
+        #expect(state.secondaryText == nil)
+        #expect(state.voiceOverAnnouncement == "dictionary.toml — “termz” has no effect")
+        #expect(state.indicator == .advisory)
+        #expect(!state.holdsKeyFocus)
+    }
+
     @Test func anUnrecognizedCommandShowsItsTitleThenTheHeardExcerptOnce() {
         let state = HUDState.error(message: "Command not recognized", action: nil, heard: HeardExcerpt(heard: "stitch to Mail"))
         #expect(state.primaryText == "Command not recognized")

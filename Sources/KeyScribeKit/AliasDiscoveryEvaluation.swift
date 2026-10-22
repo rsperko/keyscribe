@@ -55,7 +55,7 @@ public enum AliasDiscoveryEvaluation {
         }
         var summary = Summary()
         for term in terms {
-            let labels = records.map { labels(heard: $0.heard, reference: $0.reference, term: term) }
+            let labels = records.map { Self.labels(heard: $0.heard, reference: $0.reference, term: term) }
             let findings = AliasDiscovery.find(target: term, in: texts, dictionary: dictionary, threshold: threshold)
             let prepared = FuzzyCorrector.prepare([term])
             var termSummary = TermSummary(term: term)

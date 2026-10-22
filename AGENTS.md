@@ -1296,6 +1296,9 @@ also add per-flag tests — default-off fallback, override persistence, and off-
 - **File-based storage, no SQLite** — everything under `~/Library/Application Support/KeyScribe/`.
 - **Reuse the UI vocabulary** in `docs/development/ui_components.md`; never overstate privacy (no "secure/safe/
   private" for best-effort redaction — say what actually happens).
+- **Every HUD draw goes through `DictationController.present`** — it keeps a pending voice-command question
+  readable. **Every event that stops voice-command work goes through `stopVoiceCommandChoice`** — its counter
+  is what both the spoken and clicked paths re-check. No direct `hud?.render`, no stop event that cancels by hand.
 - **Never hardcode the product name in user-facing copy — use `Branding.appName`** (resolves from the
   running bundle: "KeyScribe" prod, "KeyScribeDev" dev, the bundle name for a `custom` rebrand). The
   literal "KeyScribe" lives in exactly one place, `AppVariant.production.displayName`; everything else

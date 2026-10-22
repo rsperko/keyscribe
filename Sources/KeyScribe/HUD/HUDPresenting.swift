@@ -70,6 +70,7 @@ enum HUDState: Equatable {
     case commandDone(summary: String, detail: String = HUDState.commandDetail)
     case stoppedAtLimit(outcome: DictationOutcome, limit: String, rewriteSkipped: Bool)
     case error(message: String, action: HUDErrorAction?, heard: HeardExcerpt? = nil)
+    case advisory(message: String)
     case choice(VoiceCommandChoicePrompt, status: VoiceCommandChoiceStatus, level: Float = 0)
 }
 
@@ -84,6 +85,7 @@ enum HUDIndicator: Equatable {
     case warning
     case limit
     case error
+    case advisory
 }
 
 extension HUDState {
@@ -107,6 +109,8 @@ extension HUDState {
             return .limit
         case .error:
             return .error
+        case .advisory:
+            return .advisory
         case .choice(_, .waiting, _):
             return .choice
         case .choice(_, .listening, _):
@@ -139,7 +143,7 @@ extension HUDState {
             return summary
         case .stoppedAtLimit(_, let limit, _):
             return "Stopped at the \(limit) limit"
-        case .error(let message, _, _):
+        case .error(let message, _, _), .advisory(let message):
             return message
         case .choice(let prompt, _, _):
             return prompt.title
@@ -186,6 +190,8 @@ extension HUDState {
             return "Transcribing"
         case .error(_, _, let heard):
             return heard?.text
+        case .advisory:
+            return nil
         case .hidden:
             return nil
         }
@@ -268,7 +274,7 @@ extension HUDState {
             return "Transcribing"
         case .rewriting(let connection, _, _, _, _):
             return "Rewriting with \(connection)"
-        case .localFallback, .complete, .commandDone, .stoppedAtLimit, .error:
+        case .localFallback, .complete, .commandDone, .stoppedAtLimit, .error, .advisory:
             return [primaryText, secondaryText].compactMap { $0 }.joined(separator: ". ")
         case .choice(let prompt, _, _):
             return prompt.announcement
