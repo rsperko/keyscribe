@@ -18,6 +18,11 @@ public enum ReplacementAuthoring {
         return ReturnSuffix.parse(ReplacementEscapes.expandTemplate(replacement)) != nil
     }
 
+    public static func literalReturnMarkerAdvisory(replace: String, regex: Bool) -> String? {
+        guard !regex, replace.contains("<CR>") else { return nil }
+        return "Types “<CR>” as text. Only a regular-expression rule can press Return."
+    }
+
     public struct Preview: Equatable, Sendable {
         public let text: String
         public let isTruncated: Bool

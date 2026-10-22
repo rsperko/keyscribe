@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import KeyScribeKit
 
@@ -410,5 +411,157 @@ extension View {
                     .allowsHitTesting(false)
             }
         }
+    }
+}
+
+// An operation or file failure for a pane. Field validation stays beside its field; this is for what the
+// user tried to do (or a file the pane could not read), shown where scrolling can never hide it.
+struct PaneNotice: Equatable, Identifiable {
+    var title: String
+    var message: String = ""
+    var severity: IssueText.Severity = .failure
+    var details: String? = nil
+    var fileURL: URL? = nil
+
+    var id: String { "\(title)|\(message)" }
+
+    init(title: String, message: String = "", severity: IssueText.Severity = .failure,
+         details: String? = nil, fileURL: URL? = nil) {
+        self.title = title
+        self.message = message
+        self.severity = severity
+        self.details = details
+        self.fileURL = fileURL
+    }
+
+    init(issue: ConfigFileIssue, fileURL: URL?, consequence: String? = nil) {
+        let parts = [issue.explanation, issue.isError ? nil : issue.detail, consequence ?? issue.recovery]
+        self.init(
+            title: issue.title, message: parts.compactMap { $0 }.joined(separator: " "),
+            severity: issue.isError ? .failure : .advisory,
+            details: issue.isError ? issue.technicalDetails : nil,
+            fileURL: fileURL)
+    }
+
+    // Outcome first: the title says what didn't happen, the message which file needs fixing and what still
+    // works. The parser's text and position stay in Technical details. A failure that isn't about the file
+    // (a write refused by the system) says what the system said.
+    static func failure(
+        _ title: String, error: Error, file: URL, relativePath: String, stillRunning: String?
+    ) -> PaneNotice {
+        let configError = (error as? ConfigError) ?? (error as? ConfigRepository.UnreadableModeFile)?.error
+        guard let configError else { return PaneNotice(title: title, message: error.localizedDescription) }
+        let issue = ConfigFileIssue.unreadable(
+            file.lastPathComponent, relativePath: relativePath, error: configError, recovery: .ignored)
+        return PaneNotice(
+            title: title, message: ["\(relativePath) needs fixing.", stillRunning].compactMap { $0 }.joined(separator: " "),
+            details: issue.technicalDetails, fileURL: file)
+    }
+
+    static func unreadableFile(
+        _ relativePath: String, error: ConfigError, file: URL, stillRunning: String?, here: String
+    ) -> PaneNotice {
+        let issue = ConfigFileIssue.unreadable(
+            file.lastPathComponent, relativePath: relativePath, error: error, recovery: .ignored)
+        return PaneNotice(
+            title: "\(relativePath) needs fixing", message: [stillRunning, here].compactMap { $0 }.joined(separator: " "),
+            details: issue.technicalDetails, fileURL: file)
+    }
+
+    // Only a recorded previous version earns "still working"; with no record, say nothing.
+    static func stillRunning(_ state: ConfigFileIssue.Recovery?, working: String, off: String) -> String? {
+        switch state {
+        case .previousVersion: working
+        case .ignored, .defaults: off
+        case nil: nil
+        }
+    }
+}
+
+// Sits above a pane's Form, ScrollView, or list/detail split — never inside it.
+struct PaneNoticeBanner: View {
+    let notices: [PaneNotice]
+
+    static let visibleLimit = 2
+    static let maxHeight: CGFloat = 220
+    @State private var showsAll = false
+    @State private var contentHeight: CGFloat = 0
+
+    // Exactly as tall as its content up to maxHeight, then it scrolls: a bare ScrollView would take the
+    // whole cap even for one line, and an unbounded stack could push the pane's editor out of the window.
+    var body: some View {
+        if !notices.isEmpty {
+            ScrollView {
+                content
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: PaneNoticeHeightKey.self, value: proxy.size.height)
+                    })
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: min(max(contentHeight, 1), Self.maxHeight))
+            .onPreferenceChange(PaneNoticeHeightKey.self) { contentHeight = $0 }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(AccessibilityID.Settings.paneNotice)
+            Divider()
+        }
+    }
+
+    private var content: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(showsAll ? notices[...] : notices.prefix(Self.visibleLimit)) { PaneNoticeRow(notice: $0) }
+            if notices.count > Self.visibleLimit {
+                let more = notices.count - Self.visibleLimit
+                Button(showsAll ? "Show fewer" : (more == 1 ? "Show 1 more problem" : "Show \(more) more problems")) {
+                    showsAll.toggle()
+                }
+                .buttonStyle(.link)
+                .font(.caption)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+    }
+}
+
+private struct PaneNoticeHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+struct PaneNoticeRow: View {
+    let notice: PaneNotice
+    @State private var showsDetails = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            IssueText(notice.title, severity: notice.severity, font: .callout)
+            if !notice.message.isEmpty {
+                Text(notice.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let fileURL = notice.fileURL {
+                Button("Show in Finder") {
+                    let exists = FileManager.default.fileExists(atPath: fileURL.path)
+                    NSWorkspace.shared.activateFileViewerSelecting(
+                        [exists ? fileURL : fileURL.deletingLastPathComponent()])
+                }
+                .accessibilityIdentifier(AccessibilityID.Settings.paneNoticeReveal)
+            }
+            if let details = notice.details, !details.isEmpty {
+                DisclosureSection(isExpanded: $showsDetails) {
+                    Text("Technical details").font(.caption)
+                } content: {
+                    Text(details)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

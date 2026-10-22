@@ -122,6 +122,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var onOpenSettings: (() -> Void)?
     var onOpenSpeechModels: (() -> Void)?
     var onOpenModes: (() -> Void)?
+    var onOpenSettingsPane: ((SettingsDestination) -> Void)?
+    private var statusDestination: SettingsDestination?
     var onOpenNotices: (() -> Void)?
     var onMenuWillOpen: (() -> Void)?
     var onSelectNextMode: ((String?) -> Void)?
@@ -216,7 +218,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) { onMenuWillOpen?() }
 
-    func setStatus(_ text: String) { statusLine.title = text }
+    func setStatus(_ text: String, opening destination: SettingsDestination? = nil) {
+        statusLine.title = text
+        statusDestination = destination
+        statusLine.target = destination == nil ? nil : self
+        statusLine.action = destination == nil ? nil : #selector(openStatusDestination)
+        statusLine.isEnabled = destination != nil
+    }
     func setHasResult(_ hasResult: Bool) { pasteLastItem.isEnabled = hasResult }
 
     func setSpeechModels(_ rows: [SpeechModelsModel.Row]) {
@@ -378,6 +386,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func openSettings() { onOpenSettings?() }
     @objc private func openSpeechModels() { onOpenSpeechModels?() }
     @objc private func openModes() { onOpenModes?() }
+    @objc private func openStatusDestination() { statusDestination.map { onOpenSettingsPane?($0) } }
     @objc private func openNotices() { onOpenNotices?() }
     @objc private func selectAutomatic() { onSelectNextMode?(nil) }
     @objc private func selectMode(_ sender: NSMenuItem) { onSelectNextMode?(sender.representedObject as? String) }

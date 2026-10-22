@@ -177,6 +177,37 @@ struct ModeStoreSeedTests {
         #expect(healed.triggerKeys == [.init(key: "right_option")])
     }
 
+    @Test func ensureSystemModesKeepsAKeyItDoesNotReadSoItCanBeReported() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-unknown-key-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("\(Mode.directId).toml")
+        var tampered = Mode.direct
+        tampered.source = .selection
+        let edit = "trigger_key = [\"fn\"]\n" + (try ModeStore.encode(tampered))
+        try edit.write(to: url, atomically: true, encoding: .utf8)
+
+        ModeStore.ensureSystemModes(in: dir)
+
+        #expect(try String(contentsOf: url, encoding: .utf8) == edit)
+        #expect(ModeStore.unknownKeys(in: edit).map(\.path) == ["trigger_key"])
+        let loaded = try #require(ModeStore.loadAll(in: dir).first { $0.id == Mode.directId })
+        #expect(loaded.source == Mode.direct.source)
+    }
+
+    @Test func ensureSystemModesDoesNotRewriteADirectFileOnlyForFormatting() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-format-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("\(Mode.directId).toml")
+        let edit = "# my notes\n" + (try ModeStore.encode(Mode.direct))
+        try edit.write(to: url, atomically: true, encoding: .utf8)
+
+        ModeStore.ensureSystemModes(in: dir)
+
+        #expect(try String(contentsOf: url, encoding: .utf8) == edit)
+    }
+
     @Test func ensureSystemModesLeavesAnUndecodableDirectFileUntouchedWithNoLKG() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-undecodable-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -192,7 +223,7 @@ struct ModeStoreSeedTests {
         #expect(onDisk == garbage)
     }
 
-    @Test func ensureSystemModesRecoversAnUndecodableDirectFileFromLKG() throws {
+    @Test func ensureSystemModesKeepsAHandEditedUndecodableDirectFileAndLoadRecoversFromLKG() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-undecodable-lkg-\(UUID().uuidString)")
         let lkgDir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-undecodable-lkg-store-\(UUID().uuidString)")
         defer {
@@ -207,14 +238,41 @@ struct ModeStoreSeedTests {
 
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = dir.appendingPathComponent("\(Mode.directId).toml")
-        try "this is not [[[ valid toml".write(to: url, atomically: true, encoding: .utf8)
+        let edit = "this is not [[[ valid toml"
+        try edit.write(to: url, atomically: true, encoding: .utf8)
 
-        ModeStore.ensureSystemModes(in: dir, lkgDir: lkgDir)
+        ModeStore.ensureSystemModes(in: dir)
 
-        let onDisk = try String(contentsOf: url, encoding: .utf8)
-        let recovered = try ModeStore.decode(from: onDisk, id: Mode.directId)
+        #expect(try String(contentsOf: url, encoding: .utf8) == edit)
+        let result = ModeStore.load(in: dir, previous: [], lkgDir: lkgDir)
+        let recovered = try #require(result.modes.first { $0.id == Mode.directId })
         #expect(recovered.triggerKeys == [.init(key: "right_option")])
-        #expect(recovered.excludeFromHistory)
+        #expect(result.failures.map(\.id) == [Mode.directId])
+        #expect(result.failures.first?.usedLastKnownGood == true)
+    }
+
+    @Test func aDirectModeRecoveredFromLKGKeepsItsSystemRestrictions() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-lkg-normalize-\(UUID().uuidString)")
+        let lkgDir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-system-lkg-normalize-store-\(UUID().uuidString)")
+        defer {
+            try? FileManager.default.removeItem(at: dir)
+            try? FileManager.default.removeItem(at: lkgDir)
+        }
+
+        var tampered = Mode.direct
+        tampered.triggerKeys = [.init(key: "right_option")]
+        tampered.source = .selection
+        tampered.aiRewrite = .init(connection: "c", prompt: "p")
+        try ModeStore.write(tampered, to: lkgDir)
+
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "this is not [[[ valid toml".write(
+            to: dir.appendingPathComponent("\(Mode.directId).toml"), atomically: true, encoding: .utf8)
+
+        let result = ModeStore.load(in: dir, previous: [], lkgDir: lkgDir)
+        let recovered = try #require(result.modes.first { $0.id == Mode.directId })
+        #expect(recovered.triggerKeys == [.init(key: "right_option")])
+        #expect(recovered.source == Mode.direct.source)
         #expect(recovered.aiRewrite == nil)
     }
 
@@ -235,7 +293,7 @@ struct ModeStoreSeedTests {
         let newerSchema = "schema_version = 5\nname = \"Plain Dictation\""
         try newerSchema.write(to: url, atomically: true, encoding: .utf8)
 
-        ModeStore.ensureSystemModes(in: dir, lkgDir: lkgDir)
+        ModeStore.ensureSystemModes(in: dir)
 
         let onDisk = try String(contentsOf: url, encoding: .utf8)
         #expect(onDisk == newerSchema)

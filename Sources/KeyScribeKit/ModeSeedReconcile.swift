@@ -139,7 +139,7 @@ extension ModeStore {
     static func saveLedger(_ ledger: SeedLedger, in ledgerDir: URL) {
         var sorted = ledger
         sorted.entries.sort { $0.seedId < $1.seedId }
-        guard let toml = try? TOMLEncoder().encode(sorted) else { return }
+        guard let toml = try? ConfigEncode.toml(sorted) else { return }
         let url = ledgerURL(in: ledgerDir)
         if let existing = try? String(contentsOf: url, encoding: .utf8), existing == toml { return }
         try? FileManager.default.createDirectory(at: ledgerDir, withIntermediateDirectories: true)
@@ -179,7 +179,7 @@ extension ModeStore {
     // onboarding's connection + `enabled = true` write defeat every future update for exactly the
     // starters most users keep; the template fingerprint is invariant to those two knobs.
     static func seedTemplateFingerprint(_ mode: Mode) -> String {
-        guard let toml = try? encode(templateNormalized(mode)) else { return "" }
+        guard let toml = try? TOMLEncoder().encode(templateNormalized(mode)) else { return "" }
         return seedFingerprint(toml)
     }
 

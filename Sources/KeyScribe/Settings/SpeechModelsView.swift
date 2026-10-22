@@ -9,11 +9,16 @@ struct SpeechModelsView: View {
     @State private var modelActionsExpanded = false
 
     var body: some View {
-        HStack(spacing: 0) {
-            listColumn
-            Divider()
-            detail
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        VStack(spacing: 0) {
+            PaneNoticeBanner(notices: model.rows.compactMap { row in
+                row.errorText.map { PaneNotice(title: "\(row.info.displayName): \($0)") }
+            })
+            HStack(spacing: 0) {
+                listColumn
+                Divider()
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
         }
         .onAppear {
             if selectedModelID == nil || !model.rows.contains(where: { $0.id == selectedModelID }) {
@@ -164,10 +169,6 @@ struct SpeechModelsView: View {
 
             if row.isActive, let notice = model.activeNotice {
                 IssueText(notice, severity: .advisory, font: .callout)
-            }
-
-            if let error = row.errorText {
-                IssueText(error, font: .callout)
             }
 
             Divider()

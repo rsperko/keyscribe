@@ -517,7 +517,7 @@ How a rule behaves once it matches:
   - It is honored **only** when the rule owns the whole utterance (the bare path above). In the middle
     of a longer sentence the rule does its ordinary text replacement and presses nothing.
   - It is recognized **only** in a regex rule and **only** at the very end. `<CR>` in a *literal* rule
-    is inserted verbatim; a `<CR>` anywhere but the end of a regex template is invalid and the rule is
+    is inserted verbatim (Settings flags such a rule); a `<CR>` anywhere but the end of a regex template is invalid and the rule is
     ignored. Write `\<CR>` to emit the literal text `<CR>` in a regex replacement.
   - The Return is a real key press, **not** a guaranteed "send" — its effect depends on the focused
     target. It fires only after the text verifiably lands (never on a clipboard fallback, a password
@@ -665,6 +665,10 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
   current schema.
 - **Rewrites normalize to this schema** and drop unknown keys and comments. A file whose
   `schema_version` exceeds the app's is left untouched and surfaced (`design.md` §5.1).
+- **Unknown keys are reported, not fatal.** A key this schema does not read — usually a typo such as
+  `trigger_key` for `trigger_keys` — loads as if absent and is listed in Settings → Maintenance (and in the
+  mode's editor for a mode file), with the nearest real key when one is close. Retired keys noted in this
+  document are exempt.
 - **Secrets never in TOML** — saved LLM keys live in Keychain; command-generated tokens live only in
   memory. TOML stores `key_ref`, `auth_method`, and the command to run, never key or token material.
 - **kebab-case ids**, snake_case fields, consistently.

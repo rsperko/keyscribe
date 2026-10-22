@@ -2,6 +2,8 @@ import Foundation
 
 enum AccessibilityID {
     enum Settings {
+        static let paneNotice = "settings.paneNotice"
+        static let paneNoticeReveal = "settings.paneNotice.reveal"
         enum Sidebar {
             static let general = "settings.sidebar.general"
             static let speechModels = "settings.sidebar.speechModels"
@@ -153,6 +155,7 @@ enum AccessibilityID {
         enum Advanced {
             static let revealConfig = "settings.advanced.revealConfig"
             static let reloadConfig = "settings.advanced.reloadConfig"
+            static func configIssue(_ path: String) -> String { "settings.advanced.configIssue.\(path)" }
             static let resetHUDPosition = "settings.advanced.resetHUDPosition"
             static let copyDiagnostics = "settings.advanced.copyDiagnostics"
             static let eraseAllData = "settings.advanced.eraseAllData"
@@ -179,6 +182,8 @@ enum AccessibilityID {
         }
 
         enum Editor {
+            static let fileNotice = "mode.editor.fileNotice"
+            static let revealFile = "mode.editor.revealFile"
             static let name = "mode.editor.name"
             static let enabled = "mode.editor.enabled"
             static let shortcutWell = "mode.editor.shortcutWell"

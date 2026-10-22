@@ -20,6 +20,15 @@ extension Notification.Name {
 final class ConfigRepository {
     let supportDir: URL
     private let config: ConfigCache
+
+    // What the running app is using for a file that failed to load, as the config cache recorded it — nil
+    // when the cache has no failure for it (so nothing may be claimed about what still works).
+    func runningState(of relativePath: String) -> ConfigFileIssue.Recovery? {
+        for issue in config.fileFailures where issue.relativePath == relativePath {
+            if case .unreadable(let recovery) = issue.kind { return recovery }
+        }
+        return nil
+    }
     private let selfWriteGate: ConfigSelfWriteGate
     let replacementUsage: ReplacementUsageStore?
     var onChange: (() -> Void)?
@@ -162,8 +171,31 @@ final class ConfigRepository {
         return .saved
     }
 
+    struct UnreadableModeFile: LocalizedError {
+        let fileName: String
+        let error: ConfigError
+        var errorDescription: String? {
+            "\(fileName) has an error. Fix the file before changing this mode here, or saving would replace your edit."
+        }
+    }
+
     func writeMode(_ mode: Mode) throws {
+        try requireReadableModeFile(id: mode.id)
         try commit(touching: [modeFileURL(id: mode.id)]) { try ModeStore.write(mode, to: modesDir) }
+    }
+
+    private func requireReadableModeFile(id: String) throws {
+        let url = modeFileURL(id: id)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        do {
+            let toml: String
+            do { toml = try String(contentsOf: url, encoding: .utf8) }
+            catch { throw ConfigError.unreadableFile(error.localizedDescription) }
+            _ = try ModeStore.decode(from: toml, id: id)
+        } catch {
+            throw UnreadableModeFile(
+                fileName: url.lastPathComponent, error: (error as? ConfigError) ?? .invalid("\(error)"))
+        }
     }
 
     @discardableResult
@@ -195,6 +227,7 @@ final class ConfigRepository {
         if fm.fileExists(atPath: destination.path) {
             throw ConfigError.invalid("mode id already exists")
         }
+        try requireReadableModeFile(id: mode.id)
         var renamed = mode
         renamed.id = newId
         try commit(touching: [modeFileURL(id: newId), modeFileURL(id: mode.id)]) {
@@ -250,27 +283,33 @@ final class ConfigRepository {
 
     private func modeFileURL(id: String) -> URL { modesDir.appendingPathComponent("\(id).toml") }
 
+    // Every read-for-edit failure is a ConfigError, so a caller can tell "couldn't read the file" (resolved
+    // once it reads again) from a failed write (resolved only by a write that succeeds).
     private func loadDictionaryForMutation() throws -> DictionarySet {
         let file = supportDir.appendingPathComponent(DictionaryStore.fileName)
         guard FileManager.default.fileExists(atPath: file.path) else { return DictionarySet() }
-        return try DictionaryStore.decode(from: String(contentsOf: file, encoding: .utf8))
+        return try DictionaryStore.decode(from: readForMutation(file))
     }
 
     private func loadReplacementsForMutation() throws -> ReplacementsSet {
         let file = supportDir.appendingPathComponent(ReplacementsStore.fileName)
         guard FileManager.default.fileExists(atPath: file.path) else { return ReplacementsSet() }
-        return try ReplacementsStore.decode(from: String(contentsOf: file, encoding: .utf8))
+        return try ReplacementsStore.decode(from: readForMutation(file))
     }
 
     private func loadModeForMutation(id: String) throws -> Mode {
-        let file = modeFileURL(id: id)
-        return try ModeStore.decode(from: String(contentsOf: file, encoding: .utf8), id: id)
+        try ModeStore.decode(from: readForMutation(modeFileURL(id: id)), id: id)
     }
 
     private func loadConnectionsForMutation() throws -> ConnectionSet {
         let file = supportDir.appendingPathComponent(ConnectionStore.fileName)
         guard FileManager.default.fileExists(atPath: file.path) else { return ConnectionSet() }
-        return try ConnectionStore.decode(from: String(contentsOf: file, encoding: .utf8))
+        return try ConnectionStore.decode(from: readForMutation(file))
+    }
+
+    private func readForMutation(_ file: URL) throws -> String {
+        do { return try String(contentsOf: file, encoding: .utf8) }
+        catch { throw ConfigError.unreadableFile(error.localizedDescription) }
     }
 
     private static func isMissingFile(_ error: Error) -> Bool {

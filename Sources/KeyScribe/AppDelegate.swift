@@ -8,12 +8,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public override init() { super.init() }
 
     private var settings = Settings.defaults
-    private var configError: String?
+    private var settingsIssue: ConfigFileIssue?
     private var provider: SpeechEngineProvider!
     private var config: ConfigCache!
     private var configWatcher: ConfigWatcher?
     // Lets the watcher tell the app's own config writes (skip) from external edits (reload).
     private let selfWriteGate = ConfigSelfWriteGate()
+    private var configProblemAnnouncement = ConfigProblemAnnouncement()
     private var speechModels: SpeechModelsModel!
     private let hud = HUDController()
     private let menu = MenuBarController()
@@ -130,7 +131,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         provider = resolveProvider(engines: engines, activeId: launchEngineId)
         ModeStore.recordStarterOffersIfFresh(in: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir)
-        ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir, lkgDir: KeyScribePaths.lkgDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir)
         let reconciled = ModeStore.reconcileSeeds(
             modesDir: KeyScribePaths.modesDir, ledgerDir: KeyScribePaths.lkgDir,
             settingsDir: KeyScribePaths.supportDir)
@@ -169,6 +170,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             guard gate.shouldReload(current: ConfigTreeSnapshot.capture(supportDir: dir)) else { return }
             Task { @MainActor in self?.reloadConfig() }
         }
+        configProblemAnnouncement = ConfigProblemAnnouncement(baseline: configProblems)
         history = HistoryStore(supportDir: KeyScribePaths.supportDir)
         history.applyRetention(retentionDays: settings.history.retentionDays)
         // Before the controller exists, so the first dictation already archives.
@@ -233,6 +235,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.onOpenSettings = { [weak self] in self?.settingsController.present() }
         menu.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
         menu.onOpenModes = { [weak self] in self?.settingsController.present(.modes) }
+        menu.onOpenSettingsPane = { [weak self] in self?.settingsController.present($0) }
         menu.onOpenNotices = { [weak self] in self?.notices.present() }
         menu.onMenuWillOpen = { [weak self] in
             self?.rebuildMenuItems()
@@ -399,10 +402,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func loadSettings() {
         do {
             settings = try SettingsStore.loadOrCreate(supportDir: KeyScribePaths.supportDir)
-            configError = nil
+            settingsIssue = nil
         } catch {
             settings = Settings.defaults
-            configError = "Using defaults — \(error)"
+            settingsIssue = .unreadable(
+                SettingsStore.fileName, error: (error as? ConfigError) ?? .invalid("\(error)"), recovery: .defaults)
         }
     }
 
@@ -557,7 +561,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     func reloadConfig() {
         // Re-seed/normalize the system Direct floor before reloading, so an external delete or hand-edit
         // of `_direct.toml` heals immediately (and Fn re-registers) instead of waiting for relaunch.
-        ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir, lkgDir: KeyScribePaths.lkgDir.appendingPathComponent("modes", isDirectory: true))
+        ModeStore.ensureSystemModes(in: KeyScribePaths.modesDir)
         // Adopt the post-heal state BEFORE the reads below so this reload does not echo into a second one;
         // an edit landing after is caught by the next fire, never absorbed unread.
         selfWriteGate.adopt(ConfigTreeSnapshot.capture(supportDir: KeyScribePaths.supportDir))
@@ -566,16 +570,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // it into `settings` also means a later in-app toggle merges against the current on-disk value
         switch Self.settingsFileState(current: settings, supportDir: KeyScribePaths.supportDir) {
         case .unchanged:
-            configError = nil
+            settingsIssue = nil
             rebuildHotkeyMonitor()
         case .updated(let fresh):
-            configError = nil
+            settingsIssue = nil
             applySettingsEffects(fresh)   // rebuilds the hotkey monitor for us
-        case .invalid(let message):
-            configError = "Settings file has errors — \(message)"
+        case .invalid(let error):
+            let kept: ConfigFileIssue.Recovery = settingsIssue.map { $0.kind == .unreadable(.defaults) } == true
+                ? .defaults : .previousVersion
+            settingsIssue = .unreadable(SettingsStore.fileName, error: error, recovery: kept)
             rebuildHotkeyMonitor()
         }
         refreshStatus()
+        let newProblems = configProblemAnnouncement.next(current: configProblems)
+        if !newProblems.isEmpty {
+            controller.announceConfigProblem(newProblems.joined(separator: " · "))
+        }
         configRepository.notifyExternalChange()
         // Rebuild the frozen plan off this path so the first press after an edit doesn't pay the
         // modes/dictionary/fragments realization invalidate() just discarded (mirrors the launch warm).
@@ -594,7 +604,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     enum SettingsFileState: Equatable {
         case unchanged
         case updated(Settings)
-        case invalid(String)
+        case invalid(ConfigError)
     }
 
     static func settingsFileState(current: Settings, supportDir: URL) -> SettingsFileState {
@@ -602,7 +612,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             let fresh = try SettingsStore.loadOrCreate(supportDir: supportDir)
             return fresh == current ? .unchanged : .updated(fresh)
         } catch {
-            return .invalid("\(error)")
+            return .invalid((error as? ConfigError) ?? .invalid("\(error)"))
         }
     }
 
@@ -626,7 +636,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applySettings(_ updated: Settings) {
         applySettingsEffects(updated)
-        guard configError == nil else { return }
+        guard settingsIssue == nil else { return }
         do {
             try SettingsStore.write(updated, to: KeyScribePaths.supportDir)
             recordSettingsSelfWrite()
@@ -829,15 +839,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let problems = currentProblems()
         menu.setErrorBadge(!problems.isEmpty)
         settingsController?.refreshProblems(problems)
+        settingsController?.refreshConfigIssues(configErrors + config.fileWarnings)
 
-        if let message = combinedConfigError {
-            menu.setStatus(message)
+        if let summary = ConfigFileIssue.menuSummary(configErrors) {
+            menu.setStatus(summary, opening: .advanced)
         } else if Permissions.microphoneStatus() != .granted {
-            menu.setStatus("Microphone access needed")
+            menu.setStatus("Microphone access needed…", opening: .permissions)
         } else if Permissions.accessibilityStatus() != .granted {
-            menu.setStatus("Accessibility access needed")
+            menu.setStatus("Accessibility access needed…", opening: .permissions)
         } else if !(hotkey?.isTapActive ?? true) {
-            menu.setStatus("Relaunch to finish setup")
+            menu.setStatus("Relaunch to finish setup…", opening: .permissions)
         } else {
             // The mode portion names the one-shot override if one is pending, otherwise Automatic's default.
             let enabledModes = config.modes.filter(\.enabled)
@@ -864,19 +875,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.setSpeechModels(speechModels.rows)
     }
 
-    // settings.toml decode failures (owned by AppDelegate) plus any malformed vocabulary/connection
-    // file surfaced by the config cache — both light the Advanced pane's malformed-config problem and
+    // settings.toml decode failures (owned by AppDelegate) plus any malformed vocabulary/connection/mode
+    // file surfaced by the config cache — they light the Maintenance pane's malformed-config problem and
     // the menu status line so a broken config file is never silently swallowed.
-    private var combinedConfigError: String? {
-        let parts = [configError, config.configFileError].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    private var configErrors: [ConfigFileIssue] {
+        [settingsIssue].compactMap { $0 } + config.fileFailures
+    }
+
+    private var configProblems: [String] {
+        (configErrors + config.fileWarnings).map(\.oneLine)
     }
 
     private func currentProblems() -> [SettingsProblem] {
         let modes = config.modes.filter(\.enabled)
         let failedConnectionIds = settingsController?.failedConnectionIds ?? []
         return SettingsProblem.detect(
-            hasConfigError: combinedConfigError != nil,
+            hasConfigError: !configErrors.isEmpty,
             microphoneGranted: Permissions.microphoneStatus() == .granted,
             accessibilityGranted: Permissions.accessibilityStatus() == .granted,
             accessibilityTapActive: hotkey?.isTapActive ?? true,

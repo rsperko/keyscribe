@@ -21,12 +21,7 @@ struct ModesSettingsView: View {
                 ModeLoadFailureBanner(failures: model.loadFailures)
                 Divider()
             }
-            if let error = model.error {
-                IssueText(error)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                Divider()
-            }
+            PaneNoticeBanner(notices: [model.notice].compactMap { $0 })
             paneBody
         }
     }
@@ -57,22 +52,29 @@ struct ModesSettingsView: View {
 
             Group {
                 if let mode = model.selected {
-                    ModeEditorView(
-                        mode: mode, allModes: model.modes,
-                        connections: model.connections, fragmentIds: model.fragmentIds,
-                        fragmentNames: model.fragmentNames,
-                        autofocusName: model.lastCreatedId == mode.id,
-                        onUpdate: model.update,
-                        onAddFragmentFile: model.addFragmentFile(named:),
-                        onLoadFragmentBody: model.fragmentBody,
-                        onSaveFragmentBody: model.saveFragmentBody,
-                        onCloseFragment: model.closeFragment(_:fromMode:),
-                        onRevealFragment: model.revealFragment,
-                        onConsumeFocus: model.consumeCreated,
-                        onDuplicate: { model.duplicate(mode) },
-                        onEditVocabulary: { onEditVocabulary(mode.id) },
-                        onDelete: { modePendingDelete = mode })
-                        .id(mode.id)
+                    VStack(spacing: 0) {
+                        ModeFileNotice(
+                            mode: mode, failure: model.loadFailure(for: mode.id),
+                            unknownKeys: model.unknownKeys[mode.id] ?? [],
+                            onReveal: { model.revealModeFile(mode.id) })
+                        ModeEditorView(
+                            mode: mode, allModes: model.modes,
+                            connections: model.connections, fragmentIds: model.fragmentIds,
+                            fragmentNames: model.fragmentNames,
+                            autofocusName: model.lastCreatedId == mode.id,
+                            onUpdate: { model.update($0) },
+                            onAddFragmentFile: model.addFragmentFile(named:),
+                            onLoadFragmentBody: model.fragmentBody,
+                            onSaveFragmentBody: model.saveFragmentBody,
+                            onCloseFragment: model.closeFragment(_:fromMode:),
+                            onRevealFragment: model.revealFragment,
+                            onConsumeFocus: model.consumeCreated,
+                            onDuplicate: { model.duplicate(mode) },
+                            onEditVocabulary: { onEditVocabulary(mode.id) },
+                            onDelete: { modePendingDelete = mode })
+                            .disabled(model.loadFailure(for: mode.id) != nil)
+                    }
+                    .id(mode.id)
                 } else {
                     ContentUnavailableView(
                         "Choose a mode", systemImage: "square.stack.3d.up",
@@ -255,14 +257,46 @@ private struct ModeLoadFailureBanner: View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(failures, id: \.id) { failure in
                 IssueText(failure.usedLastKnownGood
-                    ? "“\(failure.id)” has an error in its file — still running its last working version. Fix the file to apply changes."
-                    : "“\(failure.id)” couldn’t be loaded and was skipped. Check its file under Application Support.",
+                    ? "“\(failure.id)” has an error in its file — still running its last working version. Fix the file to apply changes. \(failure.message)"
+                    : "“\(failure.id)” couldn’t be loaded and was skipped. Check its file under Application Support. \(failure.message)",
                     severity: failure.usedLastKnownGood ? .advisory : .failure, font: .callout)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(10)
         .background(.orange.opacity(0.12))
+    }
+}
+
+// A mode running on its last working version is read-only here: any save would replace the user's broken
+// edit with that version. Keys the decoder never read are named, since editing them does nothing.
+private struct ModeFileNotice: View {
+    let mode: Mode
+    let failure: ModeStore.LoadFailure?
+    let unknownKeys: [UnknownConfigKey]
+    let onReveal: () -> Void
+
+    var body: some View {
+        if failure != nil || !unknownKeys.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                if let failure {
+                    IssueText(
+                        "\(mode.id).toml has an error, so this mode can’t be changed here until the file is fixed. \(failure.message)",
+                        font: .callout)
+                }
+                if !unknownKeys.isEmpty {
+                    IssueText(
+                        "\(Branding.appName) doesn’t read \(unknownKeys.map(\.description).joined(separator: ", ")) in \(mode.id).toml, so it has no effect. Changing this mode here removes it.",
+                        severity: .advisory, font: .callout)
+                }
+                Button("Show in Finder", action: onReveal)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.revealFile)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .accessibilityIdentifier(AccessibilityID.Mode.Editor.fileNotice)
+            Divider()
+        }
     }
 }
 

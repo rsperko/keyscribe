@@ -11,8 +11,11 @@ final class ModesSettingsModel: ObservableObject {
     @Published var selectedID: String?
     @Published var lastCreatedId: String?
     private var awaitingInitialName: String?
-    @Published private(set) var error: String?
+    @Published private(set) var notice: PaneNotice?
+    private var noticeSubject: String?
+    private var noticeResolvesOnLoad = false
     @Published private(set) var loadFailures: [ModeStore.LoadFailure] = []
+    @Published private(set) var unknownKeys: [String: [UnknownConfigKey]] = [:]
 
     private let repository: ConfigRepository
     private var modesDir: URL { repository.modesDir }
@@ -48,10 +51,11 @@ final class ModesSettingsModel: ObservableObject {
     func reload(force: Bool = false) {
         guard force || configSignature() != loadedSignature else { return }
         let lkgModesDir = supportDir.appendingPathComponent("lkg", isDirectory: true).appendingPathComponent("modes", isDirectory: true)
-        ModeStore.ensureSystemModes(in: modesDir, lkgDir: lkgModesDir)
+        ModeStore.ensureSystemModes(in: modesDir)
         let result = ModeStore.load(in: modesDir, previous: modes, lkgDir: lkgModesDir)
         modes = result.modes
         loadFailures = result.failures
+        unknownKeys = loadUnknownKeys()
         connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
         fragmentIds = loadFragmentIds()
         let selectionStillValid = selectedID != nil
@@ -62,7 +66,31 @@ final class ModesSettingsModel: ObservableObject {
             selectedID = modes.contains { !$0.isSystem } ? modes.first?.id : nil
         }
         loadedSignature = configSignature()
-        error = nil
+        if noticeResolvesOnLoad, let subject = noticeSubject, loadFailure(for: subject) == nil { resolve(subject) }
+    }
+
+    private func loadUnknownKeys() -> [String: [UnknownConfigKey]] {
+        var found: [String: [UnknownConfigKey]] = [:]
+        for mode in modes {
+            guard let toml = try? String(contentsOf: modeFileURL(mode.id), encoding: .utf8) else { continue }
+            let keys = ModeStore.unknownKeys(in: toml)
+            if !keys.isEmpty { found[mode.id] = keys }
+        }
+        return found
+    }
+
+    func loadFailure(for id: String) -> ModeStore.LoadFailure? {
+        loadFailures.first { $0.id == id }
+    }
+
+    func revealModeFile(_ id: String) {
+        let url = modeFileURL(id)
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func modeFileURL(_ id: String) -> URL {
+        modesDir.appendingPathComponent("\(id).toml")
     }
 
     private func configSignature() -> String {
@@ -135,19 +163,19 @@ final class ModesSettingsModel: ObservableObject {
 
     // The first real name re-slugs the id so the TOML filename matches (the id is the filename stem);
     // later renames keep the file so external references stay stable.
-    func update(_ mode: Mode) {
+    @discardableResult
+    func update(_ mode: Mode) -> Bool {
         if mode.id == awaitingInitialName {
             let newId = ModeStore.newID(for: mode.name, existing: modes.filter { $0.id != mode.id }.map(\.id))
             if newId != mode.id {
                 awaitingInitialName = nil
-                rename(mode, to: newId)
-                return
+                return rename(mode, to: newId)
             }
         }
-        save(mode)
+        return save(mode)
     }
 
-    private func rename(_ mode: Mode, to newId: String) {
+    private func rename(_ mode: Mode, to newId: String) -> Bool {
         let oldId = mode.id
         var renamed = mode
         renamed.id = newId
@@ -160,9 +188,12 @@ final class ModesSettingsModel: ObservableObject {
             }
             if selectedID == oldId { selectedID = newId }
             if lastCreatedId == oldId { lastCreatedId = newId }
-            error = nil
+            unknownKeys[oldId] = nil
+            resolve(oldId)
+            return true
         } catch {
-            self.error = "Could not save \(mode.name): \(error.localizedDescription)"
+            reportSaveFailure(error, for: mode)
+            return false
         }
     }
 
@@ -173,9 +204,9 @@ final class ModesSettingsModel: ObservableObject {
             if awaitingInitialName == mode.id { awaitingInitialName = nil }
             modes.removeAll { $0.id == mode.id }
             selectedID = modes.first?.id
-            error = nil
+            resolve(mode.id)
         } catch {
-            self.error = "Could not delete \(mode.name): \(error.localizedDescription)"
+            report(PaneNotice(title: "\(mode.name) wasn’t deleted", message: error.localizedDescription), about: mode.id)
         }
     }
 
@@ -199,10 +230,12 @@ final class ModesSettingsModel: ObservableObject {
             let (id, created) = try FragmentStore.createIfNeeded(name: name, in: fragmentsDir)
             if created { applyingLocalMutation { repository.recordSelfWrite(at: fragmentsDir.appendingPathComponent("\(id).md")) } }
             fragmentIds = loadFragmentIds()
-            error = nil
+            resolve("fragment-file")
             return id
         } catch {
-            self.error = "Could not create the instruction file: \(error.localizedDescription)"
+            report(
+                PaneNotice(title: "Instruction file wasn’t created", message: error.localizedDescription),
+                about: "fragment-file")
             return nil
         }
     }
@@ -215,7 +248,9 @@ final class ModesSettingsModel: ObservableObject {
 
     func saveFragmentBody(_ id: String, _ body: String) {
         guard let url = FragmentStore.url(forID: id, in: fragmentsDir) else {
-            error = "Could not save the instruction: '\(id)' is not a valid instruction name."
+            report(
+                PaneNotice(title: "Instruction wasn’t saved", message: "“\(id)” isn’t a valid instruction name."),
+                about: "fragment:\(id)")
             return
         }
         do {
@@ -223,9 +258,9 @@ final class ModesSettingsModel: ObservableObject {
             try FragmentStore.replacingBody(inFile: content, with: body)
                 .write(to: url, atomically: true, encoding: .utf8)
             applyingLocalMutation { repository.recordSelfWrite(at: url) }
-            error = nil
+            resolve("fragment:\(id)")
         } catch {
-            self.error = "Could not save the instruction: \(error.localizedDescription)"
+            report(PaneNotice(title: "Instruction wasn’t saved", message: error.localizedDescription), about: "fragment:\(id)")
         }
     }
 
@@ -264,11 +299,42 @@ final class ModesSettingsModel: ObservableObject {
             } else {
                 modes.append(mode)
             }
-            error = nil
+            unknownKeys[mode.id] = nil
+            resolve(mode.id)
             return true
         } catch {
-            self.error = "Could not save \(mode.name): \(error.localizedDescription)"
+            reportSaveFailure(error, for: mode)
             return false
         }
+    }
+
+    // A file broken since the last reload is only caught at the write, so reload to show it read-only.
+    private func reportSaveFailure(_ error: Error, for mode: Mode) {
+        if error is ConfigRepository.UnreadableModeFile { reload(force: true) }
+        let name = modes.first { $0.id == mode.id }?.name ?? mode.name
+        let relativePath = "modes/\(mode.id).toml"
+        let stillRunning = PaneNotice.stillRunning(
+            repository.runningState(of: relativePath),
+            working: "\(name) keeps running as it was.", off: "\(name) is off until it’s fixed.")
+        report(
+            .failure(
+                "Changes to \(name) weren’t saved", error: error, file: modeFileURL(mode.id),
+                relativePath: relativePath, stillRunning: stillRunning),
+            about: mode.id, resolvesOnLoad: error is ConfigRepository.UnreadableModeFile)
+    }
+
+    // A notice belongs to one mode or instruction: only that subject succeeding, or (for a file it couldn't
+    // read) that file loading again, clears it — never an unrelated save or reload.
+    private func report(_ notice: PaneNotice, about subject: String, resolvesOnLoad: Bool = false) {
+        self.notice = notice
+        noticeSubject = subject
+        noticeResolvesOnLoad = resolvesOnLoad
+    }
+
+    private func resolve(_ subject: String) {
+        guard noticeSubject == subject else { return }
+        notice = nil
+        noticeSubject = nil
+        noticeResolvesOnLoad = false
     }
 }

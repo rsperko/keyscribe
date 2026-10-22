@@ -11,12 +11,13 @@ final class ConfigCache {
     private let log = Logger(subsystem: "com.keyscribe.app", category: "config")
 
     // Survives invalidate(): the last successfully-loaded config, so a mid-edit malformed file falls back to
-    // its prior good copy instead of disappearing (§5.1). A clean file AND an absent file both update it
-    // (absent → empty default), so a delete then a malformed write can't resurrect the pre-delete copy.
+    // its prior good copy instead of disappearing (§5.1). nil until a file loads, and reset to nil when it is
+    // absent, so a delete then a malformed write can't resurrect the pre-delete copy and a failure with
+    // nothing to fall back on is reported as such.
     private var lastGoodModes: [Mode] = []
-    private var lastGoodReplacements = ReplacementsSet()
-    private var lastGoodConnections = ConnectionSet()
-    private var lastGoodDictionary = DictionarySet()
+    private var lastGoodReplacements: ReplacementsSet?
+    private var lastGoodConnections: ConnectionSet?
+    private var lastGoodDictionary: DictionarySet?
 
     private var modesCache: [Mode]?
     private var replacementsCache: ReplacementsSet?
@@ -27,7 +28,8 @@ final class ConfigCache {
     // Per generation: present-but-undecodable files (malformed or newer schema after a downgrade). Recorded
     // so a fat-fingered replacements.toml lights the same user-visible malformed-config warning as
     // settings.toml instead of silently disabling every replacement / connection. Reset by invalidate().
-    private(set) var loadFailures: [String] = []
+    private(set) var loadFailures: [ConfigFileIssue] = []
+    private var fileWarningsCache: [ConfigFileIssue]?
 
     init(supportDir: URL) {
         self.supportDir = supportDir
@@ -40,28 +42,58 @@ final class ConfigCache {
         dictionaryCache = nil
         resolvedCache = nil
         loadFailures = []
+        fileWarningsCache = nil
     }
 
     // User-facing summary of any config file that failed to decode this generation, or nil if all loaded
     // (or absent). Forces the vocabulary/connection loads so the answer is complete regardless of call order.
     var configFileError: String? {
+        let failures = fileFailures
+        return failures.isEmpty ? nil : failures.map(\.oneLine).joined(separator: "; ")
+    }
+
+    var fileFailures: [ConfigFileIssue] {
         _ = dictionary; _ = replacements; _ = connections; _ = modes
-        return loadFailures.isEmpty ? nil : loadFailures.joined(separator: "; ")
+        return loadFailures
     }
 
-    private func recordLoadFailure(_ fileName: String, _ error: ConfigError) {
-        let message = "\(fileName) — \(Self.describe(error))"
-        if !loadFailures.contains(message) { loadFailures.append(message) }
-        log.error("config '\(fileName, privacy: .public)' failed to load: \(Self.describe(error), privacy: .public)")
+    // Keys a file carries that nothing reads, so editing them silently does nothing. Computed on demand
+    // (status refresh, Settings), never on the dictation path.
+    var fileWarnings: [ConfigFileIssue] {
+        if let fileWarningsCache { return fileWarningsCache }
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        let modeFiles = ((try? FileManager.default.contentsOfDirectory(atPath: modesDir.path)) ?? [])
+            .filter { $0.hasSuffix(".toml") }
+            .sorted()
+        let warnings = ([
+            warning(SettingsStore.fileName, in: supportDir, SettingsStore.unknownKeys(in:)),
+            warning(DictionaryStore.fileName, in: supportDir, DictionaryStore.unknownKeys(in:)),
+            warning(ReplacementsStore.fileName, in: supportDir, ReplacementsStore.unknownKeys(in:)),
+            warning(ConnectionStore.fileName, in: supportDir, ConnectionStore.unknownKeys(in:)),
+        ] + modeFiles.map { warning($0, in: modesDir, ModeStore.unknownKeys(in:)) }).compactMap { $0 }
+        fileWarningsCache = warnings
+        return warnings
     }
 
-    private static func describe(_ error: ConfigError) -> String {
-        switch error {
-        case .missingSchemaVersion: "missing schema_version"
-        case .newerSchemaVersion(let found, let supported):
-            "schema \(found) is newer than this build supports (\(supported))"
-        case .invalid(let message): message
-        }
+    private func warning(
+        _ fileName: String, in dir: URL, _ unknownKeys: (String) -> [UnknownConfigKey]
+    ) -> ConfigFileIssue? {
+        let url = dir.appendingPathComponent(fileName)
+        guard let toml = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let keys = unknownKeys(toml)
+        guard !keys.isEmpty else { return nil }
+        return .unusedKeys(fileName, relativePath: relativePath(of: url), keys)
+    }
+
+    private func relativePath(of url: URL) -> String {
+        String(url.path.dropFirst(supportDir.path.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    private func recordLoadFailure(_ fileName: String, _ error: ConfigError, keptPrevious: Bool) {
+        let issue = ConfigFileIssue.unreadable(
+            fileName, error: error, recovery: keptPrevious ? .previousVersion : .ignored)
+        if !loadFailures.contains(issue) { loadFailures.append(issue) }
+        log.error("config '\(fileName, privacy: .public)' failed to load: \(error.summary, privacy: .public)")
     }
 
     // Frozen derived view handed to a dictation at record-start (captured once so a mid-dictation reload
@@ -110,10 +142,12 @@ final class ConfigCache {
             in: supportDir.appendingPathComponent("modes", isDirectory: true),
             previous: lastGoodModes, lkgDir: lkgModesDir)
         for failure in result.failures {
-            let recovery = failure.usedLastKnownGood ? " (kept last-known-good)" : " (skipped)"
+            let recovery = failure.usedLastKnownGood ? " — previous version still in use" : " — ignored until fixed"
             log.error("mode '\(failure.id, privacy: .public)' failed to load\(recovery, privacy: .public): \(failure.message, privacy: .public)")
-            let message = "\(failure.id).toml — \(failure.message)\(recovery)"
-            if !loadFailures.contains(message) { loadFailures.append(message) }
+            let issue = ConfigFileIssue.unreadable(
+                "\(failure.id).toml", relativePath: "modes/\(failure.id).toml",
+                error: failure.error, recovery: failure.usedLastKnownGood ? .previousVersion : .ignored)
+            if !loadFailures.contains(issue) { loadFailures.append(issue) }
         }
         modesCache = result.modes
         lastGoodModes = result.modes
@@ -124,9 +158,11 @@ final class ConfigCache {
         if let replacementsCache { return replacementsCache }
         let loaded: ReplacementsSet
         switch ReplacementsStore.load(supportDir: supportDir) {
-        case .absent: loaded = ReplacementsSet(); lastGoodReplacements = ReplacementsSet()
+        case .absent: loaded = ReplacementsSet(); lastGoodReplacements = nil
         case .loaded(let set): loaded = set; lastGoodReplacements = set
-        case .failed(let error): loaded = lastGoodReplacements; recordLoadFailure(ReplacementsStore.fileName, error)
+        case .failed(let error):
+            loaded = lastGoodReplacements ?? ReplacementsSet()
+            recordLoadFailure(ReplacementsStore.fileName, error, keptPrevious: lastGoodReplacements != nil)
         }
         replacementsCache = loaded
         return loaded
@@ -136,9 +172,11 @@ final class ConfigCache {
         if let connectionsCache { return connectionsCache }
         let loaded: ConnectionSet
         switch ConnectionStore.load(supportDir: supportDir) {
-        case .absent: loaded = ConnectionSet(); lastGoodConnections = ConnectionSet()
+        case .absent: loaded = ConnectionSet(); lastGoodConnections = nil
         case .loaded(let set): loaded = set; lastGoodConnections = set
-        case .failed(let error): loaded = lastGoodConnections; recordLoadFailure(ConnectionStore.fileName, error)
+        case .failed(let error):
+            loaded = lastGoodConnections ?? ConnectionSet()
+            recordLoadFailure(ConnectionStore.fileName, error, keptPrevious: lastGoodConnections != nil)
         }
         connectionsCache = loaded
         return loaded
@@ -148,9 +186,11 @@ final class ConfigCache {
         if let dictionaryCache { return dictionaryCache }
         let loaded: DictionarySet
         switch DictionaryStore.load(supportDir: supportDir) {
-        case .absent: loaded = DictionarySet(); lastGoodDictionary = DictionarySet()
+        case .absent: loaded = DictionarySet(); lastGoodDictionary = nil
         case .loaded(let set): loaded = set; lastGoodDictionary = set
-        case .failed(let error): loaded = lastGoodDictionary; recordLoadFailure(DictionaryStore.fileName, error)
+        case .failed(let error):
+            loaded = lastGoodDictionary ?? DictionarySet()
+            recordLoadFailure(DictionaryStore.fileName, error, keptPrevious: lastGoodDictionary != nil)
         }
         dictionaryCache = loaded
         return loaded

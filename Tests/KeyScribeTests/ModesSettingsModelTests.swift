@@ -22,6 +22,92 @@ struct ModesSettingsModelTests {
             .filter { !$0.hasPrefix(Mode.systemIdPrefix) })
     }
 
+    @Test func aModeWhoseFileIsBrokenCannotBeSavedOverFromSettings() throws {
+        let (model, support, modesDir) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+        try ModeStore.write(Mode(id: "notes", name: "Notes"), to: modesDir)
+        model.reload(force: true)
+
+        let url = modesDir.appendingPathComponent("notes.toml")
+        let broken = "schema_version = 2\nname = \"Notes\"\ntrigger_keys = [\n"
+        try broken.write(to: url, atomically: true, encoding: .utf8)
+        model.reload(force: true)
+        var edited = try #require(model.modes.first { $0.id == "notes" })
+        #expect(model.loadFailure(for: "notes") != nil)
+
+        edited.name = "Edited"
+        model.update(edited)
+
+        #expect(try String(contentsOf: url, encoding: .utf8) == broken)
+        #expect(model.modes.first { $0.id == "notes" }?.name == "Notes")
+        #expect(model.notice?.title == "Changes to Notes weren’t saved")
+        #expect(model.notice?.message.contains("modes/notes.toml") == true)
+        #expect(model.notice?.fileURL == url)
+    }
+
+    @Test func aFileThatBrokeBeforeSettingsNoticedIsStillNotSavedOver() throws {
+        let (model, support, modesDir) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+        try ModeStore.write(Mode(id: "notes", name: "Notes"), to: modesDir)
+        model.reload(force: true)
+        var edited = try #require(model.modes.first { $0.id == "notes" })
+
+        let url = modesDir.appendingPathComponent("notes.toml")
+        let broken = "schema_version = 2\nname = \"Notes\"\ntrigger_keys = [\n"
+        try broken.write(to: url, atomically: true, encoding: .utf8)
+        edited.name = "Edited"
+        model.update(edited)
+
+        #expect(try String(contentsOf: url, encoding: .utf8) == broken)
+        #expect(model.notice?.message.contains("modes/notes.toml") == true)
+        #expect(model.loadFailure(for: "notes") != nil)
+    }
+
+    @Test func savingAnotherModeLeavesTheFirstModesFailureInPlace() throws {
+        let (model, support, modesDir) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+        try ModeStore.write(Mode(id: "notes", name: "Notes"), to: modesDir)
+        try ModeStore.write(Mode(id: "email", name: "Email"), to: modesDir)
+        model.reload(force: true)
+        var notes = try #require(model.modes.first { $0.id == "notes" })
+        var email = try #require(model.modes.first { $0.id == "email" })
+        try "schema_version = 2\nname = [\n".write(
+            to: modesDir.appendingPathComponent("notes.toml"), atomically: true, encoding: .utf8)
+        notes.enabled = false
+        model.update(notes)
+
+        email.enabled = false
+        #expect(model.update(email))
+
+        #expect(model.notice?.title == "Changes to Notes weren’t saved")
+    }
+
+    @Test func savingAModeClearsTheKeysTheSaveDropped() throws {
+        let (model, support, modesDir) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+        try "schema_version = 2\nname = \"Notes\"\ntrigger_key = [\"fn\"]\n".write(
+            to: modesDir.appendingPathComponent("notes.toml"), atomically: true, encoding: .utf8)
+        model.reload(force: true)
+        var edited = try #require(model.modes.first { $0.id == "notes" })
+        #expect(model.unknownKeys["notes"] != nil)
+
+        edited.enabled = false
+        model.update(edited)
+
+        #expect(model.unknownKeys["notes"] == nil)
+    }
+
+    @Test func aModeFileKeyTheAppDoesNotReadIsReportedForThatMode() throws {
+        let (model, support, modesDir) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+        try "schema_version = 2\nname = \"Notes\"\ntrigger_key = [\"fn\"]\n".write(
+            to: modesDir.appendingPathComponent("notes.toml"), atomically: true, encoding: .utf8)
+
+        model.reload(force: true)
+
+        #expect(model.unknownKeys["notes"] == [UnknownConfigKey(path: "trigger_key", suggestion: "trigger_keys")])
+    }
+
     @Test func aTemplateThatFailsToSaveRecordsNoSeedLedgerEntry() throws {
         let (model, support, modesDir) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }

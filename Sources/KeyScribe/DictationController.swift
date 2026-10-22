@@ -539,6 +539,12 @@ final class DictationController {
         scheduleHide()
     }
 
+    func announceConfigProblem(_ message: String) {
+        guard !isBusy else { return }
+        hud?.render(.error(message: message, action: nil))
+        scheduleHide(after: 8)
+    }
+
     func handleStart(
         triggerKey: String? = nil, pressStyle: PressStyle = .holdOrTap, pressedAt: DispatchTime? = nil
     ) {

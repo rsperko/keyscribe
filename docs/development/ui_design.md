@@ -237,6 +237,11 @@ not to its label.
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
+| Config problem (idle, after an external edit) | “Couldn’t read [file] — [parser message] — previous version still in use” (or “— ignored until fixed”), or “[file] — “[key]” (did you mean “[key]”?) has no effect” | — | None; dismisses automatically |
+
+**Config problems.** The HUD names only problems an external edit just introduced — each new unreadable
+file or unread key once, never during a dictation. Settings → Maintenance keeps listing every current
+problem until it is fixed, and an unreadable file also stays in the menu status.
 
 **Recording limit.** A single take has a length limit (`design.md` §4.8). Reaching it ends the take
 the way a release does — the recording is transcribed and inserted, never discarded. The warning
@@ -348,8 +353,11 @@ Quit KeyScribe
 The first row is a single status line that answers "ready?", "what mode?", and "which model?" at once.
 When ready it reads **`<next mode> · <model>`** — the mode being the pending **one-shot override** if one
 is set, otherwise the mode that Automatic resolves to (never the literal word "Automatic"); the model
-is the active STT engine. When something needs attention it is **replaced** by the problem text
-(config error, a missing permission, or `Relaunch to finish setup`), in that precedence. There is no
+is the active STT engine. When something needs attention it is **replaced** by a short, clickable
+summary that opens the Settings pane where it is fixed — `Settings file needs attention…` /
+`A config file needs attention…` / `N config files need attention…` (Maintenance), a missing permission,
+or `Relaunch to finish setup…` (Permissions), in that precedence. It stays the menu's normal width and
+color; the detail lives in the pane, and the red badge marks it. A config advisory never appears here. There is no
 separate "Next dictation" row — selecting a one-shot mode is reflected here, in the `Next Dictation`
 checkmark, and in the HUD acknowledgement.
 
@@ -422,7 +430,10 @@ glance and can show simultaneously:
   and any mode wired to a failed connection (its row, red ⚠) are flagged in-pane. A mode whose shortcut
   can never fire is flagged the same way, in its Modes-list row (**Shortcut never fires**) as well as in
   its trigger row — the editor alone would hide it behind a selection. The sidebar polls
-  while open and clears the flag the moment it's fixed. **A missing key is not always an error** —
+  while open and clears the flag the moment it's fixed. A config **advisory** — a key a config file
+  carries that nothing reads, usually a typo — puts an **amber** dot on the Maintenance sidebar row
+  instead, and nothing on the menu bar: it means "an edit did nothing", not "something is broken". Red
+  outranks amber on the same row. **A missing key is not always an error** —
   it is legitimate when an OpenAI-compatible endpoint is set to No Auth, but hosted providers and
   API Key auth require a saved Keychain key before testing or fetching models. **KeyScribe never
   passively probes the provider** (privacy invariant); the only live AI signal is the
@@ -456,6 +467,20 @@ fixed — a new pane takes its place in this progression rather than being appen
 
 General, Speech Models, Vocabulary, and Maintenance stand on the local-only product. AI Services, and
 the rewrite-related parts of Modes, govern the optional cloud rewrite.
+
+**Where a failure appears.** A failed operation (save, add, delete) and a config file the pane can't
+read appear in a **pane notice** above the pane's scrolling content, so scrolling can never hide them.
+The notice leads with the outcome — a short red title saying what didn't happen (`Replacement wasn’t
+saved`, `Changes to Notes weren’t saved`) — then one plain line naming the file that needs fixing and
+what still works (`Your existing replacements are still working.`, said only when the running app really
+kept a previous version), **Show in Finder**, and a collapsed **Technical details** holding the line,
+column, and parser message. It sizes to its content up to a fixed height, then scrolls within itself, so
+expanding **Show more** or Technical details never squeezes out the pane; it shows two notices before
+that link, and never moves focus or scrolls the pane. Field validation stays beside
+its field, and advisories beside their setting. A failed add keeps the draft so the user can retry; a
+notice clears when that same operation later succeeds, or — for a file it couldn't read — when the file
+loads again; an unrelated save or reload never clears it. Speech Models lists each model's download or
+test failure there by model name, and the model's list row keeps its status marker.
 
 Editable fields preserve the typed draft while invalid and explain the correction inline. Blank required
 fields give a neutral hint; entered invalid values show an inline error. Names, phrases, identifiers,
@@ -746,6 +771,12 @@ The Modes list shows the user-visible summary of each mode:
   with “or” (`Fn (Globe) or Mouse Button 4 · On this Mac`), and a shortcut that repeats an earlier
   one on the same mode is not listed.
 
+When a mode's file has an error, its editor is **read-only** and a notice above it names the file and the
+parser message, with **Show in Finder**: the mode is running on its last working version, and saving from
+Settings would replace the user's broken edit with that version. A key in the file that the app does not
+read is named in an advisory above the editor, with a suggestion when it is close to a real key, since
+editing it has no effect and any change saved from the editor drops it.
+
 The editor presents a short **Mode summary** at the top. The editor is divided into progressive
 sections:
 
@@ -830,7 +861,15 @@ reset. (Notices live in the separate **About & Notices** window, not here.)
   directly. This is the answer to "where does my config live" — the files are hand-editable on
   purpose, and revealing the folder removes any need to know the hidden `~/Library` path.
 - **Reload Configuration** re-reads the config from disk on demand (edits are also picked up
-  automatically; a malformed file surfaces an error rather than being silently dropped).
+  automatically). Below it, each problem file gets its own entry: a title naming the file by its path
+  (`Couldn’t read settings.toml` in red, `modes/notes.toml has a key nothing reads` in amber), a
+  plain-language explanation by kind of failure (a formatting mistake near a line and column, a file that
+  couldn't be opened as text, a newer version's file, a missing `schema_version`, otherwise a neutral
+  "isn't valid for this app"; for an advisory, the unread keys themselves), what is running meanwhile
+  (`The previous version is still in use.` / `Default settings are in use until it’s fixed.` / `It’s
+  ignored until it’s fixed.` — and, for `settings.toml`, that app-wide settings changed meanwhile are
+  temporary and are replaced when the fixed file reloads, while modes and vocabulary save normally), **Show in Finder** selecting
+  that file, and a collapsed **Technical details** with the parser's message as selectable text.
 - **Copy Diagnostics** puts a redaction-safe summary of the install on the clipboard for a bug
   report: version and revision, granted permissions, speech model, each mode's delivery settings,
   and the most recent dictation outcomes. It carries **no transcript text, clipboard contents, or

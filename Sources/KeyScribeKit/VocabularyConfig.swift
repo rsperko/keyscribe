@@ -195,6 +195,10 @@ public enum DictionaryStore {
         }
     }
 
+    public static func unknownKeys(in toml: String) -> [UnknownConfigKey] {
+        ConfigKeyCheck.unknownKeys(DictionarySet.self, in: toml, supportedVersion: currentSchemaVersion)
+    }
+
     public static func load(supportDir: URL) -> ConfigLoad<DictionarySet> {
         ConfigLoad.read(supportDir.appendingPathComponent(fileName), decode: decode)
     }
@@ -205,7 +209,7 @@ public enum DictionaryStore {
     }
 
     public static func write(_ set: DictionarySet, to supportDir: URL) throws {
-        try writeVocabulary(TOMLEncoder().encode(set), fileName: fileName, to: supportDir)
+        try writeVocabulary(ConfigEncode.toml(set), fileName: fileName, to: supportDir)
     }
 }
 
@@ -219,6 +223,10 @@ public enum ReplacementsStore {
         }
     }
 
+    public static func unknownKeys(in toml: String) -> [UnknownConfigKey] {
+        ConfigKeyCheck.unknownKeys(ReplacementsSet.self, in: toml, supportedVersion: currentSchemaVersion)
+    }
+
     public static func load(supportDir: URL) -> ConfigLoad<ReplacementsSet> {
         ConfigLoad.read(supportDir.appendingPathComponent(fileName), decode: decode)
     }
@@ -229,7 +237,7 @@ public enum ReplacementsStore {
     }
 
     public static func write(_ set: ReplacementsSet, to supportDir: URL) throws {
-        try writeVocabulary(TOMLEncoder().encode(set), fileName: fileName, to: supportDir)
+        try writeVocabulary(ConfigEncode.toml(set), fileName: fileName, to: supportDir)
     }
 }
 

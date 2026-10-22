@@ -702,11 +702,29 @@ carries a **`schema_version`**.
   backup or recovery step.
 - User-editable files are **validated** on load; invalid files surface a clear error rather than being
   silently dropped.
-- **Last-known-good recovery (modes):** every clean mode decode is copied to a recovery store
+- **Last-known-good recovery:** every clean mode decode is copied to a recovery store
   (`<support>/lkg/modes/`, outside the watched tree). A malformed mode file falls back to its prior
-  good copy — in-memory first, then the disk copy when memory has nothing (the file was already
-  malformed **at launch**) — so one bad hand edit never makes a mode disappear. Recovery is reported,
-  never silent; a re-seed/reset clears the store so it cannot resurrect a removed mode.
+  good copy — in memory first, then the disk copy when memory has nothing (the file was already
+  malformed **at launch**) — so one bad hand edit never makes a mode disappear. A recovered system mode
+  is normalized like a decoded one, so a recovery copy cannot lift its locked settings. A malformed
+  vocabulary or connections file keeps its previous in-memory version, or runs empty when none loaded.
+  A re-seed/reset clears the store so it cannot resurrect a removed mode.
+- **Recovery never touches the file.** The malformed file stays on disk exactly as the user left it,
+  system modes included. Each write path re-reads its file at write time and refuses when it no longer
+  decodes — mode, vocabulary and connections edits, and `settings.toml` — so a file broken since the
+  last reload is caught too. A mode running on its recovery copy is read-only in the Modes pane. The
+  Direct file is rewritten only to force back a locked setting, and never while it carries a key the app
+  does not read.
+- **Reporting:** recovery is never silent. A load failure shows in the menu status, the Settings problem
+  indicator, and the Maintenance pane; one introduced by an external edit while no dictation runs also
+  gets an idle Error HUD (`ui_design.md` §5). The message names the file and the parser's line, and says
+  the previous version is still in use only when one is ("ignored until fixed" otherwise).
+- Every config file KeyScribe writes ends with a newline, so a table appended by hand or with `>>`
+  starts on its own line.
+- **Keys nothing reads are reported, not rejected.** A key the decoder never reads (usually a typo, so the
+  edit silently does nothing) is reported as an advisory naming the key, and the nearest real key when one
+  is close; the file still loads. Retired keys are exempt. Detection uses TOMLKit's strict decoding, which
+  tracks reads per keyed container, so a type must read each table through one container.
 - **Seed reconcile (modes):** schema versioning above upgrades a file's *format*; seed reconcile
   separately carries the **seeded starter catalog** forward as it drifts (renames, new starters, prompt
   revisions) without clobbering edits or resurrecting deletions. It is driven by a **seed ledger**

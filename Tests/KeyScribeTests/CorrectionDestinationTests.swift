@@ -49,6 +49,15 @@ struct CorrectionDestinationTests {
         #expect(draft.buttonTitle == "Update")
     }
 
+    @Test func aLiteralReplacementWithAReturnMarkerWarnsItTypesTheTextButStillSaves() {
+        let draft = VocabularyDraftAnalysis(
+            replacementTerm: "send it", replacement: "<CR>", regex: false,
+            analyze: { _ in VocabularyAnalysis(action: .addReplacement) })
+
+        #expect(draft.feedback == .advisory(ReplacementAuthoring.literalReturnMarkerAdvisory(replace: "<CR>", regex: false)!))
+        #expect(draft.canCommit)
+    }
+
     @Test func wordUpdateExplainsTheCasingChangeAndUsesUpdateAction() {
         let draft = VocabularyDraftAnalysis(
             term: "GitHub", replacement: "", regex: false,

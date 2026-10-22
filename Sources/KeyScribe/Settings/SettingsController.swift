@@ -84,6 +84,19 @@ final class SettingsProblemModel: ObservableObject {
         let panes = Set(problems.map(\.pane))
         if panes != flaggedPanes { flaggedPanes = panes }
     }
+
+    @Published private(set) var advisoryPanes: Set<SettingsDestination> = []
+
+    func updateAdvisories(_ panes: Set<SettingsDestination>) {
+        if panes != advisoryPanes { advisoryPanes = panes }
+    }
+
+    // Advisories reach only the sidebar, never the menu bar, and an error on the same pane outranks one.
+    func marker(for pane: SettingsDestination) -> IssueText.Severity? {
+        if flaggedPanes.contains(pane) { return .failure }
+        if advisoryPanes.contains(pane) { return .advisory }
+        return nil
+    }
 }
 
 @MainActor
@@ -190,6 +203,11 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     // For callers that already ran detection (the menu badge), so it doesn't run back-to-back.
     func refreshProblems(_ detected: [SettingsProblem]) { problems.update(detected) }
+
+    func refreshConfigIssues(_ issues: [ConfigFileIssue]) {
+        if model.configIssues != issues { model.configIssues = issues }
+        problems.updateAdvisories(issues.contains { !$0.isError } ? [.advanced] : [])
+    }
 
     // Connections whose last user-run Test Connection failed — drives the error badge.
     var failedConnectionIds: Set<String> { aiServices.failedTestIds }
@@ -367,21 +385,27 @@ struct SettingsRootView: View {
         return HotkeyConflicts.shadowed(ordered)
     }
 
+    private func sidebarAccessibilityLabel(_ destination: SettingsDestination) -> String {
+        switch problems.marker(for: destination) {
+        case .failure: "\(destination.title), needs attention"
+        case .advisory: "\(destination.title), has a warning"
+        case nil: destination.title
+        }
+    }
+
     var body: some View {
         NavigationSplitView {
             List(SettingsDestination.allCases, selection: $destination) { destination in
                 HStack {
                     Label(destination.title, systemImage: destination.symbol)
                     Spacer()
-                    if problems.flaggedPanes.contains(destination) {
-                        Circle().fill(.red).frame(width: 7, height: 7)
+                    if let marker = problems.marker(for: destination) {
+                        Circle().fill(marker == .failure ? Color.red : Color.orange).frame(width: 7, height: 7)
                             .accessibilityHidden(true)
                     }
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(problems.flaggedPanes.contains(destination)
-                    ? "\(destination.title), needs attention"
-                    : destination.title)
+                .accessibilityLabel(sidebarAccessibilityLabel(destination))
                 .accessibilityIdentifier(AccessibilityID.Settings.Sidebar.id(for: destination))
                 .tag(destination)
             }
@@ -491,7 +515,12 @@ private struct MaintenanceSettingsView: View {
                     .accessibilityIdentifier(AccessibilityID.Settings.Advanced.revealConfig)
                 Button("Reload Configuration") { model.reload() }
                     .accessibilityIdentifier(AccessibilityID.Settings.Advanced.reloadConfig)
-                Text("Config edits are detected automatically. A malformed file is surfaced as an error rather than silently ignored.")
+                ForEach(model.configIssues) { issue in
+                    PaneNoticeRow(notice: PaneNotice(
+                        issue: issue, fileURL: KeyScribePaths.supportDir.appendingPathComponent(issue.relativePath)))
+                        .accessibilityIdentifier(AccessibilityID.Settings.Advanced.configIssue(issue.relativePath))
+                }
+                Text("Config edits are detected automatically. A file that can’t be read, or a key \(Branding.appName) doesn’t recognize, is reported here rather than silently ignored.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -571,6 +600,7 @@ final class SettingsModel: ObservableObject {
     // Feature-flag enabled state, keyed by Feature.id, populated for every Feature.allCases. One toggle each.
     @Published var featureStates: [String: Bool] { didSet { persist() } }
     @Published private(set) var diagnosticsStatus: String?
+    @Published var configIssues: [ConfigFileIssue] = []
     private var diagnosticsStatusTask: Task<Void, Never>?
     // Empty string = follow the system default input; any other value is a CoreAudio device UID.
     @Published var inputDeviceUID: String { didSet { persist() } }

@@ -15,10 +15,17 @@ public enum ConfigLoad<T: Equatable & Sendable>: Equatable, Sendable {
         guard FileManager.default.fileExists(atPath: file.path) else { return .absent }
         let toml: String
         do { toml = try String(contentsOf: file, encoding: .utf8) }
-        catch { return .failed(.invalid("\(error)")) }
+        catch { return .failed(.unreadableFile(error.localizedDescription)) }
         do { return .loaded(try decode(toml)) }
         catch let error as ConfigError { return .failed(error) }
         catch { return .failed(.invalid("\(error)")) }
+    }
+}
+
+enum ConfigEncode {
+    static func toml<T: Encodable>(_ value: T) throws -> String {
+        let toml = try TOMLEncoder().encode(value)
+        return toml.hasSuffix("\n") ? toml : toml + "\n"
     }
 }
 

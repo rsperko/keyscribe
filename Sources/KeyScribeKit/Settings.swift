@@ -154,9 +154,6 @@ public struct Settings: Codable, Equatable, Sendable {
             case keepDisplayAwake = "keep_display_awake"
             case sounds
             case soundVolumePercent = "sound_volume"
-        }
-
-        private enum LegacyCodingKeys: String, CodingKey {
             case muteSystemAudio = "mute_system_audio"
         }
 
@@ -173,21 +170,26 @@ public struct Settings: Codable, Equatable, Sendable {
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             let d = Settings.defaults.duringDictation
-            otherAudio = try Self.decodeOtherAudio(from: decoder, container: c) ?? d.otherAudio
+            otherAudio = try Self.decodeOtherAudio(from: c) ?? d.otherAudio
             keepDisplayAwake = try c.decodeIfPresent(Bool.self, forKey: .keepDisplayAwake) ?? d.keepDisplayAwake
             sounds = try c.decodeIfPresent(Bool.self, forKey: .sounds) ?? d.sounds
             soundVolumePercent = try c.decodeIfPresent(Int.self, forKey: .soundVolumePercent)
                 ?? d.soundVolumePercent
         }
 
-        private static func decodeOtherAudio(
-            from decoder: Decoder, container: KeyedDecodingContainer<CodingKeys>
-        ) throws -> OtherAudio? {
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(otherAudio, forKey: .otherAudio)
+            try c.encode(keepDisplayAwake, forKey: .keepDisplayAwake)
+            try c.encode(sounds, forKey: .sounds)
+            try c.encode(soundVolumePercent, forKey: .soundVolumePercent)
+        }
+
+        private static func decodeOtherAudio(from container: KeyedDecodingContainer<CodingKeys>) throws -> OtherAudio? {
             if let value = try container.decodeIfPresent(OtherAudio.self, forKey: .otherAudio) {
                 return value
             }
-            let legacy = try decoder.container(keyedBy: LegacyCodingKeys.self)
-            guard let muted = try legacy.decodeIfPresent(Bool.self, forKey: .muteSystemAudio) else {
+            guard let muted = try container.decodeIfPresent(Bool.self, forKey: .muteSystemAudio) else {
                 return nil
             }
             return muted ? .quiet : .unchanged
@@ -417,6 +419,17 @@ public enum ConfigError: Error, Equatable {
     case missingSchemaVersion
     case newerSchemaVersion(found: Int, supported: Int)
     case invalid(String)
+    case unreadableFile(String)
+
+    public var summary: String {
+        switch self {
+        case .missingSchemaVersion: "missing schema_version"
+        case .newerSchemaVersion(let found, let supported):
+            "schema \(found) is newer than this build supports (\(supported))"
+        case .invalid(let message): message
+        case .unreadableFile(let reason): "couldn’t read the file: \(reason)"
+        }
+    }
 }
 
 public enum SettingsStore {
@@ -431,15 +444,30 @@ public enum SettingsStore {
         }
     }
 
+    static let retiredKeys: Set<String> = [
+        "default_mode_id",
+        "stt.dictionary_recovery_enabled_engines",
+        "stt.dictionary_recovery_disabled_engines",
+        "stt.dictionary_recovery_engines",
+        "during_dictation.mute_system_audio",
+    ]
+
+    public static func unknownKeys(in toml: String) -> [UnknownConfigKey] {
+        ConfigKeyCheck.unknownKeys(
+            Settings.self, in: toml, supportedVersion: currentSchemaVersion, retired: retiredKeys)
+    }
+
     public static func encode(_ settings: Settings) throws -> String {
-        try TOMLEncoder().encode(settings)
+        try ConfigEncode.toml(settings)
     }
 
     public static func loadOrCreate(supportDir: URL) throws -> Settings {
         let fm = FileManager.default
         let file = supportDir.appendingPathComponent(fileName)
         if fm.fileExists(atPath: file.path) {
-            let toml = try String(contentsOf: file, encoding: .utf8)
+            let toml: String
+            do { toml = try String(contentsOf: file, encoding: .utf8) }
+            catch { throw ConfigError.unreadableFile(error.localizedDescription) }
             return try decode(from: toml)
         }
         try fm.createDirectory(at: supportDir, withIntermediateDirectories: true)
@@ -447,10 +475,14 @@ public enum SettingsStore {
         return Settings.defaults
     }
 
+    // Refuses to replace a present file that fails to load: the user's broken edit outranks a Settings change.
     public static func write(_ settings: Settings, to supportDir: URL) throws {
         let fm = FileManager.default
+        let file = supportDir.appendingPathComponent(fileName)
+        if case .failed(let error) = ConfigLoad.read(file, decode: decode) {
+            throw ConfigError.invalid("\(fileName) has an error (\(error.summary)); not replacing it")
+        }
         try fm.createDirectory(at: supportDir, withIntermediateDirectories: true)
-        let toml = try encode(settings)
-        try toml.write(to: supportDir.appendingPathComponent(fileName), atomically: true, encoding: .utf8)
+        try encode(settings).write(to: file, atomically: true, encoding: .utf8)
     }
 }

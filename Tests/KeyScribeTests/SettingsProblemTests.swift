@@ -103,3 +103,27 @@ struct SettingsProblemTests {
         #expect(problems.isEmpty)
     }
 }
+
+@MainActor
+struct SettingsPaneMarkerTests {
+    @Test func aConfigWarningMarksMaintenanceAmber() {
+        let model = SettingsProblemModel()
+        model.updateAdvisories([.advanced])
+        #expect(model.marker(for: .advanced) == .advisory)
+        #expect(model.marker(for: .modes) == nil)
+    }
+
+    @Test func anErrorOutranksAWarningOnTheSamePane() {
+        let model = SettingsProblemModel()
+        model.updateAdvisories([.advanced])
+        model.update([.malformedConfig])
+        #expect(model.marker(for: .advanced) == .failure)
+    }
+
+    @Test func fixingTheWarningClearsTheMarker() {
+        let model = SettingsProblemModel()
+        model.updateAdvisories([.advanced])
+        model.updateAdvisories([])
+        #expect(model.marker(for: .advanced) == nil)
+    }
+}

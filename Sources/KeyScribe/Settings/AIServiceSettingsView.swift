@@ -333,12 +333,7 @@ struct AIServiceSettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let error = model.error {
-                IssueText(error)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                Divider()
-            }
+            PaneNoticeBanner(notices: [model.error.map { PaneNotice(title: $0) }].compactMap { $0 })
             paneBody
         }
     }

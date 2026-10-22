@@ -77,6 +77,12 @@ struct ReplacementAuthoringTests {
         #expect(ReplacementAuthoring.regexReturnMarkerValid("mid<CR>text") == false)
     }
 
+    @Test func onlyALiteralRuleTypesItsReturnMarkerAsText() {
+        #expect(ReplacementAuthoring.literalReturnMarkerAdvisory(replace: "/resume<CR>", regex: false) != nil)
+        #expect(ReplacementAuthoring.literalReturnMarkerAdvisory(replace: "/resume<CR>", regex: true) == nil)
+        #expect(ReplacementAuthoring.literalReturnMarkerAdvisory(replace: "/resume", regex: false) == nil)
+    }
+
     @Test func lineEndingsNormalizeToLF() {
         #expect(ReplacementAuthoring.normalizingLineEndings("a\r\nb") == "a\nb")
         #expect(ReplacementAuthoring.normalizingLineEndings("a\rb") == "a\nb")

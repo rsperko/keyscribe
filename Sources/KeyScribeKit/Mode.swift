@@ -432,8 +432,34 @@ public enum ModeStore {
         return mode
     }
 
+    public static func unknownKeys(in toml: String) -> [UnknownConfigKey] {
+        ConfigKeyCheck.unknownKeys(
+            Mode.self, in: toml, supportedVersion: currentSchemaVersion, migrations: migrations,
+            examples: [everyKeyExample])
+    }
+
+    static var everyKeyExample: Mode {
+        var mode = Mode(id: "example", name: "Example")
+        mode.seedId = "example"
+        mode.seedVersion = 1
+        mode.triggerKeys = [.init(key: "right_option", pressStyle: "hold", tapThresholdMs: 200)]
+        mode.triggerPhrases = ["example"]
+        mode.constraints = [.init(bundleId: "a", bundlePrefix: "a", urlPattern: "a", windowTitle: "a")]
+        mode.dictionary = .init(includeGlobal: false, words: ["a"])
+        mode.replacements = .init(includeGlobal: false, rules: [.init(heard: "a", replace: "b", regex: true)])
+        mode.aiRewrite = .init(
+            connection: "a", prompt: "a", fragments: ["a"],
+            context: .init(app: true, precedingText: true))
+        mode.submit = .return
+        mode.clipboardSync = true
+        mode.pasteSettleMs = 1
+        mode.trimTrailingPunctuation = true
+        mode.excludeFromHistory = true
+        return mode
+    }
+
     public static func encode(_ mode: Mode) throws -> String {
-        try TOMLEncoder().encode(mode)
+        try ConfigEncode.toml(mode)
     }
 
     // Legacy Plain Dictation seed used only to recognize an unmodified file for the Direct migration.
@@ -598,8 +624,9 @@ public enum ModeStore {
 
     public struct LoadFailure: Equatable, Sendable {
         public let id: String
-        public let message: String
+        public let error: ConfigError
         public let usedLastKnownGood: Bool
+        public var message: String { error.summary }
     }
 
     public struct LoadResult: Sendable {
@@ -622,19 +649,22 @@ public enum ModeStore {
         for url in files.filter({ $0.pathExtension == "toml" }).sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             let id = url.deletingPathExtension().lastPathComponent
             do {
-                let toml = try String(contentsOf: url, encoding: .utf8)
+                let toml: String
+                do { toml = try String(contentsOf: url, encoding: .utf8) }
+                catch { throw ConfigError.unreadableFile(error.localizedDescription) }
                 let decoded = try decode(from: toml, id: id)
                 modes.append(decoded.isSystem ? decoded.systemNormalized() : decoded)
                 if let lkgDir { saveLKG(toml, id: id, in: lkgDir) }
             } catch {
+                let configError = (error as? ConfigError) ?? .invalid("\(error)")
                 if let lastGood = prior[id] {
                     modes.append(lastGood)
-                    failures.append(LoadFailure(id: id, message: "\(error)", usedLastKnownGood: true))
+                    failures.append(LoadFailure(id: id, error: configError, usedLastKnownGood: true))
                 } else if let lkgDir, let recovered = loadLKG(id: id, in: lkgDir) {
                     modes.append(recovered)
-                    failures.append(LoadFailure(id: id, message: "\(error)", usedLastKnownGood: true))
+                    failures.append(LoadFailure(id: id, error: configError, usedLastKnownGood: true))
                 } else {
-                    failures.append(LoadFailure(id: id, message: "\(error)", usedLastKnownGood: false))
+                    failures.append(LoadFailure(id: id, error: configError, usedLastKnownGood: false))
                 }
             }
         }
@@ -652,7 +682,7 @@ public enum ModeStore {
         let url = lkgDir.appendingPathComponent("\(id).toml")
         guard let toml = try? String(contentsOf: url, encoding: .utf8),
               let mode = try? decode(from: toml, id: id) else { return nil }
-        return mode
+        return mode.systemNormalized()
     }
 
     public static func write(_ mode: Mode, to dir: URL) throws {
@@ -666,7 +696,7 @@ public enum ModeStore {
     }
 
     // The Direct file also marks the completed Plain Dictation migration.
-    public static func ensureSystemModes(in dir: URL, lkgDir: URL? = nil) {
+    public static func ensureSystemModes(in dir: URL) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let url = fileURL(for: .direct, in: dir)
         guard let current = try? String(contentsOf: url, encoding: .utf8) else {
@@ -674,15 +704,10 @@ public enum ModeStore {
             return
         }
 
-        let resolved: Mode?
-        do {
-            resolved = try decode(from: current, id: Mode.directId).systemNormalized()
-        } catch ConfigError.newerSchemaVersion {
-            return
-        } catch {
-            resolved = lkgDir.flatMap { loadLKG(id: Mode.directId, in: $0) }?.systemNormalized()
-        }
-        guard let resolved, let encoded = try? encode(resolved), encoded != current else { return }
+        guard let decoded = try? decode(from: current, id: Mode.directId) else { return }
+        let resolved = decoded.systemNormalized()
+        guard resolved != decoded, unknownKeys(in: current).isEmpty,
+              let encoded = try? encode(resolved) else { return }
         try? encoded.write(to: url, atomically: true, encoding: .utf8)
     }
 

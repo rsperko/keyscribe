@@ -160,9 +160,13 @@ struct VocabularyDraftAnalysis {
             if let message = analysis.advisories.first(where: { $0.kind == .overridesGlobal })?.message {
                 return .advisory(message)
             }
-            if case let .replacement(_, replace, _) = proposal,
-               let invisible = Self.invisibleOnlyDescription(replace) {
-                return .advisory(invisible)
+            if case let .replacement(_, replace, regex) = proposal {
+                if let literal = ReplacementAuthoring.literalReturnMarkerAdvisory(replace: replace, regex: regex) {
+                    return .advisory(literal)
+                }
+                if let invisible = Self.invisibleOnlyDescription(replace) {
+                    return .advisory(invisible)
+                }
             }
             return nil
         }

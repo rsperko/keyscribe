@@ -213,6 +213,10 @@ public enum ConnectionStore {
         }
     }
 
+    public static func unknownKeys(in toml: String) -> [UnknownConfigKey] {
+        ConfigKeyCheck.unknownKeys(ConnectionSet.self, in: toml, supportedVersion: currentSchemaVersion)
+    }
+
     public static func load(supportDir: URL) -> ConfigLoad<ConnectionSet> {
         .read(supportDir.appendingPathComponent(fileName), decode: decode)
     }
@@ -224,7 +228,7 @@ public enum ConnectionStore {
 
     public static func write(_ set: ConnectionSet, to supportDir: URL) throws {
         try FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
-        try TOMLEncoder().encode(set).write(
+        try ConfigEncode.toml(set).write(
             to: supportDir.appendingPathComponent(fileName), atomically: true, encoding: .utf8)
     }
 

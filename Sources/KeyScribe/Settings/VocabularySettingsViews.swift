@@ -159,6 +159,9 @@ struct ReplacementRows: View {
                 Text(ReplacementAuthoring.preview(for: rule.replace).text)
                     .textSelection(.enabled)
                     .lineLimit(1)
+                if let advisory = ReplacementAuthoring.literalReturnMarkerAdvisory(replace: rule.replace, regex: rule.regex) {
+                    IssueText(advisory, severity: .advisory, font: .caption)
+                }
             }
             Spacer()
             Button { editingRule = rule } label: {
@@ -573,8 +576,8 @@ private struct ReplacementEditor: View {
 
 struct VocabularyComposer: View {
     let analyze: (VocabularyProposal) -> VocabularyAnalysis
-    let onAddWord: (String) -> Void
-    let onAddReplacement: (String, String, Bool) -> Void
+    let onAddWord: (String) -> Bool
+    let onAddReplacement: (String, String, Bool) -> Bool
     @State private var heard = ""
     @State private var replace = ""
     @State private var regex = false
@@ -681,13 +684,11 @@ struct VocabularyComposer: View {
 
     private func commit() {
         guard draft.canCommit, let proposal = draft.proposal else { return }
-        switch proposal {
-        case .word(let word):
-            onAddWord(word)
-        case .replacement(let heard, let replace, let regex):
-            onAddReplacement(heard, replace, regex)
+        let saved = switch proposal {
+        case .word(let word): onAddWord(word)
+        case .replacement(let heard, let replace, let regex): onAddReplacement(heard, replace, regex)
         }
-        reset()
+        if saved { reset() }
     }
 
     private func reset() {
@@ -746,12 +747,7 @@ struct VocabularySettingsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let error = modes.error {
-                IssueText(error)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(10)
-                Divider()
-            }
+            PaneNoticeBanner(notices: [dictionary.notice, replacements.notice, modes.notice].compactMap { $0 })
             HStack(spacing: 0) {
                 List(selection: $selection) {
                     Section {
@@ -845,15 +841,13 @@ struct VocabularySettingsView: View {
                 words: dictionary.words,
                 rules: replacements.rules,
                 deletionScope: .global,
-                dictionaryError: dictionary.error,
-                replacementsError: replacements.error,
                 dictionaryAdvice: dictionary.words.count >= Self.dictionaryAdviceThreshold
                     ? "You have \(dictionary.words.count) entries. That is fine — but a phrase \(Branding.appName) always mishears the same way works better as a Replacement, which changes it exactly."
                     : nil,
                 historyReplacements: historyReplacements.map { launcher in
                     { word, onSaved in launcher.make(word, .global, "Global", onSaved) }
                 },
-                onAddWord: dictionary.add,
+                onAddWord: { dictionary.add($0) },
                 onRemoveWord: dictionary.remove,
                 onAddReplacement: { replacements.add(heard: $0, replace: $1, regex: $2) },
                 onUpdateReplacement: replacements.update,
@@ -894,7 +888,7 @@ struct VocabularySettingsView: View {
             onAddWord: { word in
                 var updated = mode
                 updated.dictionary.words = DictionarySet(words: mode.dictionary.words).adding(word: word).words
-                modes.update(updated)
+                return modes.update(updated)
             },
             onRemoveWord: { word in
                 var updated = mode
@@ -905,15 +899,14 @@ struct VocabularySettingsView: View {
                 var updated = mode
                 updated.replacements.rules = ReplacementsSet(rules: mode.replacements.rules)
                     .adding(heard: heard, replace: replace, regex: regex).rules
-                modes.update(updated)
+                return modes.update(updated)
             },
             onUpdateReplacement: { original, replacement in
                 let set = ReplacementsSet(rules: mode.replacements.rules).replacing(original, with: replacement)
                 guard set.rules != mode.replacements.rules else { return false }
                 var updated = mode
                 updated.replacements.rules = set.rules
-                modes.update(updated)
-                return true
+                return modes.update(updated)
             },
             onMoveReplacement: { source, destination in
                 var rules = mode.replacements.rules
@@ -950,13 +943,11 @@ private struct VocabularyEditor: View {
     let words: [String]
     let rules: [ReplacementsSet.Rule]
     let deletionScope: VocabularyRemovalScope
-    var dictionaryError: String? = nil
-    var replacementsError: String? = nil
     var dictionaryAdvice: String? = nil
     var historyReplacements: ((String, @escaping (Int) -> Void) -> HistoryReplacementsModel)? = nil
-    let onAddWord: (String) -> Void
+    let onAddWord: (String) -> Bool
     let onRemoveWord: (String) -> Void
-    let onAddReplacement: (String, String, Bool) -> Void
+    let onAddReplacement: (String, String, Bool) -> Bool
     let onUpdateReplacement: (ReplacementsSet.Rule, ReplacementsSet.Rule) -> Bool
     let onMoveReplacement: (IndexSet, Int) -> Void
     let onRemoveReplacement: (Int) -> Void
@@ -1008,9 +999,6 @@ private struct VocabularyEditor: View {
                     Label(dictionaryAdvice, systemImage: "info.circle")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                if let dictionaryError {
-                    IssueText(dictionaryError)
-                }
             }
             Section("Automatic Replacements") {
                 Text("Changes a consistently misheard phrase to the text you want. Replacements happen before any AI rewrite, which may still adjust the result. When two rules could match, the longer phrase wins."
@@ -1042,9 +1030,6 @@ private struct VocabularyEditor: View {
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.green)
                         .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.replacementsAdded)
-                }
-                if let replacementsError {
-                    IssueText(replacementsError)
                 }
             }
         }
@@ -1098,7 +1083,10 @@ private struct VocabularyEditor: View {
 @MainActor
 final class DictionarySettingsModel: ObservableObject {
     @Published private(set) var words: [String] = []
-    @Published private(set) var error: String?
+    @Published private(set) var loadNotice: PaneNotice?
+    @Published private(set) var operationNotice: PaneNotice?
+    private var operationFailedReading = false
+    var notice: PaneNotice? { operationNotice ?? loadNotice }
 
     private let repository: ConfigRepository
     private var isApplyingLocalMutation = false
@@ -1117,28 +1105,53 @@ final class DictionarySettingsModel: ObservableObject {
 
     func reload() {
         words = repository.dictionaryWords()
-        error = nil
+        loadNotice = Self.loadNotice(DictionaryStore.load(supportDir: repository.supportDir), repository: repository)
+        if loadNotice == nil, operationFailedReading { operationNotice = nil }
     }
 
-    func add(_ word: String) {
-        mutate { $0.adding(word: word) }
+    private static func loadNotice(_ load: ConfigLoad<DictionarySet>, repository: ConfigRepository) -> PaneNotice? {
+        guard case .failed(let error) = load else { return nil }
+        return .unreadableFile(
+            DictionaryStore.fileName, error: error,
+            file: repository.supportDir.appendingPathComponent(DictionaryStore.fileName),
+            stillRunning: stillRunning(repository),
+            here: "Global words can’t be shown or changed here until then.")
+    }
+
+    private static func stillRunning(_ repository: ConfigRepository) -> String? {
+        PaneNotice.stillRunning(
+            repository.runningState(of: DictionaryStore.fileName),
+            working: "Your existing words are still working.", off: "Its words are off until it’s fixed.")
+    }
+
+    @discardableResult
+    func add(_ word: String) -> Bool {
+        mutate("“\(word)” wasn’t added") { $0.adding(word: word) }
     }
 
     func remove(_ word: String) {
-        mutate { $0.removing(word: word) }
+        mutate("“\(word)” wasn’t removed") { $0.removing(word: word) }
     }
 
     // Reads-modifies-writes from disk (not from `@Published words`), since the global Add-to-Vocabulary
     // hotkey writes through the same repository while this pane is open — mutating stale in-memory state
     // would silently drop a word it just added.
-    private func mutate(_ transform: (DictionarySet) -> DictionarySet) {
+    @discardableResult
+    private func mutate(_ title: String, _ transform: (DictionarySet) -> DictionarySet) -> Bool {
         isApplyingLocalMutation = true
         defer { isApplyingLocalMutation = false }
         do {
             words = try repository.mutateDictionary(transform).words
-            error = nil
+            operationNotice = nil
+            loadNotice = nil
+            return true
         } catch {
-            self.error = "Could not save the dictionary: \(error.localizedDescription)"
+            operationFailedReading = error is ConfigError
+            operationNotice = .failure(
+                title, error: error,
+                file: repository.supportDir.appendingPathComponent(DictionaryStore.fileName),
+                relativePath: DictionaryStore.fileName, stillRunning: Self.stillRunning(repository))
+            return false
         }
     }
 }
@@ -1147,7 +1160,10 @@ final class DictionarySettingsModel: ObservableObject {
 final class ReplacementsSettingsModel: ObservableObject {
     @Published private(set) var rules: [ReplacementsSet.Rule] = []
     @Published private(set) var usage = ReplacementUsage()
-    @Published private(set) var error: String?
+    @Published private(set) var loadNotice: PaneNotice?
+    @Published private(set) var operationNotice: PaneNotice?
+    private var operationFailedReading = false
+    var notice: PaneNotice? { operationNotice ?? loadNotice }
 
     private let repository: ConfigRepository
     private var isApplyingLocalMutation = false
@@ -1177,7 +1193,23 @@ final class ReplacementsSettingsModel: ObservableObject {
     func reload() {
         rules = repository.replacementRules()
         usage = repository.replacementUsage?.snapshot() ?? ReplacementUsage()
-        error = nil
+        if case .failed(let error) = ReplacementsStore.load(supportDir: repository.supportDir) {
+            loadNotice = .unreadableFile(
+                ReplacementsStore.fileName, error: error, file: replacementsFile, stillRunning: stillRunning,
+                here: "Global replacements can’t be shown or changed here until then.")
+        } else {
+            loadNotice = nil
+            if operationFailedReading { operationNotice = nil }
+        }
+    }
+
+    private var replacementsFile: URL { repository.supportDir.appendingPathComponent(ReplacementsStore.fileName) }
+
+    private var stillRunning: String? {
+        PaneNotice.stillRunning(
+            repository.runningState(of: ReplacementsStore.fileName),
+            working: "Your existing replacements are still working.",
+            off: "Its replacements are off until it’s fixed.")
     }
 
     func usageCaption(for rule: ReplacementsSet.Rule, in origin: ReplacementOrigin) -> String? {
@@ -1186,10 +1218,11 @@ final class ReplacementsSettingsModel: ObservableObject {
             today: HistoryStore.todayString())
     }
 
-    func add(heard: String, replace: String, regex: Bool) {
+    @discardableResult
+    func add(heard: String, replace: String, regex: Bool) -> Bool {
         let trimmed = heard.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        mutate { set in
+        guard !trimmed.isEmpty else { return false }
+        return mutate("Replacement wasn’t saved") { set in
             set = set.adding(heard: trimmed, replace: replace, regex: regex)
         }
     }
@@ -1197,7 +1230,7 @@ final class ReplacementsSettingsModel: ObservableObject {
     func remove(at index: Int) {
         guard rules.indices.contains(index) else { return }
         let target = rules[index]
-        mutate { set in
+        mutate("Replacement wasn’t removed") { set in
             if let i = set.rules.firstIndex(of: target) { set.rules.remove(at: i) }
         }
     }
@@ -1205,12 +1238,12 @@ final class ReplacementsSettingsModel: ObservableObject {
     @discardableResult
     func update(_ original: ReplacementsSet.Rule, to updated: ReplacementsSet.Rule) -> Bool {
         var didUpdate = false
-        mutate { set in
+        let saved = mutate("Change wasn’t saved") { set in
             let replacement = set.replacing(original, with: updated)
             didUpdate = replacement != set
             set = replacement
         }
-        return didUpdate
+        return saved && didUpdate
     }
 
     func move(from source: IndexSet, to destination: Int) {
@@ -1218,7 +1251,7 @@ final class ReplacementsSettingsModel: ObservableObject {
         else { return }
         var ordered = rules
         ordered.move(fromOffsets: source, toOffset: destination)
-        mutate { set in
+        mutate("New order wasn’t saved") { set in
             set = set.reordering(ordered)
         }
     }
@@ -1226,14 +1259,21 @@ final class ReplacementsSettingsModel: ObservableObject {
     // See DictionarySettingsModel.mutate. `remove(at:)` resolves the displayed row to a rule value first,
     // then removes the matching rule from the freshly-read set, so a rule the global hotkey appended
     // concurrently is preserved.
-    private func mutate(_ transform: (inout ReplacementsSet) -> Void) {
+    @discardableResult
+    private func mutate(_ title: String, _ transform: (inout ReplacementsSet) -> Void) -> Bool {
         isApplyingLocalMutation = true
         defer { isApplyingLocalMutation = false }
         do {
             rules = try repository.mutateReplacements(transform).rules
-            error = nil
+            operationNotice = nil
+            loadNotice = nil
+            return true
         } catch {
-            self.error = "Could not save replacements: \(error.localizedDescription)"
+            operationFailedReading = error is ConfigError
+            operationNotice = .failure(
+                title, error: error, file: replacementsFile,
+                relativePath: ReplacementsStore.fileName, stillRunning: stillRunning)
+            return false
         }
     }
 }
