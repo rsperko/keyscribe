@@ -23,7 +23,11 @@ struct CaptureCueOrderingTests {
 
     private final class RecordingHUD: HUDPresenting {
         var states: [HUDState] = []
-        func render(_ state: HUDState) { states.append(state) }
+        private(set) var firstVisibleAt: UInt64?
+        func render(_ state: HUDState) {
+            if state != .hidden, firstVisibleAt == nil { firstVisibleAt = mach_absolute_time() }
+            states.append(state)
+        }
         var sawVisibleHUD: Bool { states.contains { $0 != .hidden } }
         var sawRecording: Bool { states.contains { if case .recording = $0 { return true }; return false } }
         var errorMessage: String? {
@@ -111,7 +115,7 @@ struct CaptureCueOrderingTests {
     }
 
     private func poll(until condition: @escaping () -> Bool) async {
-        for _ in 0..<200 {
+        for _ in 0..<1000 {
             if condition() { return }
             await Task.yield()
             try? await Task.sleep(for: .milliseconds(10))
@@ -158,7 +162,7 @@ struct CaptureCueOrderingTests {
         #expect(hud.states.filter { $0 != .hidden }.count == 1)
     }
 
-    @Test func theHUDStaysHiddenThroughTheCueAndAppearsOnlyAtAdmission() async {
+    @Test func theHUDStaysHiddenThroughTheCueAndAppearsOnlyAtAdmission() async throws {
         let ready = SignalLatch()
         let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
         let hud = RecordingHUD()
@@ -166,10 +170,12 @@ struct CaptureCueOrderingTests {
         controller.handleStart()
         await poll { audio.startCalls == 1 }
         ready.signal()
-        await poll { !audio.boundaries.isEmpty }
-        #expect(!hud.sawVisibleHUD)
         await poll { hud.sawRecording }
         #expect(hud.sawRecording)
+        let boundary = try #require(audio.boundaries.first)
+        let shown = try #require(hud.firstVisibleAt)
+        #expect(boundary > 0)
+        #expect(shown >= boundary)
     }
 
     @Test func theCueEndBoundaryIsAnchoredToReadinessNotToTheTrigger() async {

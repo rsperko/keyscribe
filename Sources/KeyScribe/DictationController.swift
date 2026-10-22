@@ -1889,6 +1889,9 @@ final class DictationController {
                 }
             }
             loadingHUD.cancel()
+            // A load that finished as the cancel landed still returns success; rendering now would re-show a
+            // dismissed HUD.
+            if Task.isCancelled { try? FileManager.default.removeItem(at: url); return }
             // Flip back to Transcribing for the inference that follows. A no-op (render dedupes) unless the
             // loading-model state was actually shown during a slow load.
             present(.transcribing(mode: currentModeName))

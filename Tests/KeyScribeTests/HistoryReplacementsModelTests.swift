@@ -9,10 +9,12 @@ private final class HistorySource: @unchecked Sendable {
     private var fingerprint = HistorySnapshot.Fingerprint(files: ["d.jsonl": 1])
     private var blocking = false
     private var sawCancellation = false
+    let workerBlocked = Signal("HistorySource.workerBlocked")
 
     var current: HistorySnapshot {
         if lock.withLock({ blocking }) {
-            let deadline = Date().addingTimeInterval(2)
+            workerBlocked.fire()
+            let deadline = Date().addingTimeInterval(10)
             while !Task.isCancelled, Date() < deadline { usleep(1000) }
             lock.withLock { sawCancellation = Task.isCancelled }
         }
@@ -245,7 +247,7 @@ struct HistoryReplacementsModelTests {
         h.history.blockUntilCancelled()
         let model = h.model()
         let loading = Task { await model.load() }
-        try? await Task.sleep(nanoseconds: 50_000_000)
+        await h.history.workerBlocked.wait()
         loading.cancel()
         await loading.value
         #expect(h.history.workerSawCancellation)

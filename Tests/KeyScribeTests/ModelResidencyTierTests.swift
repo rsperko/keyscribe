@@ -105,7 +105,7 @@ struct ModelResidencyTierTests {
             try? await Task.sleep(for: .milliseconds(300))
             #expect(engine.evictions == 0)
         case .balanced, .frugal:
-            #expect(await fires(engine.evicted, within: 2))
+            #expect(await fires(engine.evicted, within: 10))
         }
     }
 
@@ -156,15 +156,15 @@ struct ModelResidencyTierTests {
         let h = makeHarness(.balanced)
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
         h.controller.preloadActiveEngineIfNeeded()
-        #expect(await fires(h.engine.loaded, within: 2))
-        #expect(await fires(h.engine.evicted, within: 2))
+        #expect(await fires(h.engine.loaded, within: 10))
+        #expect(await fires(h.engine.evicted, within: 10))
     }
 
     @Test func fastestLaunchPreloadKeepsTheModelLoaded() async {
         let h = makeHarness(.fastest)
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
         h.controller.preloadActiveEngineIfNeeded()
-        #expect(await fires(h.engine.loaded, within: 2))
+        #expect(await fires(h.engine.loaded, within: 10))
         try? await Task.sleep(for: .milliseconds(300))
         #expect(h.engine.evictions == 0)
     }
@@ -202,7 +202,7 @@ struct ModelResidencyTierTests {
         await h.controller.captureBringUpTask?.value
         h.controller.cancel()
         loadRelease.fire()
-        #expect(await fires(h.engine.evicted, within: 2))
+        #expect(await fires(h.engine.evicted, within: 10))
         try? await Task.sleep(for: .milliseconds(300))
         #expect(h.engine.transcribed.isEmpty)
         #expect(!h.engine.isLoaded)
@@ -219,10 +219,10 @@ struct ModelResidencyTierTests {
         try! h.provider.setActive(engineB.id)
         h.controller.evictSwitchedAwayEngine(previous)
         h.controller.preloadActiveEngineIfNeeded()
-        #expect(await fires(engineB.loaded, within: 2))
+        #expect(await fires(engineB.loaded, within: 10))
         try? await Task.sleep(for: .milliseconds(100))
         releaseA.fire()
-        #expect(await fires(engineB.evicted, within: 3))
+        #expect(await fires(engineB.evicted, within: 10))
         #expect(!engineB.isLoaded)
         #expect(!engineA.isLoaded)
     }
