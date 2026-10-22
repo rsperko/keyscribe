@@ -81,6 +81,26 @@ private final class SlowLoadEngine: SpeechEngine, @unchecked Sendable {
     func evict() async {}
 }
 
+private final class ReleasedLoadEngine: SpeechEngine, @unchecked Sendable {
+    let id = "released"
+    let displayName = "Released"
+    let supportsRecognitionBias = false
+    let release = Signal("ReleasedLoadEngine.release")
+    let loadReturning = Signal("ReleasedLoadEngine.loadReturning")
+    private let lock = NSLock()
+    private var _transcribes = 0
+    var transcribes: Int { lock.withLock { _transcribes } }
+    func loadIfNeeded() async throws {
+        await release.wait()
+        loadReturning.fire()
+    }
+    func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
+        lock.withLock { _transcribes += 1 }
+        return "hello world"
+    }
+    func evict() async {}
+}
+
 private final class FakeAudio: AudioCapturing, @unchecked Sendable {
     private let url: URL
     init(url: URL) { self.url = url }
@@ -246,6 +266,55 @@ struct ModelLoadRetryTests {
             return false
         }
         #expect({ if case .transcribing = lastProcessing { return true }; return false }())
+    }
+
+    @Test func aLoadThatSucceedsAsTheCancelLandsLeavesTheHUDHiddenAndTranscribesNothing() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+
+        let engine = ReleasedLoadEngine()
+        let provider = try! SpeechEngineProvider(engines: [engine], activeId: engine.id)
+        let insertSpy = InsertSpy()
+        let hud = HUDSpy()
+        var settings = Settings.defaults
+        settings.stt = .init(engine: engine.id, eviction: .frugal)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: HistoryStore(supportDir: supportDir), hud: hud, permits: { _ in true },
+            audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
+            insert: { _, _, _, _, _ in await insertSpy.record(); return true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true })
+
+        // The loading HUD is scheduled as the dictation starts waiting on the load, so seeing it proves the
+        // dictation is parked there.
+        controller.loadingModelHUDDelayOverride = .milliseconds(1)
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.handleCommit()
+        let task = controller.dictationTask
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline, !hud.states.contains(where: { if case .loadingModel = $0 { return true }; return false }) {
+            await Task.yield()
+        }
+
+        // Let the load finish and its main-actor completion run, then hold the main actor while the bounded
+        // wait records the success off-main. The cancel then lands after the load succeeded but before the
+        // dictation resumes — the window a busy main thread opens in use.
+        engine.release.fire()
+        await engine.loadReturning.wait()
+        await Task.yield()
+        usleep(50_000)
+        controller.cancel()
+        await task?.value
+
+        #expect(hud.states.last == .hidden)
+        #expect(engine.transcribes == 0)
+        #expect(await insertSpy.calls == 0)
     }
 
     @Test func loadTimeoutSurfacesWithoutRetrying() async {
