@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test check-deps check-catalog-contract fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major
+.PHONY: help build run release publish ship cask test check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -46,6 +46,9 @@ check-deps: ## Detect upstream dependency mutation (moved tags, re-uploaded bina
 
 check-catalog-contract: ## Run the test suite against a restrictive stand-in AI service catalog (downstream swap contract)
 	./scripts/check-catalog-contract.sh
+
+check-min-xcode: ## Build the package and tests with the oldest supported Xcode, installed beside the current one
+	./scripts/check-min-xcode.sh
 
 fix-deps: ## Clear SwiftPM's stale binary-artifact caches after an upstream asset changed
 	./scripts/clear-binary-artifact-cache.sh

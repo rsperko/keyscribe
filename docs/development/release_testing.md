@@ -85,6 +85,9 @@ actually catches the list above.
 - **The suite also passes under a restrictive stand-in AI service catalog** (`make check-catalog-contract`):
   a downstream build replaces the lineup, and the public catalog permits everything, so this is the only
   place a test or a code path that quietly depends on the public providers shows up upstream.
+- **The package and its tests build with the oldest supported Xcode** (`make check-min-xcode`), installed
+  beside the current one. A newer compiler accepts code an older one rejects, no flag makes it behave like
+  the older one, and downstream builds with the oldest — so without this, downstream finds the break first.
 - Artifact present, and `codesign --verify --deep --strict` passes (nested resource bundles/xcframeworks too).
 - **MLX runs from the bundled shader library** (`--mlx-smoke`) — the silent Qwen killer.
 - `Info.plist` stamped: real `CFBundleShortVersionString` / `CFBundleVersion` / bundle id (no `__PLACEHOLDER__`).

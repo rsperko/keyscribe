@@ -29,7 +29,9 @@ Same name, different identity per machine; that is expected and fine.
   only on macOS 26+; the app hides that model on older supported macOS releases.
 - **Xcode installed and selected.** The app is built through an Xcode project, so the Command Line
   Tools alone are **not** enough; `make-app.sh` refuses to build against them. Last verified on
-  **Xcode 26.6 / Swift 6.3**. `Package.swift` declares Swift 6.0 as the floor.
+  **Xcode 26.6 / Swift 6.3**. `Package.swift` declares Swift 6.0 as the floor. Xcode 26.6 is also the
+  oldest Xcode the release gate builds with (`make check-min-xcode`); keep it installed in
+  `/Applications` under any `Xcode*.app` name beside the current Xcode, which stays selected.
 
   ```bash
   sudo xcode-select -s /Applications/Xcode.app

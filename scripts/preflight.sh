@@ -129,7 +129,7 @@ only_match() { [ -z "$ONLY" ] && return 0; case ",${ONLY//[[:space:]]/,}," in *,
 force_id()   { [ "$FORCE_ALL" = 1 ] && return 0; case ",${FORCE_LIST//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
 # The pre-notarize phase runs only these — swift test + Tier B. It must NOT run the Tier A packaging /
 # notarization checks (they need the notarized artifact, which does not exist yet) or Tier C (human).
-PRE_CHECKS=" a-deps a-swift-test a-catalog-contract b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
+PRE_CHECKS=" a-deps a-swift-test a-catalog-contract a-min-xcode b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
 pre_check() { case "$PRE_CHECKS" in *" $1 "*) return 0;; esac; return 1; }
 
 # guard <id> <input-sig> <fn>  — the whole cache / run / retry / override / record cycle for one check.
@@ -178,7 +178,7 @@ will_run() {
 }
 
 # Required checks must each end pass / override / skip (never fail, never un-evaluated) for the stamp.
-REQ_CORE="a-deps a-swift-test a-catalog-contract a-artifact a-codesign a-metallib a-plist a-licenses b-commands b-vad-gate b-benchmark"
+REQ_CORE="a-deps a-swift-test a-catalog-contract a-min-xcode a-artifact a-codesign a-metallib a-plist a-licenses b-commands b-vad-gate b-benchmark"
 REQ_RELEASE="a-gatekeeper a-staple a-entitlements a-dmg a-sparkle c-plain-dictation c-private-rewrite"
 
 if [ "$LIST_ONLY" = 1 ]; then
@@ -227,6 +227,17 @@ chk_a_catalog_contract() {
   fi
 }
 guard a-catalog-contract "$(sig_source)" chk_a_catalog_contract
+
+chk_a_min_xcode() {
+  # The current Xcode accepts code the oldest supported one rejects, and downstream builds with the oldest.
+  if ./scripts/check-min-xcode.sh >/tmp/preflight-min-xcode.log 2>&1; then
+    result pass "oldest supported Xcode — package and tests build"
+  else
+    tail -20 /tmp/preflight-min-xcode.log
+    result fail "oldest supported Xcode — build failed or it is not installed; see /tmp/preflight-min-xcode.log"
+  fi
+}
+guard a-min-xcode "$(sig_source)" chk_a_min_xcode
 
 chk_a_deps() {
   # An upstream dep can re-upload a binaryTarget asset in place (one did on 2026-08-13),
