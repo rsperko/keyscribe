@@ -5,134 +5,184 @@ struct HistoryReplacementsSheet: View {
     @ObservedObject var model: HistoryReplacementsModel
     let onCancel: () -> Void
     @State private var searchExpanded = false
+    @State private var combinedExpanded = false
+    @FocusState private var focusedPhrase: String?
 
     private typealias IDs = AccessibilityID.Settings.HistoryReplacements
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header
-            Form { content }
-                .formStyle(.grouped)
-            if let issue = model.issue {
-                IssueText(issue)
-                    .accessibilityIdentifier(IDs.issue)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Mishearings of “\(model.word)”").font(.title2.bold())
+                Text("Review similar phrases from saved History and choose which to correct.").foregroundStyle(.secondary)
             }
-            Divider()
-            buttons
-        }
-        .padding(20)
-        .frame(minWidth: 640, idealWidth: 720, minHeight: 540, idealHeight: 640)
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier(IDs.sheet)
-        .task { if model.snapshot == nil, !model.loadFailed { await model.load() } }
-    }
-
-    @ViewBuilder private var header: some View {
-        switch model.step {
-        case .find:
-            title("Find mishearings of “\(model.word)”",
-                  "Look for similar phrases in Heard text, then choose replacements.")
-        case .choose:
-            title("Choose phrases for \(model.word)",
-                  "These phrases resemble your word. Review what you meant in each sentence.")
-        case .review:
-            title("Review changes", "See what these replacements would change before you add them.")
-        }
-    }
-
-    private func title(_ title: String, _ subtitle: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.title2.bold())
-            Text(subtitle).foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder private var content: some View {
-        switch model.step {
-        case .find: findContent
-        case .choose: chooseContent
-        case .review: reviewContent
-        }
-    }
-
-    @ViewBuilder private var findContent: some View {
-        Section {
-            if model.loadFailed {
-                IssueText("Could not read History. Close this and try again.")
-            } else if model.snapshot == nil {
-                ProgressView("Reading History…").controlSize(.small)
-            } else if model.snapshot?.items.isEmpty == true {
-                Text("No dictations yet.").font(.headline)
-                Text("Dictations you make while History is on will appear here, and you can search them later. You can still add replacements yourself in Automatic Replacements.")
-                    .font(.caption).foregroundStyle(.secondary)
-            } else {
-                DisclosureSection(isExpanded: $searchExpanded) {
-                    DisclosureSummaryLabel(title: "Search", summary: scopeSummary)
-                } content: {
-                    searchControls
-                }
-                .accessibilityIdentifier(IDs.scopeDisclosure)
-                LabeledContent("Dictations to search") {
-                    HStack(spacing: 8) {
-                        Text("\(model.matchingCount)")
-                        DataBoundaryBadge(label: "On this Mac")
+            Form {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ReplacementValueField(
+                            title: "Use instead", placeholder: "Text to insert", text: $model.replacement,
+                            fieldID: IDs.useInstead)
+                            .formFieldLabel("Use instead")
+                        if let issue = model.replacementIssue {
+                            IssueText(issue)
+                        } else if let advisory = model.replacementAdvisory {
+                            IssueText(advisory, severity: .advisory)
+                        }
+                        Text("Add to \(model.destinationName). \(destinationScopeLine)")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                coverageNotes
-            }
-            if !model.historyEnabled {
-                Text("History is off, so new dictations are not saved. Dictations already stored can still be searched.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        destinationSection
-    }
-
-    private var searchControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Picker("Period", selection: $model.scope.period) {
-                Text("Last 7 days").tag(HistorySearchScope.Period.days(7))
-                Text("Last 30 days").tag(HistorySearchScope.Period.days(30))
-                Text("Last 90 days").tag(HistorySearchScope.Period.days(90))
-                Text("All available history").tag(HistorySearchScope.Period.all)
-            }
-            .accessibilityIdentifier(IDs.period)
-            Picker("Speech model", selection: $model.scope.model) {
-                Text("All speech models").tag(HistorySearchScope.Filter.all)
-                ForEach(modelChoices, id: \.self) { name in
-                    Text(name).tag(HistorySearchScope.Filter.named(name))
+                searchSection
+                Section {
+                    if model.loadFailed {
+                        IssueText("Could not read History. Refresh the search to try again.")
+                        Button("Try Again") { model.searchAgain() }
+                            .accessibilityIdentifier(IDs.retryLoad)
+                    } else if model.snapshot == nil {
+                        ProgressView("Searching History…").controlSize(.small)
+                    } else {
+                        if model.handledCount > 0, !model.phrases.isEmpty {
+                            Text("\(model.handledCount) similar \(model.handledCount == 1 ? "phrase is" : "phrases are") already corrected automatically.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if model.phrases.isEmpty, !model.isWorking {
+                            Text(model.handledCount > 0
+                                 ? "Similar phrases are already corrected automatically."
+                                 : "No possible mishearings found.")
+                                .font(.headline)
+                            Text("You can enter a heard phrase yourself.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(model.phrases) { phrase in
+                            HistoryReplacementDraftRow(model: model, phrase: phrase, focus: $focusedPhrase)
+                        }
+                        Button("Add a phrase manually…") { model.addPhrase() }
+                            .accessibilityIdentifier(IDs.addPhrase)
+                    }
+                }
+                if let preview = model.preview, model.showsCombinedPreview {
+                    Section {
+                        DisclosureSection(isExpanded: $combinedExpanded) {
+                            DisclosureSummaryLabel(title: "Combined preview", summary: combinedSummary(preview))
+                        } content: {
+                            ForEach(Array(preview.effects.enumerated()), id: \.offset) { _, effect in
+                                HistoryReplacementEffectRow(effect: effect, changes: effect.changes)
+                            }
+                        }
+                        .accessibilityIdentifier(IDs.combinedPreview)
+                    }
                 }
             }
-            .accessibilityIdentifier(IDs.speechModel)
-            Text("These choices only change what is searched. They never change your speech model or where replacements are added.")
+            .formStyle(.grouped)
+            if let problem = model.problem {
+                HStack {
+                    IssueText(problem.message).accessibilityIdentifier(IDs.issue)
+                    if problem.recovery == .refreshSearch {
+                        Button("Refresh Search") { model.searchAgain() }
+                            .accessibilityIdentifier(IDs.refresh)
+                    }
+                }
+            } else if let notice = model.notice {
+                IssueText(notice, severity: .advisory).accessibilityIdentifier(IDs.notice)
+            }
+            Text("Replaces future matches. Saved History stays unchanged. AI rewrites may still adjust the result.")
                 .font(.caption).foregroundStyle(.secondary)
+            Divider()
+            HStack {
+                if model.isWorking { ProgressView().controlSize(.small) }
+                Text(model.addGuidance).font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Cancel", role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier(IDs.cancel)
+                Button(addTitle) { model.perform { await $0.add() } }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(!model.canAdd)
+                    .accessibilityIdentifier(IDs.add)
+            }
         }
-    }
-
-    @ViewBuilder private var coverageNotes: some View {
-        if model.withoutRecordedModel > 0 {
-            Text("\(model.withoutRecordedModel) older \(model.withoutRecordedModel == 1 ? "dictation has" : "dictations have") no speech model recorded and \(model.withoutRecordedModel == 1 ? "is" : "are") searched only with All speech models.")
-                .font(.caption).foregroundStyle(.secondary)
+        .padding(20)
+        .frame(minWidth: 640, idealWidth: 680, minHeight: 400, idealHeight: 560, maxHeight: 760)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(IDs.sheet)
+        .task(id: model.revision) {
+            if model.snapshot != nil {
+                try? await Task.sleep(for: .milliseconds(180))
+                guard !Task.isCancelled else { return }
+            }
+            await model.refresh()
         }
-        if let unreadable = model.snapshot?.unreadableLines, unreadable > 0 {
-            IssueText("\(unreadable) History \(unreadable == 1 ? "entry" : "entries") could not be read and \(unreadable == 1 ? "is" : "are") not searched.", severity: .advisory)
+        .task(id: model.focusRequest) {
+            guard let request = model.focusRequest else { return }
+            await Task.yield()
+            guard !Task.isCancelled, model.focusRequest == request else { return }
+            focusedPhrase = request
+            model.focusHandled(request)
         }
-        if let days = model.snapshot?.unreadableFiles, days > 0 {
-            IssueText("\(days) \(days == 1 ? "day" : "days") of History could not be read and \(days == 1 ? "is" : "are") not searched.", severity: .advisory)
-        }
-    }
-
-    private var destinationSection: some View {
-        Section {
-            LabeledContent("Add replacements to", value: model.destinationName)
-            Text(destinationScopeLine)
-                .font(.caption).foregroundStyle(.secondary)
-        }
+        .onDisappear { model.close() }
     }
 
     private var destinationScopeLine: String {
         if case .mode = model.destination { return "Applies only in \(model.destinationName)." }
         return "Applies in modes that include Global replacements."
+    }
+
+    private var addTitle: String {
+        let count = model.preview?.replacementCount ?? 0
+        return count == 0 ? "Add replacements" : "Add \(count) \(count == 1 ? "replacement" : "replacements")"
+    }
+
+    private func combinedSummary(_ preview: ReplacementPreview) -> String {
+        let changes = "\(preview.changeCount) \(preview.changeCount == 1 ? "change" : "changes") in \(preview.affectedDictations) \(preview.affectedDictations == 1 ? "dictation" : "dictations")"
+        let shared = model.unattributedChangeCount
+        guard shared > 0 else { return changes }
+        return changes + " · \(shared) not from a single phrase"
+    }
+
+    private var searchSection: some View {
+        Section {
+            DisclosureSection(isExpanded: $searchExpanded) {
+                HStack {
+                    DisclosureSummaryLabel(
+                        title: "Search options",
+                        summary: "\(scopeSummary) · \(model.searchedCount) dictations")
+                    DataBoundaryBadge(label: "On this Mac")
+                }
+            } content: {
+                Picker("Period", selection: $model.scope.period) {
+                    Text("Last 7 days").tag(HistorySearchScope.Period.days(7))
+                    Text("Last 30 days").tag(HistorySearchScope.Period.days(30))
+                    Text("Last 90 days").tag(HistorySearchScope.Period.days(90))
+                    Text("All saved History").tag(HistorySearchScope.Period.all)
+                }
+                .accessibilityIdentifier(IDs.period)
+                Picker("Speech model", selection: $model.scope.model) {
+                    Text("All speech models").tag(HistorySearchScope.Filter.all)
+                    ForEach(modelChoices, id: \.self) { name in
+                        Text(name).tag(HistorySearchScope.Filter.named(name))
+                    }
+                }
+                .accessibilityIdentifier(IDs.speechModel)
+                Button("Refresh search") { model.searchAgain() }
+                    .accessibilityIdentifier(IDs.refreshSearch)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(IDs.scopeDisclosure)
+            if let unreadable = model.snapshot?.unreadableLines, unreadable > 0 {
+                IssueText("\(unreadable) History entries could not be read and are not searched.", severity: .advisory)
+            }
+            if let unreadable = model.snapshot?.unreadableFiles, unreadable > 0 {
+                IssueText("\(unreadable) days of History could not be read and are not searched.", severity: .advisory)
+            }
+            if model.withoutRecordedModel > 0, model.scope.model != .all {
+                Text("Older dictations without a recorded speech model are included only with All speech models.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if !model.historyEnabled {
+                Text("History is off. Previously saved dictations can still be searched.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var modelChoices: [String] {
@@ -145,204 +195,164 @@ struct HistoryReplacementsSheet: View {
         let period: String
         switch model.scope.period {
         case .days(let days): period = "Last \(days) days"
-        case .all: period = "All available history"
+        case .all: period = "All saved History"
         }
         let speech: String
         switch model.scope.model {
         case .all: speech = "All speech models"
         case .named(let name): speech = name
         }
-        return "\(period) · All modes · \(speech)"
+        return "\(period) · \(speech)"
     }
+}
 
-    @ViewBuilder private var chooseContent: some View {
-        Section {
-            Text("Searched \(model.searchedCount) \(model.searchedCount == 1 ? "dictation" : "dictations") · \(scopeSummary)")
-                .font(.caption).foregroundStyle(.secondary)
-            if model.handledCount > 0 {
-                Text("\(model.handledCount) similar \(model.handledCount == 1 ? "phrase is" : "phrases are") already corrected automatically and \(model.handledCount == 1 ? "is" : "are") not listed.")
-                    .font(.caption).foregroundStyle(.secondary)
+struct HistoryReplacementDraftRow: View {
+    @ObservedObject var model: HistoryReplacementsModel
+    let phrase: HistoryReplacementsModel.Phrase
+    var focus: FocusState<String?>.Binding
+    @State private var examplesExpanded = false
+
+    private typealias IDs = AccessibilityID.Settings.HistoryReplacements
+
+    var body: some View {
+        let checked = model.isChecked(phrase.id)
+        let effects = checked ? model.effects(for: phrase.id) : []
+        let excerpts = checked ? [] : model.discoveryExcerpts(for: phrase.id)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Toggle(isOn: Binding(get: { checked }, set: { _ in model.toggle(phrase.id) })) {
+                    Text(phrase.isBlank ? "New phrase" : "“\(phrase.trimmed)” → \(ReplacementAuthoring.preview(for: model.replacement).text)")
+                        .fontWeight(.medium)
+                }
+                .toggleStyle(.checkbox)
+                .disabled(phrase.isBlank)
+                .accessibilityIdentifier(IDs.phrase(phrase.id))
+                Spacer()
+                if let count = matchCount(checked: checked, effects: effects, excerpts: excerpts) {
+                    Text(count).font(.caption).foregroundStyle(.secondary)
+                }
+                if phrase.discovered {
+                    Button { model.toggleEditing(phrase.id) } label: {
+                        Label("Edit heard phrase", systemImage: "pencil")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier(IDs.editPhrase(phrase.id))
+                }
+            }
+            if model.editing.contains(phrase.id) || !phrase.discovered {
+                TextField("When heard", text: Binding(
+                    get: { phrase.heard }, set: { model.updatePhrase(phrase.id, heard: $0) }))
+                    .textFieldStyle(.roundedBorder)
+                    .focused(focus, equals: phrase.id)
+                    .accessibilityIdentifier(IDs.heard(phrase.id))
+                    .formFieldLabel("When heard")
+            }
+            if let issue = model.phraseIssue(phrase.id) { IssueText(issue) }
+            if let status = model.status(for: phrase.id) { statusMessage(status) }
+            if checked {
+                checkedPreview(effects)
+            } else if let first = excerpts.first {
+                excerptText(first).font(.callout)
+                if excerpts.count > 1 {
+                    DisclosureSection("More examples (\(excerpts.count - 1))", isExpanded: $examplesExpanded) {
+                        ForEach(Array(excerpts.dropFirst().enumerated()), id: \.offset) { _, excerpt in
+                            excerptText(excerpt).font(.callout)
+                        }
+                    }
+                    .accessibilityIdentifier(IDs.examples(phrase.id))
+                }
+            } else if !phrase.isBlank {
+                Text("Select this phrase to preview its changes.").font(.caption).foregroundStyle(.secondary)
             }
         }
-        if model.findings.isEmpty {
-            Section {
-                Text("No similar phrases found.").font(.headline)
-                Text("Search compares spelling and rough sound, so it can miss a mishearing that is spelled very differently. Try searching more of your History.")
-                    .font(.caption).foregroundStyle(.secondary)
-                HStack {
-                    if model.scope.period != .all {
-                        Button("Search All Available History") { model.searchAllAvailableHistory() }
-                            .accessibilityIdentifier(IDs.widenPeriod)
+    }
+
+    private func matchCount(
+        checked: Bool, effects: [HistoryReplacementsModel.RowEffect], excerpts: [HistoryReplacementsModel.Excerpt]
+    ) -> String? {
+        if checked {
+            guard model.preview != nil, !model.isOnlyInCombinedPreview(phrase.id) else { return nil }
+            let count = effects.reduce(0) { $0 + $1.changes.count }
+            return "\(count) \(count == 1 ? "match" : "matches") in saved History"
+        }
+        guard !excerpts.isEmpty else { return nil }
+        return "\(excerpts.count) \(excerpts.count == 1 ? "match" : "matches") in search"
+    }
+
+    @ViewBuilder private func checkedPreview(_ effects: [HistoryReplacementsModel.RowEffect]) -> some View {
+        if model.preview == nil {
+            Text("Updating the preview…").font(.caption).foregroundStyle(.secondary)
+        } else if let first = effects.first {
+            HistoryReplacementEffectRow(effect: first.effect, changes: first.changes)
+            if effects.count > 1 {
+                DisclosureSection("More examples (\(effects.count - 1))", isExpanded: $examplesExpanded) {
+                    ForEach(Array(effects.dropFirst().enumerated()), id: \.offset) { _, row in
+                        HistoryReplacementEffectRow(effect: row.effect, changes: row.changes)
                     }
                 }
+                .accessibilityIdentifier(IDs.examples(phrase.id))
             }
-        } else {
-            Section {
-                Text("Selecting a phrase creates a replacement for every future match, not just the sentence shown.")
-                    .font(.caption).foregroundStyle(.secondary)
-                ForEach(model.findings, id: \.key) { finding in
-                    phraseRow(finding)
-                }
-            } header: {
-                Text("Similar phrases")
-            }
-            destinationSection
+        } else if model.isOnlyInCombinedPreview(phrase.id) {
+            Text("Its changes overlap other selected phrases. See Combined preview.")
+                .font(.caption).foregroundStyle(.secondary)
+        } else if model.status(for: phrase.id).map(isSaved) ?? false {
+            Text("No matches in saved History. This replacement will apply to future dictations.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
-    private func phraseRow(_ finding: AliasDiscovery.Finding) -> some View {
-        Toggle(isOn: Binding(get: { model.isSelected(finding) }, set: { _ in model.toggle(finding) })) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("“\(finding.phrase)” → \(model.word)").fontWeight(.medium)
-                    Spacer()
-                    Text(finding.occurrences.count == 1 ? "1 time" : "\(finding.occurrences.count) times")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                if let excerpt = model.excerpt(for: finding) {
-                    excerptText(excerpt).font(.caption).foregroundStyle(.secondary)
-                }
-            }
+    private func isSaved(_ kind: ReplacementPreview.PhraseStatus.Kind) -> Bool {
+        switch kind {
+        case .add, .overridesGlobal: true
+        case .alreadyAdded, .conflicts: false
         }
-        .toggleStyle(.checkbox)
-        .accessibilityIdentifier(IDs.phrase(finding.key))
     }
 
     private func excerptText(_ excerpt: HistoryReplacementsModel.Excerpt) -> Text {
-        Text(excerpt.before) + Text(excerpt.match).bold().foregroundColor(.primary) + Text(excerpt.after)
+        Text(excerpt.before).foregroundColor(.secondary)
+            + Text(excerpt.match).bold()
+            + Text(excerpt.after).foregroundColor(.secondary)
     }
 
-    @ViewBuilder private var reviewContent: some View {
-        if let preview = model.preview {
-            Section {
-                Text(reviewSummary(preview)).fontWeight(.medium)
-                ForEach(preview.statuses.filter { !$0.isSaved }, id: \.phrase) { status in
-                    IssueText(statusMessage(status), severity: .advisory)
-                }
-                ForEach(preview.statuses.filter { if case .overridesGlobal = $0.kind { true } else { false } }, id: \.phrase) { status in
-                    Text(statusMessage(status)).font(.caption).foregroundStyle(.secondary)
-                }
-                Text("These are replacement effects on stored Heard text. History will not be changed. Future AI rewrites may still adjust the result.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            if preview.effects.isEmpty {
-                Section {
-                    Text("No stored dictation would change. The replacements still apply to future dictations.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            } else {
-                Section {
-                    ForEach(Array(preview.effects.enumerated()), id: \.offset) { _, effect in
-                        effectRow(effect)
-                    }
-                } header: {
-                    Text("Changes in stored dictations")
-                }
-            }
-        } else {
-            Section {
-                Text("Review these changes again before adding them.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func reviewSummary(_ preview: ReplacementPreview) -> String {
-        let rules = preview.replacementCount == 1 ? "1 replacement" : "\(preview.replacementCount) replacements"
-        guard preview.changeCount > 0 else { return "Adds \(rules) to \(model.destinationName)." }
-        let places = preview.changeCount == 1 ? "1 place" : "\(preview.changeCount) places"
-        let dictations = preview.affectedDictations == 1 ? "1 dictation" : "\(preview.affectedDictations) dictations"
-        var line = "Adds \(rules) to \(model.destinationName). In stored dictations, this would change \(places) in \(dictations)"
-        if preview.additionalMatches > 0 {
-            line += ", including \(preview.additionalMatches) outside your search"
-        }
-        return line + "."
-    }
-
-    private func statusMessage(_ status: ReplacementPreview.PhraseStatus) -> String {
-        switch status.kind {
-        case .add: return ""
-        case .alreadyAdded: return "“\(status.phrase)” already becomes \(model.word), so nothing is added for it."
+    @ViewBuilder private func statusMessage(_ kind: ReplacementPreview.PhraseStatus.Kind) -> some View {
+        switch kind {
+        case .add: EmptyView()
+        case .alreadyAdded:
+            Label("Already in Automatic Replacements.", systemImage: "checkmark.circle.fill")
+                .font(.caption).foregroundStyle(.secondary)
         case .conflicts(let output):
-            return "“\(status.phrase)” already becomes “\(output)”. It is not added; edit that replacement in Automatic Replacements to change it."
+            IssueText("Already becomes “\(ReplacementAuthoring.preview(for: output).text)”. This phrase will not be added. Edit its saved replacement to change it.", severity: .advisory)
         case .overridesGlobal(let output):
-            return "“\(status.phrase)” becomes “\(output)” from Global; in \(model.destinationName) it will become \(model.word) instead."
+            IssueText("Overrides “\(ReplacementAuthoring.preview(for: output).text)” from Global in \(model.destinationName).", severity: .advisory)
         }
     }
+}
 
-    private func effectRow(_ effect: ReplacementPreview.EntryEffect) -> some View {
+private struct HistoryReplacementEffectRow: View {
+    let effect: ReplacementPreview.EntryEffect
+    let changes: [ReplacementPreview.Change]
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                if effect.isAdditional {
-                    Text("Outside your search").font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                }
-                Text(effect.modeUnknown ? "\(effect.modeName) · mode not found" : effect.modeName)
-                    .font(.caption).foregroundStyle(.secondary)
-                if effect.wholeUtterance {
-                    Text("Whole dictation is replaced").font(.caption).foregroundStyle(.secondary)
-                }
+            Text(effect.modeUnknown ? "\(effect.modeName) · mode not found" : effect.modeName)
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(Array(changes.enumerated()), id: \.offset) { _, change in
+                changeText(change).font(.callout)
             }
-            ForEach(Array(effect.changes.enumerated()), id: \.offset) { _, change in
-                changeText(effect.currentText, change).font(.callout)
+            if effect.wholeUtterance {
+                Text("Replaces the whole dictation without an AI rewrite.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if effect.isAdditional {
+                Text("Outside the search filters").font(.caption).foregroundStyle(.secondary)
             }
         }
     }
 
-    private func changeText(_ text: String, _ change: ReplacementPreview.Change) -> Text {
-        let excerpt = HistoryReplacementsModel.excerpt(text, range: change.range)
+    private func changeText(_ change: ReplacementPreview.Change) -> Text {
+        let excerpt = HistoryReplacementsModel.excerpt(effect.currentText, range: change.range)
         return Text(excerpt.before)
             + Text(change.before).strikethrough().foregroundColor(.secondary)
-            + Text(" → ")
-            + Text(change.after).bold()
-            + Text(excerpt.after)
-    }
-
-    @ViewBuilder private var buttons: some View {
-        HStack {
-            if model.isWorking { ProgressView().controlSize(.small) }
-            Spacer()
-            switch model.step {
-            case .find:
-                Button("Cancel", role: .cancel, action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                    .accessibilityIdentifier(IDs.cancel)
-                Button("Find in History") { model.perform { await $0.find() } }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(model.isWorking || model.matchingCount == 0)
-                    .accessibilityIdentifier(IDs.find)
-            case .choose:
-                Button("Cancel", role: .cancel, action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                    .accessibilityIdentifier(IDs.cancel)
-                Button("Back") { model.back() }
-                    .accessibilityIdentifier(IDs.back)
-                if model.selected.isEmpty, !model.findings.isEmpty {
-                    Text("Select at least one phrase.").font(.caption).foregroundStyle(.secondary)
-                }
-                Button(model.selected.isEmpty ? "Review Changes" : "Review Changes (\(model.selected.count))") {
-                    model.perform { await $0.review() }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(model.isWorking || model.selected.isEmpty)
-                .accessibilityIdentifier(IDs.review)
-            case .review:
-                Button("Back") { model.back() }
-                    .keyboardShortcut(.cancelAction)
-                    .accessibilityIdentifier(IDs.back)
-                if let preview = model.preview {
-                    Button(preview.replacementCount == 1 ? "Add 1 Replacement" : "Add \(preview.replacementCount) Replacements") {
-                        model.perform { await $0.add() }
-                    }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(model.isWorking || preview.replacementCount == 0)
-                    .accessibilityIdentifier(IDs.add)
-                } else {
-                    Button("Review Again") { model.perform { await $0.review() } }
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(model.isWorking || model.selected.isEmpty)
-                        .accessibilityIdentifier(IDs.reviewAgain)
-                }
-            }
-        }
+            + Text(" → ") + Text(change.after).bold() + Text(excerpt.after)
     }
 }

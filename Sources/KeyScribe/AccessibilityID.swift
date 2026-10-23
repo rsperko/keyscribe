@@ -90,24 +90,28 @@ enum AccessibilityID {
             static func replacementRemove(_ index: Int) -> String { "settings.vocabulary.replacements.remove.\(index)" }
             static let replacementDeleteConfirmConfirm = "settings.vocabulary.replacements.deleteConfirm.confirm"
             static let replacementDeleteConfirmCancel = "settings.vocabulary.replacements.deleteConfirm.cancel"
-            static func dictionaryWord(_ word: String) -> String { "settings.vocabulary.dictionary.word.\(word)" }
-            static let findReplacements = "settings.vocabulary.dictionary.findReplacements"
+            static func findReplacementsForWord(_ word: String) -> String { "settings.vocabulary.dictionary.findReplacements.\(word)" }
             static let replacementsAdded = "settings.vocabulary.replacements.added"
         }
 
         enum HistoryReplacements {
             static let sheet = "settings.historyReplacements.sheet"
+            static let useInstead = "settings.historyReplacements.useInstead"
+            static let addPhrase = "settings.historyReplacements.addPhrase"
+            static let refresh = "settings.historyReplacements.refresh"
+            static let retryLoad = "settings.historyReplacements.retryLoad"
+            static let notice = "settings.historyReplacements.notice"
+            static let refreshSearch = "settings.historyReplacements.refreshSearch"
+            static let combinedPreview = "settings.historyReplacements.combinedPreview"
+            static func heard(_ key: String) -> String { "settings.historyReplacements.heard.\(key)" }
+            static func editPhrase(_ key: String) -> String { "settings.historyReplacements.edit.\(key)" }
+            static func examples(_ key: String) -> String { "settings.historyReplacements.examples.\(key)" }
             static let scopeDisclosure = "settings.historyReplacements.scope"
             static let period = "settings.historyReplacements.scope.period"
             static let speechModel = "settings.historyReplacements.scope.speechModel"
             static let issue = "settings.historyReplacements.issue"
             static let cancel = "settings.historyReplacements.cancel"
-            static let back = "settings.historyReplacements.back"
-            static let find = "settings.historyReplacements.find"
-            static let review = "settings.historyReplacements.review"
-            static let reviewAgain = "settings.historyReplacements.reviewAgain"
             static let add = "settings.historyReplacements.add"
-            static let widenPeriod = "settings.historyReplacements.widen.period"
             static func phrase(_ key: String) -> String { "settings.historyReplacements.phrase.\(key)" }
         }
 
@@ -191,12 +195,14 @@ enum AccessibilityID {
             static let moveShortcut = "mode.voiceCommands.moveShortcut"
             static let placeNotice = "mode.voiceCommands.place.notice"
             static let scriptNotice = "mode.voiceCommands.scriptNotice"
+            static let actionPermissions = "mode.voiceCommands.actionPermissions"
             static let addPlace = "mode.voiceCommands.addPlace"
             static let addCurrentApp = "mode.voiceCommands.addCurrentApp"
             static let addCurrentTab = "mode.voiceCommands.addCurrentTab"
             static let addApp = "mode.voiceCommands.addApp"
             static let addWebPage = "mode.voiceCommands.addWebPage"
             static let tryIt = "mode.voiceCommands.tryIt"
+            static let previewDetails = "mode.voiceCommands.previewDetails"
             static let excludeFromHistory = "mode.voiceCommands.excludeFromHistory"
             static let editVocabulary = "mode.voiceCommands.editVocabulary"
             static let placeName = "mode.voiceCommands.place.name"
@@ -210,6 +216,7 @@ enum AccessibilityID {
             static let placeExample = "mode.voiceCommands.place.example"
             static let placeURL = "mode.voiceCommands.place.url"
             static let placeBrowser = "mode.voiceCommands.place.browser"
+            static let placeBrowserDetails = "mode.voiceCommands.place.browserDetails"
             static let placeSave = "mode.voiceCommands.place.save"
             static let placeCancel = "mode.voiceCommands.place.cancel"
             static let placeDelete = "mode.voiceCommands.place.delete"
@@ -237,6 +244,7 @@ enum AccessibilityID {
             static let scriptChooseProgram = "mode.voiceCommands.script.chooseProgram"
             static let scriptArguments = "mode.voiceCommands.script.arguments"
             static let scriptArgumentDetails = "mode.voiceCommands.script.argumentDetails"
+            static let scriptExample = "mode.voiceCommands.script.example"
             static let scriptSave = "mode.voiceCommands.script.save"
             static let scriptCancel = "mode.voiceCommands.script.cancel"
             static let scriptDelete = "mode.voiceCommands.script.delete"
@@ -418,17 +426,17 @@ enum AccessibilityID {
     static let all: [String] = [
         Mode.VoiceCommands.appNotice, Mode.VoiceCommands.appNoticeConfirm, Mode.VoiceCommands.appNoticeCancel,
         Mode.VoiceCommands.moveShortcut,
-        Mode.VoiceCommands.scriptNotice, Mode.VoiceCommands.placeNotice,
+        Mode.VoiceCommands.scriptNotice, Mode.VoiceCommands.placeNotice, Mode.VoiceCommands.actionPermissions,
         Mode.VoiceCommands.addPlace, Mode.VoiceCommands.addCurrentApp, Mode.VoiceCommands.addCurrentTab,
-        Mode.VoiceCommands.addApp, Mode.VoiceCommands.addWebPage, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.editVocabulary,
+        Mode.VoiceCommands.addApp, Mode.VoiceCommands.addWebPage, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.previewDetails, Mode.VoiceCommands.editVocabulary,
         Mode.VoiceCommands.placeName, Mode.VoiceCommands.placeSay, Mode.VoiceCommands.placeKind,
-        Mode.VoiceCommands.placeApp, Mode.VoiceCommands.placeURL, Mode.VoiceCommands.placeBrowser,
+        Mode.VoiceCommands.placeApp, Mode.VoiceCommands.placeURL, Mode.VoiceCommands.placeBrowser, Mode.VoiceCommands.placeBrowserDetails,
         Mode.VoiceCommands.placeChooseFromApplications, Mode.VoiceCommands.placeEnterBundleID,
         Mode.VoiceCommands.placeBundleID, Mode.VoiceCommands.placeExample, Mode.VoiceCommands.scriptArgumentDetails,
         Mode.VoiceCommands.placeSave, Mode.VoiceCommands.placeCancel, Mode.VoiceCommands.placeDelete,
         Mode.VoiceCommands.placeDeleteConfirm,
         Mode.VoiceCommands.addScript, Mode.VoiceCommands.scriptName, Mode.VoiceCommands.scriptSay,
-        Mode.VoiceCommands.scriptProgram, Mode.VoiceCommands.scriptChooseProgram, Mode.VoiceCommands.scriptArguments,
+        Mode.VoiceCommands.scriptProgram, Mode.VoiceCommands.scriptChooseProgram, Mode.VoiceCommands.scriptArguments, Mode.VoiceCommands.scriptExample,
         Mode.VoiceCommands.scriptSave, Mode.VoiceCommands.scriptCancel, Mode.VoiceCommands.scriptDelete,
         Mode.VoiceCommands.scriptDeleteConfirm,
         Mode.VoiceCommands.addAction, Mode.VoiceCommands.addShortcut, Mode.VoiceCommands.excludeFromHistory,
@@ -449,13 +457,15 @@ enum AccessibilityID {
         Settings.Speech.list, Settings.Speech.deleteConfirmConfirm, Settings.Speech.deleteConfirmCancel,
         Settings.Speech.eviction, Settings.Speech.advancedModelBehavior,
         Settings.Vocabulary.scopeList, Settings.Vocabulary.global,
-        Settings.Vocabulary.findReplacements, Settings.Vocabulary.replacementsAdded,
+        Settings.Vocabulary.replacementsAdded,
         Settings.HistoryReplacements.sheet, Settings.HistoryReplacements.scopeDisclosure,
+        Settings.HistoryReplacements.useInstead, Settings.HistoryReplacements.addPhrase,
+        Settings.HistoryReplacements.refresh, Settings.HistoryReplacements.retryLoad,
+        Settings.HistoryReplacements.notice, Settings.HistoryReplacements.refreshSearch,
+        Settings.HistoryReplacements.combinedPreview,
         Settings.HistoryReplacements.period,
         Settings.HistoryReplacements.speechModel, Settings.HistoryReplacements.issue,
-        Settings.HistoryReplacements.cancel, Settings.HistoryReplacements.back, Settings.HistoryReplacements.find,
-        Settings.HistoryReplacements.review, Settings.HistoryReplacements.reviewAgain, Settings.HistoryReplacements.add,
-        Settings.HistoryReplacements.widenPeriod,
+        Settings.HistoryReplacements.cancel, Settings.HistoryReplacements.add,
         Settings.Vocabulary.composerTerm, Settings.Vocabulary.composerUseInstead,
         Settings.Vocabulary.composerUseInsteadExpand, Settings.Vocabulary.composerUseInsteadEditor,
         Settings.Vocabulary.composerUseInsteadEditorDone,

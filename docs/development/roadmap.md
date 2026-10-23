@@ -41,7 +41,7 @@ intentionally short. It records work with a concrete user outcome, not a running
 - Voice commands ship behind the experimental `voice_commands` toggle. Remove the flag only when:
   - Recorded voice-command phrases ("switch to …", "open …", "run …", "go back") resolve correctly
     on the recommended speech model. No corpus covers these phrases yet, so record one first.
-  - The Voice Commands editor, Try it, the choice list, and the HUD outcomes have had a hands-on
+  - The Voice Commands editor, command preview, the choice list, and the HUD outcomes have had a hands-on
     review against [`ui_design.md`](ui_design.md) §7, including keyboard and VoiceOver.
   - Saved web places work in each browser that can list tabs, including a denied grant and the first
     command after install, which waits on the Automation prompt and then reads the tabs. A command

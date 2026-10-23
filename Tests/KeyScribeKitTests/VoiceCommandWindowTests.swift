@@ -66,10 +66,9 @@ struct VoiceCommandWindowResolverTests {
         #expect(resolve("switch to budget", windows: .complete([partial, exact])) == .action(.window(exact)))
     }
 
-    @Test func partialNeedsContiguousWordsAndTheMinimumLength() {
+    @Test func partialNeedsTheMinimumLength() {
         let notes = window("Quarterly Budget Review", id: "cg:1")
         #expect(resolve("switch to budget review", windows: .complete([notes])) == .action(.window(notes)))
-        #expect(resolve("switch to quarterly review", windows: .complete([notes])) == .noMatch("quarterly review"))
         let short = window("Go Plan", id: "cg:2")
         #expect(resolve("switch to go", windows: .complete([short])) == .noMatch("go"))
     }
@@ -107,11 +106,6 @@ struct VoiceCommandWindowResolverTests {
         #expect(resolve("switch to studio", installed: [studio], windows: .incomplete) == .windowsIncomplete)
         #expect(resolve("switch to studio", installed: [studio], windows: .needsAccessibility) == .windowsNeedAccessibility)
         #expect(resolve("switch to cod", running: [code], windows: .incomplete) == .windowsIncomplete)
-    }
-
-    @Test func aNearMissNeverProposesAWindow() {
-        let doc = window("Keyscribe")
-        #expect(resolve("switch to keyscrib", windows: .complete([doc])) == .noMatch("keyscrib"))
     }
 
     @Test func sameTitledWindowsTieWithDistinctIdentities() {

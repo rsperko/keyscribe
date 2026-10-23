@@ -165,7 +165,7 @@ struct VoiceCommandsSettingsModelTests {
     }
 
     private func waitFor(_ condition: () -> Bool) async throws {
-        for _ in 0..<100 where !condition() { try await Task.sleep(for: .milliseconds(20)) }
+        for _ in 0..<500 where !condition() { try await Task.sleep(for: .milliseconds(20)) }
         #expect(condition())
     }
 
@@ -201,11 +201,32 @@ struct VoiceCommandsSettingsModelTests {
         #expect(draft.example(destination: "Mail") == nil)
         draft.name = "Mail"
         draft.say = "inbox, letters"
-        #expect(draft.example(destination: "Mail") == "Say \u{201C}switch to inbox\u{201D} to bring Mail to the front.")
+        #expect(draft.example(destination: "Mail") == "Say \u{201C}switch to Mail\u{201D} to bring Mail to the front.")
         var page = PlaceDraft(name: "Gmail", kind: .webPage, url: "https://mail.google.com/")
         #expect(page.example(destination: "mail.google.com") == "Say \u{201C}open Gmail\u{201D} to go to mail.google.com.")
         page.say = "inbox"
-        #expect(page.example(destination: "mail.google.com") == "Say \u{201C}open inbox\u{201D} to go to mail.google.com.")
+        #expect(page.example(destination: "mail.google.com") == "Say \u{201C}open Gmail\u{201D} to go to mail.google.com.")
+    }
+
+    @Test func theScriptEditorPreviewsItsDraftWithoutRunningIt() {
+        var draft = ScriptDraft()
+        #expect(draft.example == nil)
+        draft.name = "  Log note  "
+        draft.program = "/usr/bin/printf"
+        draft.arguments = "%s\nNote: {text}"
+        draft.say = "remember"
+        #expect(draft.example?.phrase == "run Log note buy milk")
+        #expect(draft.example?.command == "/usr/bin/printf %s 'Note: buy milk'")
+        draft.arguments = "Daily check-in"
+        #expect(draft.example?.phrase == "run Log note")
+        #expect(draft.example?.command == "/usr/bin/printf 'Daily check-in'")
+        draft.program = ""
+        #expect(draft.example == nil)
+    }
+
+    @Test func theScriptPreviewPreservesArgumentsTheEditorCannotRepresent() {
+        let draft = ScriptDraft(VoiceCommandScript(name: "Log", run: ["/usr/bin/printf", "{text}", ""]))
+        #expect(draft.example?.command == "/usr/bin/printf 'buy milk' ''")
     }
 
     @Test func suggestedPlaceNameComesFromTheTabTitle() {

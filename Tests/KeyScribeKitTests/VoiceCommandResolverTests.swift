@@ -14,7 +14,7 @@ struct VoiceCommandResolverTests {
 
     private func resolve(
         _ transcript: String, places: [VoiceCommandPlace] = [], running: [App] = [], installed: [App] = [],
-        tabs: [Tab]? = nil, windows: VoiceCommandCatalog.WindowScan? = .complete([])
+        tabs: [Tab]? = [], windows: VoiceCommandCatalog.WindowScan? = .complete([])
     ) -> VoiceCommandResolution {
         let catalog = VoiceCommandCatalog(
             places: places, runningApps: running, installedApps: installed, tabs: tabs, windows: windows)
@@ -99,11 +99,6 @@ struct VoiceCommandResolverTests {
 
     @Test func farMissIsNoMatch() {
         #expect(resolve("switch to banana", running: [ghostty, chrome]) == .noMatch("banana"))
-    }
-
-    @Test func fuzzyNeverReachesInstalledOnlyApps() {
-        let ghosttyInstalled = App(name: "Ghostty", bundleId: "com.mitchellh.ghostty")
-        #expect(resolve("switch to ghosty", running: [], installed: [ghosttyInstalled]) == .noMatch("ghosty"))
     }
 
     @Test func aPlaceNicknameBeatsAnAppName() {

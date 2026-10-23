@@ -291,7 +291,7 @@ grows vertically (its per-state height is a minimum, not a cap).
 **Heard excerpt.** An unrecognized voice command, and an answer to a choice that was not understood,
 show what the speech model heard so a mishearing is visible at a glance. It is the raw transcript,
 never the text after vocabulary replacements, and the HUD does not claim it is what the command
-reader received: Try it (§7) shows how a typed phrase reads after replacements. It is the one HUD text
+reader received: Preview a command (§7) shows how a typed phrase reads after replacements. It is the one HUD text
 that truncates. Whitespace is folded to single spaces, the phrase is cut to
 `HeardExcerpt.characterBudget` characters, and it shows at most two lines; a shortened excerpt keeps
 its start and ends in a single ellipsis. Titles, choice rows, hints, and actions keep wrapping. The
@@ -680,32 +680,48 @@ composer and lists do not live inside the mode editor.
   behind **How recognition works** inline help. Dictionary and replacement rows use the shared red
   trash action; deleting either opens an item-specific confirmation that distinguishes global entries
   from mode-only entries.
-- **Find replacements in History.** Words to Recognize
-  offers discovery only when there is at least one readable saved dictation. With empty History the
-  discovery instruction, action, helper text, and word-selection affordance are hidden; ordinary word
-  rows and their trash controls remain. Availability follows saved records, independently of the
-  History recording toggle, search filters, or whether the History pane has been opened, and refreshes
-  while Vocabulary is visible so the first save or last deletion updates the controls.
-  When available, it says **Select a word to find possible mishearings in History.** Clicking a word's text selects it
-  (single selection, none on entry). The selected word area has an accent-tinted background and a
-  checkmark; the trailing trash stays outside that highlight and only deletes, through its usual
-  confirmation, without selecting. Below the list, **Find Mishearings of “{word}”…** names the selected
-  word (disabled **Find Mishearings…** with no selection, or **Add a word to Words to Recognize first.**
-  with no words), followed by **Review phrases, then create automatic replacements.** Changing scope,
-  or the word disappearing, clears
-  the selection. The action opens one sheet with three steps, one primary action each:
-  **Find** (search summary with a **Search** disclosure for period and speech model; discovery always
-  searches across modes, independently of the launching vocabulary scope; the
-  dictation count with `On this Mac`; where the replacements will be added and where they apply),
-  **Choose phrases** (unchecked rows `“heard phrase” → word` with a count and one highlighted Heard
-  sentence, closest match first; no Select All; phrases today's replacements or dictionary recovery
-  already fix are counted, not listed) and **Review** (the real replacement stage run over all stored
-  Heard text: places and dictations changed, matches outside the search listed first, existing or
-  conflicting rules called out and left out of Add). **Add {n} Replacements** saves exactly the reviewed
-  rules in one write to the launching scope only; if History, the word or that scope's replacements
-  changed since the review, nothing is saved and the sheet asks for a fresh review. On success the sheet
-  closes and Automatic Replacements shows **Added {n} replacements**. Searching never contacts a network
-  service and never changes History or the dictionary word.
+- **Find replacements in History.** Each Words to Recognize row offers **Mishearings in History…**
+  directly when readable saved History exists. The action moves below the word when they cannot fit on
+  one line; long words wrap, and delete remains at the trailing edge. There is no word-selection state or separate launch
+  button below the list. Availability follows saved records, independently of the History recording
+  toggle or History pane filters, and refreshes while Vocabulary is visible. Without readable saved
+  History, dictionary rows retain their ordinary text and independent delete controls.
+  The action opens a compact editable sheet titled **Mishearings of “{word}”** and searches automatically across all saved History,
+  all modes, and all speech models. Period and speech-model filters live in a collapsed **Search
+  options** disclosure; changing them searches again on the same surface. Refreshing or narrowing a
+  search preserves chosen edits and manually entered phrases. Search filters affect discovery, never
+  the destination or the current speech model.
+  **Use instead** is always editable and starts with the launching word. Edits change the proposed
+  replacement text and previews; they do not rename the saved dictionary word or change the discovery
+  target. The launching scope is shown once as **Add to**, with a short explanation of where it applies.
+  Discovered phrases start unchecked. An unchecked suggestion shows its Heard sentence context and how
+  many times it matched **in search**, straight from discovery; more examples expand in place. Checking
+  phrases builds one combined replacement-stage preview over all saved Heard text, and each checked row
+  shows its own share of that preview; changes that cannot be tied to a single phrase stay visible in
+  **Combined preview**, which appears for several checked phrases or for any such change. A checked row
+  whose changes all overlap other phrases points to **Combined preview** instead of claiming no matches.
+  Examples outside
+  the search filters are labeled. Editing **Use instead** rebuilds only the preview, never the search.
+  Each discovered row offers **Edit heard phrase**, which opens an in-place editor and focuses it once;
+  focus moves only on that action or on **Add a phrase manually…**, never because a row scrolls into view.
+  A manual row stays inactive while blank: it is not counted, previewed, validated, or saved, and it never
+  disables Add for other phrases. Typing a phrase includes it; unchecking it afterwards is respected. A
+  checked phrase that is invalid shows its error beside the field and blocks Add. Conflicts, existing
+  rules, and Global overrides appear beside the affected phrase, outside disclosures, whether or not it is
+  checked. **Use instead** may be whitespace or line breaks; it is saved exactly as typed, with the same
+  advisory the replacement composer shows. **Add a phrase manually…** remains available when no similar
+  phrases are found. Empty results distinguish no possible mishearings from phrases already corrected
+  automatically by existing replacements or dictionary recovery.
+  **Add {n} replacements** saves the previewed rules in one write to the launching scope and closes the
+  sheet; **Cancel** always closes without saving. Add stays disabled while the preview is updating or a
+  checked phrase is invalid, and the footer says what is needed. Conflicting or already-saved rules are
+  called out and excluded from the save. If words or replacements changed before saving, nothing is
+  written: the preview is rebuilt against the current vocabulary, a notice says it changed, and Add must be
+  clicked again. If History changed, nothing is written and **Refresh Search** is offered. If the word or
+  the destination was removed, nothing is written and the first Add says which. Success appears in
+  Automatic Replacements as **Added {n} replacements**. Searching never contacts a network service and
+  never changes saved History or the dictionary word. Replacement text remains subject to a later AI
+  rewrite unless it consumes the whole utterance.
 - **Set expectations honestly in the Dictionary copy** (do not overstate — say what actually
   happens). Recognition bias is a best-effort hint that only some models can take, so let each
   model's own capability drive the copy rather than naming engines here. A model that supports it
@@ -893,9 +909,10 @@ never typed: a command it understands runs, one that matches more than one desti
 (§5), and anything else shows an Error naming what was wrong (a command it did not recognize, with what was
 heard; no match; or too many matches) and changes nothing.
 
-Before first enabling Voice Commands in Maintenance, an app-switching notice explains:
-“Voice recognition can make mistakes and open or switch to an unintended app. Its open windows may
-become visible, and your next keystrokes will go there. Keep this in mind when sharing your screen.”
+Before first enabling Voice Commands in Maintenance, an app-switching notice titled **Voice commands
+can open the wrong app** explains that the assigned shortcut starts Voice Commands, and a misheard name
+can open the wrong app or bring the wrong window forward. A separate paragraph connects this to exposing
+contents during screen sharing and advises checking the active app before typing.
 **Enable Voice Commands** accepts it; **Cancel** leaves the feature off. App names already work without
 adding a place, so this notice does not wait for **Add Place…**. If the feature was enabled by editing
 the config, assigning a shortcut shows the same notice before applying the shortcut. That acknowledgment
@@ -906,39 +923,43 @@ each time, written for what that kind of entry can do (`VoiceCommandNotices.Kind
 app and its windows forward or load a page, and take your next keystrokes; a script runs with your
 account's permissions and can change or delete files; a shortcut can send messages, change or delete
 files, or send its input to online services, depending on its steps. Each also says a misheard name can
-start it. Editing an existing entry shows the same warning collapsed.
+start it. Editing an existing entry shows the same warning collapsed below the editable fields and preview.
 
 The editor uses the same grouped form, shortcut controls, vocabulary row, and Result handling vocabulary
-as other mode panels. Add actions sit in normal form rows before saved entries, matching Triggers and
+as other mode panels. Copy leads with what to say and what will happen. Technical details stay in
+collapsed disclosures. Add/edit sheets use a scrollable form with a fixed footer so validation and
+Save/Cancel remain visible, even with an expanded notice or a long command. Add actions sit in normal form rows before saved entries, matching Triggers and
 Where it works. Vocabulary likewise puts its composer before saved words and replacements. Persistent
 master lists (Your Modes and Your Services) keep their bottom action bar.
 Its sections are, in order:
 
-1. **How to start Voice Commands** — the same shortcut structure as Plain Dictation, plus one caption
-   saying speech on the shortcut is never typed and commands are recognized on this Mac. Its shortcut can never be shared with another mode: recording one that another
+1. **Start with a shortcut** — the same shortcut structure as Plain Dictation, labeled **Start shortcut**
+   to distinguish it from actions in the Shortcuts app. With no shortcut, a caption asks the user to choose
+   a keyboard shortcut or mouse button. The caption explains that commands never type words into an app
+   and an unmatched command reports what went wrong. Its shortcut can never be shared with another mode: recording one that another
    enabled mode uses (or giving another mode this one's) asks to move it, with Undo afterwards (see the
    Voice Commands paragraph above), and a shared shortcut written by hand shows a red caption here (“…
    also uses this shortcut, so it does not start Voice Commands”) with **Move Shortcut to Voice
    Commands…**, and marks the list row and the menu-bar badge as never firing.
-2. **What it does** — one row per taught phrase (`VoiceCommandPhrase`, which also writes the
+2. **What you can say** — one row per taught phrase (`VoiceCommandPhrase`, which also writes the
    “Not a command” guidance and the feature's summary): “switch to …” and “open …” for apps, places, and open
-   windows (“Say ‘switch to Budget’ to bring an open window named Budget forward.”), “run …”
+   windows and browser tabs by name, “run …”
    for scripts and shortcuts, and “go back”, which returns to the window or app you left. Other app-switching verbs, and
    common mishearings of them such as “witch to”, are also accepted (`VoiceCommandGrammar.focusVerbs`). These prefix alternatives work
-   in live commands and Try it without changing the original heard text or action input; the panel
+   in live commands and Preview a command without changing the original heard text or action input; the panel
    continues to teach the standard phrases. Actions require “run”; neither a bare name nor an app-switching phrase runs one.
-   Each row has one line on what it does, then the same **Recognition
-   and replacements** summary and help as other modes, with **Edit Vocabulary…** opening Vocabulary on
-   Voice Commands. Its help adds that the words and replacements apply before a command is read.
-3. **Try it** — a field that shows what a typed phrase would do, live, without running anything (a script
+   Each row briefly explains the result. A caption explains that ambiguous commands offer a choice:
+   click a row or use the start shortcut and say its number, or say “cancel”.
+3. **Preview a command** — a field that shows what a typed phrase would do, live, without running anything (a script
    shows the exact command line it would run, a shortcut its name and input). A phrase that would ask which one
    says so neutrally (“Would ask “Which one?””) and lists the numbered choices; it never invites an answer,
    since a preview creates no question to answer. It sits beside the phrases it
    tests and re-checks the typed phrase whenever a place, an action, or the vocabulary changes. When the mode's vocabulary changed the
-   phrase, it shows `Read as “…”` above the result. Its caption says that checking open tabs reads their
-   addresses and titles and may ask to control the browser, and that a phrase no app or place matches reads
-   the titles of open windows.
-4. **Places** — nicknames for an app or a web page. The empty state explains that app names already work
+   phrase, it shows `Read as “…”` above the result. The introduction explicitly says nothing opens or
+   runs. **What the preview checks** is collapsed with a visible “May ask for browser access” summary;
+   its content explains that matching windows and tabs reads titles, and checking tabs reads addresses
+   and may request permission to control the browser.
+4. **Places** — nicknames for an app or a web page. A persistent introduction explains how to use them. The empty state explains that app names already work
    without one. Each row leads with an icon: the app's own for an app place, the chosen browser's for a web
    page (a globe for **Any browser**), and a generic symbol when that app is not on this Mac. Icons come
    from the installed apps only; no site icon is fetched. Each row's `Say:` line shows complete phrases that work (“switch to Mail”, “open Gmail”),
@@ -946,11 +967,12 @@ Its sections are, in order:
    tabs, **Current Browser Tab** (both read from the app that was frontmost when Settings opened), then **App…** and
    **Web Page…**. Until the browsers on this Mac have been checked, a disabled **Checking browsers…** item
    stands where **Current Browser Tab** would be. If the tab cannot be read, the web-page sheet opens with
-   that browser chosen and an orange advisory asking for the address. Each opens a sheet that starts with the destination: the app, chosen with the same app
+   that browser chosen and an orange advisory asking for the address. Each opens a sheet organized into **Destination**, **What to say**, and **Command preview**. The destination is the app, chosen with the same app
    chooser as a mode's **Where it works** (running apps with their icons, **Choose from Applications…**,
    **Enter Bundle ID…**), or the web page and browser. The name follows the chosen app or page until the
    user types their own; for an app it is the name shown in the Applications folder, whichever way the app
-   was chosen, then optional other spoken names, then a live example (“Say “switch to inbox” to
+   was chosen, then optional **Other names**, separated by commas. The live example always uses the **Spoken name**,
+   so adding another name does not silently replace the main example (“Say “switch to inbox” to
    bring Mail to the front.”). A field's problem shows beside that field, and **Add Place** stays disabled
    until the place is valid. An existing place's sheet holds the red **Delete Place** action at its
    trailing edge, with a confirmation. The web-page sheet's **Browser** picker lists every app that opens web links, including ones
@@ -958,43 +980,57 @@ Its sections are, in order:
    **Checking browsers…**, and **Any browser** or a saved browser stays selected; a refresh never changes a
    choice the user made. Entering Voice Commands, opening the sheet, or returning to KeyScribe while either
    is open re-checks the browsers once the last check is older than the installed-apps refresh window, so
-   a browser installed moments earlier can still be missing until that window passes. The sheet says that **Any browser** looks through every running
-   browser that can list its tabs, in all its windows (which can include private ones), and that finding an
-   open tab asks macOS for permission to control the browser the first time.
-5. **Actions** — scripts and shortcuts to run with “run” and their spoken name, in one list. The empty
+   a browser installed moments earlier can still be missing until that window passes. **Finding open tabs** is a collapsed disclosure with a visible permission summary. It explains
+   that **Any browser** checks every running browser that can list tabs, including private windows,
+   and that macOS may request permission the first time a browser is checked.
+5. **Actions** — scripts and shortcuts to run with “run” and their spoken name, in one list. A collapsed
+   **Permissions and confirmations** disclosure explains that macOS may request access when an action
+   first controls another app or accesses protected data; Shortcuts can offer **Allow Once** or **Always
+   Allow**, and actions can include confirmations on every run. A macOS dialog may name the app even
+   when a script triggered it, and a permission granted through Terminal may not apply to a run here.
+   The copy distinguishes those prompts
+   from the app's own behavior: it starts actions without adding a confirmation, and some actions run
+   immediately. An action that seems to be waiting may have an approval dialog open. The empty
    state explains how to add an action and say “run” followed by its name, with optional spoken input.
    Actions start in the background; their own steps may open another app. Each row leads with its kind's icon (a terminal for a script, the Shortcuts app
    icon for a shortcut), then the spoken phrases (`run {name}`, with `…` when it takes words), what it runs,
    and a `Script` or `Shortcut` badge. A script row shows its command line and an orange advisory when the
    program is missing or not executable; a shortcut row shows the shortcut's name and input, and an orange
    advisory when that shortcut is no longer in Shortcuts. **Add Action…** offers **Script…** and
-   **Shortcut…**.
+   **Shortcut from Shortcuts…**.
 
-   **Shortcut…** opens a sheet that starts with the shortcut, picked from the user's shortcuts (stored by
+   **Shortcut from Shortcuts…** opens a sheet organized into **Run this shortcut**, **What to say**,
+   **Input (optional)**, and **Command preview**. It starts with the shortcut, picked from the user's shortcuts (stored by
    identifier, so renaming it in Shortcuts keeps it working); the name follows the chosen shortcut until
    the user types their own, then other spoken names, then an optional **Input** where `{text}` marks the
    spoken words. A live example uses the configured spoken name and shows the actual input, with and
    without spoken words. The picker includes
    **Refresh List** and **Open Shortcuts…**; empty and unavailable states explain how to recover. A caption
-   says a shortcut may open another app or ask a question, is shown as started while waiting, and has
-   its final result saved when History is on. An existing
+   says a shortcut may open an app or ask a question, advises checking for a dialog if it is waiting,
+   and says its final result appears in History when saving is enabled for this mode. An existing
    shortcut's sheet holds the red **Delete Shortcut** action, with a confirmation saying the shortcut
    itself stays in Shortcuts.
 
-   **Script…** opens a sheet with the name,
-   other spoken names, the program (a path field plus **Choose…**), and the arguments, one per line, with
+   **Script…** opens a sheet organized into **Run this file**, **What to say**, **Arguments (optional)**,
+   and **Command preview**. The program (a path field plus **Choose…**) comes first, followed by the
+   spoken name and other names, then arguments, one per line, with
    `{text}` marking where the spoken words go. Beside the arguments it says the script should treat
    those words as input, not as code to run; the finer rules (blank lines, when words are
-   needed) sit in a collapsed **How arguments are passed** section. The sheet says the program runs
-   directly without a shell, inheriting the app's environment, whose PATH holds only the system folders
-   when the app is opened normally. **Add Script** and **Save** stay disabled until
+   needed) sit in a collapsed **How scripts run** section. The full-path field says pipes and redirects
+   do not work there; the disclosure explains that the program runs without a shell or Terminal window
+   and may need full paths or PATH set inside the script. The preview uses the current draft, shows the
+   spoken phrase plus the exact arguments, substitutes “buy milk” when spoken input is required, and
+   never executes the program. **Add Script** and **Save** stay disabled until
    the name, program, and arguments are valid; an incomplete or conflicting entry explains what prevents
    saving. A program with a known interpreter file name (a shell or `env`, for example), or a wrapper such
    as `nice` around one, cannot take `{text}` in its arguments; the issue names the interpreter and points
    to choosing an executable script file instead. Saving an edit to a place or action that was renamed or
    deleted elsewhere is refused with a message, and the sheet keeps the draft. A program that is not installed yet remains an advisory. An existing script's sheet holds the
    red **Delete Script** action at its trailing edge, with a confirmation.
-6. **Result handling** — the same **Do not save this mode in history** toggle as other modes, off by
+6. **Recognition and replacements** — the same vocabulary summary and help as other modes, with
+   **Edit Vocabulary…** opening Vocabulary on Voice Commands. Help explains that replacements apply
+   before a command is read and can correct frequently misheard names or phrases.
+7. **Result handling** — the same **Do not save this mode in history** toggle as other modes, off by
    default. Its help says saved commands include what was said, what ran (including input), and any
    error message, which may include text from a script or shortcut.
 

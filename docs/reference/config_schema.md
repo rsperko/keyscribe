@@ -480,7 +480,7 @@ utterance (case and punctuation ignored; a leading "the" is dropped from an app-
 `which to` and `witch to` for `switch to`, and `two` or `too` in place of `to` after `switch`, `which`,
 `witch`, or `go`. These are exact prefix alternatives, not transcript replacements: target names,
 action input, and the original heard text are preserved. They apply equally to live commands and
-**Try it**. Other command words, including `run` and `go back`, have no sound-alike alternatives.
+**Preview a command**. Other command words, including `run` and `go back`, have no sound-alike alternatives.
 An app answers, in every tier, to the name shown in the Applications folder and to the name in its own
 menu bar when the two differ; the name KeyScribe shows and sorts by is the Applications-folder one.
 A target is a running app, an app installed in an Applications folder (or one folder down inside it),
@@ -618,9 +618,12 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
 - **Matching order**, first hit wins: a place's spoken name exactly; a running app's name exactly; a
   contiguous run of words in a running app's name ("chrome" → Google Chrome); the same partial rule on
   place names; an installed app's name exactly; then an **open window's title**, exactly and then as a
-  contiguous run of words; then installed apps partially. Only if nothing matches is a near-miss snapped,
-  using the dictionary's fuzzy rule, against places and running apps (never installed-only apps or
-  windows).
+  contiguous run of words; then an **open browser tab's title** the same two ways; then installed apps
+  partially. Only if nothing matches is the target matched fuzzily against every one of those: a
+  near-miss is snapped, using the dictionary's fuzzy rule, against places, running and installed apps,
+  window titles, and tab titles, and a name or title also matches when it contains every spoken word in
+  any order ("strava run" → `Afternoon Run | Run | Strava`). The fuzzy step runs the tiers above in the
+  same order, so a fuzzy hit on a place still beats an equally close one on an app, window, or tab.
   Different targets tied at the winning step are offered as a numbered choice and nothing runs until one
   is chosen; above `VoiceCommandChoice.displayLimit` targets the command fails and asks for more of the
   name. Places and actions keep their configured order in the choice, apps are sorted by name. A
@@ -637,8 +640,15 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   panels, and dialogs are not, nor are this app's own windows. macOS lists only the windows on the
   current desktop, so a window on another desktop or in another full-screen app cannot be found from
   here, though its app's name still works. A browser window is matched by its current tab's title, since
-  that is the window's title; a page in a background tab is reached with a web place. A choice between
-  windows names each one's app, and the document or site when two titles are the same.
+  that is the window's title, and wins over that same tab. A choice between windows names each one's app,
+  and the document or site when two titles are the same.
+- **Tab titles** are read from every running browser whose tabs can be listed (see *Tab matching* below),
+  only when no place, app, or window matched first, and are split into parts like window titles. Reading them
+  uses the same Automation permission as a web place, so the first such command can be what asks macOS for it;
+  a browser that refused or did not answer contributes no tabs. If the tabs cannot be read in time, the command
+  fails rather than choosing from the rest. A choice between tabs names each one's browser and site. A tab is
+  focused by its address, re-checked just before it moves; if it has closed, the command says so and opens
+  nothing.
 - **If any app does not answer when its windows are read**, the command fails without opening anything
   (`Could not check all open windows. Nothing was opened. Try again.`) rather than choosing from the
   windows that did answer. When Accessibility is off, the command says so and offers its settings.
@@ -674,9 +684,10 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   another try. A command whose target was already in front keeps the earlier destination. Running a
   script or shortcut does not change it. It is kept in memory only, so it is lost when the app quits.
   Repeating `go back` switches back again.
-- **Try it** in Settings never runs a command, script, or shortcut, but previewing a web place reads the open tabs,
+- **Preview a command** in Settings never runs a command, script, or shortcut, but previewing a web place reads the open tabs,
   so it can be what first asks macOS for permission to control a browser, and previewing a phrase no app or
-  place matches reads the open windows' titles. Reading windows never asks for a permission.
+  place matches reads the open windows' and tabs' titles. Reading windows never asks for a permission; reading
+  tabs can.
 
 ### Replacement matching & output
 

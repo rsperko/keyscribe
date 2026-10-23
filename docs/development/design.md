@@ -416,8 +416,9 @@ suffix never re-routes a command into a dictation mode), and skips the rewrite a
 records it as a command (Result is what it ran, plus why it failed) under the usual History rules —
 the heard transcript, after the mode's own replacements and dictionary clean it (its vocabulary leaves out
 the global one unless it opts in), is parsed as a closed set of commands. **Run** resolves only against
-the user's configured scripts and shortcuts; focus verbs resolve only against apps, the user's places, and open windows (titles are read over
-Accessibility on this Mac, and only when no app or place name matched), and **go back**
+the user's configured scripts and shortcuts; focus verbs resolve only against apps, the user's places, open windows, and open browser tabs (window
+titles are read over Accessibility on this Mac and tab titles over Apple Events, each only when nothing
+before it matched), with a near-miss snapped against all of them, and **go back**
 returns to the previous window or app (`config_schema.md` "`voice_commands.toml`"). A bare script name never runs it.
 It never inserts, pastes, copies, submits, or touches the clipboard. Recognition and resolution are local
 and the transcript is never sent to an AI service; the only network effect of its own is that opening a

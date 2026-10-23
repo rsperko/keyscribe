@@ -6,25 +6,29 @@ struct VoiceCommandNotices {
 
         var title: String {
             switch self {
-            case .apps: "Voice commands can switch apps"
-            case .places: "This place opens when its name is heard"
-            case .scripts: "This script runs when its name is heard"
-            case .shortcuts: "This shortcut runs when its name is heard"
+            case .apps: "Voice commands can open the wrong app"
+            case .places: "A misheard name can open the wrong place"
+            case .scripts: "Scripts can change your files"
+            case .shortcuts: "Check what this shortcut does"
             }
         }
 
         var message: String {
             switch self {
             case .apps:
-                "Voice recognition can make mistakes and open or switch to an unintended app. Its open windows may become visible, and your next keystrokes will go there. Keep this in mind when sharing your screen."
+                "You start Voice Commands with its assigned shortcut. A misheard name can open the wrong app or bring the wrong window forward.\n\nThis may reveal its contents during screen sharing. Check which app is active before typing."
             case .places:
-                "Voice recognition can mishear a name and open this place when you meant another. An app comes to the front with its open windows, a web page loads in your browser, and your next keystrokes go there. Keep this in mind when sharing your screen."
+                "A misheard command can open this place when you meant another. Its app or browser window comes forward, which may reveal its contents during screen sharing. Check which app is active before typing."
             case .scripts:
-                "Voice recognition can mishear a name and start this script, or pass it different words than you said. It runs with your account’s permissions and can change or delete your files. For actions that cannot be undone, use a script that asks for confirmation."
+                "Saying \u{201C}run\u{201D} and this name starts the script with your account’s permissions. A misheard name or input can start the wrong action. Use a script that asks for confirmation before changing or deleting anything you cannot recover."
             case .shortcuts:
-                "Voice recognition can mishear a name and start this shortcut, or give it different words than you said. Depending on its steps, a shortcut can send messages, change or delete files, or send your words to online services. For actions that cannot be undone, add a step that asks for confirmation."
+                "Saying \u{201C}run\u{201D} and this name starts the shortcut. A misheard name or input can start the wrong action. Its steps may send messages, change or delete files, or send your words to online services. Add a confirmation step for actions you cannot undo."
             }
         }
+    }
+
+    static var actionPermissions: String {
+        "Actions start without an extra confirmation from \(Branding.appName). Some run immediately. Others may wait for a dialog:\n\n• macOS may ask for permission the first time an action controls another app or accesses protected data. The dialog may name \(Branding.appName), even when a script caused it. Permission given through Terminal may not apply here.\n\n• Shortcuts may offer Allow Once or Always Allow. Allow Once can ask again next time; Always Allow remembers that permission.\n\n• A script or shortcut may include its own confirmation on every run.\n\nIf an action seems to be waiting, check for an approval dialog."
     }
 
     private let defaults: UserDefaults

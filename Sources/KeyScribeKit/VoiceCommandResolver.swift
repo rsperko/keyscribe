@@ -121,12 +121,14 @@ public enum VoiceCommandAction: Equatable, Sendable {
     case place(VoiceCommandPlace, PlaceTarget)
     case script(VoiceCommandScript, arguments: [String])
     case window(VoiceCommandCatalog.Window)
+    case tab(VoiceCommandCatalog.Tab)
     case goBack
 
     public func summary(appName: (String) -> String?) -> String {
         switch self {
         case .app(let app): return app.name
         case .window(let window): return "\(window.title) \u{00B7} \(window.appName)"
+        case .tab(let tab): return appName(tab.browserBundleId).map { "\(tab.title) \u{00B7} \($0)" } ?? tab.title
         case .goBack: return "Back"
         case .place(let place, .tab(let tab)):
             return appName(tab.browserBundleId).map { "\(place.name) · \($0)" } ?? place.name
@@ -140,6 +142,8 @@ public enum VoiceCommandAction: Equatable, Sendable {
         case .app(let app): return "Brings \(app.name) to the front, opening it if needed."
         case .window(let window):
             return "Brings the window \u{201C}\(window.title)\u{201D} in \(window.appName) to the front."
+        case .tab(let tab):
+            return "Focuses the open tab \u{201C}\(tab.title)\u{201D} in \(appName(tab.browserBundleId) ?? tab.browserBundleId)."
         case .goBack: return "Returns to the window or app you were in before your last command."
         case .place(_, .app(let bundleId)):
             return "Brings \(appName(bundleId) ?? bundleId) to the front, opening it if needed."
@@ -218,7 +222,7 @@ public enum VoiceCommandResolver {
         return .action(.script(hit.script, arguments: hit.script.arguments(text: hit.text)))
     }
 
-    private enum Match { case exact, partial }
+    private enum Match { case exact, partial, words }
 
     private static func resolve(target: String, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
         let places = catalog.places.map(VoiceCommandCandidate.place)
@@ -236,10 +240,20 @@ public enum VoiceCommandResolver {
         case .needsAccessibility: return .windowsNeedAccessibility
         case .complete(let listed): windows = Self.ordered(listed).map(VoiceCommandCandidate.window)
         }
-        let rest: [([VoiceCommandCandidate], Match)] = [(windows, .exact), (windows, .partial), (installed, .partial)]
+        let early: [([VoiceCommandCandidate], Match)] = [(windows, .exact), (windows, .partial)]
+        if let resolution = firstTier(early, target: target, catalog: catalog) { return resolution }
+
+        guard let listed = catalog.tabs else { return .needsTabs(browser: nil) }
+        let tabs = listed.map(VoiceCommandCandidate.tab)
+        let rest: [([VoiceCommandCandidate], Match)] = [(tabs, .exact), (tabs, .partial), (installed, .partial)]
         if let resolution = firstTier(rest, target: target, catalog: catalog) { return resolution }
 
-        return nearestMiss(target, among: places + running, tiers: Array(named.prefix(4)), catalog: catalog)
+        let exhaustive = named + early + rest
+        let unordered: [([VoiceCommandCandidate], Match)] = [
+            (places, .words), (running, .words), (windows, .words), (tabs, .words), (installed, .words),
+        ]
+        return nearestMiss(
+            target, among: places + running + installed + windows + tabs, tiers: exhaustive + unordered, catalog: catalog)
             ?? .noMatch(target)
     }
 
@@ -262,9 +276,9 @@ public enum VoiceCommandResolver {
         for candidate in pool {
             let terms = candidate.spokenForms.flatMap { [$0] + $0.split(separator: " ").map(String.init) }
             let snapped = VoiceCommandText.key(FuzzyCorrector.apply(target, prepared: FuzzyCorrector.prepare(terms)))
-            guard snapped != spoken,
-                  candidate.spokenForms.contains(where: { matches(snapped, $0, .exact) || matches(snapped, $0, .partial) })
-            else { continue }
+            guard candidate.spokenForms.contains(where: { form in
+                [Match.exact, .partial, .words].contains { matches(snapped, form, $0) }
+            }) else { continue }
             let distance = FuzzyCorrector.levenshtein(VoiceCommandText.compact(spoken), VoiceCommandText.compact(snapped))
             if distance < nearestDistance { nearest = []; nearestDistance = distance }
             if distance == nearestDistance { nearest.append((candidate, snapped)) }
@@ -313,6 +327,8 @@ public enum VoiceCommandResolver {
             return .action(.app(app))
         case .window(let window):
             return .action(.window(window))
+        case .tab(let tab):
+            return .action(.tab(tab))
         case .place(let chosen):
             guard let current = catalog.places.first(where: { $0.hasSameDestination(as: chosen) }) else {
                 return .unavailable(chosen.name)
@@ -340,6 +356,10 @@ public enum VoiceCommandResolver {
             let wanted = spoken.split(separator: " ")
             guard wanted.count < words.count else { return false }
             return (0...(words.count - wanted.count)).contains { Array(words[$0..<$0 + wanted.count]) == wanted }
+        case .words:
+            guard VoiceCommandText.compact(spoken).count >= 3 else { return false }
+            let words = Set(name.split(separator: " "))
+            return spoken.split(separator: " ").allSatisfy(words.contains)
         }
     }
 
@@ -351,6 +371,8 @@ public enum VoiceCommandResolver {
             return .unavailable(script.name)
         case .window(let window):
             return .action(.window(window))
+        case .tab(let tab):
+            return .action(.tab(tab))
         case .place(let place):
             switch place.target {
             case .app(let bundleId):

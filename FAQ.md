@@ -148,13 +148,14 @@ want to speak a command:
   shortcut receives the extra words only when you have configured it to accept them.
 - **“switch to budget”** brings forward an open window whose title says Budget. With two editor
   windows or two terminals open, say a word from the title of the one you want. Only windows on the
-  current desktop can be found, and a browser window answers to its current tab's title; reach a page in
-  a background tab with a place instead.
+  current desktop can be found. **“switch to home assistant”** also finds an open browser tab by its
+  title, including tabs in the background. Titles do not have to be said exactly: the words can come in
+  any order, and a close mishearing still finds the window or tab.
 - **“go back”** returns to the window you were using before your last switch by voice, even in the
   same app. Say it again to switch back. Running an action does not change that destination.
 
 Commands never type your words. An unrecognized command shows an explanation and runs nothing, and a
-command that matches more than one place, app, or action asks which one (below). **Try it** previews
+command that matches more than one place, app, or action asks which one (below). **Preview a command** previews
 what a typed command would do without running it.
 
 Before enabling the feature, a notice explains that a recognition mistake can bring an unintended
@@ -167,7 +168,7 @@ Two or more places, apps, or actions answered to what you said, so KeyScribe lis
 instead of guessing. Nothing runs and nothing is typed while the list is shown, and while it waits for
 your answer your keystrokes keep going to the app you were in.
 
-Say you have two places, **Personal Mail** and **Work Mail**, each with `mail` under **Also say**:
+Say you have two places, **Personal Mail** and **Work Mail**, each with `mail` under **Other names**:
 
 1. Say **“switch to mail”** with your Voice Commands shortcut. A list of both appears.
 2. Use the same shortcut again and say **“two”**, **“number two”**, **“the second one”**, or
@@ -187,7 +188,7 @@ away after 30 seconds without an answer, when you switch to another app or start
 when you change your places or actions; after that, a number means nothing. When more than five match,
 KeyScribe asks you to say more of the name instead of listing them.
 
-To get this question on purpose, give two places the same name under **Also say**: Settings explains
+To get this question on purpose, give two places the same name under **Other names**: Settings explains
 that saying it will ask you to choose. If your answer is consistently misheard — “two” arriving as
 “tube”, say — add a replacement from `tube` to `two` under **Vocabulary ▸ Voice Commands**.
 
@@ -195,7 +196,7 @@ that saying it will ask you to choose. If your answer is consistently misheard �
 
 Some command-word mishearings work automatically: `which to Mail` and `witch to Mail` are understood
 as “switch to Mail”. The word `to` can also arrive as `two` or `too` after `switch`, `which`, `witch`,
-or `go`. These alternatives work in **Try it**, too, and leave the original words in History.
+or `go`. These alternatives work in **Preview a command**, too, and leave the original words in History.
 
 When KeyScribe does not recognize a command, or an answer to “Which one?”, it briefly shows what it
 heard, such as **Heard “stitch to Mail”**. That is what your speech model wrote, before any of your
@@ -226,14 +227,14 @@ replacements there apply only to commands, and run before KeyScribe reads what y
   words passed to scripts and shortcuts.
 
 - **A name that needs to work with several commands:** add an app under **Settings ▸ Modes ▸ Voice
-  Commands ▸ Places ▸ Add Place… ▸ App…**, choose Mail, and enter `male` in **Also say**. Both "switch to
+  Commands ▸ Places ▸ Add Place… ▸ App…**, choose Mail, and enter `male` in **Other names**. Both "switch to
   male" and "open male" then go to Mail, without rewriting other uses of the word. This is also useful
   for a preferred nickname, such as `email` for Mail.
 - **Your own spoken shortcuts:** a replacement for a whole phrase becomes the command, so `code` →
   `switch to Visual Studio Code` lets you say just "code".
 
-To check a phrase, open **Settings ▸ Modes ▸ Voice Commands** and type it into **Try it**: it shows what
-the phrase is read as after your replacements and what it would do. Try it reads what you type; it
+To check a phrase, open **Settings ▸ Modes ▸ Voice Commands** and type it into **Preview a command**: it shows what
+the phrase is read as after your replacements and what it would do. The preview reads what you type; it
 does not listen. It works without opening an app or running a script or shortcut.
 For the example above, type `switch to male` and check that it resolves to Mail.
 
@@ -267,7 +268,7 @@ shown as started and left to finish. When History is on, its entry updates when 
 failures also appear on screen unless you are dictating. It runs without a shell, with
 the environment KeyScribe started with. Opened normally, its `PATH` holds only the system folders, so call
 other tools by their full path or set `PATH` at the top of the script.
-Use **Try it** to see the exact command a phrase would run, without running it.
+Use **Preview a command** to see the exact command a phrase would run, without running it.
 
 The dictionary never changes a script or shortcut's name or the words you pass it. If a name keeps coming out
 wrong, add the misheard form as another spoken name.
@@ -278,7 +279,7 @@ a script that asks for confirmation.
 
 ### Can a voice command run a Shortcut?
 
-Yes. Choose **Add Action ▸ Shortcut**, pick one of your shortcuts, and give it a name to say. To hand it
+Yes. Choose **Add Action ▸ Shortcut from Shortcuts…**, pick one of your shortcuts, and give it a name to say. To hand it
 what you say after the name, set **Input** to `{text}`: a shortcut named "journal" with that input turns
 "run journal buy milk" into the shortcut receiving "buy milk" as text. It runs in the background like a
 script. A shortcut that asks you something, such as Ask for Input or Choose from Menu, waits for your

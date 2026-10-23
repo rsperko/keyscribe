@@ -5,6 +5,7 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
     case app(VoiceCommandCatalog.App)
     case script(VoiceCommandScript)
     case window(VoiceCommandCatalog.Window)
+    case tab(VoiceCommandCatalog.Tab)
 
     public var identity: String {
         switch self {
@@ -12,6 +13,7 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
         case .app(let app): "app:\(app.bundleId)"
         case .script(let script): "script:\(VoiceCommandText.key(script.name))"
         case .window(let window): "window:\(window.bundleId):\(window.pid):\(window.id)"
+        case .tab(let tab): "tab:\(tab.browserBundleId):\(tab.window):\(tab.tab):\(tab.url)"
         }
     }
 
@@ -21,6 +23,7 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
         case .app(let app): app.name
         case .script(let script): script.name
         case .window(let window): window.title
+        case .tab(let tab): tab.title
         }
     }
 
@@ -29,10 +32,14 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
         case .place(let place): return place.spokenForms
         case .app(let app): return app.spokenNames
         case .script(let script): return script.spokenForms
-        case .window(let window):
-            let segments = WindowTitle.segments(window.title)
-            return segments.contains(window.title) ? segments : segments + [window.title]
+        case .window(let window): return Self.titleForms(window.title)
+        case .tab(let tab): return Self.titleForms(tab.title)
         }
+    }
+
+    private static func titleForms(_ title: String) -> [String] {
+        let segments = WindowTitle.segments(title)
+        return segments.contains(title) ? segments : segments + [title]
     }
 
     public func detail(appName: (String) -> String?, among others: [VoiceCommandCandidate]) -> String {
@@ -66,6 +73,10 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
             }
             guard tied, let document = window.document.flatMap(Self.documentLabel) else { return window.appName }
             return "\(window.appName) \u{00B7} \(document)"
+        case .tab(let tab):
+            let browser = appName(tab.browserBundleId) ?? tab.browserBundleId
+            guard let site = Self.documentLabel(tab.url) else { return browser }
+            return "\(browser) \u{00B7} \(site)"
         }
     }
 

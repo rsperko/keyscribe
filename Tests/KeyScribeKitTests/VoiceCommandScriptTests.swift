@@ -13,7 +13,7 @@ struct VoiceCommandScriptTests {
     ) -> VoiceCommandResolution {
         VoiceCommandResolver.resolve(
             transcript, catalog: VoiceCommandCatalog(
-                places: places, scripts: scripts, runningApps: running, windows: .complete([])))
+                places: places, scripts: scripts, runningApps: running, tabs: [], windows: .complete([])))
     }
 
     @Test func decodesScriptsBesidePlaces() throws {

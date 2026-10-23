@@ -189,7 +189,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         _ transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = []
     ) async -> VoiceCommandResolution {
         let withoutApps = VoiceCommandResolver.resolve(
-            transcript, catalog: VoiceCommandCatalog(scripts: scripts, windows: .complete([])))
+            transcript, catalog: VoiceCommandCatalog(scripts: scripts, tabs: [], windows: .complete([])))
         guard case .noMatch = withoutApps else { return withoutApps }
         let running = system.runningApps()
         let installed = VoiceCommandCatalog.reconciling(installed: await system.installedApps(), with: running)
@@ -405,6 +405,18 @@ final class VoiceCommandRunner: VoiceCommandRunning {
                 return .abandoned
             }
             guard stillWanted() else { return .abandoned }
+        case .tab(let tab):
+            let focus = await system.focusTab(tab)
+            guard focus == .noResponse || stillWanted() else { return .abandoned }
+            switch focus {
+            case .focused:
+                succeeded = await system.openApp(bundleId: tab.browserBundleId)
+            case .noResponse:
+                let browser = system.appName(forBundleId: tab.browserBundleId) ?? "The browser"
+                return .failed(message: "\(browser) did not respond, so the tab was not brought forward.", command: command)
+            case .gone:
+                return .failed(message: Self.tabGoneMessage, command: command)
+            }
         case .app(let app):
             succeeded = await system.openApp(bundleId: app.bundleId)
         case .place(_, .app(let bundleId)):
@@ -499,6 +511,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     nonisolated static let windowsNeedAccessibilityMessage =
         "Accessibility is off, so open windows could not be checked. Nothing was opened."
     nonisolated static let windowGoneMessage = "That window is no longer open."
+    nonisolated static let tabGoneMessage = "That tab is no longer open."
     nonisolated static let windowElsewhereMessage = "That window is now on another desktop, so it was not brought forward."
 
     nonisolated static func windowNotForwardMessage(_ app: String) -> String {
