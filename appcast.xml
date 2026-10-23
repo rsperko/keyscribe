@@ -6,6 +6,13 @@
     <description>KeyScribe app updates</description>
     <language>en</language>
     <item>
+      <title>0.9.1</title>
+      <sparkle:version>322</sparkle:version>
+      <sparkle:shortVersionString>0.9.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/rsperko/keyscribe/releases/download/v0.9.1/KeyScribe-0.9.1.dmg" sparkle:edSignature="QuPwXPDAhpN2V8YYaB2QHyUmKzb83RqqOUOvOw6FaM3CeoPXkepLCSZ6m04a7A0DFkiWFQyYgykta5cUE3obCQ==" length="22296577" type="application/octet-stream" />
+    </item>
+    <item>
       <title>0.9.0</title>
       <sparkle:version>317</sparkle:version>
       <sparkle:shortVersionString>0.9.0</sparkle:shortVersionString>
@@ -67,13 +74,6 @@
       <sparkle:shortVersionString>0.5.1</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
       <enclosure url="https://github.com/rsperko/keyscribe/releases/download/v0.5.1/KeyScribe-0.5.1.dmg" sparkle:edSignature="VZmhZfAEshfqgthgMcTd2dkzR7qvWmyXAu0WkbkWTe6Cwj8LUS2UuTEvadBMTbGv0x6GRnZs/VRgQjhs+1sjAQ==" length="31763913" type="application/octet-stream" />
-    </item>
-    <item>
-      <title>0.4.0</title>
-      <sparkle:version>237</sparkle:version>
-      <sparkle:shortVersionString>0.4.0</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/rsperko/keyscribe/releases/download/v0.4.0/KeyScribe-0.4.0.dmg" sparkle:edSignature="kenYJZrDLXNjiwWannd3hlLD8iO8BrAdGIP6uYc5mUrQN72IezmevuZzXyotKRpHPzZhWl45Urd03ona6CUfCQ==" length="77269547" type="application/octet-stream" />
     </item>
   </channel>
 </rss>
