@@ -70,6 +70,7 @@ final class DictationController {
     private struct DictationSession {
         let identity = DictationIdentity()
         let captureLoss = CaptureLossFlag()
+        let voiceCommandStopsAtPress: Int
         var building: DictationRecord
         var pressedAt = DispatchTime.now()
         var capturedSnapshot: TargetSnapshot?
@@ -574,7 +575,7 @@ final class DictationController {
         hideTask?.cancel()
         idleEvictionTask?.cancel()
         captureRefreshTask?.cancel()
-        session = DictationSession(building: DictationRecord(modeName: currentModeName))
+        session = DictationSession(voiceCommandStopsAtPress: voiceCommandStops, building: DictationRecord(modeName: currentModeName))
         if let pressedAt {
             session?.pressedAt = pressedAt
             building.stageMillis[.grace] = elapsedMs(since: pressedAt)
@@ -1007,10 +1008,11 @@ final class DictationController {
             snapshot.bundleId.map { VoiceCommandOrigin(bundleId: $0, pid: snapshot.pid, windowId: snapshot.focusedWindowId) }
         }
         let start = DispatchTime.now()
-        let transcript = plan.voiceCommandText(heard: heard, mode: activeMode)
+        let reading = plan.voiceCommandReading(heard: heard, mode: activeMode)
+        let transcript = reading.text
         let late = LateCommandResult()
         let commands = config.voiceCommands
-        let stopsAtStart = voiceCommandStops
+        let stopsAtStart = session?.voiceCommandStopsAtPress
         // Lookup stays cancellable (still transcribing); the first check that passes is where acting begins.
         let stillWanted: @MainActor () -> Bool = { [weak self] in
             guard let self, !Task.isCancelled, !self.captureWasLost, self.voiceCommandStops == stopsAtStart,
@@ -1036,6 +1038,9 @@ final class DictationController {
                 stillWanted: stillWanted, onLateResult: onLateResult))
         }
         if Task.isCancelled { return }
+        if !reading.firedReplacements.isEmpty, Self.ranACommand(reply) {
+            replacementUsage?.record(reading.firedReplacements, capturedAt: session?.replacementUsageEpoch)
+        }
         building.stageMillis[.insert] = elapsedMs(since: start)
         if voiceCommands.pendingChoice == nil { clearVoiceCommandChoice() }
         switch reply {
@@ -1158,11 +1163,27 @@ final class DictationController {
         return VoiceCommandChoicePrompt(id: pending.id, title: pending.choice.title, rows: pending.rows, hint: hint)
     }
 
+    // A replacement counts only when the command it shaped reached its destination, like a dictation that was
+    // inserted; asking which one is not a destination, and a failure ran nothing.
+    private static func ranACommand(_ reply: VoiceCommandAnswer) -> Bool {
+        let outcome: VoiceCommandOutcome
+        switch reply {
+        case .command(let commandOutcome): outcome = commandOutcome
+        case .selected(let selection): outcome = selection.outcome
+        case .cancelled, .retry: return false
+        }
+        switch outcome {
+        case .done, .started: return true
+        case .failed, .needsChoice, .abandoned: return false
+        }
+    }
+
     private static func choiceWaiting(after state: HUDState?) -> VoiceCommandChoiceStatus {
         switch state {
-        case .error(let message, _, _), .advisory(let message): .waiting(note: message)
+        case .error(let message, let action, _): .waiting(note: message, action: action)
+        case .advisory(let message): .waiting(note: message)
         case .complete(.noSpeech, _): .waiting(note: "No speech detected")
-        case .choice(_, .waiting(let note, let heard), _): .waiting(note: note, heard: heard)
+        case .choice(_, .waiting(let note, let heard, let action), _): .waiting(note: note, heard: heard, action: action)
         default: .waiting(note: nil)
         }
     }
@@ -1294,7 +1315,7 @@ final class DictationController {
                     late.outcome = outcome
                     self?.applyLateCommandResult(late)
                 })
-            else { return }
+            else { self.markChoiceCancelled(entry); return }
             self.finishClickedChoice(selection, entry: entry, late: late, startsAtClick: startsAtClick)
         }
     }
@@ -1302,7 +1323,10 @@ final class DictationController {
     private func finishClickedChoice(
         _ selection: VoiceCommandSelection, entry: HistoryEntry?, late: LateCommandResult, startsAtClick: Int
     ) {
-        guard let shown = Self.presentation(of: selection.outcome, resultPrefix: Self.selectionPrefix(selection)) else { return }
+        guard let shown = Self.presentation(of: selection.outcome, resultPrefix: Self.selectionPrefix(selection)) else {
+            markChoiceCancelled(entry)
+            return
+        }
         if let entry, let history {
             var updated = entry
             updated.outcome = shown.outcome
@@ -1335,6 +1359,10 @@ final class DictationController {
         clearVoiceCommandChoice()
         if wasAnswering { cancel() }
         if !isBusy { present(.hidden) }
+        markChoiceCancelled(entry)
+    }
+
+    private func markChoiceCancelled(_ entry: HistoryEntry?) {
         guard let entry, let history else { return }
         var updated = entry
         updated.outcome = .commandCancelled

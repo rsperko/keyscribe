@@ -218,10 +218,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 return VocabularyAdvisor.analyze(proposal, in: self.configRepository.vocabularyScope(for: destination.scope))
             },
             addDictionaryWord: { [weak self] word, destination in
-                self?.configRepository.addDictionaryWord(word, to: destination.scope) ?? false
+                self?.configRepository.addDictionaryWord(word, to: destination.scope) ?? .failed
             },
             addReplacement: { [weak self] heard, replace, regex, destination in
-                self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex, to: destination.scope) ?? false
+                self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex, to: destination.scope) ?? .failed
             },
             clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
 
@@ -637,7 +637,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applySettings(_ updated: Settings) {
         applySettingsEffects(updated)
+        persistSettings(updated)
+    }
+
+    // A write re-encodes the whole file, so while it holds a key nothing reads the change stays in memory only;
+    // the settings.toml advisory says so.
+    private func persistSettings(_ updated: Settings) {
         guard settingsIssue == nil else { return }
+        let file = KeyScribePaths.supportDir.appendingPathComponent(SettingsStore.fileName)
+        if let toml = try? String(contentsOf: file, encoding: .utf8), !SettingsStore.unknownKeys(in: toml).isEmpty {
+            Log.config.error("settings not saved: \(SettingsStore.fileName, privacy: .public) has keys this app doesn't read")
+            return
+        }
         do {
             try SettingsStore.write(updated, to: KeyScribePaths.supportDir)
             recordSettingsSelfWrite()
@@ -713,11 +724,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // Mutate the one field, never rebuild the table: a fresh `.init` would silently reset every other
         // [audio] key (keep_captures and its budget) to defaults and persist that over the user's file.
         settings.audio.inputDeviceName = device.name
-        do {
-            try SettingsStore.write(settings, to: KeyScribePaths.supportDir)
-            recordSettingsSelfWrite()
-        }
-        catch { Log.config.error("settings write failed: \(error.localizedDescription, privacy: .public)") }
+        persistSettings(settings)
         settingsController.update(settings: settings)
     }
 

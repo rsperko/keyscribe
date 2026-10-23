@@ -22,6 +22,51 @@ struct ModesSettingsModelTests {
             .filter { !$0.hasPrefix("_") })
     }
 
+    @Test func aNewModeTakesItsPlaceInRegistrationOrderSoShortcutStatusMatchesTheApp() throws {
+        let (model, support, modesDir) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+        var writing = Mode(id: "writing", name: "Writing")
+        writing.triggerKeys = [.init(key: "option")]
+        try ModeStore.write(writing, to: modesDir)
+        model.reload(force: true)
+
+        model.create()
+        var code = try #require(model.modes.first { $0.id == model.selectedID })
+        code.name = "Code"
+        model.update(code)
+        code = try #require(model.modes.first { $0.id == "code" })
+        code.triggerKeys = [.init(key: "right_option")]
+        model.update(code)
+
+        #expect(model.modes.map(\.id) == ModeStore.loadAll(in: modesDir).map(\.id))
+        let saved = try #require(model.modes.first { $0.id == "code" })
+        let shadowed = try #require(model.modes.first { $0.id == "writing" })
+        #expect(TriggerKeyConflicts.conflict(for: saved, in: model.registeredModes)?.kind != .unreachable)
+        #expect(TriggerKeyConflicts.conflict(for: shadowed, in: model.registeredModes)?.kind == .unreachable)
+    }
+
+    @Test func aShortcutTheAppTakesFromVoiceCommandsIsNotReportedDeadOnTheOtherMode() throws {
+        let fm = FileManager.default
+        let support = fm.temporaryDirectory.appendingPathComponent("keyscribe-modes-\(UUID().uuidString)")
+        let modesDir = support.appendingPathComponent("modes")
+        try fm.createDirectory(at: modesDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: support) }
+        var commands = Mode.voiceCommands
+        commands.triggerKeys = [.init(key: "option")]
+        var zoom = Mode(id: "zoom-notes", name: "Zoom Notes")
+        zoom.triggerKeys = [.init(key: "right_option")]
+        try ModeStore.write(commands, to: modesDir)
+        try ModeStore.write(zoom, to: modesDir)
+        let config = ConfigCache(supportDir: support)
+        config.voiceCommandsEnabled = true
+        let model = ModesSettingsModel(
+            repository: ConfigRepository(supportDir: support, config: config), voiceCommandsEnabled: true)
+
+        let shown = try #require(model.modes.first { $0.id == "zoom-notes" })
+        #expect(TriggerKeyConflicts.conflict(for: shown, in: model.registeredModes)?.kind != .unreachable)
+        #expect(!TriggerKeyConflicts.hasUnreachableTrigger(in: config.modes))
+    }
+
     @Test func aModeWhoseFileIsBrokenCannotBeSavedOverFromSettings() throws {
         let (model, support, modesDir) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }
@@ -82,18 +127,26 @@ struct ModesSettingsModelTests {
         #expect(model.notice?.title == "Changes to Notes weren’t saved")
     }
 
-    @Test func savingAModeClearsTheKeysTheSaveDropped() throws {
+    @Test func savingAModeWithAKeyTheAppDoesNotReadIsRefusedUntilTheKeyIsRemoved() throws {
         let (model, support, modesDir) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }
-        try "schema_version = 2\nname = \"Notes\"\ntrigger_key = [\"fn\"]\n".write(
-            to: modesDir.appendingPathComponent("notes.toml"), atomically: true, encoding: .utf8)
+        let file = modesDir.appendingPathComponent("notes.toml")
+        let withTypo = "schema_version = 2\nname = \"Notes\"\ntrigger_key = [\"fn\"]\n"
+        try withTypo.write(to: file, atomically: true, encoding: .utf8)
         model.reload(force: true)
         var edited = try #require(model.modes.first { $0.id == "notes" })
         #expect(model.unknownKeys["notes"] != nil)
 
         edited.enabled = false
-        model.update(edited)
+        #expect(!model.update(edited))
+        #expect(try String(contentsOf: file, encoding: .utf8) == withTypo)
+        #expect(model.notice?.title == "Changes to Notes weren’t saved")
+        #expect(model.notice?.message.contains("modes/notes.toml has “trigger_key”") == true)
+        #expect(model.notice?.fileURL == file)
 
+        try "schema_version = 2\nname = \"Notes\"\n".write(to: file, atomically: true, encoding: .utf8)
+        model.reload(force: true)
+        #expect(model.update(edited))
         #expect(model.unknownKeys["notes"] == nil)
     }
 

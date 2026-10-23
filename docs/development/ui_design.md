@@ -271,7 +271,7 @@ microphone-only HUD — and during microphone bring-up the question stays exactl
 contract above still holds. A reply that is neither a number nor a command keeps the list and shows
 what was heard in place of its subtitle (“Heard “tube””), without repeating the answer hint below the
 rows; a number outside the list keeps the list and says which numbers are valid. The next answer
-recording replaces that line, and nothing restores it afterwards. Silence, a failed transcription, or cancelling the answer recording also keep it. The question is
+recording replaces that line, and nothing restores it afterwards. Silence, a failed transcription, or cancelling the answer recording also keep it; a failure that offers a repair (such as **Open Microphone Settings**) keeps the list and shows its message as the subtitle with the repair button beside **Cancel**. The question is
 neither success nor failure, so it plays no cue. It is dismissed by an answer, spoken or clicked
 **Cancel**, a new command, the idle timeout (`VoiceCommandRunner.choiceIdleSeconds`, restarted each
 time the list is shown again), starting another mode, switching to an app other than the one the
@@ -819,7 +819,9 @@ When a mode's file has an error, its editor is **read-only** and a notice above 
 parser message, with **Show in Finder**: the mode is running on its last working version, and saving from
 Settings would replace the user's broken edit with that version. A key in the file that the app does not
 read is named in an advisory above the editor, with a suggestion when it is close to a real key, since
-editing it has no effect and any change saved from the editor drops it.
+editing it has no effect. Saving from the editor is refused until that key is fixed or removed in the
+file, since the save would otherwise delete it; every other in-app save to such a file is refused the same
+way, with a notice naming the file and key, and a sheet that refused keeps its draft open.
 
 The editor presents a short **Mode summary** at the top. The editor is divided into progressive
 sections:
@@ -984,11 +986,13 @@ Its sections are, in order:
    `{text}` marking where the spoken words go. Beside the arguments it says the script should treat
    those words as input, not as code to run; the finer rules (blank lines, when words are
    needed) sit in a collapsed **How arguments are passed** section. The sheet says the program runs
-   directly without a shell and with a minimal PATH. **Add Script** and **Save** stay disabled until
+   directly without a shell, inheriting the app's environment, whose PATH holds only the system folders
+   when the app is opened normally. **Add Script** and **Save** stay disabled until
    the name, program, and arguments are valid; an incomplete or conflicting entry explains what prevents
-   saving. A program with a known interpreter file name (a shell or `env`, for example) cannot take
-   `{text}` in its arguments; the issue names the program and points to choosing an executable script
-   file instead. A program that is not installed yet remains an advisory. An existing script's sheet holds the
+   saving. A program with a known interpreter file name (a shell or `env`, for example), or a wrapper such
+   as `nice` around one, cannot take `{text}` in its arguments; the issue names the interpreter and points
+   to choosing an executable script file instead. Saving an edit to a place or action that was renamed or
+   deleted elsewhere is refused with a message, and the sheet keeps the draft. A program that is not installed yet remains an advisory. An existing script's sheet holds the
    red **Delete Script** action at its trailing edge, with a confirmation.
 6. **Result handling** — the same **Do not save this mode in history** toggle as other modes, off by
    default. Its help says saved commands include what was said, what ran (including input), and any

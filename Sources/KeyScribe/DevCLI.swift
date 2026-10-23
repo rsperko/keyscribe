@@ -318,12 +318,14 @@ public enum DevCLI {
             let cohorts = value("--cohort").map { Set($0.split(separator: ",").map(String.init)) }
             let threshold = value("--threshold").flatMap(Double.init) ?? AliasDiscovery.defaultThreshold
             let done = DispatchSemaphore(value: 0)
+            let ok = Atomic<Bool>(false)
             Task.detached {
-                await AliasDiscoveryRunner.run(path: path, only: only, cohorts: cohorts, threshold: threshold)
+                let passed = await AliasDiscoveryRunner.run(path: path, only: only, cohorts: cohorts, threshold: threshold)
+                ok.store(passed, ordering: .relaxed)
                 done.signal()
             }
             done.wait()
-            exit(0)
+            exit(ok.load(ordering: .relaxed) ? 0 : 1)
         }
 
         if let i = CommandLine.arguments.firstIndex(of: "--vad-probe"), i + 1 < CommandLine.arguments.count {

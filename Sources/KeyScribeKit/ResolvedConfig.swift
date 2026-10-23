@@ -100,14 +100,18 @@ public final class ResolvedConfig: @unchecked Sendable {
     }
 
     public func voiceCommandText(heard: String, mode: Mode?) -> String {
+        voiceCommandReading(heard: heard, mode: mode).text
+    }
+
+    public func voiceCommandReading(heard: String, mode: Mode?) -> (text: String, firedReplacements: [ReplacementRule]) {
         let stages = postSTTTextStages(for: mode)
         let pipeline = Pipeline(stages.filter { !($0 is FuzzyStage) })
         let payload = pipeline.forward(heard)
         let replaced = payload.bareReplacement?.text ?? pipeline.restore(payload.text)
-        guard let target = VoiceCommandGrammar.targetRange(in: replaced) else { return replaced }
+        guard let target = VoiceCommandGrammar.targetRange(in: replaced) else { return (replaced, payload.firedReplacements) }
         var context = PipelineContext(text: String(replaced[target]))
         for stage in stages where stage is FuzzyStage { stage.apply(&context) }
-        return String(replaced[..<target.lowerBound]) + context.text
+        return (String(replaced[..<target.lowerBound]) + context.text, payload.firedReplacements)
     }
 
     private func buildTextStages(for mode: Mode?) -> [any PipelineStage] {

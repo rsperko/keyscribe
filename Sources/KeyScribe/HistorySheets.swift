@@ -4,15 +4,16 @@ import SwiftUI
 
 struct CreateReplacementSheet: View {
     let initialSource: String
-    let onSave: (String, String) -> Void
+    let onSave: (String, String) -> String?
     @Environment(\.dismiss) private var dismiss
     @State private var source: String
     @State private var replace = ""
+    @State private var saveFailure: String?
     @FocusState private var focus: Field?
 
     private enum Field { case source, replace }
 
-    init(initialSource: String, onSave: @escaping (String, String) -> Void) {
+    init(initialSource: String, onSave: @escaping (String, String) -> String?) {
         self.initialSource = initialSource
         self.onSave = onSave
         _source = State(initialValue: initialSource)
@@ -59,6 +60,7 @@ struct CreateReplacementSheet: View {
             }
             Text("Applies to future dictations in every mode that uses replacements.")
                 .font(.caption).foregroundStyle(.secondary)
+            if let saveFailure { IssueText(saveFailure) }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -73,23 +75,24 @@ struct CreateReplacementSheet: View {
 
     private func save() {
         guard canSave else { return }
-        onSave(sourceTrimmed, replace)
-        dismiss()
+        saveFailure = onSave(sourceTrimmed, replace)
+        if saveFailure == nil { dismiss() }
     }
 }
 
 struct AddToDictionarySheet: View {
     let initialTerm: String
     let analyze: (VocabularyProposal) -> VocabularyAnalysis
-    let onSave: (String, VocabularyAnalysis.Action) -> Void
+    let onSave: (String, VocabularyAnalysis.Action) -> String?
     @Environment(\.dismiss) private var dismiss
     @State private var term: String
+    @State private var saveFailure: String?
     @FocusState private var termFocused: Bool
 
     init(
         initialTerm: String,
         analyze: @escaping (VocabularyProposal) -> VocabularyAnalysis,
-        onSave: @escaping (String, VocabularyAnalysis.Action) -> Void
+        onSave: @escaping (String, VocabularyAnalysis.Action) -> String?
     ) {
         self.initialTerm = initialTerm
         self.analyze = analyze
@@ -121,6 +124,7 @@ struct AddToDictionarySheet: View {
             }
             Text("Next time you say this, \(Branding.appName) will prefer your spelling. A phrase that is always misheard the same way works better as a Replacement, which changes it exactly.")
                 .font(.caption).foregroundStyle(.secondary)
+            if let saveFailure { IssueText(saveFailure) }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -138,7 +142,7 @@ struct AddToDictionarySheet: View {
               case let .word(word) = draft.proposal,
               let action = draft.analysis?.action
         else { return }
-        onSave(word, action)
-        dismiss()
+        saveFailure = onSave(word, action)
+        if saveFailure == nil { dismiss() }
     }
 }

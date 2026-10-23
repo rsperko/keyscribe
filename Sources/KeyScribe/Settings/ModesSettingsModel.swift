@@ -257,6 +257,10 @@ final class ModesSettingsModel: ObservableObject {
         return appliedMove
     }
 
+    var shownUndoMove: AppliedShortcutMove? {
+        noticeSubject == Self.moveSubject ? nil : undoableMove
+    }
+
     func undoMove() {
         guard let applied = undoableMove else { return }
         appliedMove = nil
@@ -305,6 +309,12 @@ final class ModesSettingsModel: ObservableObject {
         return true
     }
 
+    var registeredModes: [Mode] { VoiceCommandTriggers.guarded(modes) }
+
+    private func keepStoreOrder() {
+        modes.sort { ModeStore.fileName(for: $0.id) < ModeStore.fileName(for: $1.id) }
+    }
+
     private func normalized(_ mode: Mode) -> Mode {
         mode.isSystem ? mode.systemNormalized() : mode
     }
@@ -320,6 +330,7 @@ final class ModesSettingsModel: ObservableObject {
             } else {
                 modes.append(renamed)
             }
+            keepStoreOrder()
             if selectedID == oldId { selectedID = newId }
             if lastCreatedId == oldId { lastCreatedId = newId }
             unknownKeys[oldId] = nil
@@ -432,6 +443,7 @@ final class ModesSettingsModel: ObservableObject {
                 modes[index] = mode
             } else {
                 modes.append(mode)
+                keepStoreOrder()
             }
             unknownKeys[mode.id] = nil
             resolve(mode.id)
@@ -454,7 +466,8 @@ final class ModesSettingsModel: ObservableObject {
             .failure(
                 "Changes to \(name) weren’t saved", error: error, file: modeFileURL(mode.id),
                 relativePath: relativePath, stillRunning: stillRunning),
-            about: mode.id, resolvesOnLoad: error is ConfigRepository.UnreadableModeFile)
+            about: mode.id,
+            resolvesOnLoad: error is ConfigRepository.UnreadableModeFile || error is ConfigRepository.UnreadKeys)
     }
 
     // A notice belongs to one mode or instruction: only that subject succeeding, or (for a file it couldn't

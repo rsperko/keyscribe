@@ -1,7 +1,7 @@
 import Foundation
 
 // Single source of truth for in-development feature flags. Each value is one opt-in toggle under
-// Settings → Advanced → Experimental Features, read at its gate via `settings.features.isEnabled(.someFlag)`.
+// Settings → Maintenance → Experimental features, read at its gate via `settings.features.isEnabled(.someFlag)`.
 //
 // Add:      a `static let` with a unique snake_case id, listed in `allCases`; gate on isEnabled. The toggle
 //           renders automatically.
@@ -38,7 +38,7 @@ public struct Feature: CaseIterable, Hashable, Sendable {
 
     public static let voiceCommands = Feature(
         id: "voice_commands",
-        title: "Voice commands",
+        title: "Voice Commands",
         summary: "Adds a built-in Voice Commands mode: give it a shortcut, then \(VoiceCommandPhrase.guidance). Speech on that shortcut is never typed."
     )
 

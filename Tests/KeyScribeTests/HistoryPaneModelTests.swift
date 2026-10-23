@@ -119,9 +119,9 @@ struct HistoryPaneModelTests {
     private func model(_ store: HistoryStore, corrections: Corrections = Corrections()) -> HistoryPaneModel {
         HistoryPaneModel(
             store: store,
-            addDictionaryWord: { corrections.words.append(($0, $1)); return true },
+            addDictionaryWord: { corrections.words.append(($0, $1)); return .saved },
             analyzeDictionaryWord: { corrections.analyzed.append($1); return VocabularyAnalysis(action: .addWord) },
-            addReplacement: { corrections.replacements.append(($0, $1, $2)); return true }, openSettings: { _ in })
+            addReplacement: { corrections.replacements.append(($0, $1, $2)); return .saved }, openSettings: { _ in })
     }
 
     private func selectingOnly(_ value: HistoryEntry, corrections: Corrections) async throws -> HistoryPaneModel {
@@ -142,8 +142,8 @@ struct HistoryPaneModelTests {
         let model = try await selectingOnly(command, corrections: corrections)
         #expect(model.selected?.outcome == .command)
         _ = model.analyzeDictionaryWord("Hydra")
-        #expect(model.addDictionaryWord("Hydra"))
-        #expect(model.addReplacement("hydro", "Hydra"))
+        #expect(model.addDictionaryWord("Hydra") == .saved)
+        #expect(model.addReplacement("hydro", "Hydra") == .saved)
         #expect(corrections.analyzed == [.mode(Mode.voiceCommandsId)])
         #expect(corrections.words.map(\.1) == [.mode(Mode.voiceCommandsId)])
         #expect(corrections.replacements.map(\.2) == [.mode(Mode.voiceCommandsId)])
@@ -156,18 +156,45 @@ struct HistoryPaneModelTests {
         let model = try await selectingOnly(command, corrections: corrections)
         model.voiceCommandsEnabled = { false }
         #expect(!model.canCorrect)
-        #expect(!model.addDictionaryWord("Hydra"))
-        #expect(!model.addReplacement("hydro", "Hydra"))
+        #expect(model.addDictionaryWord("Hydra") == .failed)
+        #expect(model.addReplacement("hydro", "Hydra") == .failed)
         #expect(corrections.words.isEmpty && corrections.replacements.isEmpty)
     }
 
     @Test func correctionsFromADictationGoToTheGlobalVocabulary() async throws {
         let corrections = Corrections()
         let model = try await selectingOnly(entry("hello"), corrections: corrections)
-        #expect(model.addDictionaryWord("Hydra"))
-        #expect(model.addReplacement("hydro", "Hydra"))
+        #expect(model.addDictionaryWord("Hydra") == .saved)
+        #expect(model.addReplacement("hydro", "Hydra") == .saved)
         #expect(corrections.words.map(\.1) == [.global])
         #expect(corrections.replacements.map(\.2) == [.global])
+    }
+
+    @Test func aRefusedSheetSaveReturnsTheReasonAndARetrySucceeds() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try store.append(entry("hello"), today: "2026-07-10")
+        var results: [ConfigRepository.AddResult] = [.refused("dictionary.toml has an unread key"), .saved,
+                                                     .refused("replacements.toml has an unread key"), .saved]
+        var attempts: [String] = []
+        let model = HistoryPaneModel(
+            store: store,
+            addDictionaryWord: { word, _ in attempts.append(word); return results.removeFirst() },
+            analyzeDictionaryWord: { _, _ in VocabularyAnalysis(action: .addWord) },
+            addReplacement: { heard, _, _ in attempts.append(heard); return results.removeFirst() },
+            openSettings: { _ in })
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.selection = model.groups.first?.rows.first?.id
+
+        #expect(model.saveDictionaryWord("Hydra", .addWord) == "dictionary.toml has an unread key")
+        #expect(model.statusMessage == nil)
+        #expect(model.saveDictionaryWord("Hydra", .addWord) == nil)
+        #expect(model.statusMessage?.contains("Hydra") == true)
+
+        #expect(model.saveReplacement("hydro", "Hydra") == "replacements.toml has an unread key")
+        #expect(model.saveReplacement("hydro", "Hydra") == nil)
+        #expect(attempts == ["Hydra", "Hydra", "hydro", "hydro"])
     }
 
     @Test func releaseForCloseClearsAllInMemoryState() async throws {

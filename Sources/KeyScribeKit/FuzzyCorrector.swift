@@ -105,7 +105,10 @@ public enum FuzzyCorrector {
         }
     }
 
-    fileprivate struct Term: Sendable { let canonical: String; let norm: String; let latin: String?; let key: String }
+    fileprivate struct Term: Sendable {
+        let canonical: String; let norm: String; let latin: String?; let key: String
+        var digits: String { latin.map(FuzzyCorrector.digits) ?? "" }
+    }
 
     private static func canonicalize(_ terms: [String]) -> [Term] {
         var seen = Set<String>()
@@ -124,6 +127,7 @@ public enum FuzzyCorrector {
         if let exact = prepared.byNorm[norm] { return exact }                       // casing/spacing only
         guard allowFuzzy, let latin = latinized(norm) else { return nil }
         let latinKey = phoneticKey(latin)
+        let latinDigits = digits(latin)
         let allowed = latin.count < shortestNearMatch ? 0 : latin.count >= 7 ? 2 : 1
         var candidateIndices: [Int] = []
         for len in (latin.count - allowed)...(latin.count + allowed) where len >= 0 {
@@ -134,7 +138,8 @@ public enum FuzzyCorrector {
         var bestDistance = Int.max
         for idx in candidateIndices {
             let term = prepared.terms[idx]
-            guard let termLatin = term.latin, term.key == latinKey else { continue }
+            // The phonetic key drops digits, so a version number would otherwise be one free edit ("llama2" → Llama3).
+            guard let termLatin = term.latin, term.key == latinKey, term.digits == latinDigits else { continue }
             let distance = levenshtein(latin, termLatin)
             let termAllowed = termLatin.count < shortestNearMatch ? 0 : allowed
             guard distance <= termAllowed, distance < bestDistance else { continue }
@@ -145,6 +150,8 @@ public enum FuzzyCorrector {
     }
 
     private static let shortestNearMatch = 5
+
+    fileprivate static func digits(_ latin: String) -> String { latin.filter(\.isNumber) }
 
     private static let lettersWithoutAnAccentForm: [Character: String] = ["ß": "ss", "æ": "ae", "œ": "oe", "ø": "o", "ł": "l"]
 

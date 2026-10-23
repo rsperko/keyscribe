@@ -431,6 +431,9 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             if let refusal = browserRefusal(browser, place: place) { return refusal }
             succeeded = await system.openURL(url, browser: browser)
         case .script(let script, let arguments):
+            if let refusal = script.executionRefusal(resolvedProgram: ScriptLauncher.resolvedPath(script.program)) {
+                return .failed(message: "\(script.name) was not run. \(refusal)", command: command)
+            }
             let run = await system.runScript(script, arguments: arguments) { late in
                 onLateResult(Self.outcome(of: late, script: script, command: command))
             }
@@ -464,8 +467,10 @@ final class VoiceCommandRunner: VoiceCommandRunning {
                 return .done(summary: name, command: command)
             case .alreadyFrontmost:
                 return .done(summary: name, command: command)
-            case .gone, .elsewhere:
+            case .gone:
                 break
+            case .elsewhere:
+                return .failed(message: Self.windowElsewhereMessage, command: command)
             case .noResponse, .failed:
                 return failure
             case .cancelled:
@@ -563,7 +568,8 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     private let handlers: @Sendable () -> [URL]
     private let now: () -> ContinuousClock.Instant
     private static let installedTTL: Duration = .seconds(60)
-    private static let scripts = DeadlineQueue(label: "com.keyscribe.voice-commands.applescript")
+    private static let scripts = DeadlineQueue(
+        label: "com.keyscribe.voice-commands.applescript", backlog: TimeInterval(BrowserScripting.replyTimeout))
     private static let accessibility = DeadlineQueue(label: "com.keyscribe.voice-commands.accessibility")
     private static let windowReadDeadline: TimeInterval = 1
     private static let tabReadDeadline: TimeInterval = 1.5

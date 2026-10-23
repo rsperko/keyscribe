@@ -22,7 +22,7 @@ struct ModesSettingsView: View {
                 Divider()
             }
             ModesPaneNotices(model: model, voiceCommands: model.voiceCommands)
-            if model.notice == nil, let applied = model.undoableMove {
+            if let applied = model.shownUndoMove {
                 HStack {
                     Text(ShortcutMoveCopy(applied.move, notice: nil).done).font(.caption)
                     Spacer()
@@ -164,11 +164,11 @@ struct ModesSettingsView: View {
         guard mode.enabled else { return nil }
         // A trigger the shadowing pass drops means this mode can never start — worth saying in the list,
         // since the trigger row that explains it is only visible once this mode is selected.
-        if TriggerKeyConflicts.conflict(for: mode, in: model.modes)?.kind == .unreachable {
+        if TriggerKeyConflicts.conflict(for: mode, in: model.registeredModes)?.kind == .unreachable {
             return .triggerUnreachable
         }
         if mode.runsVoiceCommands, VoiceCommandTriggers.isShutOut(model.modes) {
-            return .triggerUnreachable
+            return .voiceCommandsShutOut
         }
         guard let rewrite = mode.aiRewrite else { return nil }
         if rewrite.connection.isEmpty {
@@ -332,7 +332,7 @@ private struct ModeFileNotice: View {
                 }
                 if !unknownKeys.isEmpty {
                     IssueText(
-                        "\(Branding.appName) doesn’t read \(unknownKeys.map(\.description).joined(separator: ", ")) in \(mode.id).toml, so it has no effect. Changing this mode here removes it.",
+                        "\(Branding.appName) doesn’t read \(unknownKeys.map(\.description).joined(separator: ", ")) in \(mode.id).toml, so it has no effect. Fix or remove it in the file before changing this mode here, so it isn’t deleted.",
                         severity: .advisory, font: .callout)
                 }
                 Button("Show in Finder", action: onReveal)
@@ -374,13 +374,14 @@ private enum ModeSummaryIssue {
     case missingService
     case failedService
     case triggerUnreachable
+    case voiceCommandsShutOut
 
     var summary: String {
         switch self {
         case .needsService: "Needs AI service"
         case .missingService: "AI service missing"
         case .failedService: "AI service failed"
-        case .triggerUnreachable: "Shortcut never fires"
+        case .triggerUnreachable, .voiceCommandsShutOut: "Shortcut never fires"
         }
     }
 
@@ -390,6 +391,7 @@ private enum ModeSummaryIssue {
         case .missingService: "The selected AI service no longer exists."
         case .failedService: "This mode's AI service failed its last connection test."
         case .triggerUnreachable: "Another mode claims the same press, written a different way, so no shortcut on this mode fires."
+        case .voiceCommandsShutOut: "Another mode uses this shortcut, and it keeps it, so Voice Commands never starts. Select Voice Commands and choose Move Shortcut to take it, or record a different shortcut."
         }
     }
 }

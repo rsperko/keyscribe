@@ -65,6 +65,15 @@ struct ConfigLoadFailureMessageTests {
             == "schema 3 is newer than this build supports (1)")
         #expect(ConfigError.invalid("bad").summary == "bad")
     }
+
+    @Test func theLoggedCategoryNeverCarriesTheFilesContent() {
+        let errors: [ConfigError] = [
+            .missingSchemaVersion, .newerSchemaVersion(found: 3, supported: 1),
+            .invalid("place \"Secret Project\" has no target"), .unreadableFile("Secret Project"),
+        ]
+        #expect(Set(errors.map(\.category)).count == errors.count)
+        #expect(errors.allSatisfy { !$0.category.contains("Secret") && !$0.category.contains("3") })
+    }
 }
 
 struct SettingsWriteGuardTests {

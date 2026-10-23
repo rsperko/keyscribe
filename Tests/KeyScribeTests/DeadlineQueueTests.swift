@@ -45,6 +45,31 @@ struct DeadlineQueueTests {
         #expect(ran.count == 0)
     }
 
+    @Test func aBacklogLetsTheNextCallWaitOutWorkAnExpiredCallerLeftRunning() async {
+        let queue = DeadlineQueue(label: "test.deadline.backlog", backlog: 0.5)
+        let abandoned = await queue.run(within: 0.05) { Thread.sleep(forTimeInterval: 0.3); return 0 }
+        guard case .expired = abandoned else {
+            Issue.record("expected the first call to expire")
+            return
+        }
+        guard case .finished(let value) = await queue.run(within: 0.1, { 1 }) else {
+            Issue.record("expected the next call to run once the abandoned work ended")
+            return
+        }
+        #expect(value == 1)
+    }
+
+    @Test func aBacklogStillExpiresWorkThatOutlivesItsOwnDeadline() async {
+        let queue = DeadlineQueue(label: "test.deadline.backlog-slow", backlog: 0.5)
+        let started = Date()
+        let result = await queue.run(within: 0.05) { Thread.sleep(forTimeInterval: 0.4); return true }
+        guard case .expired = result else {
+            Issue.record("expected expiry")
+            return
+        }
+        #expect(Date().timeIntervalSince(started) < 0.3)
+    }
+
     @Test func workThatSeesItsDeadlinePassStopsSoTheNextCallRuns() async {
         let queue = DeadlineQueue(label: "test.deadline.recover")
         let steps = Counter()

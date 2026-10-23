@@ -16,8 +16,8 @@ final class CorrectionPanelController {
     private var window: NSWindow?
     private let destinations: () -> [CorrectionDestination]
     private let analyze: (VocabularyProposal, CorrectionDestination) -> VocabularyAnalysis
-    private let addDictionaryWord: (String, CorrectionDestination) -> Bool
-    private let addReplacement: (String, String, Bool, CorrectionDestination) -> Bool
+    private let addDictionaryWord: (String, CorrectionDestination) -> ConfigRepository.AddResult
+    private let addReplacement: (String, String, Bool, CorrectionDestination) -> ConfigRepository.AddResult
     private let captureSelection: () async -> String?
     private let clipboardPaste: () -> ClipboardPaste
     private var previousApp: NSRunningApplication?
@@ -26,8 +26,8 @@ final class CorrectionPanelController {
     init(
         destinations: @escaping () -> [CorrectionDestination] = { [.global] },
         analyze: @escaping (VocabularyProposal, CorrectionDestination) -> VocabularyAnalysis,
-        addDictionaryWord: @escaping (String, CorrectionDestination) -> Bool,
-        addReplacement: @escaping (String, String, Bool, CorrectionDestination) -> Bool,
+        addDictionaryWord: @escaping (String, CorrectionDestination) -> ConfigRepository.AddResult,
+        addReplacement: @escaping (String, String, Bool, CorrectionDestination) -> ConfigRepository.AddResult,
         captureSelection: @escaping () async -> String? = { await TextInserter.captureSelection(requirePerfectRestore: true) },
         clipboardPaste: @escaping () -> ClipboardPaste = { ClipboardPaste() }
     ) {
@@ -68,8 +68,8 @@ final class CorrectionPanelController {
                     self.window?.close()
                 case .noChange:
                     self.status.refresh()
-                case .failed:
-                    self.status.message = Self.saveFailedMessage(for: Self.destination(of: result))
+                case .failed(let refusal):
+                    self.status.message = refusal ?? Self.saveFailedMessage(for: Self.destination(of: result))
                 }
             },
             onCorrect: { [weak self] result, pasteText in self?.applyAndCorrect(result, pasteText: pasteText) },
@@ -84,19 +84,23 @@ final class CorrectionPanelController {
         self.window = window
     }
 
-    private enum SaveOutcome { case saved, noChange, failed }
+    private enum SaveOutcome { case saved, noChange, failed(refusal: String?) }
 
     private func apply(_ result: CorrectionPanelView.SaveResult) -> SaveOutcome {
         if case .noChange = analyze(Self.proposal(of: result), Self.destination(of: result)).action {
             return .noChange
         }
-        let saved: Bool
+        let added: ConfigRepository.AddResult
         switch result {
-        case .dictionary(let word, let destination): saved = addDictionaryWord(word, destination)
+        case .dictionary(let word, let destination): added = addDictionaryWord(word, destination)
         case .replacement(let heard, let replace, let regex, let destination):
-            saved = addReplacement(heard, replace, regex, destination)
+            added = addReplacement(heard, replace, regex, destination)
         }
-        return saved ? .saved : .failed
+        switch added {
+        case .saved: return .saved
+        case .refused(let message): return .failed(refusal: message)
+        case .failed: return .failed(refusal: nil)
+        }
     }
 
     static func saveFailedMessage(for destination: CorrectionDestination) -> String {
@@ -125,8 +129,8 @@ final class CorrectionPanelController {
 
     private func applyAndCorrect(_ result: CorrectionPanelView.SaveResult, pasteText: String) {
         switch apply(result) {
-        case .failed:
-            status.message = Self.saveFailedMessage(for: Self.destination(of: result))
+        case .failed(let refusal):
+            status.message = refusal ?? Self.saveFailedMessage(for: Self.destination(of: result))
             return
         case .noChange, .saved:
             break

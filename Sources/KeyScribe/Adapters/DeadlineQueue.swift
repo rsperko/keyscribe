@@ -7,9 +7,11 @@ enum DeadlineResult<T: Sendable>: Sendable {
 
 final class DeadlineQueue: Sendable {
     private let queue: DispatchQueue
+    private let backlog: TimeInterval
 
-    init(label: String) {
+    init(label: String, backlog: TimeInterval = 0) {
         queue = DispatchQueue(label: label, qos: .userInitiated)
+        self.backlog = backlog
     }
 
     func run<T: Sendable>(within seconds: TimeInterval, _ work: @escaping @Sendable () -> T) async -> DeadlineResult<T> {
@@ -25,12 +27,18 @@ final class DeadlineQueue: Sendable {
             await withCheckedContinuation { (continuation: CheckedContinuation<DeadlineResult<T>, Never>) in
                 reply.attach(continuation)
                 if Task.isCancelled, gate.close() { reply.send(.expired) }
+                let backlog = backlog
                 queue.async {
                     guard gate.isOpen else { return }
+                    if backlog > 0 {
+                        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + seconds) {
+                            if gate.close() { reply.send(.expired) }
+                        }
+                    }
                     let value = work { gate.isOpen }
                     if gate.close() { reply.send(.finished(value)) }
                 }
-                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + seconds) {
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + seconds + backlog) {
                     if gate.close() { reply.send(.expired) }
                 }
             }

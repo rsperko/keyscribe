@@ -449,6 +449,9 @@ struct PaneNotice: Equatable, Identifiable {
     static func failure(
         _ title: String, error: Error, file: URL, relativePath: String, stillRunning: String?
     ) -> PaneNotice {
+        if error is ConfigRepository.UnreadKeys {
+            return PaneNotice(title: title, message: error.localizedDescription, fileURL: file)
+        }
         let configError = (error as? ConfigError) ?? (error as? ConfigRepository.UnreadableModeFile)?.error
         guard let configError else { return PaneNotice(title: title, message: error.localizedDescription) }
         let issue = ConfigFileIssue.unreadable(

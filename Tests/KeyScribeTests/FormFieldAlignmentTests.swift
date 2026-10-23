@@ -44,7 +44,9 @@ struct FormFieldAlignmentTests {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-align-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        let model = VoiceCommandsSettingsModel(repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)))
+        let model = VoiceCommandsSettingsModel(
+            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)),
+            system: LiveVoiceCommandSystem(roots: [], handlers: { [] }))
         let fields = render(VoiceCommandsEditorView(mode: .voiceCommands, allModes: [.voiceCommands], onUpdate: { _ in }, onMoveShortcut: { _ in }, model: model)
             .environmentObject(HotkeyRecordingState()))
         #expect(!fields.isEmpty)

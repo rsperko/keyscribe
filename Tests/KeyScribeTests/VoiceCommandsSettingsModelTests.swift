@@ -128,6 +128,22 @@ struct VoiceCommandsSettingsModelTests {
         #expect(model.readAs("switch to herder") == "switch to herdr")
     }
 
+    @Test func tryItNeverCountsAReplacementAsUsed() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-vcsettings-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let usage = ReplacementUsageStore(supportDir: dir)
+        let config = ConfigCache(supportDir: dir)
+        config.voiceCommandsEnabled = true
+        let repository = ConfigRepository(supportDir: dir, config: config, replacementUsage: usage)
+        var commands = Mode.voiceCommands
+        commands.replacements.rules = [.init(heard: "male", replace: "mail", regex: false)]
+        try repository.writeMode(commands)
+        let model = VoiceCommandsSettingsModel(repository: repository)
+        #expect(model.readAs("switch to male") == "switch to mail")
+        usage.flush()
+        #expect(usage.snapshot().rules["mode:\(Mode.voiceCommandsId)|l|male"]?.count == 0)
+    }
+
     @Test func tryItShowsWhatTheVocabularyChanged() {
         let cleaned = VoiceCommandsSettingsModel.describe(
             .noMatch("herdr"), heard: "bitch to herder", readAs: "switch to herdr", appName: { _ in nil })
@@ -241,6 +257,45 @@ struct VoiceCommandsSettingsModelTests {
         #expect(model.saveScript(VoiceCommandScript(name: deploy.name, run: ["/usr/bin/env", "{text}"]), replacing: deploy.name) != nil)
         #expect(model.scripts == [deploy])
         #expect(try String(contentsOf: file, encoding: .utf8) == before)
+    }
+
+    @Test func aSavedFileWithARefusedScriptStillLoadsItsOtherEntries() throws {
+        let (model, dir) = make()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let shell = VoiceCommandScript(name: "Shell", run: ["/usr/bin/xcrun", "swift", "-e", "{text}"])
+        try VoiceCommandStore.write(VoiceCommandConfig(places: [mail], scripts: [shell, deploy]), to: dir)
+        model.reload()
+        #expect(!model.hasUnreadableFile)
+        #expect(model.places == [mail])
+        #expect(model.scripts == [shell, deploy])
+    }
+
+    @Test func editingAPlaceRemovedElsewhereIsRefusedAndAddingStillWorks() throws {
+        let (model, dir) = make()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        _ = model.save(mail, replacing: nil)
+        try VoiceCommandStore.write(VoiceCommandConfig(), to: dir)
+        let file = dir.appendingPathComponent(VoiceCommandStore.fileName)
+        let before = try String(contentsOf: file, encoding: .utf8)
+        var edited = mail
+        edited.say = ["email"]
+        #expect(model.save(edited, replacing: "Mail") == VoiceCommandsSettingsModel.staleEditMessage(kind: "place"))
+        #expect(try String(contentsOf: file, encoding: .utf8) == before)
+        #expect(model.save(edited, replacing: nil) == nil)
+        #expect(VoiceCommandStore.loadOrDefault(supportDir: dir).places == [edited])
+    }
+
+    @Test func editingAnActionRenamedElsewhereIsRefusedRatherThanResurrected() throws {
+        let (model, dir) = make()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        _ = model.saveScript(deploy, replacing: nil)
+        var renamedElsewhere = deploy
+        renamedElsewhere.name = "Release"
+        try VoiceCommandStore.write(VoiceCommandConfig(scripts: [renamedElsewhere]), to: dir)
+        var edited = deploy
+        edited.say = ["push"]
+        #expect(model.saveScript(edited, replacing: "Deploy") == VoiceCommandsSettingsModel.staleEditMessage(kind: "action"))
+        #expect(VoiceCommandStore.loadOrDefault(supportDir: dir).scripts == [renamedElsewhere])
     }
 
     @Test func scriptValidationExplainsWhatPreventsSavingWithoutWriting() {

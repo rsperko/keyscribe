@@ -31,3 +31,7 @@ Each installed engine transcribes every clip; the reference text labels which He
 misses. The report gives occurrence and form recall, wrong suggestions per 100 negatives, wrong phrase
 groups, and top-three precision. A run whose clips are all transcribed correctly says nothing about
 recall, only about wrong suggestions.
+
+The command exits 1 when nothing was evaluated, or when any selected engine fails to load, produces no
+records, or fails to transcribe a clip it has. The report still prints for the engines that ran. Missing
+recordings are listed but do not fail the run on their own.

@@ -194,11 +194,11 @@ struct FuzzyCorrectorTests {
         #expect(fix("the UGBte cluster", ["Yugabyte"]) == "the UGBte cluster")
     }
 
-    @Test func replacementOutputIsNotRewrittenByFuzzyStage() {
-        var ctx = PipelineContext(text: "We scheduled a meeting yesterday.")
-        ReplacementsStage(rules: [ReplacementRule(heard: "meeting", replace: "rally", isRegex: false)]).apply(&ctx)
-        FuzzyStage(terms: ["Aerially"]).apply(&ctx)
-        #expect(ctx.text == "We scheduled a rally yesterday.")
+    @Test func replacementOutputIsNotProtectedFromTheFuzzyStage() {
+        var ctx = PipelineContext(text: "We deployed to cubes yesterday.")
+        ReplacementsStage(rules: [ReplacementRule(heard: "cubes", replace: "kubernetis", isRegex: false)]).apply(&ctx)
+        FuzzyStage(terms: ["Kubernetes"]).apply(&ctx)
+        #expect(ctx.text == "We deployed to Kubernetes yesterday.")
     }
 
     @Test func neverFuzzesAWordThePhoneticKeyCannotSee() {
@@ -243,6 +243,21 @@ struct FuzzyCorrectorTests {
 
     @Test func aSevenLetterWordStillGetsTwoEdits() {
         #expect(fix("open Gravena now", ["Grafana"]) == "open Grafana now")
+    }
+
+    @Test(arguments: [
+        ("try llama2 today", "Llama3"), ("try qwen2 today", "Qwen3"), ("run python311 now", "Python312"),
+        ("use gpt4o here", "GPT5o"), ("use llama today", "Llama3"), ("use llama3 today", "Llama"),
+    ])
+    func aNearMatchNeverChangesAVersionNumber(text: String, term: String) {
+        #expect(fix(text, [term]) == text)
+        #expect(candidates(text, [term]).isEmpty)
+    }
+
+    @Test func aVersionedTermStillRecoversCasingSpacingAndSpelling() {
+        #expect(fix("try llama 3 today", ["Llama3"]) == "try Llama3 today")
+        #expect(fix("try qwen3 today", ["Qwen3"]) == "try Qwen3 today")
+        #expect(fix("try lama3 today", ["Llama3"]) == "try Llama3 today")
     }
 
     @Test(arguments: [

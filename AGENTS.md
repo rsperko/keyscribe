@@ -1233,8 +1233,8 @@ the flag. The single source of truth is the **`Feature`** type (`Sources/KeyScri
 a struct whose `static let` catalog (listed in `allCases`) is the set of flags;
 state lives in the global `settings.toml` `[features]` table as **deviations only** — it stores just
 the ids the user turned on, so an absent (or unknown, or pruned) id means **off**. Flags are strictly
-opt-in (no per-flag default-on) and appear in every build under **Settings → Advanced → Experimental
-Features** (the section hides itself when there are no flags).
+opt-in (no per-flag default-on) and appear in every build under **Settings → Maintenance → Experimental
+features** (the section hides itself when there are no flags).
 
 - **Read a flag (code):** `settings.features.isEnabled(.myFlag)` — `.myFlag` is a real `static let`, so a
   typo won't compile. `Settings` is already threaded through `AppDelegate` → `DictationController`; just gate at
@@ -1246,7 +1246,7 @@ Features** (the section hides itself when there are no flags).
   code path.
 - **Add a flag:** add one `static let` to `Feature` with its `id` (stable, unique snake_case TOML key — never
   rename once shipped; `FeaturesTests.featureIdsAreUnique` guards collisions), `title`, and `summary`, and
-  append it to `allCases`. The Advanced toggle renders automatically; no UI code to touch.
+  append it to `allCases`. The Maintenance toggle renders automatically; no UI code to touch.
 - **Roll out / retire:** delete the `static let` and its `allCases` entry, and make the gate unconditional
   (or delete the dead branch). A stale id left in a user's `settings.toml` is ignored and dropped on the next write.
 
@@ -1279,7 +1279,7 @@ paste the dictation, and the immediate ⌘V must paste `MARKER`.
 `allCases` may be empty — that is the normal state once every flag has been rolled out, not a bug.
 `Feature` is a **struct** with a
 `static let` catalog rather than an enum precisely so that empty state does not read to the compiler as
-unreachable code, and so the Advanced section can hide itself when `allCases` is empty. When you add a flag,
+unreachable code, and so the Experimental features section can hide itself when `allCases` is empty. When you add a flag,
 also add per-flag tests — default-off fallback, override persistence, and off-elision.
 
 ---

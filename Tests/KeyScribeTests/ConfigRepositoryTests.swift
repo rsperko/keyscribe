@@ -368,6 +368,88 @@ struct ConfigRepositoryTests {
         #expect(usage.snapshot().rules["mode:code|l|teh"] == nil)
     }
 
+    private func prependUnreadKey(to file: URL) throws -> String {
+        let withKey = "unread_key = 1\n" + (try String(contentsOf: file, encoding: .utf8))
+        try withKey.write(to: file, atomically: true, encoding: .utf8)
+        return withKey
+    }
+
+    private func dropUnreadKey(from file: URL) throws {
+        let text = try String(contentsOf: file, encoding: .utf8)
+        try String(text.dropFirst("unread_key = 1\n".count)).write(to: file, atomically: true, encoding: .utf8)
+    }
+
+    @Test func everyInAppWriteRefusesToDeleteAKeyTheAppDoesNotRead() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        try DictionaryStore.write(DictionarySet(words: ["Redis"]), to: dir)
+        try ReplacementsStore.write(ReplacementsSet(rules: [.init(heard: "teh", replace: "the", regex: false)]), to: dir)
+        try ConnectionStore.write(ConnectionSet(connections: []), to: dir)
+        try VoiceCommandStore.write(VoiceCommandConfig(), to: dir)
+        try repo.writeMode(Mode(id: "notes", name: "Notes"))
+        let writes: [(file: String, write: () throws -> Void)] = [
+            (DictionaryStore.fileName, { try repo.mutateDictionary { $0.adding(word: "Kafka") } }),
+            (ReplacementsStore.fileName, { try repo.mutateReplacements { $0 = $0.adding(heard: "recieve", replace: "receive", regex: false) } }),
+            (ConnectionStore.fileName, {
+                try repo.upsertConnection(Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k"))
+            }),
+            (VoiceCommandStore.fileName, { try repo.mutateVoiceCommands { $0.places.append(VoiceCommandPlace(name: "Mail", target: .url("https://mail.example.net/"))) } }),
+            ("modes/notes.toml", { try repo.mutateMode(id: "notes") { $0.dictionary.words = ["Kafka"] } }),
+            ("modes/notes.toml", { var mode = Mode(id: "notes", name: "Notes"); mode.enabled = false; try repo.writeMode(mode) }),
+        ]
+        for (relativePath, write) in writes {
+            let file = dir.appendingPathComponent(relativePath)
+            let withKey = try prependUnreadKey(to: file)
+            #expect(throws: ConfigRepository.UnreadKeys.self, "\(relativePath)") { try write() }
+            #expect(try String(contentsOf: file, encoding: .utf8) == withKey, "\(relativePath)")
+            try dropUnreadKey(from: file)
+            try write()
+        }
+    }
+
+    @Test func aRefusedCorrectionNamesTheFileAndKey() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let repo = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
+        try DictionaryStore.write(DictionarySet(words: ["Redis"]), to: dir)
+        _ = try prependUnreadKey(to: dir.appendingPathComponent(DictionaryStore.fileName))
+        guard case .refused(let message) = repo.addDictionaryWord("Kafka", to: .global) else {
+            Issue.record("expected a refusal")
+            return
+        }
+        #expect(message.hasPrefix("dictionary.toml has “unread_key”"))
+        #expect(repo.dictionaryWords() == ["Redis"])
+    }
+
+    @Test func turningVoiceCommandsOffAndOnKeepsTheUseOfItsReplacements() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let usage = ReplacementUsageStore(supportDir: dir)
+        let config = ConfigCache(supportDir: dir)
+        config.voiceCommandsEnabled = true
+        let repo = ConfigRepository(supportDir: dir, config: config, replacementUsage: usage)
+        var commands = Mode.voiceCommands
+        commands.replacements.rules = [.init(heard: "male", replace: "mail", regex: false)]
+        try repo.writeMode(commands)
+        usage.record([ReplacementRule(heard: "male", replace: "mail", isRegex: false, origin: .mode(Mode.voiceCommandsId))])
+        usage.flush()
+        let key = "mode:\(Mode.voiceCommandsId)|l|male"
+        let tracked = try #require(usage.snapshot().rules[key])
+        #expect(tracked.count == 1)
+
+        config.voiceCommandsEnabled = false
+        repo.reconcileReplacementUsage()
+        usage.flush()
+        #expect(usage.snapshot().rules[key] == tracked)
+
+        let relaunched = ReplacementUsageStore(supportDir: dir)
+        config.voiceCommandsEnabled = true
+        ConfigRepository(supportDir: dir, config: config, replacementUsage: relaunched).reconcileReplacementUsage()
+        relaunched.flush()
+        #expect(relaunched.snapshot().rules[key] == tracked)
+    }
+
     @Test func aBrokenReplacementsFileDoesNotWipeTrackedUse() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

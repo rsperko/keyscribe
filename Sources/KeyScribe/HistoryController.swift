@@ -77,9 +77,9 @@ final class HistoryPaneModel: ObservableObject {
     private var loadGeneration = 0
 
     private let store: HistoryStore
-    private let saveWord: (String, CorrectionDestination.Scope) -> Bool
+    private let saveWord: (String, CorrectionDestination.Scope) -> ConfigRepository.AddResult
     private let analyzeWord: (String, CorrectionDestination.Scope) -> VocabularyAnalysis
-    private let saveReplacement: (String, String, CorrectionDestination.Scope) -> Bool
+    private let saveReplacement: (String, String, CorrectionDestination.Scope) -> ConfigRepository.AddResult
     var openSettings: (SettingsDestination) -> Void
     var copyText: ((String) -> Void)?
     var pasteText: ((String) -> Void)?
@@ -96,9 +96,9 @@ final class HistoryPaneModel: ObservableObject {
 
     init(
         store: HistoryStore,
-        addDictionaryWord: @escaping (String, CorrectionDestination.Scope) -> Bool,
+        addDictionaryWord: @escaping (String, CorrectionDestination.Scope) -> ConfigRepository.AddResult,
         analyzeDictionaryWord: @escaping (String, CorrectionDestination.Scope) -> VocabularyAnalysis,
-        addReplacement: @escaping (String, String, CorrectionDestination.Scope) -> Bool,
+        addReplacement: @escaping (String, String, CorrectionDestination.Scope) -> ConfigRepository.AddResult,
         openSettings: @escaping (SettingsDestination) -> Void
     ) {
         self.store = store
@@ -305,9 +305,38 @@ final class HistoryPaneModel: ObservableObject {
     var canCorrect: Bool { !correctsCommands || voiceCommandsEnabled() }
     private var correctionScope: CorrectionDestination.Scope { correctsCommands ? .mode(Mode.voiceCommandsId) : .global }
 
-    func addDictionaryWord(_ word: String) -> Bool { canCorrect && saveWord(word, correctionScope) }
+    func addDictionaryWord(_ word: String) -> ConfigRepository.AddResult { canCorrect ? saveWord(word, correctionScope) : .failed }
     func analyzeDictionaryWord(_ word: String) -> VocabularyAnalysis { analyzeWord(word, correctionScope) }
-    func addReplacement(_ heard: String, _ replace: String) -> Bool { canCorrect && saveReplacement(heard, replace, correctionScope) }
+    func addReplacement(_ heard: String, _ replace: String) -> ConfigRepository.AddResult {
+        canCorrect ? saveReplacement(heard, replace, correctionScope) : .failed
+    }
+
+    func saveReplacement(_ heard: String, _ replace: String) -> String? {
+        let added = addReplacement(heard, replace)
+        guard added == .saved else { return Self.failureMessage(added) }
+        let target = replace.isEmpty ? "nothing" : ReplacementAuthoring.preview(for: replace).text
+        flash("\(correctsCommands ? "Future voice commands" : "Future dictations") will replace \u{201C}\(heard)\u{201D} with \u{201C}\(target)\u{201D}.")
+        return nil
+    }
+
+    func saveDictionaryWord(_ term: String, _ action: VocabularyAnalysis.Action) -> String? {
+        let added = addDictionaryWord(term)
+        guard added == .saved else { return Self.failureMessage(added) }
+        let destination = correctsCommands
+            ? "the Voice Commands dictionary."
+            : "your dictionary — a recognition hint for future dictations."
+        if case let .updateWord(currentWord) = action {
+            flash("Updated \u{201C}\(currentWord)\u{201D} to \u{201C}\(term)\u{201D} in \(destination)")
+        } else {
+            flash("Added \u{201C}\(term)\u{201D} to \(destination)")
+        }
+        return nil
+    }
+
+    static func failureMessage(_ result: ConfigRepository.AddResult) -> String {
+        if case .refused(let message) = result { return message }
+        return saveFailedMessage
+    }
 
     func deleteSelected() {
         guard let entry = selected else { return }
@@ -664,13 +693,7 @@ private struct HistoryDetailView: View {
             selectedRole = nil
         }
         .sheet(isPresented: $showReplacementSheet) {
-            CreateReplacementSheet(initialSource: replacementSource) { heard, replace in
-                if model.addReplacement(heard, replace) {
-                    model.flash("\(model.correctsCommands ? "Future voice commands" : "Future dictations") will replace \u{201C}\(heard)\u{201D} with \u{201C}\(replace.isEmpty ? "nothing" : ReplacementAuthoring.preview(for: replace).text)\u{201D}.")
-                } else {
-                    model.flash(HistoryPaneModel.saveFailedMessage)
-                }
-            }
+            CreateReplacementSheet(initialSource: replacementSource, onSave: model.saveReplacement)
         }
         .sheet(isPresented: $showDictionarySheet) {
             AddToDictionarySheet(initialTerm: dictionarySource, analyze: { proposal in
@@ -678,17 +701,7 @@ private struct HistoryDetailView: View {
                     return VocabularyAnalysis(action: .addWord)
                 }
                 return model.analyzeDictionaryWord(word)
-            }) { term, action in
-                if model.addDictionaryWord(term) {
-                    if case let .updateWord(currentWord) = action {
-                        model.flash("Updated \u{201C}\(currentWord)\u{201D} to \u{201C}\(term)\u{201D} in \(dictionaryDestination)")
-                    } else {
-                        model.flash("Added \u{201C}\(term)\u{201D} to \(dictionaryDestination)")
-                    }
-                } else {
-                    model.flash(HistoryPaneModel.saveFailedMessage)
-                }
-            }
+            }, onSave: model.saveDictionaryWord)
         }
     }
 
@@ -769,12 +782,6 @@ private struct HistoryDetailView: View {
     }
 
     private var selectionIsHeard: Bool { selectedRole == .heard }
-
-    private var dictionaryDestination: String {
-        model.correctsCommands
-            ? "the Voice Commands dictionary."
-            : "your dictionary — a recognition hint for future dictations."
-    }
 
     private var replacementSource: String {
         HistoryCorrectionSource.replacement(selection: selectedText, selectionIsHeard: selectionIsHeard)

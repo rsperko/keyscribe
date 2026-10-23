@@ -108,7 +108,9 @@ never hand-edited, and a write to it does not reload configuration.
   date is unknown. Dates are local days (`yyyy-MM-dd`), never timestamps, and no dictation text is
   stored.
 - A rule counts only when the dictation was inserted or copied; a cancelled, empty, or failed one
-  never counts. A whole-utterance replacement counts only the rule that owns the utterance. A count
+  never counts. For a voice command, a rule counts only when the command ran (it finished or started);
+  an unrecognized, refused, or failed command never counts, and neither does one that asks which
+  destination to use. The spoken answer to that question counts its own rules when the chosen command runs. A whole-utterance replacement counts only the rule that owns the utterance. A count
   lands only on a rule that is still configured when the dictation finishes: one removed mid-dictation
   is not brought back, and one whose mode was renamed mid-dictation counts under the new id.
 - A failed write is logged and retried on the next change; the in-memory counts are never discarded.
@@ -473,7 +475,8 @@ regex = false
 
 Read only while the `voice_commands` flag is on. The Voice Commands mode understands
 an app-switching verb followed by a target (`VoiceCommandGrammar.focusVerbs`), `run <action> [words]`, and `go back`, matched against the whole
-utterance (case, punctuation, and a leading "the" are ignored). The app-switching prefixes also accept
+utterance (case and punctuation ignored; a leading "the" is dropped from an app-switching target, so
+`switch to the browser` looks for `browser`, but not from a `run` action name). The app-switching prefixes also accept
 `which to` and `witch to` for `switch to`, and `two` or `too` in place of `to` after `switch`, `which`,
 `witch`, or `go`. These are exact prefix alternatives, not transcript replacements: target names,
 action input, and the original heard text are preserved. They apply equally to live commands and
@@ -515,7 +518,8 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
 
 - `run` is the program followed by its arguments. The program is a full path (`/…` or `~/…`); it is run
   directly, never through a shell, from the home folder, with standard input, output, and error not
-  connected to anything you see and the app's own minimal `PATH`. Each argument is passed exactly as
+  connected to anything you see, and the environment KeyScribe itself was started with. Opened from Finder or
+  at login, that `PATH` holds only the system folders. Each argument is passed exactly as
   written, except that `{text}` is replaced by the spoken text inside that argument: the words never
   become extra arguments, and KeyScribe never evaluates them. `{text}` may not appear in the program.
 - **Matching** requires **run** (`run deploy staging`), followed by one of the script's spoken names in
@@ -555,14 +559,18 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   can take longer to start the first time, while macOS checks it.
 - **Interpreters cannot take `{text}`.** A script whose program has a known interpreter file name, such
   as `sh` or `env`, including a version suffix like `python3.12`, is refused when any of its arguments
-  contains `{text}`, because `/bin/sh -c {text}` would run spoken words as shell commands. The rule
-  checks only the program's file name, so it also refuses an interpreter given a script file
+  contains `{text}`, because `/bin/sh -c {text}` would run spoken words as shell commands. The name is
+  checked as written and after following symbolic links, so a link to `/bin/zsh` under another name is
+  refused too. For a known wrapper program (such as `nice`, `nohup`, `xcrun`, or `timeout`), the rule
+  checks the program the wrapper launches, skipping the wrapper's own options, so `nice /bin/sh -c {text}`
+  and `xcrun swift -e {text}` are refused while `nice ~/bin/record --category python {text}` is not. The rule also refuses an interpreter given a script file
   (`/bin/sh ~/bin/note.sh {text}`); instead, start that file with a `#!` line naming its interpreter and
   any options it needs, make it executable, and choose the file itself as the program. An interpreter
-  without `{text}`, such as `osascript -e` with fixed code, is allowed. The rule prevents a common
-  mistake; it does not make other programs safe. A renamed interpreter, a wrapper, or a script that
-  runs its input as code (`eval "$1"`) can still run spoken words as code, so write scripts that treat
-  the text as data, as in `"$1"` below.
+  without `{text}`, such as `osascript -e` with fixed code, is allowed. The editor will not save a refused
+  script. One that is already in the file still loads with everything else, but saying it runs nothing
+  and shows why. The rule prevents a common mistake; it does not make other programs safe. A copied
+  interpreter, a wrapper the rule does not know, or a script that runs its input as code (`eval "$1"`)
+  can still run spoken words as code, so write scripts that treat the text as data, as in `"$1"` below.
 - **An invalid entry rejects the whole file**, like any other validation error in it: when KeyScribe
   starts with such a file, no saved places or actions are available until it is fixed (apps still open
   by name), and while KeyScribe is running it keeps the last version that loaded. The Voice Commands
@@ -891,8 +899,12 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 - **Older schema versions** are normalized on read. KeyScribe does not rewrite a file just because a
   read migration ran, and it does not create pre-migration backups today; a later save writes the
   current schema.
-- **Rewrites normalize to this schema** and drop unknown keys and comments. A file whose
-  `schema_version` exceeds the app's is left untouched and surfaced (`design.md` §5.1).
+- **Rewrites normalize to this schema** and drop comments. A file whose `schema_version` exceeds the
+  app's is left untouched and surfaced (`design.md` §5.1). **No rewrite drops an unknown key:** a save
+  from the app to a file holding one is refused with a notice naming the file and key, leaving the file
+  and the unsaved edit as they were, and an automatic rewrite (a starter-mode update or rename) skips
+  that file. For `settings.toml`, app-wide changes still apply but are not saved until the key is fixed
+  or removed.
 - **Unknown keys are reported, not fatal.** A key this schema does not read — usually a typo such as
   `trigger_key` for `trigger_keys` — loads as if absent and is listed in Settings → Maintenance (and in the
   mode's editor for a mode file), with the nearest real key when one is close. Retired keys noted in this

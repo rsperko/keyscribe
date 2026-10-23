@@ -16,7 +16,11 @@ struct VoiceCommandChoiceWiringTests {
             set { lock.withLock { _text = newValue } }
         }
         func loadIfNeeded() async throws {}
-        func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String { text }
+        var whileTranscribing: (@Sendable () async -> Void)?
+        func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
+            await whileTranscribing?()
+            return text
+        }
         func evict() async {}
     }
 
@@ -43,6 +47,7 @@ struct VoiceCommandChoiceWiringTests {
     private final class Captured: @unchecked Sendable {
         var inserted: [String] = []
         var clipboardReads = 0
+        var micDenied = false
     }
 
     final class ManualTimer: @unchecked Sendable {
@@ -80,6 +85,7 @@ struct VoiceCommandChoiceWiringTests {
         let runner: VoiceCommandRunner
         let controller: DictationController
         let history: HistoryStore
+        let usage: ReplacementUsageStore
         let config: ConfigCache
         let captured = Captured()
         let timer = ManualTimer()
@@ -117,6 +123,7 @@ struct VoiceCommandChoiceWiringTests {
             config = ConfigCache(supportDir: supportDir)
             config.voiceCommandsEnabled = true
             history = HistoryStore(supportDir: supportDir)
+            usage = ReplacementUsageStore(supportDir: supportDir)
             system.running = [
                 VoiceCommandCatalog.App(name: "Safari", bundleId: "com.apple.Safari"),
                 VoiceCommandCatalog.App(name: "Ghostty", bundleId: "com.mitchellh.ghostty"),
@@ -127,7 +134,7 @@ struct VoiceCommandChoiceWiringTests {
             let captured = captured
             controller = DictationController(
                 settings: settings, provider: provider, config: config,
-                history: history, hud: hud, permits: { _ in true },
+                history: history, replacementUsage: usage, hud: hud, permits: { _ in true },
                 audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
                 presenceDetector: StubPresence(),
                 insert: { _, _, _, text, _ in captured.inserted.append(text); return true },
@@ -135,7 +142,7 @@ struct VoiceCommandChoiceWiringTests {
                 clipboard: { captured.clipboardReads += 1; return nil },
                 pressSnapshot: { TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1) },
                 snapshot: snapshot ?? { target },
-                micStatus: { .granted },
+                micStatus: { captured.micDenied ? .denied : .granted },
                 accessibilityGranted: { true },
                 voiceCommands: runner)
             controller.choiceExpirySleep = { await timer.sleep($0) }
@@ -331,6 +338,29 @@ struct VoiceCommandChoiceWiringTests {
         #expect(h.prompt == prompt)
     }
 
+    @Test func aFailureWithARepairActionDuringAnAnswerKeepsTheListAndTheAction() async throws {
+        let h = try Harness(places: [personal, work])
+        await h.dictate("switch to mail")
+        let prompt = try #require(h.prompt)
+        h.captured.micDenied = true
+        h.controller.handleStart(triggerKey: "right_option")
+        let shown = h.hud.last
+        #expect(shown == .choice(prompt, status: .waiting(note: "Microphone access is off", action: .openMicrophoneSettings)))
+        #expect(shown?.errorAction == .openMicrophoneSettings)
+        #expect(shown?.holdsKeyFocus == false)
+        #expect(h.prompt == prompt)
+    }
+
+    @Test func aConfigAdvisoryDuringAQuestionIsANoteWithoutAnAction() async throws {
+        let h = try Harness(places: [personal, work])
+        await h.dictate("switch to mail")
+        let prompt = try #require(h.prompt)
+        let issue = ConfigFileIssue.unusedKeys("dictionary.toml", [UnknownConfigKey(path: "wrods", suggestion: nil)])
+        h.controller.announceConfigProblems([issue])
+        #expect(h.hud.last == .choice(prompt, status: .waiting(note: issue.oneLine)))
+        #expect(h.hud.last?.errorAction == nil)
+    }
+
     @Test func aStaleTimerCannotHideANewerQuestion() async throws {
         let h = try Harness(places: [personal, work])
         await h.dictate("switch to mail")
@@ -399,6 +429,8 @@ struct VoiceCommandChoiceWiringTests {
         try await h.settle()
         #expect(h.system.openedURLs.isEmpty)
         #expect(!h.hud.states.contains(.commandDone(summary: "Work Mail")))
+        #expect(!h.history.entries().contains { $0.outcome == .commandNeedsChoice })
+        #expect(h.history.entries().contains { $0.outcome == .commandCancelled })
         h.controller.cancel()
     }
 
@@ -428,6 +460,7 @@ struct VoiceCommandChoiceWiringTests {
         try await h.settle()
         #expect(h.system.openedURLs.isEmpty)
         #expect(!h.hud.states.contains(.commandDone(summary: "Work Mail")))
+        #expect(h.history.entries().map(\.outcome) == [.commandCancelled])
     }
 
     @Test func aSpokenAnswerStillLookingUpTabsStopsWhenTheSystemSleeps() async throws {
@@ -447,6 +480,48 @@ struct VoiceCommandChoiceWiringTests {
         try await h.settle()
         #expect(h.system.openedURLs.isEmpty)
         #expect(!h.hud.states.contains(.commandDone(summary: "Work Mail")))
+    }
+
+    @Test func aCommandStillTranscribingWhenTheSystemSleepsNeverRuns() async throws {
+        let h = try Harness(places: [personal, work])
+        let gate = Gate()
+        h.engine.whileTranscribing = { await gate.wait() }
+        h.engine.text = "switch to mail"
+        await h.press()
+        h.controller.handleCommit()
+        for _ in 0..<500 where !gate.entered { await Task.yield() }
+        #expect(gate.entered)
+        h.controller.handleSystemSleep()
+        gate.open()
+        await h.controller.dictationTask?.value
+        try await h.settle()
+        #expect(h.system.openedURLs.isEmpty)
+        #expect(h.prompt == nil)
+        #expect(!h.hud.states.contains { if case .choice = $0 { true } else { false } })
+
+        h.engine.whileTranscribing = nil
+        await h.dictate("switch to mail")
+        #expect(h.prompt != nil)
+    }
+
+    @Test func aSpokenCommandRecordsTheReplacementsThatShapedIt() async throws {
+        let h = try Harness(places: [personal], replacements: [.init(heard: "male", replace: "mail", regex: false)])
+        await h.dictate("switch to male")
+        #expect(h.system.openedURLs.map(\.0) == ["https://mail.example.net/"])
+        h.usage.flush()
+        #expect(h.usage.snapshot().rules["mode:\(Mode.voiceCommandsId)|l|male"]?.count == 1)
+    }
+
+    @Test func aCommandThatRanNothingOrAskedWhichOneDoesNotCountItsReplacements() async throws {
+        let h = try Harness(
+            places: [personal, work],
+            replacements: [.init(heard: "male", replace: "mail", regex: false), .init(heard: "zork", replace: "nowhere", regex: false)])
+        await h.dictate("switch to zork")
+        await h.dictate("switch to male")
+        #expect(h.prompt != nil)
+        h.usage.flush()
+        #expect(h.usage.snapshot().rules["mode:\(Mode.voiceCommandsId)|l|zork"] == nil)
+        #expect(h.usage.snapshot().rules["mode:\(Mode.voiceCommandsId)|l|male"] == nil)
     }
 
     @Test func aChoiceThatCannotBeClaimedIsClosedInTheRunnerToo() async throws {
@@ -613,7 +688,7 @@ struct VoiceCommandChoiceWiringTests {
         #expect(h.hud.last == .choice(prompt, status: .waiting(note: nil)))
         await h.dictate("tube")
         await h.dictate("   ")
-        guard case .choice(prompt, .waiting(_, let heard), _)? = h.hud.last else { Issue.record("expected the list"); return }
+        guard case .choice(prompt, .waiting(_, let heard, _), _)? = h.hud.last else { Issue.record("expected the list"); return }
         #expect(heard == nil)
         await h.dictate("tube")
         await h.dictate("cancel")

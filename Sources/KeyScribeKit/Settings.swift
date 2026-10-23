@@ -430,6 +430,15 @@ public enum ConfigError: Error, Equatable {
         case .unreadableFile(let reason): "couldn’t read the file: \(reason)"
         }
     }
+
+    public var category: String {
+        switch self {
+        case .missingSchemaVersion: "missing-schema-version"
+        case .newerSchemaVersion: "newer-schema-version"
+        case .invalid: "invalid"
+        case .unreadableFile: "unreadable-file"
+        }
+    }
 }
 
 public enum SettingsStore {

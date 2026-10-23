@@ -123,9 +123,9 @@ If a word comes out correctly spelled but mis-capitalized or punctuated (say `pi
 
 One thing, honestly: when you say a term you added, KeyScribe writes it your way. It is best-effort,
 not a guarantee — a phrase the model badly mangles belongs in **Replacements** instead, which changes
-it exactly, every time. That includes short names: a name of four letters or fewer is fixed for
-capitalization only, never for a near-miss spelling, because it sits one letter away from everyday
-words (Mike and "make"). A dictionaried compound also snaps its spoken form ("text field" →
+it exactly, every time. That includes short names: a four-letter name is fixed for capitalization only, never for a near-miss
+spelling, because it sits one letter away from everyday words (Mike and "make"), and a name of three
+letters or fewer is left as heard. A dictionaried compound also snaps its spoken form ("text field" →
 "TextField") whenever you say those words; if you only *sometimes* want that, add the term to a
 **per-mode** dictionary so it applies only in that mode. And when a mode runs an AI rewrite, your
 dictionary terms are shared with your own AI service — marked as intended spellings, not typos, so it
@@ -264,8 +264,9 @@ Then add a script named "note" with the program `~/bin/note` and one argument, `
 KeyScribe starts the script in the background. The script itself may open another app. KeyScribe waits a moment: if
 the script fails by then, the error shows what it printed last. A script still running after that is
 shown as started and left to finish. When History is on, its entry updates when it finishes. Later
-failures also appear on screen unless you are dictating. It runs without a shell and
-with a minimal `PATH`, so call other tools by their full path or set `PATH` at the top of the script.
+failures also appear on screen unless you are dictating. It runs without a shell, with
+the environment KeyScribe started with. Opened normally, its `PATH` holds only the system folders, so call
+other tools by their full path or set `PATH` at the top of the script.
 Use **Try it** to see the exact command a phrase would run, without running it.
 
 The dictionary never changes a script or shortcut's name or the words you pass it. If a name keeps coming out

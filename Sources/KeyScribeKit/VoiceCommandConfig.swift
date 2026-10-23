@@ -187,13 +187,76 @@ public struct VoiceCommandScript: Codable, Equatable, Sendable {
         guard program.hasPrefix("/") || program.hasPrefix("~/") else {
             return "Program: Use a full path, such as /usr/local/bin/tool or ~/bin/tool."
         }
-        let fileName = (program as NSString).lastPathComponent
-        if isInterpreter(fileName), run.dropFirst().contains(where: { $0.contains(textPlaceholder) }) {
-            return "Program: With \(textPlaceholder), “\(fileName)” could run spoken words as code. "
-                + "Put the logic in an executable script file and choose that file instead."
-        }
         for (index, argument) in run.dropFirst().enumerated() {
             if let issue = UserInputValidation.identifierIssue(argument) { return "Argument \(index + 1): \(issue.message)" }
+        }
+        return nil
+    }
+
+    // Checked when the action is saved and again at launch, never at load: a refusal disables only this action,
+    // so tightening the rule can never make the rest of a saved file unloadable.
+    public func executionRefusal(resolvedProgram: String? = nil) -> String? {
+        guard case .program(let run) = action, let program = run.first,
+              run.dropFirst().contains(where: { $0.contains(Self.textPlaceholder) }) else { return nil }
+        var names = [program, resolvedProgram].compactMap { $0 }.map { ($0 as NSString).lastPathComponent }
+        var rest = run.dropFirst()
+        while let wrapper = names.lazy.compactMap({ Self.wrappers[$0.lowercased()] }).first,
+              let operand = Self.operand(of: wrapper, in: rest) {
+            if run[operand].contains(Self.textPlaceholder) { return Self.refusal(names[0]) }
+            names = [(run[operand] as NSString).lastPathComponent]
+            rest = run[(operand + 1)...]
+        }
+        guard let interpreter = names.first(where: Self.isInterpreter) else { return nil }
+        return Self.refusal(interpreter)
+    }
+
+    private static func refusal(_ name: String) -> String {
+        "With \(textPlaceholder), “\(name)” could run spoken words as code. "
+            + "Put the logic in an executable script file and choose that file instead."
+    }
+
+    private struct Wrapper {
+        var optionsWithValues: Set<String> = []
+        var leadingValues = 0
+    }
+
+    // Each wrapper's options that take a separate value, and the plain values it reads before its program, so
+    // the program it launches can be found without guessing from later arguments.
+    private static let wrappers: [String: Wrapper] = [
+        "nice": Wrapper(optionsWithValues: ["-n"]),
+        "nohup": Wrapper(),
+        "xcrun": Wrapper(optionsWithValues: ["--sdk", "-sdk", "--toolchain", "-toolchain"]),
+        "timeout": Wrapper(optionsWithValues: ["-s", "--signal", "-k", "--kill-after"], leadingValues: 1),
+        "gtimeout": Wrapper(optionsWithValues: ["-s", "--signal", "-k", "--kill-after"], leadingValues: 1),
+        "caffeinate": Wrapper(optionsWithValues: ["-t", "-w"]),
+        "time": Wrapper(),
+        "arch": Wrapper(optionsWithValues: ["-arch"]),
+        "sudo": Wrapper(optionsWithValues: ["-u", "-g", "-h", "-p", "-C", "-D", "-R", "-T", "-U", "-r", "-t"]),
+        "doas": Wrapper(optionsWithValues: ["-u", "-C"]),
+        "xargs": Wrapper(optionsWithValues: ["-n", "-I", "-J", "-L", "-P", "-R", "-S", "-s", "-E"]),
+        "stdbuf": Wrapper(optionsWithValues: ["-i", "-o", "-e"]),
+        "taskpolicy": Wrapper(optionsWithValues: ["-c", "-t", "-l", "-d", "-p"]),
+    ]
+
+    private static func operand(of wrapper: Wrapper, in arguments: ArraySlice<String>) -> Int? {
+        var index = arguments.startIndex
+        var leadingValues = wrapper.leadingValues
+        var optionsEnded = false
+        while index < arguments.endIndex {
+            let argument = arguments[index]
+            if !optionsEnded, argument == "--" {
+                optionsEnded = true
+                index += 1
+            } else if !optionsEnded, argument.hasPrefix("-"), argument.count > 1 {
+                index += wrapper.optionsWithValues.contains(argument) ? 2 : 1
+            } else if !optionsEnded, argument.firstMatch(of: /^[A-Za-z_][A-Za-z0-9_]*=/) != nil {
+                index += 1
+            } else if leadingValues > 0 {
+                leadingValues -= 1
+                index += 1
+            } else {
+                return index
+            }
         }
         return nil
     }

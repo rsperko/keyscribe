@@ -104,7 +104,7 @@ final class ConfigCache {
         let issue = ConfigFileIssue.unreadable(
             fileName, error: error, recovery: keptPrevious ? .previousVersion : .ignored)
         if !loadFailures.contains(issue) { loadFailures.append(issue) }
-        log.error("config '\(fileName, privacy: .public)' failed to load: \(error.summary, privacy: .public)")
+        log.error("config '\(fileName, privacy: .public)' failed to load (\(error.category, privacy: .public)): \(error.summary, privacy: .private)")
     }
 
     // Frozen derived view handed to a dictation at record-start (captured once so a mid-dictation reload
@@ -154,7 +154,7 @@ final class ConfigCache {
             previous: lastGoodModes, lkgDir: lkgModesDir)
         for failure in result.failures {
             let recovery = failure.usedLastKnownGood ? " — previous version still in use" : " — ignored until fixed"
-            log.error("mode '\(failure.id, privacy: .public)' failed to load\(recovery, privacy: .public): \(failure.message, privacy: .public)")
+            log.error("mode '\(failure.id, privacy: .public)' failed to load\(recovery, privacy: .public) (\(failure.error.category, privacy: .public)): \(failure.message, privacy: .private)")
             let issue = ConfigFileIssue.unreadable(
                 "\(failure.id).toml", relativePath: "modes/\(failure.id).toml",
                 error: failure.error, recovery: failure.usedLastKnownGood ? .previousVersion : .ignored)
@@ -166,6 +166,12 @@ final class ConfigCache {
         modesCache = visible
         lastGoodModes = result.modes
         return visible
+    }
+
+    // Every mode on disk, including one a feature flag hides, for bookkeeping that must outlive the flag.
+    var storedModes: [Mode] {
+        _ = modes
+        return lastGoodModes
     }
 
     var voiceCommandsShutOut: Bool {

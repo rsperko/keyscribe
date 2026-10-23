@@ -12,6 +12,11 @@ enum ScriptLauncher {
         (program as NSString).expandingTildeInPath
     }
 
+    static func resolvedPath(_ program: String) -> String? {
+        guard !program.isEmpty else { return nil }
+        return URL(fileURLWithPath: expandedPath(program)).resolvingSymlinksInPath().path
+    }
+
     static func run(
         program: String, arguments: [String], input: String? = nil, reportWithin window: TimeInterval = reportWindow,
         onLateFinish: @escaping @Sendable (ScriptRun) -> Void = { _ in }

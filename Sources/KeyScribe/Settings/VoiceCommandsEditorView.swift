@@ -697,7 +697,7 @@ private struct ScriptEditorSheet: View {
                     if let programIssue = VoiceCommandsSettingsModel.programIssue(draft.program) {
                         IssueText(programIssue, severity: .advisory)
                     }
-                    Text("The full path to an executable file. It runs directly, not through a shell, with a minimal PATH, so a script that calls other tools should use their full paths or set PATH itself.")
+                    Text("The full path to an executable file. It runs directly, not through a shell, with \(Branding.appName)’s own environment, whose PATH usually holds only the system folders, so a script that calls other tools should use their full paths or set PATH itself.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 4) {

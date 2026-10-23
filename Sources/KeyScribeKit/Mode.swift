@@ -806,8 +806,10 @@ public enum ModeStore {
     }
 
     private static func fileURL(for mode: Mode, in dir: URL) -> URL {
-        dir.appendingPathComponent("\(mode.id).toml")
+        dir.appendingPathComponent(fileName(for: mode.id))
     }
+
+    public static func fileName(for id: String) -> String { "\(id).toml" }
 
     public static func recordStarterOffersIfFresh(in dir: URL, ledgerDir: URL? = nil) {
         let fm = FileManager.default

@@ -234,6 +234,7 @@ extension ModeStore {
             guard FileManager.default.fileExists(atPath: oldURL.path),
                   !FileManager.default.fileExists(atPath: newURL.path),
                   let onDisk = try? String(contentsOf: oldURL, encoding: .utf8),
+                  unknownKeys(in: onDisk).isEmpty,
                   let mode = try? decode(from: onDisk, id: rename.old),
                   let expected = preRenameTemplate(for: rename.old),
                   let newSeed = catalog.first(where: { $0.id == rename.new }) else { continue }
@@ -283,12 +284,14 @@ extension ModeStore {
 
         // 3. Update: an unedited seed (template fingerprint still matches what we wrote) whose catalog
         //    version has advanced is refreshed, preserving connection + enabled. Edited files fail the
-        //    fingerprint check and are left alone. Dormant until a seed's version is first bumped.
+        //    fingerprint check and are left alone, and so is a file carrying a key the decoder does not read,
+        //    which the fingerprint cannot see and a rewrite would delete. Dormant until a seed's version is first bumped.
         for mode in catalog {
             let url = modesDir.appendingPathComponent("\(mode.id).toml")
             guard let entry = ledger.entry(mode.id), let fingerprint = entry.fingerprint,
                   (mode.seedVersion ?? 1) > entry.version,
                   let onDisk = try? String(contentsOf: url, encoding: .utf8),
+                  unknownKeys(in: onDisk).isEmpty,
                   let current = try? decode(from: onDisk, id: mode.id),
                   current.seedId == mode.id,
                   seedTemplateFingerprint(current) == fingerprint else { continue }

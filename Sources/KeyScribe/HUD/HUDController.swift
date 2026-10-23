@@ -424,9 +424,17 @@ private struct HUDView: View {
             }
             Text(prompt.hint).font(.system(size: 11)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            Button { onCancelChoice(prompt.id) } label: { Text("Cancel") }
-                .buttonStyle(HUDActionButtonStyle())
-                .accessibilityIdentifier(AccessibilityID.HUD.choiceCancel)
+            HStack(spacing: 8) {
+                if let action = model.state.errorAction {
+                    Button { onErrorAction(action) } label: {
+                        Label(action.buttonTitle, systemImage: "gearshape")
+                    }
+                    .accessibilityIdentifier(AccessibilityID.HUD.repairAction)
+                }
+                Button { onCancelChoice(prompt.id) } label: { Text("Cancel") }
+                    .accessibilityIdentifier(AccessibilityID.HUD.choiceCancel)
+            }
+            .buttonStyle(HUDActionButtonStyle())
         }
     }
 

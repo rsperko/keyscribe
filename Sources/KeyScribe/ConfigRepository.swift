@@ -12,8 +12,8 @@ extension Notification.Name {
 // FSEvents watcher. The watcher stays only as a backstop for external edits (an extra invalidate is
 // idempotent). `onChange` lets the host refresh dependent UI (menu status).
 //
-// Mutators THROW so a Settings pane can surface the failure; the `add*` helpers wrap them into a Bool for
-// correction-surface callers (menu, History detail, correction panel) that only care whether it stuck.
+// Mutators THROW so a Settings pane can surface the failure; the `add*` helpers wrap them into a Bool or an
+// AddResult for correction-surface callers (menu, History detail, correction panel).
 // settings.toml is NOT owned here — it is a whole-object write routed through AppDelegate.applySettings
 // (external edits absorbed only via the FSEvents reload path); read-modify-write would buy little there.
 @MainActor
@@ -50,7 +50,7 @@ final class ConfigRepository {
     func reconcileReplacementUsage() {
         guard let replacementUsage, config.configFileError == nil else { return }
         replacementUsage.reconcile(
-            keys: ReplacementUsage.configuredKeys(global: config.replacements, modes: config.modes))
+            keys: ReplacementUsage.configuredKeys(global: config.replacements, modes: config.storedModes))
     }
 
     func addChangeObserver(_ observer: @escaping () -> Void) {
@@ -101,17 +101,45 @@ final class ConfigRepository {
         }) != nil
     }
 
-    func addDictionaryWord(_ word: String, to scope: CorrectionDestination.Scope) -> Bool {
-        switch scope {
-        case .global: addDictionaryWord(word)
-        case .mode(let id): addDictionaryWord(word, toMode: id)
+    enum AddResult: Equatable {
+        case saved
+        case refused(String)
+        case failed
+    }
+
+    func addDictionaryWord(_ word: String, to scope: CorrectionDestination.Scope) -> AddResult {
+        addResult {
+            switch scope {
+            case .global: try mutateDictionary { $0.adding(word: word) }
+            case .mode(let id):
+                try mutateMode(id: id) { mode in
+                    mode.dictionary.words = DictionarySet(words: mode.dictionary.words).adding(word: word).words
+                }
+            }
         }
     }
 
-    func addReplacement(heard: String, replace: String, regex: Bool = false, to scope: CorrectionDestination.Scope) -> Bool {
-        switch scope {
-        case .global: addReplacement(heard: heard, replace: replace, regex: regex)
-        case .mode(let id): addReplacement(heard: heard, replace: replace, regex: regex, toMode: id)
+    func addReplacement(heard: String, replace: String, regex: Bool = false, to scope: CorrectionDestination.Scope) -> AddResult {
+        addResult {
+            switch scope {
+            case .global: try mutateReplacements { $0 = $0.adding(heard: heard, replace: replace, regex: regex) }
+            case .mode(let id):
+                try mutateMode(id: id) { mode in
+                    mode.replacements.rules = ReplacementsSet(rules: mode.replacements.rules)
+                        .adding(heard: heard, replace: replace, regex: regex).rules
+                }
+            }
+        }
+    }
+
+    private func addResult(_ save: () throws -> Void) -> AddResult {
+        do {
+            try save()
+            return .saved
+        } catch let refused as UnreadKeys {
+            return .refused(refused.localizedDescription)
+        } catch {
+            return .failed
         }
     }
 
@@ -201,6 +229,26 @@ final class ConfigRepository {
         return .saved
     }
 
+    // A save re-encodes the whole file from what was decoded, so a key nothing reads would be deleted by it.
+    struct UnreadKeys: LocalizedError {
+        let relativePath: String
+        let keys: [UnknownConfigKey]
+        var errorDescription: String? {
+            let line = keys.count == 1 ? "that line" : "those lines"
+            return "\(relativePath) has \(keys.map(\.description).joined(separator: ", ")), which \(Branding.appName) "
+                + "doesn’t read. Saving here would delete \(line), so nothing was saved. Fix or remove \(line) in "
+                + "the file, then try again."
+        }
+    }
+
+    private func refuseUnreadKeys(_ toml: String, in file: URL, _ unknownKeys: (String) -> [UnknownConfigKey]) throws {
+        let keys = unknownKeys(toml)
+        guard !keys.isEmpty else { return }
+        let relativePath = String(file.path.dropFirst(supportDir.path.count))
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        throw UnreadKeys(relativePath: relativePath, keys: keys)
+    }
+
     struct UnreadableModeFile: LocalizedError {
         let fileName: String
         let error: ConfigError
@@ -222,6 +270,9 @@ final class ConfigRepository {
             do { toml = try String(contentsOf: url, encoding: .utf8) }
             catch { throw ConfigError.unreadableFile(error.localizedDescription) }
             _ = try ModeStore.decode(from: toml, id: id)
+            try refuseUnreadKeys(toml, in: url, ModeStore.unknownKeys(in:))
+        } catch let refused as UnreadKeys {
+            throw refused
         } catch {
             throw UnreadableModeFile(
                 fileName: url.lastPathComponent, error: (error as? ConfigError) ?? .invalid("\(error)"))
@@ -347,7 +398,10 @@ final class ConfigRepository {
     private func loadVoiceCommandsForMutation() throws -> VoiceCommandConfig {
         let file = supportDir.appendingPathComponent(VoiceCommandStore.fileName)
         guard FileManager.default.fileExists(atPath: file.path) else { return VoiceCommandConfig() }
-        return try VoiceCommandStore.decode(from: readForMutation(file))
+        let toml = try readForMutation(file)
+        let config = try VoiceCommandStore.decode(from: toml)
+        try refuseUnreadKeys(toml, in: file, VoiceCommandStore.unknownKeys(in:))
+        return config
     }
 
     // On write success: record the touched files (suppress the watcher echo), invalidate the cache, then
@@ -366,23 +420,36 @@ final class ConfigRepository {
     private func loadDictionaryForMutation() throws -> DictionarySet {
         let file = supportDir.appendingPathComponent(DictionaryStore.fileName)
         guard FileManager.default.fileExists(atPath: file.path) else { return DictionarySet() }
-        return try DictionaryStore.decode(from: readForMutation(file))
+        let toml = try readForMutation(file)
+        let set = try DictionaryStore.decode(from: toml)
+        try refuseUnreadKeys(toml, in: file, DictionaryStore.unknownKeys(in:))
+        return set
     }
 
     private func loadReplacementsForMutation() throws -> ReplacementsSet {
         let file = supportDir.appendingPathComponent(ReplacementsStore.fileName)
         guard FileManager.default.fileExists(atPath: file.path) else { return ReplacementsSet() }
-        return try ReplacementsStore.decode(from: readForMutation(file))
+        let toml = try readForMutation(file)
+        let set = try ReplacementsStore.decode(from: toml)
+        try refuseUnreadKeys(toml, in: file, ReplacementsStore.unknownKeys(in:))
+        return set
     }
 
     private func loadModeForMutation(id: String) throws -> Mode {
-        try ModeStore.decode(from: readForMutation(modeFileURL(id: id)), id: id)
+        let file = modeFileURL(id: id)
+        let toml = try readForMutation(file)
+        let mode = try ModeStore.decode(from: toml, id: id)
+        try refuseUnreadKeys(toml, in: file, ModeStore.unknownKeys(in:))
+        return mode
     }
 
     private func loadConnectionsForMutation() throws -> ConnectionSet {
         let file = supportDir.appendingPathComponent(ConnectionStore.fileName)
         guard FileManager.default.fileExists(atPath: file.path) else { return ConnectionSet() }
-        return try ConnectionStore.decode(from: readForMutation(file))
+        let toml = try readForMutation(file)
+        let set = try ConnectionStore.decode(from: toml)
+        try refuseUnreadKeys(toml, in: file, ConnectionStore.unknownKeys(in:))
+        return set
     }
 
     private func readForMutation(_ file: URL) throws -> String {

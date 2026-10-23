@@ -98,7 +98,7 @@ struct ModeTrigger {
     let onUpdate: (Mode) -> Void
 
     var conflict: TriggerKeyConflict? {
-        TriggerKeyConflicts.conflict(for: mode, in: allModes)
+        TriggerKeyConflicts.conflict(for: mode, in: VoiceCommandTriggers.guarded(allModes))
     }
 
     var usesMouseShortcut: Bool {

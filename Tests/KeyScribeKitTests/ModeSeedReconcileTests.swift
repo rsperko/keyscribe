@@ -319,6 +319,39 @@ struct ModeSeedReconcileTests {
         #expect(after.seedVersion == future)
     }
 
+    @Test func versionBumpLeavesASeedWithAnUnreadKeyUntouchedUntilTheKeyIsRemoved() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        ModeStore.seedStarterFilesAndLedgerForTesting(in: d.modes, ledgerDir: d.ledger)
+        let url = d.modes.appendingPathComponent("message.toml")
+        let seeded = try String(contentsOf: url, encoding: .utf8)
+        let withTypo = "trigger_key = \"fn\"\n" + seeded
+        try withTypo.write(to: url, atomically: true, encoding: .utf8)
+        #expect(!ModeStore.unknownKeys(in: withTypo).isEmpty)
+
+        let bumped = catalog(bumping: "message", prompt: "revised message prompt", to: nextVersion("message"))
+        let skipped = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: bumped)
+        #expect(!skipped.updated.contains("message"))
+        #expect(try String(contentsOf: url, encoding: .utf8) == withTypo)
+
+        try seeded.write(to: url, atomically: true, encoding: .utf8)
+        let updated = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support, catalog: bumped)
+        #expect(updated.updated.contains("message"))
+    }
+
+    @Test func renameLeavesALegacySeedWithAnUnreadKeyAtItsOldId() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        try writeLegacy(newId: "polish", oldId: "polished-dictation", oldName: "Polished Dictation", to: d.modes)
+        let oldURL = d.modes.appendingPathComponent("polished-dictation.toml")
+        let withTypo = "trigger_key = \"fn\"\n" + (try String(contentsOf: oldURL, encoding: .utf8))
+        try withTypo.write(to: oldURL, atomically: true, encoding: .utf8)
+
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+        #expect(!outcome.renamed.contains("polish"))
+        #expect(try String(contentsOf: oldURL, encoding: .utf8) == withTypo)
+    }
+
     @Test func versionBumpSkipsAnEditedSeed() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }

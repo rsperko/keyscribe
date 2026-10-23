@@ -71,7 +71,10 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
         case .unreadable(.previousVersion): "The previous version is still in use."
         case .unreadable(.defaults): "Default settings are in use until it’s fixed."
         case .unreadable(.ignored): "It’s ignored until it’s fixed."
-        case .unusedKeys: "It has no effect."
+        case .unusedKeys: "It has no effect, and changes to this file aren’t saved from the app until that line is fixed or removed."
+        }
+        if kind == .unusedKeys, relativePath == SettingsStore.fileName {
+            return state + " App-wide settings you change meanwhile are temporary."
         }
         guard isError, relativePath == SettingsStore.fileName else { return state }
         return state + " App-wide settings you change meanwhile are temporary: fixing the file reloads it and replaces them. Modes and vocabulary still save normally."

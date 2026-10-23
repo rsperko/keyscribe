@@ -114,6 +114,18 @@ struct VoiceCommandRunnerTests {
         #expect(system.opened == [ghostty.bundleId, textEdit.bundleId, ghostty.bundleId])
     }
 
+    @Test func goBackToAWindowOnAnotherDesktopFailsAndKeepsItsDestination() async {
+        let (runner, system) = make()
+        let origin = VoiceCommandOrigin(bundleId: textEdit.bundleId, pid: 42, windowId: "cg:7")
+        system.runningPids = [42: textEdit.bundleId]
+        _ = await runner.run(transcript: "switch to ghostty", places: [], origin: origin)
+        system.windowFocusResults = [.elsewhere]
+        #expect(await runner.run(transcript: "go back", places: [], origin: .init(bundleId: ghostty.bundleId))
+                == .failed(message: VoiceCommandRunner.windowElsewhereMessage, command: "Returns to TextEdit."))
+        #expect(system.activatedPids.isEmpty)
+        #expect(runner.backTarget == origin)
+    }
+
     @Test func repeatingACommandForTheFrontAppKeepsTheEarlierReturnDestination() async {
         let (runner, _) = make()
         _ = await runner.run(transcript: "switch to ghostty", places: [], origin: .init(bundleId: textEdit.bundleId))
@@ -428,6 +440,35 @@ struct VoiceCommandRunnerTests {
         #expect(system.scriptRuns.map(\.arguments) == [["--env", "staging two"]])
         #expect(system.installedScans == 0)
         #expect(system.opened.isEmpty)
+    }
+
+    private func failureMessage(_ outcome: VoiceCommandOutcome) -> String? {
+        if case .failed(let message, _, _, _) = outcome { return message }
+        return nil
+    }
+
+    @Test func anInterpreterGivenTheTextIsRefusedWhenInvokedWhileOtherActionsStillRun() async {
+        let (runner, system) = make()
+        let shell = VoiceCommandScript(name: "Shell", run: ["/usr/bin/nice", "/bin/sh", "-c", "{text}"])
+        let outcome = await runner.run(transcript: "run shell ls", places: [], scripts: [shell, deploy], origin: nil)
+        #expect(failureMessage(outcome) == "Shell was not run. With {text}, “sh” could run spoken words as code. "
+            + "Put the logic in an executable script file and choose that file instead.")
+        #expect(system.scriptRuns.isEmpty)
+        #expect(await runner.run(transcript: "run deploy prod", places: [], scripts: [shell, deploy], origin: nil)
+            == .done(summary: "Deploy", command: "~/bin/deploy --env prod"))
+    }
+
+    @Test func aSymlinkToAnInterpreterIsRefusedAtLaunch() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-symlink-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let link = dir.appendingPathComponent("helper")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: URL(fileURLWithPath: "/bin/zsh"))
+        let (runner, system) = make()
+        let helper = VoiceCommandScript(name: "Helper", run: [link.path, "-c", "{text}"])
+        let outcome = await runner.run(transcript: "run helper ls", places: [], scripts: [helper], origin: nil)
+        #expect(failureMessage(outcome)?.hasPrefix("Helper was not run. With {text}, “zsh”") == true)
+        #expect(system.scriptRuns.isEmpty)
     }
 
     @Test func aScriptThatIsStillRunningIsReportedAsStarted() async {

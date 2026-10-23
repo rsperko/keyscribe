@@ -318,6 +318,8 @@ struct VoiceCommandWiringTests {
     @Test func aSpokenSuffixNeverReroutesACommand() async throws {
         var email = Mode(id: "email", name: "Email")
         email.triggerPhrases = ["as an email"]
+        let dictated = try await run(transcript: "dear bob as an email", otherModes: [email], useVoiceCommands: false)
+        #expect(dictated.record?.modeName == "Email")
         let result = try await run(transcript: "switch to chrome as an email", otherModes: [email])
         #expect(result.runner.calls.map(\.transcript) == ["switch to chrome as an email"])
         #expect(result.inserted == nil)

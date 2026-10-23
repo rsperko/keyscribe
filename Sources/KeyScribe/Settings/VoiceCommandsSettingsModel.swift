@@ -90,7 +90,10 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         if nameTaken(place.name, except: originalKey) { return "Another place or action already uses this name." }
         do {
             try repository.mutateVoiceCommands { config in
-                if let originalKey, let index = config.places.firstIndex(where: { VoiceCommandText.key($0.name) == originalKey }) {
+                if let originalKey {
+                    guard let index = config.places.firstIndex(where: { VoiceCommandText.key($0.name) == originalKey }) else {
+                        throw StaleEdit()
+                    }
                     config.places[index] = place
                 } else {
                     config.places.append(place)
@@ -98,6 +101,9 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             }
             reload()
             return nil
+        } catch is StaleEdit {
+            reload()
+            return Self.staleEditMessage(kind: "place")
         } catch {
             return "Could not save: \(error.localizedDescription)"
         }
@@ -106,6 +112,9 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     func scriptIssue(_ script: VoiceCommandScript, replacing originalName: String?) -> String? {
         if let unreadableFileIssue { return unreadableFileIssue }
         if let issue = script.issue { return issue }
+        if let refusal = script.executionRefusal(resolvedProgram: ScriptLauncher.resolvedPath(script.program)) {
+            return "Program: \(refusal)"
+        }
         let originalKey = originalName.map(VoiceCommandText.key)
         if nameTaken(script.name, except: originalKey) { return "Another place or action already uses this name." }
         return nil
@@ -116,7 +125,10 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         let originalKey = originalName.map(VoiceCommandText.key)
         do {
             try repository.mutateVoiceCommands { config in
-                if let originalKey, let index = config.scripts.firstIndex(where: { VoiceCommandText.key($0.name) == originalKey }) {
+                if let originalKey {
+                    guard let index = config.scripts.firstIndex(where: { VoiceCommandText.key($0.name) == originalKey }) else {
+                        throw StaleEdit()
+                    }
                     config.scripts[index] = script
                 } else {
                     config.scripts.append(script)
@@ -124,9 +136,18 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             }
             reload()
             return nil
+        } catch is StaleEdit {
+            reload()
+            return Self.staleEditMessage(kind: "action")
         } catch {
             return "Could not save: \(error.localizedDescription)"
         }
+    }
+
+    private struct StaleEdit: Error {}
+
+    static func staleEditMessage(kind: String) -> String {
+        "This \(kind) was renamed or deleted elsewhere, so your edit was not saved."
     }
 
     func deleteScript(named name: String) -> String? {

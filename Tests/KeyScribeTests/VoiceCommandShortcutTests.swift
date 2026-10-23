@@ -89,6 +89,27 @@ struct VoiceCommandShortcutTests {
         #expect(onDisk(Mode.voiceCommandsId, in: f.dir).isEmpty)
     }
 
+    @Test func aNoticeAboutAnotherModeLeavesTheMoveUndoable() throws {
+        let f = try make(commandKey: "control+option+v", polishKey: "right_option")
+        defer { try? FileManager.default.removeItem(at: f.dir) }
+        let modesDir = f.dir.appendingPathComponent("modes")
+        try ModeStore.write(Mode(id: "email", name: "Email"), to: modesDir)
+        let emailFile = modesDir.appendingPathComponent("email.toml")
+        let original = try String(contentsOf: emailFile, encoding: .utf8)
+        try ("colour = \"blue\"\n" + original).write(to: emailFile, atomically: true, encoding: .utf8)
+        f.model.reload(force: true)
+        try assign("right_option", to: Mode.voiceCommandsId, in: f)
+        f.model.confirmMove()
+        var email = try #require(f.model.modes.first { $0.id == "email" })
+        email.name = "Mail"
+        f.model.update(email)
+        #expect(f.model.notice != nil)
+        #expect(f.model.shownUndoMove != nil)
+        f.model.undoMove()
+        #expect(onDisk(Mode.voiceCommandsId, in: f.dir) == ["control+option+v"])
+        #expect(onDisk("polish", in: f.dir) == ["right_option"])
+    }
+
     @Test func undoGoesAwayOnceAnAffectedModeIsEdited() throws {
         let f = try make(commandKey: "control+option+v", polishKey: "right_option")
         defer { try? FileManager.default.removeItem(at: f.dir) }
