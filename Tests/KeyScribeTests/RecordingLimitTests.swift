@@ -285,6 +285,32 @@ struct RecordingLimitTests {
         #expect(shown.allSatisfy { $0?.totalSeconds == 300 && ($0?.secondsLeft ?? 99) <= 1 })
     }
 
+    @Test func aSteadyLevelRedrawsTheHUDOnlyWhenSomethingChanges() async throws {
+        let h = makeHarness(mode: plainMode(), maxRecordingSeconds: 300, limitWarningSeconds: 30)
+        defer { try? FileManager.default.removeItem(at: h.supportDir) }
+
+        h.controller.handleStart()
+        await h.controller.captureBringUpTask?.value
+        try await Task.sleep(for: .milliseconds(250))
+        let recording = h.hud.states.filter { if case .recording = $0 { true } else { false } }
+        h.controller.handleCommit()
+        await h.controller.dictationTask?.value
+
+        #expect(!recording.isEmpty)
+        #expect(zip(recording, recording.dropFirst()).allSatisfy { $0 != $1 })
+    }
+
+    @Test func theCountdownKeepsTickingWhileTheLevelIsSteady() async {
+        let h = makeHarness(mode: plainMode(), maxRecordingSeconds: 1.3, limitWarningSeconds: 30)
+        defer { try? FileManager.default.removeItem(at: h.supportDir) }
+
+        await runUntilIdle(h)
+
+        let seconds = countdowns(h.hud).compactMap { $0?.secondsLeft }
+        #expect(seconds.contains(2))
+        #expect(seconds.contains(1))
+    }
+
     @Test func noCountdownShowsBeforeTheWarningWindow() async {
         let h = makeHarness(mode: plainMode(), maxRecordingSeconds: 300, limitWarningSeconds: 30)
         defer { try? FileManager.default.removeItem(at: h.supportDir) }

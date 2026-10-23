@@ -67,11 +67,7 @@ enum TextInserter {
     // `.text` (incl. empty) when the focused element reports a selection; `.unsupported` (no readable
     // selection attribute — Electron/Chromium) routes to the ⌘C fallback.
     private static func axSelectedText() -> AXSelection {
-        let system = AXUIElementCreateSystemWide()
-        var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
-              let focusedRef else { return .unsupported }
-        let element = focusedRef as! AXUIElement
+        guard let element = focusedElement(timeout: 0.3) else { return .unsupported }
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXSelectedTextAttribute as CFString, &value) == .success,
               let text = value as? String else { return .unsupported }
@@ -137,8 +133,8 @@ enum TextInserter {
     // types into whatever app the user has focused. When this is set the characters are recorded instead.
     @TaskLocal static var typedCharacterSink: (@Sendable (Character) -> Void)?
 
-    // Returns whether the insertion path actually acted. False ⇒ nothing inserted, so the caller must not
-    // report success or fire a submit keystroke.
+    // Returns whether the insertion path verifiably acted. False ⇒ nothing is known to have landed, so the
+    // caller must not report success or fire a submit keystroke.
     @discardableResult
     static func perform(_ decision: InsertionDecision, method: Mode.Insertion, paste: ClipboardPaste, text: String, awaitSettle: Bool = true) async -> Bool {
         // Covers the paths with no suspension of their own to check at — AX insertion and the clipboard
@@ -422,26 +418,54 @@ enum TextInserter {
     // AX can report success while doing nothing, so trust it only when a read-back proves the value changed.
     @discardableResult
     static func insertViaAX(_ text: String, paste: ClipboardPaste = .init(), awaitSettle: Bool = true) async -> Bool {
-        if axInsertVerified(text) {
+        switch axInsertVerified(text) {
+        case .landed:
             Log.insertion.notice("ax-insert: succeeded")
             return true
+        case .uncertain:
+            Log.insertion.error("ax-insert: could not confirm the write; not pasting over text that may have landed")
+            return false
+        case .notLanded:
+            break
         }
         Log.insertion.notice("ax-insert: unverified here, falling back to paste")
         return await insertViaPaste(text, paste: paste, awaitSettle: awaitSettle)
     }
 
-    private static func axInsertVerified(_ text: String) -> Bool {
-        let system = AXUIElementCreateSystemWide()
-        var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
-              let focusedRef else { return false }
-        let element = focusedRef as! AXUIElement
-        guard let before = axValue(element) else { return false }
+    // Asked of the frontmost app rather than the system-wide element: a timeout set on the system-wide
+    // element becomes the default for every AX call in the process.
+    private static func focusedElement(timeout: Float) -> AXUIElement? {
+        guard let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return nil }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 0.1)
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &ref) == .success,
+              let ref, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
+        let element = ref as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, timeout)
+        return element
+    }
+
+    enum AXInsertOutcome: Equatable { case landed, notLanded, uncertain }
+
+    private static func axInsertVerified(_ text: String) -> AXInsertOutcome {
+        guard let element = focusedElement(timeout: 0.5), let before = axValue(element) else { return .notLanded }
         let selectedBefore = axSelectedTextValue(element)
-        guard AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString) == .success
-        else { return false }
-        return axInsertLandedInPlace(before: before, after: axValue(element), selectedBefore: selectedBefore,
-                                     selectedAfter: axSelectedTextValue(element), inserted: text)
+        let written = AXUIElementSetAttributeValue(element, kAXSelectedTextAttribute as CFString, text as CFString)
+        guard written == .success || written == .cannotComplete else { return .notLanded }
+        return axInsertOutcome(written: written, before: before, after: axValue(element),
+                               selectedBefore: selectedBefore, selectedAfter: axSelectedTextValue(element), inserted: text)
+    }
+
+    // A write may have been applied even when it timed out or the read-back did not answer, and falling back
+    // to paste then inserts the text twice. It counts as not landed only when the app answered the read-back,
+    // which it handles after the write.
+    static func axInsertOutcome(written: AXError, before: String, after: String?, selectedBefore: String?,
+                                selectedAfter: String?, inserted: String) -> AXInsertOutcome {
+        guard written == .success || written == .cannotComplete else { return .notLanded }
+        if axInsertLandedInPlace(before: before, after: after, selectedBefore: selectedBefore,
+                                 selectedAfter: selectedAfter, inserted: inserted) { return .landed }
+        return after == nil ? .uncertain : .notLanded
     }
 
     static func axInsertLandedInPlace(before: String, after: String?, selectedBefore: String?,

@@ -573,7 +573,10 @@ AX-insert sets the focused element's
 selected text but **does not trust the API's `.success` return** — Chromium/Electron return success
 and silently no-op it. It only takes the AX path when it can read the field value back and confirm it
 changed, else **falls back to paste** — so `insert` uses AX on native fields and paste on
-web/Electron and never loses text. Type posts Unicode key events with no success signal, so it is
+web/Electron and never loses text. AX calls carry short messaging timeouts so an unresponsive
+target cannot stall the app; a write may land even when it times out, so whenever the field cannot
+be read back afterward the insert is reported as failed (text kept for "Paste last dictation")
+instead of pasted a second time. Type posts Unicode key events with no success signal, so it is
 best-effort with no fallback. The focus-race clipboard fallback (below) overrides whichever method
 the mode picks.
 - **Permissions:** **Accessibility** (post ⌘V/⌘C and AX reads;

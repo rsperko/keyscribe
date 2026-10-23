@@ -46,7 +46,8 @@ struct DictationRecordWiringTests {
 
     private func run(
         transcript: String, mode: Mode, connection: Connection? = nil,
-        llm: any LLMClient = EchoLLM(), historyEnabled: Bool, pressedAt: DispatchTime? = nil
+        llm: any LLMClient = EchoLLM(), historyEnabled: Bool, pressedAt: DispatchTime? = nil,
+        snapshotAsync: (@MainActor () async -> TargetSnapshot)? = nil
     ) async -> DictationRecord? {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-record-\(UUID().uuidString)", isDirectory: true)
@@ -71,6 +72,7 @@ struct DictationRecordWiringTests {
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, _, _, _, _ in true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            snapshotAsync: snapshotAsync,
             micStatus: { .granted },
             accessibilityGranted: { true },
             llmClient: llm)
@@ -104,6 +106,17 @@ struct DictationRecordWiringTests {
         #expect(record?.fingerprints[.raw] == TextFingerprint.of("hello world"))
         #expect(record?.fingerprints[.final] == TextFingerprint.of("hello world"))
         #expect(record?.cloudInvolved == false)
+    }
+
+    @Test func thePreInsertTargetCheckIsTimedApartFromTheInsert() async {
+        let record = await run(
+            transcript: "hello world", mode: mode(id: "plain"), historyEnabled: false,
+            snapshotAsync: {
+                try? await Task.sleep(for: .milliseconds(60))
+                return TargetSnapshot(bundleId: "test.bundle")
+            })
+        #expect((record?.stageMillis[.targetCheck] ?? 0) >= 50)
+        #expect((record?.stageMillis[.insert] ?? .infinity) < 50)
     }
 
     @Test func redactionBoundaryFingerprintsDifferAndOnlyCountIsKept() async {

@@ -180,6 +180,7 @@ final class DictationController {
     private static let modelLoadDeadlineSeconds: Double = 300
 
     private var lastRenderedLevel: Float = -1
+    private var lastPresented: HUDState?
 
     private var latchedTriggerName: String?
 
@@ -202,7 +203,9 @@ final class DictationController {
         guard case .recording = machine.state else { return }
         let quantized = (level * 20).rounded() / 20
         lastRenderedLevel = quantized
-        present(recordingHUD(level: quantized))
+        let state = recordingHUD(level: quantized)
+        guard keepingChoiceVisible(state) != lastPresented else { return }
+        present(state)
     }
 
     private func recordingHUD(level: Float) -> HUDState {
@@ -1198,7 +1201,9 @@ final class DictationController {
     // The only path to the HUD: a pending choice must stay readable, so anything that would cover it
     // becomes its status instead.
     private func present(_ state: HUDState) {
-        hud?.render(keepingChoiceVisible(state))
+        let shown = keepingChoiceVisible(state)
+        lastPresented = shown
+        hud?.render(shown)
     }
 
     private func keepingChoiceVisible(_ state: HUDState) -> HUDState {
@@ -2060,7 +2065,9 @@ final class DictationController {
         // Guarded transition: another terminal path may already have won the race.
         guard machine.beginInserting() else { return }
         hud?.relinquishKeyFocus()
+        let targetCheckStart = DispatchTime.now()
         let current = await snapshotAsync()
+        building.stageMillis[.targetCheck] = elapsedMs(since: targetCheckStart)
         let targetDecision = decideInsertion(
             captured: capturedSnapshot ?? TargetSnapshot(bundleId: nil), current: current)
         // Without Accessibility every synthetic insertion path is silently dropped by the OS. Divert to

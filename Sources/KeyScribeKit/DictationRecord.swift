@@ -50,7 +50,7 @@ public struct DictationRecord: Codable, Equatable, Sendable {
     // the controller sees it (chord grace + main-queue hop); `arm` is physical press→recording and INCLUDES
     // `grace`; `modelWait` is the commit-time load await.
     public enum Stage: String, Codable, Sendable, CaseIterable {
-        case grace, arm, drain, modelWait, transcribe, streamFinalize, localProcess, rewrite, insert
+        case grace, arm, drain, modelWait, transcribe, streamFinalize, localProcess, rewrite, targetCheck, insert
     }
 
     // The text boundaries a fingerprint is taken at, in pipeline order.
