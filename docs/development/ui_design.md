@@ -276,7 +276,7 @@ neither success nor failure, so it plays no cue. It is dismissed by an answer, s
 **Cancel**, a new command, the idle timeout (`VoiceCommandRunner.choiceIdleSeconds`, restarted each
 time the list is shown again), starting another mode, switching to an app other than the one the
 command was given in (any app, when it was given in KeyScribe's own window), locking the screen,
-sleep, turning Voice Commands off, or editing its places and actions. More matches than
+sleep, turning Voice Commands off, or editing its saved commands. More matches than
 `VoiceCommandChoice.displayLimit` offer no list: the Error asks the user to say more of the name.
 A clicked row runs only if no new dictation starts while its destination is being looked up, and its
 result appears once any interrupted answer recording has finished unwinding.
@@ -914,11 +914,11 @@ can open the wrong app** explains that the assigned shortcut starts Voice Comman
 can open the wrong app or bring the wrong window forward. A separate paragraph connects this to exposing
 contents during screen sharing and advises checking the active app before typing.
 **Enable Voice Commands** accepts it; **Cancel** leaves the feature off. App names already work without
-adding a place, so this notice does not wait for **Add Place…**. If the feature was enabled by editing
+adding a command, so this notice does not wait for **Add Command…**. If the feature was enabled by editing
 the config, assigning a shortcut shows the same notice before applying the shortcut. That acknowledgment
 is remembered for this configuration across launches; resetting onboarding or configuration clears it.
 
-Every **Add Place**, **Add Script**, and **Add Shortcut** sheet opens with its own warning expanded,
+Every new command sheet opens with its own warning expanded,
 each time, written for what that kind of entry can do (`VoiceCommandNotices.Kind`): a place can bring an
 app and its windows forward or load a page, and take your next keystrokes; a script runs with your
 account's permissions and can change or delete files; a shortcut can send messages, change or delete
@@ -941,13 +941,17 @@ Its sections are, in order:
    Voice Commands paragraph above), and a shared shortcut written by hand shows a red caption here (“…
    also uses this shortcut, so it does not start Voice Commands”) with **Move Shortcut to Voice
    Commands…**, and marks the list row and the menu-bar badge as never firing.
-2. **What you can say** — one row per taught phrase (`VoiceCommandPhrase`, which also writes the
+2. **What you can say** — first a **Your commands** row: say the name of a command saved below, then any
+   words it takes. A caption introduces the built-in phrases that work without saving anything, one row per
+   taught phrase (`VoiceCommandPhrase`, which also writes the
    “Not a command” guidance and the feature's summary): “switch to …” and “open …” for apps, places, and open
    windows and browser tabs by name, “run …”
    for scripts and shortcuts, and “go back”, which returns to the window or app you left. Other app-switching verbs, and
    common mishearings of them such as “witch to”, are also accepted (`VoiceCommandGrammar.focusVerbs`). These prefix alternatives work
    in live commands and Preview a command without changing the original heard text or action input; the panel
-   continues to teach the standard phrases. Actions require “run”; neither a bare name nor an app-switching phrase runs one.
+   continues to teach the standard phrases. “run …” is presented as optional: a saved action's name alone runs
+   it, including a name that starts with an app-switching word (“open notes”); an app-switching word followed by anything that is
+   not a saved name never does.
    Each row briefly explains the result. A caption explains that ambiguous commands offer a choice:
    click a row or use the start shortcut and say its number, or say “cancel”.
 3. **Preview a command** — a field that shows what a typed phrase would do, live, without running anything (a script
@@ -959,78 +963,105 @@ Its sections are, in order:
    runs. **What the preview checks** is collapsed with a visible “May ask for browser access” summary;
    its content explains that matching windows and tabs reads titles, and checking tabs reads addresses
    and may request permission to control the browser.
-4. **Places** — nicknames for an app or a web page. A persistent introduction explains how to use them. The empty state explains that app names already work
-   without one. Each row leads with an icon: the app's own for an app place, the chosen browser's for a web
-   page (a globe for **Any browser**), and a generic symbol when that app is not on this Mac. Icons come
-   from the installed apps only; no site icon is fetched. Each row's `Say:` line shows complete phrases that work (“switch to Mail”, “open Gmail”),
-   never a bare name. **Add Place…** offers **Current App (name)** and, when that app is a browser that can list its
-   tabs, **Current Browser Tab** (both read from the app that was frontmost when Settings opened), then **App…** and
-   **Web Page…**. Until the browsers on this Mac have been checked, a disabled **Checking browsers…** item
-   stands where **Current Browser Tab** would be. If the tab cannot be read, the web-page sheet opens with
-   that browser chosen and an orange advisory asking for the address. Each opens a sheet organized into **Destination**, **What to say**, and **Command preview**. The destination is the app, chosen with the same app
-   chooser as a mode's **Where it works** (running apps with their icons, **Choose from Applications…**,
-   **Enter Bundle ID…**), or the web page and browser. The name follows the chosen app or page until the
-   user types their own; for an app it is the name shown in the Applications folder, whichever way the app
-   was chosen, then optional **Other names**, separated by commas. The live example always uses the **Spoken name**,
-   so adding another name does not silently replace the main example (“Say “switch to inbox” to
-   bring Mail to the front.”). A field's problem shows beside that field, and **Add Place** stays disabled
-   until the place is valid. An existing place's sheet holds the red **Delete Place** action at its
-   trailing edge, with a confirmation. The web-page sheet's **Browser** picker lists every app that opens web links, including ones
-   whose tabs cannot be read (their pages open directly). While browsers are being checked, a caption says
-   **Checking browsers…**, and **Any browser** or a saved browser stays selected; a refresh never changes a
-   choice the user made. Entering Voice Commands, opening the sheet, or returning to KeyScribe while either
-   is open re-checks the browsers once the last check is older than the installed-apps refresh window, so
-   a browser installed moments earlier can still be missing until that window passes. **Finding open tabs** is a collapsed disclosure with a visible permission summary. It explains
-   that **Any browser** checks every running browser that can list tabs, including private windows,
-   and that macOS may request permission the first time a browser is checked.
-5. **Actions** — scripts and shortcuts to run with “run” and their spoken name, in one list. A collapsed
-   **Permissions and confirmations** disclosure explains that macOS may request access when an action
-   first controls another app or accesses protected data; Shortcuts can offer **Allow Once** or **Always
-   Allow**, and actions can include confirmations on every run. A macOS dialog may name the app even
-   when a script triggered it, and a permission granted through Terminal may not apply to a run here.
-   The copy distinguishes those prompts
-   from the app's own behavior: it starts actions without adding a confirmation, and some actions run
-   immediately. An action that seems to be waiting may have an approval dialog open. The empty
-   state explains how to add an action and say “run” followed by its name, with optional spoken input.
-   Actions start in the background; their own steps may open another app. Each row leads with its kind's icon (a terminal for a script, the Shortcuts app
-   icon for a shortcut), then the spoken phrases (`run {name}`, with `…` when it takes words), what it runs,
-   and a `Script` or `Shortcut` badge. A script row shows its command line and an orange advisory when the
-   program is missing or not executable; a shortcut row shows the shortcut's name and input, and an orange
-   advisory when that shortcut is no longer in Shortcuts. **Add Action…** offers **Script…** and
-   **Shortcut from Shortcuts…**.
+4. **Commands** — every saved command in one list, in file order, whatever it does. A persistent introduction names the kinds and says app names already work without saving
+   anything; the empty state says the same. **Add Command…** offers outcome-named starting points: **Open
+   Current App (name)** and, when that app is a browser that can list its tabs, **Open Current Browser Tab**
+   (both read from the app that was frontmost when Settings opened); then **Open an App or Link…**, **Find a
+   Browser Tab…**, **Run a Shortcut…**, a divider, and **Run a Script…** for advanced setup. Until the browsers
+   on this Mac have been checked, a disabled **Checking browsers…** item stands where **Open Current Browser
+   Tab** would be. Every starting point opens a normal command sheet that saves an ordinary entry in this
+   list, edited from its row; there is no separate template lifecycle.
 
-   **Shortcut from Shortcuts…** opens a sheet organized into **Run this shortcut**, **What to say**,
-   **Input (optional)**, and **Command preview**. It starts with the shortcut, picked from the user's shortcuts (stored by
+   Every sheet shares one shape: its warning, **What will you say?**, **What should happen?** (the app, link,
+   tab search's browser, shortcut, or program), then the optional input or arguments, and **Preview**; the
+   technical details sit last. The starting point still suggests a name until the user types one.
+   **What will you say?** has **Spoken name** with a caption saying what saying it does, and optional
+   **Other names** separated by commas, whose caption suggests one for a word that is often misheard. There
+   is no setting for whether a name works on its own: every saved name does. Any phrase can be a name,
+   including one that starts with a command word (“go home”, “open notes”). Below the fields, orange
+   advisories (`VoiceCommandConfig.conflicts`) name concrete outcomes: a phrase another command already
+   answers to (saying it will ask which one), a longer saved name that takes over some of what this command
+   would receive (“slack joe” runs Slack Joe instead), a longer name that takes words away from an existing
+   command that takes them (adding Note work beside Note), and a name that catches a built-in command word
+   (“Saying “open …” will reach this command instead of switching apps. Say “switch to …” to switch apps.”).
+   **Preview** is an example card, “You say” → “What happens”, for a sample utterance (“buy milk” for words,
+   “inbox” for a tab search), read through the mode's replacements and checked against the other saved
+   commands exactly as a live command would be (`VoiceCommandExample`). When a replacement or another
+   command would send the sample elsewhere, or it would ask which one, the card is replaced by an orange
+   advisory saying so, quoting what the replacements read it as. It shows only once the draft is
+   valid. A sheet's title names the starting point when adding (**Open an App or Link**, **Find a
+   Browser Tab**, **Run a Shortcut**, **Run a Script**) and reads **Edit Command** when editing; its buttons
+   are **Add Command**, and **Delete Command** in red at the trailing edge, with a confirmation.
+
+   Each row leads with an icon: the app's own for an app, the chosen browser's for a web page or tab search
+   (a globe for **Any browser**), a terminal for a script, the Shortcuts icon for a shortcut, and a generic
+   symbol when that app is not on this Mac. Icons come from the installed apps only; no site icon is
+   fetched. Each row's `Say:` line shows its spoken names, with `…` when it takes words (“Mail”, “web hooks”,
+   “chrome …”, “deploy …”), then where it goes or what it runs,
+   then a badge: **App**, **Web page**, **App link**, **Tab search**, **Script**, or **Shortcut**. A script row
+   shows its command line and an orange advisory when the program is missing or not executable; a shortcut
+   row shows the shortcut's name and input, and an orange advisory when that shortcut is no longer in
+   Shortcuts. Under the list sit the apps warning and a collapsed **Permissions and confirmations**
+   disclosure explaining that macOS may request access when an action first controls another app or
+   accesses protected data; Shortcuts can offer **Allow Once** or **Always Allow**, and actions can include
+   confirmations on every run. A macOS dialog may name the app even when a script triggered it, and a
+   permission granted through Terminal may not apply to a run here. The copy distinguishes those prompts
+   from the app's own behavior: it starts actions without adding a confirmation, and some actions run
+   immediately. An action that seems to be waiting may have an approval dialog open.
+
+   **Open an App or Link** has a segmented **An app** / **A link** / **A browser tab** destination. The app
+   is chosen with the same app chooser as a mode's **Where it works** (running apps with their icons,
+   **Choose from Applications…**, **Enter Bundle ID…**). The name follows the chosen app or page until the
+   user types their own; for an app it is the name shown in the Applications folder, whichever way the app
+   was chosen. A **Link** is a web address or a link that opens an app (a chat channel or note link). For a web
+   address the caption says it switches to an open tab whose address starts with it or opens the page, and a
+   **Browser** picker follows; for an app link the browser picker and **Finding open tabs** are hidden, the
+   caption names the app that opens it (“Opens this link in …. Open tabs are not checked.”), and an orange
+   advisory says when no app on this Mac opens it. If the current tab cannot be read, the sheet opens on a
+   link with that browser chosen and an orange advisory asking for the address. **Find a Browser Tab** (the
+   **A browser tab** destination) says to say the name, then words from the tab's title, and has only the
+   **Browser** picker. The **Browser** picker lists every
+   app that opens web links, including ones whose tabs cannot be read (their pages open directly), plus
+   **Any browser**. While browsers are being checked, a caption says **Checking browsers…**, and **Any
+   browser** or a saved browser stays selected; a refresh never changes a choice the user made. Entering
+   Voice Commands, opening the sheet, or returning to KeyScribe while either is open re-checks the browsers
+   once the last check is older than the installed-apps refresh window, so a browser installed moments
+   earlier can still be missing until that window passes. **Finding open tabs** is a collapsed disclosure
+   with a visible permission summary. It explains that it reads open tabs' titles and addresses, that **Any
+   browser** checks every running browser that can list tabs, including private windows, and that macOS may
+   request permission the first time a browser is checked. A field's problem shows beside that field, and
+   **Add Command** stays disabled until the command is valid.
+
+   **Run a Shortcut** is organized into **What will you say?**, **What should happen?** (the shortcut),
+   **Input (optional)**, and **Preview**. The shortcut is picked from the user's shortcuts (stored by
    identifier, so renaming it in Shortcuts keeps it working); the name follows the chosen shortcut until
-   the user types their own, then other spoken names, then an optional **Input** where `{text}` marks the
-   spoken words. A live example uses the configured spoken name and shows the actual input, with and
-   without spoken words. The picker includes
+   the user types their own. The optional **Input** uses `{text}` to mark the spoken words. The preview shows the actual input, with and without spoken words. The picker includes
    **Refresh List** and **Open Shortcuts…**; empty and unavailable states explain how to recover. A caption
    says a shortcut may open an app or ask a question, advises checking for a dialog if it is waiting,
    and says its final result appears in History when saving is enabled for this mode. An existing
-   shortcut's sheet holds the red **Delete Shortcut** action, with a confirmation saying the shortcut
+   shortcut's sheet holds the red **Delete Command** action, with a confirmation saying the shortcut
    itself stays in Shortcuts.
 
-   **Script…** opens a sheet organized into **Run this file**, **What to say**, **Arguments (optional)**,
-   and **Command preview**. The program (a path field plus **Choose…**) comes first, followed by the
-   spoken name and other names, then arguments, one per line, with
+   **Run a Script** is organized into **What will you say?**, **What should happen?** (the program, a path
+   field plus **Choose…**), **Arguments (optional)**, and **Preview**. Arguments go one per line, with
    `{text}` marking where the spoken words go. Beside the arguments it says the script should treat
    those words as input, not as code to run; the finer rules (blank lines, when words are
    needed) sit in a collapsed **How scripts run** section. The full-path field says pipes and redirects
    do not work there; the disclosure explains that the program runs without a shell or Terminal window
-   and may need full paths or PATH set inside the script. The preview uses the current draft, shows the
-   spoken phrase plus the exact arguments, substitutes “buy milk” when spoken input is required, and
-   never executes the program. **Add Script** and **Save** stay disabled until
+   and may need full paths or PATH set inside the script. The preview shows the exact command line,
+   substitutes “buy milk” when spoken input is required, and never executes the program. **Add Command**
+   and **Save** stay disabled until
    the name, program, and arguments are valid; an incomplete or conflicting entry explains what prevents
    saving. A program with a known interpreter file name (a shell or `env`, for example), or a wrapper such
    as `nice` around one, cannot take `{text}` in its arguments; the issue names the interpreter and points
-   to choosing an executable script file instead. Saving an edit to a place or action that was renamed or
-   deleted elsewhere is refused with a message, and the sheet keeps the draft. A program that is not installed yet remains an advisory. An existing script's sheet holds the
-   red **Delete Script** action at its trailing edge, with a confirmation.
-6. **Recognition and replacements** — the same vocabulary summary and help as other modes, with
+   to choosing an executable script file instead. Saving an edit to a command that was
+   deleted elsewhere is refused with a message, and the sheet keeps the draft; a rename elsewhere does not
+   refuse it, because a command is edited by its stable id, never its name. A program that is not installed yet remains an advisory. An existing script's sheet holds the
+   red **Delete Command** action at its trailing edge, with a confirmation.
+5. **Recognition and replacements** — the same vocabulary summary and help as other modes, with
    **Edit Vocabulary…** opening Vocabulary on Voice Commands. Help explains that replacements apply
    before a command is read and can correct frequently misheard names or phrases.
-7. **Result handling** — the same **Do not save this mode in history** toggle as other modes, off by
+6. **Result handling** — the same **Do not save this mode in history** toggle as other modes, off by
    default. Its help says saved commands include what was said, what ran (including input), and any
    error message, which may include text from a script or shortcut.
 

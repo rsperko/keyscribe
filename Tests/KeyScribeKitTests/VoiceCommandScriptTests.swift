@@ -20,11 +20,11 @@ struct VoiceCommandScriptTests {
         let toml = """
         schema_version = 1
 
-        [[place]]
+        [[command]]
         name = "Gmail"
         url = "https://mail.google.com/"
 
-        [[script]]
+        [[command]]
         name = "Deploy"
         say = ["ship"]
         run = ["~/bin/deploy", "--env", "{text}"]
@@ -168,11 +168,11 @@ struct VoiceCommandScriptTests {
         let toml = """
         schema_version = 1
 
-        [[place]]
+        [[command]]
         name = "Gmail"
         url = "https://mail.google.com/"
 
-        [[script]]
+        [[command]]
         name = "Shell"
         run = ["/bin/sh", "-c", "{text}"]
         """
@@ -194,17 +194,17 @@ struct VoiceCommandScriptTests {
     @Test func rejectsAScriptNamedLikeAPlace() {
         let config = VoiceCommandConfig(
             places: [VoiceCommandPlace(name: "Deploy", target: .app(bundleId: "com.example"))], scripts: [deploy])
-        #expect(config.issue == "script \"Deploy\": a place or script already uses this name")
+        #expect(config.issue == "command \"Deploy\": another command already uses this name")
     }
 
     @Test func rejectsDuplicateScriptNames() {
         let config = VoiceCommandConfig(scripts: [deploy, VoiceCommandScript(name: "deploy", run: ["/bin/x"])])
-        #expect(config.issue == "script \"deploy\": a place or script already uses this name")
+        #expect(config.issue == "command \"deploy\": another command already uses this name")
     }
 
-    @Test func aBareScriptNameDoesNotRunAnything() {
-        #expect(resolve("Herdr.", scripts: [herdr]) == .notACommand)
-        #expect(resolve("deploy staging", scripts: [deploy]) == .notACommand)
+    @Test func aScriptRunsByItsNameAlone() {
+        #expect(resolve("Herdr.", scripts: [herdr]) == .action(.script(herdr, arguments: ["attach"])))
+        #expect(resolve("deploy staging", scripts: [deploy]) == .action(.script(deploy, arguments: ["--env", "staging"])))
     }
 
     @Test func runUsesTheSpokenNameRatherThanTheProgramFileName() {
@@ -247,8 +247,8 @@ struct VoiceCommandScriptTests {
             == .action(.script(deploy, arguments: ["--env", "Which to choose, witch too"])))
     }
 
-    @Test func aScriptWithoutTextIgnoresAnUtteranceWithMoreWords() {
-        #expect(resolve("run herdr please", scripts: [herdr]) == .scriptNotFound("herdr please"))
+    @Test func aScriptWithoutTextSaysItTakesNoWords() {
+        #expect(resolve("run herdr please", scripts: [herdr]) == .takesNoText("herdr"))
     }
 
     @Test func whatFollowsTheNameBecomesTheText() {
@@ -284,11 +284,11 @@ struct VoiceCommandScriptTests {
         #expect(resolve("run ticket old", scripts: [ticket, newTicket]) == .action(.script(ticket, arguments: ["old"])))
     }
 
-    @Test func aLongerNameWithoutTextGivesWayWhenMoreWordsFollow() {
+    @Test func aLongerNameWithoutTextNeverGivesWayToTheShorterOne() {
         let ticket = VoiceCommandScript(name: "Ticket", run: ["/bin/ticket", "{text}"])
         let board = VoiceCommandScript(name: "Ticket board", run: ["/bin/board"])
         #expect(resolve("run ticket board", scripts: [ticket, board]) == .action(.script(board, arguments: [])))
-        #expect(resolve("run ticket board two", scripts: [ticket, board]) == .action(.script(ticket, arguments: ["board two"])))
+        #expect(resolve("run ticket board two", scripts: [ticket, board]) == .takesNoText("Ticket board"))
     }
 
     @Test func twoScriptsWithTheSameSpokenNameAreAmbiguous() {
@@ -339,14 +339,14 @@ struct VoiceCommandScriptTests {
         let toml = """
         schema_version = 1
 
-        [[script]]
+        [[command]]
         name = "Journal"
         say = ["log"]
         shortcut = "Journal Entry"
         shortcut_id = "6E982466-2036-4362-BDEC-983051029F6A"
         input = "{text}"
 
-        [[script]]
+        [[command]]
         name = "Deploy"
         say = ["ship"]
         run = ["~/bin/deploy", "--env", "{text}"]
@@ -360,9 +360,9 @@ struct VoiceCommandScriptTests {
     }
 
     @Test func anEntrySetsExactlyOneOfRunOrShortcut() {
-        let both = "schema_version = 1\n[[script]]\nname = \"X\"\nrun = [\"/bin/x\"]\nshortcut = \"X\"\n"
-        let neither = "schema_version = 1\n[[script]]\nname = \"X\"\n"
-        let inputOnAProgram = "schema_version = 1\n[[script]]\nname = \"X\"\nrun = [\"/bin/x\"]\ninput = \"{text}\"\n"
+        let both = "schema_version = 1\n[[command]]\nname = \"X\"\nrun = [\"/bin/x\"]\nshortcut = \"X\"\n"
+        let neither = "schema_version = 1\n[[command]]\nname = \"X\"\n"
+        let inputOnAProgram = "schema_version = 1\n[[command]]\nname = \"X\"\nrun = [\"/bin/x\"]\ninput = \"{text}\"\n"
         for toml in [both, neither, inputOnAProgram] {
             #expect(throws: ConfigError.self) { try VoiceCommandStore.decode(from: toml) }
         }

@@ -76,16 +76,19 @@ There is no background phone-home or license check.
 ## Programs and shortcuts you run by voice
 
 With the experimental voice commands you can name a script or a macOS shortcut that KeyScribe runs
-when you say **run** followed by its name, and pass it the words you say after the name. A bare name or
-an app-switching phrase never runs one. KeyScribe starts a script on your Mac and hands it those words
+when you say its name (optionally after **run**), and pass it the words you say after the name. It runs
+whenever what you say starts with one of its names, including a mishearing of something else and a
+name that sounds like switching apps, such as "open notes". Saying "switch to" or "open" with
+anything that is not one of its names never runs one. KeyScribe starts a script on your Mac and hands it those words
 as an argument, or runs a shortcut and hands them over as its input; it does not send them anywhere
 itself. What the script or shortcut does with them is up to what you chose: a shortcut can send
 messages, change files, or send its input to online services, depending on its steps. Both run as you, with
 everything your account can do, and a misheard command can run them, so choose what you connect this
 way with care.
 
-Every Add Script and Add Shortcut sheet explains these consequences before saving, each in its own
-words, and every Add Place sheet explains that a place can bring an app's windows forward. Separately,
+Every Run a Script and Run a Shortcut sheet explains these consequences before saving, each in its own
+words, and every Open an App or Link and Find a Browser Tab sheet explains that it can bring an app's
+windows forward. Separately,
 a notice before first enabling Voice Commands explains that an unintended app's windows can become
 visible and receive your next keystrokes.
 

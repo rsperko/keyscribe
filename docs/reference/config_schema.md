@@ -15,7 +15,7 @@
   connections.toml         # named LLM connections (BYOK)
   dictionary.toml          # global dictionary
   replacements.toml        # global replacements
-  voice_commands.toml      # places and actions for the Voice Commands mode (experimental)
+  voice_commands.toml      # saved commands for the Voice Commands mode (experimental)
   fragments/               # shared prompt fragments (one file per fragment)
     my-voice.md            #   markdown body + YAML frontmatter
   modes/                   # one file per mode; filename stem = mode id
@@ -471,10 +471,10 @@ replace = "the"
 regex = false
 ```
 
-### `voice_commands.toml` — places and actions for Voice Commands (experimental)
+### `voice_commands.toml` — saved commands for Voice Commands (experimental)
 
 Read only while the `voice_commands` flag is on. The Voice Commands mode understands
-an app-switching verb followed by a target (`VoiceCommandGrammar.focusVerbs`), `run <action> [words]`, and `go back`, matched against the whole
+a saved command's spoken name (below, checked first), an app-switching verb followed by a target (`VoiceCommandGrammar.focusVerbs`), `run <action> [words]`, and `go back`, matched against the whole
 utterance (case and punctuation ignored; a leading "the" is dropped from an app-switching target, so
 `switch to the browser` looks for `browser`, but not from a `run` action name). The app-switching prefixes also accept
 `which to` and `witch to` for `switch to`, and `two` or `too` in place of `to` after `switch`, `which`,
@@ -484,37 +484,52 @@ action input, and the original heard text are preserved. They apply equally to l
 An app answers, in every tier, to the name shown in the Applications folder and to the name in its own
 menu bar when the two differ; the name KeyScribe shows and sorts by is the Applications-folder one.
 A target is a running app, an app installed in an Applications folder (or one folder down inside it),
-or a place from this file:
+or a saved command from this file. The file is one ordered list of `[[command]]` tables; each does
+exactly one thing, chosen by which of `app`, `url`, `find_tab`, `run`, or `shortcut` it sets:
 
 ```toml
 schema_version = 1
 
-[[place]]
+[[command]]
+id = "3f2a9c1e-…"                # stable and never shown; Settings writes a random one. Optional when written by hand
 name = "Mail"                    # display name; also always a spoken name. Unique, ignoring case.
 say = ["male", "email"]          # optional misheard form or preferred nickname
 app = "com.apple.mail"           # bring this app forward, opening it if needed
 
-[[place]]
+[[command]]
 name = "Gmail"
-url = "https://mail.google.com/" # focus an open tab whose address starts with this; else open it
+url = "https://mail.google.com/" # focus an open tab whose address starts with this; else open it (or an app link — below)
 browser = "com.google.Chrome"    # optional: only look in, and open with, this browser
 
-[[script]]
-name = "Deploy"                  # display name; also always a spoken name. Unique among places and scripts.
-say = ["ship"]                   # optional extra spoken names
-run = ["~/bin/deploy", "--env", "{text}"]  # program, then its arguments
+[[command]]
+name = "Web Hooks"
+url = "slack://channel?team=T0123ABCD&id=C0456EFGH"  # an app link: opened as-is in its app
 
-[[script]]
+[[command]]
+name = "Chrome"
+find_tab = true                  # a tab search: "chrome gmail" finds Chrome's tab titled like "gmail"
+browser = "com.google.Chrome"    # optional: only search this browser; absent = every browser
+
+[[command]]
+name = "Deploy"
+say = ["ship"]                   # optional extra spoken names
+run = ["~/bin/deploy", "--env", "{text}"]  # a program, then its arguments
+
+[[command]]
 name = "Journal"                 # a macOS Shortcut: same naming and matching as a program
 shortcut = "Journal Entry"       # the shortcut's name in Shortcuts
 shortcut_id = "6E982466-2036-4362-BDEC-983051029F6A"  # optional: run by identifier, so a rename still works
 input = "{text}"                 # optional text given as the shortcut's input
 ```
 
-Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly one** of `run` (a program) or
-`shortcut` (a shortcut from the Shortcuts app); `shortcut_id` and `input` apply only to a shortcut.
+Settings lists the commands in file order under **Commands**. `browser` applies to `url` and `find_tab`
+commands; `shortcut_id` and `input` apply only to a shortcut. **`id`** identifies the command
+across renames and edits: Settings edits, deletes, and remembers a pending choice by it, never by name.
+A command written without one gets an id derived from its name, which the next save from Settings keeps.
+Two commands may not share an id or a name. In what follows, a *place* is a command that opens an app,
+link, or tab, and a *script* one that runs a program or shortcut.
 
-**Scripts** run a program when you say **run** followed by their name, and can be handed what you say after it:
+**Scripts** run a program when you say their name, optionally after **run**, and can be handed what you say after it:
 
 - `run` is the program followed by its arguments. The program is a full path (`/…` or `~/…`); it is run
   directly, never through a shell, from the home folder, with standard input, output, and error not
@@ -522,21 +537,15 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   at login, that `PATH` holds only the system folders. Each argument is passed exactly as
   written, except that `{text}` is replaced by the spoken text inside that argument: the words never
   become extra arguments, and KeyScribe never evaluates them. `{text}` may not appear in the program.
-- **Matching** requires **run** (`run deploy staging`), followed by one of the script's spoken names in
-  whole words (case and punctuation ignored). A bare name or an app-switching phrase never runs a script;
-  **run** never opens an app or place. The spoken name is independent of the executable's filename:
-  `name = "Foo"` can point at `~/bin/bar.sh`. A script whose arguments use `{text}` needs words after its
-  name; saying only `run {name}` fails with a message and runs nothing. A script without `{text}` runs
-  only when `run {name}` is the whole utterance. The longest spoken name after **run** is chosen first,
-  and only then are its words checked, so "run ticket new"
-  asks for text for a `Ticket new` script rather than running `Ticket` with "new"; a longer name without
-  `{text}` that has more words after it is skipped. Scripts tied for the longest name are offered as a
-  numbered choice, and the words after the name are kept for whichever one is chosen.
-  A script is never matched by a near-miss, and the dictionary never corrects its name or arguments.
-  These matching rules apply after mode replacements, which can explicitly produce a **run** command.
-  `go back` returns to the
-  previous app; a script named `Go back` instead requires `run go back`. Command words can be script names
-  because the **run** prefix separates script execution from app switching.
+- **Matching** follows the saved-name rules below: one of the script's spoken names in whole words at
+  the start of what was said (`deploy staging`), or the same after **run** (`run deploy staging`), where
+  only scripts are considered. A script's name may itself start with an app-switching word (`open notes`),
+  and then saying it runs the script; an app-switching word followed by anything that is not a saved
+  name never runs one, and **run** never opens an app or place. The spoken name is independent of the executable's filename: `name = "Foo"` can point at
+  `~/bin/bar.sh`. A script whose arguments use `{text}` needs words after its name; saying only the name
+  fails with a message and runs nothing. A script without `{text}` fails with a message when more words
+  follow its name. A script is never matched by a near-miss, and the dictionary never corrects its name or
+  arguments. These matching rules apply after mode replacements.
 - **The text** is what follows the spoken name, in the cleaned transcript's own case and punctuation, with
   leading and trailing spaces and the `, ; : . ! ? …` that speech recognition adds at the edges removed.
   The voice-commands dictionary never corrects it.
@@ -572,7 +581,7 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   interpreter, a wrapper the rule does not know, or a script that runs its input as code (`eval "$1"`)
   can still run spoken words as code, so write scripts that treat the text as data, as in `"$1"` below.
 - **An invalid entry rejects the whole file**, like any other validation error in it: when KeyScribe
-  starts with such a file, no saved places or actions are available until it is fixed (apps still open
+  starts with such a file, no saved commands are available until it is fixed (apps still open
   by name), and while KeyScribe is running it keeps the last version that loaded. The Voice Commands
   editor names the offending entry and why it is invalid. Fix or remove that entry in
   `voice_commands.toml` and save; the file is read again automatically.
@@ -586,12 +595,12 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   made executable with `chmod +x ~/bin/note`, and the entry
 
   ```toml
-  [[script]]
+  [[command]]
   name = "Note"
   run = ["~/bin/note", "{text}"]
   ```
 
-  turns "run note buy milk" into `~/bin/note "buy milk"`, which appends `buy milk` to `~/notes.txt`.
+  turns "note buy milk" into `~/bin/note "buy milk"`, which appends `buy milk` to `~/notes.txt`.
 
 - **What is matched is the cleaned transcript.** Before anything is matched, the Voice Commands mode's own
   replacements run over the whole utterance, so one can repair other misheard verbs
@@ -613,9 +622,32 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   `switch to male` and `open email` reach Mail without rewriting the transcript. Keep these fixes in the
   mode's vocabulary unless you deliberately want other modes to use them. See the
   [worked examples in the FAQ](../../FAQ.md#a-voice-command-keeps-being-misheard).
-- A place sets **exactly one** of `app` or `url`; `url` must be `http`/`https`. A script sets `run` or `shortcut`. A file that breaks a rule
+- A command sets **exactly one** of `app`, `url`, `find_tab = true`, `run`, or `shortcut`. `url` is an `http`/`https` address, or a link that opens an
+  app (`slack://…`, `obsidian://…`): any other scheme except `file`, `javascript`, `data`, `blob`, `about`, and
+  `ftp`, with no username or password. An app link is opened as written by the app macOS assigns to it; it is
+  never matched against open tabs, never reads them, and cannot set `browser`. If no app opens it, the command
+  fails and opens nothing. A file that breaks a rule
   fails to load as a whole and the last good copy stays in effect (surfaced like any malformed config file).
-- **Matching order**, first hit wins: a place's spoken name exactly; a running app's name exactly; a
+- **Saved names come first.** Every place and script is checked before any command word, against the
+  start of what was said, in whole words, the same way for every kind of command
+  (`VoiceCommandResolver.savedMatch`): `Web hooks` answers "web hooks", not "webhooks"; add `webhooks` to
+  `say` for that. Only navigation targets reached through a verb (apps, windows, tab titles) are matched
+  loosely. The **longest matching spoken name wins**
+  whatever the file order, so `Note` and `Note work` both work and "note work buy milk" runs `Note work`.
+  Only then are the words after it checked: a script or shortcut with `{text}` needs some, a tab search
+  uses them to find the tab, and anything else must have none. When the check fails the command explains
+  and runs nothing; it never falls back to a shorter name. Names tied for longest are offered as a numbered
+  choice. Names match exactly, never by a near-miss. Any phrase can be a name, including one that starts
+  with a command word (`go home`, `open notes`); because saved names come first, a name that is itself a
+  command word or a prefix of one (`go`, `open`) catches those commands, and Settings says so while
+  editing. The verb forms keep working for places and scripts, except that a tab search is never reached by
+  "switch to": "switch to chrome" still opens the browser.
+- **Tab searches** (`find_tab = true`) look only at tabs in their `browser`, or in every running browser that
+  can list tabs when `browser` is absent, using the same title matching as an open browser tab below (exact,
+  then a run of words, then words in any order or a near-miss). Said alone, a tab search with a `browser`
+  brings that browser forward; one without asks for words to find. Reading tabs uses the same Automation
+  permission as a web place.
+- **Matching order** for an app-switching verb, first hit wins: a place's spoken name exactly; a running app's name exactly; a
   contiguous run of words in a running app's name ("chrome" → Google Chrome); the same partial rule on
   place names; an installed app's name exactly; then an **open window's title**, exactly and then as a
   contiguous run of words; then an **open browser tab's title** the same two ways; then installed apps
@@ -629,9 +661,13 @@ Settings lists both kinds under **Actions**. Each `[[script]]` sets **exactly on
   name. Places and actions keep their configured order in the choice, apps are sorted by name. A
   near-miss picks the closest target; targets tied for closest go through the same order, so a place
   still beats an app equally close, and two tied at the same step are offered whatever order they are
-  listed in. Places or actions may share a spoken name on purpose — that is how to get the choice — so a
+  listed in. Saved commands may share a spoken name on purpose (that is how to get the choice), so a
   shared name is an advisory in Settings, never a load error; primary names must still be unique. The
-  advisory compares names the way each family is matched: places ignoring spaces, actions word by word.
+  advisory compares names the way they are matched, word by word. Settings also points out, while
+  editing, a longer saved name that takes over some of what a command taking words would receive, a new
+  longer name that takes words away from an existing command that takes them, a name that catches a built-in command word, and a preview phrase
+  that, after the mode's replacements, another saved command would answer or no saved command would
+  (`VoiceCommandConfig.conflicts`, `VoiceCommandExample`).
 - **Window titles** are read over Accessibility on this Mac, and only when no place or app name matched
   first, so an exact app name (`open Slack`) never looks at windows. A title matches exactly when the
   spoken target equals the whole title or one of its parts: apps put the document, project, and app name

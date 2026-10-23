@@ -593,8 +593,8 @@ struct VoiceCommandChoiceWiringTests {
         #expect(h.runner.backTarget == VoiceCommandOrigin(bundleId: "com.apple.TextEdit", pid: 1))
     }
 
-    private static let notACommand = "Not a command. Say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, "
-        + "\u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}."
+    private static let notACommand = "Not a command. Say the name of a saved command. You can also say \u{201C}switch to\u{201D} "
+        + "or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}."
     private static let retryNote = "Choose 1\u{2013}2, say \u{201C}cancel\u{201D}, or give a new command."
     nonisolated private static let secureTarget = TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1, isSecureField: true)
     nonisolated private static let movedTarget = TargetSnapshot(bundleId: "com.example.Other", pid: 2)

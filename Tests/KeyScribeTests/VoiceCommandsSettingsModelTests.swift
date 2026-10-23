@@ -39,7 +39,7 @@ struct VoiceCommandsSettingsModelTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         _ = model.save(mail, replacing: nil)
         let other = VoiceCommandPlace(name: "mail", target: .app(bundleId: "com.apple.mail"))
-        #expect(model.save(other, replacing: nil) == "Another place or action already uses this name.")
+        #expect(model.save(other, replacing: nil) == VoiceCommandsSettingsModel.nameTakenMessage)
         #expect(model.places == [mail])
     }
 
@@ -55,14 +55,14 @@ struct VoiceCommandsSettingsModelTests {
         let (model, dir) = make()
         defer { try? FileManager.default.removeItem(at: dir) }
         _ = model.save(mail, replacing: nil)
-        #expect(model.delete(named: "MAIL") == nil)
+        #expect(model.delete(id: mail.id) == nil)
         #expect(model.places.isEmpty)
     }
 
     @Test func aMalformedFileBlocksEditingAndExplainsWhy() throws {
         let (model, dir) = make()
         defer { try? FileManager.default.removeItem(at: dir) }
-        try "schema_version = 1\n[[place]]\nname = \"Nowhere\"\n"
+        try "schema_version = 1\n[[command]]\nname = \"Nowhere\"\n"
             .write(to: dir.appendingPathComponent(VoiceCommandStore.fileName), atomically: true, encoding: .utf8)
         model.reload()
         #expect(model.fileNotice?.title == "\(VoiceCommandStore.fileName) needs fixing")
@@ -103,8 +103,8 @@ struct VoiceCommandsSettingsModelTests {
         let personal = VoiceCommandPlace(name: "Personal Mail", say: ["mail"], target: .url("https://mail.example.net/"))
         let work = VoiceCommandPlace(name: "Work Mail", say: ["mail"], target: .url("https://inbox.example.org/"))
         #expect(model.save(personal, replacing: nil) == nil)
-        #expect(model.sharedNameAdvisory(for: work, replacing: nil)
-                == "Saying \u{201C}mail\u{201D} will ask you to choose between Work Mail and Personal Mail.")
+        #expect(model.conflicts(for: .place(work))
+                == ["\u{201C}mail\u{201D} is also a name for Personal Mail, so saying it will ask you to choose. Give this one a name of its own."])
         #expect(model.save(work, replacing: nil) == nil)
         model.reload()
         #expect(model.places.map(\.name) == ["Personal Mail", "Work Mail"])
@@ -126,6 +126,21 @@ struct VoiceCommandsSettingsModelTests {
         try "not toml".write(to: modesDir.appendingPathComponent("\(Mode.voiceCommandsId).toml"), atomically: true, encoding: .utf8)
 
         #expect(model.readAs("switch to herder") == "switch to herdr")
+    }
+
+    @Test func theEditorPreviewAppliesTheModesReplacements() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-vcsettings-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let config = ConfigCache(supportDir: dir)
+        config.voiceCommandsEnabled = true
+        let repository = ConfigRepository(supportDir: dir, config: config)
+        var commands = Mode.voiceCommands
+        commands.replacements.rules = [.init(heard: "inbox", replace: "switch to inbox", regex: false)]
+        try repository.writeMode(commands)
+        let model = VoiceCommandsSettingsModel(repository: repository)
+        let inbox = VoiceCommandScript(name: "Inbox", run: ["/usr/bin/true"])
+        #expect(model.example(for: .script(inbox)).conflict
+                == "Your replacements read \u{201C}inbox\u{201D} as \u{201C}switch to inbox\u{201D}, so it does not run this command.")
     }
 
     @Test func tryItNeverCountsAReplacementAsUsed() throws {
@@ -153,6 +168,16 @@ struct VoiceCommandsSettingsModelTests {
         #expect(unchanged.readAs == nil)
     }
 
+    @Test func anAppLinkPlaceSavesWithoutABrowser() throws {
+        let (model, dir) = make()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let channel = VoiceCommandPlace(name: "Web Hooks", say: ["web hooks"], target: .url("slack://channel?team=T1&id=C1"))
+        #expect(model.save(channel, replacing: nil) == nil)
+        #expect(model.places == [channel])
+        let browsed = VoiceCommandPlace(name: "Other", target: .url("slack://open"), browser: "com.example.browser")
+        #expect(model.save(browsed, replacing: nil) != nil)
+    }
+
     @Test func tryItRefreshesWhenAPlaceIsSaved() async throws {
         let (model, dir) = make()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -169,10 +194,10 @@ struct VoiceCommandsSettingsModelTests {
         #expect(condition())
     }
 
-    @Test func aPlaceRowShowsPhrasesThatActuallyWork() {
-        #expect(mail.spokenExamples == ["open Mail", "open inbox"])
-        let code = VoiceCommandPlace(name: "Code", say: ["editor"], target: .app(bundleId: "com.microsoft.VSCode"))
-        #expect(code.spokenExamples == ["switch to Code", "switch to editor"])
+    @Test func aCommandRowShowsPhrasesThatActuallyWork() {
+        #expect(VoiceCommandExample.phrases(for: .place(mail)) == ["Mail", "inbox"])
+        let log = VoiceCommandScript(name: "Log", say: ["note"], run: ["/usr/bin/printf", "{text}"])
+        #expect(VoiceCommandExample.phrases(for: .script(log)) == ["Log \u{2026}", "note \u{2026}"])
     }
 
     @Test func choosingAnAppSuggestsItsNameUntilTheUserTypesOne() {
@@ -196,37 +221,44 @@ struct VoiceCommandsSettingsModelTests {
         #expect(existing.name == "Work")
     }
 
-    @Test func thePlaceSheetShowsALiveExample() {
-        var draft = PlaceDraft(name: "", kind: .app, bundleId: "com.apple.mail")
-        #expect(draft.example(destination: "Mail") == nil)
-        draft.name = "Mail"
-        draft.say = "inbox, letters"
-        #expect(draft.example(destination: "Mail") == "Say \u{201C}switch to Mail\u{201D} to bring Mail to the front.")
-        var page = PlaceDraft(name: "Gmail", kind: .webPage, url: "https://mail.google.com/")
-        #expect(page.example(destination: "mail.google.com") == "Say \u{201C}open Gmail\u{201D} to go to mail.google.com.")
-        page.say = "inbox"
-        #expect(page.example(destination: "mail.google.com") == "Say \u{201C}open Gmail\u{201D} to go to mail.google.com.")
+    @Test func aPlacePreviewFollowsTheDraft() {
+        let draft = PlaceDraft(name: "Mail", kind: .app, bundleId: "com.apple.mail")
+        #expect(VoiceCommandExample.make(for: .place(draft.place), appName: { _ in "Mail" })
+                == VoiceCommandExample(heard: "mail", result: "Brings Mail to the front, opening it if needed."))
+        let search = PlaceDraft(name: "Chrome", kind: .tabSearch, browser: "com.google.Chrome")
+        #expect(search.place == VoiceCommandPlace(id: search.commandId, name: "Chrome", target: .tabSearch, browser: "com.google.Chrome"))
+    }
+
+    @Test func theEditorPreviewIsCheckedAgainstSavedCommands() {
+        let (model, dir) = make()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(model.save(mail, replacing: nil) == nil)
+        let mailer = VoiceCommandScript(name: "Mailer", say: ["mail"], run: ["/usr/bin/true"])
+        #expect(model.example(for: .script(mailer)).conflict == nil)
+        let clash = VoiceCommandScript(name: "Mail it", say: ["inbox"], run: ["/usr/bin/true"])
+        #expect(model.example(for: .script(clash)).conflict == nil)
+        let same = VoiceCommandScript(name: "Inbox", run: ["/usr/bin/true"])
+        #expect(model.example(for: .script(same)).conflict
+                == "Saying \u{201C}inbox\u{201D} would ask you to choose between this command and Mail.")
+        #expect(model.example(for: .place(mail)).conflict == nil)
     }
 
     @Test func theScriptEditorPreviewsItsDraftWithoutRunningIt() {
         var draft = ScriptDraft()
-        #expect(draft.example == nil)
         draft.name = "  Log note  "
         draft.program = "/usr/bin/printf"
         draft.arguments = "%s\nNote: {text}"
         draft.say = "remember"
-        #expect(draft.example?.phrase == "run Log note buy milk")
-        #expect(draft.example?.command == "/usr/bin/printf %s 'Note: buy milk'")
+        #expect(VoiceCommandExample.make(for: .script(draft.script))
+                == VoiceCommandExample(heard: "log note buy milk", result: "Runs /usr/bin/printf %s 'Note: buy milk' in the background."))
         draft.arguments = "Daily check-in"
-        #expect(draft.example?.phrase == "run Log note")
-        #expect(draft.example?.command == "/usr/bin/printf 'Daily check-in'")
-        draft.program = ""
-        #expect(draft.example == nil)
+        #expect(VoiceCommandExample.make(for: .script(draft.script))
+                == VoiceCommandExample(heard: "log note", result: "Runs /usr/bin/printf 'Daily check-in' in the background."))
     }
 
     @Test func theScriptPreviewPreservesArgumentsTheEditorCannotRepresent() {
         let draft = ScriptDraft(VoiceCommandScript(name: "Log", run: ["/usr/bin/printf", "{text}", ""]))
-        #expect(draft.example?.command == "/usr/bin/printf 'buy milk' ''")
+        #expect(VoiceCommandExample.make(for: .script(draft.script)).result == "Runs /usr/bin/printf 'buy milk' '' in the background.")
     }
 
     @Test func suggestedPlaceNameComesFromTheTabTitle() {
@@ -245,7 +277,7 @@ struct VoiceCommandsSettingsModelTests {
         renamed.name = "Release"
         #expect(model.saveScript(renamed, replacing: "Deploy") == nil)
         #expect(model.scripts == [renamed])
-        #expect(model.deleteScript(named: "release") == nil)
+        #expect(model.delete(id: renamed.id) == nil)
         #expect(VoiceCommandStore.loadOrDefault(supportDir: dir).scripts.isEmpty)
     }
 
@@ -254,9 +286,9 @@ struct VoiceCommandsSettingsModelTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         _ = model.save(mail, replacing: nil)
         let clash = VoiceCommandScript(name: "Mail", run: ["/usr/bin/true"])
-        #expect(model.saveScript(clash, replacing: nil) == "Another place or action already uses this name.")
+        #expect(model.saveScript(clash, replacing: nil) == VoiceCommandsSettingsModel.nameTakenMessage)
         #expect(model.save(VoiceCommandPlace(name: "deploy", target: .app(bundleId: "com.example")), replacing: nil) == nil)
-        #expect(model.saveScript(deploy, replacing: nil) == "Another place or action already uses this name.")
+        #expect(model.saveScript(deploy, replacing: nil) == VoiceCommandsSettingsModel.nameTakenMessage)
     }
 
     @Test func anInvalidScriptIsRefusedWithItsIssue() throws {
@@ -300,37 +332,38 @@ struct VoiceCommandsSettingsModelTests {
         let before = try String(contentsOf: file, encoding: .utf8)
         var edited = mail
         edited.say = ["email"]
-        #expect(model.save(edited, replacing: "Mail") == VoiceCommandsSettingsModel.staleEditMessage(kind: "place"))
+        #expect(model.save(edited, replacing: "Mail") == VoiceCommandsSettingsModel.staleEditMessage)
         #expect(try String(contentsOf: file, encoding: .utf8) == before)
         #expect(model.save(edited, replacing: nil) == nil)
         #expect(VoiceCommandStore.loadOrDefault(supportDir: dir).places == [edited])
     }
 
-    @Test func editingAnActionRenamedElsewhereIsRefusedRatherThanResurrected() throws {
+    @Test func aRenameKeepsTheCommandsIdentity() throws {
         let (model, dir) = make()
         defer { try? FileManager.default.removeItem(at: dir) }
-        _ = model.saveScript(deploy, replacing: nil)
-        var renamedElsewhere = deploy
-        renamedElsewhere.name = "Release"
-        try VoiceCommandStore.write(VoiceCommandConfig(scripts: [renamedElsewhere]), to: dir)
-        var edited = deploy
-        edited.say = ["push"]
-        #expect(model.saveScript(edited, replacing: "Deploy") == VoiceCommandsSettingsModel.staleEditMessage(kind: "action"))
-        #expect(VoiceCommandStore.loadOrDefault(supportDir: dir).scripts == [renamedElsewhere])
+        let original = VoiceCommandScript(id: "a1", name: "Deploy", run: ["/bin/deploy"])
+        _ = model.saveScript(original, replacing: nil)
+        var renamed = original
+        renamed.name = "Release"
+        #expect(model.saveScript(renamed, replacing: "Deploy") == nil)
+        #expect(VoiceCommandStore.loadOrDefault(supportDir: dir).commands == [.script(renamed)])
+        let newcomer = VoiceCommandScript(id: "b2", name: "Deploy", run: ["/bin/other"])
+        #expect(model.saveScript(newcomer, replacing: nil) == nil)
+        #expect(model.commands.map(\.id) == ["a1", "b2"])
     }
 
     @Test func scriptValidationExplainsWhatPreventsSavingWithoutWriting() {
         let (model, dir) = make()
         defer { try? FileManager.default.removeItem(at: dir) }
-        #expect(model.scriptIssue(deploy, replacing: nil) == nil)
-        #expect(model.scriptIssue(VoiceCommandScript(name: "", run: ["/bin/tool"]), replacing: nil) != nil)
-        #expect(model.scriptIssue(VoiceCommandScript(name: "Tool", run: ["tool"]), replacing: nil)
+        #expect(model.scriptIssue(deploy) == nil)
+        #expect(model.scriptIssue(VoiceCommandScript(name: "", run: ["/bin/tool"])) != nil)
+        #expect(model.scriptIssue(VoiceCommandScript(name: "Tool", run: ["tool"]))
             == "Program: Use a full path, such as /usr/local/bin/tool or ~/bin/tool.")
         #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent(VoiceCommandStore.fileName).path))
 
         _ = model.saveScript(deploy, replacing: nil)
-        #expect(model.scriptIssue(deploy, replacing: nil) == "Another place or action already uses this name.")
-        #expect(model.scriptIssue(deploy, replacing: deploy.name) == nil)
+        #expect(model.scriptIssue(VoiceCommandScript(id: "other", name: "deploy", run: ["/bin/x"])) == "Another command already uses this name.")
+        #expect(model.scriptIssue(deploy) == nil)
     }
 
     @Test func theProgramCheckNamesWhatIsWrong() throws {
@@ -363,7 +396,8 @@ struct VoiceCommandsSettingsModelTests {
         draft.say = "ship, , release"
         draft.program = " ~/bin/deploy "
         draft.arguments = "--env\n\n  {text}  \n\n"
-        #expect(draft.script == VoiceCommandScript(name: "Deploy", say: ["ship", "release"], run: ["~/bin/deploy", "--env", "", "  {text}  "]))
+        #expect(draft.script == VoiceCommandScript(
+            id: draft.commandId, name: "Deploy", say: ["ship", "release"], run: ["~/bin/deploy", "--env", "", "  {text}  "]))
     }
 
     @Test func openingAndSavingAScriptChangesNoArgument() {
@@ -410,13 +444,12 @@ struct VoiceCommandsSettingsModelTests {
 
     @Test func aShortcutExampleUsesItsActualSpokenNameAndInput() {
         var draft = ShortcutDraft()
-        #expect(draft.example == nil)
         draft.choose(VoiceCommandShortcut(name: "Journal Entry"))
-        #expect(draft.example == "Say “run Journal Entry” to run “Journal Entry” with no input.")
+        #expect(VoiceCommandExample.make(for: .script(draft.script))
+                == VoiceCommandExample(heard: "journal entry", result: "Runs the shortcut \u{201C}Journal Entry\u{201D}."))
         draft.name = "journal"
         draft.input = "Note: {text}"
-        #expect(draft.example == "Say “run journal buy milk” to pass “Note: buy milk” to “Journal Entry”.")
-        draft.input = "Daily check-in"
-        #expect(draft.example == "Say “run journal” to pass “Daily check-in” to “Journal Entry”.")
+        #expect(VoiceCommandExample.make(for: .script(draft.script))
+                == VoiceCommandExample(heard: "journal buy milk", result: "Runs the shortcut \u{201C}Journal Entry\u{201D} with \u{201C}Note: buy milk\u{201D} as its input."))
     }
 }

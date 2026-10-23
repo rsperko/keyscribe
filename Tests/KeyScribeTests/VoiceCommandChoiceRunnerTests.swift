@@ -105,6 +105,17 @@ struct VoiceCommandChoiceRunnerTests {
         #expect(runner.pendingChoice == nil)
     }
 
+    @Test func aSavedPhraseSaidOnItsOwnIsANewCommandNotAFailedAnswer() async throws {
+        let (runner, system, _) = make()
+        let terminal = VoiceCommandPlace(name: "Terminal", target: .app(bundleId: ghostty.bundleId))
+        _ = try #require(await ask(runner, places: [personal, work, terminal]))
+        guard case .command(let outcome) = await answer(runner, "terminal", places: [personal, work, terminal]) else {
+            Issue.record("expected a new command"); return
+        }
+        #expect(outcome == .done(summary: "Terminal", command: "Brings Ghostty to the front, opening it if needed."))
+        #expect(system.opened == [ghostty.bundleId])
+    }
+
     @Test func anUnrecognizedOrOutOfRangeReplyKeepsTheList() async throws {
         let (runner, system, _) = make()
         let pending = try #require(await ask(runner))

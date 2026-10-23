@@ -196,11 +196,11 @@ enum AccessibilityID {
             static let placeNotice = "mode.voiceCommands.place.notice"
             static let scriptNotice = "mode.voiceCommands.scriptNotice"
             static let actionPermissions = "mode.voiceCommands.actionPermissions"
-            static let addPlace = "mode.voiceCommands.addPlace"
+            static let addCommand = "mode.voiceCommands.addCommand"
+            static let addTabSearch = "mode.voiceCommands.addTabSearch"
             static let addCurrentApp = "mode.voiceCommands.addCurrentApp"
             static let addCurrentTab = "mode.voiceCommands.addCurrentTab"
             static let addApp = "mode.voiceCommands.addApp"
-            static let addWebPage = "mode.voiceCommands.addWebPage"
             static let tryIt = "mode.voiceCommands.tryIt"
             static let previewDetails = "mode.voiceCommands.previewDetails"
             static let excludeFromHistory = "mode.voiceCommands.excludeFromHistory"
@@ -223,7 +223,6 @@ enum AccessibilityID {
             static let placeDeleteConfirm = "mode.voiceCommands.place.deleteConfirm.confirm"
             static func placeEdit(_ placeKey: String) -> String { "mode.voiceCommands.place.edit.\(placeKey)" }
             static let addScript = "mode.voiceCommands.addScript"
-            static let addAction = "mode.voiceCommands.addAction"
             static let addShortcut = "mode.voiceCommands.addShortcut"
             static let shortcutNotice = "mode.voiceCommands.shortcut.notice"
             static let shortcutChoice = "mode.voiceCommands.shortcut.choice"
@@ -427,8 +426,8 @@ enum AccessibilityID {
         Mode.VoiceCommands.appNotice, Mode.VoiceCommands.appNoticeConfirm, Mode.VoiceCommands.appNoticeCancel,
         Mode.VoiceCommands.moveShortcut,
         Mode.VoiceCommands.scriptNotice, Mode.VoiceCommands.placeNotice, Mode.VoiceCommands.actionPermissions,
-        Mode.VoiceCommands.addPlace, Mode.VoiceCommands.addCurrentApp, Mode.VoiceCommands.addCurrentTab,
-        Mode.VoiceCommands.addApp, Mode.VoiceCommands.addWebPage, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.previewDetails, Mode.VoiceCommands.editVocabulary,
+        Mode.VoiceCommands.addCommand, Mode.VoiceCommands.addTabSearch, Mode.VoiceCommands.addCurrentApp, Mode.VoiceCommands.addCurrentTab,
+        Mode.VoiceCommands.addApp, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.previewDetails, Mode.VoiceCommands.editVocabulary,
         Mode.VoiceCommands.placeName, Mode.VoiceCommands.placeSay, Mode.VoiceCommands.placeKind,
         Mode.VoiceCommands.placeApp, Mode.VoiceCommands.placeURL, Mode.VoiceCommands.placeBrowser, Mode.VoiceCommands.placeBrowserDetails,
         Mode.VoiceCommands.placeChooseFromApplications, Mode.VoiceCommands.placeEnterBundleID,
@@ -439,7 +438,7 @@ enum AccessibilityID {
         Mode.VoiceCommands.scriptProgram, Mode.VoiceCommands.scriptChooseProgram, Mode.VoiceCommands.scriptArguments, Mode.VoiceCommands.scriptExample,
         Mode.VoiceCommands.scriptSave, Mode.VoiceCommands.scriptCancel, Mode.VoiceCommands.scriptDelete,
         Mode.VoiceCommands.scriptDeleteConfirm,
-        Mode.VoiceCommands.addAction, Mode.VoiceCommands.addShortcut, Mode.VoiceCommands.excludeFromHistory,
+        Mode.VoiceCommands.addShortcut, Mode.VoiceCommands.excludeFromHistory,
         Mode.VoiceCommands.shortcutNotice, Mode.VoiceCommands.shortcutChoice,
         Mode.VoiceCommands.shortcutRefresh, Mode.VoiceCommands.shortcutOpenApp,
         Mode.VoiceCommands.shortcutName, Mode.VoiceCommands.shortcutSay, Mode.VoiceCommands.shortcutInput,

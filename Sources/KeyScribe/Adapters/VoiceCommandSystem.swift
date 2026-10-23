@@ -188,6 +188,11 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     func resolve(
         _ transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = []
     ) async -> VoiceCommandResolution {
+        if Self.isSavedPhrase(transcript, places: places, scripts: scripts) {
+            return await readingTabs(VoiceCommandCatalog(places: places, scripts: scripts)) {
+                VoiceCommandResolver.resolve(transcript, catalog: $0)
+            }
+        }
         let withoutApps = VoiceCommandResolver.resolve(
             transcript, catalog: VoiceCommandCatalog(scripts: scripts, tabs: [], windows: .complete([])))
         guard case .noMatch = withoutApps else { return withoutApps }
@@ -317,7 +322,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         case .invalidSelection:
             return .retry(message: pending.choice.retryMessage, reason: .invalidSelection)
         case .unrecognized:
-            guard VoiceCommandGrammar.parse(transcript) != nil else {
+            guard VoiceCommandGrammar.parse(transcript) != nil || Self.isSavedPhrase(transcript, places: places, scripts: scripts) else {
                 return .retry(message: pending.choice.retryMessage, reason: .unrecognizedAnswer)
             }
             return .command(await run(transcript: transcript, places: places, scripts: scripts, origin: origin,
@@ -359,6 +364,8 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             return .failed(message: Self.notFoundMessage(target))
         case .noMatch(let target):
             return .failed(message: Self.noMatchMessage(target))
+        case .noTabMatch(let target, let browser):
+            return .failed(message: Self.noTabMatchMessage(target, browser: browser.map { system.appName(forBundleId: $0) ?? $0 }))
         case .needsWindows, .windowsIncomplete:
             return .failed(message: Self.windowsIncompleteMessage)
         case .windowsNeedAccessibility:
@@ -374,6 +381,8 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             return .failed(message: Self.notAllowedMessage(browser: system.appName(forBundleId: browser) ?? browser))
         case .scriptNeedsText(let name):
             return .failed(message: Self.needsTextMessage(script: name))
+        case .takesNoText(let name):
+            return .failed(message: Self.takesNoTextMessage(name))
         case .action(let action):
             return await execute(action, origin: origin, stillWanted: stillWanted, onLateResult: onLateResult)
         }
@@ -441,6 +450,10 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             }
         case .place(let place, .openURL(let url, let browser)):
             if let refusal = browserRefusal(browser, place: place) { return refusal }
+            if place.isAppLink, system.defaultBrowserId(for: url) == nil {
+                let scheme = URL(string: url)?.scheme ?? url
+                return .failed(message: "No app on this Mac opens \(scheme): links.", command: command)
+            }
             succeeded = await system.openURL(url, browser: browser)
         case .script(let script, let arguments):
             if let refusal = script.executionRefusal(resolvedProgram: ScriptLauncher.resolvedPath(script.program)) {
@@ -507,6 +520,10 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         "No matching app, place, or window found for \u{201C}\(target)\u{201D}."
     }
 
+    nonisolated static func noTabMatchMessage(_ target: String, browser: String?) -> String {
+        "No open tab\(browser.map { " in \($0)" } ?? "") matches \u{201C}\(target)\u{201D}."
+    }
+
     nonisolated static let windowsIncompleteMessage = "Could not check all open windows. Nothing was opened. Try again."
     nonisolated static let windowsNeedAccessibilityMessage =
         "Accessibility is off, so open windows could not be checked. Nothing was opened."
@@ -526,7 +543,15 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         "Say what to pass to \(script) after its name."
     }
 
-    static let notACommandHint = VoiceCommandPhrase.guidance.prefix(1).uppercased() + VoiceCommandPhrase.guidance.dropFirst() + "."
+    static func takesNoTextMessage(_ name: String) -> String {
+        "\(name) does not take words after its name. Say only its name."
+    }
+
+    static func isSavedPhrase(_ transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript]) -> Bool {
+        VoiceCommandResolver.savedMatch(transcript, catalog: VoiceCommandCatalog(places: places, scripts: scripts)) != nil
+    }
+
+    static let notACommandHint = "Say the name of a saved command. You can also " + VoiceCommandPhrase.guidance + "."
 
     static func notFoundMessage(_ target: String) -> String {
         "No script or shortcut is called \u{201C}\(target)\u{201D}."
@@ -729,9 +754,9 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     }
 
     func openURL(_ url: String, browser: String?) async -> Bool {
-        guard let target = URL(string: url), let scheme = target.scheme?.lowercased(), scheme == "https" || scheme == "http" else {
-            return false
-        }
+        guard let target = URL(string: url), let scheme = target.scheme?.lowercased(),
+              scheme == "https" || scheme == "http" || (browser == nil && VoiceCommandPlace.isAppLink(url))
+        else { return false }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
         do {

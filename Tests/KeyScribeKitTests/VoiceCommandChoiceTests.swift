@@ -192,46 +192,40 @@ struct VoiceCommandSharedNameTests {
     private let work = VoiceCommandPlace(name: "Work Mail", say: ["mail"], target: .url("https://inbox.example.org/"))
     private let deploy = VoiceCommandScript(name: "Deploy", say: ["mail"], run: ["/bin/deploy"])
 
-    @Test func aSharedPlaceNameExplainsTheQuestionItWillAsk() {
+    @Test func aSharedNameExplainsTheQuestionItWillAsk() {
         let config = VoiceCommandConfig(places: [personal], scripts: [deploy])
-        #expect(config.sharedNameAdvisory(for: work, replacing: nil)
-                == "Saying \u{201C}mail\u{201D} will ask you to choose between Work Mail and Personal Mail.")
-    }
-
-    @Test func actionsAndPlacesNeverCollide() {
-        let config = VoiceCommandConfig(places: [personal])
-        #expect(config.sharedNameAdvisory(for: deploy, replacing: nil) == nil)
+        #expect(config.conflicts(for: .place(work))
+                == ["\u{201C}mail\u{201D} is also a name for Personal Mail and Deploy, so saying it will ask you to choose. Give this one a name of its own."])
     }
 
     @Test func editingAnEntryDoesNotCollideWithItsSavedSelf() {
         let config = VoiceCommandConfig(places: [personal, work])
         var renamed = work
         renamed.say = ["inbox"]
-        #expect(config.sharedNameAdvisory(for: renamed, replacing: "Work Mail") == nil)
-        #expect(config.sharedNameAdvisory(for: work, replacing: "Work Mail")
-                == "Saying \u{201C}mail\u{201D} will ask you to choose between Work Mail and Personal Mail.")
+        #expect(config.conflicts(for: .place(renamed)).isEmpty)
+        #expect(config.conflicts(for: .place(work))
+                == ["\u{201C}mail\u{201D} is also a name for Personal Mail, so saying it will ask you to choose. Give this one a name of its own."])
     }
 
-    @Test func manySharersAreListedAndTooManyAreNamedAsSuch() {
-        let others = (1...4).map { VoiceCommandScript(name: "Tool \($0)", say: ["build"], run: ["/bin/t\($0)"]) }
+    @Test func tooManySharersAreNamedAsSuch() {
+        let others = (1...5).map { VoiceCommandScript(name: "Tool \($0)", say: ["build"], run: ["/bin/t\($0)"]) }
         let edited = VoiceCommandScript(name: "Builder", say: ["build"], run: ["/bin/b"])
-        #expect(VoiceCommandConfig(scripts: Array(others.prefix(2))).sharedNameAdvisory(for: edited, replacing: nil)
-                == "Saying \u{201C}build\u{201D} will ask you to choose between Builder, Tool 1, and Tool 2.")
-        let more = others + [VoiceCommandScript(name: "Tool 5", say: ["build"], run: ["/bin/t5"])]
-        #expect(VoiceCommandConfig(scripts: more).sharedNameAdvisory(for: edited, replacing: nil)
-                == "6 actions answer to \u{201C}build\u{201D}, too many to choose from. Give this one a name of its own.")
+        #expect(VoiceCommandConfig(scripts: others).conflicts(for: .script(edited))
+                == ["6 commands answer to \u{201C}build\u{201D}, too many to choose from. Give this one a name of its own."])
     }
 
-    @Test func theAdvisoryUsesEachFamilysOwnMatchingRule() {
+    @Test func theConflictFollowsTheMatchingRule() {
         let backUp = VoiceCommandScript(name: "Back up", run: ["/bin/a"])
         let backup = VoiceCommandScript(name: "Backup", run: ["/bin/b"])
-        #expect(VoiceCommandConfig(scripts: [backUp]).sharedNameAdvisory(for: backup, replacing: nil) == nil)
-        #expect(VoiceCommandResolver.resolve("run backup", catalog: VoiceCommandCatalog(scripts: [backUp, backup]))
+        #expect(VoiceCommandConfig(scripts: [backUp]).conflicts(for: .script(backup)).isEmpty)
+        #expect(VoiceCommandResolver.resolve("backup", catalog: VoiceCommandCatalog(scripts: [backUp, backup]))
                 == .action(.script(backup, arguments: [])))
 
         let spaced = VoiceCommandPlace(name: "Work Mail", target: .url("https://a.example/"))
         let joined = VoiceCommandPlace(name: "Workmail", target: .url("https://b.example/"))
-        #expect(VoiceCommandConfig(places: [spaced]).sharedNameAdvisory(for: joined, replacing: nil) != nil)
+        #expect(VoiceCommandConfig(places: [spaced]).conflicts(for: .place(joined)).isEmpty)
+        #expect(VoiceCommandResolver.resolve("workmail", catalog: VoiceCommandCatalog(places: [spaced, joined], tabs: []))
+                == .action(.place(joined, .openURL("https://b.example/", browser: nil))))
         #expect(ambiguousNames(VoiceCommandResolver.resolve(
             "switch to workmail", catalog: VoiceCommandCatalog(places: [spaced, joined]))) == ["Work Mail", "Workmail"])
     }

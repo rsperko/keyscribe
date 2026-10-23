@@ -215,6 +215,49 @@ struct VoiceCommandRunnerTests {
         #expect(system.openedURLs.map(\.0) == ["https://mail.google.com/"])
     }
 
+    @Test func aTabSearchFocusesTheBestTitleInItsBrowserOnly() async {
+        let (runner, system) = make()
+        let inbox = VoiceCommandCatalog.Tab(browserBundleId: chrome.bundleId, window: 1, tab: 2, url: "https://mail.google.com/", title: "Inbox - Gmail")
+        let other = VoiceCommandCatalog.Tab(browserBundleId: "com.brave.Browser", window: 1, tab: 1, url: "https://x.example/", title: "Gmail")
+        system.tabs = [other, inbox]
+        let search = VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: chrome.bundleId)
+        #expect(await runner.run(transcript: "chrome gmail", places: [search], origin: nil)
+                == .done(summary: "Inbox - Gmail · Google Chrome", command: "Focuses the open tab \u{201C}Inbox - Gmail\u{201D} in Google Chrome."))
+        #expect(system.tabReads == [chrome.bundleId])
+        #expect(system.focused == [inbox])
+        #expect(system.opened == [chrome.bundleId])
+    }
+
+    @Test func aSavedPlaceOpensWithoutAVerb() async {
+        let (runner, system) = make()
+        let editor = VoiceCommandPlace(name: "Editor", target: .app(bundleId: textEdit.bundleId))
+        #expect(await runner.run(transcript: "Editor.", places: [editor], origin: nil)
+                == .done(summary: "Editor", command: "Brings TextEdit to the front, opening it if needed."))
+        #expect(system.opened == [textEdit.bundleId])
+        #expect(system.installedScans == 0)
+    }
+
+    @Test func anAppLinkPlaceOpensInItsAppWithoutReadingTabs() async {
+        let (runner, system) = make()
+        system.defaultBrowsers["slack"] = "com.example.chat"
+        let channel = VoiceCommandPlace(name: "Web Hooks", target: .url("slack://channel?team=T1&id=C1"))
+        #expect(await runner.run(transcript: "switch to web hooks", places: [channel], origin: nil)
+                == .done(summary: "Web Hooks", command: "Opens slack://channel?team=T1&id=C1 in the app that handles it."))
+        #expect(system.openedURLs.map(\.0) == ["slack://channel?team=T1&id=C1"])
+        #expect(system.openedURLs.map(\.1) == [nil])
+        #expect(system.tabReads.isEmpty)
+    }
+
+    @Test func anAppLinkNoInstalledAppHandlesFailsWithoutOpening() async {
+        let (runner, system) = make()
+        let channel = VoiceCommandPlace(name: "Web Hooks", target: .url("slack://channel?team=T1&id=C1"))
+        guard case .failed(let message, _, _, _) = await runner.run(transcript: "switch to web hooks", places: [channel], origin: nil) else {
+            Issue.record("expected a failure"); return
+        }
+        #expect(message == "No app on this Mac opens slack: links.")
+        #expect(system.openedURLs.isEmpty)
+    }
+
     @Test func aTabThatCannotBeFocusedFallsBackToOpening() async {
         let (runner, system) = make()
         system.tabs = [VoiceCommandCatalog.Tab(browserBundleId: chrome.bundleId, window: 1, tab: 1, url: "https://mail.google.com/", title: "Inbox")]
@@ -404,7 +447,7 @@ struct VoiceCommandRunnerTests {
     @Test func failuresExplainThemselves() async {
         let (runner, _) = make()
         #expect(await runner.run(transcript: "hello", places: [], origin: nil)
-                == .failed(message: "Not a command. Say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}.",
+                == .failed(message: "Not a command. Say the name of a saved command. You can also say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}.",
                            kind: .unrecognizedCommand))
         #expect(await runner.run(transcript: "switch to banana", places: [], origin: nil)
                 == .failed(message: "No matching app, place, or window found for \u{201C}banana\u{201D}."))

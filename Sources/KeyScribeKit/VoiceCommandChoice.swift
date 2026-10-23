@@ -9,9 +9,9 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
 
     public var identity: String {
         switch self {
-        case .place(let place): "place:\(VoiceCommandText.key(place.name))"
+        case .place(let place): "place:\(place.id)"
         case .app(let app): "app:\(app.bundleId)"
-        case .script(let script): "script:\(VoiceCommandText.key(script.name))"
+        case .script(let script): "script:\(script.id)"
         case .window(let window): "window:\(window.bundleId):\(window.pid):\(window.id)"
         case .tab(let tab): "tab:\(tab.browserBundleId):\(tab.window):\(tab.tab):\(tab.url)"
         }
@@ -37,6 +37,14 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
         }
     }
 
+    public var takesWords: Bool {
+        switch self {
+        case .place(let place): place.isTabSearch
+        case .script(let script): script.takesText
+        case .app, .window, .tab: false
+        }
+    }
+
     private static func titleForms(_ title: String) -> [String] {
         let segments = WindowTitle.segments(title)
         return segments.contains(title) ? segments : segments + [title]
@@ -48,6 +56,8 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
             switch place.target {
             case .app(let bundleId):
                 return appName(bundleId) ?? bundleId
+            case .tabSearch:
+                return "Tabs in " + (place.browser.map { appName($0) ?? $0 } ?? "any browser")
             case .url(let url):
                 let browser = place.browser.map { appName($0) ?? $0 } ?? "Default browser"
                 guard let host = URL(string: url)?.host?.lowercased() else { return browser }

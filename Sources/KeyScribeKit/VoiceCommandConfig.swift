@@ -1,28 +1,33 @@
 import Foundation
 import TOMLKit
 
-public struct VoiceCommandPlace: Codable, Equatable, Sendable {
+public struct VoiceCommandPlace: Encodable, Equatable, Sendable {
     public enum Target: Equatable, Sendable {
         case app(bundleId: String)
         case url(String)
+        case tabSearch
     }
 
+    public var id: String
     public var name: String
     public var say: [String]
     public var target: Target
     public var browser: String?
 
-    public init(name: String, say: [String] = [], target: Target, browser: String? = nil) {
+    public init(id: String? = nil, name: String, say: [String] = [], target: Target, browser: String? = nil) {
+        self.id = id ?? VoiceCommandNaming.defaultId(name)
         self.name = name
         self.say = say
         self.target = target
         self.browser = browser
     }
 
+    public var isTabSearch: Bool { target == .tabSearch }
+
     public var spokenForms: [String] { VoiceCommandNaming.spokenForms(name: name, say: say) }
 
     public func hasSameDestination(as other: VoiceCommandPlace) -> Bool {
-        VoiceCommandText.key(name) == VoiceCommandText.key(other.name) && target == other.target && browser == other.browser
+        id == other.id && target == other.target && browser == other.browser
     }
 
     public var issue: String? {
@@ -31,37 +36,71 @@ public struct VoiceCommandPlace: Codable, Equatable, Sendable {
         case .app(let bundleId):
             if let issue = UserInputValidation.identifierIssue(bundleId, required: true) { return "App: \(issue.message)" }
         case .url(let url):
-            if let issue = UserInputValidation.endpointIssue(url) { return "Web page: \(issue.message)" }
+            if let issue = Self.linkIssue(url) { return "Web page: \(issue)" }
+        case .tabSearch:
+            break
         }
-        if let browser, let issue = UserInputValidation.identifierIssue(browser, required: true) {
-            return "Browser: \(issue.message)"
+        if let browser {
+            if let issue = UserInputValidation.identifierIssue(browser, required: true) { return "Browser: \(issue.message)" }
+            if isAppLink { return "Browser: An app link opens in its own app, so leave the browser unset." }
         }
         return nil
     }
 
-    enum CodingKeys: String, CodingKey { case name, say, app, url, browser }
+    public var isAppLink: Bool {
+        guard case .url(let url) = target else { return false }
+        return Self.isAppLink(url)
+    }
 
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        name = try c.decode(String.self, forKey: .name)
-        say = try c.decodeIfPresent([String].self, forKey: .say) ?? []
-        browser = try c.decodeIfPresent(String.self, forKey: .browser)
-        let app = try c.decodeIfPresent(String.self, forKey: .app)
-        let url = try c.decodeIfPresent(String.self, forKey: .url)
-        switch (app, url) {
-        case (let app?, nil): target = .app(bundleId: app)
-        case (nil, let url?): target = .url(url)
-        default: throw ConfigError.invalid("place \"\(name)\": set exactly one of app or url")
+    static let refusedLinkSchemes: Set<String> = ["file", "javascript", "data", "blob", "about", "ftp", "http", "https"]
+
+    public static func isAppLink(_ url: String) -> Bool {
+        guard let scheme = linkScheme(url) else { return false }
+        return !refusedLinkSchemes.contains(scheme)
+    }
+
+    private static func linkScheme(_ url: String) -> String? {
+        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let colon = trimmed.firstIndex(of: ":") else { return nil }
+        let scheme = trimmed[..<colon]
+        guard let first = scheme.unicodeScalars.first, CharacterSet.letters.contains(first), first.isASCII,
+              scheme.unicodeScalars.allSatisfy({ $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "+-.".unicodeScalars.contains($0)) }),
+              URLComponents(string: trimmed) != nil
+        else { return nil }
+        return scheme.lowercased()
+    }
+
+    public static func linkIssue(_ url: String) -> String? {
+        guard let scheme = linkScheme(url), !["http", "https"].contains(scheme) else {
+            return UserInputValidation.endpointIssue(url).map { _ in
+                "Enter a complete http or https address, or a link that opens an app."
+            }
         }
+        if let issue = UserInputValidation.singleLineIssue(url, required: true, limit: UserInputValidation.endpointLimit) {
+            return issue.message
+        }
+        guard !refusedLinkSchemes.contains(scheme) else { return "Links that start with \(scheme): can\u{2019}t be used." }
+        let components = URLComponents(string: url.trimmingCharacters(in: .whitespacesAndNewlines))
+        guard components?.user == nil, components?.password == nil else {
+            return UserInputValidation.Issue.credentialsNotAllowed.message
+        }
+        return nil
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, say, app, url, browser
+        case findTab = "find_tab"
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
         if !say.isEmpty { try c.encode(say, forKey: .say) }
         switch target {
         case .app(let bundleId): try c.encode(bundleId, forKey: .app)
         case .url(let url): try c.encode(url, forKey: .url)
+        case .tabSearch: try c.encode(true, forKey: .findTab)
         }
         try c.encodeIfPresent(browser, forKey: .browser)
     }
@@ -95,7 +134,7 @@ public struct VoiceCommandShortcut: Equatable, Sendable {
     }
 }
 
-public struct VoiceCommandScript: Codable, Equatable, Sendable {
+public struct VoiceCommandScript: Encodable, Equatable, Sendable {
     public static let textPlaceholder = "{text}"
 
     public enum Action: Equatable, Sendable {
@@ -103,17 +142,20 @@ public struct VoiceCommandScript: Codable, Equatable, Sendable {
         case shortcut(VoiceCommandShortcut)
     }
 
+    public var id: String
     public var name: String
     public var say: [String]
     public var action: Action
 
-    public init(name: String, say: [String] = [], run: [String]) {
+    public init(id: String? = nil, name: String, say: [String] = [], run: [String]) {
+        self.id = id ?? VoiceCommandNaming.defaultId(name)
         self.name = name
         self.say = say
         action = .program(run)
     }
 
-    public init(name: String, say: [String] = [], shortcut: VoiceCommandShortcut) {
+    public init(id: String? = nil, name: String, say: [String] = [], shortcut: VoiceCommandShortcut) {
+        self.id = id ?? VoiceCommandNaming.defaultId(name)
         self.name = name
         self.say = say
         action = .shortcut(shortcut)
@@ -283,33 +325,13 @@ public struct VoiceCommandScript: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case name, say, run, shortcut, input
+        case id, name, say, run, shortcut, input
         case shortcutId = "shortcut_id"
-    }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        name = try c.decode(String.self, forKey: .name)
-        say = try c.decodeIfPresent([String].self, forKey: .say) ?? []
-        let run = try c.decodeIfPresent([String].self, forKey: .run)
-        let shortcut = try c.decodeIfPresent(String.self, forKey: .shortcut)
-        let identifier = try c.decodeIfPresent(String.self, forKey: .shortcutId)
-        let input = try c.decodeIfPresent(String.self, forKey: .input)
-        switch (run, shortcut) {
-        case (let run?, nil):
-            guard identifier == nil, input == nil else {
-                throw ConfigError.invalid("script \"\(name)\": shortcut_id and input apply only to a shortcut")
-            }
-            action = .program(run)
-        case (nil, let shortcut?):
-            action = .shortcut(VoiceCommandShortcut(name: shortcut, identifier: identifier, input: input))
-        default:
-            throw ConfigError.invalid("script \"\(name)\": set exactly one of run or shortcut")
-        }
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
         try c.encode(name, forKey: .name)
         if !say.isEmpty { try c.encode(say, forKey: .say) }
         switch action {
@@ -323,52 +345,142 @@ public struct VoiceCommandScript: Codable, Equatable, Sendable {
     }
 }
 
+public enum VoiceCommand: Codable, Equatable, Sendable {
+    case place(VoiceCommandPlace)
+    case script(VoiceCommandScript)
+
+    public var id: String {
+        switch self {
+        case .place(let place): place.id
+        case .script(let script): script.id
+        }
+    }
+
+    public var name: String {
+        switch self {
+        case .place(let place): place.name
+        case .script(let script): script.name
+        }
+    }
+
+    public var candidate: VoiceCommandCandidate {
+        switch self {
+        case .place(let place): .place(place)
+        case .script(let script): .script(script)
+        }
+    }
+
+    var issue: String? {
+        switch self {
+        case .place(let place): place.issue
+        case .script(let script): script.issue
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, say, app, url, browser, run, shortcut, input
+        case findTab = "find_tab"
+        case shortcutId = "shortcut_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let name = try c.decode(String.self, forKey: .name)
+        let id = try c.decodeIfPresent(String.self, forKey: .id)
+        let say = try c.decodeIfPresent([String].self, forKey: .say) ?? []
+        let app = try c.decodeIfPresent(String.self, forKey: .app)
+        let url = try c.decodeIfPresent(String.self, forKey: .url)
+        let findTab = try c.decodeIfPresent(Bool.self, forKey: .findTab) ?? false
+        let browser = try c.decodeIfPresent(String.self, forKey: .browser)
+        let run = try c.decodeIfPresent([String].self, forKey: .run)
+        let shortcut = try c.decodeIfPresent(String.self, forKey: .shortcut)
+        let shortcutId = try c.decodeIfPresent(String.self, forKey: .shortcutId)
+        let input = try c.decodeIfPresent(String.self, forKey: .input)
+        func invalid(_ problem: String) -> ConfigError { .invalid("command \"\(name)\": \(problem)") }
+        let exactlyOne = "set exactly one of app, url, find_tab, run, or shortcut"
+        switch (app, url, findTab, run, shortcut) {
+        case (let app?, nil, false, nil, nil):
+            guard shortcutId == nil, input == nil else { throw invalid("shortcut_id and input apply only to a shortcut") }
+            self = .place(VoiceCommandPlace(id: id, name: name, say: say, target: .app(bundleId: app), browser: browser))
+        case (nil, let url?, false, nil, nil):
+            guard shortcutId == nil, input == nil else { throw invalid("shortcut_id and input apply only to a shortcut") }
+            self = .place(VoiceCommandPlace(id: id, name: name, say: say, target: .url(url), browser: browser))
+        case (nil, nil, true, nil, nil):
+            guard shortcutId == nil, input == nil else { throw invalid("shortcut_id and input apply only to a shortcut") }
+            self = .place(VoiceCommandPlace(id: id, name: name, say: say, target: .tabSearch, browser: browser))
+        case (nil, nil, false, let run?, nil):
+            guard browser == nil else { throw invalid("browser applies only to app, url, or find_tab") }
+            guard shortcutId == nil, input == nil else { throw invalid("shortcut_id and input apply only to a shortcut") }
+            self = .script(VoiceCommandScript(id: id, name: name, say: say, run: run))
+        case (nil, nil, false, nil, let shortcut?):
+            guard browser == nil else { throw invalid("browser applies only to app, url, or find_tab") }
+            self = .script(VoiceCommandScript(
+                id: id, name: name, say: say,
+                shortcut: VoiceCommandShortcut(name: shortcut, identifier: shortcutId, input: input)))
+        default:
+            throw invalid(exactlyOne)
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        switch self {
+        case .place(let place): try place.encode(to: encoder)
+        case .script(let script): try script.encode(to: encoder)
+        }
+    }
+}
+
 public struct VoiceCommandConfig: Codable, Equatable, Sendable {
     public var schemaVersion: Int
-    public var places: [VoiceCommandPlace]
-    public var scripts: [VoiceCommandScript]
+    public var commands: [VoiceCommand]
+
+    public init(schemaVersion: Int = VoiceCommandStore.currentSchemaVersion, commands: [VoiceCommand]) {
+        self.schemaVersion = schemaVersion
+        self.commands = commands
+    }
 
     public init(
         schemaVersion: Int = VoiceCommandStore.currentSchemaVersion, places: [VoiceCommandPlace] = [],
         scripts: [VoiceCommandScript] = []
     ) {
-        self.schemaVersion = schemaVersion
-        self.places = places
-        self.scripts = scripts
+        self.init(schemaVersion: schemaVersion, commands: places.map(VoiceCommand.place) + scripts.map(VoiceCommand.script))
+    }
+
+    public var places: [VoiceCommandPlace] {
+        commands.compactMap { if case .place(let place) = $0 { place } else { nil } }
+    }
+
+    public var scripts: [VoiceCommandScript] {
+        commands.compactMap { if case .script(let script) = $0 { script } else { nil } }
     }
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
-        case places = "place"
-        case scripts = "script"
+        case commands = "command"
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         schemaVersion = try c.decode(Int.self, forKey: .schemaVersion)
-        places = try c.decodeIfPresent([VoiceCommandPlace].self, forKey: .places) ?? []
-        scripts = try c.decodeIfPresent([VoiceCommandScript].self, forKey: .scripts) ?? []
+        commands = try c.decodeIfPresent([VoiceCommand].self, forKey: .commands) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(schemaVersion, forKey: .schemaVersion)
-        if !places.isEmpty { try c.encode(places, forKey: .places) }
-        if !scripts.isEmpty { try c.encode(scripts, forKey: .scripts) }
+        if !commands.isEmpty { try c.encode(commands, forKey: .commands) }
     }
 
     public var issue: String? {
         var names = Set<String>()
-        for place in places {
-            if let issue = place.issue { return "place \"\(place.name)\": \(issue)" }
-            guard names.insert(VoiceCommandText.key(place.name)).inserted else {
-                return "place \"\(place.name)\": another place already uses this name"
+        var ids = Set<String>()
+        for command in commands {
+            if let issue = command.issue { return "command \"\(command.name)\": \(issue)" }
+            guard names.insert(VoiceCommandText.key(command.name)).inserted else {
+                return "command \"\(command.name)\": another command already uses this name"
             }
-        }
-        for script in scripts {
-            if let issue = script.issue { return "script \"\(script.name)\": \(issue)" }
-            guard names.insert(VoiceCommandText.key(script.name)).inserted else {
-                return "script \"\(script.name)\": a place or script already uses this name"
+            guard ids.insert(command.id).inserted else {
+                return "command \"\(command.name)\": another command already uses the id \"\(command.id)\""
             }
         }
         return nil
@@ -376,42 +488,83 @@ public struct VoiceCommandConfig: Codable, Equatable, Sendable {
 }
 
 extension VoiceCommandConfig {
-    public func sharedNameAdvisory(for place: VoiceCommandPlace, replacing originalName: String?) -> String? {
-        let others = places.filter { !Self.isSame($0.name, place.name, originalName) }
-        return Self.sharedNameAdvisory(name: place.name, forms: place.spokenForms, kind: "places",
-                                       among: others.map { ($0.name, $0.spokenForms) }, spoken: VoiceCommandText.compact)
+    public func conflicts(for candidate: VoiceCommandCandidate) -> [String] {
+        let others = commands.map(\.candidate).filter { $0.identity != candidate.identity }
+        return [Self.duplicate(candidate, among: others), Self.longer(candidate, among: others), Self.shorter(candidate, among: others)]
+            .compactMap { $0 } + candidate.spokenForms.compactMap(Self.builtInConflict)
     }
 
-    public func sharedNameAdvisory(for script: VoiceCommandScript, replacing originalName: String?) -> String? {
-        let others = scripts.filter { !Self.isSame($0.name, script.name, originalName) }
-        return Self.sharedNameAdvisory(name: script.name, forms: script.spokenForms, kind: "actions",
-                                       among: others.map { ($0.name, $0.spokenForms) }, spoken: VoiceCommandText.key)
+    private static func words(_ phrase: String) -> [Substring] {
+        VoiceCommandText.key(phrase).split(separator: " ")
     }
 
-    private static func isSame(_ saved: String, _ edited: String, _ original: String?) -> Bool {
-        let key = VoiceCommandText.key(saved)
-        return key == VoiceCommandText.key(original ?? edited)
+    private static func starts(_ long: String, with short: String) -> Bool {
+        let long = words(long)
+        let short = words(short)
+        return !short.isEmpty && long.count > short.count && Array(long.prefix(short.count)) == short
     }
 
-    private static func sharedNameAdvisory(
-        name: String, forms: [String], kind: String, among others: [(name: String, forms: [String])],
-        spoken comparable: (String) -> String
-    ) -> String? {
-        for form in forms {
-            let spoken = comparable(form)
+    private static func duplicate(_ candidate: VoiceCommandCandidate, among others: [VoiceCommandCandidate]) -> String? {
+        for form in candidate.spokenForms {
+            let spoken = VoiceCommandText.key(form)
             guard !spoken.isEmpty else { continue }
-            let sharers = others.filter { $0.forms.contains { comparable($0) == spoken } }.map(\.name)
+            let sharers = others.filter { $0.spokenForms.contains { VoiceCommandText.key($0) == spoken } }.map(\.name)
             guard !sharers.isEmpty else { continue }
-            let names = [name] + sharers
-            guard names.count <= VoiceCommandChoice.displayLimit else {
-                return "\(names.count) \(kind) answer to \u{201C}\(form)\u{201D}, too many to choose from. Give this one a name of its own."
+            guard sharers.count < VoiceCommandChoice.displayLimit else {
+                return "\(sharers.count + 1) commands answer to \u{201C}\(form)\u{201D}, too many to choose from. Give this one a name of its own."
             }
-            let list = names.count == 2
-                ? "\(names[0]) and \(names[1])"
-                : names.dropLast().joined(separator: ", ") + ", and \(names[names.count - 1])"
-            return "Saying \u{201C}\(form)\u{201D} will ask you to choose between \(list)."
+            return "\u{201C}\(form)\u{201D} is also a name for \(list(sharers)), so saying it will ask you to choose. Give this one a name of its own."
         }
         return nil
+    }
+
+    private static func longer(_ candidate: VoiceCommandCandidate, among others: [VoiceCommandCandidate]) -> String? {
+        guard candidate.takesWords else { return nil }
+        for form in candidate.spokenForms {
+            for other in others {
+                guard let phrase = other.spokenForms.first(where: { starts($0, with: form) }) else { continue }
+                return "\u{201C}\(phrase)\u{201D} runs \(other.name) instead, because its name is longer."
+            }
+        }
+        return nil
+    }
+
+    private static func shorter(_ candidate: VoiceCommandCandidate, among others: [VoiceCommandCandidate]) -> String? {
+        for form in candidate.spokenForms {
+            for other in others where other.takesWords {
+                guard other.spokenForms.contains(where: { starts(form, with: $0) }) else { continue }
+                let said = candidate.takesWords ? "\(form) \u{2026}" : form
+                return "Saying \u{201C}\(said)\u{201D} will run this command instead of \(other.name), because its name is longer."
+            }
+        }
+        return nil
+    }
+
+    private static func builtInConflict(_ form: String) -> String? {
+        let spoken = words(form)
+        guard !spoken.isEmpty else { return nil }
+        func covers(_ phrase: String) -> Bool {
+            let builtIn = words(phrase)
+            return builtIn.count >= spoken.count && Array(builtIn.prefix(spoken.count)) == spoken
+        }
+        if covers(VoiceCommandGrammar.goBack) {
+            return "Saying \u{201C}\(VoiceCommandGrammar.goBack)\u{201D} will run this command instead of returning to the previous window."
+        }
+        if covers(VoiceCommandGrammar.run) {
+            return "Saying \u{201C}\(VoiceCommandGrammar.run) \u{2026}\u{201D} will reach this command instead of your other actions."
+        }
+        guard let verb = VoiceCommandGrammar.focusVerbs.first(where: covers) else { return nil }
+        let alternative = VoiceCommandPhrase.focus.words.first { !covers($0) }.map { " Say \u{201C}\($0) \u{2026}\u{201D} to switch apps." } ?? ""
+        return "Saying \u{201C}\(verb) \u{2026}\u{201D} will reach this command instead of switching apps.\(alternative)"
+    }
+
+    private static func list(_ names: [String]) -> String {
+        switch names.count {
+        case 0: return ""
+        case 1: return names[0]
+        case 2: return "\(names[0]) and \(names[1])"
+        default: return names.dropLast().joined(separator: ", ") + ", and \(names[names.count - 1])"
+        }
     }
 }
 
@@ -441,6 +594,7 @@ public enum VoiceCommandStore {
             places: [
                 VoiceCommandPlace(name: "a", say: ["a"], target: .app(bundleId: "a")),
                 VoiceCommandPlace(name: "b", say: ["b"], target: .url("https://example.com/"), browser: "b"),
+                VoiceCommandPlace(name: "c", say: ["c"], target: .tabSearch, browser: "c"),
             ],
             scripts: [
                 VoiceCommandScript(name: "a", say: ["a"], run: ["/a", "{text}"]),
@@ -465,7 +619,13 @@ public enum VoiceCommandStore {
     }
 }
 
-enum VoiceCommandNaming {
+public enum VoiceCommandNaming {
+    public static func newId() -> String { UUID().uuidString.lowercased() }
+
+    static func defaultId(_ name: String) -> String {
+        VoiceCommandText.key(name).replacingOccurrences(of: " ", with: "-")
+    }
+
     static func spokenForms(name: String, say: [String]) -> [String] {
         var seen = Set<String>()
         return ([name] + say).filter { seen.insert(VoiceCommandText.key($0)).inserted }

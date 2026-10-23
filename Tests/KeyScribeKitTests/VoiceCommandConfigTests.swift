@@ -7,12 +7,12 @@ struct VoiceCommandConfigTests {
         let toml = """
         schema_version = 1
 
-        [[place]]
+        [[command]]
         name = "VS Code"
         say = ["vscode", "editor"]
         app = "com.microsoft.VSCode"
 
-        [[place]]
+        [[command]]
         name = "Gmail"
         url = "https://mail.google.com/"
         browser = "com.google.Chrome"
@@ -55,12 +55,12 @@ struct VoiceCommandConfigTests {
         let toml = """
         schema_version = 1
 
-        [[place]]
+        [[command]]
         name = "Gmail"
         url = "https://mail.google.com/"
         browsr = "com.google.Chrome"
         """
-        #expect(VoiceCommandStore.unknownKeys(in: toml) == [UnknownConfigKey(path: "place[0].browsr", suggestion: "browser")])
+        #expect(VoiceCommandStore.unknownKeys(in: toml) == [UnknownConfigKey(path: "command[0].browsr", suggestion: "browser")])
     }
 
     @Test func everyKeyTheFileCanHoldIsRead() throws {
@@ -79,7 +79,7 @@ struct VoiceCommandConfigTests {
     @Test func rejectsAPlaceWithBothTargets() {
         let toml = """
         schema_version = 1
-        [[place]]
+        [[command]]
         name = "Both"
         app = "com.example.app"
         url = "https://example.com/"
@@ -90,7 +90,7 @@ struct VoiceCommandConfigTests {
     @Test func rejectsAPlaceWithNoTarget() {
         let toml = """
         schema_version = 1
-        [[place]]
+        [[command]]
         name = "Nowhere"
         """
         #expect(throws: ConfigError.self) { try VoiceCommandStore.decode(from: toml) }
@@ -99,7 +99,7 @@ struct VoiceCommandConfigTests {
     @Test func rejectsANonWebURL() {
         let toml = """
         schema_version = 1
-        [[place]]
+        [[command]]
         name = "Files"
         url = "file:///etc/hosts"
         """
@@ -109,7 +109,7 @@ struct VoiceCommandConfigTests {
     @Test func rejectsABlankName() {
         let toml = """
         schema_version = 1
-        [[place]]
+        [[command]]
         name = "  "
         app = "com.example.app"
         """
@@ -119,7 +119,7 @@ struct VoiceCommandConfigTests {
     @Test func rejectsAMultilineSpokenForm() {
         let toml = """
         schema_version = 1
-        [[place]]
+        [[command]]
         name = "Mail"
         say = ["mail\\nbox"]
         app = "com.apple.mail"
@@ -130,10 +130,10 @@ struct VoiceCommandConfigTests {
     @Test func rejectsDuplicatePlaceNames() {
         let toml = """
         schema_version = 1
-        [[place]]
+        [[command]]
         name = "Mail"
         app = "com.apple.mail"
-        [[place]]
+        [[command]]
         name = "mail"
         url = "https://mail.google.com/"
         """

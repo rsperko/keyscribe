@@ -20,9 +20,9 @@ struct VoiceCommandNotices {
             case .places:
                 "A misheard command can open this place when you meant another. Its app or browser window comes forward, which may reveal its contents during screen sharing. Check which app is active before typing."
             case .scripts:
-                "Saying \u{201C}run\u{201D} and this name starts the script with your account’s permissions. A misheard name or input can start the wrong action. Use a script that asks for confirmation before changing or deleting anything you cannot recover."
+                "Saying this command starts the script with your account’s permissions. A misheard name or input can start the wrong action. Use a script that asks for confirmation before changing or deleting anything you cannot recover."
             case .shortcuts:
-                "Saying \u{201C}run\u{201D} and this name starts the shortcut. A misheard name or input can start the wrong action. Its steps may send messages, change or delete files, or send your words to online services. Add a confirmation step for actions you cannot undo."
+                "Saying this command starts the shortcut. A misheard name or input can start the wrong action. Its steps may send messages, change or delete files, or send your words to online services. Add a confirmation step for actions you cannot undo."
             }
         }
     }

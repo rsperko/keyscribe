@@ -394,7 +394,7 @@ struct ConfigRepositoryTests {
             (ConnectionStore.fileName, {
                 try repo.upsertConnection(Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k"))
             }),
-            (VoiceCommandStore.fileName, { try repo.mutateVoiceCommands { $0.places.append(VoiceCommandPlace(name: "Mail", target: .url("https://mail.example.net/"))) } }),
+            (VoiceCommandStore.fileName, { try repo.mutateVoiceCommands { $0.commands.append(.place(VoiceCommandPlace(name: "Mail", target: .url("https://mail.example.net/")))) } }),
             ("modes/notes.toml", { try repo.mutateMode(id: "notes") { $0.dictionary.words = ["Kafka"] } }),
             ("modes/notes.toml", { var mode = Mode(id: "notes", name: "Notes"); mode.enabled = false; try repo.writeMode(mode) }),
         ]

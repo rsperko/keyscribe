@@ -79,7 +79,7 @@ public enum UserInputValidation {
             : nil
     }
 
-    private static func singleLineIssue(_ value: String, required: Bool, limit: Int) -> Issue? {
+    static func singleLineIssue(_ value: String, required: Bool, limit: Int) -> Issue? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if required && trimmed.isEmpty { return .empty }
         if value.contains(where: { $0.isNewline }) { return .multipleLines }

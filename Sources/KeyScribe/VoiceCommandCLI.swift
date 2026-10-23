@@ -37,6 +37,8 @@ enum VoiceCommandCLI {
         switch resolution {
         case .notACommand: return "not a command"
         case .noMatch(let target): return VoiceCommandRunner.noMatchMessage(target)
+        case .noTabMatch(let target, let browser):
+            return VoiceCommandRunner.noTabMatchMessage(target, browser: browser.map { system.appName(forBundleId: $0) ?? $0 })
         case .needsWindows, .windowsIncomplete: return VoiceCommandRunner.windowsIncompleteMessage
         case .windowsNeedAccessibility: return VoiceCommandRunner.windowsNeedAccessibilityMessage
         case .ambiguous(let choice):
@@ -49,6 +51,7 @@ enum VoiceCommandCLI {
         case .needsTabs: return "needs browser tabs"
         case .browserNotAllowed(let browser): return "not allowed to control \(browser)"
         case .scriptNeedsText(let name): return "\(name) needs words after its name"
+        case .takesNoText(let name): return VoiceCommandRunner.takesNoTextMessage(name)
         case .scriptNotFound(let target): return "no script or shortcut matches \u{201C}\(target)\u{201D}"
         case .action(let action):
             return "\(action.summary(appName: system.appName(forBundleId:))) — \(action.detail(appName: system.appName(forBundleId:)))"

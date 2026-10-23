@@ -259,7 +259,7 @@ private struct ModeStarterPreview: View {
                 .font(.callout)
 
                 if let example = ModeStore.templateExample(for: template.id) {
-                    exampleCard(example)
+                    ExampleCard(heard: example.heard, result: example.result)
                 }
 
                 Divider()
@@ -274,18 +274,24 @@ private struct ModeStarterPreview: View {
             .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
+}
 
-    private func exampleCard(_ example: (heard: String, result: String)) -> some View {
+struct ExampleCard: View {
+    let heard: String
+    let result: String
+    var resultLabel = "You get"
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            exampleRow(label: "You say", text: example.heard, style: AnyShapeStyle(.secondary))
-            exampleRow(label: "You get", text: example.result, style: AnyShapeStyle(.primary))
+            row(label: "You say", text: heard, style: AnyShapeStyle(.secondary))
+            row(label: resultLabel, text: result, style: AnyShapeStyle(.primary))
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private func exampleRow(label: String, text: String, style: AnyShapeStyle) -> some View {
+    private func row(label: String, text: String, style: AnyShapeStyle) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label).font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
             Text(text).font(.callout).foregroundStyle(style)

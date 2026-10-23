@@ -415,11 +415,22 @@ mode identity: the pipeline branches on the output kind. Such a take skips Phase
 suffix never re-routes a command into a dictation mode), and skips the rewrite and insertion; History
 records it as a command (Result is what it ran, plus why it failed) under the usual History rules —
 the heard transcript, after the mode's own replacements and dictionary clean it (its vocabulary leaves out
-the global one unless it opts in), is parsed as a closed set of commands. **Run** resolves only against
+the global one unless it opts in), is matched first against the user's saved commands by spoken name, then
+parsed as a closed set of command words. A saved name matches in whole words at the start of the
+utterance; the longest wins, and only then are the words after it checked against what that command
+accepts, so a failed check explains instead of falling back to a shorter name. **Run** resolves only against
 the user's configured scripts and shortcuts; focus verbs resolve only against apps, the user's places, open windows, and open browser tabs (window
 titles are read over Accessibility on this Mac and tab titles over Apple Events, each only when nothing
 before it matched), with a near-miss snapped against all of them, and **go back**
-returns to the previous window or app (`config_schema.md` "`voice_commands.toml`"). A bare script name never runs it.
+returns to the previous window or app (`config_schema.md` "`voice_commands.toml`"). File order never decides
+between `note` and `note work`; equally long names ask. Saved commands are one ordered list, each with a
+stable `id` that renames and edits keep, so anything that refers to a command (a pending choice today)
+refers to the id, never the name. Every saved phrase matches the same way whatever the command does:
+normalized whole words, with alternatives only as explicit `say` entries; loose matching is reserved for
+navigation targets reached through a verb. Execution, **Preview a command**, and each command sheet's
+preview all go through one `VoiceCommandResolver.route` on the transcript after the mode's replacements,
+so a preview cannot disagree with what runs. If per-app scope is added, it breaks an equal-length tie in
+favor of the command scoped to the frontmost app before anything asks; it never outranks a longer name.
 It never inserts, pastes, copies, submits, or touches the clipboard. Recognition and resolution are local
 and the transcript is never sent to an AI service; the only network effect of its own is that opening a
 saved web place loads that site in the browser. It opens only apps and URLs the system or the user's file
@@ -438,8 +449,8 @@ services, is outside KeyScribe's invariants, which is why `PRIVACY.md` says so. 
 after the short report window is shown as started and never killed; its later result updates the History
 entry it wrote.
 A script is never matched by a near-miss, and its name and arguments are never fuzzy-corrected by the
-dictionary. Dictionary correction applies only to an app or place target, so a guess cannot turn an
-app-switching command into script execution. It is never the Direct fallback and is
+dictionary. Dictionary correction applies only to an app or place target after a verb, so a guess cannot turn an
+app-switching command into script execution, and a saved name is never snapped to. It is never the Direct fallback and is
 reachable only by its own shortcut.
 **Ambiguity asks; it never guesses.** Ties at the winning match step resolve to a typed
 `VoiceCommandChoice` (frozen candidate identities and order, the spoken target, any `{text}` input, and

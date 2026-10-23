@@ -4,8 +4,7 @@ import KeyScribeKit
 
 @MainActor
 final class VoiceCommandsSettingsModel: ObservableObject {
-    @Published private(set) var places: [VoiceCommandPlace] = []
-    @Published private(set) var scripts: [VoiceCommandScript] = []
+    @Published private(set) var commands: [VoiceCommand] = []
     @Published private(set) var fileNotice: PaneNotice?
     @Published private(set) var tryResult: TryResult?
     @Published private(set) var browserChoices: BrowserChoices = .loading
@@ -56,12 +55,10 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     func reload() {
         switch VoiceCommandStore.load(supportDir: repository.supportDir) {
         case .absent:
-            places = []
-            scripts = []
+            commands = []
             fileNotice = nil
         case .loaded(let config):
-            places = config.places
-            scripts = config.scripts
+            commands = config.commands
             fileNotice = nil
         case .failed(let error):
             let relativePath = VoiceCommandStore.fileName
@@ -70,91 +67,87 @@ final class VoiceCommandsSettingsModel: ObservableObject {
                 file: repository.supportDir.appendingPathComponent(relativePath),
                 stillRunning: PaneNotice.stillRunning(
                     repository.runningState(of: relativePath),
-                    working: "Your places and actions keep working as they were.",
-                    off: "Your places and actions are off until it’s fixed."),
-                here: "Places and actions can’t be changed here until then.")
+                    working: "Your commands keep working as they were.",
+                    off: "Your commands are off until it’s fixed."),
+                here: "Commands can’t be changed here until then.")
         }
         if !lastTried.isEmpty { tryIt(lastTried) }
     }
 
     var hasUnreadableFile: Bool { fileNotice != nil }
 
+    var places: [VoiceCommandPlace] { saved.places }
+
+    var scripts: [VoiceCommandScript] { saved.scripts }
+
     private var unreadableFileIssue: String? {
-        fileNotice.map { _ in "Fix \(VoiceCommandStore.fileName) before changing places and actions here." }
+        fileNotice.map { _ in "Fix \(VoiceCommandStore.fileName) before changing commands here." }
     }
 
     func save(_ place: VoiceCommandPlace, replacing originalName: String?) -> String? {
         if let unreadableFileIssue { return unreadableFileIssue }
         if let issue = place.issue { return issue }
-        let originalKey = originalName.map(VoiceCommandText.key)
-        if nameTaken(place.name, except: originalKey) { return "Another place or action already uses this name." }
+        if nameTaken(place.name, except: place.id) { return Self.nameTakenMessage }
+        return store(.place(place), editing: originalName != nil)
+    }
+
+    private func store(_ command: VoiceCommand, editing: Bool) -> String? {
         do {
             try repository.mutateVoiceCommands { config in
-                if let originalKey {
-                    guard let index = config.places.firstIndex(where: { VoiceCommandText.key($0.name) == originalKey }) else {
-                        throw StaleEdit()
-                    }
-                    config.places[index] = place
-                } else {
-                    config.places.append(place)
+                let index = config.commands.firstIndex(where: { $0.id == command.id })
+                switch (index, editing) {
+                case (let index?, true): config.commands[index] = command
+                case (nil, true): throw StaleEdit()
+                case (_?, false): throw NameTaken()
+                case (nil, false): config.commands.append(command)
                 }
             }
             reload()
             return nil
         } catch is StaleEdit {
             reload()
-            return Self.staleEditMessage(kind: "place")
+            return Self.staleEditMessage
+        } catch is NameTaken {
+            return Self.nameTakenMessage
         } catch {
             return "Could not save: \(error.localizedDescription)"
         }
     }
 
-    func scriptIssue(_ script: VoiceCommandScript, replacing originalName: String?) -> String? {
+    func scriptIssue(_ script: VoiceCommandScript) -> String? {
         if let unreadableFileIssue { return unreadableFileIssue }
         if let issue = script.issue { return issue }
         if let refusal = script.executionRefusal(resolvedProgram: ScriptLauncher.resolvedPath(script.program)) {
             return "Program: \(refusal)"
         }
-        let originalKey = originalName.map(VoiceCommandText.key)
-        if nameTaken(script.name, except: originalKey) { return "Another place or action already uses this name." }
+        if nameTaken(script.name, except: script.id) { return Self.nameTakenMessage }
         return nil
     }
 
     func saveScript(_ script: VoiceCommandScript, replacing originalName: String?) -> String? {
-        if let issue = scriptIssue(script, replacing: originalName) { return issue }
-        let originalKey = originalName.map(VoiceCommandText.key)
-        do {
-            try repository.mutateVoiceCommands { config in
-                if let originalKey {
-                    guard let index = config.scripts.firstIndex(where: { VoiceCommandText.key($0.name) == originalKey }) else {
-                        throw StaleEdit()
-                    }
-                    config.scripts[index] = script
-                } else {
-                    config.scripts.append(script)
-                }
-            }
-            reload()
-            return nil
-        } catch is StaleEdit {
-            reload()
-            return Self.staleEditMessage(kind: "action")
-        } catch {
-            return "Could not save: \(error.localizedDescription)"
-        }
+        if let issue = scriptIssue(script) { return issue }
+        return store(.script(script), editing: originalName != nil)
     }
 
     private struct StaleEdit: Error {}
+    private struct NameTaken: Error {}
 
-    static func staleEditMessage(kind: String) -> String {
-        "This \(kind) was renamed or deleted elsewhere, so your edit was not saved."
+    static let nameTakenMessage = "Another command already uses this name."
+
+    func linkAppName(_ url: String) -> String? {
+        guard let link = URL(string: url.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let app = NSWorkspace.shared.urlForApplication(toOpen: link),
+              let bundleId = Bundle(url: app)?.bundleIdentifier
+        else { return nil }
+        return system.appName(forBundleId: bundleId) ?? bundleId
     }
 
-    func deleteScript(named name: String) -> String? {
-        let key = VoiceCommandText.key(name)
+    static let staleEditMessage = "This command was deleted elsewhere, so your edit was not saved."
+
+    func delete(id: String) -> String? {
         do {
             try repository.mutateVoiceCommands { config in
-                config.scripts.removeAll { VoiceCommandText.key($0.name) == key }
+                config.commands.removeAll { $0.id == id }
             }
             reload()
             return nil
@@ -175,31 +168,21 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         return nil
     }
 
-    func nameTaken(_ name: String, except originalKey: String?) -> Bool {
+    func nameTaken(_ name: String, except id: String) -> Bool {
         let key = VoiceCommandText.key(name)
-        guard key != originalKey else { return false }
-        return (places.map(\.name) + scripts.map(\.name)).contains { VoiceCommandText.key($0) == key }
+        return commands.contains { $0.id != id && VoiceCommandText.key($0.name) == key }
     }
 
-    func sharedNameAdvisory(for place: VoiceCommandPlace, replacing originalName: String?) -> String? {
-        VoiceCommandConfig(places: places, scripts: scripts).sharedNameAdvisory(for: place, replacing: originalName)
+    var saved: VoiceCommandConfig { VoiceCommandConfig(commands: commands) }
+
+    func conflicts(for candidate: VoiceCommandCandidate) -> [String] {
+        saved.conflicts(for: candidate)
     }
 
-    func sharedNameAdvisory(for script: VoiceCommandScript, replacing originalName: String?) -> String? {
-        VoiceCommandConfig(places: places, scripts: scripts).sharedNameAdvisory(for: script, replacing: originalName)
-    }
-
-    func delete(named name: String) -> String? {
-        let key = VoiceCommandText.key(name)
-        do {
-            try repository.mutateVoiceCommands { config in
-                config.places.removeAll { VoiceCommandText.key($0.name) == key }
-            }
-            reload()
-            return nil
-        } catch {
-            return "Could not delete: \(error.localizedDescription)"
-        }
+    func example(for candidate: VoiceCommandCandidate) -> VoiceCommandExample {
+        VoiceCommandExample.make(
+            for: candidate, among: saved, readAs: readAs,
+            appName: { [system] in system.appName(forBundleId: $0) })
     }
 
     var currentApp: VoiceCommandCatalog.App? {
@@ -289,6 +272,9 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             return TryResult(heard: heard, summary: "No matching action", detail: VoiceCommandRunner.notFoundMessage(target), resolved: false)
         case .noMatch(let target):
             return TryResult(heard: heard, summary: "No match", detail: VoiceCommandRunner.noMatchMessage(target), resolved: false)
+        case .noTabMatch(let target, let browser):
+            return TryResult(heard: heard, summary: "No matching tab",
+                             detail: VoiceCommandRunner.noTabMatchMessage(target, browser: browser.map { appName($0) ?? $0 }), resolved: false)
         case .needsWindows, .windowsIncomplete:
             return TryResult(heard: heard, summary: "Could not check all windows", detail: VoiceCommandRunner.windowsIncompleteMessage, resolved: false)
         case .windowsNeedAccessibility:
@@ -308,6 +294,8 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             return TryResult(heard: heard, summary: "Not available", detail: VoiceCommandRunner.unavailableMessage(name), resolved: false)
         case .scriptNeedsText(let name):
             return TryResult(heard: heard, summary: "Needs more words", detail: VoiceCommandRunner.needsTextMessage(script: name), resolved: false)
+        case .takesNoText(let name):
+            return TryResult(heard: heard, summary: "Too many words", detail: VoiceCommandRunner.takesNoTextMessage(name), resolved: false)
         case .needsTabs:
             return TryResult(heard: heard, summary: "Could not read browser tabs", detail: "", resolved: false)
         case .browserNotAllowed(let browser):
