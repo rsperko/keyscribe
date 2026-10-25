@@ -1019,8 +1019,10 @@ Its sections are, in order:
    caption names the app that opens it (“Opens this link in …. Open tabs are not checked.”), and an orange
    advisory says when no app on this Mac opens it. If the current tab cannot be read, the sheet opens on a
    link with that browser chosen and an orange advisory asking for the address. **Find a Browser Tab** (the
-   **A browser tab** destination) says to say the name, then words from the tab's title, and has only the
-   **Browser** picker. The **Browser** picker lists every
+   **A browser tab** destination) says to say the name, then words from the tab's title or site, and has the
+   **Browser** picker and a **Switch without asking** toggle (off by default): when on, tabs that match equally
+   well in one browser switch to the leftmost match in its frontmost window that has one instead of offering a
+   choice; ties across browsers still offer one. The **Browser** picker lists every
    app that opens web links, including ones whose tabs cannot be read (their pages open directly), plus
    **Any browser**. While browsers are being checked, a caption says **Checking browsers…**, and **Any
    browser** or a saved browser stays selected; a refresh never changes a choice the user made. Entering

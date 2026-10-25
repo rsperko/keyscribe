@@ -13,13 +13,17 @@ public struct VoiceCommandPlace: Encodable, Equatable, Sendable {
     public var say: [String]
     public var target: Target
     public var browser: String?
+    public var quickSwitch: Bool
 
-    public init(id: String? = nil, name: String, say: [String] = [], target: Target, browser: String? = nil) {
+    public init(
+        id: String? = nil, name: String, say: [String] = [], target: Target, browser: String? = nil, quickSwitch: Bool = false
+    ) {
         self.id = id ?? VoiceCommandNaming.defaultId(name)
         self.name = name
         self.say = say
         self.target = target
         self.browser = browser
+        self.quickSwitch = quickSwitch
     }
 
     public var isTabSearch: Bool { target == .tabSearch }
@@ -90,6 +94,7 @@ public struct VoiceCommandPlace: Encodable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id, name, say, app, url, browser
         case findTab = "find_tab"
+        case quickSwitch = "quick_switch"
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -103,6 +108,7 @@ public struct VoiceCommandPlace: Encodable, Equatable, Sendable {
         case .tabSearch: try c.encode(true, forKey: .findTab)
         }
         try c.encodeIfPresent(browser, forKey: .browser)
+        if quickSwitch { try c.encode(true, forKey: .quickSwitch) }
     }
 }
 
@@ -380,6 +386,7 @@ public enum VoiceCommand: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id, name, say, app, url, browser, run, shortcut, input
         case findTab = "find_tab"
+        case quickSwitch = "quick_switch"
         case shortcutId = "shortcut_id"
     }
 
@@ -396,7 +403,9 @@ public enum VoiceCommand: Codable, Equatable, Sendable {
         let shortcut = try c.decodeIfPresent(String.self, forKey: .shortcut)
         let shortcutId = try c.decodeIfPresent(String.self, forKey: .shortcutId)
         let input = try c.decodeIfPresent(String.self, forKey: .input)
+        let quickSwitch = try c.decodeIfPresent(Bool.self, forKey: .quickSwitch) ?? false
         func invalid(_ problem: String) -> ConfigError { .invalid("command \"\(name)\": \(problem)") }
+        if quickSwitch && !findTab { throw invalid("quick_switch applies only to find_tab") }
         let exactlyOne = "set exactly one of app, url, find_tab, run, or shortcut"
         switch (app, url, findTab, run, shortcut) {
         case (let app?, nil, false, nil, nil):
@@ -407,7 +416,8 @@ public enum VoiceCommand: Codable, Equatable, Sendable {
             self = .place(VoiceCommandPlace(id: id, name: name, say: say, target: .url(url), browser: browser))
         case (nil, nil, true, nil, nil):
             guard shortcutId == nil, input == nil else { throw invalid("shortcut_id and input apply only to a shortcut") }
-            self = .place(VoiceCommandPlace(id: id, name: name, say: say, target: .tabSearch, browser: browser))
+            self = .place(VoiceCommandPlace(
+                id: id, name: name, say: say, target: .tabSearch, browser: browser, quickSwitch: quickSwitch))
         case (nil, nil, false, let run?, nil):
             guard browser == nil else { throw invalid("browser applies only to app, url, or find_tab") }
             guard shortcutId == nil, input == nil else { throw invalid("shortcut_id and input apply only to a shortcut") }
@@ -594,7 +604,7 @@ public enum VoiceCommandStore {
             places: [
                 VoiceCommandPlace(name: "a", say: ["a"], target: .app(bundleId: "a")),
                 VoiceCommandPlace(name: "b", say: ["b"], target: .url("https://example.com/"), browser: "b"),
-                VoiceCommandPlace(name: "c", say: ["c"], target: .tabSearch, browser: "c"),
+                VoiceCommandPlace(name: "c", say: ["c"], target: .tabSearch, browser: "c", quickSwitch: true),
             ],
             scripts: [
                 VoiceCommandScript(name: "a", say: ["a"], run: ["/a", "{text}"]),

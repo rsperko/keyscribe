@@ -140,8 +140,10 @@ moving it, names the modes that lose it, and offers **Undo** afterwards. Use tha
 the name of a command you saved under **Commands ▸ Add Command…**:
 
 - **“chrome gmail”**: choose **Find a Browser Tab**, name it `chrome`, and pick Google Chrome. Saying
-  `chrome` and words from a tab's title switches to the best-matching tab in Chrome only; `chrome` alone
-  brings Chrome forward. Pick **Any browser** to search every browser instead.
+  `chrome` and words from a tab's title or its site (`chrome github`) switches to the best-matching tab in
+  Chrome only; `chrome` alone brings Chrome forward. Pick **Any browser** to search every browser instead.
+  When several tabs match, you choose one; turn on **Switch without asking** to go straight to the frontmost
+  one instead (matches in different browsers still ask).
 - **“web hooks”** for a chat channel: choose **Open an App or Link**, pick **A link**, and paste the
   channel's app link (for one chat app, `slack://channel?team=…&id=…`, built from the IDs in the channel's
   details). Name it `web hooks`; the link opens in the chat app.

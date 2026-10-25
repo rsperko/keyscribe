@@ -229,6 +229,15 @@ struct VoiceCommandsSettingsModelTests {
         #expect(search.place == VoiceCommandPlace(id: search.commandId, name: "Chrome", target: .tabSearch, browser: "com.google.Chrome"))
     }
 
+    @Test func aTabSearchDraftKeepsQuickSwitchOnlyWhileItFindsTabs() {
+        let saved = VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: "com.google.Chrome", quickSwitch: true)
+        var draft = PlaceDraft(saved)
+        #expect(draft.place == saved)
+        draft.kind = .app
+        draft.bundleId = "com.google.Chrome"
+        #expect(!draft.place.quickSwitch)
+    }
+
     @Test func theEditorPreviewIsCheckedAgainstSavedCommands() {
         let (model, dir) = make()
         defer { try? FileManager.default.removeItem(at: dir) }

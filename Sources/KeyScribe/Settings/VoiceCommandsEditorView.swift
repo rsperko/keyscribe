@@ -379,6 +379,7 @@ struct PlaceDraft: Identifiable, Equatable {
     var bundleId: String
     var url: String
     var browser: String
+    var quickSwitch = false
     var notice: String?
     private var suggestion: String?
 
@@ -408,6 +409,7 @@ struct PlaceDraft: Identifiable, Equatable {
             kind = .tabSearch; bundleId = ""; url = ""
         }
         browser = place.browser ?? ""
+        quickSwitch = place.quickSwitch
     }
 
     mutating func suggest(_ suggested: String) {
@@ -434,7 +436,9 @@ struct PlaceDraft: Identifiable, Equatable {
         }
         let takesBrowser = kind == .tabSearch || (kind == .webPage && !VoiceCommandPlace.isAppLink(url))
         let browserValue = takesBrowser && !browser.isEmpty ? browser : nil
-        return VoiceCommandPlace(id: commandId, name: trimmedName, say: forms, target: target, browser: browserValue)
+        return VoiceCommandPlace(
+            id: commandId, name: trimmedName, say: forms, target: target, browser: browserValue,
+            quickSwitch: kind == .tabSearch && quickSwitch)
     }
 }
 
@@ -499,9 +503,16 @@ private struct PlaceEditorSheet: View {
                         }
                         if !isAppLink { browserChoice }
                     case .tabSearch:
-                        Text("Say the name, then words from the tab\u{2019}s title. It switches to the open tab whose title best matches them.")
+                        Text("Say the name, then words from the tab\u{2019}s title or site, such as github. It switches to the open tab that best matches them.")
                             .font(.caption).foregroundStyle(.secondary)
                         browserChoice
+                        SettingRow(
+                            title: "Switch without asking",
+                            help: "When several tabs in one browser match equally well, switches to the leftmost match in the frontmost window that has one instead of asking which one you meant. Matches in different browsers still ask.")
+                        {
+                            Toggle("", isOn: $draft.quickSwitch).labelsHidden()
+                                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeQuickSwitch)
+                        }
                     }
                 }
                 CommandPreviewSection(

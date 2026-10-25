@@ -512,6 +512,7 @@ url = "slack://channel?team=T0123ABCD&id=C0456EFGH"  # an app link: opened as-is
 name = "Chrome"
 find_tab = true                  # a tab search: "chrome gmail" finds Chrome's tab titled like "gmail"
 browser = "com.google.Chrome"    # optional: only search this browser; absent = every browser
+quick_switch = true              # optional: on a tie, switch to the frontmost tab instead of asking
 
 [[command]]
 name = "Deploy"
@@ -526,7 +527,7 @@ input = "{text}"                 # optional text given as the shortcut's input
 ```
 
 Settings lists the commands in file order under **Commands**. `browser` applies to `url` and `find_tab`
-commands; `shortcut_id` and `input` apply only to a shortcut. **`id`** identifies the command
+commands, `quick_switch` only to `find_tab`; `shortcut_id` and `input` apply only to a shortcut. **`id`** identifies the command
 across renames and edits: Settings edits, deletes, and remembers a pending choice by it, never by name.
 A command written without one gets an id derived from its name, which the next save from Settings keeps.
 Two commands may not share an id or a name. In what follows, a *place* is a command that opens an app,
@@ -674,16 +675,22 @@ link, or tab, and a *script* one that runs a program or shortcut.
   "switch to": "switch to chrome" still opens the browser.
 - **Tab searches** (`find_tab = true`) look only at tabs in their `browser`, or in every running browser that
   can list tabs when `browser` is absent, using the same title matching as an open browser tab below (exact,
-  then a run of words, then words in any order or a near-miss). Said alone, a tab search with a `browser`
+  then a run of words, then words in any order or a near-miss). A tab is also known by its **site**, the
+  `http`/`https` host without `www.` or its top-level domain (`grafana.example.com` → "grafana example",
+  `bbc.co.uk` → "bbc"); the site is tried after the title at each step, so a tab titled "Dashboard" is found
+  by "grafana", and a title match beats a site match. With `quick_switch = true`, tabs tied at the winning
+  step are not offered as a choice when they are all in one browser: the one in that browser's frontmost
+  window that has a match wins, leftmost first, however many there are. Window order is per browser, so ties
+  across browsers are still offered as a choice. Said alone, a tab search with a `browser`
   brings that browser forward; one without asks for words to find. Reading tabs uses the same Automation
   permission as a web place.
 - **Matching order** for an app-switching verb, first hit wins: a place's spoken name exactly; a running app's name exactly; a
   contiguous run of words in a running app's name ("chrome" → Google Chrome); the same partial rule on
   place names; an installed app's name exactly; then an **open window's title**, exactly and then as a
-  contiguous run of words; then an **open browser tab's title** the same two ways; then installed apps
-  partially. Only if nothing matches is the target matched fuzzily against every one of those: a
+  contiguous run of words; then an **open browser tab's title** the same two ways, then its **site** the same
+  two ways; then installed apps partially. Only if nothing matches is the target matched fuzzily against every one of those: a
   near-miss is snapped, using the dictionary's fuzzy rule, against places, running and installed apps,
-  window titles, and tab titles, and a name or title also matches when it contains every spoken word in
+  window titles, and tab titles and sites, and a name or title also matches when it contains every spoken word in
   any order ("strava run" → `Afternoon Run | Run | Strava`). The fuzzy step runs the tiers above in the
   same order, so a fuzzy hit on a place still beats an equally close one on an app, window, or tab.
   Different targets tied at the winning step are offered as a numbered choice and nothing runs until one

@@ -88,7 +88,10 @@ public struct VoiceCommandExample: Equatable, Sendable {
             switch place.target {
             case .tabSearch where !input.isEmpty:
                 let scope = place.browser.map { "open \(appName($0) ?? $0) tab" } ?? "open tab, in any browser,"
-                return "Switches to the \(scope) whose title best matches \u{201C}\(input)\u{201D}."
+                let across = place.browser == nil ? " Matches in different browsers still ask." : ""
+                let tie = place.quickSwitch
+                    ? " If several match equally, it picks the leftmost match in the frontmost window that has one.\(across)" : ""
+                return "Switches to the \(scope) whose title or site best matches \u{201C}\(input)\u{201D}.\(tie)"
             case .url(let url) where !place.isAppLink:
                 let inBrowser = place.browser.map { " in \(appName($0) ?? $0)" } ?? ""
                 return "Switches to an open tab at \(url)\(inBrowser), or opens it."

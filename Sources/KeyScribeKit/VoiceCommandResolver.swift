@@ -30,6 +30,19 @@ public struct VoiceCommandCatalog: Equatable, Sendable {
             self.url = url
             self.title = title
         }
+
+        public var siteName: String? {
+            guard let url = URL(string: url), ["http", "https"].contains(url.scheme?.lowercased()),
+                  let host = url.host?.lowercased() else { return nil }
+            var labels = host.split(separator: ".").map(String.init)
+            if labels.first == "www" { labels.removeFirst() }
+            guard labels.count >= 2, let suffix = labels.popLast(), suffix.allSatisfy(\.isLetter) else { return nil }
+            if suffix.count == 2, labels.count >= 2, Self.secondLevels.contains(labels[labels.count - 1]) { labels.removeLast() }
+            let name = VoiceCommandText.key(labels.joined(separator: " "))
+            return name.isEmpty ? nil : name
+        }
+
+        private static let secondLevels: Set<String> = ["co", "com", "org", "net", "gov", "ac", "edu", "ne", "or"]
     }
 
     public struct Window: Equatable, Hashable, Sendable {
@@ -267,7 +280,21 @@ public enum VoiceCommandResolver {
         return resolve(only, text: match.text, catalog: catalog)
     }
 
-    private enum Match { case exact, partial, words }
+    private indirect enum Match {
+        case exact, partial, words
+        case site(Match)
+    }
+
+    private static func isSite(_ match: Match) -> Bool {
+        if case .site = match { return true }
+        return false
+    }
+
+    private static func forms(_ candidate: VoiceCommandCandidate, _ match: Match) -> [String] {
+        guard case .site = match else { return candidate.spokenForms }
+        guard case .tab(let tab) = candidate, let site = tab.siteName else { return [] }
+        return [site]
+    }
 
     static func resolveTabSearch(_ place: VoiceCommandPlace, text: String, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
         guard !text.isEmpty else {
@@ -276,9 +303,13 @@ public enum VoiceCommandResolver {
         }
         guard let listed = catalog.tabs else { return .needsTabs(browser: place.browser) }
         let tabs = listed.filter { place.browser == nil || $0.browserBundleId == place.browser }.map(VoiceCommandCandidate.tab)
-        let named: [([VoiceCommandCandidate], Match)] = [(tabs, .exact), (tabs, .partial)]
-        if let resolution = firstTier(named, target: text, catalog: catalog) { return resolution }
-        return nearestMiss(text, among: tabs, tiers: named + [(tabs, .words)], catalog: catalog)
+        let named: [([VoiceCommandCandidate], Match)] = [
+            (tabs, .exact), (tabs, .partial), (tabs, .site(.exact)), (tabs, .site(.partial)),
+        ]
+        let settle = place.quickSwitch ? frontmost : nil
+        if let resolution = firstTier(named, target: text, catalog: catalog, settle: settle) { return resolution }
+        return nearestMiss(
+            text, among: tabs, tiers: named + [(tabs, .words), (tabs, .site(.words))], catalog: catalog, settle: settle)
             ?? .noTabMatch(text, browser: place.browser)
     }
 
@@ -303,12 +334,14 @@ public enum VoiceCommandResolver {
 
         guard let listed = catalog.tabs else { return .needsTabs(browser: nil) }
         let tabs = listed.map(VoiceCommandCandidate.tab)
-        let rest: [([VoiceCommandCandidate], Match)] = [(tabs, .exact), (tabs, .partial), (installed, .partial)]
+        let rest: [([VoiceCommandCandidate], Match)] = [
+            (tabs, .exact), (tabs, .partial), (tabs, .site(.exact)), (tabs, .site(.partial)), (installed, .partial),
+        ]
         if let resolution = firstTier(rest, target: target, catalog: catalog) { return resolution }
 
         let exhaustive = named + early + rest
         let unordered: [([VoiceCommandCandidate], Match)] = [
-            (places, .words), (running, .words), (windows, .words), (tabs, .words), (installed, .words),
+            (places, .words), (running, .words), (windows, .words), (tabs, .words), (tabs, .site(.words)), (installed, .words),
         ]
         return nearestMiss(
             target, among: places + running + installed + windows + tabs, tiers: exhaustive + unordered, catalog: catalog)
@@ -326,46 +359,70 @@ public enum VoiceCommandResolver {
     }
 
     private static func nearestMiss(
-        _ target: String, among pool: [VoiceCommandCandidate], tiers: [([VoiceCommandCandidate], Match)], catalog: VoiceCommandCatalog
+        _ target: String, among pool: [VoiceCommandCandidate], tiers: [([VoiceCommandCandidate], Match)], catalog: VoiceCommandCatalog,
+        settle: (([VoiceCommandCandidate]) -> VoiceCommandCandidate?)? = nil
     ) -> VoiceCommandResolution? {
         let spoken = VoiceCommandText.key(target)
-        var nearest: [(candidate: VoiceCommandCandidate, snapped: String)] = []
+        var nearest: [(candidate: VoiceCommandCandidate, snapped: String, bySite: Bool)] = []
         var nearestDistance = Int.max
         for candidate in pool {
-            let terms = candidate.spokenForms.flatMap { [$0] + $0.split(separator: " ").map(String.init) }
-            let snapped = VoiceCommandText.key(FuzzyCorrector.apply(target, prepared: FuzzyCorrector.prepare(terms)))
-            guard candidate.spokenForms.contains(where: { form in
-                [Match.exact, .partial, .words].contains { matches(snapped, form, $0) }
-            }) else { continue }
-            let distance = FuzzyCorrector.levenshtein(VoiceCommandText.compact(spoken), VoiceCommandText.compact(snapped))
-            if distance < nearestDistance { nearest = []; nearestDistance = distance }
-            if distance == nearestDistance { nearest.append((candidate, snapped)) }
+            for bySite in [false, true] {
+                let names = forms(candidate, bySite ? .site(.exact) : .exact)
+                let terms = names.flatMap { [$0] + $0.split(separator: " ").map(String.init) }
+                guard !terms.isEmpty else { continue }
+                let snapped = VoiceCommandText.key(FuzzyCorrector.apply(target, prepared: FuzzyCorrector.prepare(terms)))
+                guard names.contains(where: { form in
+                    [Match.exact, .partial, .words].contains { matches(snapped, form, $0) }
+                }) else { continue }
+                let distance = FuzzyCorrector.levenshtein(VoiceCommandText.compact(spoken), VoiceCommandText.compact(snapped))
+                if distance < nearestDistance { nearest = []; nearestDistance = distance }
+                if distance == nearestDistance { nearest.append((candidate, snapped, bySite)) }
+            }
         }
         for (tierPool, match) in tiers {
             var seen = Set<String>()
             let hits = nearest.filter { entry in
                 tierPool.contains(entry.candidate)
-                    && entry.candidate.spokenForms.contains { matches(entry.snapped, $0, match) }
+                    && entry.bySite == isSite(match)
+                    && forms(entry.candidate, match).contains { matches(entry.snapped, $0, match) }
                     && seen.insert(entry.candidate.identity).inserted
             }.map(\.candidate)
-            if hits.count == 1 { return action(for: hits[0], catalog: catalog) }
-            if hits.count > 1 { return .ambiguous(VoiceCommandChoice(family: .navigation, target: target, matches: hits)) }
+            if let result = settled(hits, target: target, catalog: catalog, settle: settle) { return result }
         }
         return nil
     }
 
     private static func firstTier(
-        _ tiers: [([VoiceCommandCandidate], Match)], target: String, catalog: VoiceCommandCatalog
+        _ tiers: [([VoiceCommandCandidate], Match)], target: String, catalog: VoiceCommandCatalog,
+        settle: (([VoiceCommandCandidate]) -> VoiceCommandCandidate?)? = nil
     ) -> VoiceCommandResolution? {
         for (pool, match) in tiers {
             var seen = Set<String>()
             let hits = pool.filter { candidate in
-                candidate.spokenForms.contains { matches(target, $0, match) } && seen.insert(candidate.identity).inserted
+                forms(candidate, match).contains { matches(target, $0, match) } && seen.insert(candidate.identity).inserted
             }
-            if hits.count == 1 { return action(for: hits[0], catalog: catalog) }
-            if hits.count > 1 { return .ambiguous(VoiceCommandChoice(family: .navigation, target: target, matches: hits)) }
+            if let result = settled(hits, target: target, catalog: catalog, settle: settle) { return result }
         }
         return nil
+    }
+
+    private static func settled(
+        _ hits: [VoiceCommandCandidate], target: String, catalog: VoiceCommandCatalog,
+        settle: (([VoiceCommandCandidate]) -> VoiceCommandCandidate?)?
+    ) -> VoiceCommandResolution? {
+        guard let first = hits.first else { return nil }
+        if hits.count == 1 { return action(for: first, catalog: catalog) }
+        if let pick = settle?(hits) { return action(for: pick, catalog: catalog) }
+        return .ambiguous(VoiceCommandChoice(family: .navigation, target: target, matches: hits))
+    }
+
+    private static func frontmost(_ hits: [VoiceCommandCandidate]) -> VoiceCommandCandidate? {
+        let tabs = hits.compactMap { candidate -> VoiceCommandCatalog.Tab? in
+            if case .tab(let tab) = candidate { return tab }
+            return nil
+        }
+        guard tabs.count == hits.count, Set(tabs.map(\.browserBundleId)).count == 1 else { return nil }
+        return tabs.min { ($0.window, $0.tab) < ($1.window, $1.tab) }.map(VoiceCommandCandidate.tab)
     }
 
     private static func ordered(_ apps: [VoiceCommandCatalog.App]) -> [VoiceCommandCatalog.App] {
@@ -425,6 +482,8 @@ public enum VoiceCommandResolver {
             guard VoiceCommandText.compact(spoken).count >= 3 else { return false }
             let words = Set(name.split(separator: " "))
             return spoken.split(separator: " ").allSatisfy(words.contains)
+        case .site(let inner):
+            return matches(target, form, inner)
         }
     }
 

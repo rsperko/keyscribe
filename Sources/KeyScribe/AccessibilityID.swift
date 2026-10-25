@@ -217,6 +217,7 @@ enum AccessibilityID {
             static let placeURL = "mode.voiceCommands.place.url"
             static let placeBrowser = "mode.voiceCommands.place.browser"
             static let placeBrowserDetails = "mode.voiceCommands.place.browserDetails"
+            static let placeQuickSwitch = "mode.voiceCommands.place.quickSwitch"
             static let placeSave = "mode.voiceCommands.place.save"
             static let placeCancel = "mode.voiceCommands.place.cancel"
             static let placeDelete = "mode.voiceCommands.place.delete"
@@ -430,6 +431,7 @@ enum AccessibilityID {
         Mode.VoiceCommands.addApp, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.previewDetails, Mode.VoiceCommands.editVocabulary,
         Mode.VoiceCommands.placeName, Mode.VoiceCommands.placeSay, Mode.VoiceCommands.placeKind,
         Mode.VoiceCommands.placeApp, Mode.VoiceCommands.placeURL, Mode.VoiceCommands.placeBrowser, Mode.VoiceCommands.placeBrowserDetails,
+        Mode.VoiceCommands.placeQuickSwitch,
         Mode.VoiceCommands.placeChooseFromApplications, Mode.VoiceCommands.placeEnterBundleID,
         Mode.VoiceCommands.placeBundleID, Mode.VoiceCommands.placeExample, Mode.VoiceCommands.scriptArgumentDetails,
         Mode.VoiceCommands.placeSave, Mode.VoiceCommands.placeCancel, Mode.VoiceCommands.placeDelete,

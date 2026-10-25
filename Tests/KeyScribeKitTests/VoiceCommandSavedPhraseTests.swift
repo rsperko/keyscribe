@@ -308,10 +308,16 @@ struct VoiceCommandExampleTests {
         let chrome = VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: "com.google.Chrome")
         let example = VoiceCommandExample.make(for: .place(chrome), appName: { _ in "Google Chrome" })
         #expect(example.heard == "chrome inbox")
-        #expect(example.result == "Switches to the open Google Chrome tab whose title best matches \u{201C}inbox\u{201D}.")
+        #expect(example.result == "Switches to the open Google Chrome tab whose title or site best matches \u{201C}inbox\u{201D}.")
         let any = VoiceCommandPlace(name: "Tab", target: .tabSearch)
         #expect(VoiceCommandExample.make(for: .place(any)).result
-                == "Switches to the open tab, in any browser, whose title best matches \u{201C}inbox\u{201D}.")
+                == "Switches to the open tab, in any browser, whose title or site best matches \u{201C}inbox\u{201D}.")
+        let quick = VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: "com.google.Chrome", quickSwitch: true)
+        #expect(VoiceCommandExample.make(for: .place(quick), appName: { _ in "Google Chrome" }).result
+                == "Switches to the open Google Chrome tab whose title or site best matches \u{201C}inbox\u{201D}. If several match equally, it picks the leftmost match in the frontmost window that has one.")
+        let quickAny = VoiceCommandPlace(name: "Tab", target: .tabSearch, quickSwitch: true)
+        #expect(VoiceCommandExample.make(for: .place(quickAny)).result.hasSuffix(
+            "frontmost window that has one. Matches in different browsers still ask."))
     }
 
     @Test func theExampleIsCheckedAgainstTheOtherSavedCommands() {
@@ -361,7 +367,7 @@ struct VoiceCommandExampleTests {
         let chrome = VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: "com.google.Chrome")
         let example = VoiceCommandExample.make(
             for: .place(chrome), readAs: { $0.replacingOccurrences(of: "inbox", with: "gmail") }, appName: { _ in "Google Chrome" })
-        #expect(example.result == "Switches to the open Google Chrome tab whose title best matches \u{201C}gmail\u{201D}.")
+        #expect(example.result == "Switches to the open Google Chrome tab whose title or site best matches \u{201C}gmail\u{201D}.")
     }
 
     @Test func aReplacementThatTurnsAPlaceIntoAVerbStillFindsIt() {
