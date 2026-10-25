@@ -470,6 +470,10 @@ public enum SettingsStore {
         try ConfigEncode.toml(settings)
     }
 
+    public static func load(supportDir: URL) -> ConfigLoad<Settings> {
+        ConfigLoad.read(supportDir.appendingPathComponent(fileName), decode: decode)
+    }
+
     public static func loadOrCreate(supportDir: URL) throws -> Settings {
         let fm = FileManager.default
         let file = supportDir.appendingPathComponent(fileName)

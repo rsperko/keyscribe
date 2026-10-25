@@ -82,9 +82,10 @@ public enum DevCLI {
                 --dictations <n>        How many recent dictation outcomes to include (default 10, 0 for none).
               --voice-command <text>  Resolve <text> as a spoken voice command ("switch to ghostty", "go back")
                                       against this Mac's running and installed apps, open browser tabs, and
-                                      the saved commands, print what it resolved to, run it, and exit. Exits
-                                      non-zero when it does not resolve or does not run.
-                --dry-run               Print the resolution without running it.
+                                      the saved commands, print what it resolved to, run it, and exit. Runs
+                                      nothing while Voice Commands is turned off. Exits non-zero when it does
+                                      not resolve or does not run.
+                --dry-run               Print the resolution without running it, even while Voice Commands is off.
               --windows-probe         List every regular app's Accessibility windows (subrole, id, minimized,
                                       whether a document is reported, title) with per-app read latency, then
                                       exit. Read-only; prints window titles to this terminal only.

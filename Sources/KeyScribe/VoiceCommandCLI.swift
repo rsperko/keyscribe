@@ -3,11 +3,17 @@ import KeyScribeKit
 
 @MainActor
 enum VoiceCommandCLI {
-    static func run(transcript: String, dryRun: Bool) async -> Int32 {
-        let system = LiveVoiceCommandSystem.shared
+    static func run(
+        transcript: String, dryRun: Bool, supportDir: URL = KeyScribePaths.supportDir,
+        system: any VoiceCommandSystem = LiveVoiceCommandSystem.shared
+    ) async -> Int32 {
+        if !dryRun, let refusal = refusal(supportDir: supportDir) {
+            print("not run:    \(refusal)")
+            return 1
+        }
         let runner = VoiceCommandRunner(system: system)
-        let commands = VoiceCommandStore.loadOrDefault(supportDir: KeyScribePaths.supportDir)
-        let config = ConfigCache(supportDir: KeyScribePaths.supportDir)
+        let commands = VoiceCommandStore.loadOrDefault(supportDir: supportDir)
+        let config = ConfigCache(supportDir: supportDir)
         config.voiceCommandsEnabled = true
         let readAs = config.resolved.voiceCommandText(heard: transcript)
         let resolution = await runner.resolve(readAs, places: commands.places, scripts: commands.scripts)
@@ -38,7 +44,19 @@ enum VoiceCommandCLI {
         }
     }
 
-    private static func describe(_ resolution: VoiceCommandResolution, system: LiveVoiceCommandSystem) -> String {
+    static func refusal(supportDir: URL) -> String? {
+        let hint = "Add --dry-run to check a phrase without running it."
+        switch SettingsStore.load(supportDir: supportDir) {
+        case .loaded(let settings) where settings.features.isEnabled(.voiceCommands):
+            return nil
+        case .failed(let error):
+            return "\(SettingsStore.fileName) has an error (\(error.summary)), so Voice Commands stays off. \(hint)"
+        case .loaded, .absent:
+            return "Voice Commands is turned off in Settings. \(hint)"
+        }
+    }
+
+    private static func describe(_ resolution: VoiceCommandResolution, system: any VoiceCommandSystem) -> String {
         switch resolution {
         case .notACommand: return "not a command"
         case .noMatch(let target): return VoiceCommandRunner.noMatchMessage(target)
