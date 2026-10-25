@@ -6,6 +6,7 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
     case script(VoiceCommandScript)
     case window(VoiceCommandCatalog.Window)
     case tab(VoiceCommandCatalog.Tab)
+    case sidebarItem(VoiceCommandCatalog.SidebarItem)
     case option(VoiceCommandScriptOption)
 
     public var identity: String {
@@ -15,6 +16,8 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
         case .script(let script): "script:\(script.id)"
         case .window(let window): "window:\(window.bundleId):\(window.pid):\(window.id)"
         case .tab(let tab): "tab:\(tab.browserBundleId):\(tab.window):\(tab.tab):\(tab.url)"
+        case .sidebarItem(let item):
+            "sidebar:\(item.bundleId):\(item.pid):\(item.window.map(String.init) ?? "-"):\(item.path.map(String.init).joined(separator: ".")):\(item.name)"
         case .option(let option): "option:\(option.script.id):\(option.value)"
         }
     }
@@ -26,6 +29,7 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
         case .script(let script): script.name
         case .window(let window): window.title
         case .tab(let tab): tab.title
+        case .sidebarItem(let item): item.name
         case .option(let option): option.label
         }
     }
@@ -37,15 +41,18 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
         case .script(let script): return script.spokenForms
         case .window(let window): return Self.titleForms(window.title)
         case .tab(let tab): return Self.titleForms(tab.title)
+        case .sidebarItem(let item):
+            let spoken = VoiceCommandText.key(item.name)
+            return spoken == item.name ? [item.name] : [item.name, spoken]
         case .option: return []
         }
     }
 
     public var takesWords: Bool {
         switch self {
-        case .place(let place): place.isTabSearch
+        case .place(let place): place.searchesByName
         case .script(let script): script.takesText
-        case .app, .window, .tab, .option: false
+        case .app, .window, .tab, .sidebarItem, .option: false
         }
     }
 
@@ -62,6 +69,8 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
                 return appName(bundleId) ?? bundleId
             case .tabSearch:
                 return "Tabs in " + (place.browser.map { appName($0) ?? $0 } ?? "any browser")
+            case .sidebar(let bundleId):
+                return "Sidebar of " + (appName(bundleId) ?? bundleId)
             case .url(let url):
                 let browser = place.browser.map { appName($0) ?? $0 } ?? "Default browser"
                 guard let host = URL(string: url)?.host?.lowercased() else { return browser }
@@ -91,6 +100,9 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
             let browser = appName(tab.browserBundleId) ?? tab.browserBundleId
             guard let site = Self.documentLabel(tab.url) else { return browser }
             return "\(browser) \u{00B7} \(site)"
+        case .sidebarItem(let item):
+            let app = appName(item.bundleId) ?? item.bundleId
+            return item.section.map { "\(app) \u{00B7} \($0)" } ?? app
         case .option(let option):
             return option.script.name
         }

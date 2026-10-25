@@ -42,5 +42,14 @@ public struct Feature: CaseIterable, Hashable, Sendable {
         summary: "Adds a built-in Voice Commands mode: give it a shortcut, then say the name of a command you saved, or \(VoiceCommandPhrase.guidance). Speech on that shortcut is never typed."
     )
 
-    public static let allCases: [Feature] = [streamingTranscription, consumptionDrivenRestore, voiceCommands]
+    // Sidebar search: a saved voice command opens an entry listed in an app's sidebar, read through
+    // Accessibility. Flagged because it depends on each app's outline shape; measured only in a few apps, and
+    // not yet exercised through unread changes, rearranged rows, multiple windows, or account switches.
+    public static let sidebarSearch = Feature(
+        id: "voice_command_sidebars",
+        title: "Voice Commands: app sidebars",
+        summary: "Lets a saved voice command open a channel, person, mailbox, or folder listed in an app\u{2019}s sidebar. Measured in Slack, Mail, and Notes; other apps may not work. Needs Voice Commands."
+    )
+
+    public static let allCases: [Feature] = [streamingTranscription, consumptionDrivenRestore, voiceCommands, sidebarSearch]
 }

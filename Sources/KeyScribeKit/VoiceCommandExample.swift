@@ -53,7 +53,7 @@ public struct VoiceCommandExample: Equatable, Sendable {
     private static func heard(for candidate: VoiceCommandCandidate) -> String {
         let phrase = VoiceCommandText.key(candidate.name)
         switch candidate {
-        case .place(let place) where place.isTabSearch: return "\(phrase) \(sampleTabWords)"
+        case .place(let place) where place.searchesByName: return "\(phrase) \(sampleTabWords)"
         case .script(let script) where script.takesText: return "\(phrase) \(sampleWords)"
         default: return phrase
         }
@@ -64,7 +64,7 @@ public struct VoiceCommandExample: Equatable, Sendable {
         switch candidate {
         case .place(let place): commands.append(.place(place))
         case .script(let script): commands.append(.script(script))
-        case .app, .window, .tab, .option: break
+        case .app, .window, .tab, .sidebarItem, .option: break
         }
         let config = VoiceCommandConfig(commands: commands)
         return VoiceCommandCatalog(places: config.places, scripts: config.scripts, tabs: [], windows: .complete([]))
@@ -92,6 +92,8 @@ public struct VoiceCommandExample: Equatable, Sendable {
                 let tie = place.quickSwitch
                     ? " If several match equally, it picks the leftmost match in the frontmost window that has one.\(across)" : ""
                 return "Switches to the \(scope) whose title or site best matches \u{201C}\(input)\u{201D}.\(tie)"
+            case .sidebar(let bundleId) where !input.isEmpty:
+                return "Opens the entry in \(appName(bundleId) ?? bundleId)\u{2019}s sidebar whose name best matches \u{201C}\(input)\u{201D}."
             case .url(let url) where !place.isAppLink:
                 let inBrowser = place.browser.map { " in \(appName($0) ?? $0)" } ?? ""
                 return "Switches to an open tab at \(url)\(inBrowser), or opens it."

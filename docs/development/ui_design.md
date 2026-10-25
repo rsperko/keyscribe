@@ -967,7 +967,8 @@ Its sections are, in order:
    anything; the empty state says the same. **Add Command…** offers outcome-named starting points: **Open
    Current App (name)** and, when that app is a browser that can list its tabs, **Open Current Browser Tab**
    (both read from the app that was frontmost when Settings opened); then **Open an App or Link…**, **Find a
-   Browser Tab…**, **Run a Shortcut…**, a divider, and **Run a Script…** for advanced setup. Until the browsers
+   Browser Tab…**, **Find in an App’s Sidebar…** (only while the experimental **Voice Commands: app
+   sidebars** flag is on), **Run a Shortcut…**, a divider, and **Run a Script…** for advanced setup. Until the browsers
    on this Mac have been checked, a disabled **Checking browsers…** item stands where **Open Current Browser
    Tab** would be. Every starting point opens a normal command sheet that saves an ordinary entry in this
    list, edited from its row; there is no separate template lifecycle.
@@ -1022,7 +1023,20 @@ Its sections are, in order:
    **A browser tab** destination) says to say the name, then words from the tab's title or site, and has the
    **Browser** picker and a **Switch without asking** toggle (off by default): when on, tabs that match equally
    well in one browser switch to the leftmost match in its frontmost window that has one instead of offering a
-   choice; ties across browsers still offer one. The **Browser** picker lists every
+   choice; ties across browsers still offer one. **Find in an App’s Sidebar** (the **A sidebar entry**
+   destination) has the **App** chooser, a caption saying to say the name and then a channel, person, mailbox,
+   or folder listed in that app's sidebar, that it opens the best match in the app's front window and asks
+   when several match, and a collapsed **Reading the sidebar** section (summary “Uses Accessibility”)
+   explaining that names are read only when the command runs, that hidden entries are not found, and that
+   some apps turn on their accessibility support until they quit. A caption above **Check Sidebar**, always
+   visible, says the check reads the app's front window now and may first turn on the app's accessibility
+   support until it quits. The check says how many entries it found with a few examples and whether the read
+   was incomplete, or why it could not be read, and in either case whether the app's accessibility support was
+   turned on. A spoken command whose open cannot be confirmed shows an orange advisory naming the entry
+   instead of the usual confirmation. **Preview** never reads a sidebar: it says the command would
+   look in the app's sidebar and points to **Check Sidebar**. While the flag is off, the destination is
+   offered only for a command that already uses it, the check is disabled, and both the sheet and the row
+   show an orange advisory saying how to turn it on. Its rows show a **Sidebar** badge and the app's icon. The **Browser** picker lists every
    app that opens web links, including ones whose tabs cannot be read (their pages open directly), plus
    **Any browser**. While browsers are being checked, a caption says **Checking browsers…**, and **Any
    browser** or a saved browser stays selected; a refresh never changes a choice the user made. Entering

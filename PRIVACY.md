@@ -95,6 +95,11 @@ visible and receive your next keystrokes.
 To find a window you name, Voice Commands reads the titles of your open windows on this Mac, only when
 no app or place matched what you said. The titles are not sent anywhere or written to diagnostic logs.
 
+A Find in an App's Sidebar command (an experimental feature, off unless you turn it on) reads the names listed in that app's sidebar, such as channels, people,
+or mailboxes, only when you say it or press Check Sidebar while editing it. The names are not sent anywhere or written to diagnostic logs. For some
+apps, such as Slack, reading the sidebar first turns on the app's own accessibility support, which stays on
+until that app quits.
+
 When history is on, each voice command is saved there like a dictation: what you said, the command it
 ran with those words (for a window, its title and app, and the titles in a list it offered you), and, if it failed, the error message, which can include the last line the script
 or shortcut wrote to its error output. An action still running when it is saved is updated with its

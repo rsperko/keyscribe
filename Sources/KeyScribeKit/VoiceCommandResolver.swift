@@ -67,6 +67,23 @@ public struct VoiceCommandCatalog: Equatable, Sendable {
         }
     }
 
+    public struct SidebarItem: Equatable, Hashable, Sendable {
+        public var bundleId: String
+        public var pid: Int32
+        public var name: String
+        public var section: String?
+        public var path: [Int]
+        public var window: UInt32?
+        public init(bundleId: String, pid: Int32, name: String, section: String?, path: [Int], window: UInt32? = nil) {
+            self.bundleId = bundleId
+            self.pid = pid
+            self.name = name
+            self.section = section
+            self.path = path
+            self.window = window
+        }
+    }
+
     public enum WindowScan: Equatable, Sendable {
         case complete([Window])
         case incomplete
@@ -79,6 +96,8 @@ public struct VoiceCommandCatalog: Equatable, Sendable {
     public var installedApps: [App]
     public var tabs: [Tab]?
     public var windows: WindowScan?
+    public var sidebarItems: [SidebarItem]?
+    public var sidebarIsComplete = true
 
     public init(
         places: [VoiceCommandPlace] = [], scripts: [VoiceCommandScript] = [], runningApps: [App] = [],
@@ -135,6 +154,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
     case script(VoiceCommandScript, arguments: [String], choice: String? = nil)
     case window(VoiceCommandCatalog.Window)
     case tab(VoiceCommandCatalog.Tab)
+    case sidebarItem(VoiceCommandCatalog.SidebarItem)
     case goBack
 
     public func summary(appName: (String) -> String?) -> String {
@@ -142,6 +162,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
         case .app(let app): return app.name
         case .window(let window): return "\(window.title) \u{00B7} \(window.appName)"
         case .tab(let tab): return appName(tab.browserBundleId).map { "\(tab.title) \u{00B7} \($0)" } ?? tab.title
+        case .sidebarItem(let item): return appName(item.bundleId).map { "\(item.name) \u{00B7} \($0)" } ?? item.name
         case .goBack: return "Back"
         case .place(let place, .tab(let tab)):
             return appName(tab.browserBundleId).map { "\(place.name) · \($0)" } ?? place.name
@@ -157,6 +178,8 @@ public enum VoiceCommandAction: Equatable, Sendable {
             return "Brings the window \u{201C}\(window.title)\u{201D} in \(window.appName) to the front."
         case .tab(let tab):
             return "Focuses the open tab \u{201C}\(tab.title)\u{201D} in \(appName(tab.browserBundleId) ?? tab.browserBundleId)."
+        case .sidebarItem(let item):
+            return "Opens \u{201C}\(item.name)\u{201D} in the sidebar of \(appName(item.bundleId) ?? item.bundleId)."
         case .goBack: return "Returns to the window or app you were in before your last command."
         case .place(_, .app(let bundleId)):
             return "Brings \(appName(bundleId) ?? bundleId) to the front, opening it if needed."
@@ -179,6 +202,15 @@ public enum VoiceCommandAction: Equatable, Sendable {
     }
 }
 
+public enum SidebarProblem: Equatable, Sendable {
+    case notRunning
+    case needsAccessibility
+    case noSidebar
+    case windowUnknown
+    case noResponse
+    case turnedOff
+}
+
 public enum VoiceCommandResolution: Equatable, Sendable {
     case notACommand
     case action(VoiceCommandAction)
@@ -187,6 +219,9 @@ public enum VoiceCommandResolution: Equatable, Sendable {
     case noMatch(String)
     case noTabMatch(String, browser: String?)
     case needsTabs(browser: String?)
+    case needsSidebar(String)
+    case noSidebarMatch(String, app: String)
+    case sidebarUnreadable(app: String, SidebarProblem)
     case needsWindows
     case windowsIncomplete
     case windowsNeedAccessibility
@@ -313,8 +348,22 @@ public enum VoiceCommandResolver {
             ?? .noTabMatch(text, browser: place.browser)
     }
 
+    static func resolveSidebar(
+        _ place: VoiceCommandPlace, app: String, text: String, catalog: VoiceCommandCatalog
+    ) -> VoiceCommandResolution {
+        guard !text.isEmpty else { return .action(.place(place, .app(bundleId: app))) }
+        guard let listed = catalog.sidebarItems else { return .needsSidebar(app) }
+        let entries = listed.filter { $0.bundleId == app }.map(VoiceCommandCandidate.sidebarItem)
+        let named: [([VoiceCommandCandidate], Match)] = [(entries, .exact), (entries, .partial)]
+        let resolution = firstTier(named, target: text, catalog: catalog)
+            ?? nearestMiss(text, among: entries, tiers: named + [(entries, .words)], catalog: catalog)
+            ?? .noSidebarMatch(text, app: app)
+        guard !catalog.sidebarIsComplete, case .action(.sidebarItem(let item)) = resolution else { return resolution }
+        return .ambiguous(VoiceCommandChoice(family: .navigation, target: text, matches: [.sidebarItem(item)]))
+    }
+
     private static func resolve(target: String, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
-        let places = catalog.places.filter { !$0.isTabSearch }.map(VoiceCommandCandidate.place)
+        let places = catalog.places.filter { !$0.searchesByName }.map(VoiceCommandCandidate.place)
         let running = Self.ordered(catalog.runningApps).map(VoiceCommandCandidate.app)
         let installed = Self.ordered(catalog.installedApps).map(VoiceCommandCandidate.app)
         let named: [([VoiceCommandCandidate], Match)] = [
@@ -444,11 +493,14 @@ public enum VoiceCommandResolver {
             return .action(.window(window))
         case .tab(let tab):
             return .action(.tab(tab))
+        case .sidebarItem(let item):
+            return .action(.sidebarItem(item))
         case .place(let chosen):
             guard let current = catalog.places.first(where: { $0.hasSameDestination(as: chosen) }) else {
                 return .unavailable(chosen.name)
             }
             if current.isTabSearch { return resolveTabSearch(current, text: text, catalog: catalog) }
+            if let app = current.sidebarApp { return resolveSidebar(current, app: app, text: text, catalog: catalog) }
             guard text.isEmpty else { return .takesNoText(current.name) }
             return action(for: .place(current), catalog: catalog)
         case .script(let chosen):
@@ -499,6 +551,8 @@ public enum VoiceCommandResolver {
             return .action(.window(window))
         case .tab(let tab):
             return .action(.tab(tab))
+        case .sidebarItem(let item):
+            return .action(.sidebarItem(item))
         case .place(let place):
             switch place.target {
             case .app(let bundleId):
@@ -513,6 +567,8 @@ public enum VoiceCommandResolver {
                 return .action(.place(place, .openURL(url, browser: place.browser)))
             case .tabSearch:
                 return resolveTabSearch(place, text: "", catalog: catalog)
+            case .sidebar(let app):
+                return resolveSidebar(place, app: app, text: "", catalog: catalog)
             }
         }
     }

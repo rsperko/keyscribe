@@ -102,6 +102,26 @@ struct FeaturesTests {
         #expect(decoded.features.isEnabled(.voiceCommands))
     }
 
+    @Test func sidebarSearchDefaultsOff() {
+        #expect(!Settings.defaults.features.isEnabled(.sidebarSearch))
+    }
+
+    @Test func sidebarSearchOverridePersists() throws {
+        var s = Settings.defaults
+        s.features.setEnabled(true, for: .sidebarSearch)
+        let toml = try SettingsStore.encode(s)
+        #expect(toml.contains("voice_command_sidebars = true"))
+        #expect(try SettingsStore.decode(from: toml).features.isEnabled(.sidebarSearch))
+    }
+
+    @Test func sidebarSearchOffIsElided() throws {
+        var s = Settings.defaults
+        s.features.setEnabled(true, for: .sidebarSearch)
+        s.features.setEnabled(false, for: .sidebarSearch)
+        #expect(s.features == Settings.Features())
+        #expect(try !SettingsStore.encode(s).contains("voice_command_sidebars"))
+    }
+
     @Test func voiceCommandsOffIsElided() throws {
         var s = Settings.defaults
         s.features.setEnabled(true, for: .voiceCommands)

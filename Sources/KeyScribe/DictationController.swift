@@ -306,7 +306,7 @@ final class DictationController {
         self.activeEngineUsable = activeEngineUsable
         self.isSessionLocked = isSessionLocked
         self.llmClient = llmClient
-        self.voiceCommands = voiceCommands ?? VoiceCommandRunner()
+        self.voiceCommands = voiceCommands ?? VoiceCommandRunner(sidebarEnabled: { config.sidebarSearchEnabled })
         self.permits = permits
         self.recordModelLoadFailure = recordModelLoadFailure
         self.maxRecordingSeconds = maxRecordingSeconds

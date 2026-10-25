@@ -72,6 +72,15 @@ struct VoiceCommandRunnerTests {
             guard stillWanted() else { return .cancelled }
             return windowFocusResults.isEmpty ? .focused : windowFocusResults.removeFirst()
         }
+        var sidebar: SidebarRead = .listing(SidebarListing(items: [], isComplete: true))
+        var sidebarOpenResult: SidebarOpenResult = .opened
+        private(set) var sidebarReads: [String] = []
+        private(set) var openedSidebarItems: [VoiceCommandCatalog.SidebarItem] = []
+        func sidebarItems(in bundleId: String) async -> SidebarRead { sidebarReads.append(bundleId); return sidebar }
+        func openSidebarItem(_ item: VoiceCommandCatalog.SidebarItem) async -> SidebarOpenResult {
+            openedSidebarItems.append(item)
+            return sidebarOpenResult
+        }
         func isRunning(pid: Int32, bundleId: String) -> Bool { runningPids[pid] == bundleId }
         func activate(pid: Int32) -> Bool { activatedPids.append(pid); return openSucceeds }
         func runScript(

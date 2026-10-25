@@ -153,6 +153,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 Log.config.error("replacement usage file was unreadable; moved to \(aside.lastPathComponent, privacy: .public) and started fresh")
             })
         config.voiceCommandsEnabled = settings.features.isEnabled(.voiceCommands)
+        config.sidebarSearchEnabled = settings.features.isEnabled(.sidebarSearch)
         configRepository = ConfigRepository(
             supportDir: KeyScribePaths.supportDir, config: config, selfWriteGate: selfWriteGate,
             replacementUsage: replacementUsage)
@@ -698,6 +699,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             selfWriteGate.adopt(ConfigTreeSnapshot.capture(supportDir: KeyScribePaths.supportDir))
             config.voiceCommandsEnabled = updated.features.isEnabled(.voiceCommands)
         }
+        config.sidebarSearchEnabled = updated.features.isEnabled(.sidebarSearch)
         controller.updateSettings(updated)
         hud.appearance = updated.hud.appearance
         rebuildHotkeyMonitor()

@@ -38,6 +38,8 @@ final class ConfigCache {
         didSet { if voiceCommandsEnabled != oldValue { invalidate() } }
     }
 
+    var sidebarSearchEnabled = false
+
     init(supportDir: URL) {
         self.supportDir = supportDir
     }

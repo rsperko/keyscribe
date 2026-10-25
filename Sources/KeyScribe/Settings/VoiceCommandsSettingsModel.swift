@@ -228,6 +228,12 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         }
     }
 
+    var sidebarSearchEnabled: Bool { repository.sidebarSearchEnabled }
+
+    func checkSidebar(of bundleId: String) async -> String {
+        await VoiceCommandRunner.checkSidebar(of: bundleId, system: system)
+    }
+
     func appName(_ bundleId: String) -> String {
         system.appName(forBundleId: bundleId) ?? bundleId
     }
@@ -239,6 +245,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         guard !heard.isEmpty else { tryResult = nil; return }
         let places = places
         let scripts = scripts
+        let sidebars = repository.sidebarSearchEnabled
         tryTask = Task { [weak self, system] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled, let readAs = self?.readAs(heard) else { return }
@@ -246,7 +253,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             let resolution = await runner.resolve(readAs, places: places, scripts: scripts)
             guard !Task.isCancelled, let self else { return }
             self.tryResult = Self.describe(
-                resolution, heard: heard, readAs: readAs, appName: { system.appName(forBundleId: $0) })
+                resolution, heard: heard, readAs: readAs, sidebars: sidebars, appName: { system.appName(forBundleId: $0) })
         }
     }
 
@@ -255,14 +262,17 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     }
 
     static func describe(
-        _ resolution: VoiceCommandResolution, heard: String, readAs: String, appName: (String) -> String?
+        _ resolution: VoiceCommandResolution, heard: String, readAs: String, sidebars: Bool = false,
+        appName: (String) -> String?
     ) -> TryResult {
-        var result = describe(resolution, heard: heard, appName: appName)
+        var result = describe(resolution, heard: heard, sidebars: sidebars, appName: appName)
         if readAs != heard { result.readAs = readAs }
         return result
     }
 
-    static func describe(_ resolution: VoiceCommandResolution, heard: String, appName: (String) -> String?) -> TryResult {
+    static func describe(
+        _ resolution: VoiceCommandResolution, heard: String, sidebars: Bool = false, appName: (String) -> String?
+    ) -> TryResult {
         switch resolution {
         case .action(let action):
             return TryResult(heard: heard, summary: action.summary(appName: appName), detail: action.detail(appName: appName), resolved: true)
@@ -298,6 +308,18 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             return TryResult(heard: heard, summary: "Too many words", detail: VoiceCommandRunner.takesNoTextMessage(name), resolved: false)
         case .needsTabs:
             return TryResult(heard: heard, summary: "Could not read browser tabs", detail: "", resolved: false)
+        case .sidebarUnreadable(let app, .turnedOff) where sidebars:
+            return TryResult(heard: heard, summary: "Looks in \(appName(app) ?? app)\u{2019}s sidebar",
+                             detail: "The preview does not read sidebars. Use Check Sidebar in this command\u{2019}s editor to see what it finds.",
+                             resolved: false)
+        case .sidebarUnreadable(_, .turnedOff):
+            return TryResult(heard: heard, summary: "Turned off", detail: VoiceCommandRunner.sidebarTurnedOffMessage, resolved: false)
+        case .needsSidebar(let app), .sidebarUnreadable(let app, _):
+            return TryResult(heard: heard, summary: "Could not read the sidebar",
+                             detail: "\(appName(app) ?? app)\u{2019}s sidebar could not be checked.", resolved: false)
+        case .noSidebarMatch(let target, let app):
+            return TryResult(heard: heard, summary: "No matching entry",
+                             detail: VoiceCommandRunner.noSidebarMatchMessage(target, app: appName(app) ?? app), resolved: false)
         case .browserNotAllowed(let browser):
             return TryResult(heard: heard, summary: "Not allowed to control the browser",
                              detail: VoiceCommandRunner.notAllowedMessage(browser: appName(browser) ?? browser), resolved: false)

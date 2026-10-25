@@ -198,6 +198,7 @@ enum AccessibilityID {
             static let actionPermissions = "mode.voiceCommands.actionPermissions"
             static let addCommand = "mode.voiceCommands.addCommand"
             static let addTabSearch = "mode.voiceCommands.addTabSearch"
+            static let addSidebarSearch = "mode.voiceCommands.addSidebarSearch"
             static let addCurrentApp = "mode.voiceCommands.addCurrentApp"
             static let addCurrentTab = "mode.voiceCommands.addCurrentTab"
             static let addApp = "mode.voiceCommands.addApp"
@@ -218,6 +219,10 @@ enum AccessibilityID {
             static let placeBrowser = "mode.voiceCommands.place.browser"
             static let placeBrowserDetails = "mode.voiceCommands.place.browserDetails"
             static let placeQuickSwitch = "mode.voiceCommands.place.quickSwitch"
+            static let placeSidebarDetails = "mode.voiceCommands.place.sidebarDetails"
+            static let placeCheckSidebar = "mode.voiceCommands.place.checkSidebar"
+            static let placeSidebarCheckResult = "mode.voiceCommands.place.sidebarCheckResult"
+            static let placeSidebarCheckNote = "mode.voiceCommands.place.sidebarCheckNote"
             static let placeSave = "mode.voiceCommands.place.save"
             static let placeCancel = "mode.voiceCommands.place.cancel"
             static let placeDelete = "mode.voiceCommands.place.delete"
@@ -431,7 +436,8 @@ enum AccessibilityID {
         Mode.VoiceCommands.addApp, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.previewDetails, Mode.VoiceCommands.editVocabulary,
         Mode.VoiceCommands.placeName, Mode.VoiceCommands.placeSay, Mode.VoiceCommands.placeKind,
         Mode.VoiceCommands.placeApp, Mode.VoiceCommands.placeURL, Mode.VoiceCommands.placeBrowser, Mode.VoiceCommands.placeBrowserDetails,
-        Mode.VoiceCommands.placeQuickSwitch,
+        Mode.VoiceCommands.placeQuickSwitch, Mode.VoiceCommands.placeSidebarDetails, Mode.VoiceCommands.addSidebarSearch,
+        Mode.VoiceCommands.placeCheckSidebar, Mode.VoiceCommands.placeSidebarCheckResult, Mode.VoiceCommands.placeSidebarCheckNote,
         Mode.VoiceCommands.placeChooseFromApplications, Mode.VoiceCommands.placeEnterBundleID,
         Mode.VoiceCommands.placeBundleID, Mode.VoiceCommands.placeExample, Mode.VoiceCommands.scriptArgumentDetails,
         Mode.VoiceCommands.placeSave, Mode.VoiceCommands.placeCancel, Mode.VoiceCommands.placeDelete,

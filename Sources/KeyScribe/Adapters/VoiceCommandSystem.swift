@@ -81,6 +81,18 @@ enum ScriptRun: Equatable, Sendable {
     case couldNotStart(String)
 }
 
+enum SidebarRead: Equatable, Sendable {
+    case listing(SidebarListing)
+    case unreadable(SidebarProblem, switchedOnAccessibility: Bool = false)
+}
+
+enum SidebarOpenResult: Equatable, Sendable {
+    case opened
+    case unconfirmed
+    case gone
+    case noResponse
+}
+
 enum TabFocusResult: Equatable, Sendable {
     case focused
     case gone
@@ -99,6 +111,8 @@ protocol VoiceCommandSystem: AnyObject {
     func isInstalled(bundleId: String) -> Bool
     func openApp(bundleId: String) async -> Bool
     func focusTab(_ tab: VoiceCommandCatalog.Tab) async -> TabFocusResult
+    func sidebarItems(in bundleId: String) async -> SidebarRead
+    func openSidebarItem(_ item: VoiceCommandCatalog.SidebarItem) async -> SidebarOpenResult
     func windows() async -> VoiceCommandCatalog.WindowScan
     func focusWindow(_ window: VoiceCommandCatalog.Window, stillWanted: @MainActor () -> Bool) async -> WindowFocusResult
     func isRunning(pid: Int32, bundleId: String) -> Bool
@@ -163,6 +177,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     static let choiceIdleSeconds: Double = 30
 
     private let system: VoiceCommandSystem
+    private let sidebarEnabled: @MainActor () -> Bool
     private let now: () -> Double
     private let idleSeconds: Double
     private(set) var backTarget: VoiceCommandOrigin?
@@ -178,10 +193,12 @@ final class VoiceCommandRunner: VoiceCommandRunning {
 
     init(
         system: VoiceCommandSystem = LiveVoiceCommandSystem.shared,
+        sidebarEnabled: @escaping @MainActor () -> Bool = { false },
         now: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
         idleSeconds: Double = VoiceCommandRunner.choiceIdleSeconds
     ) {
         self.system = system
+        self.sidebarEnabled = sidebarEnabled
         self.now = now
         self.idleSeconds = idleSeconds
     }
@@ -190,7 +207,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         _ transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = []
     ) async -> VoiceCommandResolution {
         if Self.isSavedPhrase(transcript, places: places, scripts: scripts) {
-            return await readingTabs(VoiceCommandCatalog(places: places, scripts: scripts)) {
+            return await readingSidebar(VoiceCommandCatalog(places: places, scripts: scripts)) {
                 VoiceCommandResolver.resolve(transcript, catalog: $0)
             }
         }
@@ -211,6 +228,23 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         var catalog = catalog
         catalog.windows = await system.windows()
         return await readingTabs(catalog, resolve)
+    }
+
+    private func readingSidebar(
+        _ catalog: VoiceCommandCatalog, _ resolve: (VoiceCommandCatalog) -> VoiceCommandResolution
+    ) async -> VoiceCommandResolution {
+        let first = await readingTabs(catalog, resolve)
+        guard case .needsSidebar(let app) = first else { return first }
+        guard sidebarEnabled() else { return .sidebarUnreadable(app: app, .turnedOff) }
+        switch await system.sidebarItems(in: app) {
+        case .listing(let listing):
+            var catalog = catalog
+            catalog.sidebarItems = listing.items
+            catalog.sidebarIsComplete = listing.isComplete
+            return await readingTabs(catalog, resolve)
+        case .unreadable(let problem, _):
+            return .sidebarUnreadable(app: app, problem)
+        }
     }
 
     private func readingTabs(
@@ -349,7 +383,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         if case .app(let app) = candidate, !system.isInstalled(bundleId: app.bundleId), !system.isRunning(bundleId: app.bundleId) {
             resolution = .unavailable(app.name)
         } else {
-            resolution = await readingTabs(VoiceCommandCatalog(places: places, scripts: scripts)) {
+            resolution = await readingSidebar(VoiceCommandCatalog(places: places, scripts: scripts)) {
                 VoiceCommandResolver.resolve(candidate, text: pending.choice.text, catalog: $0)
             }
         }
@@ -384,6 +418,14 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             return .failed(message: choice.tooManyMessage)
         case .unavailable(let name):
             return .failed(message: Self.unavailableMessage(name))
+        case .needsSidebar(let app):
+            return .failed(message: Self.sidebarNoResponseMessage(name(of: app)))
+        case .sidebarUnreadable(let app, let problem):
+            return .failed(
+                message: Self.sidebarMessage(problem, app: name(of: app)),
+                action: problem == .needsAccessibility ? .openAccessibilitySettings : nil)
+        case .noSidebarMatch(let target, let app):
+            return .failed(message: Self.noSidebarMatchMessage(target, app: name(of: app)))
         case .needsTabs(let browser):
             let name = browser.flatMap(system.appName(forBundleId:)) ?? "The browser"
             return .failed(message: "\(name) did not list its open tabs, so nothing was opened.")
@@ -435,6 +477,21 @@ final class VoiceCommandRunner: VoiceCommandRunning {
                 return .failed(message: "\(browser) did not respond, so the tab was not brought forward.", command: command)
             case .gone:
                 return .failed(message: Self.tabGoneMessage, command: command)
+            }
+        case .sidebarItem(let item):
+            guard sidebarEnabled() else { return .failed(message: Self.sidebarTurnedOffMessage) }
+            switch await system.openSidebarItem(item) {
+            case .opened:
+                succeeded = true
+            case .unconfirmed:
+                let app = name(of: item.bundleId)
+                command = "Pressed \u{201C}\(item.name)\u{201D} in \(app)\u{2019}s sidebar, but could not confirm that it opened."
+                return .done(summary: summary, command: command, report: ScriptReport.Message(
+                    level: .info, text: "Could not confirm that \u{201C}\(item.name)\u{201D} opened in \(app)."))
+            case .gone:
+                return .failed(message: Self.sidebarItemGoneMessage(item.name, app: name(of: item.bundleId)), command: command)
+            case .noResponse:
+                return .failed(message: Self.sidebarNoResponseMessage(name(of: item.bundleId)), command: command)
             }
         case .app(let app):
             succeeded = await system.openApp(bundleId: app.bundleId)
@@ -488,6 +545,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         switch action {
         case .app(let app): return app.bundleId
         case .place(_, .app(let bundleId)): return bundleId
+        case .sidebarItem(let item): return item.bundleId
         default: return nil
         }
     }
@@ -543,6 +601,60 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     nonisolated static let windowsNeedAccessibilityMessage =
         "Accessibility is off, so open windows could not be checked. Nothing was opened."
     nonisolated static let windowGoneMessage = "That window is no longer open."
+
+    private func name(of app: String) -> String { system.appName(forBundleId: app) ?? app }
+
+    nonisolated static func sidebarNotRunningMessage(_ app: String) -> String {
+        "\(app) is not open, so its sidebar was not checked. Open it, then try again."
+    }
+
+    nonisolated static func sidebarNeedsAccessibilityMessage(_ app: String) -> String {
+        "Accessibility is off, so \(app)\u{2019}s sidebar could not be checked. Nothing was opened."
+    }
+
+    nonisolated static func noSidebarMessage(_ app: String) -> String {
+        "No sidebar was found in \(app)\u{2019}s front window, so nothing was opened."
+    }
+
+    static func checkSidebar(of app: String, system: any VoiceCommandSystem) async -> String {
+        let name = system.appName(forBundleId: app) ?? app
+        switch await system.sidebarItems(in: app) {
+        case .listing(let listing): return listing.checkSummary(appName: name)
+        case .unreadable(let problem, let switched):
+            let message = sidebarMessage(problem, app: name)
+            return switched ? message + " " + SidebarListing.switchedNote(appName: name) : message
+        }
+    }
+
+    nonisolated static func sidebarMessage(_ problem: SidebarProblem, app: String) -> String {
+        switch problem {
+        case .notRunning: sidebarNotRunningMessage(app)
+        case .needsAccessibility: sidebarNeedsAccessibilityMessage(app)
+        case .noSidebar: noSidebarMessage(app)
+        case .windowUnknown: sidebarWindowUnknownMessage(app)
+        case .noResponse: sidebarNoResponseMessage(app)
+        case .turnedOff: sidebarTurnedOffMessage
+        }
+    }
+
+    nonisolated static let sidebarTurnedOffMessage =
+        "Opening sidebar entries is turned off. Turn on \u{201C}\(Feature.sidebarSearch.title)\u{201D} under Experimental features in Settings."
+
+    nonisolated static func sidebarWindowUnknownMessage(_ app: String) -> String {
+        "\(app)\u{2019}s front window could not be identified, so nothing was opened."
+    }
+
+    nonisolated static func sidebarNoResponseMessage(_ app: String) -> String {
+        "\(app) did not respond, so nothing was opened."
+    }
+
+    nonisolated static func noSidebarMatchMessage(_ target: String, app: String) -> String {
+        "Nothing in \(app)\u{2019}s sidebar matches \u{201C}\(target)\u{201D}."
+    }
+
+    nonisolated static func sidebarItemGoneMessage(_ item: String, app: String) -> String {
+        "\(item) is no longer in \(app)\u{2019}s sidebar, so nothing was opened."
+    }
     nonisolated static let tabGoneMessage = "That tab is no longer open."
     nonisolated static let windowElsewhereMessage = "That window is now on another desktop, so it was not brought forward."
 
@@ -649,6 +761,8 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     private static let windowReadDeadline: TimeInterval = 1
     private static let tabReadDeadline: TimeInterval = 1.5
     private static let focusDeadline: TimeInterval = 2
+    private static let sidebarReadDeadline: TimeInterval = 3
+    private static let sidebarOpenDeadline: TimeInterval = 3
 
     init(
         roots: [URL] = LiveVoiceCommandSystem.applicationRoots,
@@ -927,6 +1041,40 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
         case .finished(true):
             return .focused
         }
+    }
+
+    func sidebarItems(in bundleId: String) async -> SidebarRead {
+        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first(where: { !$0.isTerminated })
+        else { return .unreadable(.notRunning) }
+        let pid = app.processIdentifier
+        let electron = SidebarAccess.usesElectron(app)
+        let started = DispatchTime.now()
+        guard case .finished(let read) = await Self.accessibility.run(within: Self.sidebarReadDeadline, { isCurrent in
+            SidebarAccess.read(pid: pid, bundleId: bundleId, electron: electron, isCurrent: isCurrent)
+        }) else {
+            Log.context.error("voice command: \(bundleId, privacy: .public) did not list its sidebar in time")
+            return .unreadable(.noResponse)
+        }
+        let ms = (DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000
+        switch read {
+        case .listing(let listing):
+            Log.context.debug("voice command: read \(listing.items.count, privacy: .public) sidebar entries (complete: \(listing.isComplete, privacy: .public)) from \(bundleId, privacy: .public) in \(ms, privacy: .public)ms")
+        case .unreadable(let problem, _):
+            Log.context.error("voice command: \(bundleId, privacy: .public) sidebar unreadable (\(String(describing: problem), privacy: .public), \(ms, privacy: .public)ms)")
+        }
+        return read
+    }
+
+    func openSidebarItem(_ item: VoiceCommandCatalog.SidebarItem) async -> SidebarOpenResult {
+        guard isRunning(pid: item.pid, bundleId: item.bundleId) else { return .gone }
+        _ = activate(pid: item.pid)
+        guard case .finished(let result) = await Self.accessibility.run(within: Self.sidebarOpenDeadline, { isCurrent in
+            SidebarAccess.open(item, isCurrent: isCurrent)
+        }) else {
+            Log.context.error("voice command: \(item.bundleId, privacy: .public) did not open a sidebar entry in time")
+            return .noResponse
+        }
+        return result
     }
 
     func windows() async -> VoiceCommandCatalog.WindowScan {

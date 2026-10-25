@@ -229,6 +229,13 @@ struct VoiceCommandsSettingsModelTests {
         #expect(search.place == VoiceCommandPlace(id: search.commandId, name: "Chrome", target: .tabSearch, browser: "com.google.Chrome"))
     }
 
+    @Test func aSidebarDraftRoundTrips() {
+        let saved = VoiceCommandPlace(name: "Slack", target: .sidebar(bundleId: "com.tinyspeck.slackmacgap"))
+        let draft = PlaceDraft(saved)
+        #expect(draft.kind == .sidebar)
+        #expect(draft.place == saved)
+    }
+
     @Test func aTabSearchDraftKeepsQuickSwitchOnlyWhileItFindsTabs() {
         let saved = VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: "com.google.Chrome", quickSwitch: true)
         var draft = PlaceDraft(saved)

@@ -515,6 +515,10 @@ browser = "com.google.Chrome"    # optional: only search this browser; absent = 
 quick_switch = true              # optional: on a tie, switch to the frontmost tab instead of asking
 
 [[command]]
+name = "Slack"
+sidebar = "com.tinyspeck.slackmacgap"  # a sidebar search: "slack general" opens the entry named like "general"
+
+[[command]]
 name = "Deploy"
 say = ["ship"]                   # optional extra spoken names
 run = ["~/bin/deploy", "--env", "{text}"]  # a program, then its arguments
@@ -653,7 +657,7 @@ link, or tab, and a *script* one that runs a program or shortcut.
   `switch to male` and `open email` reach Mail without rewriting the transcript. Keep these fixes in the
   mode's vocabulary unless you deliberately want other modes to use them. See the
   [worked examples in the FAQ](../../FAQ.md#a-voice-command-keeps-being-misheard).
-- A command sets **exactly one** of `app`, `url`, `find_tab = true`, `run`, or `shortcut`. `url` is an `http`/`https` address, or a link that opens an
+- A command sets **exactly one** of `app`, `url`, `find_tab = true`, `sidebar`, `run`, or `shortcut`. `url` is an `http`/`https` address, or a link that opens an
   app (`slack://…`, `obsidian://…`): any other scheme except `file`, `javascript`, `data`, `blob`, `about`, and
   `ftp`, with no username or password. An app link is opened as written by the app macOS assigns to it; it is
   never matched against open tabs, never reads them, and cannot set `browser`. If no app opens it, the command
@@ -684,6 +688,27 @@ link, or tab, and a *script* one that runs a program or shortcut.
   across browsers are still offered as a choice. Said alone, a tab search with a `browser`
   brings that browser forward; one without asks for words to find. Reading tabs uses the same Automation
   permission as a web place.
+- **Sidebar searches** (`sidebar = "<bundle id>"`) are experimental: they run only while the
+  `Feature.sidebarSearch` flag is on, and otherwise fail with a message saying how to turn it on (said
+  alone, one still brings its app forward). They find an entry listed in the sidebar of that app's front
+  window: the leftmost outline it shows, such as chat channels and people, mailboxes, or note folders. An
+  entry is named by the text it shows, not its unread count or badge, and grouped under the row or level
+  above it ("Channels", "Direct Messages", an account). Matching is the tab-title matching above (exact,
+  a run of words, words in any order, or a near-miss), and entries tied at the winning step are always
+  offered as a choice with their group shown; there is no automatic pick. Only entries the app shows are
+  found, so a collapsed section or a long list that draws only its visible rows can hide one. The sidebar is
+  read through Accessibility only when the command runs, never in the background; an app built on Electron
+  whose sidebar is not exposed has its accessibility support turned on first (`AXManualAccessibility`), which
+  stays on until that app quits. When the sidebar could not be read in full (it lists more than
+  `SidebarOutline.itemLimit` entries, or the read was cut short), even a single match is offered as a choice,
+  since an entry of the same name may not have been seen. A sidebar whose window cannot be identified is not read, and an entry opens only in the window it was read from,
+  and only if it is still at the same place under the same group; otherwise the command fails and opens
+  nothing. Opening presses the element that shows the entry's name, or selects the row; it never presses a
+  disclosure triangle, checkbox, or button, never types or sends anything, and stops before each step once
+  the command is abandoned or has run out of time. Afterwards it confirms the open when the row reports
+  itself selected or the window title names the entry (`SidebarOutline.confirms`); otherwise the result says
+  the entry was pressed but could not be confirmed. Settings' preview never reads a sidebar. Said alone, a sidebar search brings the
+  app forward. A sidebar search takes neither `browser` nor `quick_switch`, and is never reached by "switch to".
 - **Matching order** for an app-switching verb, first hit wins: a place's spoken name exactly; a running app's name exactly; a
   contiguous run of words in a running app's name ("chrome" → Google Chrome); the same partial rule on
   place names; an installed app's name exactly; then an **open window's title**, exactly and then as a

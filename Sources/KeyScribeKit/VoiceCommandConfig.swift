@@ -6,6 +6,7 @@ public struct VoiceCommandPlace: Encodable, Equatable, Sendable {
         case app(bundleId: String)
         case url(String)
         case tabSearch
+        case sidebar(bundleId: String)
     }
 
     public var id: String
@@ -28,6 +29,13 @@ public struct VoiceCommandPlace: Encodable, Equatable, Sendable {
 
     public var isTabSearch: Bool { target == .tabSearch }
 
+    public var sidebarApp: String? {
+        if case .sidebar(let bundleId) = target { return bundleId }
+        return nil
+    }
+
+    public var searchesByName: Bool { isTabSearch || sidebarApp != nil }
+
     public var spokenForms: [String] { VoiceCommandNaming.spokenForms(name: name, say: say) }
 
     public func hasSameDestination(as other: VoiceCommandPlace) -> Bool {
@@ -43,6 +51,8 @@ public struct VoiceCommandPlace: Encodable, Equatable, Sendable {
             if let issue = Self.linkIssue(url) { return "Web page: \(issue)" }
         case .tabSearch:
             break
+        case .sidebar(let bundleId):
+            if let issue = UserInputValidation.identifierIssue(bundleId, required: true) { return "App: \(issue.message)" }
         }
         if let browser {
             if let issue = UserInputValidation.identifierIssue(browser, required: true) { return "Browser: \(issue.message)" }
@@ -92,7 +102,7 @@ public struct VoiceCommandPlace: Encodable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, say, app, url, browser
+        case id, name, say, app, url, browser, sidebar
         case findTab = "find_tab"
         case quickSwitch = "quick_switch"
     }
@@ -106,6 +116,7 @@ public struct VoiceCommandPlace: Encodable, Equatable, Sendable {
         case .app(let bundleId): try c.encode(bundleId, forKey: .app)
         case .url(let url): try c.encode(url, forKey: .url)
         case .tabSearch: try c.encode(true, forKey: .findTab)
+        case .sidebar(let bundleId): try c.encode(bundleId, forKey: .sidebar)
         }
         try c.encodeIfPresent(browser, forKey: .browser)
         if quickSwitch { try c.encode(true, forKey: .quickSwitch) }
@@ -384,7 +395,7 @@ public enum VoiceCommand: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, say, app, url, browser, run, shortcut, input
+        case id, name, say, app, url, browser, run, shortcut, input, sidebar
         case findTab = "find_tab"
         case quickSwitch = "quick_switch"
         case shortcutId = "shortcut_id"
@@ -406,7 +417,14 @@ public enum VoiceCommand: Codable, Equatable, Sendable {
         let quickSwitch = try c.decodeIfPresent(Bool.self, forKey: .quickSwitch) ?? false
         func invalid(_ problem: String) -> ConfigError { .invalid("command \"\(name)\": \(problem)") }
         if quickSwitch && !findTab { throw invalid("quick_switch applies only to find_tab") }
-        let exactlyOne = "set exactly one of app, url, find_tab, run, or shortcut"
+        let exactlyOne = "set exactly one of app, url, find_tab, sidebar, run, or shortcut"
+        if let sidebar = try c.decodeIfPresent(String.self, forKey: .sidebar) {
+            guard app == nil, url == nil, !findTab, run == nil, shortcut == nil else { throw invalid(exactlyOne) }
+            guard browser == nil else { throw invalid("browser applies only to app, url, or find_tab") }
+            guard shortcutId == nil, input == nil else { throw invalid("shortcut_id and input apply only to a shortcut") }
+            self = .place(VoiceCommandPlace(id: id, name: name, say: say, target: .sidebar(bundleId: sidebar)))
+            return
+        }
         switch (app, url, findTab, run, shortcut) {
         case (let app?, nil, false, nil, nil):
             guard shortcutId == nil, input == nil else { throw invalid("shortcut_id and input apply only to a shortcut") }
@@ -605,6 +623,7 @@ public enum VoiceCommandStore {
                 VoiceCommandPlace(name: "a", say: ["a"], target: .app(bundleId: "a")),
                 VoiceCommandPlace(name: "b", say: ["b"], target: .url("https://example.com/"), browser: "b"),
                 VoiceCommandPlace(name: "c", say: ["c"], target: .tabSearch, browser: "c", quickSwitch: true),
+                VoiceCommandPlace(name: "d", say: ["d"], target: .sidebar(bundleId: "d")),
             ],
             scripts: [
                 VoiceCommandScript(name: "a", say: ["a"], run: ["/a", "{text}"]),

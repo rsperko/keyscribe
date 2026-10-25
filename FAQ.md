@@ -144,6 +144,12 @@ the name of a command you saved under **Commands ▸ Add Command…**:
   Chrome only; `chrome` alone brings Chrome forward. Pick **Any browser** to search every browser instead.
   When several tabs match, you choose one; turn on **Switch without asking** to go straight to the frontmost
   one instead (matches in different browsers still ask).
+- **“slack general”** or **“mail sent”** (experimental): turn on **Voice Commands: app sidebars** under
+  **Experimental features**, then choose **Find in an App’s Sidebar**, pick the app, and name it. Saying the
+  name and an entry listed in the app's sidebar, such as a channel, a person, a mailbox, or a folder, opens it
+  without saving a command for each one. Only what the sidebar shows is found, and two entries with the same
+  name ask which one you meant. Use **Check Sidebar** in the command to see what it can open. It was tried
+  in Slack, Mail, and Notes (2026-10-25); other apps may not work.
 - **“web hooks”** for a chat channel: choose **Open an App or Link**, pick **A link**, and paste the
   channel's app link (for one chat app, `slack://channel?team=…&id=…`, built from the IDs in the channel's
   details). Name it `web hooks`; the link opens in the chat app.

@@ -11,7 +11,13 @@ enum VoiceCommandCLI {
             print("not run:    \(refusal)")
             return 1
         }
-        let runner = VoiceCommandRunner(system: system)
+        let sidebars: Bool
+        if case .loaded(let settings) = SettingsStore.load(supportDir: supportDir) {
+            sidebars = settings.features.isEnabled(.sidebarSearch)
+        } else {
+            sidebars = false
+        }
+        let runner = VoiceCommandRunner(system: system, sidebarEnabled: { sidebars })
         let commands = VoiceCommandStore.loadOrDefault(supportDir: supportDir)
         let config = ConfigCache(supportDir: supportDir)
         config.voiceCommandsEnabled = true
@@ -72,6 +78,11 @@ enum VoiceCommandCLI {
             return "spoken, this asks \u{201C}\(choice.title)\u{201D} and you answer with a number; the command line cannot answer, so give more of the name to run one directly:\(rows.joined())"
         case .unavailable(let name): return VoiceCommandRunner.unavailableMessage(name)
         case .needsTabs: return "needs browser tabs"
+        case .needsSidebar(let app): return "needs \(system.appName(forBundleId: app) ?? app)\u{2019}s sidebar"
+        case .sidebarUnreadable(let app, let problem):
+            return "could not read \(system.appName(forBundleId: app) ?? app)\u{2019}s sidebar (\(problem))"
+        case .noSidebarMatch(let target, let app):
+            return VoiceCommandRunner.noSidebarMatchMessage(target, app: system.appName(forBundleId: app) ?? app)
         case .browserNotAllowed(let browser): return "not allowed to control \(browser)"
         case .scriptNeedsText(let name): return "\(name) needs words after its name"
         case .takesNoText(let name): return VoiceCommandRunner.takesNoTextMessage(name)
