@@ -17,9 +17,10 @@ enum VoiceCommandCLI {
         guard case .action = resolution else { return 1 }
         if dryRun { return 0 }
         switch await runner.run(resolution, origin: nil) {
-        case .done(let summary, let command):
+        case .done(let summary, let command, let report):
             print("ran:        \(summary)")
             print("command:    \(command)")
+            if let report { print("reported:   \(report.text)") }
             return 0
         case .started(let summary, let command):
             print("started:    \(summary) (still running)")
@@ -28,7 +29,11 @@ enum VoiceCommandCLI {
         case .failed(let message, _, _, _):
             print("failed:     \(message)")
             return 1
-        case .needsChoice, .abandoned:
+        case .needsChoice(let pending):
+            let rows = pending.rows.map { "\n  \($0.number). \($0.name)" }.joined()
+            print("asks:       \(pending.choice.title)\(rows)")
+            return 1
+        case .abandoned:
             return 1
         }
     }

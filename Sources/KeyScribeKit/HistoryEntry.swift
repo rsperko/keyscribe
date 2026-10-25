@@ -63,6 +63,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     public var fallbackReason: String?
     public var stoppedAtLimit: Bool?
     public var failureReason: String?
+    public var reported: String?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -87,6 +88,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case fallbackReason = "fallback_reason"
         case stoppedAtLimit = "stopped_at_limit"
         case failureReason = "failure_reason"
+        case reported
     }
 
     public init(
@@ -97,7 +99,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         connection: String? = nil, model: String? = nil, prompt: String? = nil, received: String? = nil,
         modeChoice: ModeChoiceReason? = nil, routedPhrase: String? = nil,
         triggerKey: String? = nil, fallbackReason: String? = nil, stoppedAtLimit: Bool? = nil,
-        failureReason: String? = nil
+        failureReason: String? = nil, reported: String? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -121,6 +123,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         self.fallbackReason = fallbackReason
         self.stoppedAtLimit = stoppedAtLimit
         self.failureReason = failureReason
+        self.reported = reported
     }
 
     private static let encoder: JSONEncoder = {

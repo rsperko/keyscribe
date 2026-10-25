@@ -1,10 +1,12 @@
 import Foundation
+import KeyScribeKit
 
 enum ScriptLauncher {
     static let reportWindow: TimeInterval = 1.5
     static let errorGrace: TimeInterval = 0.25
     static let errorCaptureLimit = 16_384
     static let errorLineLimit = 200
+    static let choiceVariable = "KEYSCRIBE_CHOICE"
 
     private static let running = Running()
 
@@ -18,7 +20,8 @@ enum ScriptLauncher {
     }
 
     static func run(
-        program: String, arguments: [String], input: String? = nil, reportWithin window: TimeInterval = reportWindow,
+        program: String, arguments: [String], input: String? = nil, environment: [String: String] = [:],
+        reportWithin window: TimeInterval = reportWindow,
         onLateFinish: @escaping @Sendable (ScriptRun) -> Void = { _ in }
     ) async -> ScriptRun {
         let path = expandedPath(program)
@@ -30,9 +33,13 @@ enum ScriptLauncher {
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
         process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
+        if !environment.isEmpty {
+            process.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }
+        }
         let stdin = input.map { _ in Pipe() }
         process.standardInput = stdin ?? FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
+        let output = Pipe()
+        process.standardOutput = output
         let errors = Pipe()
         process.standardError = errors
 
@@ -42,9 +49,18 @@ enum ScriptLauncher {
                 let data = handle.availableData
                 if data.isEmpty {
                     handle.readabilityHandler = nil
-                    report.errorsClosed()
+                    report.streamClosed()
                 } else {
-                    report.append(data)
+                    report.appendError(data)
+                }
+            }
+            output.fileHandleForReading.readabilityHandler = { handle in
+                let data = handle.availableData
+                if data.isEmpty {
+                    handle.readabilityHandler = nil
+                    report.streamClosed()
+                } else {
+                    report.appendOutput(data)
                 }
             }
             process.terminationHandler = { finished in
@@ -57,6 +73,7 @@ enum ScriptLauncher {
             } catch {
                 running.remove(process)
                 errors.fileHandleForReading.readabilityHandler = nil
+                output.fileHandleForReading.readabilityHandler = nil
                 report.failedToStart(error.localizedDescription)
                 return
             }
@@ -93,15 +110,20 @@ enum ScriptLauncher {
         private var onLateFinish: (@Sendable (ScriptRun) -> Void)?
         private var reportedRunning = false
         private var errorOutput = Data()
+        private var output = ScriptReport.Collector()
         private var status: Int32?
-        private var closed = false
+        private var openStreams = 2
 
         init(_ continuation: CheckedContinuation<ScriptRun, Never>, onLateFinish: @escaping @Sendable (ScriptRun) -> Void) {
             self.continuation = continuation
             self.onLateFinish = onLateFinish
         }
 
-        func append(_ data: Data) {
+        func appendOutput(_ data: Data) {
+            lock.withLock { output.append(data) }
+        }
+
+        func appendError(_ data: Data) {
             lock.withLock {
                 errorOutput.append(data.suffix(ScriptLauncher.errorCaptureLimit))
                 let excess = errorOutput.count - ScriptLauncher.errorCaptureLimit
@@ -109,8 +131,8 @@ enum ScriptLauncher {
             }
         }
 
-        func errorsClosed() {
-            lock.withLock { closed = true }
+        func streamClosed() {
+            lock.withLock { openStreams -= 1 }
             finishIfExited()
         }
 
@@ -125,25 +147,26 @@ enum ScriptLauncher {
         }
 
         func windowClosed() {
-            let result: ScriptRun = lock.withLock {
-                status.map { .finished(status: $0, lastError: ScriptLauncher.lastLine(of: errorOutput)) } ?? .stillRunning
-            }
+            let result: ScriptRun = lock.withLock { status.map(finished) ?? .stillRunning }
             resume(result)
         }
 
         private func graceEnded() {
-            let result: ScriptRun? = lock.withLock {
-                status.map { .finished(status: $0, lastError: ScriptLauncher.lastLine(of: errorOutput)) }
-            }
+            let result: ScriptRun? = lock.withLock { status.map(finished) }
             if let result { resume(result) }
         }
 
         private func finishIfExited() {
             let result: ScriptRun? = lock.withLock {
-                guard closed, let status else { return nil }
-                return .finished(status: status, lastError: ScriptLauncher.lastLine(of: errorOutput))
+                guard openStreams == 0, let status else { return nil }
+                return finished(status)
             }
             if let result { resume(result) }
+        }
+
+        private func finished(_ status: Int32) -> ScriptRun {
+            var collected = output
+            return .finished(status: status, lastError: ScriptLauncher.lastLine(of: errorOutput), report: collected.finish())
         }
 
         private func resume(_ result: ScriptRun) {

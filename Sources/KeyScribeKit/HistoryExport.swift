@@ -61,6 +61,7 @@ public enum HistoryExport {
                 if !e.heard.isEmpty, e.heard != e.result { out += "  - Heard: \(e.heard)\n" }
                 out += "  - Result: \(e.result.isEmpty ? "(no text)" : e.result)\n"
                 if let reason = e.failureReason { out += "  - Why it failed: \(reason)\n" }
+                if let reported = e.reported { out += "  - Reported: \(reported)\n" }
             }
         }
         return out
@@ -78,6 +79,7 @@ public enum HistoryExport {
                 if !e.heard.isEmpty, e.heard != e.result { out += "    Heard:  \(e.heard)\n" }
                 out += "    Result: \(e.result.isEmpty ? "(no text)" : e.result)\n"
                 if let reason = e.failureReason { out += "    Why it failed: \(reason)\n" }
+                if let reported = e.reported { out += "    Reported: \(reported)\n" }
             }
         }
         return out

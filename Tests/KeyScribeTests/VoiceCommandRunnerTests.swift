@@ -26,6 +26,8 @@ struct VoiceCommandRunnerTests {
         private(set) var installedScans = 0
         var scriptResult: ScriptRun = .finished(status: 0, lastError: nil)
         private(set) var scriptRuns: [(program: String, arguments: [String])] = []
+        private(set) var scriptChoices: [String?] = []
+        var whileRunningScript: () -> Void = {}
         private(set) var shortcutRuns: [(target: String, input: String?)] = []
         private(set) var finishLate: (@MainActor (ScriptRun) -> Void)?
 
@@ -73,14 +75,17 @@ struct VoiceCommandRunnerTests {
         func isRunning(pid: Int32, bundleId: String) -> Bool { runningPids[pid] == bundleId }
         func activate(pid: Int32) -> Bool { activatedPids.append(pid); return openSucceeds }
         func runScript(
-            _ script: VoiceCommandScript, arguments: [String], onLateFinish: @escaping @MainActor (ScriptRun) -> Void
+            _ script: VoiceCommandScript, arguments: [String], choice: String?,
+            onLateFinish: @escaping @MainActor (ScriptRun) -> Void
         ) async -> ScriptRun {
+            scriptChoices.append(choice)
             if let shortcut = script.shortcut {
                 shortcutRuns.append((shortcut.target, arguments.first))
             } else {
                 scriptRuns.append((script.program, arguments))
             }
             finishLate = onLateFinish
+            whileRunningScript()
             return scriptResult
         }
     }

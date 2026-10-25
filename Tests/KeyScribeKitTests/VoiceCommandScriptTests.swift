@@ -432,3 +432,39 @@ struct VoiceCommandScriptTests {
         #expect(absolute.commandLine(arguments: []) == "'/opt/my tools/note'")
     }
 }
+
+struct VoiceCommandScriptOptionTests {
+    private let channels = VoiceCommandScript(name: "Channel", run: ["~/bin/channel", "{text}"])
+
+    private func option(_ value: String, _ label: String, script: VoiceCommandScript? = nil) -> VoiceCommandCandidate {
+        .option(VoiceCommandScriptOption(script: script ?? channels, arguments: ["gen"], value: value, label: label))
+    }
+
+    @Test func anOptionReadsAsItsLabelUnderItsScript() {
+        let candidate = option("C1", "#general")
+        #expect(candidate.name == "#general")
+        #expect(candidate.detail(appName: { _ in nil }, among: [candidate]) == "Channel")
+        #expect(!candidate.takesWords)
+    }
+
+    @Test func optionsOfOneScriptAreToldApartByValue() {
+        #expect(option("C1", "#general").identity != option("C2", "#general").identity)
+    }
+
+    @Test func choosingAnOptionRunsTheScriptAgainWithItsArgumentsAndTheChoice() {
+        let catalog = VoiceCommandCatalog(places: [], scripts: [channels])
+        #expect(VoiceCommandResolver.resolve(option("C1", "#general"), text: "", catalog: catalog)
+            == .action(.script(channels, arguments: ["gen"], choice: "C1")))
+    }
+
+    @Test func anOptionWhoseScriptWasRemovedIsUnavailable() {
+        let catalog = VoiceCommandCatalog(places: [], scripts: [])
+        #expect(VoiceCommandResolver.resolve(option("C1", "#general"), text: "", catalog: catalog) == .unavailable("Channel"))
+    }
+
+    @Test func anOptionWhoseScriptChangedIsUnavailable() {
+        let edited = VoiceCommandScript(name: "Channel", run: ["~/bin/other", "{text}"])
+        let catalog = VoiceCommandCatalog(places: [], scripts: [edited])
+        #expect(VoiceCommandResolver.resolve(option("C1", "#general"), text: "", catalog: catalog) == .unavailable("Channel"))
+    }
+}

@@ -119,7 +119,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
 
     case app(VoiceCommandCatalog.App)
     case place(VoiceCommandPlace, PlaceTarget)
-    case script(VoiceCommandScript, arguments: [String])
+    case script(VoiceCommandScript, arguments: [String], choice: String? = nil)
     case window(VoiceCommandCatalog.Window)
     case tab(VoiceCommandCatalog.Tab)
     case goBack
@@ -133,7 +133,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
         case .place(let place, .tab(let tab)):
             return appName(tab.browserBundleId).map { "\(place.name) · \($0)" } ?? place.name
         case .place(let place, _): return place.name
-        case .script(let script, _): return script.name
+        case .script(let script, _, _): return script.name
         }
     }
 
@@ -154,14 +154,14 @@ public enum VoiceCommandAction: Equatable, Sendable {
         case .place(_, .openURL(let url, let browser)):
             let inBrowser = browser.map { " in \(appName($0) ?? $0)" } ?? ""
             return "No open tab matches, so it opens \(url)\(inBrowser)."
-        case .script(let script, let arguments):
+        case .script(let script, let arguments, _):
             if script.isShortcut { return script.commandLine(arguments: arguments) }
             return "Runs \(script.commandLine(arguments: arguments)) in the background."
         }
     }
 
     public func command(appName: (String) -> String?) -> String {
-        if case .script(let script, let arguments) = self { return script.commandLine(arguments: arguments) }
+        if case .script(let script, let arguments, _) = self { return script.commandLine(arguments: arguments) }
         return detail(appName: appName)
     }
 }
@@ -401,6 +401,10 @@ public enum VoiceCommandResolver {
             if current.takesText && text.isEmpty { return .scriptNeedsText(current.name) }
             if !current.takesText && !text.isEmpty { return .takesNoText(current.name) }
             return .action(.script(current, arguments: current.arguments(text: text)))
+        case .option(let option):
+            guard let current = catalog.scripts.first(where: { $0.id == option.script.id && $0.action == option.script.action })
+            else { return .unavailable(option.script.name) }
+            return .action(.script(current, arguments: option.arguments, choice: option.value))
         }
     }
 
@@ -430,6 +434,8 @@ public enum VoiceCommandResolver {
             return .action(.app(app))
         case .script(let script):
             return .unavailable(script.name)
+        case .option(let option):
+            return .unavailable(option.script.name)
         case .window(let window):
             return .action(.window(window))
         case .tab(let tab):

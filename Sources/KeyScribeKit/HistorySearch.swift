@@ -15,5 +15,6 @@ public enum HistorySearch {
             || entry.result.localizedCaseInsensitiveContains(q)
             || entry.modeName.localizedCaseInsensitiveContains(q)
             || entry.failureReason?.localizedCaseInsensitiveContains(q) == true
+            || entry.reported?.localizedCaseInsensitiveContains(q) == true
     }
 }

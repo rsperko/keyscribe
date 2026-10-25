@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 @testable import KeyScribeApp
+import KeyScribeKit
 
 struct ScriptLauncherTests {
     private func script(_ body: String) throws -> (URL, URL) {
@@ -36,6 +37,47 @@ struct ScriptLauncherTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         #expect(await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 20)
             == .finished(status: 1, lastError: "REAL FINAL ERROR"))
+    }
+
+    @Test func reportLinesOnStandardOutputAreRead() async throws {
+        let (dir, file) = try script("echo 'plain output'\necho '::choice::C1\t#general'\necho '::done::Opened #general'")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 20) == .finished(
+            status: 0, lastError: nil,
+            report: ScriptReport(message: .init(level: .done, text: "Opened #general"),
+                                 options: [.init(value: "C1", label: "#general")])))
+    }
+
+    @Test func aFailureCarriesItsReportBesideTheErrorLine() async throws {
+        let (dir, file) = try script("echo '::info::Not signed in'\necho 'stack trace' >&2\nexit 4")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 20) == .finished(
+            status: 4, lastError: "stack trace", report: ScriptReport(message: .init(level: .info, text: "Not signed in"))))
+    }
+
+    @Test func theChoiceArrivesInTheEnvironmentBesideTheUsualOne() async throws {
+        let (dir, file) = try script("printf '%s|%s' \"$KEYSCRIBE_CHOICE\" \"$HOME\" > \"$(dirname \"$0\")/env\"")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        _ = await ScriptLauncher.run(
+            program: file.path, arguments: [], environment: [ScriptLauncher.choiceVariable: "C2"], reportWithin: 20)
+        let env = try String(contentsOf: dir.appendingPathComponent("env"), encoding: .utf8)
+        #expect(env == "C2|\(NSHomeDirectory())")
+    }
+
+    @Test func aChoiceIsNotSetWhenNoneWasMade() async throws {
+        let (dir, file) = try script("printf '%s' \"${KEYSCRIBE_CHOICE-unset}\" > \"$(dirname \"$0\")/env\"")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        _ = await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 20)
+        #expect(try String(contentsOf: dir.appendingPathComponent("env"), encoding: .utf8) == "unset")
+    }
+
+    @Test func aBackgroundChildHoldingStandardOutputDoesNotHoldTheResult() async throws {
+        let (dir, file) = try script("echo '::done::Started'\nsleep 8 &\nexit 0")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let started = Date()
+        #expect(await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 20)
+            == .finished(status: 0, lastError: nil, report: ScriptReport(message: .init(level: .done, text: "Started"))))
+        #expect(Date().timeIntervalSince(started) < 5)
     }
 
     @Test func aLongRunningScriptIsLeftRunning() async throws {

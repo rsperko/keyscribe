@@ -1079,6 +1079,7 @@ final class DictationController {
         let outcome: HistoryEntry.Outcome
         let result: String
         let failure: String?
+        var reported: String?
     }
 
     private static let unrecognizedCommandTitle = "Command not recognized"
@@ -1087,9 +1088,10 @@ final class DictationController {
         of outcome: VoiceCommandOutcome, resultPrefix: String, excerpt: HeardExcerpt? = nil
     ) -> CommandPresentation? {
         switch outcome {
-        case .done(let summary, let command):
-            CommandPresentation(state: .commandDone(summary: summary), cue: .success, hideAfter: 1.5, outcome: .command,
-                                result: resultPrefix + command, failure: nil)
+        case .done(let summary, let command, let report):
+            CommandPresentation(state: commandDoneState(summary: summary, report: report), cue: .success,
+                                hideAfter: report == nil ? 1.5 : 3, outcome: .command,
+                                result: resultPrefix + command, failure: nil, reported: report?.text)
         case .started(let summary, let command):
             CommandPresentation(state: .commandDone(summary: summary, detail: HUDState.commandStillRunningDetail),
                                 cue: .success, hideAfter: 1.5, outcome: .commandStarted, result: resultPrefix + command,
@@ -1105,6 +1107,14 @@ final class DictationController {
         }
     }
 
+    private static func commandDoneState(summary: String, report: ScriptReport.Message?) -> HUDState {
+        switch report?.level {
+        case nil: .commandDone(summary: summary)
+        case .done: .commandDone(summary: report?.text ?? summary, detail: summary)
+        case .info: .advisory(message: report?.text ?? summary)
+        }
+    }
+
     private func finishCommand(
         _ outcome: VoiceCommandOutcome, heard: String, transcript: String, late: LateCommandResult, resultPrefix: String = "",
         excerpt: HeardExcerpt? = nil
@@ -1113,7 +1123,7 @@ final class DictationController {
             let failed = shown.failure != nil
             var write = HistoryWrite(heard: heard, transformed: transcript, result: shown.result,
                                      insertion: failed ? .failed : .inserted, rewrite: nil, failureReason: shown.failure,
-                                     outcome: shown.outcome)
+                                     reported: shown.reported, outcome: shown.outcome)
             let started = shown.outcome == .commandStarted
             if started {
                 write.onRecorded = { [weak self] entry in
@@ -1320,7 +1330,7 @@ final class DictationController {
                     late.outcome = outcome
                     self?.applyLateCommandResult(late)
                 })
-            else { self.markChoiceCancelled(entry); return }
+            else { self.abandonClickedChoice(entry, startsAtClick: startsAtClick); return }
             self.finishClickedChoice(selection, entry: entry, late: late, startsAtClick: startsAtClick)
         }
     }
@@ -1328,8 +1338,12 @@ final class DictationController {
     private func finishClickedChoice(
         _ selection: VoiceCommandSelection, entry: HistoryEntry?, late: LateCommandResult, startsAtClick: Int
     ) {
+        if case .needsChoice(let pending) = selection.outcome {
+            askAgainAfterClick(pending, selection: selection, entry: entry, startsAtClick: startsAtClick)
+            return
+        }
         guard let shown = Self.presentation(of: selection.outcome, resultPrefix: Self.selectionPrefix(selection)) else {
-            markChoiceCancelled(entry)
+            abandonClickedChoice(entry, startsAtClick: startsAtClick)
             return
         }
         if let entry, let history {
@@ -1337,6 +1351,7 @@ final class DictationController {
             updated.outcome = shown.outcome
             updated.result = shown.result
             updated.failureReason = shown.failure
+            updated.reported = shown.reported
             late.entry = updated
             historyWriteQueue.async { [weak self] in
                 guard history.replace(entry, with: updated) else { return }
@@ -1354,6 +1369,39 @@ final class DictationController {
         if shown.outcome == .commandStarted {
             late.started = true
             applyLateCommandResult(late)
+        }
+    }
+
+    private func abandonClickedChoice(_ entry: HistoryEntry?, startsAtClick: Int) {
+        markChoiceCancelled(entry)
+        guard dictationStarts == startsAtClick, !isBusy, voiceCommands.pendingChoice == nil else { return }
+        present(.hidden)
+    }
+
+    private func askAgainAfterClick(
+        _ pending: VoiceCommandPendingChoice, selection: VoiceCommandSelection, entry: HistoryEntry?, startsAtClick: Int
+    ) {
+        var asked = entry
+        if let entry, let history {
+            let rows = pending.rows.map { "\($0.number). \($0.name)" }.joined(separator: ", ")
+            asked?.result = Self.selectionPrefix(selection) + "Asked to choose: \(rows)"
+            let updated = asked ?? entry
+            historyWriteQueue.async { [weak self] in
+                guard history.replace(entry, with: updated) else { return }
+                Task { @MainActor in self?.onHistoryUpdated?() }
+            }
+        }
+        runWhenIdle { [weak self] in
+            guard let self, self.voiceCommands.pendingChoice?.id == pending.id else { return }
+            guard self.dictationStarts == startsAtClick else {
+                self.voiceCommands.dismissChoice(pending.id)
+                return
+            }
+            let prompt = self.choicePrompt(for: pending)
+            self.choicePrompt = prompt
+            self.choiceEntry = asked
+            self.present(.choice(prompt, status: .waiting(note: nil)))
+            self.scheduleChoiceExpiry(pending.id)
         }
     }
 
@@ -1388,22 +1436,31 @@ final class DictationController {
         guard late.started, !late.applied, let outcome = late.outcome else { return }
         late.applied = true
         let failure: String?
+        let report: ScriptReport.Message?
+        let summary: String
         switch outcome {
-        case .failed(let message, _, _, _): failure = message
-        case .done: failure = nil
+        case .failed(let message, _, _, _): (failure, report, summary) = (message, nil, "")
+        case .done(let name, _, let message): (failure, report, summary) = (nil, message, name)
         case .started, .needsChoice, .abandoned: return
         }
         if let entry = late.entry, let history {
             var updated = entry
             updated.outcome = failure == nil ? .command : .commandFailed
             updated.failureReason = failure
+            updated.reported = report?.text
             historyWriteQueue.async { [weak self] in
                 guard history.replace(entry, with: updated) else { return }
                 Task { @MainActor in self?.onHistoryUpdated?() }
             }
         }
-        guard let failure, !isBusy, voiceCommands.pendingChoice == nil else { return }
-        present(.error(message: failure, action: nil))
+        guard !isBusy, voiceCommands.pendingChoice == nil else { return }
+        if let failure {
+            present(.error(message: failure, action: nil))
+        } else if let report {
+            present(Self.commandDoneState(summary: summary, report: report))
+        } else {
+            return
+        }
         scheduleHide(after: 4)
     }
 
@@ -2243,7 +2300,7 @@ final class DictationController {
     @discardableResult
     private func recordHistory(
         heard: String, transformed: String?, result: String, insertion: DictationOutcome,
-        rewrite: RewriteDetails?, failureReason: String? = nil, confirmWrite: Bool = false,
+        rewrite: RewriteDetails?, failureReason: String? = nil, reported: String? = nil, confirmWrite: Bool = false,
         commandStillRunning: Bool = false, outcome override: HistoryEntry.Outcome? = nil,
         onRecorded: ((HistoryEntry) -> Void)? = nil
     ) -> Bool {
@@ -2282,7 +2339,7 @@ final class DictationController {
             fallbackReason: outcome == .localFallback
                 ? (rewriteSkipped ? Self.rewriteSkippedAtLimitReason : rewrite?.fallbackReason) : nil,
             stoppedAtLimit: session?.stoppedAtLimit == true ? true : nil,
-            failureReason: failureReason)
+            failureReason: failureReason, reported: reported)
         guard let history else { return false }
         onRecorded?(entry)
         let retentionDays = settings.history.retentionDays
@@ -2802,6 +2859,7 @@ final class DictationController {
         let insertion: DictationOutcome
         let rewrite: RewriteDetails?
         var failureReason: String?
+        var reported: String?
         var commandStillRunning = false
         var outcome: HistoryEntry.Outcome?
         var onRecorded: ((HistoryEntry) -> Void)?
@@ -2855,7 +2913,8 @@ final class DictationController {
         if let history {
             recordHistory(heard: history.heard, transformed: history.transformed, result: history.result,
                           insertion: history.insertion, rewrite: history.rewrite,
-                          failureReason: history.failureReason, commandStillRunning: history.commandStillRunning,
+                          failureReason: history.failureReason, reported: history.reported,
+                          commandStillRunning: history.commandStillRunning,
                           outcome: history.outcome, onRecorded: history.onRecorded)
         }
         let engineUsed = activeEngine

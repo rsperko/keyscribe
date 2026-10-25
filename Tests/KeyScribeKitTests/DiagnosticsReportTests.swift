@@ -6,6 +6,7 @@ import Testing
 private let sentinels = [
     "SENTINELHEARD", "SENTINELTRANSFORMED", "SENTINELRESULT",
     "SENTINELPROMPT", "SENTINELRECEIVED", "SENTINELROUTED", "SENTINELFAILURE",
+    "SENTINELREPORTED",
 ]
 
 private func contentBearingEntry(outcome: HistoryEntry.Outcome = .inserted) -> HistoryEntry {
@@ -29,7 +30,8 @@ private func contentBearingEntry(outcome: HistoryEntry.Outcome = .inserted) -> H
         routedPhrase: "SENTINELROUTED",
         triggerKey: "Right-⌥",
         fallbackReason: "The AI service could not be reached.",
-        failureReason: "SENTINELFAILURE")
+        failureReason: "SENTINELFAILURE",
+        reported: "SENTINELREPORTED")
 }
 
 private func report(

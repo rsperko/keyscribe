@@ -434,6 +434,25 @@ struct VoiceCommandChoiceWiringTests {
         h.controller.cancel()
     }
 
+    @Test func anAbandonedClickNeverHidesTheResultOfANewerDictation() async throws {
+        let h = try Harness(places: [personal, work])
+        await h.dictate("switch to mail")
+        let prompt = try #require(h.prompt)
+        let gate = Gate()
+        h.system.whileReadingTabs = { await gate.wait() }
+        h.controller.chooseVoiceCommand(choice: prompt.id, candidate: prompt.rows[1].identity)
+        for _ in 0..<50 where !gate.entered { await Task.yield() }
+        #expect(gate.entered)
+        await h.dictate("hello", trigger: "right_command")
+        let newer = try #require(h.hud.last)
+        #expect(newer != .hidden)
+        #expect(waiting(newer) == nil)
+        gate.open()
+        try await h.settle()
+        #expect(h.system.openedURLs.isEmpty)
+        #expect(h.hud.last == newer)
+    }
+
     enum ClickStop: CaseIterable, Sendable { case voiceCommandsTurnedOff, screenLocked, systemSleeping }
 
     @Test(arguments: ClickStop.allCases)
@@ -461,6 +480,7 @@ struct VoiceCommandChoiceWiringTests {
         #expect(h.system.openedURLs.isEmpty)
         #expect(!h.hud.states.contains(.commandDone(summary: "Work Mail")))
         #expect(h.history.entries().map(\.outcome) == [.commandCancelled])
+        #expect(waiting(h.hud.last) == nil)
     }
 
     @Test func aSpokenAnswerStillLookingUpTabsStopsWhenTheSystemSleeps() async throws {
@@ -564,6 +584,87 @@ struct VoiceCommandChoiceWiringTests {
         try await h.settle()
         #expect(h.system.openedURLs.map(\.0) == ["https://mail.example.net/"])
         #expect(h.hud.last == .commandDone(summary: "Personal Mail"))
+    }
+
+    private let channel = VoiceCommandScript(name: "Channel", run: ["/bin/channel", "{text}"])
+
+    private func offering(_ labels: String...) -> ScriptRun {
+        .finished(status: 0, lastError: nil,
+                  report: ScriptReport(options: labels.enumerated().map { .init(value: "C\($0.offset + 1)", label: $0.element) }))
+    }
+
+    @Test func aScriptsOptionsAreAnsweredByVoiceAndHandedBackToIt() async throws {
+        let h = try Harness(places: [], scripts: [channel])
+        h.system.scriptResult = offering("#general", "#random")
+        await h.dictate("channel gen")
+        let prompt = try #require(waiting(h.hud.last))
+        #expect(prompt.title == "Which one?")
+        #expect(prompt.rows.map(\.name) == ["#general", "#random"])
+        h.system.scriptResult = .finished(status: 0, lastError: nil,
+                                          report: ScriptReport(message: .init(level: .done, text: "Opened #random")))
+        await h.dictate("two")
+        #expect(h.system.scriptChoices == [nil, "C2"])
+        #expect(h.system.scriptRuns.map(\.arguments) == [["gen"], ["gen"]])
+        #expect(h.hud.last == .commandDone(summary: "Opened #random", detail: "Channel"))
+        #expect(h.history.entries().first?.reported == "Opened #random")
+    }
+
+    @Test func aClickedOptionThatAsksAgainShowsTheNewQuestion() async throws {
+        let h = try Harness(places: [], scripts: [channel])
+        h.system.scriptResult = offering("#general", "#random")
+        await h.dictate("channel gen")
+        let first = try #require(h.prompt)
+        h.system.scriptResult = offering("#random-dev", "#random-ops")
+        h.controller.chooseVoiceCommand(choice: first.id, candidate: first.rows[1].identity)
+        try await h.settle()
+        let second = try #require(waiting(h.hud.last))
+        #expect(second.id != first.id)
+        #expect(second.rows.map(\.name) == ["#random-dev", "#random-ops"])
+        #expect(h.prompt?.id == second.id)
+        let entries = h.history.entries()
+        #expect(entries.count == 1)
+        #expect(entries.first?.result.hasPrefix("Selected #random for \u{201C}channel gen\u{201D}: Asked to choose: ") == true)
+    }
+
+    enum ScriptStop: CaseIterable { case turnOff, lockScreen }
+
+    private func stop(_ stop: ScriptStop, _ h: Harness) {
+        switch stop {
+        case .turnOff:
+            var settings = h.controller.settings
+            settings.features.setEnabled(false, for: .voiceCommands)
+            h.controller.updateSettings(settings)
+        case .lockScreen:
+            h.controller.handleScreenLocked()
+        }
+    }
+
+    @Test(arguments: ScriptStop.allCases)
+    func optionsAreNotOfferedWhenVoiceCommandsStopWhileTheScriptRuns(_ how: ScriptStop) async throws {
+        let h = try Harness(places: [], scripts: [channel])
+        h.system.scriptResult = offering("#general", "#random")
+        h.system.whileRunningScript = { [h] in stop(how, h) }
+        await h.dictate("channel gen")
+        try await h.settle()
+        #expect(h.prompt == nil)
+        #expect(h.runner.pendingChoice == nil)
+        #expect(waiting(h.hud.last) == nil)
+    }
+
+    @Test(arguments: ScriptStop.allCases)
+    func aClickedRerunDoesNotAskAgainWhenVoiceCommandsStopWhileItRuns(_ how: ScriptStop) async throws {
+        let h = try Harness(places: [], scripts: [channel])
+        h.system.scriptResult = offering("#general", "#random")
+        await h.dictate("channel gen")
+        let first = try #require(h.prompt)
+        h.system.scriptResult = offering("#random-dev", "#random-ops")
+        h.system.whileRunningScript = { [h] in stop(how, h) }
+        h.controller.chooseVoiceCommand(choice: first.id, candidate: first.rows[1].identity)
+        try await h.settle()
+        #expect(h.system.scriptChoices == [nil, "C2"])
+        #expect(h.prompt == nil)
+        #expect(h.runner.pendingChoice == nil)
+        #expect(waiting(h.hud.last) == nil)
     }
 
     @Test func theCancelButtonDismissesAndMarksTheQuestion() async throws {

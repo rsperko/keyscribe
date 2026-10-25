@@ -890,6 +890,9 @@ private struct HistoryDetailView: View {
                 if let reason = entry.failureReason {
                     detailRow("Why it failed", reason)
                 }
+                if let reported = entry.reported {
+                    detailRow("Reported", reported)
+                }
                 detailRow("Best-effort redaction", entry.redaction ? "Applied" : "Not applied")
                 detailRow("Speech", entry.engine.map { "On-device · \($0)" } ?? "On-device")
                 if let device = entry.device {

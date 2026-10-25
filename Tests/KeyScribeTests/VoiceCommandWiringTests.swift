@@ -222,6 +222,45 @@ struct VoiceCommandWiringTests {
         #expect(result.hud.states.last == .error(message: "Deploy failed (exit 1).", action: nil))
     }
 
+    @Test func aReportedResultIsShownUnderTheScriptAndRecorded() async throws {
+        let result = try await run(
+            transcript: "tab inbox",
+            outcome: .done(summary: "Tab", command: "~/bin/tab inbox", report: .init(level: .done, text: "Switched to Inbox")))
+        #expect(result.hud.states.last == .commandDone(summary: "Switched to Inbox", detail: "Tab"))
+        let entry = try #require(result.history.first)
+        #expect(entry.outcome == .command)
+        #expect(entry.result == "~/bin/tab inbox")
+        #expect(entry.reported == "Switched to Inbox")
+    }
+
+    @Test func anInformationalResultIsShownAsANoticeNotAFailure() async throws {
+        let result = try await run(
+            transcript: "next unread",
+            outcome: .done(summary: "Unread", command: "~/bin/unread", report: .init(level: .info, text: "Nothing waiting")))
+        #expect(result.hud.states.last == .advisory(message: "Nothing waiting"))
+        let entry = try #require(result.history.first)
+        #expect(entry.outcome == .command)
+        #expect(entry.failureReason == nil)
+        #expect(entry.reported == "Nothing waiting")
+    }
+
+    @Test func aReportedResultIsNotRecordedWhileHistoryIsOff() async throws {
+        let result = try await run(
+            transcript: "tab inbox", outcome: .done(summary: "Tab", command: "~/bin/tab inbox",
+                                                   report: .init(level: .done, text: "Switched to Inbox")),
+            historyEnabled: false)
+        #expect(result.history.isEmpty)
+    }
+
+    @Test func aLateReportedResultIsShownAndRecorded() async throws {
+        let result = try await run(
+            transcript: "tab inbox", outcome: .started(summary: "Tab", command: "~/bin/tab inbox"),
+            late: .done(summary: "Tab", command: "~/bin/tab inbox", report: .init(level: .done, text: "Switched to Inbox")))
+        #expect(result.hud.states.last == .commandDone(summary: "Switched to Inbox", detail: "Tab"))
+        #expect(result.history.map(\.reported) == ["Switched to Inbox"])
+        #expect(result.history.map(\.outcome) == [.command])
+    }
+
     @Test func aVoiceCommandIsRecordedWithTheCommandItRan() async throws {
         let result = try await run(transcript: "Bitch to Ghostty.") { mode in
             mode.replacements.rules = [.init(heard: "bitch to", replace: "switch to", regex: false)]

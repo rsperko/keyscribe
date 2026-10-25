@@ -59,6 +59,18 @@ struct HistoryEntryCodecTests {
         #expect(try HistoryEntry(jsonLine: line) == entry)
     }
 
+    @Test func aVoiceCommandRoundTripsWithWhatItReported() throws {
+        let entry = HistoryEntry(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            modeName: "Voice Commands", heard: "tab inbox", transformed: "tab inbox",
+            result: "~/bin/tab inbox", outcome: .command,
+            cloudInvolved: false, redaction: false, contextCategories: [],
+            reported: "Switched to Inbox")
+        let line = try entry.jsonLine()
+        #expect(line.contains("\"reported\":\"Switched to Inbox\""))
+        #expect(try HistoryEntry(jsonLine: line) == entry)
+    }
+
     @Test func onlyCommandOutcomesAreCommands() {
         #expect(HistoryEntry.Outcome.command.isCommand)
         #expect(HistoryEntry.Outcome.commandFailed.isCommand)
@@ -268,6 +280,12 @@ struct HistorySearchTests {
         var failed = sampleEntry(heard: "deploy prod", result: "~/bin/deploy prod", mode: "Voice Commands", outcome: .commandFailed)
         failed.failureReason = "Deploy failed (exit 2): no such environment"
         #expect(HistorySearch.matches(failed, query: "no such environment"))
+    }
+
+    @Test func matchesWhatACommandReported() {
+        var done = sampleEntry(heard: "tab inbox", result: "~/bin/tab inbox", mode: "Voice Commands", outcome: .command)
+        done.reported = "Switched to Inbox"
+        #expect(HistorySearch.matches(done, query: "switched to"))
     }
 }
 

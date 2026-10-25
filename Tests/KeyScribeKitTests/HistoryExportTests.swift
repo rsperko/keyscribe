@@ -107,6 +107,15 @@ struct HistoryStatsTests {
         #expect(md.contains("  - Why it failed: Deploy failed (exit 2): no such environment\n"))
     }
 
+    @Test func textAndMarkdownExportsSayWhatACommandReported() {
+        var done = entry("~/bin/tab inbox", heard: "tab inbox", outcome: .command)
+        done.reported = "Switched to Inbox"
+        let txt = HistoryExport.export([done], format: .text, formatting: utc(), appName: "KeyScribe")
+        let md = HistoryExport.export([done], format: .markdown, formatting: utc(), appName: "KeyScribe")
+        #expect(txt.contains("    Reported: Switched to Inbox\n"))
+        #expect(md.contains("  - Reported: Switched to Inbox\n"))
+    }
+
     @Test func exportsLabelACommandAsOne() {
         let entries = [entry("~/bin/deploy staging", outcome: .command), entry("~/bin/deploy prod", outcome: .commandFailed)]
         let txt = HistoryExport.export(entries, format: .text, formatting: utc(), appName: "KeyScribe")

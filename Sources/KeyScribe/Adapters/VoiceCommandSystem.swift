@@ -25,7 +25,7 @@ enum VoiceCommandRetryReason: Equatable, Sendable {
 }
 
 enum VoiceCommandOutcome: Equatable, Sendable {
-    case done(summary: String, command: String)
+    case done(summary: String, command: String, report: ScriptReport.Message? = nil)
     case started(summary: String, command: String)
     case failed(message: String, command: String? = nil, action: HUDErrorAction? = nil, kind: VoiceCommandFailureKind = .other)
     case needsChoice(VoiceCommandPendingChoice)
@@ -75,7 +75,7 @@ enum BrowserTabsReply: Equatable, Sendable {
 }
 
 enum ScriptRun: Equatable, Sendable {
-    case finished(status: Int32, lastError: String?)
+    case finished(status: Int32, lastError: String?, report: ScriptReport = ScriptReport())
     case stillRunning
     case notRunnable
     case couldNotStart(String)
@@ -105,7 +105,8 @@ protocol VoiceCommandSystem: AnyObject {
     func activate(pid: Int32) -> Bool
     func openURL(_ url: String, browser: String?) async -> Bool
     func runScript(
-        _ script: VoiceCommandScript, arguments: [String], onLateFinish: @escaping @MainActor (ScriptRun) -> Void
+        _ script: VoiceCommandScript, arguments: [String], choice: String?,
+        onLateFinish: @escaping @MainActor (ScriptRun) -> Void
     ) async -> ScriptRun
 }
 
@@ -240,7 +241,14 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         if case .ambiguous(let choice) = resolution, choice.isOffered {
             return .needsChoice(offer(choice, request: transcript, origin: origin, places: places, scripts: scripts))
         }
-        return await run(resolution, origin: origin, stillWanted: stillWanted, onLateResult: onLateResult)
+        return await run(resolution, origin: origin, asking: Asking(request: transcript, places: places, scripts: scripts),
+                         stillWanted: stillWanted, onLateResult: onLateResult)
+    }
+
+    struct Asking {
+        let request: String
+        let places: [VoiceCommandPlace]
+        let scripts: [VoiceCommandScript]
     }
 
     private func offer(
@@ -346,12 +354,14 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             }
         }
         guard stillWanted() else { return VoiceCommandSelection(name: candidate.name, request: pending.request, outcome: .abandoned) }
-        let outcome = await run(resolution, origin: pending.origin, stillWanted: stillWanted, onLateResult: onLateResult)
+        let outcome = await run(resolution, origin: pending.origin,
+                                asking: Asking(request: pending.request, places: places, scripts: scripts),
+                                stillWanted: stillWanted, onLateResult: onLateResult)
         return VoiceCommandSelection(name: candidate.name, request: pending.request, outcome: outcome)
     }
 
     func run(
-        _ resolution: VoiceCommandResolution, origin: VoiceCommandOrigin?,
+        _ resolution: VoiceCommandResolution, origin: VoiceCommandOrigin?, asking: Asking? = nil,
         stillWanted: @MainActor () -> Bool = { true },
         onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void = { _ in }
     ) async -> VoiceCommandOutcome {
@@ -384,12 +394,12 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         case .takesNoText(let name):
             return .failed(message: Self.takesNoTextMessage(name))
         case .action(let action):
-            return await execute(action, origin: origin, stillWanted: stillWanted, onLateResult: onLateResult)
+            return await execute(action, origin: origin, asking: asking, stillWanted: stillWanted, onLateResult: onLateResult)
         }
     }
 
     private func execute(
-        _ action: VoiceCommandAction, origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool,
+        _ action: VoiceCommandAction, origin: VoiceCommandOrigin?, asking: Asking?, stillWanted: @MainActor () -> Bool,
         onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
     ) async -> VoiceCommandOutcome {
         let summary = action.summary(appName: system.appName(forBundleId:))
@@ -455,12 +465,17 @@ final class VoiceCommandRunner: VoiceCommandRunning {
                 return .failed(message: "No app on this Mac opens \(scheme): links.", command: command)
             }
             succeeded = await system.openURL(url, browser: browser)
-        case .script(let script, let arguments):
+        case .script(let script, let arguments, let choice):
             if let refusal = script.executionRefusal(resolvedProgram: ScriptLauncher.resolvedPath(script.program)) {
                 return .failed(message: "\(script.name) was not run. \(refusal)", command: command)
             }
-            let run = await system.runScript(script, arguments: arguments) { late in
+            let run = await system.runScript(script, arguments: arguments, choice: choice) { late in
                 onLateResult(Self.outcome(of: late, script: script, command: command))
+            }
+            if case .finished(0, _, let report) = run, !script.isShortcut, !report.options.isEmpty {
+                guard stillWanted() else { return .abandoned }
+                return offerOptions(report.options, script: script, arguments: arguments, origin: origin,
+                                    asking: asking, command: command)
             }
             return Self.outcome(of: run, script: script, command: command)
         }
@@ -557,15 +572,37 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         "No script or shortcut is called \u{201C}\(target)\u{201D}."
     }
 
+    private func offerOptions(
+        _ options: [ScriptReport.Option], script: VoiceCommandScript, arguments: [String], origin: VoiceCommandOrigin?,
+        asking: Asking?, command: String
+    ) -> VoiceCommandOutcome {
+        let candidates = options.map {
+            VoiceCommandCandidate.option(VoiceCommandScriptOption(script: script, arguments: arguments, value: $0.value, label: $0.label))
+        }
+        let choice = VoiceCommandChoice(family: .navigation, target: script.name, matches: candidates)
+        guard choice.isOffered else {
+            return .failed(message: "\(script.name) offered \(options.count) choices, more than can be listed.", command: command)
+        }
+        let asking = asking ?? Asking(request: script.name, places: [], scripts: [script])
+        return .needsChoice(offer(choice, request: asking.request, origin: origin, places: asking.places, scripts: asking.scripts))
+    }
+
     static func outcome(of run: ScriptRun, script: VoiceCommandScript, command: String) -> VoiceCommandOutcome {
+        var run = run
+        if script.isShortcut, case .finished(let status, let lastError, _) = run {
+            run = .finished(status: status, lastError: lastError)
+        }
         switch run {
-        case .finished(0, _):
-            return .done(summary: script.name, command: command)
+        case .finished(0, _, let report) where !report.options.isEmpty:
+            return .failed(message: "\(script.name) took too long to offer a choice.", command: command)
+        case .finished(0, _, let report):
+            return .done(summary: script.name, command: command, report: report.message)
         case .stillRunning:
             return .started(summary: script.name, command: command)
-        case .finished(let status, let lastError):
+        case .finished(let status, let lastError, let report):
             let exit = script.isShortcut ? "" : " (exit \(status))"
-            return .failed(message: "\(script.name) failed\(exit)" + (lastError.map { ": \($0)" } ?? "."), command: command)
+            let reason = report.message?.text ?? lastError
+            return .failed(message: "\(script.name) failed\(exit)" + (reason.map { ": \($0)" } ?? "."), command: command)
         case .notRunnable where script.isShortcut:
             return .failed(message: "Shortcuts could not be started from \(Branding.appName) on this Mac.", command: command)
         case .notRunnable:
@@ -779,11 +816,14 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     nonisolated static let shortcutsTool = "/usr/bin/shortcuts"
 
     func runScript(
-        _ script: VoiceCommandScript, arguments: [String], onLateFinish: @escaping @MainActor (ScriptRun) -> Void
+        _ script: VoiceCommandScript, arguments: [String], choice: String?,
+        onLateFinish: @escaping @MainActor (ScriptRun) -> Void
     ) async -> ScriptRun {
         let late: @Sendable (ScriptRun) -> Void = { run in Task { @MainActor in onLateFinish(run) } }
         guard let shortcut = script.shortcut else {
-            return await ScriptLauncher.run(program: script.program, arguments: arguments, onLateFinish: late)
+            return await ScriptLauncher.run(
+                program: script.program, arguments: arguments,
+                environment: choice.map { [ScriptLauncher.choiceVariable: $0] } ?? [:], onLateFinish: late)
         }
         let input = arguments.first
         return await ScriptLauncher.run(

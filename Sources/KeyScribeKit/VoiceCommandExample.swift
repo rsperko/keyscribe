@@ -64,7 +64,7 @@ public struct VoiceCommandExample: Equatable, Sendable {
         switch candidate {
         case .place(let place): commands.append(.place(place))
         case .script(let script): commands.append(.script(script))
-        case .app, .window, .tab: break
+        case .app, .window, .tab, .option: break
         }
         let config = VoiceCommandConfig(commands: commands)
         return VoiceCommandCatalog(places: config.places, scripts: config.scripts, tabs: [], windows: .complete([]))

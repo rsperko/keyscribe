@@ -74,6 +74,9 @@
   script's command line, quoted the way a shell would, or the description of a switch. A command that
   matched nothing has an empty `result`. A failed command adds the optional `failure_reason` — the
   message the HUD showed, which for a script can include the last line it wrote to standard error.
+  A script that reported a result (*Reporting results* under Scripts) adds the optional `reported`, the
+  message the HUD showed for it. A choice offered by a script and answered by clicking, whose second run
+  asks again, rewrites the question's entry with the new list.
   An app older than this change skips these rows rather than failing to load history.
 
 ### Model storage
@@ -533,7 +536,8 @@ link, or tab, and a *script* one that runs a program or shortcut.
 
 - `run` is the program followed by its arguments. The program is a full path (`/…` or `~/…`); it is run
   directly, never through a shell, from the home folder, with standard input, output, and error not
-  connected to anything you see, and the environment KeyScribe itself was started with. Opened from Finder or
+  connected to anything you see (standard output is read only for the report lines below), and the
+  environment KeyScribe itself was started with. Opened from Finder or
   at login, that `PATH` holds only the system folders. Each argument is passed exactly as
   written, except that `{text}` is replaced by the spoken text inside that argument: the words never
   become extra arguments, and KeyScribe never evaluates them. `{text}` may not appear in the program.
@@ -562,10 +566,36 @@ link, or tab, and a *script* one that runs a program or shortcut.
   the HUD unless a dictation is in progress. A result arriving after KeyScribe quits is not seen, so that
   entry stays *Command started*. A nonzero exit fails the command, showing the exit status and the last
   line the script wrote to standard error. A program that is missing or not executable fails without
-  starting. The script's arguments and output are never logged. Standard output is never kept; with history on,
-  History saves the command line, arguments included, and a failure's message, which can carry the last line
-  the script wrote to standard error (see *History records* above). A newly written or edited file
-  can take longer to start the first time, while macOS checks it.
+  starting. The script's arguments and output are never logged. Standard output is never kept beyond the
+  report lines below; with history on, History saves the command line, arguments included, a failure's
+  message, which can carry the last line the script wrote to standard error, and a reported message (see
+  *History records* above). A newly written or edited file can take longer to start the first time, while
+  macOS checks it.
+- **Reporting results.** A program can tell you what happened by writing lines that start with one of
+  these markers to standard output. Every other line is ignored, so a script that prints nothing of the
+  kind behaves exactly as before. The exit status still decides whether the command failed. Shortcuts
+  cannot report this way.
+
+  | Line | Exit status | What you see |
+  |---|---|---|
+  | none | 0 | The script's name, as a completed command |
+  | `::done::<message>` | 0 | The message as a completed command, with the script's name under it |
+  | `::info::<message>` | 0 | The message as a neutral notice, with no failure styling and no exit status |
+  | `::choice::<value>⇥<label>` (one line each) | 0 | *Which one?* listing each label, answered like any other choice |
+  | none | nonzero | `<name> failed (exit N): <last standard error line>` |
+  | `::done::` or `::info::` | nonzero | `<name> failed (exit N): <message>`, in place of the standard error line |
+
+  `⇥` is a tab. A choice line without a tab uses its text as both value and label, and a repeated value is
+  listed once. When several messages are written, the last one counts. A long message or label is shortened.
+  Choices win over a message from the same run, and they are ignored on a nonzero
+  exit. When a choice is answered, by voice or by click, the script runs again with the **same arguments**
+  and the chosen value in the environment variable `KEYSCRIBE_CHOICE`; that run reports like any other,
+  and can offer a new choice. The number you say is never passed. Cancelling, a new command, or the
+  choice timing out runs nothing, so a script never learns that a choice was dismissed. A run offers a
+  choice only if it finishes within the wait above; one that is still running when the wait ends and
+  then writes choice lines fails with *<name> took too long to offer a choice*. A run offering more
+  choices than *Which one?* can list fails and asks you to narrow them down. A reported message from a
+  script that finishes late is still shown, under the same rule as a late failure.
 - **Interpreters cannot take `{text}`.** A script whose program has a known interpreter file name, such
   as `sh` or `env`, including a version suffix like `python3.12`, is refused when any of its arguments
   contains `{text}`, because `/bin/sh -c {text}` would run spoken words as shell commands. The name is

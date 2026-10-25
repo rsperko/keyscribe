@@ -6,6 +6,7 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
     case script(VoiceCommandScript)
     case window(VoiceCommandCatalog.Window)
     case tab(VoiceCommandCatalog.Tab)
+    case option(VoiceCommandScriptOption)
 
     public var identity: String {
         switch self {
@@ -14,6 +15,7 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
         case .script(let script): "script:\(script.id)"
         case .window(let window): "window:\(window.bundleId):\(window.pid):\(window.id)"
         case .tab(let tab): "tab:\(tab.browserBundleId):\(tab.window):\(tab.tab):\(tab.url)"
+        case .option(let option): "option:\(option.script.id):\(option.value)"
         }
     }
 
@@ -24,6 +26,7 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
         case .script(let script): script.name
         case .window(let window): window.title
         case .tab(let tab): tab.title
+        case .option(let option): option.label
         }
     }
 
@@ -34,6 +37,7 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
         case .script(let script): return script.spokenForms
         case .window(let window): return Self.titleForms(window.title)
         case .tab(let tab): return Self.titleForms(tab.title)
+        case .option: return []
         }
     }
 
@@ -41,7 +45,7 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
         switch self {
         case .place(let place): place.isTabSearch
         case .script(let script): script.takesText
-        case .app, .window, .tab: false
+        case .app, .window, .tab, .option: false
         }
     }
 
@@ -87,6 +91,8 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
             let browser = appName(tab.browserBundleId) ?? tab.browserBundleId
             guard let site = Self.documentLabel(tab.url) else { return browser }
             return "\(browser) \u{00B7} \(site)"
+        case .option(let option):
+            return option.script.name
         }
     }
 
@@ -98,6 +104,20 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
         }
         guard let host = url.host?.lowercased(), !host.isEmpty else { return nil }
         return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+}
+
+public struct VoiceCommandScriptOption: Equatable, Sendable {
+    public var script: VoiceCommandScript
+    public var arguments: [String]
+    public var value: String
+    public var label: String
+
+    public init(script: VoiceCommandScript, arguments: [String], value: String, label: String) {
+        self.script = script
+        self.arguments = arguments
+        self.value = value
+        self.label = label
     }
 }
 
