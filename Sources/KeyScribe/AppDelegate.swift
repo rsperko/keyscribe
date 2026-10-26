@@ -822,7 +822,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func relaunch(_ configuration: NSWorkspace.OpenConfiguration, guidance: String) {
         NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { [weak self] app, error in
             Task { @MainActor [weak self] in
-                if app != nil { NSApp.terminate(nil); return }
+                if app != nil { AppQuit.shared.quit(nil); return }
                 self?.reportRelaunchFailure(error, guidance: guidance)
             }
         }

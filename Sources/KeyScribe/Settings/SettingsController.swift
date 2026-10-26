@@ -455,7 +455,11 @@ struct SettingsRootView: View {
                 PermissionsSettingsView(
                     accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch)
             case .advanced:
-                MaintenanceSettingsView(model: general)
+                MaintenanceSettingsView(model: general) {
+                    modes.selectedID = Mode.voiceCommandsId
+                    modes.voiceCommands.requestedSidebarCommand = true
+                    navigation.destination = .modes
+                }
             }
         }
         .frame(minWidth: 760, idealWidth: 940, minHeight: 520, idealHeight: 640)
@@ -514,7 +518,20 @@ enum SettingsDestination: CaseIterable, Hashable, Identifiable {
 
 private struct MaintenanceSettingsView: View {
     @ObservedObject var model: SettingsModel
+    let onAddSidebarCommand: () -> Void
     @State private var confirmingErase = false
+
+    private func featureToggle(_ feature: Feature) -> some View {
+        Toggle(isOn: model.binding(for: feature)) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(feature.title)
+                Text(feature.summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityIdentifier(AccessibilityID.Settings.Advanced.feature(feature.id))
+    }
 
     var body: some View {
         Form {
@@ -553,16 +570,19 @@ private struct MaintenanceSettingsView: View {
             }
             if !Feature.allCases.isEmpty {
                 Section("Experimental features") {
-                    ForEach(Feature.allCases, id: \.self) { feature in
-                        Toggle(isOn: model.binding(for: feature)) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(feature.title)
-                                Text(feature.summary)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                    ForEach(Feature.topLevel, id: \.self) { feature in
+                        featureToggle(feature)
+                        ForEach(feature.dependents, id: \.self) { dependent in
+                            VStack(alignment: .leading, spacing: 6) {
+                                featureToggle(dependent)
+                                if dependent == .sidebarSearch, model.isEnabled(dependent) {
+                                    Button("Add a Sidebar Command\u{2026}", action: onAddSidebarCommand)
+                                        .accessibilityIdentifier(AccessibilityID.Settings.Advanced.addSidebarCommand)
+                                }
                             }
+                            .padding(.leading, 20)
+                            .disabled(!model.isEnabled(feature))
                         }
-                        .accessibilityIdentifier(AccessibilityID.Settings.Advanced.feature(feature.id))
                     }
                     Text("Opt in to features still under development. They default off and may change or be removed.")
                         .font(.caption)
@@ -769,6 +789,8 @@ final class SettingsModel: ObservableObject {
                 }
             })
     }
+
+    func isEnabled(_ feature: Feature) -> Bool { featureStates[feature.id] ?? false }
 
     func confirmVoiceCommands() {
         voiceCommandNotices.acknowledge(.apps)

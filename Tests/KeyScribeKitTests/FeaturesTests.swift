@@ -106,6 +106,23 @@ struct FeaturesTests {
         #expect(!Settings.defaults.features.isEnabled(.sidebarSearch))
     }
 
+    @Test func sidebarSearchIsNestedUnderVoiceCommands() {
+        #expect(Feature.sidebarSearch.requires == .voiceCommands)
+        #expect(Feature.voiceCommands.dependents == [.sidebarSearch])
+        #expect(Feature.voiceCommands.requires == nil)
+        #expect(!Feature.topLevel.contains(.sidebarSearch))
+        #expect(Feature.topLevel.contains(.voiceCommands))
+    }
+
+    @Test func everyRequirementIsAnotherTopLevelFeature() {
+        for feature in Feature.allCases {
+            guard let parent = feature.requires else { continue }
+            #expect(parent != feature)
+            #expect(Feature.topLevel.contains(parent))
+        }
+        #expect(Set(Feature.topLevel + Feature.topLevel.flatMap(\.dependents)) == Set(Feature.allCases))
+    }
+
     @Test func sidebarSearchOverridePersists() throws {
         var s = Settings.defaults
         s.features.setEnabled(true, for: .sidebarSearch)

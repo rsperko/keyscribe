@@ -16,6 +16,19 @@ public struct Feature: CaseIterable, Hashable, Sendable {
     public let id: String
     public let title: String
     public let summary: String
+    // Shown nested under the feature it builds on, and unavailable while that one is off.
+    private let requiresId: String?
+
+    init(id: String, title: String, summary: String, requires: Feature? = nil) {
+        self.id = id
+        self.title = title
+        self.summary = summary
+        self.requiresId = requires?.id
+    }
+
+    public var requires: Feature? { Self.allCases.first { $0.id == requiresId } }
+    public var dependents: [Feature] { Self.allCases.filter { $0.requiresId == id } }
+    public static var topLevel: [Feature] { allCases.filter { $0.requiresId == nil } }
 
     // Streaming transcription (P3-1): on supported engines, transcribe incrementally during capture so the
     // transcript is ready sooner after release. Off by default; non-streaming engines keep the batch path.
@@ -47,8 +60,9 @@ public struct Feature: CaseIterable, Hashable, Sendable {
     // not yet exercised through unread changes, rearranged rows, multiple windows, or account switches.
     public static let sidebarSearch = Feature(
         id: "voice_command_sidebars",
-        title: "Voice Commands: app sidebars",
-        summary: "Lets a saved voice command open a channel, person, mailbox, or folder listed in an app\u{2019}s sidebar. Measured in Slack, Mail, and Notes; other apps may not work. Needs Voice Commands."
+        title: "Open sidebar items by voice",
+        summary: "Add a command such as \u{201C}mail sent\u{201D} to open items listed in an app\u{2019}s sidebar.",
+        requires: voiceCommands
     )
 
     public static let allCases: [Feature] = [streamingTranscription, consumptionDrivenRestore, voiceCommands, sidebarSearch]

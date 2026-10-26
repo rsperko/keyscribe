@@ -616,13 +616,18 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         "No sidebar was found in \(app)\u{2019}s front window, so nothing was opened."
     }
 
-    static func checkSidebar(of app: String, system: any VoiceCommandSystem) async -> String {
+    enum SidebarCheck: Equatable {
+        case listing(SidebarListing, appName: String)
+        case problem(String)
+    }
+
+    static func checkSidebar(of app: String, system: any VoiceCommandSystem) async -> SidebarCheck {
         let name = system.appName(forBundleId: app) ?? app
         switch await system.sidebarItems(in: app) {
-        case .listing(let listing): return listing.checkSummary(appName: name)
+        case .listing(let listing): return .listing(listing, appName: name)
         case .unreadable(let problem, let switched):
             let message = sidebarMessage(problem, app: name)
-            return switched ? message + " " + SidebarListing.switchedNote(appName: name) : message
+            return .problem(switched ? message + " " + SidebarListing.switchedNote(appName: name) : message)
         }
     }
 
@@ -638,7 +643,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     }
 
     nonisolated static let sidebarTurnedOffMessage =
-        "Opening sidebar entries is turned off. Turn on \u{201C}\(Feature.sidebarSearch.title)\u{201D} under Experimental features in Settings."
+        "Opening sidebar items is turned off. Turn on \u{201C}\(Feature.sidebarSearch.title)\u{201D} under Experimental features in Settings."
 
     nonisolated static func sidebarWindowUnknownMessage(_ app: String) -> String {
         "\(app)\u{2019}s front window could not be identified, so nothing was opened."

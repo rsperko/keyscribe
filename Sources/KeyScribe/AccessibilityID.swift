@@ -166,6 +166,7 @@ enum AccessibilityID {
             static let eraseConfirmConfirm = "settings.advanced.eraseConfirm.confirm"
             static let eraseConfirmCancel = "settings.advanced.eraseConfirm.cancel"
             static func feature(_ featureID: String) -> String { "settings.advanced.feature.\(featureID)" }
+            static let addSidebarCommand = "settings.advanced.addSidebarCommand"
         }
     }
 

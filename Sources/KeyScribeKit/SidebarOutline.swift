@@ -39,16 +39,32 @@ public struct SidebarListing: Equatable, Sendable {
         self.isComplete = isComplete
     }
 
-    public func checkSummary(appName: String) -> String {
-        guard !items.isEmpty else { return "\(appName)\u{2019}s front window shows no sidebar entries this command can open." }
-        let samples = items.prefix(3).map(\.name)
-        let such = samples.count < 3
-            ? samples.joined(separator: " and ")
-            : samples.dropLast().joined(separator: ", ") + ", and " + samples[samples.count - 1]
-        var parts = ["Found \(items.count) \(items.count == 1 ? "entry" : "entries") in \(appName)\u{2019}s front window, such as \(such)."]
-        if !isComplete { parts.append("Not every entry could be read, so a match will be offered as a choice before it opens.") }
-        if switchedOnAccessibility { parts.append(Self.switchedNote(appName: appName)) }
-        return parts.joined(separator: " ")
+    public struct Section: Equatable, Sendable {
+        public let title: String?
+        public let names: [String]
+
+        public init(title: String?, names: [String]) {
+            self.title = title
+            self.names = names
+        }
+    }
+
+    public var sections: [Section] {
+        var order: [String?] = []
+        var names: [String?: [String]] = [:]
+        for item in items {
+            if names[item.section] == nil { order.append(item.section) }
+            names[item.section, default: []].append(item.name)
+        }
+        return order.map { Section(title: $0, names: names[$0] ?? []) }
+    }
+
+    public func notes(appName: String) -> [String] {
+        var notes: [String] = []
+        if items.isEmpty { notes.append("\(appName)\u{2019}s front window shows no sidebar items this command can open.") }
+        if !isComplete { notes.append("Not every item could be read, so a match will be offered as a choice before it opens.") }
+        if switchedOnAccessibility { notes.append(Self.switchedNote(appName: appName)) }
+        return notes
     }
 
     public static func switchedNote(appName: String) -> String {

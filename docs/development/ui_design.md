@@ -392,6 +392,13 @@ About & Notices…
 Quit KeyScribe
 ```
 
+**Quit** always quits, from the menu bar, from ⌘Q in a Settings window, and when the app relaunches itself
+(a permission repair or Erase All). This is a deliberate KeyScribe policy: Quit dismisses open dialogs and
+discards unsubmitted drafts, such as a half-filled command sheet, without asking. Settings already applied
+remain saved, since panes apply each change as it is made. macOS would
+otherwise refuse to quit with a beep, which left Quit dead whenever a command sheet sat in a Settings window
+hidden behind other apps, and would leave a relaunch running two copies.
+
 The first row is a single status line that answers "ready?", "what mode?", and "which model?" at once.
 When ready it reads **`<next mode> · <model>`** — the mode being the pending **one-shot override** if one
 is set, otherwise the mode that Automatic resolves to (never the literal word "Automatic"); the model
@@ -889,7 +896,7 @@ Commands' shortcut for another mode — changes nothing until the user confirms 
 [mode]?”. The confirmation names every mode that uses it, says whether the press will run commands or
 type speech afterwards, names a key given up under a different name (moving ⌘ takes Left-⌘), and says
 which modes are left with no shortcut. On the first Voice Commands shortcut it also carries the
-app-switching notice below. **Move Shortcut** removes only the clashing shortcuts from those modes,
+voice-command notice below. **Move Shortcut** removes only the clashing shortcuts from those modes,
 keeps their others, and assigns it to the destination in one write; **Cancel** keeps everything. The
 check is repeated against the files before writing, and if the modes using the shortcut changed in the
 meantime, nothing moves and the pane says to try again. A failed write restores what it had already
@@ -909,10 +916,12 @@ never typed: a command it understands runs, one that matches more than one desti
 (§5), and anything else shows an Error naming what was wrong (a command it did not recognize, with what was
 heard; no match; or too many matches) and changes nothing.
 
-Before first enabling Voice Commands in Maintenance, an app-switching notice titled **Voice commands
-can open the wrong app** explains that the assigned shortcut starts Voice Commands, and a misheard name
-can open the wrong app or bring the wrong window forward. A separate paragraph connects this to exposing
-contents during screen sharing and advises checking the active app before typing.
+Before first enabling Voice Commands in Maintenance, a notice titled **Using Voice Commands** explains
+that the assigned shortcut switches apps and windows by voice, and users can add commands that run scripts
+or Shortcuts. It explains that recognition can get a name or input wrong, bringing an unintended window
+into view during screen sharing or starting an unintended saved action. Scripts and Shortcuts run by
+voice may act without asking for confirmation and, depending on their steps, can change files, send
+messages, or share information.
 **Enable Voice Commands** accepts it; **Cancel** leaves the feature off. App names already work without
 adding a command, so this notice does not wait for **Add Command…**. If the feature was enabled by editing
 the config, assigning a shortcut shows the same notice before applying the shortcut. That acknowledgment
@@ -967,15 +976,17 @@ Its sections are, in order:
    anything; the empty state says the same. **Add Command…** offers outcome-named starting points: **Open
    Current App (name)** and, when that app is a browser that can list its tabs, **Open Current Browser Tab**
    (both read from the app that was frontmost when Settings opened); then **Open an App or Link…**, **Find a
-   Browser Tab…**, **Find in an App’s Sidebar…** (only while the experimental **Voice Commands: app
-   sidebars** flag is on), **Run a Shortcut…**, a divider, and **Run a Script…** for advanced setup. Until the browsers
+   Browser Tab…**, **Open a Sidebar Item…** (only while the experimental **Open sidebar items by
+   voice** flag is on), **Run a Shortcut…**, a divider, and **Run a Script…** for advanced setup. Until the browsers
    on this Mac have been checked, a disabled **Checking browsers…** item stands where **Open Current Browser
    Tab** would be. Every starting point opens a normal command sheet that saves an ordinary entry in this
    list, edited from its row; there is no separate template lifecycle.
 
    Every sheet shares one shape: its warning, **What will you say?**, **What should happen?** (the app, link,
    tab search's browser, shortcut, or program), then the optional input or arguments, and **Preview**; the
-   technical details sit last. The starting point still suggests a name until the user types one.
+   technical details sit last. The one exception is **Open a Sidebar Item**, which is app-first:
+   **What should happen?** (the app and **Show Available Items**) comes before **What will you say?**, and its
+   warning sits after setup. The starting point still suggests a name until the user types one.
    **What will you say?** has **Spoken name** with a caption saying what saying it does, and optional
    **Other names** separated by commas, whose caption suggests one for a word that is often misheard. There
    is no setting for whether a name works on its own: every saved name does. Any phrase can be a name,
@@ -1002,7 +1013,7 @@ Its sections are, in order:
    then a badge: **App**, **Web page**, **App link**, **Tab search**, **Script**, or **Shortcut**. A script row
    shows its command line and an orange advisory when the program is missing or not executable; a shortcut
    row shows the shortcut's name and input, and an orange advisory when that shortcut is no longer in
-   Shortcuts. Under the list sit the apps warning and a collapsed **Permissions and confirmations**
+   Shortcuts. Under the list sit the **Using Voice Commands** notice and a collapsed **Permissions and confirmations**
    disclosure explaining that macOS may request access when an action first controls another app or
    accesses protected data; Shortcuts can offer **Allow Once** or **Always Allow**, and actions can include
    confirmations on every run. A macOS dialog may name the app even when a script triggered it, and a
@@ -1023,20 +1034,26 @@ Its sections are, in order:
    **A browser tab** destination) says to say the name, then words from the tab's title or site, and has the
    **Browser** picker and a **Switch without asking** toggle (off by default): when on, tabs that match equally
    well in one browser switch to the leftmost match in its frontmost window that has one instead of offering a
-   choice; ties across browsers still offer one. **Find in an App’s Sidebar** (the **A sidebar entry**
-   destination) has the **App** chooser, a caption saying to say the name and then a channel, person, mailbox,
-   or folder listed in that app's sidebar, that it opens the best match in the app's front window and asks
-   when several match, and a collapsed **Reading the sidebar** section (summary “Uses Accessibility”)
-   explaining that names are read only when the command runs, that hidden entries are not found, and that
-   some apps turn on their accessibility support until they quit. A caption above **Check Sidebar**, always
-   visible, says the check reads the app's front window now and may first turn on the app's accessibility
-   support until it quits. The check says how many entries it found with a few examples and whether the read
-   was incomplete, or why it could not be read, and in either case whether the app's accessibility support was
-   turned on. A spoken command whose open cannot be confirmed shows an orange advisory naming the entry
-   instead of the usual confirmation. **Preview** never reads a sidebar: it says the command would
-   look in the app's sidebar and points to **Check Sidebar**. While the flag is off, the destination is
-   offered only for a command that already uses it, the check is disabled, and both the sheet and the row
-   show an orange advisory saying how to turn it on. Its rows show a **Sidebar** badge and the app's icon. The **Browser** picker lists every
+   choice; ties across browsers still offer one. **Open a Sidebar Item** (the **A sidebar item**
+   destination) is app-first: its **What should happen?** section comes before **What will you say?**, and
+   choosing the app suggests the spoken name. Under the **App** chooser, an always-visible caption says to say
+   the name and then a channel, person, mailbox, or folder listed in the sidebar of the app's front window,
+   that only items the sidebar shows can be found (expand a collapsed section or scroll to reach a hidden
+   one), and that it asks when several match. **Show Available Items** reads the sidebar now; the caption
+   beside it, visible before it is pressed, says some apps first turn on their accessibility support, which
+   stays on until they quit and can use more memory. The result lists the items it found grouped by sidebar
+   section, a validated example phrase when one is found (the spoken name paired with an item it would really
+   open, checked against every saved command and the user's replacements so a saved action whose name starts
+   the same way is never promised; only a few distinct names are tried, so none may be shown), and notes when
+   the read was
+   incomplete or turned on the app's accessibility support; or, in orange, why the sidebar could not be read.
+   A collapsed **Reading the sidebar** section (summary “Uses Accessibility”) holds the technical detail. A
+   spoken command whose open cannot be confirmed shows an orange advisory naming the item instead of the
+   usual confirmation. **Preview** never reads a sidebar: it says the command would look in the app's sidebar
+   and points to **Show Available Items**. While the flag is off, the destination is offered only for a
+   command that already uses it, **Show Available Items** is disabled, and both the sheet and the row show an
+   orange advisory saying how to turn it on. Its warning, **A misheard name can open the wrong item**, is
+   written for sidebar items and sits after setup rather than above the app chooser, even on a new command. Its rows show a **Sidebar** badge and the app's icon. The **Browser** picker lists every
    app that opens web links, including ones whose tabs cannot be read (their pages open directly), plus
    **Any browser**. While browsers are being checked, a caption says **Checking browsers…**, and **Any
    browser** or a saved browser stays selected; a refresh never changes a choice the user made. Entering
@@ -1139,6 +1156,10 @@ reset. (Notices live in the separate **About & Notices** window, not here.)
   API keys** — the projection from history drops every content field by construction, not by
   filtering. The same report is available headless as `KeyScribe --diagnose` (see
   `docs/troubleshooting.md`). A transient caption confirms the copy; there is no separate window.
+- **Experimental features** lists one toggle per flag. A flag that builds on another sits indented under
+  it and is disabled while that one is off. **Open sidebar items by voice** sits under **Voice Commands**;
+  while both are on, an **Add a Sidebar Command…** button under it opens the Voice Commands mode with the
+  **Open a Sidebar Item** sheet, so setup does not have to be found through Modes.
 - *(Parked, not v1:)* a dedicated diagnostics/migration-error surface and a separate `models/`
   weights-folder reveal (the folder is reachable via Reveal Config today); plus an optional
   `KEYSCRIBE_CONFIG_DIR` override for users who keep config in a dotfiles directory — added only if

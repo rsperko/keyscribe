@@ -101,6 +101,8 @@ struct VoiceCommandsEditorView: View {
             Task { await model.loadBrowserChoices() }
         }
         .onDisappear { capturingTab?.cancel() }
+        .onAppear(perform: openRequestedSidebarCommand)
+        .onChange(of: model.requestedSidebarCommand) { _, _ in openRequestedSidebarCommand() }
         .sheet(item: $editing) { draft in
             PlaceEditorSheet(draft: draft, model: model) { editing = nil }
         }
@@ -280,7 +282,7 @@ struct VoiceCommandsEditorView: View {
             Button("Find a Browser Tab\u{2026}") { edit(place: PlaceDraft(name: "", kind: .tabSearch)) }
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addTabSearch)
             if model.sidebarSearchEnabled {
-                Button("Find in an App\u{2019}s Sidebar\u{2026}") { edit(place: PlaceDraft(name: "", kind: .sidebar)) }
+                Button("Open a Sidebar Item\u{2026}") { edit(place: PlaceDraft(name: "", kind: .sidebar)) }
                     .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addSidebarSearch)
             }
             Button("Run a Shortcut\u{2026}") { edit(shortcut: ShortcutDraft()) }
@@ -292,6 +294,12 @@ struct VoiceCommandsEditorView: View {
         .fixedSize()
         .disabled(model.hasUnreadableFile)
         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addCommand)
+    }
+
+    private func openRequestedSidebarCommand() {
+        guard model.requestedSidebarCommand else { return }
+        model.requestedSidebarCommand = false
+        edit(place: PlaceDraft(name: "", kind: .sidebar))
     }
 
     private func edit(place draft: PlaceDraft) {
@@ -466,20 +474,21 @@ private struct PlaceEditorSheet: View {
     @State private var browserDetailsExpanded = false
     @State private var sidebarDetailsExpanded = false
     @State private var checkingSidebar = false
-    @State private var sidebarCheck: String?
+    @State private var sidebarCheck: VoiceCommandRunner.SidebarCheck?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title).font(.title2.bold())
             Form {
-                if draft.originalName == nil {
+                if draft.originalName == nil, draft.kind != .sidebar {
                     Section { notice }
                 }
+                if draft.kind == .sidebar { whatShouldHappen }
                 Section("What will you say?") {
                     CommandPhraseFields(
                         name: $draft.name, say: $draft.say,
                         caption: draft.kind == .tabSearch ? "Say this name, then words from the tab\u{2019}s title."
-                            : draft.kind == .sidebar ? "Say this name, then the name of an entry in the app\u{2019}s sidebar."
+                            : draft.kind == .sidebar ? "Say this name, then the name of an item in the app\u{2019}s sidebar."
                             : "Say this name to open it.",
                         namePrompt: draft.kind == .tabSearch ? "chrome" : draft.kind == .sidebar ? "slack" : "What would you like to call it?",
                         sayPrompt: "Optional, such as inbox, email",
@@ -489,86 +498,11 @@ private struct PlaceEditorSheet: View {
                             name: AccessibilityID.Mode.VoiceCommands.placeName,
                             say: AccessibilityID.Mode.VoiceCommands.placeSay))
                 }
-                Section("What should happen?") {
-                    Picker("Open", selection: $draft.kind) {
-                        Text("An app").tag(PlaceDraft.Kind.app)
-                        Text("A link").tag(PlaceDraft.Kind.webPage)
-                        Text("A browser tab").tag(PlaceDraft.Kind.tabSearch)
-                        if model.sidebarSearchEnabled || draft.kind == .sidebar {
-                            Text("A sidebar entry").tag(PlaceDraft.Kind.sidebar)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeKind)
-                    switch draft.kind {
-                    case .app:
-                        appRow
-                    case .webPage:
-                        VStack(alignment: .leading, spacing: 4) {
-                            TextField("Link", text: $draft.url, prompt: Text("https://example.com/inbox"))
-                                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeURL)
-                                .formFieldLabel("Link")
-                            if let urlIssue { IssueText(urlIssue) }
-                            if let notice = draft.notice { IssueText(notice, severity: .advisory) }
-                            if isAppLink {
-                                if let app = model.linkAppName(draft.url) {
-                                    Text("Opens this link in \(app). Open tabs are not checked.")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                } else {
-                                    IssueText("No app on this Mac opens this link yet.", severity: .advisory)
-                                }
-                            } else {
-                                Text("A web address switches to an open tab whose address starts with it, or opens the page. A link that opens an app, such as a chat channel link, opens in that app.")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        if !isAppLink { browserChoice }
-                    case .tabSearch:
-                        Text("Say the name, then words from the tab\u{2019}s title or site, such as github. It switches to the open tab that best matches them.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        browserChoice
-                        SettingRow(
-                            title: "Switch without asking",
-                            help: "When several tabs in one browser match equally well, switches to the leftmost match in the frontmost window that has one instead of asking which one you meant. Matches in different browsers still ask.")
-                        {
-                            Toggle("", isOn: $draft.quickSwitch).labelsHidden()
-                                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeQuickSwitch)
-                        }
-                    case .sidebar:
-                        appRow
-                        if !model.sidebarSearchEnabled {
-                            IssueText(
-                                "Turned off. Turn on \u{201C}\(Feature.sidebarSearch.title)\u{201D} under Experimental features to use it.",
-                                severity: .advisory)
-                        }
-                        Text("Check Sidebar reads the names in the sidebar of the app\u{2019}s front window now, so you can see what this command can open. For some apps, such as Slack, it first turns on the app\u{2019}s accessibility support, which stays on until the app quits and can make it use more memory.")
-                            .font(.caption).foregroundStyle(.secondary)
-                            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSidebarCheckNote)
-                        HStack {
-                            Button(checkingSidebar ? "Checking\u{2026}" : "Check Sidebar") { checkSidebar() }
-                                .disabled(draft.bundleId.isEmpty || checkingSidebar || !model.sidebarSearchEnabled)
-                                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeCheckSidebar)
-                            Spacer()
-                        }
-                        if let sidebarCheck {
-                            Text(sidebarCheck).font(.caption).foregroundStyle(.secondary)
-                                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSidebarCheckResult)
-                        }
-                        Text("Say the name, then a channel, person, mailbox, or folder listed in the app\u{2019}s sidebar. It opens the entry that best matches in the app\u{2019}s front window. When several entries match, it asks which one you meant.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        DisclosureSection(isExpanded: $sidebarDetailsExpanded) {
-                            DisclosureSummaryLabel(title: "Reading the sidebar", summary: "Uses Accessibility")
-                        } content: {
-                            Text("Reads the names listed in the sidebar of the app\u{2019}s front window, only when you say this command. Only entries the app shows are found, so expand a collapsed section or scroll to reach one that is hidden. Some apps, such as Slack, list their sidebar only after their accessibility support is turned on; that stays on until the app quits and can make it use more memory.")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSidebarDetails)
-                    }
-                }
+                if draft.kind != .sidebar { whatShouldHappen }
                 CommandPreviewSection(
                     example: canSave ? model.example(for: .place(draft.place)) : nil,
                     id: AccessibilityID.Mode.VoiceCommands.placeExample)
-                if draft.originalName != nil {
+                if draft.originalName != nil || draft.kind == .sidebar {
                     Section { notice }
                 }
             }
@@ -609,6 +543,7 @@ private struct PlaceEditorSheet: View {
             Task { await model.loadBrowserChoices() }
         }
         .onChange(of: draft.bundleId) { _, _ in sidebarCheck = nil }
+
         .onChange(of: draft.url) { _, url in
             if let host = Self.host(url) {
                 draft.suggest(host)
@@ -627,13 +562,126 @@ private struct PlaceEditorSheet: View {
         }
     }
 
+    @ViewBuilder private var whatShouldHappen: some View {
+        Section("What should happen?") {
+            Picker("Open", selection: $draft.kind) {
+                Text("An app").tag(PlaceDraft.Kind.app)
+                Text("A link").tag(PlaceDraft.Kind.webPage)
+                Text("A browser tab").tag(PlaceDraft.Kind.tabSearch)
+                if model.sidebarSearchEnabled || draft.kind == .sidebar {
+                    Text("A sidebar item").tag(PlaceDraft.Kind.sidebar)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeKind)
+            switch draft.kind {
+            case .app:
+                appRow
+            case .webPage:
+                VStack(alignment: .leading, spacing: 4) {
+                    TextField("Link", text: $draft.url, prompt: Text("https://example.com/inbox"))
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeURL)
+                        .formFieldLabel("Link")
+                    if let urlIssue { IssueText(urlIssue) }
+                    if let notice = draft.notice { IssueText(notice, severity: .advisory) }
+                    if isAppLink {
+                        if let app = model.linkAppName(draft.url) {
+                            Text("Opens this link in \(app). Open tabs are not checked.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            IssueText("No app on this Mac opens this link yet.", severity: .advisory)
+                        }
+                    } else {
+                        Text("A web address switches to an open tab whose address starts with it, or opens the page. A link that opens an app, such as a chat channel link, opens in that app.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if !isAppLink { browserChoice }
+            case .tabSearch:
+                Text("Say the name, then words from the tab\u{2019}s title or site, such as github. It switches to the open tab that best matches them.")
+                    .font(.caption).foregroundStyle(.secondary)
+                browserChoice
+                SettingRow(
+                    title: "Switch without asking",
+                    help: "When several tabs in one browser match equally well, switches to the leftmost match in the frontmost window that has one instead of asking which one you meant. Matches in different browsers still ask.")
+                {
+                    Toggle("", isOn: $draft.quickSwitch).labelsHidden()
+                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeQuickSwitch)
+                }
+            case .sidebar:
+                appRow
+                if !model.sidebarSearchEnabled {
+                    IssueText(
+                        "Turned off. Turn on \u{201C}\(Feature.sidebarSearch.title)\u{201D} under Experimental features to use it.",
+                        severity: .advisory)
+                }
+                Text("Say the name, then an item listed in the sidebar of the app\u{2019}s front window, such as a channel, person, mailbox, or folder. Only items the sidebar shows can be found, so expand a collapsed section or scroll to reach one that is hidden. When several items match, it asks which one you meant.")
+                    .font(.caption).foregroundStyle(.secondary)
+                availableItems
+                DisclosureSection(isExpanded: $sidebarDetailsExpanded) {
+                    DisclosureSummaryLabel(title: "Reading the sidebar", summary: "Uses Accessibility")
+                } content: {
+                    Text("Reads the names listed in the sidebar of the app\u{2019}s front window, only when you say this command or show its items here. Some apps, such as Slack, list their sidebar only after their accessibility support is turned on; that stays on until the app quits and can make it use more memory.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSidebarDetails)
+            }
+        }
+    }
+
+    @ViewBuilder private var availableItems: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Button(checkingSidebar ? "Reading\u{2026}" : "Show Available Items") { checkSidebar() }
+                    .disabled(draft.bundleId.isEmpty || checkingSidebar || !model.sidebarSearchEnabled)
+                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeCheckSidebar)
+                Spacer()
+            }
+            Text("Reads the sidebar of the app\u{2019}s front window now. Some apps, such as Slack, first turn on their accessibility support, which stays on until the app quits and can make it use more memory.")
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSidebarCheckNote)
+            switch sidebarCheck {
+            case .problem(let message):
+                IssueText(message, severity: .advisory)
+                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSidebarCheckResult)
+            case .listing(let listing, let appName):
+                VStack(alignment: .leading, spacing: 6) {
+                    if let example = model.sidebarExample(for: draft.place, items: listing) {
+                        Text("Say \u{201C}\(example.heard)\u{201D} to open \(example.item.name).")
+                    }
+                    if !listing.items.isEmpty {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(Array(listing.sections.enumerated()), id: \.offset) { _, section in
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        if let title = section.title { Text(title).font(.caption.bold()) }
+                                        Text(section.names.joined(separator: ", ")).font(.caption)
+                                    }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                        }
+                        .frame(maxHeight: 140)
+                    }
+                    ForEach(listing.notes(appName: appName), id: \.self) { note in
+                        Text(note).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSidebarCheckResult)
+            case nil:
+                EmptyView()
+            }
+        }
+    }
+
     private func checkSidebar() {
         let bundleId = draft.bundleId
         checkingSidebar = true
         Task {
-            let summary = await model.checkSidebar(of: bundleId)
+            let check = await model.checkSidebar(of: bundleId)
             checkingSidebar = false
-            if draft.bundleId == bundleId { sidebarCheck = summary }
+            if draft.bundleId == bundleId { sidebarCheck = check }
         }
     }
 
@@ -641,7 +689,7 @@ private struct PlaceEditorSheet: View {
         guard draft.originalName == nil else { return "Edit Command" }
         switch draft.kind {
         case .tabSearch: return "Find a Browser Tab"
-        case .sidebar: return "Find in an App\u{2019}s Sidebar"
+        case .sidebar: return "Open a Sidebar Item"
         case .app, .webPage: return "Open an App or Link"
         }
     }
@@ -670,7 +718,7 @@ private struct PlaceEditorSheet: View {
     }
 
     private var notice: some View {
-        VoiceCommandNoticeRow(kind: .places, needsAcknowledgment: draft.originalName == nil)
+        VoiceCommandNoticeRow(kind: draft.kind == .sidebar ? .sidebars : .places, needsAcknowledgment: draft.originalName == nil)
             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeNotice)
     }
 

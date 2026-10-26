@@ -205,7 +205,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(notices)
 
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit \(Branding.appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit \(Branding.appName)", action: #selector(AppQuit.quit(_:)), keyEquivalent: "q")
+        quit.target = AppQuit.shared
         menu.addItem(quit)
 
         menu.delegate = self

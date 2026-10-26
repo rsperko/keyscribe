@@ -189,6 +189,21 @@ struct VoiceCommandsSettingsModelTests {
         #expect(model.tryResult?.summary == "Zzqvplace")
     }
 
+    @Test func aSidebarExampleFollowsSavedCommands() {
+        let (model, dir) = make()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let notes = VoiceCommandPlace(name: "Review Notes", target: .sidebar(bundleId: "com.apple.Notes"))
+        let listing = SidebarListing(
+            items: ["Shared", "Recipes"].enumerated().map {
+                VoiceCommandCatalog.SidebarItem(bundleId: "com.apple.Notes", pid: 3, name: $1, section: nil, path: [$0])
+            },
+            isComplete: true)
+        #expect(model.sidebarExample(for: notes, items: listing)?.heard == "review notes shared")
+        let taken = VoiceCommandScript(name: "Review Notes Shared", run: ["/usr/bin/true"])
+        #expect(model.saveScript(taken, replacing: nil) == nil)
+        #expect(model.sidebarExample(for: notes, items: listing)?.heard == "review notes recipes")
+    }
+
     private func waitFor(_ condition: () -> Bool) async throws {
         for _ in 0..<500 where !condition() { try await Task.sleep(for: .milliseconds(20)) }
         #expect(condition())
@@ -451,11 +466,12 @@ struct VoiceCommandsSettingsModelTests {
     }
 
     @Test func eachListHasItsOwnWarning() {
-        let kinds: [VoiceCommandNotices.Kind] = [.places, .scripts, .shortcuts]
+        let kinds: [VoiceCommandNotices.Kind] = [.places, .sidebars, .scripts, .shortcuts]
         #expect(Set(kinds.map(\.title)).count == kinds.count)
         #expect(Set(kinds.map(\.message)).count == kinds.count)
         #expect(VoiceCommandNotices.Kind.shortcuts.message.contains("send messages"))
         #expect(VoiceCommandNotices.Kind.shortcuts.message.contains("online services"))
+        #expect(VoiceCommandNotices.Kind.sidebars.message.contains("sidebar"))
     }
 
     @Test func aShortcutExampleUsesItsActualSpokenNameAndInput() {

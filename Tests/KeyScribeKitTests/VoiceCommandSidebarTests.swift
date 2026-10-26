@@ -95,9 +95,55 @@ struct VoiceCommandSidebarTests {
         }
     }
 
+    private func listing(_ names: [String], complete: Bool = true) -> SidebarListing {
+        SidebarListing(items: names.enumerated().map { item($1, at: [$0]) }, isComplete: complete)
+    }
+
+    @Test func theSidebarExampleUsesAnItemTheCommandWouldOpen() {
+        let example = VoiceCommandExample.sidebarExample(for: slack, items: listing(["general", "random"]))
+        #expect(example?.heard == "slack general")
+        #expect(example?.item.name == "general")
+    }
+
+    @Test func theSidebarExampleSkipsAPhraseAnotherCommandTakes() {
+        let mail = VoiceCommandPlace(name: "Mail", target: .sidebar(bundleId: "com.apple.mail"))
+        let inbox = VoiceCommandScript(name: "Mail Inbox", run: ["/bin/true"])
+        let items = SidebarListing(
+            items: ["Inbox", "Sent"].enumerated().map {
+                Item(bundleId: "com.apple.mail", pid: 9, name: $1, section: nil, path: [$0])
+            },
+            isComplete: true)
+        let example = VoiceCommandExample.sidebarExample(
+            for: mail, items: items, among: VoiceCommandConfig(commands: [.place(mail), .script(inbox)]))
+        #expect(example?.heard == "mail sent")
+    }
+
+    @Test func theSidebarExampleSkipsNamesListedMoreThanOnce() {
+        let example = VoiceCommandExample.sidebarExample(for: slack, items: listing(["general", "General", "random"]))
+        #expect(example?.heard == "slack random")
+    }
+
+    @Test func theSidebarExampleTriesOnlyAFewNames() {
+        var tried: [String] = []
+        let names = (0..<50).map { "room \($0)" }
+        let none = VoiceCommandExample.sidebarExample(
+            for: slack, items: listing(names), readAs: { tried.append($0); return "nothing" })
+        #expect(none == nil)
+        #expect(tried.count == VoiceCommandExample.sidebarExampleAttempts)
+    }
+
+    @Test func theSidebarExampleFollowsReplacementsAndAnIncompleteRead() {
+        let example = VoiceCommandExample.sidebarExample(
+            for: slack, items: listing(["general"], complete: false), readAs: { $0.replacingOccurrences(of: "slak", with: "slack") })
+        #expect(example?.heard == "slack general")
+        #expect(VoiceCommandExample.sidebarExample(for: slack, items: listing([])) == nil)
+        #expect(VoiceCommandExample.sidebarExample(
+            for: slack, items: listing(["general"]), readAs: { _ in "something else" }) == nil)
+    }
+
     @Test func aSidebarSearchExampleSaysWhereItLooks() {
         let example = VoiceCommandExample.make(for: .place(slack), appName: { _ in "Slack" })
         #expect(example.heard == "slack inbox")
-        #expect(example.result == "Opens the entry in Slack\u{2019}s sidebar whose name best matches \u{201C}inbox\u{201D}.")
+        #expect(example.result == "Opens the item in Slack\u{2019}s sidebar whose name best matches \u{201C}inbox\u{201D}.")
     }
 }

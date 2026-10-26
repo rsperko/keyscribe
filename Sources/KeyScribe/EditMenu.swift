@@ -1,7 +1,7 @@
 import AppKit
 
 public enum EditMenu {
-    public static func make() -> NSMenu {
+    @MainActor public static func make() -> NSMenu {
         let mainMenu = NSMenu()
 
         let editItem = NSMenuItem()
@@ -9,6 +9,11 @@ public enum EditMenu {
 
         let editMenu = NSMenu(title: "Edit")
         editItem.submenu = editMenu
+
+        let quit = NSMenuItem(title: "Quit \(Branding.appName)", action: #selector(AppQuit.quit(_:)), keyEquivalent: "q")
+        quit.target = AppQuit.shared
+        editMenu.addItem(quit)
+        editMenu.addItem(.separator())
 
         editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")

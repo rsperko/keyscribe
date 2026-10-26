@@ -124,20 +124,31 @@ struct SidebarOutlineTests {
         #expect(!SidebarOutline.confirms(name: "Sent", selected: false, windowTitle: nil))
     }
 
-    @Test func aCheckSaysWhatWasFound() {
-        func listing(_ names: [String], complete: Bool = true, switched: Bool = false) -> SidebarListing {
-            var listing = SidebarListing(
-                items: names.enumerated().map { Item(bundleId: "app", pid: 7, name: $1, section: nil, path: [$0]) },
-                isComplete: complete)
-            listing.switchedOnAccessibility = switched
-            return listing
-        }
-        #expect(listing([]).checkSummary(appName: "Slack")
-                == "Slack\u{2019}s front window shows no sidebar entries this command can open.")
-        #expect(listing(["general", "random", "Ana Diaz", "tech"]).checkSummary(appName: "Slack")
-                == "Found 4 entries in Slack\u{2019}s front window, such as general, random, and Ana Diaz.")
-        #expect(listing(["Inbox"], complete: false, switched: true).checkSummary(appName: "Slack")
-                == "Found 1 entry in Slack\u{2019}s front window, such as Inbox. Not every entry could be read, so a match will be offered as a choice before it opens. Slack\u{2019}s accessibility support was turned on to read it and stays on until Slack quits.")
+    private func listing(_ entries: [(String, String?)], complete: Bool = true, switched: Bool = false) -> SidebarListing {
+        var listing = SidebarListing(
+            items: entries.enumerated().map { Item(bundleId: "app", pid: 7, name: $1.0, section: $1.1, path: [$0]) },
+            isComplete: complete)
+        listing.switchedOnAccessibility = switched
+        return listing
+    }
+
+    @Test func itemsAreGroupedByTheirSectionInSidebarOrder() {
+        let slack = listing([("Threads", nil), ("general", "Channels"), ("Ana Diaz", "Direct Messages"), ("random", "Channels")])
+        #expect(slack.sections == [
+            .init(title: nil, names: ["Threads"]),
+            .init(title: "Channels", names: ["general", "random"]),
+            .init(title: "Direct Messages", names: ["Ana Diaz"]),
+        ])
+    }
+
+    @Test func theNotesSayWhatTheListMisses() {
+        #expect(listing([("Inbox", nil)]).notes(appName: "Mail").isEmpty)
+        #expect(listing([]).notes(appName: "Mail")
+                == ["Mail\u{2019}s front window shows no sidebar items this command can open."])
+        #expect(listing([("Inbox", nil)], complete: false, switched: true).notes(appName: "Slack") == [
+            "Not every item could be read, so a match will be offered as a choice before it opens.",
+            "Slack\u{2019}s accessibility support was turned on to read it and stays on until Slack quits.",
+        ])
     }
 
     @Test func openingRefusesAnEntryThatChangedSinceItWasRead() {

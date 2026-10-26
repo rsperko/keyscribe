@@ -2,12 +2,13 @@ import SwiftUI
 
 struct VoiceCommandNotices {
     enum Kind: String, CaseIterable {
-        case apps, places, scripts, shortcuts
+        case apps, places, sidebars, scripts, shortcuts
 
         var title: String {
             switch self {
-            case .apps: "Voice commands can open the wrong app"
+            case .apps: "Using Voice Commands"
             case .places: "A misheard name can open the wrong place"
+            case .sidebars: "A misheard name can open the wrong item"
             case .scripts: "Scripts can change your files"
             case .shortcuts: "Check what this shortcut does"
             }
@@ -16,9 +17,11 @@ struct VoiceCommandNotices {
         var message: String {
             switch self {
             case .apps:
-                "You start Voice Commands with its assigned shortcut. A misheard name can open the wrong app or bring the wrong window forward.\n\nThis may reveal its contents during screen sharing. Check which app is active before typing."
+                "Use your assigned shortcut to switch apps and windows by voice. You can also add commands that run scripts or Shortcuts.\n\nSpeech recognition can get a name or input wrong. A command may bring an unintended window into view, including during screen sharing, or start a saved action you did not intend.\n\nScripts and Shortcuts you run by voice may act without asking for confirmation. Depending on their steps, they can change files, send messages, or share information."
             case .places:
                 "A misheard command can open this place when you meant another. Its app or browser window comes forward, which may reveal its contents during screen sharing. Check which app is active before typing."
+            case .sidebars:
+                "A misheard item name can open a different channel, person, or mailbox in the app\u{2019}s sidebar. The app\u{2019}s window comes forward, which may reveal its contents during screen sharing."
             case .scripts:
                 "Saying this command starts the script with your account’s permissions. A misheard name or input can start the wrong action. Use a script that asks for confirmation before changing or deleting anything you cannot recover."
             case .shortcuts:

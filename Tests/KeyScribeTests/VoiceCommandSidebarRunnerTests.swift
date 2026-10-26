@@ -92,14 +92,16 @@ struct VoiceCommandSidebarRunnerTests {
 
     @Test func aCheckDescribesTheSidebarOrWhyItCannotBeRead() async {
         let (_, system) = make()
-        #expect(await VoiceCommandRunner.checkSidebar(of: slackId, system: system)
-                == "Found 1 entry in Slack\u{2019}s front window, such as general.")
+        guard case .listing(let listing, appName: "Slack") = await VoiceCommandRunner.checkSidebar(of: slackId, system: system) else {
+            Issue.record("expected a listing"); return
+        }
+        #expect(listing.items.map(\.name) == ["general"])
         system.sidebar = .unreadable(.notRunning)
         #expect(await VoiceCommandRunner.checkSidebar(of: slackId, system: system)
-                == VoiceCommandRunner.sidebarNotRunningMessage("Slack"))
+                == .problem(VoiceCommandRunner.sidebarNotRunningMessage("Slack")))
         system.sidebar = .unreadable(.noSidebar, switchedOnAccessibility: true)
         #expect(await VoiceCommandRunner.checkSidebar(of: slackId, system: system)
-                == VoiceCommandRunner.noSidebarMessage("Slack") + " " + SidebarListing.switchedNote(appName: "Slack"))
+                == .problem(VoiceCommandRunner.noSidebarMessage("Slack") + " " + SidebarListing.switchedNote(appName: "Slack")))
         #expect(system.sidebarReads == [slackId, slackId, slackId])
     }
 

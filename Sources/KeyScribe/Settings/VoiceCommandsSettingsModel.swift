@@ -9,6 +9,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     @Published private(set) var tryResult: TryResult?
     @Published private(set) var browserChoices: BrowserChoices = .loading
     @Published private(set) var shortcutChoices: ShortcutChoices = .loading
+    @Published var requestedSidebarCommand = false
 
     enum BrowserChoices: Equatable {
         case loading
@@ -43,6 +44,8 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     private let system: LiveVoiceCommandSystem
     private var tryTask: Task<Void, Never>?
     private var lastTried = ""
+    private var revision = 0
+    private var sidebarExampleCache: (place: VoiceCommandPlace, items: SidebarListing, revision: Int, example: SidebarExample?)?
 
     init(repository: ConfigRepository, system: LiveVoiceCommandSystem = .shared) {
         self.repository = repository
@@ -53,6 +56,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     }
 
     func reload() {
+        revision += 1
         switch VoiceCommandStore.load(supportDir: repository.supportDir) {
         case .absent:
             commands = []
@@ -185,6 +189,19 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             appName: { [system] in system.appName(forBundleId: $0) })
     }
 
+    typealias SidebarExample = (heard: String, item: VoiceCommandCatalog.SidebarItem)
+
+    // Each search resolves against a whole sidebar, so it runs once per input and reload rather than on every
+    // render; `revision` moves with every config change, because a saved command or replacement can take the phrase.
+    func sidebarExample(for place: VoiceCommandPlace, items: SidebarListing) -> SidebarExample? {
+        if let cached = sidebarExampleCache, cached.place == place, cached.items == items, cached.revision == revision {
+            return cached.example
+        }
+        let example = VoiceCommandExample.sidebarExample(for: place, items: items, among: saved, readAs: readAs)
+        sidebarExampleCache = (place, items, revision, example)
+        return example
+    }
+
     var currentApp: VoiceCommandCatalog.App? {
         guard let app = previousApp(), let bundleId = app.bundleIdentifier, bundleId != Bundle.main.bundleIdentifier else {
             return nil
@@ -230,7 +247,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
 
     var sidebarSearchEnabled: Bool { repository.sidebarSearchEnabled }
 
-    func checkSidebar(of bundleId: String) async -> String {
+    func checkSidebar(of bundleId: String) async -> VoiceCommandRunner.SidebarCheck {
         await VoiceCommandRunner.checkSidebar(of: bundleId, system: system)
     }
 
@@ -310,7 +327,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             return TryResult(heard: heard, summary: "Could not read browser tabs", detail: "", resolved: false)
         case .sidebarUnreadable(let app, .turnedOff) where sidebars:
             return TryResult(heard: heard, summary: "Looks in \(appName(app) ?? app)\u{2019}s sidebar",
-                             detail: "The preview does not read sidebars. Use Check Sidebar in this command\u{2019}s editor to see what it finds.",
+                             detail: "The preview does not read sidebars. Use Show Available Items in this command\u{2019}s editor to see what it can open.",
                              resolved: false)
         case .sidebarUnreadable(_, .turnedOff):
             return TryResult(heard: heard, summary: "Turned off", detail: VoiceCommandRunner.sidebarTurnedOffMessage, resolved: false)
