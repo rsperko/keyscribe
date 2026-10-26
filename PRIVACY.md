@@ -25,7 +25,9 @@ not a legal privacy policy.
 - **No telemetry, no analytics, no crash reporting.** KeyScribe does not collect or transmit speech,
   transcripts, usage data, or diagnostics. There is no account and no sign-in.
 - **History stays local.** Past dictations are stored as plain JSONL files under
-  `~/Library/Application Support/KeyScribe/` and are never uploaded.
+  `~/Library/Application Support/KeyScribe/` and are never uploaded. History is on by default and
+  keeps a limited number of days, which you can change or turn off in Settings. The history folder is
+  excluded from Time Machine backups.
 - **Your saved API keys stay in the Keychain.** BYOK provider keys are stored in the macOS
   Keychain. The on-disk config holds only a reference to a key, never the key material itself.
 - **Command-generated tokens are not persisted.** OpenAI-compatible endpoints can use a command that
@@ -134,7 +136,10 @@ recognizable-span redaction, is the only user content that can leave the machine
 Everything KeyScribe persists is a plain file under `~/Library/Application Support/KeyScribe/`:
 
 - **Config** (modes, connections, dictionary, replacements) as TOML.
-- **History** as JSONL, one file per day.
+- **History** as JSONL, one file per day. Each entry holds what you said and what was inserted, and,
+  for a mode that uses an AI service, the request sent to it. That request can include text from other
+  apps: the text you selected for a rewrite mode, and whatever context the mode attaches, such as text
+  before the cursor. It is plain text, readable by anything running as you.
 - **Replacement use counts** under `usage/`: for each of your replacements, how many dictations it
   changed and the day it was last used. No dictation text is stored there, and it is kept whether or
   not History is on.
@@ -142,6 +147,29 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
 
 You can inspect, back up, or delete any of it with the Finder or a text editor. Deleting the history
 files removes that history; removing the application support folder resets KeyScribe.
+
+While you dictate, the recording is written to a temporary file and deleted once it is transcribed. If
+KeyScribe quits in the middle of a dictation, it deletes the leftover recording the next time it starts,
+or within a few minutes of starting for a recording left by an older version.
+**Erase All KeyScribe Data** in Settings removes everything described here except downloaded speech
+models, including retained and leftover recordings, and also deletes saved API keys from the Keychain.
+One exception: a leftover recording made in the last few minutes by an older version of KeyScribe could
+still be in use by that version, so it is kept, and the next start deletes it.
+
+## What KeyScribe trusts
+
+KeyScribe treats its own settings folder as yours. Anything that can change the files in it can change
+what KeyScribe runs on your behalf:
+
+- **A connection's token command** runs through your login shell, as you, each time a token is needed.
+- **Voice commands** run the script or shortcut a command names, with the words you said.
+
+So protect that folder as you would your shell profile.
+
+A voice command acts on whatever the microphone hears while you are recording, not only your own voice.
+Anyone audible during a dictation, especially one you have left running, can supply the words a script
+receives. Keep that in mind before connecting a script that sends messages, changes files, or calls
+online services.
 
 ## Open source
 

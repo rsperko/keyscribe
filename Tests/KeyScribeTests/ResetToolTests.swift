@@ -17,6 +17,17 @@ struct ResetToolTests {
         return dir
     }
 
+    private func isolatedTool(_ dir: URL, _ defaults: UserDefaults) -> ResetTool {
+        var tool = ResetTool(supportDir: dir, defaults: defaults)
+        tool.modelsDir = dir.appendingPathComponent("models", isDirectory: true)
+        tool.captureArchiveDir = URL(fileURLWithPath: dir.path + "-captures", isDirectory: true)
+        tool.modelLoadDiagFile = URL(fileURLWithPath: dir.path + "-model-load.log")
+        tool.temporaryDir = URL(fileURLWithPath: dir.path + "-tmp", isDirectory: true)
+        tool.eraseKeychain = { [] }
+        tool.resetTCCService = { _, _ in "" }
+        return tool
+    }
+
     private func ephemeralDefaults() -> UserDefaults {
         let d = UserDefaults(suiteName: "reset-test-\(UUID().uuidString)")!
         d.set(true, forKey: ResetTool.firstRunKey)
@@ -29,7 +40,7 @@ struct ResetToolTests {
         let defaults = ephemeralDefaults()
         defaults.set(true, forKey: ResetTool.accessibilityAtLastLaunchKey)
 
-        ResetTool(supportDir: dir, defaults: defaults).run(.onboarding)
+        isolatedTool(dir, defaults).run(.onboarding)
 
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
         #expect(defaults.object(forKey: ResetTool.accessibilityAtLastLaunchKey) == nil)
@@ -43,7 +54,7 @@ struct ResetToolTests {
         let defaults = ephemeralDefaults()
         let fm = FileManager.default
 
-        ResetTool(supportDir: dir, defaults: defaults).run(.config)
+        isolatedTool(dir, defaults).run(.config)
 
         #expect(fm.fileExists(atPath: dir.appendingPathComponent("models/parakeet/weights.bin").path))
         #expect(!fm.fileExists(atPath: dir.appendingPathComponent("settings.toml").path))
@@ -58,7 +69,7 @@ struct ResetToolTests {
         let defaults = ephemeralDefaults()
         let fm = FileManager.default
 
-        var tool = ResetTool(supportDir: dir, defaults: defaults)
+        var tool = isolatedTool(dir, defaults)
         tool.modelsDir = dir.appendingPathComponent("models", isDirectory: true)
         tool.run(.all)
 
@@ -75,7 +86,7 @@ struct ResetToolTests {
         let defaults = ephemeralDefaults()
         let fm = FileManager.default
 
-        var tool = ResetTool(supportDir: dir, defaults: defaults)
+        var tool = isolatedTool(dir, defaults)
         tool.modelsDir = modelsDir.appendingPathComponent("models", isDirectory: true)
         tool.run(.all)
 
@@ -92,7 +103,7 @@ struct ResetToolTests {
         var keychainErased = false
         var tccCalls: [String] = []
 
-        var tool = ResetTool(supportDir: dir, defaults: defaults)
+        var tool = isolatedTool(dir, defaults)
         tool.modelsDir = dir.appendingPathComponent("models", isDirectory: true)
         tool.eraseKeychain = { keychainErased = true; return ["Erased 2 saved AI keys from the Keychain."] }
         tool.resetTCCService = { service, _ in tccCalls.append(service); return "" }
@@ -119,7 +130,7 @@ struct ResetToolTests {
         try Data("wav".utf8).write(to: captures.appendingPathComponent("commit-a.wav"))
         try Data("wav".utf8).write(to: captures.appendingPathComponent("commit-b.wav"))
 
-        var tool = ResetTool(supportDir: dir, defaults: ephemeralDefaults())
+        var tool = isolatedTool(dir, ephemeralDefaults())
         tool.modelsDir = dir.appendingPathComponent("models", isDirectory: true)
         tool.captureArchiveDir = captures
         tool.eraseKeychain = { [] }
@@ -130,11 +141,32 @@ struct ResetToolTests {
         #expect(actions.contains { $0.contains("2 retained recordings") })
     }
 
+    @Test func eraseAllRemovesTheModelLoadLogAndAbandonedRecordingsButSparesAFreshLegacyOne() throws {
+        let dir = try makeSupportDir()
+        var tool = isolatedTool(dir, ephemeralDefaults())
+        defer {
+            for url in [dir, tool.temporaryDir, tool.modelLoadDiagFile] { try? FileManager.default.removeItem(at: url) }
+        }
+        let fm = FileManager.default
+        try fm.createDirectory(at: tool.temporaryDir, withIntermediateDirectories: true)
+        try "engine failed".write(to: tool.modelLoadDiagFile, atomically: true, encoding: .utf8)
+        let abandoned = CaptureLeftovers.newURL(in: tool.temporaryDir, pid: 4242)
+        try Data("wav".utf8).write(to: abandoned)
+        let legacy = tool.temporaryDir.appendingPathComponent("\(CaptureLeftovers.prefix)\(UUID().uuidString).wav")
+        try Data("wav".utf8).write(to: legacy)
+        tool.isProcessAlive = { _ in false }
+        tool.run(.eraseAll)
+
+        #expect(!fm.fileExists(atPath: tool.modelLoadDiagFile.path))
+        #expect(!fm.fileExists(atPath: abandoned.path))
+        #expect(fm.fileExists(atPath: legacy.path))
+    }
+
     @Test func eraseAllReportsNoRecordingsWhenTheArchiveIsAbsent() throws {
         let dir = try makeSupportDir()
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        var tool = ResetTool(supportDir: dir, defaults: ephemeralDefaults())
+        var tool = isolatedTool(dir, ephemeralDefaults())
         tool.modelsDir = dir.appendingPathComponent("models", isDirectory: true)
         tool.captureArchiveDir = dir.deletingLastPathComponent()
             .appendingPathComponent("keyscribe-absent-\(UUID().uuidString)", isDirectory: true)
@@ -150,7 +182,7 @@ struct ResetToolTests {
         let defaults = ephemeralDefaults()
         var calls: [String] = []
 
-        var tool = ResetTool(supportDir: dir, defaults: defaults)
+        var tool = isolatedTool(dir, defaults)
         tool.bundleID = "com.keyscribe.app"
         tool.resetTCCService = { service, bundleID in
             calls.append("\(service):\(bundleID)")
@@ -169,7 +201,7 @@ struct ResetToolTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let modesDir = dir.appendingPathComponent("modes")
 
-        ResetTool(supportDir: dir, defaults: ephemeralDefaults()).run(.modes)
+        isolatedTool(dir, ephemeralDefaults()).run(.modes)
 
         let tomls = (try? FileManager.default.contentsOfDirectory(at: modesDir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "toml" }) ?? []

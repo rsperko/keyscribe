@@ -39,8 +39,7 @@ enum KeyScribePaths {
     @discardableResult
     static func ensureModelsDir() -> URL {
         let dir = modelsDir
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        BackupExclusion.exclude(dir)
+        BackupExclusion.ensureExcluded(dir)
         return dir
     }
 

@@ -177,6 +177,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         configProblemAnnouncement = ConfigProblemAnnouncement(baseline: configProblems)
         history = HistoryStore(supportDir: KeyScribePaths.supportDir)
         history.applyRetention(retentionDays: settings.history.retentionDays)
+        BackupExclusion.ensureExcluded(history.dir)
+        Task.detached(priority: .utility) {
+            CaptureLeftovers.sweep()
+            try? await Task.sleep(for: .seconds(CaptureLeftovers.legacyMinimumAge))
+            CaptureLeftovers.sweep()
+        }
         // Before the controller exists, so the first dictation already archives.
         CaptureArchive.publish(settings.audio)
         CaptureArchive.applyRetention()

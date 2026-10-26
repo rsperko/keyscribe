@@ -486,8 +486,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         guard let recordFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32, sampleRate: Double(sampleRate),
             channels: 1, interleaved: false) else { throw AudioCaptureError.formatUnavailable }
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("keyscribe-capture-\(UUID().uuidString).wav")
+        let url = CaptureLeftovers.newURL()
         let file = try AVAudioFile(forWriting: url, settings: recordFormat.settings)
 
         // Bail before publishing shared state if a watchdog already superseded this arm.

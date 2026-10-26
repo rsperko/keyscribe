@@ -20,6 +20,9 @@ struct ResetTool {
     // Retained capture WAVs (`[audio] keep_captures`). A sibling of supportDir, so no supportDir wipe reaches
     // it — but it is raw user speech, which is exactly what an erase promises to destroy.
     var captureArchiveDir: URL = KeyScribePaths.captureArchiveDir
+    var modelLoadDiagFile: URL = KeyScribePaths.modelLoadDiagFile
+    var temporaryDir: URL = FileManager.default.temporaryDirectory
+    var isProcessAlive: (Int32) -> Bool = CaptureLeftovers.isRunning
     var bundleID: String = Bundle.main.bundleIdentifier ?? "com.keyscribe.app"
     // Test seam: dispatch without touching the real TCC database.
     var resetTCCService: (_ service: String, _ bundleID: String) -> String = ResetTool.tccutilReset
@@ -44,6 +47,7 @@ struct ResetTool {
     private func eraseAllData() -> [String] {
         var actions = wipeAll()
         actions += eraseCaptureArchive()
+        actions += eraseLeftovers()
         actions += eraseKeychain()
         return actions
     }
@@ -55,6 +59,13 @@ struct ResetTool {
         guard !contents.isEmpty else { return [] }
         try? fileManager.removeItem(at: captureArchiveDir)
         return ["Erased \(contents.count) retained recording\(contents.count == 1 ? "" : "s") from \(captureArchiveDir.path)."]
+    }
+
+    private func eraseLeftovers() -> [String] {
+        try? fileManager.removeItem(at: modelLoadDiagFile)
+        let count = CaptureLeftovers.sweep(in: temporaryDir, isAlive: isProcessAlive)
+        guard count > 0 else { return [] }
+        return ["Erased \(count) recording\(count == 1 ? "" : "s") left behind by an interrupted dictation."]
     }
 
     private static func eraseKeychainKeys() -> [String] {

@@ -18,6 +18,12 @@ enum BackupExclusion {
         }
     }
 
+    @discardableResult
+    static func ensureExcluded(_ dir: URL) -> Bool {
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return exclude(dir)
+    }
+
     static func isExcluded(_ url: URL) -> Bool {
         (try? url.resourceValues(forKeys: [.isExcludedFromBackupKey]))?.isExcludedFromBackup ?? false
     }

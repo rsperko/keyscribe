@@ -36,4 +36,13 @@ struct BackupExclusionTests {
         #expect(BackupExclusion.exclude(missing) == false)
         #expect(BackupExclusion.isExcluded(missing) == false)
     }
+
+    @Test func ensuringCreatesAMissingDirectoryAndExcludesIt() throws {
+        let parent = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let history = parent.appendingPathComponent("history", isDirectory: true)
+
+        #expect(BackupExclusion.ensureExcluded(history) == true)
+        #expect(BackupExclusion.isExcluded(history) == true)
+    }
 }
