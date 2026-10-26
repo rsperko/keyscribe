@@ -107,9 +107,11 @@ struct AccessibilityRecoveryTests {
 
     @Test func boundedRunnerTerminatesAProcessThatOutlivesItsBudget() async {
         let started = Date()
-        let outcome = await ResetTool.runBounded(URL(fileURLWithPath: "/bin/sleep"), ["30"], timeoutSeconds: 0.2)
+        let outcome = await ResetTool.runBounded(URL(fileURLWithPath: "/bin/sleep"), ["60"], timeoutSeconds: 0.2)
         #expect(outcome == .timedOut)
-        #expect(Date().timeIntervalSince(started) < 5)
+        // Bounded against the child's lifetime, not a tight wall clock: this suite resumes on a main actor the
+        // rest of a parallel run also uses, so a tight bound measured that contention instead of the runner.
+        #expect(Date().timeIntervalSince(started) < 30)
     }
 
     @Test func boundedRunnerReportsAnExecutableThatCannotLaunch() async {

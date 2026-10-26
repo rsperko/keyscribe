@@ -8,7 +8,7 @@ struct VoiceCommandNotices {
             switch self {
             case .apps: "Using Voice Commands"
             case .places: "A misheard name can open the wrong place"
-            case .sidebars: "A misheard name can open the wrong item"
+            case .sidebars: "A misheard name can open the wrong app or item"
             case .scripts: "Scripts can change your files"
             case .shortcuts: "Check what this shortcut does"
             }
@@ -21,7 +21,7 @@ struct VoiceCommandNotices {
             case .places:
                 "A misheard command can open this place when you meant another. Its app or browser window comes forward, which may reveal its contents during screen sharing. Check which app is active before typing."
             case .sidebars:
-                "A misheard item name can open a different channel, person, or mailbox in the app\u{2019}s sidebar. The app\u{2019}s window comes forward, which may reveal its contents during screen sharing."
+                "A misheard command can open this app when you meant another, or a different item in its sidebar, such as the wrong channel or mailbox. The app\u{2019}s window comes forward, which may reveal its contents during screen sharing."
             case .scripts:
                 "Saying this command starts the script with your account’s permissions. A misheard name or input can start the wrong action. Use a script that asks for confirmation before changing or deleting anything you cannot recover."
             case .shortcuts:

@@ -688,7 +688,9 @@ link, or tab, and a *script* one that runs a program or shortcut.
   across browsers are still offered as a choice. Said alone, a tab search with a `browser`
   brings that browser forward; one without asks for words to find. Reading tabs uses the same Automation
   permission as a web place.
-- **Sidebar searches** (`sidebar = "<bundle id>"`) are experimental: they run only while the
+- **Sidebar searches** (`sidebar = "<bundle id>"`) are what an app command with **Find items in this app**
+  turned on saves: the option replaces `app = "<bundle id>"` with `sidebar` for the same bundle id, and
+  turning it off writes `app` back, keeping the command's `id`, `name`, and `say`. They are experimental: they run only while the
   `Feature.sidebarSearch` flag is on, and otherwise fail with a message saying how to turn it on (said
   alone, one still brings its app forward). They find an entry listed in the sidebar of that app's front
   window: the leftmost outline it shows, such as chat channels and people, mailboxes, or note folders. An
@@ -697,7 +699,8 @@ link, or tab, and a *script* one that runs a program or shortcut.
   a run of words, words in any order, or a near-miss), and entries tied at the winning step are always
   offered as a choice with their group shown; there is no automatic pick. Only entries the app shows are
   found, so a collapsed section or a long list that draws only its visible rows can hide one. The sidebar is
-  read through Accessibility only when the command runs, never in the background; an app built on Electron
+  read through Accessibility when the command searches for an item or you press Show Available Items; it is
+  never read in the background; an app built on Electron
   whose sidebar is not exposed has its accessibility support turned on first (`AXManualAccessibility`), which
   stays on until that app quits. When the sidebar could not be read in full (it lists more than
   `SidebarOutline.itemLimit` entries, or the read was cut short), even a single match is offered as a choice,

@@ -1021,19 +1021,28 @@ struct DictationCaptureStartTests {
         #expect(controller.isBusy == false)
     }
 
-    @Test func startIsCancellableWithNoVisibleHUDBeforeCaptureIsLive() {
+    @Test func startIsCancellableWithNoVisibleHUDBeforeCaptureIsLive() async {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: supportDir) }
         let hud = HUDSpy()
-        let audio = GatedStartAudio(url: supportDir.appendingPathComponent("capture.wav"), gate: Signal())
+        let gate = Signal()
+        let audio = GatedStartAudio(url: supportDir.appendingPathComponent("capture.wav"), gate: gate)
         let controller = makeController(
             audio: audio, hud: hud, insertSpy: InsertSpy(), supportDir: supportDir)
 
         controller.handleStart()
+        let bringUpTask = controller.captureBringUpTask
 
         #expect(!hud.states.contains { $0 != .hidden })
         #expect(controller.isCancellable)
+
+        // Unwind the bring-up before the test ends: a start left parked on the gate outlives the test, and
+        // its bounded wait then fails the whole run once the run lasts longer than that bound.
+        controller.handleCommit()
+        gate.fire()
+        await bringUpTask?.value
+        #expect(controller.isBusy == false)
     }
 
     @Test func startDuringCanceledBringUpIsIgnoredUntilCleanupFinishes() async {

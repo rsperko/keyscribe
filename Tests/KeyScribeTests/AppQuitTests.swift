@@ -13,8 +13,10 @@ struct AppQuitTests {
         return window
     }
 
-    private func spin(until done: () -> Bool) {
-        let deadline = Date().addingTimeInterval(2)
+    // These tests turn the main run loop, which every main-actor test in a parallel run shares, so keep each
+    // spin as short as its purpose allows.
+    private func spin(for seconds: TimeInterval = 2, until done: () -> Bool) {
+        let deadline = Date().addingTimeInterval(seconds)
         while !done(), Date() < deadline { RunLoop.main.run(until: Date().addingTimeInterval(0.02)) }
     }
 
@@ -40,7 +42,7 @@ struct AppQuitTests {
         spin { settings.attachedSheet != nil }
         #expect(settings.attachedSheet != nil)
         AppQuit.closeModals(in: [settings])
-        spin { false }
+        spin(for: 0.3) { settings.attachedSheet != nil }
         #expect(settings.attachedSheet == nil)
     }
 

@@ -61,7 +61,7 @@ public struct Feature: CaseIterable, Hashable, Sendable {
     public static let sidebarSearch = Feature(
         id: "voice_command_sidebars",
         title: "Open sidebar items by voice",
-        summary: "Add a command such as \u{201C}mail sent\u{201D} to open items listed in an app\u{2019}s sidebar.",
+        summary: "Find mailboxes, channels, and other sidebar items by adding their names after an app command. Configure this when adding or editing an app command.",
         requires: voiceCommands
     )
 

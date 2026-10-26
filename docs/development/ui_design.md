@@ -976,17 +976,14 @@ Its sections are, in order:
    anything; the empty state says the same. **Add Command…** offers outcome-named starting points: **Open
    Current App (name)** and, when that app is a browser that can list its tabs, **Open Current Browser Tab**
    (both read from the app that was frontmost when Settings opened); then **Open an App or Link…**, **Find a
-   Browser Tab…**, **Open a Sidebar Item…** (only while the experimental **Open sidebar items by
-   voice** flag is on), **Run a Shortcut…**, a divider, and **Run a Script…** for advanced setup. Until the browsers
+   Browser Tab…**, **Run a Shortcut…**, a divider, and **Run a Script…** for advanced setup. Until the browsers
    on this Mac have been checked, a disabled **Checking browsers…** item stands where **Open Current Browser
    Tab** would be. Every starting point opens a normal command sheet that saves an ordinary entry in this
    list, edited from its row; there is no separate template lifecycle.
 
    Every sheet shares one shape: its warning, **What will you say?**, **What should happen?** (the app, link,
    tab search's browser, shortcut, or program), then the optional input or arguments, and **Preview**; the
-   technical details sit last. The one exception is **Open a Sidebar Item**, which is app-first:
-   **What should happen?** (the app and **Show Available Items**) comes before **What will you say?**, and its
-   warning sits after setup. The starting point still suggests a name until the user types one.
+   technical details sit last. The starting point still suggests a name until the user types one.
    **What will you say?** has **Spoken name** with a caption saying what saying it does, and optional
    **Other names** separated by commas, whose caption suggests one for a word that is often misheard. There
    is no setting for whether a name works on its own: every saved name does. Any phrase can be a name,
@@ -1034,26 +1031,31 @@ Its sections are, in order:
    **A browser tab** destination) says to say the name, then words from the tab's title or site, and has the
    **Browser** picker and a **Switch without asking** toggle (off by default): when on, tabs that match equally
    well in one browser switch to the leftmost match in its frontmost window that has one instead of offering a
-   choice; ties across browsers still offer one. **Open a Sidebar Item** (the **A sidebar item**
-   destination) is app-first: its **What should happen?** section comes before **What will you say?**, and
-   choosing the app suggests the spoken name. Under the **App** chooser, an always-visible caption says to say
-   the name and then a channel, person, mailbox, or folder listed in the sidebar of the app's front window,
-   that only items the sidebar shows can be found (expand a collapsed section or scroll to reach a hidden
-   one), and that it asks when several match. **Show Available Items** reads the sidebar now; the caption
-   beside it, visible before it is pressed, says some apps first turn on their accessibility support, which
-   stays on until they quit and can use more memory. The result lists the items it found grouped by sidebar
-   section, a validated example phrase when one is found (the spoken name paired with an item it would really
-   open, checked against every saved command and the user's replacements so a saved action whose name starts
-   the same way is never promised; only a few distinct names are tried, so none may be shown), and notes when
-   the read was
-   incomplete or turned on the app's accessibility support; or, in orange, why the sidebar could not be read.
-   A collapsed **Reading the sidebar** section (summary “Uses Accessibility”) holds the technical detail. A
-   spoken command whose open cannot be confirmed shows an orange advisory naming the item instead of the
-   usual confirmation. **Preview** never reads a sidebar: it says the command would look in the app's sidebar
-   and points to **Show Available Items**. While the flag is off, the destination is offered only for a
-   command that already uses it, **Show Available Items** is disabled, and both the sheet and the row show an
-   orange advisory saying how to turn it on. Its warning, **A misheard name can open the wrong item**, is
-   written for sidebar items and sits after setup rather than above the app chooser, even on a new command. Its rows show a **Sidebar** badge and the app's icon. The **Browser** picker lists every
+   choice; ties across browsers still offer one. **Find items in this app** is
+   an optional toggle on an **An app** command, offered while the experimental **Open sidebar items by voice**
+   flag is on (and always on a command that already uses it). It is off by default, so the ordinary app command
+   is unchanged; turning it on reveals the rest. The spoken name alone still brings the app forward; extra
+   words find an item in the app's sidebar, such as a mailbox, channel, person, or folder. A caption built from
+   the chosen app and spoken name says exactly that (for a command named mail: “mail” alone brings Mail
+   forward, and “mail” followed by an item's name finds that item), that several matches ask which one was meant, and plainly: “Only items currently shown
+   in the app's sidebar can be found. Expand sections or scroll to reveal other items.” **Show Available Items**
+   reads the sidebar now; the caption beside it, visible before it is pressed, says some apps first turn on
+   their accessibility support, which stays on until they quit and can use more memory. The result lists the
+   items it found grouped by sidebar section, a validated example phrase when one is found (the spoken name
+   paired with an item it would really open, checked against every saved command and the user's replacements
+   so a saved action whose name starts the same way is never promised; only a few distinct names are tried, so
+   none may be shown), and notes when the read was incomplete or turned on the app's accessibility support; or,
+   in orange, why the sidebar could not be read. A collapsed **Reading the sidebar** section (summary “Uses
+   Accessibility”) holds the technical detail. While the option is on, the sheet's one warning is **A misheard
+   name can open the wrong app or item** in place of the place warning, so the two never stack. Turning the
+   option off saves an ordinary app command with the same identity, spoken name, and other names. A spoken
+   command whose open cannot be confirmed shows an orange advisory naming the item instead of the usual
+   confirmation. **Preview** never reads a sidebar: it says the command would look in the app's sidebar and
+   points to **Show Available Items**. While the flag is off, a command that already finds items keeps the
+   option on and editable, and it stays on screen for the rest of that edit even after being switched off so
+   the change can be undone in place; **Show Available Items** is disabled, and both the sheet and the row show an orange
+   advisory saying how to turn the flag on. Its row reads as an app command: the **App** badge, the app's icon,
+   and “<app> · finds items in its sidebar”. The **Browser** picker lists every
    app that opens web links, including ones whose tabs cannot be read (their pages open directly), plus
    **Any browser**. While browsers are being checked, a caption says **Checking browsers…**, and **Any
    browser** or a saved browser stays selected; a refresh never changes a choice the user made. Entering
@@ -1158,8 +1160,8 @@ reset. (Notices live in the separate **About & Notices** window, not here.)
   `docs/troubleshooting.md`). A transient caption confirms the copy; there is no separate window.
 - **Experimental features** lists one toggle per flag. A flag that builds on another sits indented under
   it and is disabled while that one is off. **Open sidebar items by voice** sits under **Voice Commands**;
-  while both are on, an **Add a Sidebar Command…** button under it opens the Voice Commands mode with the
-  **Open a Sidebar Item** sheet, so setup does not have to be found through Modes.
+  its summary says what it does and that it is configured when adding or editing an app command. Maintenance
+  only enables experiments: there is no setup button here.
 - *(Parked, not v1:)* a dedicated diagnostics/migration-error surface and a separate `models/`
   weights-folder reveal (the folder is reachable via Reveal Config today); plus an optional
   `KEYSCRIBE_CONFIG_DIR` override for users who keep config in a dotfiles directory — added only if

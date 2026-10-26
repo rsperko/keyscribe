@@ -5,11 +5,17 @@ import Testing
 
 @MainActor
 struct VoiceCommandsSettingsModelTests {
+    // No installed apps or browsers: a preview that falls through to browser tabs would otherwise ask macOS for
+    // Automation consent on behalf of the test runner and wait on a prompt nobody answers.
+    private func isolatedModel(_ repository: ConfigRepository) -> VoiceCommandsSettingsModel {
+        VoiceCommandsSettingsModel(repository: repository, system: LiveVoiceCommandSystem(roots: [], handlers: { [] }))
+    }
+
     private func make() -> (VoiceCommandsSettingsModel, URL) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-vcsettings-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let repository = ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir))
-        return (VoiceCommandsSettingsModel(repository: repository), dir)
+        return (isolatedModel(repository), dir)
     }
 
     private let mail = VoiceCommandPlace(name: "Mail", say: ["inbox"], target: .url("https://mail.google.com/"))
@@ -120,7 +126,7 @@ struct VoiceCommandsSettingsModelTests {
         try ModeStore.write(commands, to: modesDir)
         let config = ConfigCache(supportDir: dir)
         config.voiceCommandsEnabled = true
-        let model = VoiceCommandsSettingsModel(repository: ConfigRepository(supportDir: dir, config: config))
+        let model = isolatedModel(ConfigRepository(supportDir: dir, config: config))
         _ = config.resolved
 
         try "not toml".write(to: modesDir.appendingPathComponent("\(Mode.voiceCommandsId).toml"), atomically: true, encoding: .utf8)
@@ -137,7 +143,7 @@ struct VoiceCommandsSettingsModelTests {
         var commands = Mode.voiceCommands
         commands.replacements.rules = [.init(heard: "inbox", replace: "switch to inbox", regex: false)]
         try repository.writeMode(commands)
-        let model = VoiceCommandsSettingsModel(repository: repository)
+        let model = isolatedModel(repository)
         let inbox = VoiceCommandScript(name: "Inbox", run: ["/usr/bin/true"])
         #expect(model.example(for: .script(inbox)).conflict
                 == "Your replacements read \u{201C}inbox\u{201D} as \u{201C}switch to inbox\u{201D}, so it does not run this command.")
@@ -153,7 +159,7 @@ struct VoiceCommandsSettingsModelTests {
         var commands = Mode.voiceCommands
         commands.replacements.rules = [.init(heard: "male", replace: "mail", regex: false)]
         try repository.writeMode(commands)
-        let model = VoiceCommandsSettingsModel(repository: repository)
+        let model = isolatedModel(repository)
         #expect(model.readAs("switch to male") == "switch to mail")
         usage.flush()
         #expect(usage.snapshot().rules["mode:\(Mode.voiceCommandsId)|l|male"]?.count == 0)
@@ -244,11 +250,39 @@ struct VoiceCommandsSettingsModelTests {
         #expect(search.place == VoiceCommandPlace(id: search.commandId, name: "Chrome", target: .tabSearch, browser: "com.google.Chrome"))
     }
 
-    @Test func aSidebarDraftRoundTrips() {
+    @Test func aSidebarCommandOpensAsAnAppCommandThatFindsItems() {
         let saved = VoiceCommandPlace(name: "Slack", target: .sidebar(bundleId: "com.tinyspeck.slackmacgap"))
         let draft = PlaceDraft(saved)
-        #expect(draft.kind == .sidebar)
+        #expect(draft.kind == .app)
+        #expect(draft.findsItems)
         #expect(draft.place == saved)
+    }
+
+    @Test func findingItemsTogglesBetweenAnAppAndASidebarCommandKeepingItsIdentity() {
+        let slack = "com.tinyspeck.slackmacgap"
+        let saved = VoiceCommandPlace(name: "Slack", say: ["chat"], target: .sidebar(bundleId: slack))
+        var draft = PlaceDraft(saved)
+        draft.findsItems = false
+        #expect(draft.place == VoiceCommandPlace(id: saved.id, name: "Slack", say: ["chat"], target: .app(bundleId: slack)))
+        draft.findsItems = true
+        #expect(draft.place == saved)
+        #expect(!PlaceDraft(VoiceCommandPlace(name: "Slack", target: .app(bundleId: slack))).findsItems)
+    }
+
+    @Test func theFindItemsOptionStaysOfferedForTheWholeEditOfACommandThatUsedIt() {
+        let slack = "com.tinyspeck.slackmacgap"
+        var draft = PlaceDraft(VoiceCommandPlace(name: "Slack", target: .sidebar(bundleId: slack)))
+        draft.findsItems = false
+        #expect(draft.offersFindingItems(experimentOn: false))
+        #expect(!PlaceDraft(VoiceCommandPlace(name: "Slack", target: .app(bundleId: slack))).offersFindingItems(experimentOn: false))
+        #expect(PlaceDraft(name: "", kind: .app).offersFindingItems(experimentOn: true))
+    }
+
+    @Test func findingItemsAppliesOnlyToAnApp() {
+        var draft = PlaceDraft(VoiceCommandPlace(name: "Slack", target: .sidebar(bundleId: "com.tinyspeck.slackmacgap")))
+        draft.kind = .webPage
+        draft.url = "https://example.com"
+        #expect(draft.place.target == .url("https://example.com"))
     }
 
     @Test func aTabSearchDraftKeepsQuickSwitchOnlyWhileItFindsTabs() {

@@ -101,8 +101,6 @@ struct VoiceCommandsEditorView: View {
             Task { await model.loadBrowserChoices() }
         }
         .onDisappear { capturingTab?.cancel() }
-        .onAppear(perform: openRequestedSidebarCommand)
-        .onChange(of: model.requestedSidebarCommand) { _, _ in openRequestedSidebarCommand() }
         .sheet(item: $editing) { draft in
             PlaceEditorSheet(draft: draft, model: model) { editing = nil }
         }
@@ -210,7 +208,7 @@ struct VoiceCommandsEditorView: View {
                 }
             }
             Spacer()
-            PaneBadge(place.isTabSearch ? "Tab search" : place.sidebarApp != nil ? "Sidebar" : place.isAppLink ? "App link" : place.isWebPage ? "Web page" : "App")
+            PaneBadge(place.isTabSearch ? "Tab search" : place.sidebarApp != nil ? "App" : place.isAppLink ? "App link" : place.isWebPage ? "Web page" : "App")
             Button("Edit…") { edit(place: PlaceDraft(place)) }
                 .accessibilityLabel("Edit place \(place.name)")
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeEdit(VoiceCommandText.key(place.name).replacingOccurrences(of: " ", with: "-")))
@@ -256,7 +254,7 @@ struct VoiceCommandsEditorView: View {
         case .tabSearch:
             return "Finds an open tab in " + (place.browser.map(model.appName) ?? "any browser")
         case .sidebar(let bundleId):
-            return "Finds an entry in the sidebar of " + model.appName(bundleId)
+            return model.appName(bundleId) + " \u{00B7} finds items in its sidebar"
         }
     }
 
@@ -281,10 +279,6 @@ struct VoiceCommandsEditorView: View {
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addApp)
             Button("Find a Browser Tab\u{2026}") { edit(place: PlaceDraft(name: "", kind: .tabSearch)) }
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addTabSearch)
-            if model.sidebarSearchEnabled {
-                Button("Open a Sidebar Item\u{2026}") { edit(place: PlaceDraft(name: "", kind: .sidebar)) }
-                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addSidebarSearch)
-            }
             Button("Run a Shortcut\u{2026}") { edit(shortcut: ShortcutDraft()) }
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addShortcut)
             Divider()
@@ -294,12 +288,6 @@ struct VoiceCommandsEditorView: View {
         .fixedSize()
         .disabled(model.hasUnreadableFile)
         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addCommand)
-    }
-
-    private func openRequestedSidebarCommand() {
-        guard model.requestedSidebarCommand else { return }
-        model.requestedSidebarCommand = false
-        edit(place: PlaceDraft(name: "", kind: .sidebar))
     }
 
     private func edit(place draft: PlaceDraft) {
@@ -387,7 +375,7 @@ extension VoiceCommandPlace {
 }
 
 struct PlaceDraft: Identifiable, Equatable {
-    enum Kind: String, CaseIterable { case app, webPage, tabSearch, sidebar }
+    enum Kind: String, CaseIterable { case app, webPage, tabSearch }
 
     let id = UUID()
     let commandId: String
@@ -399,6 +387,11 @@ struct PlaceDraft: Identifiable, Equatable {
     var url: String
     var browser: String
     var quickSwitch = false
+    // An app command can also find items in that app's sidebar; saved as its own target so existing files load.
+    var findsItems = false
+    // Whether it found items when the sheet opened: with the experiment off, the option must stay on screen
+    // for the whole edit so switching it off can be undone without reopening the sheet.
+    private var foundItems = false
     var notice: String?
     private var suggestion: String?
 
@@ -427,11 +420,13 @@ struct PlaceDraft: Identifiable, Equatable {
         case .tabSearch:
             kind = .tabSearch; bundleId = ""; url = ""
         case .sidebar(let app):
-            kind = .sidebar; bundleId = app; url = ""
+            kind = .app; bundleId = app; url = ""; findsItems = true; foundItems = true
         }
         browser = place.browser ?? ""
         quickSwitch = place.quickSwitch
     }
+
+    func offersFindingItems(experimentOn: Bool) -> Bool { experimentOn || findsItems || foundItems }
 
     mutating func suggest(_ suggested: String) {
         let current = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -451,10 +446,9 @@ struct PlaceDraft: Identifiable, Equatable {
         let forms = say.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         let target: VoiceCommandPlace.Target
         switch kind {
-        case .app: target = .app(bundleId: bundleId)
+        case .app: target = findsItems ? .sidebar(bundleId: bundleId) : .app(bundleId: bundleId)
         case .webPage: target = .url(url.trimmingCharacters(in: .whitespacesAndNewlines))
         case .tabSearch: target = .tabSearch
-        case .sidebar: target = .sidebar(bundleId: bundleId)
         }
         let takesBrowser = kind == .tabSearch || (kind == .webPage && !VoiceCommandPlace.isAppLink(url))
         let browserValue = takesBrowser && !browser.isEmpty ? browser : nil
@@ -480,17 +474,16 @@ private struct PlaceEditorSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title).font(.title2.bold())
             Form {
-                if draft.originalName == nil, draft.kind != .sidebar {
+                if draft.originalName == nil {
                     Section { notice }
                 }
-                if draft.kind == .sidebar { whatShouldHappen }
                 Section("What will you say?") {
                     CommandPhraseFields(
                         name: $draft.name, say: $draft.say,
                         caption: draft.kind == .tabSearch ? "Say this name, then words from the tab\u{2019}s title."
-                            : draft.kind == .sidebar ? "Say this name, then the name of an item in the app\u{2019}s sidebar."
+                            : draft.kind == .app && draft.findsItems ? "Say this name to open the app, or add an item\u{2019}s name to find it in the app\u{2019}s sidebar."
                             : "Say this name to open it.",
-                        namePrompt: draft.kind == .tabSearch ? "chrome" : draft.kind == .sidebar ? "slack" : "What would you like to call it?",
+                        namePrompt: draft.kind == .tabSearch ? "chrome" : "What would you like to call it?",
                         sayPrompt: "Optional, such as inbox, email",
                         nameIssue: nameIssue, sayIssue: sayIssue,
                         advisories: model.conflicts(for: .place(draft.place)),
@@ -498,17 +491,17 @@ private struct PlaceEditorSheet: View {
                             name: AccessibilityID.Mode.VoiceCommands.placeName,
                             say: AccessibilityID.Mode.VoiceCommands.placeSay))
                 }
-                if draft.kind != .sidebar { whatShouldHappen }
+                whatShouldHappen
                 CommandPreviewSection(
                     example: canSave ? model.example(for: .place(draft.place)) : nil,
                     id: AccessibilityID.Mode.VoiceCommands.placeExample)
-                if draft.originalName != nil || draft.kind == .sidebar {
+                if draft.originalName != nil {
                     Section { notice }
                 }
             }
             .formStyle(.grouped)
             if draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || ((draft.kind == .app || draft.kind == .sidebar) && draft.bundleId.isEmpty)
+                || (draft.kind == .app && draft.bundleId.isEmpty)
                 || (draft.kind == .webPage && draft.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
                 Text("Enter a spoken name and choose what should happen to continue.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -568,15 +561,13 @@ private struct PlaceEditorSheet: View {
                 Text("An app").tag(PlaceDraft.Kind.app)
                 Text("A link").tag(PlaceDraft.Kind.webPage)
                 Text("A browser tab").tag(PlaceDraft.Kind.tabSearch)
-                if model.sidebarSearchEnabled || draft.kind == .sidebar {
-                    Text("A sidebar item").tag(PlaceDraft.Kind.sidebar)
-                }
             }
             .pickerStyle(.segmented)
             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeKind)
             switch draft.kind {
             case .app:
                 appRow
+                findItems
             case .webPage:
                 VStack(alignment: .leading, spacing: 4) {
                     TextField("Link", text: $draft.url, prompt: Text("https://example.com/inbox"))
@@ -608,25 +599,44 @@ private struct PlaceEditorSheet: View {
                     Toggle("", isOn: $draft.quickSwitch).labelsHidden()
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeQuickSwitch)
                 }
-            case .sidebar:
-                appRow
+            }
+        }
+    }
+
+    @ViewBuilder private var findItems: some View {
+        if draft.offersFindingItems(experimentOn: model.sidebarSearchEnabled) {
+            SettingRow(
+                title: "Find items in this app",
+                help: "Open a mailbox, channel, or other item in the app\u{2019}s sidebar by saying its name after this command\u{2019}s name.")
+            {
+                Toggle("", isOn: $draft.findsItems).labelsHidden()
+                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeFindsItems)
+            }
+            if draft.findsItems {
                 if !model.sidebarSearchEnabled {
                     IssueText(
                         "Turned off. Turn on \u{201C}\(Feature.sidebarSearch.title)\u{201D} under Experimental features to use it.",
                         severity: .advisory)
                 }
-                Text("Say the name, then an item listed in the sidebar of the app\u{2019}s front window, such as a channel, person, mailbox, or folder. Only items the sidebar shows can be found, so expand a collapsed section or scroll to reach one that is hidden. When several items match, it asks which one you meant.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text(findItemsExplanation).font(.caption).foregroundStyle(.secondary)
                 availableItems
                 DisclosureSection(isExpanded: $sidebarDetailsExpanded) {
                     DisclosureSummaryLabel(title: "Reading the sidebar", summary: "Uses Accessibility")
                 } content: {
-                    Text("Reads the names listed in the sidebar of the app\u{2019}s front window, only when you say this command or show its items here. Some apps, such as Slack, list their sidebar only after their accessibility support is turned on; that stays on until the app quits and can make it use more memory.")
+                    Text("Reads the names listed in the sidebar of the app\u{2019}s front window, only when you say this command with more words or show its items here. Some apps, such as Slack, list their sidebar only after their accessibility support is turned on; that stays on until the app quits and can make it use more memory.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSidebarDetails)
             }
         }
+    }
+
+    private var findItemsExplanation: String {
+        let spoken = VoiceCommandText.key(draft.name)
+        let app = draft.bundleId.isEmpty ? "the app" : model.appName(draft.bundleId)
+        let said = spoken.isEmpty ? "Its name alone" : "\u{201C}\(spoken)\u{201D} alone"
+        let with = spoken.isEmpty ? "its name" : "\u{201C}\(spoken)\u{201D}"
+        return "\(said) brings \(app) forward. Say \(with) followed by an item\u{2019}s name to find that item in \(app)\u{2019}s sidebar and open it; when several match, it asks which one you meant. Only items currently shown in the app\u{2019}s sidebar can be found. Expand sections or scroll to reveal other items."
     }
 
     @ViewBuilder private var availableItems: some View {
@@ -689,7 +699,6 @@ private struct PlaceEditorSheet: View {
         guard draft.originalName == nil else { return "Edit Command" }
         switch draft.kind {
         case .tabSearch: return "Find a Browser Tab"
-        case .sidebar: return "Open a Sidebar Item"
         case .app, .webPage: return "Open an App or Link"
         }
     }
@@ -718,7 +727,7 @@ private struct PlaceEditorSheet: View {
     }
 
     private var notice: some View {
-        VoiceCommandNoticeRow(kind: draft.kind == .sidebar ? .sidebars : .places, needsAcknowledgment: draft.originalName == nil)
+        VoiceCommandNoticeRow(kind: draft.kind == .app && draft.findsItems ? .sidebars : .places, needsAcknowledgment: draft.originalName == nil)
             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeNotice)
     }
 

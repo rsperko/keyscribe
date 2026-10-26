@@ -144,15 +144,15 @@ the name of a command you saved under **Commands ▸ Add Command…**:
   Chrome only; `chrome` alone brings Chrome forward. Pick **Any browser** to search every browser instead.
   When several tabs match, you choose one; turn on **Switch without asking** to go straight to the frontmost
   one instead (matches in different browsers still ask).
-- **“mail sent”**, **“mail drafts”**, or **“slack general”** (experimental): one command opens anything
-  listed in an app's sidebar, such as a mailbox, folder, channel, or person, so you do not set up each
-  destination separately. Under **Maintenance ▸ Experimental features**, turn on **Open sidebar items by
-  voice** (it sits under **Voice Commands**), then press **Add a Sidebar Command…**. Pick the app, press
-  **Show Available Items** to see what the command can open and, when possible, an example phrase, and name it. Only items
-  the sidebar shows right now are found, so expand a collapsed section or scroll to reach a hidden one, and
-  two items with the same name ask which one you meant. It was tried in Slack, Mail, and Notes
-  (2026-10-25); other apps may not work. For one or two fixed destinations, an **Open an App or Link**
-  command is simpler.
+- **“mail”**, **“mail sent”**, **“mail drafts”** (experimental): one app command reaches many destinations.
+  Saying the name alone brings the app forward; adding the name of something in the app's sidebar, such as a
+  mailbox, folder, channel, or person, finds and opens it, so you do not set up each destination separately.
+  Under **Maintenance ▸ Experimental features**, turn on **Open sidebar items by voice** (under **Voice
+  Commands**). Then add or edit an **Open an App or Link** command for the app and turn on **Find items in this
+  app**. **Show Available Items** shows what the command can open and, when possible, an example phrase. Only
+  items currently shown in the app's sidebar can be found, so expand sections or scroll to reveal others, and
+  two items with the same name ask which one you meant. It was tried in Slack, Mail, and Notes (2026-10-25);
+  other apps may not work. For a single fixed destination, an app link (below) is simpler.
 - **“web hooks”** for a chat channel: choose **Open an App or Link**, pick **A link**, and paste the
   channel's app link (for one chat app, `slack://channel?team=…&id=…`, built from the IDs in the channel's
   details). Name it `web hooks`; the link opens in the chat app.

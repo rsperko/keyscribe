@@ -89,8 +89,8 @@ everything your account can do, and a misheard command can run them, so choose w
 way with care.
 
 Every Run a Script and Run a Shortcut sheet explains these consequences before saving, each in its own
-words, and every Open an App or Link, Find a Browser Tab, and Open a Sidebar Item sheet explains that it can bring an
-app's windows forward. Separately,
+words, and every Open an App or Link and Find a Browser Tab sheet explains that it can bring an app's
+windows forward. Separately,
 a notice before first enabling Voice Commands explains that recognition mistakes can bring an unintended
 window into view or start an unintended saved action. It also explains that scripts and Shortcuts run by
 voice may act without asking for confirmation and can change files, send messages, or share information.
@@ -98,9 +98,9 @@ voice may act without asking for confirmation and can change files, send message
 To find a window you name, Voice Commands reads the titles of your open windows on this Mac, only when
 no app or place matched what you said. The titles are not sent anywhere or written to diagnostic logs.
 
-An Open a Sidebar Item command (an experimental feature, off unless you turn it on) reads the names
-listed in that app's sidebar, such as channels, people, or mailboxes, only when you say it or press Show
-Available Items while editing it. The names are not sent anywhere or written to diagnostic logs. For some
+An app command with Find items in this app turned on (an experimental feature, off unless you turn it on)
+reads the names listed in that app's sidebar, such as channels, people, or mailboxes, only when you say it
+with an item's name or press Show Available Items while editing it. The names are not sent anywhere or written to diagnostic logs. For some
 apps, such as Slack, reading the sidebar first turns on the app's own accessibility support, which stays on
 until that app quits.
 

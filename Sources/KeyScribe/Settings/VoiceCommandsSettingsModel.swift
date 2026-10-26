@@ -9,7 +9,6 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     @Published private(set) var tryResult: TryResult?
     @Published private(set) var browserChoices: BrowserChoices = .loading
     @Published private(set) var shortcutChoices: ShortcutChoices = .loading
-    @Published var requestedSidebarCommand = false
 
     enum BrowserChoices: Equatable {
         case loading

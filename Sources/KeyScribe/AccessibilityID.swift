@@ -166,7 +166,6 @@ enum AccessibilityID {
             static let eraseConfirmConfirm = "settings.advanced.eraseConfirm.confirm"
             static let eraseConfirmCancel = "settings.advanced.eraseConfirm.cancel"
             static func feature(_ featureID: String) -> String { "settings.advanced.feature.\(featureID)" }
-            static let addSidebarCommand = "settings.advanced.addSidebarCommand"
         }
     }
 
@@ -199,7 +198,7 @@ enum AccessibilityID {
             static let actionPermissions = "mode.voiceCommands.actionPermissions"
             static let addCommand = "mode.voiceCommands.addCommand"
             static let addTabSearch = "mode.voiceCommands.addTabSearch"
-            static let addSidebarSearch = "mode.voiceCommands.addSidebarSearch"
+            static let placeFindsItems = "mode.voiceCommands.place.findsItems"
             static let addCurrentApp = "mode.voiceCommands.addCurrentApp"
             static let addCurrentTab = "mode.voiceCommands.addCurrentTab"
             static let addApp = "mode.voiceCommands.addApp"
@@ -437,7 +436,7 @@ enum AccessibilityID {
         Mode.VoiceCommands.addApp, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.previewDetails, Mode.VoiceCommands.editVocabulary,
         Mode.VoiceCommands.placeName, Mode.VoiceCommands.placeSay, Mode.VoiceCommands.placeKind,
         Mode.VoiceCommands.placeApp, Mode.VoiceCommands.placeURL, Mode.VoiceCommands.placeBrowser, Mode.VoiceCommands.placeBrowserDetails,
-        Mode.VoiceCommands.placeQuickSwitch, Mode.VoiceCommands.placeSidebarDetails, Mode.VoiceCommands.addSidebarSearch,
+        Mode.VoiceCommands.placeQuickSwitch, Mode.VoiceCommands.placeSidebarDetails, Mode.VoiceCommands.placeFindsItems,
         Mode.VoiceCommands.placeCheckSidebar, Mode.VoiceCommands.placeSidebarCheckResult, Mode.VoiceCommands.placeSidebarCheckNote,
         Mode.VoiceCommands.placeChooseFromApplications, Mode.VoiceCommands.placeEnterBundleID,
         Mode.VoiceCommands.placeBundleID, Mode.VoiceCommands.placeExample, Mode.VoiceCommands.scriptArgumentDetails,

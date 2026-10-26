@@ -455,11 +455,7 @@ struct SettingsRootView: View {
                 PermissionsSettingsView(
                     accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch)
             case .advanced:
-                MaintenanceSettingsView(model: general) {
-                    modes.selectedID = Mode.voiceCommandsId
-                    modes.voiceCommands.requestedSidebarCommand = true
-                    navigation.destination = .modes
-                }
+                MaintenanceSettingsView(model: general)
             }
         }
         .frame(minWidth: 760, idealWidth: 940, minHeight: 520, idealHeight: 640)
@@ -518,7 +514,6 @@ enum SettingsDestination: CaseIterable, Hashable, Identifiable {
 
 private struct MaintenanceSettingsView: View {
     @ObservedObject var model: SettingsModel
-    let onAddSidebarCommand: () -> Void
     @State private var confirmingErase = false
 
     private func featureToggle(_ feature: Feature) -> some View {
@@ -573,15 +568,9 @@ private struct MaintenanceSettingsView: View {
                     ForEach(Feature.topLevel, id: \.self) { feature in
                         featureToggle(feature)
                         ForEach(feature.dependents, id: \.self) { dependent in
-                            VStack(alignment: .leading, spacing: 6) {
-                                featureToggle(dependent)
-                                if dependent == .sidebarSearch, model.isEnabled(dependent) {
-                                    Button("Add a Sidebar Command\u{2026}", action: onAddSidebarCommand)
-                                        .accessibilityIdentifier(AccessibilityID.Settings.Advanced.addSidebarCommand)
-                                }
-                            }
-                            .padding(.leading, 20)
-                            .disabled(!model.isEnabled(feature))
+                            featureToggle(dependent)
+                                .padding(.leading, 20)
+                                .disabled(!model.isEnabled(feature))
                         }
                     }
                     Text("Opt in to features still under development. They default off and may change or be removed.")
