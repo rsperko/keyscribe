@@ -3,7 +3,6 @@ import Foundation
 public struct VoiceCommandExample: Equatable, Sendable {
     public static let sampleWords = "buy milk"
     public static let sampleTabWords = "inbox"
-    public static let sidebarExampleAttempts = 8
 
     public var heard: String
     public var result: String
@@ -42,34 +41,6 @@ public struct VoiceCommandExample: Equatable, Sendable {
         }
     }
 
-    // Pairs the command with the first listed item whose phrase this command really opens, so a saved action
-    // whose name starts the same way can never be the one the example promises.
-    public static func sidebarExample(
-        for place: VoiceCommandPlace, items listing: SidebarListing, among saved: VoiceCommandConfig = VoiceCommandConfig(),
-        readAs: (String) -> String = { $0 }
-    ) -> (heard: String, item: VoiceCommandCatalog.SidebarItem)? {
-        var catalog = catalog(with: .place(place), among: saved)
-        catalog.sidebarItems = listing.items
-        catalog.sidebarIsComplete = listing.isComplete
-        let phrase = VoiceCommandText.key(place.name)
-        // Each attempt resolves against the whole sidebar, so only a few distinct names are tried, and a name
-        // listed twice is skipped because saying it can only ask which one was meant.
-        let counts = Dictionary(listing.items.map { (VoiceCommandText.key($0.name), 1) }, uniquingKeysWith: +)
-        let unique = listing.items.filter { counts[VoiceCommandText.key($0.name)] == 1 }
-        for item in unique.prefix(sidebarExampleAttempts) {
-            let heard = "\(phrase) \(VoiceCommandText.key(item.name))"
-            switch VoiceCommandResolver.resolve(readAs(heard), catalog: catalog) {
-            case .action(.sidebarItem(let opened)) where opened == item:
-                return (heard, item)
-            case .ambiguous(let choice) where choice.candidates == [.sidebarItem(item)]:
-                return (heard, item)
-            default:
-                continue
-            }
-        }
-        return nil
-    }
-
     private static func list(_ names: [String]) -> String {
         names.count == 2 ? "\(names[0]) and \(names[1])" : names.dropLast().joined(separator: ", ") + ", and \(names[names.count - 1])"
     }
@@ -82,7 +53,7 @@ public struct VoiceCommandExample: Equatable, Sendable {
     private static func heard(for candidate: VoiceCommandCandidate) -> String {
         let phrase = VoiceCommandText.key(candidate.name)
         switch candidate {
-        case .place(let place) where place.searchesByName: return "\(phrase) \(sampleTabWords)"
+        case .place(let place) where place.isTabSearch: return "\(phrase) \(sampleTabWords)"
         case .script(let script) where script.takesText: return "\(phrase) \(sampleWords)"
         default: return phrase
         }
@@ -118,11 +89,8 @@ public struct VoiceCommandExample: Equatable, Sendable {
             case .tabSearch where !input.isEmpty:
                 let scope = place.browser.map { "open \(appName($0) ?? $0) tab" } ?? "open tab, in any browser,"
                 let across = place.browser == nil ? " Matches in different browsers still ask." : ""
-                let tie = place.quickSwitch
-                    ? " If several match equally, it picks the leftmost match in the frontmost window that has one.\(across)" : ""
+                let tie = " If several match equally, it picks the leftmost match in the frontmost window that has one.\(across)"
                 return "Switches to the \(scope) whose title or site best matches \u{201C}\(input)\u{201D}.\(tie)"
-            case .sidebar(let bundleId) where !input.isEmpty:
-                return "Opens the item in \(appName(bundleId) ?? bundleId)\u{2019}s sidebar whose name best matches \u{201C}\(input)\u{201D}."
             case .url(let url) where !place.isAppLink:
                 let inBrowser = place.browser.map { " in \(appName($0) ?? $0)" } ?? ""
                 return "Switches to an open tab at \(url)\(inBrowser), or opens it."

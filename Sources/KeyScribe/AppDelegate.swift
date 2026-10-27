@@ -153,7 +153,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 Log.config.error("replacement usage file was unreadable; moved to \(aside.lastPathComponent, privacy: .public) and started fresh")
             })
         config.voiceCommandsEnabled = settings.features.isEnabled(.voiceCommands)
-        config.sidebarSearchEnabled = settings.features.isEnabled(.sidebarSearch)
+        config.findsInAppsEnabled = settings.features.isEnabled(.findInApps)
         configRepository = ConfigRepository(
             supportDir: KeyScribePaths.supportDir, config: config, selfWriteGate: selfWriteGate,
             replacementUsage: replacementUsage)
@@ -206,10 +206,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hud.onCancelVoiceCommandChoice = { [weak self] id in self?.controller.cancelVoiceCommandChoice(choice: id) }
         hud.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
-        hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
+        hud.canCancel = { [weak self] in self?.controller.escapeCancels ?? false }
         hud.onEscapeCancel = { [weak self] in
             self?.hotkey.cancelGestures()
-            self?.controller.cancel()
+            self?.controller.cancelFromEscape()
             self?.refreshStatus()
         }
 
@@ -705,7 +705,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             selfWriteGate.adopt(ConfigTreeSnapshot.capture(supportDir: KeyScribePaths.supportDir))
             config.voiceCommandsEnabled = updated.features.isEnabled(.voiceCommands)
         }
-        config.sidebarSearchEnabled = updated.features.isEnabled(.sidebarSearch)
+        config.findsInAppsEnabled = updated.features.isEnabled(.findInApps)
         controller.updateSettings(updated)
         hud.appearance = updated.hud.appearance
         rebuildHotkeyMonitor()

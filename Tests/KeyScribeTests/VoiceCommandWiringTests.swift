@@ -37,6 +37,7 @@ struct VoiceCommandWiringTests {
     }
 
     private final class RunnerSpy: VoiceCommandRunning {
+        var onProgress: (@MainActor (VoiceCommandProgress) -> Void)?
         var outcome: VoiceCommandOutcome = .done(summary: "Ghostty", command: "Brings Ghostty to the front, opening it if needed.")
         var whileResolving: () -> Void = {}
         private(set) var calls: [(

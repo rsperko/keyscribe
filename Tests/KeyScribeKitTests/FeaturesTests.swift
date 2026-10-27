@@ -102,15 +102,15 @@ struct FeaturesTests {
         #expect(decoded.features.isEnabled(.voiceCommands))
     }
 
-    @Test func sidebarSearchDefaultsOff() {
-        #expect(!Settings.defaults.features.isEnabled(.sidebarSearch))
+    @Test func findInAppsDefaultsOff() {
+        #expect(!Settings.defaults.features.isEnabled(.findInApps))
     }
 
-    @Test func sidebarSearchIsNestedUnderVoiceCommands() {
-        #expect(Feature.sidebarSearch.requires == .voiceCommands)
-        #expect(Feature.voiceCommands.dependents == [.sidebarSearch])
+    @Test func findInAppsIsNestedUnderVoiceCommands() {
+        #expect(Feature.findInApps.requires == .voiceCommands)
+        #expect(Feature.voiceCommands.dependents == [.findInApps])
         #expect(Feature.voiceCommands.requires == nil)
-        #expect(!Feature.topLevel.contains(.sidebarSearch))
+        #expect(!Feature.topLevel.contains(.findInApps))
         #expect(Feature.topLevel.contains(.voiceCommands))
     }
 
@@ -123,18 +123,18 @@ struct FeaturesTests {
         #expect(Set(Feature.topLevel + Feature.topLevel.flatMap(\.dependents)) == Set(Feature.allCases))
     }
 
-    @Test func sidebarSearchOverridePersists() throws {
+    @Test func findInAppsOverridePersists() throws {
         var s = Settings.defaults
-        s.features.setEnabled(true, for: .sidebarSearch)
+        s.features.setEnabled(true, for: .findInApps)
         let toml = try SettingsStore.encode(s)
         #expect(toml.contains("voice_command_sidebars = true"))
-        #expect(try SettingsStore.decode(from: toml).features.isEnabled(.sidebarSearch))
+        #expect(try SettingsStore.decode(from: toml).features.isEnabled(.findInApps))
     }
 
-    @Test func sidebarSearchOffIsElided() throws {
+    @Test func findInAppsOffIsElided() throws {
         var s = Settings.defaults
-        s.features.setEnabled(true, for: .sidebarSearch)
-        s.features.setEnabled(false, for: .sidebarSearch)
+        s.features.setEnabled(true, for: .findInApps)
+        s.features.setEnabled(false, for: .findInApps)
         #expect(s.features == Settings.Features())
         #expect(try !SettingsStore.encode(s).contains("voice_command_sidebars"))
     }

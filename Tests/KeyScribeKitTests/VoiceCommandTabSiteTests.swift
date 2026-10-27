@@ -56,12 +56,9 @@ struct VoiceCommandTabSiteTests {
         #expect(resolve("chrome github", places: [chrome], tabs: [onSite]) == .action(.tab(onSite)))
     }
 
-    @Test func severalTabsOnOneSiteAskWhichOne() throws {
+    @Test func severalTabsOnOneSiteGoToTheLeftmost() {
         let pulls = tab("Pull requests", at: "https://github.com/pulls", tab: 1)
         let issues = tab("Issues", at: "https://github.com/issues", tab: 2)
-        guard case .ambiguous(let choice) = resolve("chrome github", places: [chrome], tabs: [pulls, issues]) else {
-            Issue.record("expected a choice"); return
-        }
-        #expect(choice.candidates == [.tab(pulls), .tab(issues)])
+        #expect(resolve("chrome github", places: [chrome], tabs: [issues, pulls]) == .action(.tab(pulls)))
     }
 }

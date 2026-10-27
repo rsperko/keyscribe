@@ -195,21 +195,6 @@ struct VoiceCommandsSettingsModelTests {
         #expect(model.tryResult?.summary == "Zzqvplace")
     }
 
-    @Test func aSidebarExampleFollowsSavedCommands() {
-        let (model, dir) = make()
-        defer { try? FileManager.default.removeItem(at: dir) }
-        let notes = VoiceCommandPlace(name: "Review Notes", target: .sidebar(bundleId: "com.apple.Notes"))
-        let listing = SidebarListing(
-            items: ["Shared", "Recipes"].enumerated().map {
-                VoiceCommandCatalog.SidebarItem(bundleId: "com.apple.Notes", pid: 3, name: $1, section: nil, path: [$0])
-            },
-            isComplete: true)
-        #expect(model.sidebarExample(for: notes, items: listing)?.heard == "review notes shared")
-        let taken = VoiceCommandScript(name: "Review Notes Shared", run: ["/usr/bin/true"])
-        #expect(model.saveScript(taken, replacing: nil) == nil)
-        #expect(model.sidebarExample(for: notes, items: listing)?.heard == "review notes recipes")
-    }
-
     private func waitFor(_ condition: () -> Bool) async throws {
         for _ in 0..<500 where !condition() { try await Task.sleep(for: .milliseconds(20)) }
         #expect(condition())
@@ -250,48 +235,24 @@ struct VoiceCommandsSettingsModelTests {
         #expect(search.place == VoiceCommandPlace(id: search.commandId, name: "Chrome", target: .tabSearch, browser: "com.google.Chrome"))
     }
 
-    @Test func aSidebarCommandOpensAsAnAppCommandThatFindsItems() {
-        let saved = VoiceCommandPlace(name: "Slack", target: .sidebar(bundleId: "com.tinyspeck.slackmacgap"))
+    @Test func theFirstExamplesNeedNothingSaved() {
+        #expect(VoiceCommandsEditorView.examples(findsInApps: true).map(\.phrase)
+                == ["\u{201C}open Mail\u{201D}", "\u{201C}open Slack general\u{201D}", "\u{201C}go back\u{201D}"])
+        #expect(VoiceCommandsEditorView.examples(findsInApps: false).map(\.phrase)
+                == ["\u{201C}open Mail\u{201D}", "\u{201C}go back\u{201D}"])
+    }
+
+    @Test func findingInsideAppsIsTaughtOnlyWhileItIsOn() {
+        #expect(VoiceCommandsEditorView.explanation(for: .focus, findsInApps: true).contains("open Slack general"))
+        #expect(!VoiceCommandsEditorView.explanation(for: .focus, findsInApps: false).contains("open Slack general"))
+    }
+
+    @Test func anOldSidebarCommandEditsAsAPlainAppCommand() {
+        let slack = "com.tinyspeck.slackmacgap"
+        let saved = VoiceCommandPlace(name: "Slack", say: ["chat"], target: .app(bundleId: slack))
         let draft = PlaceDraft(saved)
         #expect(draft.kind == .app)
-        #expect(draft.findsItems)
         #expect(draft.place == saved)
-    }
-
-    @Test func findingItemsTogglesBetweenAnAppAndASidebarCommandKeepingItsIdentity() {
-        let slack = "com.tinyspeck.slackmacgap"
-        let saved = VoiceCommandPlace(name: "Slack", say: ["chat"], target: .sidebar(bundleId: slack))
-        var draft = PlaceDraft(saved)
-        draft.findsItems = false
-        #expect(draft.place == VoiceCommandPlace(id: saved.id, name: "Slack", say: ["chat"], target: .app(bundleId: slack)))
-        draft.findsItems = true
-        #expect(draft.place == saved)
-        #expect(!PlaceDraft(VoiceCommandPlace(name: "Slack", target: .app(bundleId: slack))).findsItems)
-    }
-
-    @Test func theFindItemsOptionStaysOfferedForTheWholeEditOfACommandThatUsedIt() {
-        let slack = "com.tinyspeck.slackmacgap"
-        var draft = PlaceDraft(VoiceCommandPlace(name: "Slack", target: .sidebar(bundleId: slack)))
-        draft.findsItems = false
-        #expect(draft.offersFindingItems(experimentOn: false))
-        #expect(!PlaceDraft(VoiceCommandPlace(name: "Slack", target: .app(bundleId: slack))).offersFindingItems(experimentOn: false))
-        #expect(PlaceDraft(name: "", kind: .app).offersFindingItems(experimentOn: true))
-    }
-
-    @Test func findingItemsAppliesOnlyToAnApp() {
-        var draft = PlaceDraft(VoiceCommandPlace(name: "Slack", target: .sidebar(bundleId: "com.tinyspeck.slackmacgap")))
-        draft.kind = .webPage
-        draft.url = "https://example.com"
-        #expect(draft.place.target == .url("https://example.com"))
-    }
-
-    @Test func aTabSearchDraftKeepsQuickSwitchOnlyWhileItFindsTabs() {
-        let saved = VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: "com.google.Chrome", quickSwitch: true)
-        var draft = PlaceDraft(saved)
-        #expect(draft.place == saved)
-        draft.kind = .app
-        draft.bundleId = "com.google.Chrome"
-        #expect(!draft.place.quickSwitch)
     }
 
     @Test func theEditorPreviewIsCheckedAgainstSavedCommands() {
@@ -500,12 +461,11 @@ struct VoiceCommandsSettingsModelTests {
     }
 
     @Test func eachListHasItsOwnWarning() {
-        let kinds: [VoiceCommandNotices.Kind] = [.places, .sidebars, .scripts, .shortcuts]
+        let kinds: [VoiceCommandNotices.Kind] = [.places, .scripts, .shortcuts]
         #expect(Set(kinds.map(\.title)).count == kinds.count)
         #expect(Set(kinds.map(\.message)).count == kinds.count)
         #expect(VoiceCommandNotices.Kind.shortcuts.message.contains("send messages"))
         #expect(VoiceCommandNotices.Kind.shortcuts.message.contains("online services"))
-        #expect(VoiceCommandNotices.Kind.sidebars.message.contains("sidebar"))
     }
 
     @Test func aShortcutExampleUsesItsActualSpokenNameAndInput() {

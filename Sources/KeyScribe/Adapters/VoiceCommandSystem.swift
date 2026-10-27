@@ -83,7 +83,7 @@ enum ScriptRun: Equatable, Sendable {
 
 enum SidebarRead: Equatable, Sendable {
     case listing(SidebarListing)
-    case unreadable(SidebarProblem, switchedOnAccessibility: Bool = false)
+    case unreadable(SidebarProblem)
 }
 
 enum SidebarOpenResult: Equatable, Sendable {
@@ -106,6 +106,7 @@ protocol VoiceCommandSystem: AnyObject {
     func runningApps() -> [VoiceCommandCatalog.App]
     func installedApps() async -> [VoiceCommandCatalog.App]
     func browserTabs(in browser: String?) async -> TabRead?
+    func tabBrowsers() async -> Set<String>
     func appName(forBundleId bundleId: String) -> String?
     func isRunning(bundleId: String) -> Bool
     func isInstalled(bundleId: String) -> Bool
@@ -124,8 +125,21 @@ protocol VoiceCommandSystem: AnyObject {
     ) async -> ScriptRun
 }
 
+enum VoiceCommandProgress: Equatable, Sendable {
+    case opening(String)
+    case looking(String)
+
+    var text: String {
+        switch self {
+        case .opening(let app): "Opening \(app)\u{2026}"
+        case .looking(let app): "Looking in \(app)\u{2026}"
+        }
+    }
+}
+
 @MainActor
 protocol VoiceCommandRunning: AnyObject {
+    var onProgress: (@MainActor (VoiceCommandProgress) -> Void)? { get set }
     func run(
         transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript], origin: VoiceCommandOrigin?,
         stillWanted: @MainActor () -> Bool, onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
@@ -176,8 +190,16 @@ extension VoiceCommandRunning {
 final class VoiceCommandRunner: VoiceCommandRunning {
     static let choiceIdleSeconds: Double = 30
 
+    static let launchWaitSeconds: Double = 6
+    static let emptySidebarSettleReads = 2
+    private static let launchReadInterval: Double = 0.5
+
+    var onProgress: (@MainActor (VoiceCommandProgress) -> Void)?
+
     private let system: VoiceCommandSystem
-    private let sidebarEnabled: @MainActor () -> Bool
+    private let findsInApps: @MainActor () -> Bool
+    private let isPreview: Bool
+    private let pause: (Double) async -> Void
     private let now: () -> Double
     private let idleSeconds: Double
     private(set) var backTarget: VoiceCommandOrigin?
@@ -193,21 +215,26 @@ final class VoiceCommandRunner: VoiceCommandRunning {
 
     init(
         system: VoiceCommandSystem = LiveVoiceCommandSystem.shared,
-        sidebarEnabled: @escaping @MainActor () -> Bool = { false },
+        findsInApps: @escaping @MainActor () -> Bool = { false },
+        isPreview: Bool = false,
+        pause: @escaping (Double) async -> Void = { try? await Task.sleep(for: .seconds($0)) },
         now: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
         idleSeconds: Double = VoiceCommandRunner.choiceIdleSeconds
     ) {
         self.system = system
-        self.sidebarEnabled = sidebarEnabled
+        self.findsInApps = findsInApps
+        self.isPreview = isPreview
+        self.pause = pause
         self.now = now
         self.idleSeconds = idleSeconds
     }
 
     func resolve(
-        _ transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = []
+        _ transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = [],
+        stillWanted: @MainActor () -> Bool = { true }
     ) async -> VoiceCommandResolution {
         if Self.isSavedPhrase(transcript, places: places, scripts: scripts) {
-            return await readingSidebar(VoiceCommandCatalog(places: places, scripts: scripts)) {
+            return await reading(await catalog(places: places, scripts: scripts), stillWanted: stillWanted) {
                 VoiceCommandResolver.resolve(transcript, catalog: $0)
             }
         }
@@ -216,52 +243,108 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         guard case .noMatch = withoutApps else { return withoutApps }
         let running = system.runningApps()
         let installed = VoiceCommandCatalog.reconciling(installed: await system.installedApps(), with: running)
-        let catalog = VoiceCommandCatalog(places: places, scripts: scripts, runningApps: running, installedApps: installed)
-        return await readingWindows(catalog) { VoiceCommandResolver.resolve(transcript, catalog: $0) }
+        let catalog = await catalog(places: places, scripts: scripts, running: running, installed: installed)
+        return await reading(catalog, stillWanted: stillWanted) { VoiceCommandResolver.resolve(transcript, catalog: $0) }
     }
 
-    private func readingWindows(
-        _ catalog: VoiceCommandCatalog, _ resolve: (VoiceCommandCatalog) -> VoiceCommandResolution
-    ) async -> VoiceCommandResolution {
-        let first = await readingTabs(catalog, resolve)
-        guard case .needsWindows = first else { return first }
-        var catalog = catalog
-        catalog.windows = await system.windows()
-        return await readingTabs(catalog, resolve)
+    private func catalog(
+        places: [VoiceCommandPlace], scripts: [VoiceCommandScript], running: [VoiceCommandCatalog.App] = [],
+        installed: [VoiceCommandCatalog.App] = []
+    ) async -> VoiceCommandCatalog {
+        var catalog = VoiceCommandCatalog(places: places, scripts: scripts, runningApps: running, installedApps: installed)
+        catalog.findsInApps = findsInApps()
+        if catalog.findsInApps { catalog.tabBrowsers = await system.tabBrowsers() }
+        return catalog
     }
 
-    private func readingSidebar(
-        _ catalog: VoiceCommandCatalog, _ resolve: (VoiceCommandCatalog) -> VoiceCommandResolution
+    // Each pass fills in only what the resolver asked for, so nothing is read that the phrase does not need.
+    private func reading(
+        _ start: VoiceCommandCatalog, stillWanted: @MainActor () -> Bool,
+        _ resolve: (VoiceCommandCatalog) -> VoiceCommandResolution
     ) async -> VoiceCommandResolution {
-        let first = await readingTabs(catalog, resolve)
-        guard case .needsSidebar(let app) = first else { return first }
-        guard sidebarEnabled() else { return .sidebarUnreadable(app: app, .turnedOff) }
-        switch await system.sidebarItems(in: app) {
-        case .listing(let listing):
-            var catalog = catalog
-            catalog.sidebarItems = listing.items
-            catalog.sidebarIsComplete = listing.isComplete
-            return await readingTabs(catalog, resolve)
-        case .unreadable(let problem, _):
-            return .sidebarUnreadable(app: app, problem)
+        var catalog = start
+        var tabRead: TabRead?
+        while true {
+            let resolution = resolve(catalog)
+            switch resolution {
+            case .needsWindows where catalog.windows == nil:
+                catalog.windows = await system.windows()
+            case .needsTabs(let browser) where catalog.tabs == nil:
+                guard let read = await tabs(in: browser, stillWanted: stillWanted) else { return resolution }
+                if let browser, read.refused.contains(browser) { return .browserNotAllowed(browser) }
+                if let browser, read.unavailable.contains(browser) { return resolution }
+                catalog.tabs = read.tabs
+                tabRead = read
+            case .needsSidebar(let app) where catalog.sidebarItems == nil && !isPreview:
+                switch await sidebar(of: app, stillWanted: stillWanted) {
+                case .listing(let listing):
+                    catalog.sidebarItems = listing.items
+                case .unreadable(let problem):
+                    return .sidebarUnreadable(app: app, problem)
+                }
+            default:
+                if let tabRead, case .action(.place(_, .openURL(let url, let opener))) = resolution,
+                   let destination = opener ?? system.defaultBrowserId(for: url) {
+                    if tabRead.refused.contains(destination) { return .browserNotAllowed(destination) }
+                    if tabRead.unavailable.contains(destination) { return .needsTabs(browser: destination) }
+                }
+                return resolution
+            }
         }
     }
 
-    private func readingTabs(
-        _ catalog: VoiceCommandCatalog, _ resolve: (VoiceCommandCatalog) -> VoiceCommandResolution
-    ) async -> VoiceCommandResolution {
-        var catalog = catalog
-        let first = resolve(catalog)
-        guard case .needsTabs(let browser) = first else { return first }
-        guard let read = await system.browserTabs(in: browser) else { return first }
-        catalog.tabs = read.tabs
-        let resolved = resolve(catalog)
-        if case .action(.place(_, .openURL(let url, let opener))) = resolved,
-           let destination = opener ?? system.defaultBrowserId(for: url) {
-            if read.refused.contains(destination) { return .browserNotAllowed(destination) }
-            if read.unavailable.contains(destination) { return .needsTabs(browser: destination) }
+    // Asking for something in an app that is not open opens it, then waits a bounded time for it to fill.
+    // A command abandoned meanwhile opens nothing more and stops waiting. A sidebar that stays empty for a
+    // few reads is taken as empty rather than as still loading, so it reports what it shows.
+    private func sidebar(of app: String, stillWanted: @MainActor () -> Bool) async -> SidebarRead {
+        let first = await system.sidebarItems(in: app)
+        guard case .unreadable(.notRunning) = first, stillWanted(), await launch(app) else { return first }
+        let deadline = now() + Self.launchWaitSeconds
+        var empties = 0
+        while true {
+            await pause(Self.launchReadInterval)
+            guard stillWanted() else { return first }
+            guard now() < deadline else { break }
+            let read = await system.sidebarItems(in: app)
+            switch read {
+            case .listing(let listing) where !listing.items.isEmpty:
+                return read
+            case .listing:
+                empties += 1
+                if empties >= Self.emptySidebarSettleReads { return read }
+            case .unreadable(.notRunning), .unreadable(.noSidebar), .unreadable(.windowUnknown):
+                empties = 0
+            case .unreadable:
+                return read
+            }
         }
-        return resolved
+        return .unreadable(.notReady)
+    }
+
+    // Reported only once the command is committed to acting, so the progress never covers a cancellable state.
+    private func launch(_ app: String) async -> Bool {
+        let shown = name(of: app)
+        onProgress?(.opening(shown))
+        guard await system.openApp(bundleId: app) else { return false }
+        onProgress?(.looking(shown))
+        return true
+    }
+
+    // Only an empty list is worth waiting out while a browser starts; a refusal or a failed read will not change.
+    private func tabs(in browser: String?, stillWanted: @MainActor () -> Bool) async -> TabRead? {
+        guard let browser, findsInApps(), !isPreview, !system.isRunning(bundleId: browser) else {
+            return await system.browserTabs(in: browser)
+        }
+        var read: TabRead? = TabRead(tabs: [])
+        guard stillWanted(), await launch(browser) else { return read }
+        let deadline = now() + Self.launchWaitSeconds
+        while true {
+            await pause(Self.launchReadInterval)
+            guard stillWanted(), now() < deadline else { break }
+            read = await system.browserTabs(in: browser)
+            guard let current = read, current.tabs.isEmpty, current.refused.isEmpty, current.unavailable.isEmpty else { break }
+        }
+        return read
     }
 
     func run(
@@ -270,7 +353,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void = { _ in }
     ) async -> VoiceCommandOutcome {
         live = nil
-        let resolution = await resolve(transcript, places: places, scripts: scripts)
+        let resolution = await resolve(transcript, places: places, scripts: scripts, stillWanted: stillWanted)
         guard stillWanted() else { return .abandoned }
         if case .ambiguous(let choice) = resolution, choice.isOffered {
             return .needsChoice(offer(choice, request: transcript, origin: origin, places: places, scripts: scripts))
@@ -383,7 +466,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         if case .app(let app) = candidate, !system.isInstalled(bundleId: app.bundleId), !system.isRunning(bundleId: app.bundleId) {
             resolution = .unavailable(app.name)
         } else {
-            resolution = await readingSidebar(VoiceCommandCatalog(places: places, scripts: scripts)) {
+            resolution = await reading(await catalog(places: places, scripts: scripts), stillWanted: stillWanted) {
                 VoiceCommandResolver.resolve(candidate, text: pending.choice.text, catalog: $0)
             }
         }
@@ -428,7 +511,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             return .failed(message: Self.noSidebarMatchMessage(target, app: name(of: app)))
         case .needsTabs(let browser):
             let name = browser.flatMap(system.appName(forBundleId:)) ?? "The browser"
-            return .failed(message: "\(name) did not list its open tabs, so nothing was opened.")
+            return .failed(message: "\(name) did not list its open tabs, so no tab was opened.")
         case .browserNotAllowed(let browser):
             return .failed(message: Self.notAllowedMessage(browser: system.appName(forBundleId: browser) ?? browser))
         case .scriptNeedsText(let name):
@@ -479,7 +562,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
                 return .failed(message: Self.tabGoneMessage, command: command)
             }
         case .sidebarItem(let item):
-            guard sidebarEnabled() else { return .failed(message: Self.sidebarTurnedOffMessage) }
+            guard findsInApps() else { return .failed(message: Self.sidebarTurnedOffMessage) }
             switch await system.openSidebarItem(item) {
             case .opened:
                 succeeded = true
@@ -616,21 +699,6 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         "No sidebar was found in \(app)\u{2019}s front window, so nothing was opened."
     }
 
-    enum SidebarCheck: Equatable {
-        case listing(SidebarListing, appName: String)
-        case problem(String)
-    }
-
-    static func checkSidebar(of app: String, system: any VoiceCommandSystem) async -> SidebarCheck {
-        let name = system.appName(forBundleId: app) ?? app
-        switch await system.sidebarItems(in: app) {
-        case .listing(let listing): return .listing(listing, appName: name)
-        case .unreadable(let problem, let switched):
-            let message = sidebarMessage(problem, app: name)
-            return .problem(switched ? message + " " + SidebarListing.switchedNote(appName: name) : message)
-        }
-    }
-
     nonisolated static func sidebarMessage(_ problem: SidebarProblem, app: String) -> String {
         switch problem {
         case .notRunning: sidebarNotRunningMessage(app)
@@ -638,12 +706,13 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         case .noSidebar: noSidebarMessage(app)
         case .windowUnknown: sidebarWindowUnknownMessage(app)
         case .noResponse: sidebarNoResponseMessage(app)
+        case .notReady: "Opened \(app), but its sidebar isn\u{2019}t ready yet. Try again."
         case .turnedOff: sidebarTurnedOffMessage
         }
     }
 
     nonisolated static let sidebarTurnedOffMessage =
-        "Opening sidebar items is turned off. Turn on \u{201C}\(Feature.sidebarSearch.title)\u{201D} under Experimental features in Settings."
+        "Opening sidebar items is turned off. Turn on \u{201C}\(Feature.findInApps.title)\u{201D} under Experimental features in Settings."
 
     nonisolated static func sidebarWindowUnknownMessage(_ app: String) -> String {
         "\(app)\u{2019}s front window could not be identified, so nothing was opened."
@@ -654,7 +723,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     }
 
     nonisolated static func noSidebarMatchMessage(_ target: String, app: String) -> String {
-        "Nothing in \(app)\u{2019}s sidebar matches \u{201C}\(target)\u{201D}."
+        "Nothing shown in \(app)\u{2019}s sidebar matches \u{201C}\(target)\u{201D}. Only items the sidebar shows can be found; expand a section or scroll the sidebar, then try again."
     }
 
     nonisolated static func sidebarItemGoneMessage(_ item: String, app: String) -> String {
@@ -994,6 +1063,10 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
         return String(decoding: data, as: UTF8.self)
     }
 
+    func tabBrowsers() async -> Set<String> {
+        await installedSnapshot().tabBrowsers
+    }
+
     func browserTabs(in browser: String?) async -> TabRead? {
         let scan = await installedSnapshot()
         let browsers = Self.runningTabBrowsers(in: scan, running: Self.runningIds()).filter { browser == nil || $0 == browser }
@@ -1064,7 +1137,7 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
         switch read {
         case .listing(let listing):
             Log.context.debug("voice command: read \(listing.items.count, privacy: .public) sidebar entries (complete: \(listing.isComplete, privacy: .public)) from \(bundleId, privacy: .public) in \(ms, privacy: .public)ms")
-        case .unreadable(let problem, _):
+        case .unreadable(let problem):
             Log.context.error("voice command: \(bundleId, privacy: .public) sidebar unreadable (\(String(describing: problem), privacy: .public), \(ms, privacy: .public)ms)")
         }
         return read

@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import KeyScribeApp
@@ -94,7 +95,8 @@ struct VoiceCommandChoiceWiringTests {
         init(
             places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = [], historyEnabled: Bool = true,
             titleScopedMode: Bool = false, target: TargetSnapshot = TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1),
-            replacements: [ReplacementsSet.Rule] = [], snapshot: (@Sendable () -> TargetSnapshot)? = nil
+            replacements: [ReplacementsSet.Rule] = [], snapshot: (@Sendable () -> TargetSnapshot)? = nil,
+            findsInApps: Bool = false
         ) throws {
             supportDir = FileManager.default.temporaryDirectory
                 .appendingPathComponent("keyscribe-vcchoice-\(UUID().uuidString)", isDirectory: true)
@@ -129,7 +131,7 @@ struct VoiceCommandChoiceWiringTests {
                 VoiceCommandCatalog.App(name: "Ghostty", bundleId: "com.mitchellh.ghostty"),
             ]
             let timer = timer
-            runner = VoiceCommandRunner(system: system, now: { timer.now })
+            runner = VoiceCommandRunner(system: system, findsInApps: { findsInApps }, pause: { timer.advance($0) }, now: { timer.now })
             let provider = try SpeechEngineProvider(engines: [engine], activeId: "fixed")
             let captured = captured
             controller = DictationController(
@@ -187,14 +189,14 @@ struct VoiceCommandChoiceWiringTests {
         return nil
     }
 
-    @Test func anAmbiguousCommandShowsANumberedQuestionThatDoesNotTakeFocus() async throws {
+    @Test func anAmbiguousCommandShowsANumberedQuestionThatTakesFocusLikeTheHUD() async throws {
         let h = try Harness(places: [personal, work])
         await h.dictate("switch to mail")
         let prompt = try #require(waiting(h.hud.last))
         #expect(prompt.title == "Which one?")
         #expect(prompt.rows.map(\.name) == ["Personal Mail", "Work Mail"])
-        #expect(prompt.hint.hasPrefix("Use Right-\u{2325} and say"))
-        #expect(h.hud.last?.holdsKeyFocus == false)
+        #expect(prompt.hint.hasPrefix("Press 1\u{2013}2, or use any shortcut and say"))
+        #expect(h.hud.last?.holdsKeyFocus == true)
         #expect(h.hud.last?.isWaitingForChoice == true)
         #expect(h.captured.inserted.isEmpty)
         #expect(h.captured.clipboardReads == 0)
@@ -276,14 +278,65 @@ struct VoiceCommandChoiceWiringTests {
         #expect(h.system.openedURLs.isEmpty)
     }
 
-    @Test func startingAnotherModeDismissesTheQuestionAtStart() async throws {
+    @Test func openingAClosedAppShowsWhatTheCommandIsDoing() async throws {
+        let slackId = "com.tinyspeck.slackmacgap"
+        let work = VoiceCommandPlace(name: "Work", target: .app(bundleId: slackId))
+        let h = try Harness(places: [work], findsInApps: true)
+        h.system.installed = [VoiceCommandCatalog.App(name: "Slack", bundleId: slackId)]
+        h.system.sidebar = .unreadable(.notRunning)
+        let general = VoiceCommandCatalog.SidebarItem(bundleId: slackId, pid: 4, name: "general", section: nil, path: [0])
+        h.system.sidebarOnceOpened = .listing(SidebarListing(items: [general], isComplete: true))
+        await h.dictate("work general")
+        let statuses = h.hud.states.compactMap { state -> String? in
+            if case .transcribing(_, let status?) = state { return status }
+            return nil
+        }
+        #expect(statuses == ["Opening Slack\u{2026}", "Looking in Slack\u{2026}"])
+        #expect(h.system.openedSidebarItems == [general])
+    }
+
+    @Test func anyShortcutCanAnswerTheQuestion() async throws {
         let h = try Harness(places: [personal, work])
         await h.dictate("switch to mail")
-        await h.press("right_command")
+        await h.dictate("two", trigger: "right_command")
+        #expect(h.system.openedURLs.map(\.0) == ["https://inbox.example.org/"])
+        #expect(h.captured.inserted.isEmpty)
         #expect(h.prompt == nil)
-        h.controller.cancel()
-        await h.dictate("two")
+    }
+
+    @Test func anotherShortcutDictatesAnythingButAnAnswerAndClosesTheQuestion() async throws {
+        let h = try Harness(places: [personal, work])
+        await h.dictate("switch to mail")
+        await h.dictate("see you tomorrow", trigger: "right_command")
+        #expect(h.captured.inserted.map { $0.trimmingCharacters(in: .whitespaces) } == ["see you tomorrow"])
         #expect(h.system.openedURLs.isEmpty)
+        #expect(h.prompt == nil)
+        #expect(waiting(h.hud.last) == nil)
+    }
+
+    @Test func escapeClosesAWaitingQuestion() async throws {
+        let h = try Harness(places: [personal, work])
+        await h.dictate("switch to mail")
+        #expect(h.controller.escapeCancels)
+        h.controller.cancelFromEscape()
+        #expect(h.prompt == nil)
+        #expect(h.hud.last == .hidden)
+        #expect(!h.controller.escapeCancels)
+    }
+
+    @Test func aNumberKeyPicksItsRow() throws {
+        let rows = [
+            VoiceCommandChoiceRow(number: 1, name: "Personal Mail", detail: "", identity: "a"),
+            VoiceCommandChoiceRow(number: 2, name: "Work Mail", detail: "", identity: "b"),
+        ]
+        let prompt = VoiceCommandChoicePrompt(id: 1, title: "Which one?", rows: rows, hint: "")
+        #expect(prompt.row(forKey: "2", modifiers: [])?.identity == "b")
+        #expect(prompt.row(forKey: "2", modifiers: .numericPad)?.identity == "b")
+        #expect(prompt.row(forKey: "3", modifiers: []) == nil)
+        #expect(prompt.row(forKey: "x", modifiers: []) == nil)
+        for modifier: NSEvent.ModifierFlags in [.command, .option, .control, .shift] {
+            #expect(prompt.row(forKey: "1", modifiers: modifier) == nil)
+        }
     }
 
     @Test func switchingToAnotherAppDismissesButTheOriginalAppDoesNot() async throws {
@@ -347,7 +400,7 @@ struct VoiceCommandChoiceWiringTests {
         let shown = h.hud.last
         #expect(shown == .choice(prompt, status: .waiting(note: "Microphone access is off", action: .openMicrophoneSettings)))
         #expect(shown?.errorAction == .openMicrophoneSettings)
-        #expect(shown?.holdsKeyFocus == false)
+        #expect(shown?.holdsKeyFocus == true)
         #expect(h.prompt == prompt)
     }
 

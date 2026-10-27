@@ -89,7 +89,7 @@ everything your account can do, and a misheard command can run them, so choose w
 way with care.
 
 Every Run a Script and Run a Shortcut sheet explains these consequences before saving, each in its own
-words, and every Open an App or Link and Find a Browser Tab sheet explains that it can bring an app's
+words, and every Open an App, Open a Link, and Find a Browser Tab sheet explains that it can bring an app's
 windows forward. Separately,
 a notice before first enabling Voice Commands explains that recognition mistakes can bring an unintended
 window into view or start an unintended saved action. It also explains that scripts and Shortcuts run by
@@ -98,11 +98,13 @@ voice may act without asking for confirmation and can change files, send message
 To find a window you name, Voice Commands reads the titles of your open windows on this Mac, only when
 no app or place matched what you said. The titles are not sent anywhere or written to diagnostic logs.
 
-An app command with Find items in this app turned on (an experimental feature, off unless you turn it on)
-reads the names listed in that app's sidebar, such as channels, people, or mailboxes, only when you say it
-with an item's name or press Show Available Items while editing it. The names are not sent anywhere or written to diagnostic logs. For some
-apps, such as Slack, reading the sidebar first turns on the app's own accessibility support, which stays on
-until that app quits.
+With finding items in apps turned on (an experimental feature, off unless you turn it on), saying an app's
+name followed by more words, such as "open Slack general", reads that app only: a browser's open tab titles
+and addresses, or the names listed in another app's sidebar, such as channels, people, or mailboxes. Nothing
+is read in the background. If the app is not open, it is opened first. These
+names are not sent anywhere or written to diagnostic logs; History records the command and what it opened,
+as described below. For some apps, such as Slack, reading the sidebar first turns on the app's own
+accessibility support, which stays on until that app quits.
 
 When history is on, each voice command is saved there like a dictation: what you said, the command it
 ran with those words (for a window, its title and app, and the titles in a list it offered you), and, if it failed, the error message, which can include the last line the script

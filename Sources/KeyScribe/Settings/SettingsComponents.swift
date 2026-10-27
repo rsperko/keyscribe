@@ -18,6 +18,7 @@ struct DisclosureSection<Label: View, Content: View>: View {
     // dot (colored to match the child's severity) keeps it reachable — mirroring the Settings sidebar.
     var hasError: Bool = false
     var hasWarning: Bool = false
+    var headerID: String?
     @ViewBuilder var label: () -> Label
     @ViewBuilder var content: () -> Content
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -46,6 +47,7 @@ struct DisclosureSection<Label: View, Content: View>: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint(showsAttentionDot ? "Needs attention" : "")
+            .accessibilityIdentifier(headerID)
             if isExpanded { content() }
         }
         // Only forces open — never auto-collapses — so the user can still close it, falling back to the dot.
@@ -64,6 +66,12 @@ extension DisclosureSection where Label == Text {
         self.hasWarning = hasWarning
         self.label = { Text(title) }
         self.content = content
+    }
+}
+
+private extension View {
+    @ViewBuilder func accessibilityIdentifier(_ id: String?) -> some View {
+        if let id { accessibilityIdentifier(id) } else { self }
     }
 }
 

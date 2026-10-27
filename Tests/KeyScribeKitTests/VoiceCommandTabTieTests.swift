@@ -1,12 +1,12 @@
 import Testing
 @testable import KeyScribeKit
 
-struct VoiceCommandQuickSwitchTests {
+struct VoiceCommandTabTieTests {
     private typealias Tab = VoiceCommandCatalog.Tab
 
     private let chromeId = "com.google.Chrome"
     private var quick: VoiceCommandPlace {
-        VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: chromeId, quickSwitch: true)
+        VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: chromeId)
     }
 
     private func tab(_ title: String, window: Int, tab: Int, url: String = "https://github.com/") -> Tab {
@@ -42,7 +42,7 @@ struct VoiceCommandQuickSwitchTests {
     }
 
     @Test func tiesInDifferentBrowsersStillAsk() {
-        let anyBrowser = VoiceCommandPlace(name: "Tab", target: .tabSearch, quickSwitch: true)
+        let anyBrowser = VoiceCommandPlace(name: "Tab", target: .tabSearch)
         let safari = Tab(browserBundleId: "com.apple.Safari", window: 1, tab: 1, url: "https://github.com/", title: "Issues")
         let chrome = tab("Pull requests", window: 1, tab: 5)
         guard case .ambiguous(let choice) = resolve("tab github", place: anyBrowser, tabs: [safari, chrome]) else {
@@ -52,35 +52,35 @@ struct VoiceCommandQuickSwitchTests {
     }
 
     @Test func tiesInOneBrowserSwitchEvenWhenAnyBrowserIsSearched() {
-        let anyBrowser = VoiceCommandPlace(name: "Tab", target: .tabSearch, quickSwitch: true)
+        let anyBrowser = VoiceCommandPlace(name: "Tab", target: .tabSearch)
         let back = tab("Pull requests", window: 2, tab: 1)
         let front = tab("Issues", window: 1, tab: 4)
         #expect(resolve("tab github", place: anyBrowser, tabs: [back, front]) == .action(.tab(front)))
     }
 
-    @Test func withoutQuickSwitchSeveralMatchesStillAsk() {
-        let place = VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: chromeId)
-        guard case .ambiguous = resolve("chrome github", place: place, tabs: [tab("A", window: 1, tab: 1), tab("B", window: 1, tab: 2)])
-        else { Issue.record("expected a choice"); return }
+    @Test func anAppNameAndWordsAlsoGoToTheFrontmostTie() {
+        var catalog = VoiceCommandCatalog(
+            runningApps: [VoiceCommandCatalog.App(name: "Chrome", bundleId: chromeId)],
+            tabs: [tab("Issues", window: 2, tab: 1), tab("Pulls", window: 1, tab: 4)], windows: .complete([]))
+        catalog.findsInApps = true
+        catalog.tabBrowsers = [chromeId]
+        #expect(VoiceCommandResolver.resolve("open chrome github", catalog: catalog)
+                == .action(.tab(tab("Pulls", window: 1, tab: 4))))
     }
 
-    @Test func quickSwitchRoundTripsAndIsOmittedWhenOff() throws {
-        let off = VoiceCommandPlace(name: "Tabs", target: .tabSearch)
-        let config = VoiceCommandConfig(places: [quick, off])
-        let toml = try VoiceCommandStore.encode(config)
-        #expect(try VoiceCommandStore.decode(from: toml) == config)
-        #expect(toml.components(separatedBy: "quick_switch").count == 2)
-    }
-
-    @Test func quickSwitchAppliesOnlyToATabSearch() {
+    @Test func anOldQuickSwitchSettingIsReadAndDroppedOnSave() throws {
         let toml = """
         schema_version = 1
 
         [[command]]
-        name = "Mail"
-        app = "com.apple.mail"
+        name = "Chrome"
+        find_tab = true
+        browser = "\(chromeId)"
         quick_switch = true
         """
-        #expect(throws: ConfigError.self) { try VoiceCommandStore.decode(from: toml) }
+        let config = try VoiceCommandStore.decode(from: toml)
+        #expect(config.places == [VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: chromeId)])
+        #expect(VoiceCommandStore.unknownKeys(in: toml).isEmpty)
+        #expect(!(try VoiceCommandStore.encode(config)).contains("quick_switch"))
     }
 }

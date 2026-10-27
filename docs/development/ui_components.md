@@ -65,9 +65,9 @@ it as a shared type — never a one-off inline pattern. (Anatomy, behavior, and 
 | Editable replacement row | Global and mode scopes in Vocabulary: readable rule text with a bounded one-line Use-instead preview, a roomy edit popover with an inline multiline editor, and direct tie-priority reordering with keyboard and VoiceOver alternatives. |
 | Shortcut well | Every keyboard/mouse shortcut binding; one control that always shows the current binding with an attached menu (never picker⇄recorder mode-swapping). |
 | App chooser | Every place a user picks an app — a mode's **Where it works** and a voice command place: one menu of running apps with their icons, then **Choose from Applications…** and **Enter Bundle ID…**, with room for a surface's own extra items. |
-| Voice command choice | The HUD's numbered question for an ambiguous voice command: a title, one row per candidate (number, name, distinguishing detail), the answer hint naming the real shortcut, and Cancel. Rows are clickable but the waiting panel never takes key focus. |
+| Voice command choice | The HUD's numbered question for an ambiguous voice command: a title, one row per candidate (number, name, distinguishing detail), the answer hint (number keys, any shortcut and a spoken number, Esc), and Cancel. Rows are clickable, and the panel holds key focus while shown, like the recording HUD. |
 | Heard excerpt | `Heard “…”` under an unrecognized voice command or choice answer: the raw transcript, whitespace folded, at most two lines. The only HUD text that truncates — every other explanation still wraps. Hidden for a password-field or unconfirmed target. |
-| Voice command notice | One warning per kind of entry, each written for what that kind can do, shown expanded on every new entry and collapsed when editing. A separate notice about recognition mistakes, window visibility, and scripts and Shortcuts run by voice gates first enabling Voice Commands and is remembered for each configuration. |
+| Voice command notice | One note per kind of entry, each written for what that kind can do and weighted by its risk: a script or shortcut warning is shown expanded on every new entry and collapsed when editing; an app, link, or tab search gets a brief, neutral, collapsed note at the end of its sheet. A separate notice about recognition mistakes, window visibility, and scripts and Shortcuts run by voice gates first enabling Voice Commands and is remembered for each configuration. |
 | Keycap glyph | *Displaying* (never editing) a trigger as small physical keys — onboarding trial/playground, the General trigger pointer. |
 | Step indicator | The onboarding wizard's progress dots. |
 | Permission row | Microphone and Accessibility-dependent features — state, why, what still works without it, `Open System Settings`. |
@@ -131,5 +131,8 @@ Every load-bearing control carries a stable accessibility identifier so UI autom
 exactly. These are **frozen API once shipped** — a rename breaks the harness. All identifiers are
 constants in `Sources/KeyScribe/AccessibilityID.swift` (nested by surface, registered in
 `AccessibilityID.all`); never a string literal at a call site; dynamic rows interpolate the stable domain
-id, never the display name. Wiring mechanics (SwiftUI vs AppKit, the `NSMenuItem` exception) are in the
+id, never the display name. A container's identifier must not stand in for its children's: a disclosure
+header and each field inside it keep distinct identifiers (`DisclosureSection(headerID:)` tags only the
+header), since an identifier set on a whole section is inherited by every child that lacks its own and
+hides theirs. Wiring mechanics (SwiftUI vs AppKit, the `NSMenuItem` exception) are in the
 `keyscribe-ui` build guide.

@@ -40,9 +40,7 @@ enum SidebarAccess {
         guard AXIsProcessTrusted() else { return .unreadable(.needsAccessibility) }
         let app = application(pid)
         var located = locate(in: frontWindow(app), isCurrent: isCurrent)
-        var switched = false
         if electron, case .problem(.noSidebar) = located, isCurrent(), exposeElectronTree(app) {
-            switched = true
             let until = Date().addingTimeInterval(electronWarmUp)
             while case .problem(.noSidebar) = located, Date() < until, isCurrent() {
                 Thread.sleep(forTimeInterval: electronPoll)
@@ -50,23 +48,21 @@ enum SidebarAccess {
             }
         }
         switch located {
-        case .problem(let problem): return .unreadable(problem, switchedOnAccessibility: switched)
+        case .problem(let problem): return .unreadable(problem)
         case .outline(let outline, let window):
             var budget = elementLimit
             guard let node = node(outline, depth: 0, budget: &budget, isCurrent: isCurrent), isCurrent() else {
-                return .unreadable(.noResponse, switchedOnAccessibility: switched)
+                return .unreadable(.noResponse)
             }
-            return result(of: node, bundleId: bundleId, pid: pid, window: AXWindowID.of(window), switched: switched)
+            return result(of: node, bundleId: bundleId, pid: pid, window: AXWindowID.of(window))
         }
     }
 
     nonisolated static func result(
-        of outline: SidebarNode, bundleId: String, pid: Int32, window: UInt32?, switched: Bool = false
+        of outline: SidebarNode, bundleId: String, pid: Int32, window: UInt32?
     ) -> SidebarRead {
-        guard let window else { return .unreadable(.windowUnknown, switchedOnAccessibility: switched) }
-        var listing = SidebarOutline.listing(in: outline, bundleId: bundleId, pid: pid, window: window)
-        listing.switchedOnAccessibility = switched
-        return .listing(listing)
+        guard let window else { return .unreadable(.windowUnknown) }
+        return .listing(SidebarOutline.listing(in: outline, bundleId: bundleId, pid: pid, window: window))
     }
 
     nonisolated static func open(_ item: VoiceCommandCatalog.SidebarItem, isCurrent: () -> Bool) -> SidebarOpenResult {

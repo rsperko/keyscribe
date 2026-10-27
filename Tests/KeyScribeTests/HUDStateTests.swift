@@ -201,9 +201,17 @@ struct HUDStateTests {
         #expect(state.offersPasteLast)
     }
 
-    @Test func aWaitingQuestionNeverTakesKeyFocusButAnsweringItDoes() {
+    @Test func aCommandsProgressReplacesTranscribingWithoutTakingFocus() {
+        let state = HUDState.transcribing(mode: "Voice Commands", status: "Opening Slack\u{2026}")
+        #expect(state.secondaryText == "Opening Slack\u{2026}")
+        #expect(state.voiceOverAnnouncement == "Opening Slack\u{2026}")
+        #expect(!state.holdsKeyFocus)
+        #expect(HUDState.transcribing(mode: "Voice Commands").holdsKeyFocus)
+    }
+
+    @Test func aQuestionTakesKeyFocusWhileItIsShownLikeTheRecordingHUD() {
         let prompt = HUDPreview.choicePrompt
-        #expect(!HUDState.choice(prompt, status: .waiting(note: nil)).holdsKeyFocus)
+        #expect(HUDState.choice(prompt, status: .waiting(note: nil)).holdsKeyFocus)
         #expect(HUDState.choice(prompt, status: .listening(latchedTrigger: nil)).holdsKeyFocus)
         #expect(HUDState.choice(prompt, status: .working).holdsKeyFocus)
     }

@@ -11,13 +11,13 @@ enum VoiceCommandCLI {
             print("not run:    \(refusal)")
             return 1
         }
-        let sidebars: Bool
+        let findsInApps: Bool
         if case .loaded(let settings) = SettingsStore.load(supportDir: supportDir) {
-            sidebars = settings.features.isEnabled(.sidebarSearch)
+            findsInApps = settings.features.isEnabled(.findInApps)
         } else {
-            sidebars = false
+            findsInApps = false
         }
-        let runner = VoiceCommandRunner(system: system, sidebarEnabled: { sidebars })
+        let runner = VoiceCommandRunner(system: system, findsInApps: { findsInApps }, isPreview: dryRun)
         let commands = VoiceCommandStore.loadOrDefault(supportDir: supportDir)
         let config = ConfigCache(supportDir: supportDir)
         config.voiceCommandsEnabled = true

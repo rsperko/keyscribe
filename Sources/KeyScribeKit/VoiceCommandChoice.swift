@@ -50,7 +50,7 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
 
     public var takesWords: Bool {
         switch self {
-        case .place(let place): place.searchesByName
+        case .place(let place): place.isTabSearch
         case .script(let script): script.takesText
         case .app, .window, .tab, .sidebarItem, .option: false
         }
@@ -69,8 +69,6 @@ public enum VoiceCommandCandidate: Equatable, Sendable {
                 return appName(bundleId) ?? bundleId
             case .tabSearch:
                 return "Tabs in " + (place.browser.map { appName($0) ?? $0 } ?? "any browser")
-            case .sidebar(let bundleId):
-                return "Sidebar of " + (appName(bundleId) ?? bundleId)
             case .url(let url):
                 let browser = place.browser.map { appName($0) ?? $0 } ?? "Default browser"
                 guard let host = URL(string: url)?.host?.lowercased() else { return browser }

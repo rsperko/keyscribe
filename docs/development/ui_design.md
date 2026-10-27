@@ -229,6 +229,7 @@ not to its label.
 | Recording | Mode name + a red level circle (halo + dot; Reduce Motion: intensity-only dot) | “Listening”, or “Listening — tap [trigger] again to stop” for a latched tap-to-toggle recording | Stop if tap-to-toggle |
 | Recording, near the limit | Same, plus an orange ring around the level circle that drains to empty | “Stops in 0:SS”, counting down | As Recording |
 | Transcribing | “Transcribing” | Mode name | Cancel when safe |
+| Voice command opening an app | Mode name | “Opening [app]…”, then “Looking in [app]…” while its tabs or sidebar fill | None; shown only once the command is acting, so it is not cancellable and does not take key focus away from the app being opened |
 | Rewriting | “Rewriting with [connection name]” | Boundary badges: `Cloud rewrite`, then `Best-effort redaction` or the exact shared context categories | Insert without rewriting after timeout |
 | Complete | “Inserted” | Mode name | None; dismiss automatically |
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
@@ -262,9 +263,13 @@ History write, so a failed save never sends the user looking for an entry that d
 stopped by the limit never presses the mode's Return, including a take that is only a spoken Return
 command; the latter reports “Stopped at the [limit] limit — Return not pressed”.
 
-**Voice command choice.** When a command matches more than one destination at the same step, the HUD
-asks instead of guessing, and the user answers with the same shortcut (“two”, “the second one”, “the
-last one”, “cancel”). The list is frozen when it appears: rows never reorder or refill, and a chosen row
+**Voice command choice.** The list interrupts the user, so it is used sparingly (`principles.md` §4,
+“Asking is a last resort”): navigation settles ties it can order by itself, and the list appears only when
+no predictable default exists or a wrong guess would run the wrong action. When a command matches more than
+one destination at the same step in those cases, the HUD asks instead of guessing. The user answers with any shortcut (“two”, “the second one”, “the last one”,
+“cancel”), by pressing a row's number key, or by clicking a row. A dictation mode's shortcut answers only when
+what was said is a number or “cancel”; anything else is dictated into the app as usual and the question
+closes, so a list left on screen never swallows real dictation. The list is frozen when it appears: rows never reorder or refill, and a chosen row
 that has since disappeared reports that rather than choosing its neighbour. While answering, the list
 stays on screen with the normal status (`Listening`, `Transcribing`) in place of its subtitle — never a
 microphone-only HUD — and during microphone bring-up the question stays exactly as it was, so the timing
@@ -274,16 +279,15 @@ rows; a number outside the list keeps the list and says which numbers are valid.
 recording replaces that line, and nothing restores it afterwards. Silence, a failed transcription, or cancelling the answer recording also keep it; a failure that offers a repair (such as **Open Microphone Settings**) keeps the list and shows its message as the subtitle with the repair button beside **Cancel**. The question is
 neither success nor failure, so it plays no cue. It is dismissed by an answer, spoken or clicked
 **Cancel**, a new command, the idle timeout (`VoiceCommandRunner.choiceIdleSeconds`, restarted each
-time the list is shown again), starting another mode, switching to an app other than the one the
+time the list is shown again), a dictation that is not an answer, switching to an app other than the one the
 command was given in (any app, when it was given in KeyScribe's own window), locking the screen,
 sleep, turning Voice Commands off, or editing its saved commands. More matches than
 `VoiceCommandChoice.displayLimit` offer no list: the Error asks the user to say more of the name.
 A clicked row runs only if no new dictation starts while its destination is being looked up, and its
 result appears once any interrupted answer recording has finished unwinding.
-**Focus:** the waiting question never takes key focus, including when a row is clicked, so typing
-keeps reaching the app the user was in; it holds key focus only while an answer is recording or being
-transcribed, exactly like Recording. There is no keyboard selection — no number keys, arrows, Return,
-or Escape for the list — because the answer is spoken (see §9).
+**Focus:** the question holds key focus whenever it is on screen, exactly like Recording, since it is
+visible and cancellable: **Esc** dismisses it like **Cancel**, and a row's number key, pressed without ⌘, ⌥, ⌃,
+or ⇧, chooses that row like a click. Clicking another app returns focus there. There are no arrows or Return for the list (see §9).
 
 Badges and explanations never truncate: the badge row wraps to as many rows as needed and the HUD
 grows vertically (its per-state height is a minimum, not a cap).
@@ -927,12 +931,14 @@ adding a command, so this notice does not wait for **Add Command…**. If the fe
 the config, assigning a shortcut shows the same notice before applying the shortcut. That acknowledgment
 is remembered for this configuration across launches; resetting onboarding or configuration clears it.
 
-Every new command sheet opens with its own warning expanded,
-each time, written for what that kind of entry can do (`VoiceCommandNotices.Kind`): a place can bring an
-app and its windows forward or load a page, and take your next keystrokes; a script runs with your
-account's permissions and can change or delete files; a shortcut can send messages, change or delete
-files, or send its input to online services, depending on its steps. Each also says a misheard name can
-start it. Editing an existing entry shows the same warning collapsed below the editable fields and preview.
+Each command sheet carries guidance written for what that kind of entry can do (`VoiceCommandNotices.Kind`),
+weighted by what it risks. An app, link, or tab search opens apps and links or switches windows and tabs, so its sheet ends
+with a brief, neutral, collapsed **If a name is misheard** note (the wrong app, link, tab, channel, or mailbox
+can open, which can bring the wrong content into view while sharing the screen) and never opens with a warning. A script runs
+with your account's permissions and can change or delete files; a shortcut can send messages, change or
+delete files, or send its input to online services, depending on its steps. A new script or shortcut sheet
+opens with that warning expanded, each time, and also says a misheard name can start it; editing one shows
+it collapsed below the editable fields and preview.
 
 The editor uses the same grouped form, shortcut controls, vocabulary row, and Result handling vocabulary
 as other mode panels. Copy leads with what to say and what will happen. Technical details stay in
@@ -943,26 +949,27 @@ master lists (Your Modes and Your Services) keep their bottom action bar.
 Its sections are, in order:
 
 1. **Start with a shortcut** — the same shortcut structure as Plain Dictation, labeled **Start shortcut**
-   to distinguish it from actions in the Shortcuts app. With no shortcut, a caption asks the user to choose
-   a keyboard shortcut or mouse button. The caption explains that commands never type words into an app
-   and an unmatched command reports what went wrong. Its shortcut can never be shared with another mode: recording one that another
+   to distinguish it from actions in the Shortcuts app. There is no caption under it: the empty shortcut
+   well already asks for one, and the header says what the mode does. Its shortcut can never be shared with another mode: recording one that another
    enabled mode uses (or giving another mode this one's) asks to move it, with Undo afterwards (see the
    Voice Commands paragraph above), and a shared shortcut written by hand shows a red caption here (“…
    also uses this shortcut, so it does not start Voice Commands”) with **Move Shortcut to Voice
    Commands…**, and marks the list row and the menu-bar badge as never firing.
-2. **What you can say** — first a **Your commands** row: say the name of a command saved below, then any
-   words it takes. A caption introduces the built-in phrases that work without saving anything, one row per
-   taught phrase (`VoiceCommandPhrase`, which also writes the
-   “Not a command” guidance and the feature's summary): “switch to …” and “open …” for apps, places, and open
-   windows and browser tabs by name, “run …”
-   for scripts and shortcuts, and “go back”, which returns to the window or app you left. Other app-switching verbs, and
-   common mishearings of them such as “witch to”, are also accepted (`VoiceCommandGrammar.focusVerbs`). These prefix alternatives work
-   in live commands and Preview a command without changing the original heard text or action input; the panel
-   continues to teach the standard phrases. “run …” is presented as optional: a saved action's name alone runs
-   it, including a name that starts with an app-switching word (“open notes”); an app-switching word followed by anything that is
-   not a saved name never does.
-   Each row briefly explains the result. A caption explains that ambiguous commands offer a choice:
-   click a row or use the start shortcut and say its number, or say “cancel”.
+2. **What you can say** — leads with what already works, as a few short examples that need nothing saved
+   (`VoiceCommandsEditorView.examples`): “open Mail” (an app, window, or tab), “open Slack general” (something
+   inside an app, shown only while **Find items in apps by voice** is on), and “go back”. The longer guide sits
+   in a collapsed **More examples** disclosure: a **Your commands** row (say the name of a command saved
+   below, then any words it takes), then one row per taught phrase (`VoiceCommandPhrase`, which also writes
+   the “Not a command” guidance and the feature's summary): “switch to …” and “open …” for apps, places, and
+   open windows and browser tabs by name, “run …” for scripts and shortcuts, and “go back”, which returns to
+   the window or app you left. Other app-switching verbs, and common mishearings of them such as “witch to”,
+   are also accepted (`VoiceCommandGrammar.focusVerbs`). These prefix alternatives work in live commands and
+   Preview a command without changing the original heard text or action input; the panel continues to teach
+   the standard phrases. “run …” is presented as optional: a saved action's name alone runs it, including a
+   name that starts with an app-switching word (“open notes”); an app-switching word followed by anything
+   that is not a saved name never does. Each row briefly explains the result. A caption explains that
+   ambiguous commands offer a choice (click a row or use the start shortcut and say its number, or say
+   “cancel”) and that an unmatched command is reported instead of typed.
 3. **Preview a command** — a field that shows what a typed phrase would do, live, without running anything (a script
    shows the exact command line it would run, a shortcut its name and input). A phrase that would ask which one
    says so neutrally (“Would ask “Which one?””) and lists the numbered choices; it never invites an answer,
@@ -972,20 +979,27 @@ Its sections are, in order:
    runs. **What the preview checks** is collapsed with a visible “May ask for browser access” summary;
    its content explains that matching windows and tabs reads titles, and checking tabs reads addresses
    and may request permission to control the browser.
-4. **Commands** — every saved command in one list, in file order, whatever it does. A persistent introduction names the kinds and says app names already work without saving
-   anything; the empty state says the same. **Add Command…** offers outcome-named starting points: **Open
+4. **Commands** — every saved command in one list, in file order, whatever it does. A short introduction
+   says a saved command is a name of your own for an app or link, or a script or shortcut to run; the empty
+   state reads “No saved commands yet.” **Add Command…** offers outcome-named starting points: **Open
    Current App (name)** and, when that app is a browser that can list its tabs, **Open Current Browser Tab**
-   (both read from the app that was frontmost when Settings opened); then **Open an App or Link…**, **Find a
-   Browser Tab…**, **Run a Shortcut…**, a divider, and **Run a Script…** for advanced setup. Until the browsers
+   (both read from the app that was frontmost when Settings opened); then **Open an App…**, **Open a Link…**,
+   **Run a Shortcut…**, **Run a Script…**, a divider, and **Find a Browser Tab…** (a saved tab search, in any
+   browser or one chosen). The outcome is chosen
+   once, here: no sheet asks it again, and editing a command opens the sheet for its kind. Until the browsers
    on this Mac have been checked, a disabled **Checking browsers…** item stands where **Open Current Browser
    Tab** would be. Every starting point opens a normal command sheet that saves an ordinary entry in this
    list, edited from its row; there is no separate template lifecycle.
 
-   Every sheet shares one shape: its warning, **What will you say?**, **What should happen?** (the app, link,
-   tab search's browser, shortcut, or program), then the optional input or arguments, and **Preview**; the
-   technical details sit last. The starting point still suggests a name until the user types one.
-   **What will you say?** has **Spoken name** with a caption saying what saying it does, and optional
-   **Other names** separated by commas, whose caption suggests one for a word that is often misheard. There
+   Every sheet shares one shape: a script or shortcut's warning, **What should happen?** (the app, link, tab search's browser,
+   shortcut, or program), **What will you say?**, then the optional input or arguments, and **Preview**; the
+   technical details sit last. The target comes first so choosing it can suggest the spoken name, which
+   follows the target until the user types their own.
+   **What will you say?** has **Spoken name** with a caption saying what saying it does, and a collapsed
+   **Other names (optional)** disclosure whose summary shows the names already set (or “None”), holding the
+   comma-separated field and a caption suggesting one for a word that is often misheard; it opens itself when
+   one of those names has an error. The tab search's spoken-name placeholder is “tabs”, since a browser's
+   own name already finds its tabs. There
    is no setting for whether a name works on its own: every saved name does. Any phrase can be a name,
    including one that starts with a command word (“go home”, “open notes”). Below the fields, orange
    advisories (`VoiceCommandConfig.conflicts`) name concrete outcomes: a phrase another command already
@@ -998,8 +1012,8 @@ Its sections are, in order:
    commands exactly as a live command would be (`VoiceCommandExample`). When a replacement or another
    command would send the sample elsewhere, or it would ask which one, the card is replaced by an orange
    advisory saying so, quoting what the replacements read it as. It shows only once the draft is
-   valid. A sheet's title names the starting point when adding (**Open an App or Link**, **Find a
-   Browser Tab**, **Run a Shortcut**, **Run a Script**) and reads **Edit Command** when editing; its buttons
+   valid. A sheet's title names the starting point when adding (**Open an App**, **Open a Link**,
+   **Run a Shortcut**, **Run a Script**, **Find a Browser Tab**) and reads **Edit Command** when editing; its buttons
    are **Add Command**, and **Delete Command** in red at the trailing edge, with a confirmation.
 
    Each row leads with an icon: the app's own for an app, the chosen browser's for a web page or tab search
@@ -1018,44 +1032,32 @@ Its sections are, in order:
    from the app's own behavior: it starts actions without adding a confirmation, and some actions run
    immediately. An action that seems to be waiting may have an approval dialog open.
 
-   **Open an App or Link** has a segmented **An app** / **A link** / **A browser tab** destination. The app
+   **Open an App** has an **App** row; the app
    is chosen with the same app chooser as a mode's **Where it works** (running apps with their icons,
    **Choose from Applications…**, **Enter Bundle ID…**). The name follows the chosen app or page until the
    user types their own; for an app it is the name shown in the Applications folder, whichever way the app
-   was chosen. A **Link** is a web address or a link that opens an app (a chat channel or note link). For a web
+   was chosen. **Open a Link** has a **Link** field: a web address or a link that opens an app (a chat channel or note link). For a web
    address the caption says it switches to an open tab whose address starts with it or opens the page, and a
    **Browser** picker follows; for an app link the browser picker and **Finding open tabs** are hidden, the
    caption names the app that opens it (“Opens this link in …. Open tabs are not checked.”), and an orange
    advisory says when no app on this Mac opens it. If the current tab cannot be read, the sheet opens on a
-   link with that browser chosen and an orange advisory asking for the address. **Find a Browser Tab** (the
-   **A browser tab** destination) says to say the name, then words from the tab's title or site, and has the
-   **Browser** picker and a **Switch without asking** toggle (off by default): when on, tabs that match equally
-   well in one browser switch to the leftmost match in its frontmost window that has one instead of offering a
-   choice; ties across browsers still offer one. **Find items in this app** is
-   an optional toggle on an **An app** command, offered while the experimental **Open sidebar items by voice**
-   flag is on (and always on a command that already uses it). It is off by default, so the ordinary app command
-   is unchanged; turning it on reveals the rest. The spoken name alone still brings the app forward; extra
-   words find an item in the app's sidebar, such as a mailbox, channel, person, or folder. A caption built from
-   the chosen app and spoken name says exactly that (for a command named mail: “mail” alone brings Mail
-   forward, and “mail” followed by an item's name finds that item), that several matches ask which one was meant, and plainly: “Only items currently shown
-   in the app's sidebar can be found. Expand sections or scroll to reveal other items.” **Show Available Items**
-   reads the sidebar now; the caption beside it, visible before it is pressed, says some apps first turn on
-   their accessibility support, which stays on until they quit and can use more memory. The result lists the
-   items it found grouped by sidebar section, a validated example phrase when one is found (the spoken name
-   paired with an item it would really open, checked against every saved command and the user's replacements
-   so a saved action whose name starts the same way is never promised; only a few distinct names are tried, so
-   none may be shown), and notes when the read was incomplete or turned on the app's accessibility support; or,
-   in orange, why the sidebar could not be read. A collapsed **Reading the sidebar** section (summary “Uses
-   Accessibility”) holds the technical detail. While the option is on, the sheet's one warning is **A misheard
-   name can open the wrong app or item** in place of the place warning, so the two never stack. Turning the
-   option off saves an ordinary app command with the same identity, spoken name, and other names. A spoken
-   command whose open cannot be confirmed shows an orange advisory naming the item instead of the usual
-   confirmation. **Preview** never reads a sidebar: it says the command would look in the app's sidebar and
-   points to **Show Available Items**. While the flag is off, a command that already finds items keeps the
-   option on and editable, and it stays on screen for the rest of that edit even after being switched off so
-   the change can be undone in place; **Show Available Items** is disabled, and both the sheet and the row show an orange
-   advisory saying how to turn the flag on. Its row reads as an app command: the **App** badge, the app's icon,
-   and “<app> · finds items in its sidebar”. The **Browser** picker lists every
+   link with that browser chosen and an orange advisory asking for the address. **Find a Browser Tab**
+   says to say the name, then words from the tab's title or site, and has the
+   **Browser** picker. Tabs that match equally well in one browser always switch to the leftmost match in its
+   frontmost window that has one; only ties across browsers offer a choice. Navigation keeps the choice list to
+   a minimum: sidebar items tied by name open the first in sidebar order, and a sidebar that could not be read
+   in full still opens its match. Finding items inside an app needs **no
+   setup** and has no control in the sheet: while the experimental **Find items in apps by voice** flag is on,
+   an **Open an App** command's caption reads “Say this name to open the app. Add more words to find a tab, channel,
+   mailbox, or other item in it.” (and “Say this name to open it.” while the flag is off). The same works for
+   any app's own name after “open” with nothing saved. There is no item list, toggle, or read button in
+   Settings; the sidebar is read only when such a phrase is spoken, and a failed lookup says what was searched
+   and how to reveal more (expand a section or scroll the sidebar). **Preview** never reads a sidebar: it
+   says the phrase would look in that app's sidebar, opening the app first if needed. The phrase fields
+   also carry an orange advisory when a spoken name is also an installed app's name (a command named
+   “sublime” that opens TextEdit while Sublime Text is installed), since the saved command silently wins.
+   A spoken command whose sidebar open cannot be confirmed shows an orange advisory naming the item instead
+   of the usual confirmation. Older sidebar commands open as ordinary app commands. The **Browser** picker lists every
    app that opens web links, including ones whose tabs cannot be read (their pages open directly), plus
    **Any browser**. While browsers are being checked, a caption says **Checking browsers…**, and **Any
    browser** or a saved browser stays selected; a refresh never changes a choice the user made. Entering
@@ -1067,7 +1069,7 @@ Its sections are, in order:
    request permission the first time a browser is checked. A field's problem shows beside that field, and
    **Add Command** stays disabled until the command is valid.
 
-   **Run a Shortcut** is organized into **What will you say?**, **What should happen?** (the shortcut),
+   **Run a Shortcut** is organized into **What should happen?** (the shortcut), **What will you say?**,
    **Input (optional)**, and **Preview**. The shortcut is picked from the user's shortcuts (stored by
    identifier, so renaming it in Shortcuts keeps it working); the name follows the chosen shortcut until
    the user types their own. The optional **Input** uses `{text}` to mark the spoken words. The preview shows the actual input, with and without spoken words. The picker includes
@@ -1077,8 +1079,8 @@ Its sections are, in order:
    shortcut's sheet holds the red **Delete Command** action, with a confirmation saying the shortcut
    itself stays in Shortcuts.
 
-   **Run a Script** is organized into **What will you say?**, **What should happen?** (the program, a path
-   field plus **Choose…**), **Arguments (optional)**, and **Preview**. Arguments go one per line, with
+   **Run a Script** is organized into **What should happen?** (the program, a path
+   field plus **Choose…**), **What will you say?**, **Arguments (optional)**, and **Preview**. Arguments go one per line, with
    `{text}` marking where the spoken words go. Beside the arguments it says the script should treat
    those words as input, not as code to run; the finer rules (blank lines, when words are
    needed) sit in a collapsed **How scripts run** section. The full-path field says pipes and redirects
@@ -1159,8 +1161,9 @@ reset. (Notices live in the separate **About & Notices** window, not here.)
   filtering. The same report is available headless as `KeyScribe --diagnose` (see
   `docs/troubleshooting.md`). A transient caption confirms the copy; there is no separate window.
 - **Experimental features** lists one toggle per flag. A flag that builds on another sits indented under
-  it and is disabled while that one is off. **Open sidebar items by voice** sits under **Voice Commands**;
-  its summary says what it does and that it is configured when adding or editing an app command. Maintenance
+  it and is disabled while that one is off. **Find items in apps by voice** sits under **Voice Commands**;
+  its summary says what to say, what is read, and that some apps turn on their accessibility support to be
+  read. Maintenance
   only enables experiments: there is no setup button here.
 - *(Parked, not v1:)* a dedicated diagnostics/migration-error surface and a separate `models/`
   weights-folder reveal (the folder is reachable via Reveal Config today); plus an optional
@@ -1269,8 +1272,8 @@ controls and each mode's Result handling.
 ## 9. Accessibility and keyboard behavior
 
 - Every action is usable by keyboard and reachable through standard SwiftUI/AppKit accessibility
-  semantics. One deliberate exception: the Voice Commands choice (§5) is answered by voice with the
-  user's own shortcut, so it installs no keyboard selection and never takes key focus while waiting.
+  semantics. The Voice Commands choice (§5) is answered by voice, a row's number key, or a click, and
+  **Esc** dismisses it; it has no arrow-key or Return selection.
   Its question, numbered rows with their details, status, and Cancel all carry accessibility labels,
   and a new question is announced once with its rows; a retained list is not announced again.
 - Status uses text labels in addition to color, glyphs, and motion.

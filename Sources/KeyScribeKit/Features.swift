@@ -55,15 +55,16 @@ public struct Feature: CaseIterable, Hashable, Sendable {
         summary: "Adds a built-in Voice Commands mode: give it a shortcut, then say the name of a command you saved, or \(VoiceCommandPhrase.guidance). Speech on that shortcut is never typed."
     )
 
-    // Sidebar search: a saved voice command opens an entry listed in an app's sidebar, read through
-    // Accessibility. Flagged because it depends on each app's outline shape; measured only in a few apps, and
-    // not yet exercised through unread changes, rearranged rows, multiple windows, or account switches.
-    public static let sidebarSearch = Feature(
+    // Finding items in apps: an app name followed by more words opens a browser tab or an entry in the app's
+    // sidebar, read through Accessibility. Flagged because sidebars depend on each app's outline shape; measured
+    // only in a few apps, and not yet exercised through unread changes, rearranged rows, multiple windows, or
+    // account switches.
+    public static let findInApps = Feature(
         id: "voice_command_sidebars",
-        title: "Open sidebar items by voice",
-        summary: "Find mailboxes, channels, and other sidebar items by adding their names after an app command. Configure this when adding or editing an app command.",
+        title: "Find items in apps by voice",
+        summary: "Say \u{201C}open\u{201D}, then the app and what you want to find, such as \u{201C}open Slack general\u{201D} or \u{201C}open Chrome weather\u{201D}. A browser is searched by its open tabs; another app by the items shown in its sidebar, read only when you ask. Some apps, such as Slack, turn on their accessibility support to be read, which stays on until the app quits and can make it use more memory.",
         requires: voiceCommands
     )
 
-    public static let allCases: [Feature] = [streamingTranscription, consumptionDrivenRestore, voiceCommands, sidebarSearch]
+    public static let allCases: [Feature] = [streamingTranscription, consumptionDrivenRestore, voiceCommands, findInApps]
 }

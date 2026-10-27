@@ -32,43 +32,10 @@ public struct SidebarNode: Equatable, Sendable {
 public struct SidebarListing: Equatable, Sendable {
     public var items: [VoiceCommandCatalog.SidebarItem]
     public var isComplete: Bool
-    public var switchedOnAccessibility = false
 
     public init(items: [VoiceCommandCatalog.SidebarItem], isComplete: Bool) {
         self.items = items
         self.isComplete = isComplete
-    }
-
-    public struct Section: Equatable, Sendable {
-        public let title: String?
-        public let names: [String]
-
-        public init(title: String?, names: [String]) {
-            self.title = title
-            self.names = names
-        }
-    }
-
-    public var sections: [Section] {
-        var order: [String?] = []
-        var names: [String?: [String]] = [:]
-        for item in items {
-            if names[item.section] == nil { order.append(item.section) }
-            names[item.section, default: []].append(item.name)
-        }
-        return order.map { Section(title: $0, names: names[$0] ?? []) }
-    }
-
-    public func notes(appName: String) -> [String] {
-        var notes: [String] = []
-        if items.isEmpty { notes.append("\(appName)\u{2019}s front window shows no sidebar items this command can open.") }
-        if !isComplete { notes.append("Not every item could be read, so a match will be offered as a choice before it opens.") }
-        if switchedOnAccessibility { notes.append(Self.switchedNote(appName: appName)) }
-        return notes
-    }
-
-    public static func switchedNote(appName: String) -> String {
-        "\(appName)\u{2019}s accessibility support was turned on to read it and stays on until \(appName) quits."
     }
 }
 

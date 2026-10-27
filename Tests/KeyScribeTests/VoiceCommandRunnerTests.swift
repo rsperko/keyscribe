@@ -38,6 +38,7 @@ struct VoiceCommandRunnerTests {
             tabReads.append(browser)
             await whileReadingTabs?()
             if tabsUnreadable { return nil }
+            if let browser, opened.contains(browser), let tabsOnceOpened { return TabRead(tabs: tabsOnceOpened) }
             return TabRead(tabs: tabs.filter { browser == nil || $0.browserBundleId == browser },
                            refused: refused.filter { browser == nil || $0 == browser },
                            unavailable: unavailable.filter { browser == nil || $0 == browser })
@@ -76,7 +77,16 @@ struct VoiceCommandRunnerTests {
         var sidebarOpenResult: SidebarOpenResult = .opened
         private(set) var sidebarReads: [String] = []
         private(set) var openedSidebarItems: [VoiceCommandCatalog.SidebarItem] = []
-        func sidebarItems(in bundleId: String) async -> SidebarRead { sidebarReads.append(bundleId); return sidebar }
+        var sidebarOnceOpened: SidebarRead?
+        var tabBrowserIds: Set<String> = []
+        var tabsOnceOpened: [VoiceCommandCatalog.Tab]?
+        func tabBrowsers() async -> Set<String> { tabBrowserIds }
+        var whileReadingSidebar: () -> Void = {}
+        func sidebarItems(in bundleId: String) async -> SidebarRead {
+            sidebarReads.append(bundleId)
+            whileReadingSidebar()
+            return opened.contains(bundleId) ? sidebarOnceOpened ?? sidebar : sidebar
+        }
         func openSidebarItem(_ item: VoiceCommandCatalog.SidebarItem) async -> SidebarOpenResult {
             openedSidebarItems.append(item)
             return sidebarOpenResult
@@ -296,7 +306,7 @@ struct VoiceCommandRunnerTests {
         let (runner, system) = make()
         system.tabsUnreadable = true
         #expect(await runner.run(transcript: "switch to gmail", places: [gmail], origin: nil)
-                == .failed(message: "The browser did not list its open tabs, so nothing was opened."))
+                == .failed(message: "The browser did not list its open tabs, so no tab was opened."))
         #expect(system.openedURLs.isEmpty)
     }
 
@@ -332,7 +342,7 @@ struct VoiceCommandRunnerTests {
         let place = VoiceCommandPlace(name: "Gmail", target: .url("https://mail.google.com/"), browser: browser)
         system.unavailable = [chrome.bundleId]
         #expect(await runner.run(transcript: "switch to gmail", places: [place], origin: nil)
-                == .failed(message: "Google Chrome did not list its open tabs, so nothing was opened."))
+                == .failed(message: "Google Chrome did not list its open tabs, so no tab was opened."))
         #expect(system.openedURLs.isEmpty)
     }
 

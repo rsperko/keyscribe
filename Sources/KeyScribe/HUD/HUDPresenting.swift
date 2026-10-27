@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import KeyScribeKit
 
@@ -46,6 +47,13 @@ struct VoiceCommandChoicePrompt: Equatable {
     let rows: [VoiceCommandChoiceRow]
     let hint: String
 
+    // Only a bare number key picks a row: ⌘1 or ⌥1 belongs to whatever shortcut the user meant.
+    func row(forKey characters: String?, modifiers: NSEvent.ModifierFlags) -> VoiceCommandChoiceRow? {
+        let held = modifiers.intersection(.deviceIndependentFlagsMask).subtracting([.numericPad, .capsLock, .function])
+        guard held.isEmpty, let characters, let number = Int(characters) else { return nil }
+        return rows.first { $0.number == number }
+    }
+
     var announcement: String {
         let rows = rows.map { "\($0.number), \($0.name), \($0.detail)" }
         return ([title] + rows + [hint]).joined(separator: ". ")
@@ -63,7 +71,7 @@ enum HUDState: Equatable {
     case ready(mode: String)
     case recording(mode: String?, level: Float, latchedTrigger: String?, countdown: RecordingCountdown? = nil)
     case loadingModel(mode: String)
-    case transcribing(mode: String)
+    case transcribing(mode: String, status: String? = nil)
     case rewriting(connection: String, mode: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
     case localFallback(outcome: DictationOutcome, mode: String)
     case complete(outcome: DictationOutcome, mode: String)
@@ -130,7 +138,7 @@ extension HUDState {
             return mode
         case .loadingModel(let mode):
             return mode
-        case .transcribing(let mode):
+        case .transcribing(let mode, _):
             return mode
         case .rewriting(_, let mode, _, _, _):
             return mode
@@ -167,8 +175,8 @@ extension HUDState {
             return latchedTrigger.map { "Listening — tap \($0) again to stop" } ?? "Listening"
         case .loadingModel:
             return "Loading speech model…"
-        case .transcribing:
-            return "Transcribing"
+        case .transcribing(_, let status):
+            return status ?? "Transcribing"
         case .rewriting(let connection, _, _, _, _):
             return "Rewriting with \(connection)"
         case .complete(.copied(let reason), _), .localFallback(.copied(let reason), _),
@@ -272,8 +280,8 @@ extension HUDState {
             return "Recording"
         case .loadingModel:
             return "Loading speech model"
-        case .transcribing:
-            return "Transcribing"
+        case .transcribing(_, let status):
+            return status ?? "Transcribing"
         case .rewriting(let connection, _, _, _, _):
             return "Rewriting with \(connection)"
         case .localFallback, .complete, .commandDone, .stoppedAtLimit, .error, .advisory:
@@ -309,8 +317,9 @@ extension HUDState {
     // HUD, so ESC does not reach us there — the trigger itself cancels an arming dictation (handleCommit).
     var holdsKeyFocus: Bool {
         switch self {
+        case .transcribing(_, _?): return false
         case .recording, .loadingModel, .transcribing, .rewriting: return true
-        case .choice(_, .listening, _), .choice(_, .working, _): return true
+        case .choice: return true
         default: return false
         }
     }

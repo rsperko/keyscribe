@@ -512,11 +512,6 @@ url = "slack://channel?team=T0123ABCD&id=C0456EFGH"  # an app link: opened as-is
 name = "Chrome"
 find_tab = true                  # a tab search: "chrome gmail" finds Chrome's tab titled like "gmail"
 browser = "com.google.Chrome"    # optional: only search this browser; absent = every browser
-quick_switch = true              # optional: on a tie, switch to the frontmost tab instead of asking
-
-[[command]]
-name = "Slack"
-sidebar = "com.tinyspeck.slackmacgap"  # a sidebar search: "slack general" opens the entry named like "general"
 
 [[command]]
 name = "Deploy"
@@ -531,7 +526,7 @@ input = "{text}"                 # optional text given as the shortcut's input
 ```
 
 Settings lists the commands in file order under **Commands**. `browser` applies to `url` and `find_tab`
-commands, `quick_switch` only to `find_tab`; `shortcut_id` and `input` apply only to a shortcut. **`id`** identifies the command
+commands; `shortcut_id` and `input` apply only to a shortcut. **`id`** identifies the command
 across renames and edits: Settings edits, deletes, and remembers a pending choice by it, never by name.
 A command written without one gets an id derived from its name, which the next save from Settings keeps.
 Two commands may not share an id or a name. In what follows, a *place* is a command that opens an app,
@@ -657,7 +652,9 @@ link, or tab, and a *script* one that runs a program or shortcut.
   `switch to male` and `open email` reach Mail without rewriting the transcript. Keep these fixes in the
   mode's vocabulary unless you deliberately want other modes to use them. See the
   [worked examples in the FAQ](../../FAQ.md#a-voice-command-keeps-being-misheard).
-- A command sets **exactly one** of `app`, `url`, `find_tab = true`, `sidebar`, `run`, or `shortcut`. `url` is an `http`/`https` address, or a link that opens an
+- A command sets **exactly one** of `app`, `url`, `find_tab = true`, `run`, or `shortcut`. An older
+  `sidebar = "<bundle id>"` is read as `app` for the same bundle id and written back as `app` on the next
+  save; a command that sets both is rejected. `url` is an `http`/`https` address, or a link that opens an
   app (`slack://…`, `obsidian://…`): any other scheme except `file`, `javascript`, `data`, `blob`, `about`, and
   `ftp`, with no username or password. An app link is opened as written by the app macOS assigns to it; it is
   never matched against open tabs, never reads them, and cannot set `browser`. If no app opens it, the command
@@ -670,7 +667,8 @@ link, or tab, and a *script* one that runs a program or shortcut.
   loosely. The **longest matching spoken name wins**
   whatever the file order, so `Note` and `Note work` both work and "note work buy milk" runs `Note work`.
   Only then are the words after it checked: a script or shortcut with `{text}` needs some, a tab search
-  uses them to find the tab, and anything else must have none. When the check fails the command explains
+  uses them to find the tab, an app place uses them to find something in its app (below), and anything else
+  must have none. When the check fails the command explains
   and runs nothing; it never falls back to a shorter name. Names tied for longest are offered as a numbered
   choice. Names match exactly, never by a near-miss. Any phrase can be a name, including one that starts
   with a command word (`go home`, `open notes`); because saved names come first, a name that is itself a
@@ -682,37 +680,53 @@ link, or tab, and a *script* one that runs a program or shortcut.
   then a run of words, then words in any order or a near-miss). A tab is also known by its **site**, the
   `http`/`https` host without `www.` or its top-level domain (`grafana.example.com` → "grafana example",
   `bbc.co.uk` → "bbc"); the site is tried after the title at each step, so a tab titled "Dashboard" is found
-  by "grafana", and a title match beats a site match. With `quick_switch = true`, tabs tied at the winning
-  step are not offered as a choice when they are all in one browser: the one in that browser's frontmost
-  window that has a match wins, leftmost first, however many there are. Window order is per browser, so ties
-  across browsers are still offered as a choice. Said alone, a tab search with a `browser`
+  by "grafana", and a title match beats a site match. Tabs tied at the winning step are never offered as a
+  choice when they are all in one browser: the one in that browser's frontmost window that has a match wins,
+  leftmost first, however many there are. Window order is per browser, so ties across browsers are still
+  offered as a choice. An older `quick_switch` key, which used to turn this on, is read and ignored, and is
+  dropped on the next save. Said alone, a tab search with a `browser`
   brings that browser forward; one without asks for words to find. Reading tabs uses the same Automation
   permission as a web place.
-- **Sidebar searches** (`sidebar = "<bundle id>"`) are what an app command with **Find items in this app**
-  turned on saves: the option replaces `app = "<bundle id>"` with `sidebar` for the same bundle id, and
-  turning it off writes `app` back, keeping the command's `id`, `name`, and `say`. They are experimental: they run only while the
-  `Feature.sidebarSearch` flag is on, and otherwise fail with a message saying how to turn it on (said
-  alone, one still brings its app forward). They find an entry listed in the sidebar of that app's front
-  window: the leftmost outline it shows, such as chat channels and people, mailboxes, or note folders. An
-  entry is named by the text it shows, not its unread count or badge, and grouped under the row or level
-  above it ("Channels", "Direct Messages", an account). Matching is the tab-title matching above (exact,
-  a run of words, words in any order, or a near-miss), and entries tied at the winning step are always
-  offered as a choice with their group shown; there is no automatic pick. Only entries the app shows are
-  found, so a collapsed section or a long list that draws only its visible rows can hide one. The sidebar is
-  read through Accessibility when the command searches for an item or you press Show Available Items; it is
-  never read in the background; an app built on Electron
-  whose sidebar is not exposed has its accessibility support turned on first (`AXManualAccessibility`), which
-  stays on until that app quits. When the sidebar could not be read in full (it lists more than
-  `SidebarOutline.itemLimit` entries, or the read was cut short), even a single match is offered as a choice,
-  since an entry of the same name may not have been seen. A sidebar whose window cannot be identified is not read, and an entry opens only in the window it was read from,
-  and only if it is still at the same place under the same group; otherwise the command fails and opens
-  nothing. Opening presses the element that shows the entry's name, or selects the row; it never presses a
-  disclosure triangle, checkbox, or button, never types or sends anything, and stops before each step once
-  the command is abandoned or has run out of time. Afterwards it confirms the open when the row reports
-  itself selected or the window title names the entry (`SidebarOutline.confirms`); otherwise the result says
-  the entry was pressed but could not be confirmed. Settings' preview never reads a sidebar. Said alone, a sidebar search brings the
-  app forward. A sidebar search takes neither `browser` nor `quick_switch`, and is never reached by "switch to".
-- **Matching order** for an app-switching verb, first hit wins: a place's spoken name exactly; a running app's name exactly; a
+- **Finding items in apps** is experimental and runs only while the `Feature.findInApps` flag is on. An app's
+  name or an app place's spoken name, followed by more words, searches that app for the rest: "open slack
+  general", or "work general" when a place named `Work` opens Slack. Nothing has to be saved for an app's
+  own name. The app is chosen first, by the longest name at the start of the phrase: a place's spoken name
+  over a running app's over an installed app's, so a place can stand in for an app ("sublime" opening
+  TextEdit), and Settings warns when a place's name is also an installed app's. Apps sharing that name are
+  offered as a choice before anything is read. Then only that app is searched; nothing falls back to other
+  apps' windows or tabs. A browser that can list its tabs (`installedSnapshot().tabBrowsers`) is searched by
+  its open tabs, with the tab-search matching above. Any other app is searched by the entries listed in the
+  sidebar of its front window: the leftmost outline it shows, such as chat channels and people, mailboxes,
+  or note folders. An entry is named by the text it shows, not its unread count or badge, and grouped under
+  the row or level above it ("Channels", "Direct Messages", an account). Matching is the tab-title matching
+  above (exact, a run of words, words in any order, or a near-miss), and entries tied at the winning step
+  open the first in sidebar order, without asking; "go back" returns to where you were if it was the wrong
+  one. Only entries the app
+  shows are found, so a collapsed section or a long list that draws only its visible rows can hide one, and
+  a failed search says so. The sidebar is read through Accessibility only when such a phrase is said; it is
+  never read in the background, and Settings' preview never reads one. An app built on Electron whose
+  sidebar is not exposed has its accessibility support turned on first (`AXManualAccessibility`), which
+  stays on until that app quits. An app that is not running, a browser included, is opened first, and its
+  sidebar or tabs are read again for a bounded time (`VoiceCommandRunner.launchWaitSeconds`, one deadline across the waits and the reads) while the
+  HUD says it is opening the app and then looking in it. A sidebar that stays empty for a few reads in a row
+  (`VoiceCommandRunner.emptySidebarSettleReads`) is taken as empty and reported as having no match; one that
+  never appears is reported as not ready yet. Cancelling or replacing the command stops this:
+  an app not yet opened is not opened, and no further reads are made, but an app that already started stays
+  open. Settings' preview and `--voice-command --dry-run` never open an app.
+  A sidebar that could not be read in full (it lists more than `SidebarOutline.itemLimit` entries, or the
+  read was cut short) is still searched as read, and a match opens without asking. A sidebar whose window cannot be identified is not read, and an entry opens only in the
+  window it was read from, and only if it is still at the same place under the same group; otherwise the
+  command fails and opens nothing. Opening presses the element that shows the entry's name, or selects the
+  row; it never presses a disclosure triangle, checkbox, or button, never types or sends anything, and stops
+  before each step once the command is abandoned or has run out of time. Afterwards it confirms the open
+  when the row reports itself selected or the window title names the entry (`SidebarOutline.confirms`);
+  otherwise the result says the entry was pressed but could not be confirmed. While the flag is off, an app
+  place takes no extra words, and the app's name with extra words is matched as a whole like any other
+  target. While it is on, the exact names in the matching order below (a place's, a running app's, an
+  installed app's) come first, then an app's name followed by more words, and only then the partial
+  matches, so "open mail inbox" searches Mail even beside a running app called Mail Inbox Helper.
+- **Matching order** for an app-switching verb while finding items in apps is off (the change when it is on is
+  described above), first hit wins: a place's spoken name exactly; a running app's name exactly; a
   contiguous run of words in a running app's name ("chrome" → Google Chrome); the same partial rule on
   place names; an installed app's name exactly; then an **open window's title**, exactly and then as a
   contiguous run of words; then an **open browser tab's title** the same two ways, then its **site** the same

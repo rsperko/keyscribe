@@ -467,4 +467,9 @@ struct VoiceCommandScriptOptionTests {
         let catalog = VoiceCommandCatalog(places: [], scripts: [edited])
         #expect(VoiceCommandResolver.resolve(option("C1", "#general"), text: "", catalog: catalog) == .unavailable("Channel"))
     }
+
+    @Test func aTooLongOtherNameIsReportedAsAnOtherName() {
+        let script = VoiceCommandScript(name: "Deploy", say: [String(repeating: "a", count: 257)], run: ["/usr/bin/true"])
+        #expect(script.issue?.hasPrefix("Other names: ") == true)
+    }
 }

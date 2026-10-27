@@ -6,7 +6,6 @@ public struct VoiceCommandPlace: Encodable, Equatable, Sendable {
         case app(bundleId: String)
         case url(String)
         case tabSearch
-        case sidebar(bundleId: String)
     }
 
     public var id: String
@@ -14,27 +13,16 @@ public struct VoiceCommandPlace: Encodable, Equatable, Sendable {
     public var say: [String]
     public var target: Target
     public var browser: String?
-    public var quickSwitch: Bool
 
-    public init(
-        id: String? = nil, name: String, say: [String] = [], target: Target, browser: String? = nil, quickSwitch: Bool = false
-    ) {
+    public init(id: String? = nil, name: String, say: [String] = [], target: Target, browser: String? = nil) {
         self.id = id ?? VoiceCommandNaming.defaultId(name)
         self.name = name
         self.say = say
         self.target = target
         self.browser = browser
-        self.quickSwitch = quickSwitch
     }
 
     public var isTabSearch: Bool { target == .tabSearch }
-
-    public var sidebarApp: String? {
-        if case .sidebar(let bundleId) = target { return bundleId }
-        return nil
-    }
-
-    public var searchesByName: Bool { isTabSearch || sidebarApp != nil }
 
     public var spokenForms: [String] { VoiceCommandNaming.spokenForms(name: name, say: say) }
 
@@ -51,8 +39,6 @@ public struct VoiceCommandPlace: Encodable, Equatable, Sendable {
             if let issue = Self.linkIssue(url) { return "Web page: \(issue)" }
         case .tabSearch:
             break
-        case .sidebar(let bundleId):
-            if let issue = UserInputValidation.identifierIssue(bundleId, required: true) { return "App: \(issue.message)" }
         }
         if let browser {
             if let issue = UserInputValidation.identifierIssue(browser, required: true) { return "Browser: \(issue.message)" }
@@ -102,9 +88,8 @@ public struct VoiceCommandPlace: Encodable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, say, app, url, browser, sidebar
+        case id, name, say, app, url, browser
         case findTab = "find_tab"
-        case quickSwitch = "quick_switch"
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -116,10 +101,8 @@ public struct VoiceCommandPlace: Encodable, Equatable, Sendable {
         case .app(let bundleId): try c.encode(bundleId, forKey: .app)
         case .url(let url): try c.encode(url, forKey: .url)
         case .tabSearch: try c.encode(true, forKey: .findTab)
-        case .sidebar(let bundleId): try c.encode(bundleId, forKey: .sidebar)
         }
         try c.encodeIfPresent(browser, forKey: .browser)
-        if quickSwitch { try c.encode(true, forKey: .quickSwitch) }
     }
 }
 
@@ -406,7 +389,8 @@ public enum VoiceCommand: Codable, Equatable, Sendable {
         let name = try c.decode(String.self, forKey: .name)
         let id = try c.decodeIfPresent(String.self, forKey: .id)
         let say = try c.decodeIfPresent([String].self, forKey: .say) ?? []
-        let app = try c.decodeIfPresent(String.self, forKey: .app)
+        let sidebar = try c.decodeIfPresent(String.self, forKey: .sidebar)
+        let app = try c.decodeIfPresent(String.self, forKey: .app) ?? sidebar
         let url = try c.decodeIfPresent(String.self, forKey: .url)
         let findTab = try c.decodeIfPresent(Bool.self, forKey: .findTab) ?? false
         let browser = try c.decodeIfPresent(String.self, forKey: .browser)
@@ -414,17 +398,10 @@ public enum VoiceCommand: Codable, Equatable, Sendable {
         let shortcut = try c.decodeIfPresent(String.self, forKey: .shortcut)
         let shortcutId = try c.decodeIfPresent(String.self, forKey: .shortcutId)
         let input = try c.decodeIfPresent(String.self, forKey: .input)
-        let quickSwitch = try c.decodeIfPresent(Bool.self, forKey: .quickSwitch) ?? false
+        _ = try c.decodeIfPresent(Bool.self, forKey: .quickSwitch)
         func invalid(_ problem: String) -> ConfigError { .invalid("command \"\(name)\": \(problem)") }
-        if quickSwitch && !findTab { throw invalid("quick_switch applies only to find_tab") }
-        let exactlyOne = "set exactly one of app, url, find_tab, sidebar, run, or shortcut"
-        if let sidebar = try c.decodeIfPresent(String.self, forKey: .sidebar) {
-            guard app == nil, url == nil, !findTab, run == nil, shortcut == nil else { throw invalid(exactlyOne) }
-            guard browser == nil else { throw invalid("browser applies only to app, url, or find_tab") }
-            guard shortcutId == nil, input == nil else { throw invalid("shortcut_id and input apply only to a shortcut") }
-            self = .place(VoiceCommandPlace(id: id, name: name, say: say, target: .sidebar(bundleId: sidebar)))
-            return
-        }
+        let exactlyOne = "set exactly one of app, url, find_tab, run, or shortcut"
+        if sidebar != nil, c.contains(.app) { throw invalid(exactlyOne) }
         switch (app, url, findTab, run, shortcut) {
         case (let app?, nil, false, nil, nil):
             guard shortcutId == nil, input == nil else { throw invalid("shortcut_id and input apply only to a shortcut") }
@@ -435,7 +412,7 @@ public enum VoiceCommand: Codable, Equatable, Sendable {
         case (nil, nil, true, nil, nil):
             guard shortcutId == nil, input == nil else { throw invalid("shortcut_id and input apply only to a shortcut") }
             self = .place(VoiceCommandPlace(
-                id: id, name: name, say: say, target: .tabSearch, browser: browser, quickSwitch: quickSwitch))
+                id: id, name: name, say: say, target: .tabSearch, browser: browser))
         case (nil, nil, false, let run?, nil):
             guard browser == nil else { throw invalid("browser applies only to app, url, or find_tab") }
             guard shortcutId == nil, input == nil else { throw invalid("shortcut_id and input apply only to a shortcut") }
@@ -520,6 +497,18 @@ extension VoiceCommandConfig {
         let others = commands.map(\.candidate).filter { $0.identity != candidate.identity }
         return [Self.duplicate(candidate, among: others), Self.longer(candidate, among: others), Self.shorter(candidate, among: others)]
             .compactMap { $0 } + candidate.spokenForms.compactMap(Self.builtInConflict)
+    }
+
+    public static func hiddenApps(by candidate: VoiceCommandCandidate, installed: [VoiceCommandCatalog.App]) -> [String] {
+        guard case .place(let place) = candidate else { return [] }
+        let own: String? = if case .app(let bundleId) = place.target { bundleId } else { nil }
+        return place.spokenForms.compactMap { form in
+            let spoken = VoiceCommandText.key(form)
+            guard let app = installed.first(where: { app in
+                app.bundleId != own && app.spokenNames.contains { VoiceCommandText.key($0) == spoken }
+            }) else { return nil }
+            return "\u{201C}\(form)\u{201D} is also the name of \(app.name), so saying it opens this command instead."
+        }
     }
 
     private static func words(_ phrase: String) -> [Substring] {
@@ -622,8 +611,7 @@ public enum VoiceCommandStore {
             places: [
                 VoiceCommandPlace(name: "a", say: ["a"], target: .app(bundleId: "a")),
                 VoiceCommandPlace(name: "b", say: ["b"], target: .url("https://example.com/"), browser: "b"),
-                VoiceCommandPlace(name: "c", say: ["c"], target: .tabSearch, browser: "c", quickSwitch: true),
-                VoiceCommandPlace(name: "d", say: ["d"], target: .sidebar(bundleId: "d")),
+                VoiceCommandPlace(name: "c", say: ["c"], target: .tabSearch, browser: "c"),
             ],
             scripts: [
                 VoiceCommandScript(name: "a", say: ["a"], run: ["/a", "{text}"]),
@@ -663,7 +651,7 @@ public enum VoiceCommandNaming {
     static func issue(name: String, say: [String]) -> String? {
         if let issue = UserInputValidation.nameIssue(name) { return "Name: \(issue.message)" }
         for form in say {
-            if let issue = UserInputValidation.phraseIssue(form) { return "Spoken name: \(issue.message)" }
+            if let issue = UserInputValidation.phraseIssue(form) { return "Other names: \(issue.message)" }
         }
         return nil
     }

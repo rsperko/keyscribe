@@ -75,13 +75,10 @@ struct VoiceCommandFuzzyTests {
                         windows: .complete([window("Keyscribe")])) == .noMatch("banana"))
     }
 
-    @Test func tabsTiedOnTitleAreOfferedAsAChoice() {
+    @Test func tabsTiedOnTitleInOneBrowserGoToTheLeftmost() {
         let first = tab("Login - oMLX Admin", tab: 1)
         let second = tab("Dashboard - oMLX Admin", tab: 2)
-        guard case .ambiguous(let choice) = resolve("switch to omlx admin", tabs: [first, second]) else {
-            Issue.record("expected a choice"); return
-        }
-        #expect(choice.candidates == [.tab(first), .tab(second)])
+        #expect(resolve("switch to omlx admin", tabs: [second, first]) == .action(.tab(first)))
     }
 
     @Test func aTabCandidateHasAStableIdentityAndNamesItsSite() {

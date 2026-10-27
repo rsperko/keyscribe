@@ -136,28 +136,31 @@ does not "fix" them — including in privacy modes, which turn context off but s
 Yes, with the experimental **Voice Commands** mode. Turn it on in **Settings ▸ Maintenance ▸
 Experimental features**, then assign a shortcut in **Settings ▸ Modes ▸ Voice Commands**. It can't
 be shared with another mode: if you pick one that a dictation mode already uses, KeyScribe asks before
-moving it, names the modes that lose it, and offers **Undo** afterwards. Use that shortcut, then say
-the name of a command you saved under **Commands ▸ Add Command…**:
+moving it, names the modes that lose it, and offers **Undo** afterwards.
 
-- **“chrome gmail”**: choose **Find a Browser Tab**, name it `chrome`, and pick Google Chrome. Saying
-  `chrome` and words from a tab's title or its site (`chrome github`) switches to the best-matching tab in
-  Chrome only; `chrome` alone brings Chrome forward. Pick **Any browser** to search every browser instead.
-  When several tabs match, you choose one; turn on **Switch without asking** to go straight to the frontmost
-  one instead (matches in different browsers still ask).
-- **“mail”**, **“mail sent”**, **“mail drafts”** (experimental): one app command reaches many destinations.
-  Saying the name alone brings the app forward; adding the name of something in the app's sidebar, such as a
-  mailbox, folder, channel, or person, finds and opens it, so you do not set up each destination separately.
-  Under **Maintenance ▸ Experimental features**, turn on **Open sidebar items by voice** (under **Voice
-  Commands**). Then add or edit an **Open an App or Link** command for the app and turn on **Find items in this
-  app**. **Show Available Items** shows what the command can open and, when possible, an example phrase. Only
-  items currently shown in the app's sidebar can be found, so expand sections or scroll to reveal others, and
-  two items with the same name ask which one you meant. It was tried in Slack, Mail, and Notes (2026-10-25);
-  other apps may not work. For a single fixed destination, an app link (below) is simpler.
-- **“web hooks”** for a chat channel: choose **Open an App or Link**, pick **A link**, and paste the
+Use that shortcut, then say “open” and an app, window, or tab: **“open Mail”** works with nothing saved.
+To reach something inside an app, turn on **Find items in apps by voice** under **Maintenance ▸
+Experimental features** (under **Voice Commands**) and say the app, then what you want in it:
+
+- **“open Slack general”**, **“open Mail sent”**: opens the channel, mailbox, folder, or person shown in the
+  app's sidebar. Only items the sidebar currently shows can be found, so expand a section or scroll if one is
+  missing, and two items with the same name ask which one you meant. It was tried in Slack, Mail, and Notes
+  (2026-10-25); other apps may not work.
+- **“open Chrome github”**: switches to the Chrome tab whose title or site best matches.
+
+An app that isn't open is opened first. For anything else, save a command under **Commands ▸ Add
+Command…** and say its name:
+
+- **“work general”**: choose **Open an App**, pick Slack, and name it `work`. A saved app name works like
+  the app's own, with or without words after it.
+- **“web hooks”** for a chat channel: choose **Open a Link** and paste the
   channel's app link (for one chat app, `slack://channel?team=…&id=…`, built from the IDs in the channel's
   details). Name it `web hooks`; the link opens in the chat app.
 - **“note buy milk”**: choose **Run a Script** or **Run a Shortcut**, name it `note`, and give it
   `{text}`. The words after the name are passed to it.
+- **“tabs github”**: choose **Find a Browser Tab** and name it `tabs` to search the tabs of every
+  browser at once. When several tabs in one browser match equally, it goes to the frontmost one; matches in
+  different browsers ask which one you meant.
 - **“go home”**, **“open notes”**, **“focus mode”**: any natural phrase can be a name, including one
   that starts like a built-in command below. A saved name is checked first.
 
@@ -258,7 +261,7 @@ replacements there apply only to commands, and run before KeyScribe reads what y
   words passed to scripts and shortcuts.
 
 - **A name that needs to work with several commands:** add an app under **Settings ▸ Modes ▸ Voice
-  Commands ▸ Commands ▸ Add Command… ▸ Open an App or Link…**, choose Mail, and enter `male` in **Other names**. "male",
+  Commands ▸ Commands ▸ Add Command… ▸ Open an App…**, choose Mail, and enter `male` in **Other names**. "male",
   "switch to male", and "open male" then go to Mail, without rewriting other uses of the word. This is also useful
   for a preferred nickname, such as `email` for Mail.
 - **Your own spoken shortcuts:** saving a command is simplest. A replacement for a whole phrase also

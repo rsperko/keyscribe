@@ -306,7 +306,7 @@ final class DictationController {
         self.activeEngineUsable = activeEngineUsable
         self.isSessionLocked = isSessionLocked
         self.llmClient = llmClient
-        self.voiceCommands = voiceCommands ?? VoiceCommandRunner(sidebarEnabled: { config.sidebarSearchEnabled })
+        self.voiceCommands = voiceCommands ?? VoiceCommandRunner(findsInApps: { config.findsInAppsEnabled })
         self.permits = permits
         self.recordModelLoadFailure = recordModelLoadFailure
         self.maxRecordingSeconds = maxRecordingSeconds
@@ -314,6 +314,12 @@ final class DictationController {
         self.warmupClip = warmupClip
         self.audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         installMemoryPressureHandler()
+        self.voiceCommands.onProgress = { [weak self] progress in self?.showCommandProgress(progress) }
+    }
+
+    private func showCommandProgress(_ progress: VoiceCommandProgress) {
+        guard machine.state == .inserting else { return }
+        present(.transcribing(mode: currentModeName, status: progress.text))
     }
 
     // Record loss here; every terminal handles it at insertion. A stale report must not affect a successor.
@@ -1169,10 +1175,10 @@ final class DictationController {
     private func choicePrompt(for pending: VoiceCommandPendingChoice) -> VoiceCommandChoicePrompt {
         let shortcut = plan.modes.first { $0.runsVoiceCommands }?.triggerKeys.first
             .flatMap { try? KeyDescriptor(parsing: $0.key) }?.displayString
-        let use = shortcut.map { "Use \($0)" } ?? "Use your Voice Commands shortcut"
+        let newCommand = shortcut.map { "use \($0) to give a new command" } ?? "use your Voice Commands shortcut to give a new command"
         let hint = (pending.choice.note.map { "\($0) " } ?? "")
-            + "\(use) and say \u{201C}two\u{201D} or \u{201C}the second one\u{201D}. "
-            + "Say \u{201C}cancel\u{201D} to dismiss, or give a new command."
+            + "Press 1\u{2013}\(pending.rows.count), or use any shortcut and say \u{201C}two\u{201D} or \u{201C}the second one\u{201D}. "
+            + "Press Esc or say \u{201C}cancel\u{201D} to dismiss, or \(newCommand)."
         return VoiceCommandChoicePrompt(id: pending.id, title: pending.choice.title, rows: pending.rows, hint: hint)
     }
 
@@ -1236,9 +1242,11 @@ final class DictationController {
         }
     }
 
+    // Any shortcut claims an open question: a dictation shortcut's words answer it only when they are a number
+    // or "cancel" (decided at commit), and otherwise are typed as usual and the question closes.
     private func claimOrDismissVoiceCommandChoice() {
         guard voiceCommands.pendingChoice != nil else { return }
-        guard activeMode?.runsVoiceCommands == true, settings.features.isEnabled(.voiceCommands) else {
+        guard settings.features.isEnabled(.voiceCommands) else {
             dismissVoiceCommandChoice()
             return
         }
@@ -2073,6 +2081,17 @@ final class DictationController {
             await finishVoiceCommand(heard: raw)
             return
         }
+        if let id = session?.choiceId {
+            if let pending = voiceCommands.pendingChoice, pending.id == id,
+               VoiceCommandChoiceAnswer.parse(raw, count: pending.rows.count) != .unrecognized,
+               let commandMode = plan.modes.first(where: { $0.runsVoiceCommands }) {
+                activeMode = commandMode
+                await finishVoiceCommand(heard: raw)
+                return
+            }
+            session?.choiceId = nil
+            dismissVoiceCommandChoice()
+        }
 
         // Phase B (design.md §4.3): a trigger-phrase suffix re-routes to that mode's pipeline
         // and is stripped from the transcript; otherwise the Phase-A mode stands.
@@ -2737,6 +2756,16 @@ final class DictationController {
     // the HUD's ESC monitor, which can only fire while the HUD is key, i.e. NOT while arming — an arming
     // dictation is cancelled by the trigger (handleCommit), the chord-wins abort, a screen lock, or quit.
     var isCancellable: Bool { machine.isCancellable }
+
+    var escapeCancels: Bool { isCancellable || (!isBusy && pendingVoiceCommandChoice != nil) }
+
+    func cancelFromEscape() {
+        if isCancellable {
+            cancel()
+        } else if !isBusy, let prompt = pendingVoiceCommandChoice {
+            cancelVoiceCommandChoice(choice: prompt.id)
+        }
+    }
 
     func cancel() {
         guard machine.isBusy else { return }

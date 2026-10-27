@@ -9,6 +9,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     @Published private(set) var tryResult: TryResult?
     @Published private(set) var browserChoices: BrowserChoices = .loading
     @Published private(set) var shortcutChoices: ShortcutChoices = .loading
+    @Published private(set) var installedApps: [VoiceCommandCatalog.App] = []
 
     enum BrowserChoices: Equatable {
         case loading
@@ -44,7 +45,6 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     private var tryTask: Task<Void, Never>?
     private var lastTried = ""
     private var revision = 0
-    private var sidebarExampleCache: (place: VoiceCommandPlace, items: SidebarListing, revision: Int, example: SidebarExample?)?
 
     init(repository: ConfigRepository, system: LiveVoiceCommandSystem = .shared) {
         self.repository = repository
@@ -179,26 +179,13 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     var saved: VoiceCommandConfig { VoiceCommandConfig(commands: commands) }
 
     func conflicts(for candidate: VoiceCommandCandidate) -> [String] {
-        saved.conflicts(for: candidate)
+        saved.conflicts(for: candidate) + VoiceCommandConfig.hiddenApps(by: candidate, installed: installedApps)
     }
 
     func example(for candidate: VoiceCommandCandidate) -> VoiceCommandExample {
         VoiceCommandExample.make(
             for: candidate, among: saved, readAs: readAs,
             appName: { [system] in system.appName(forBundleId: $0) })
-    }
-
-    typealias SidebarExample = (heard: String, item: VoiceCommandCatalog.SidebarItem)
-
-    // Each search resolves against a whole sidebar, so it runs once per input and reload rather than on every
-    // render; `revision` moves with every config change, because a saved command or replacement can take the phrase.
-    func sidebarExample(for place: VoiceCommandPlace, items: SidebarListing) -> SidebarExample? {
-        if let cached = sidebarExampleCache, cached.place == place, cached.items == items, cached.revision == revision {
-            return cached.example
-        }
-        let example = VoiceCommandExample.sidebarExample(for: place, items: items, among: saved, readAs: readAs)
-        sidebarExampleCache = (place, items, revision, example)
-        return example
     }
 
     var currentApp: VoiceCommandCatalog.App? {
@@ -231,6 +218,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         let scan = await system.installedSnapshot()
         let loaded = BrowserChoices.loaded(browsers: scan.browsers, tabBrowsers: scan.tabBrowsers)
         if browserChoices != loaded { browserChoices = loaded }
+        if installedApps != scan.apps { installedApps = scan.apps }
     }
 
     func loadShortcutChoices() async {
@@ -244,11 +232,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         }
     }
 
-    var sidebarSearchEnabled: Bool { repository.sidebarSearchEnabled }
-
-    func checkSidebar(of bundleId: String) async -> VoiceCommandRunner.SidebarCheck {
-        await VoiceCommandRunner.checkSidebar(of: bundleId, system: system)
-    }
+    var findsInApps: Bool { repository.findsInAppsEnabled }
 
     func appName(_ bundleId: String) -> String {
         system.appName(forBundleId: bundleId) ?? bundleId
@@ -261,15 +245,14 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         guard !heard.isEmpty else { tryResult = nil; return }
         let places = places
         let scripts = scripts
-        let sidebars = repository.sidebarSearchEnabled
+        let findsInApps = repository.findsInAppsEnabled
         tryTask = Task { [weak self, system] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled, let readAs = self?.readAs(heard) else { return }
-            let runner = VoiceCommandRunner(system: system)
+            let runner = VoiceCommandRunner(system: system, findsInApps: { findsInApps }, isPreview: true)
             let resolution = await runner.resolve(readAs, places: places, scripts: scripts)
             guard !Task.isCancelled, let self else { return }
-            self.tryResult = Self.describe(
-                resolution, heard: heard, readAs: readAs, sidebars: sidebars, appName: { system.appName(forBundleId: $0) })
+            self.tryResult = Self.describe(resolution, heard: heard, readAs: readAs, appName: { system.appName(forBundleId: $0) })
         }
     }
 
@@ -278,16 +261,15 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     }
 
     static func describe(
-        _ resolution: VoiceCommandResolution, heard: String, readAs: String, sidebars: Bool = false,
-        appName: (String) -> String?
+        _ resolution: VoiceCommandResolution, heard: String, readAs: String, appName: (String) -> String?
     ) -> TryResult {
-        var result = describe(resolution, heard: heard, sidebars: sidebars, appName: appName)
+        var result = describe(resolution, heard: heard, appName: appName)
         if readAs != heard { result.readAs = readAs }
         return result
     }
 
     static func describe(
-        _ resolution: VoiceCommandResolution, heard: String, sidebars: Bool = false, appName: (String) -> String?
+        _ resolution: VoiceCommandResolution, heard: String, appName: (String) -> String?
     ) -> TryResult {
         switch resolution {
         case .action(let action):
@@ -324,13 +306,12 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             return TryResult(heard: heard, summary: "Too many words", detail: VoiceCommandRunner.takesNoTextMessage(name), resolved: false)
         case .needsTabs:
             return TryResult(heard: heard, summary: "Could not read browser tabs", detail: "", resolved: false)
-        case .sidebarUnreadable(let app, .turnedOff) where sidebars:
-            return TryResult(heard: heard, summary: "Looks in \(appName(app) ?? app)\u{2019}s sidebar",
-                             detail: "The preview does not read sidebars. Use Show Available Items in this command\u{2019}s editor to see what it can open.",
+        case .needsSidebar(let app):
+            let name = appName(app) ?? app
+            return TryResult(heard: heard, summary: "Looks in \(name)\u{2019}s sidebar",
+                             detail: "When spoken, this reads \(name)\u{2019}s sidebar, opening \(name) first if needed, and opens the item that best matches. If several match equally, or the sidebar could not be read in full, it asks which one you meant. The preview does not read sidebars.",
                              resolved: false)
-        case .sidebarUnreadable(_, .turnedOff):
-            return TryResult(heard: heard, summary: "Turned off", detail: VoiceCommandRunner.sidebarTurnedOffMessage, resolved: false)
-        case .needsSidebar(let app), .sidebarUnreadable(let app, _):
+        case .sidebarUnreadable(let app, _):
             return TryResult(heard: heard, summary: "Could not read the sidebar",
                              detail: "\(appName(app) ?? app)\u{2019}s sidebar could not be checked.", resolved: false)
         case .noSidebarMatch(let target, let app):

@@ -16,6 +16,7 @@ struct VoiceCommandsEditorView: View {
     @State private var pendingShortcut: Mode?
     @State private var actionPermissionsExpanded = false
     @State private var previewDetailsExpanded = false
+    @State private var moreExamplesExpanded = false
     @State private var capturingTab: Task<Void, Never>?
 
     private var trigger: ModeTrigger { ModeTrigger(mode: mode, allModes: allModes, onUpdate: onUpdate) }
@@ -48,21 +49,23 @@ struct VoiceCommandsEditorView: View {
                     Text("While this shortcut is assigned, the mouse button won’t also go Back or Forward in other apps.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Text(mode.triggerKeys.isEmpty
-                     ? "Choose a keyboard shortcut or mouse button to speak commands instead of dictation."
-                     : "Use this shortcut, then say a command. If no command matches, \(Branding.appName) tells you instead of typing your words.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("What you can say") {
-                phraseRow("Your commands", "Say the name of a command you saved below, such as \u{201C}web hooks\u{201D}. If it takes words, say them after the name: \u{201C}note buy milk\u{201D}.")
-                Text("These also work without saving anything:")
-                    .font(.caption).foregroundStyle(.secondary)
-                ForEach(VoiceCommandPhrase.allCases, id: \.self) { phrase in
-                    phraseRow(Self.label(for: phrase), Self.explanation(for: phrase))
+                ForEach(Self.examples(findsInApps: model.findsInApps), id: \.phrase) { example in
+                    phraseRow(example.phrase, example.meaning)
                 }
-                Text("If more than one thing matches, choose from the list that appears. Click a choice, or use your start shortcut and say its number. Say \u{201C}cancel\u{201D} to dismiss it.")
-                    .font(.caption).foregroundStyle(.secondary)
+                DisclosureSection(isExpanded: $moreExamplesExpanded) {
+                    DisclosureSummaryLabel(title: "More examples", summary: "Saved commands, scripts and shortcuts, and choosing from a list")
+                } content: {
+                    phraseRow("Your commands", "Say the name of a command you saved below, such as \u{201C}web hooks\u{201D}. If it takes words, say them after the name: \u{201C}note buy milk\u{201D}.")
+                    ForEach(VoiceCommandPhrase.allCases, id: \.self) { phrase in
+                        phraseRow(Self.label(for: phrase), Self.explanation(for: phrase, findsInApps: model.findsInApps))
+                    }
+                    Text("If more than one thing matches, choose from the list that appears. Click a choice, press its number, or use any shortcut and say its number. Press Esc or say \u{201C}cancel\u{201D} to dismiss it. If nothing matches, \(Branding.appName) tells you instead of typing your words.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.moreExamples)
             }
 
             trySection
@@ -138,12 +141,21 @@ struct VoiceCommandsEditorView: View {
         }
     }
 
+    static func examples(findsInApps: Bool) -> [(phrase: String, meaning: String)] {
+        let open = ("\u{201C}open Mail\u{201D}", "Switches to an app, window, or tab. Nothing to set up.")
+        let inside = ("\u{201C}open Slack general\u{201D}", "Opens something inside an app, such as a channel, mailbox, or tab.")
+        let back = ("\u{201C}go back\u{201D}", "Returns to where you were.")
+        return findsInApps ? [open, inside, back] : [open, back]
+    }
+
     private static func label(for phrase: VoiceCommandPhrase) -> String {
         phrase.words.map { phrase == .goBack ? "\u{201C}\($0)\u{201D}" : "\u{201C}\($0) …\u{201D}" }.joined(separator: "  ")
     }
 
-    private static func explanation(for phrase: VoiceCommandPhrase) -> String {
+    static func explanation(for phrase: VoiceCommandPhrase, findsInApps: Bool) -> String {
         switch phrase {
+        case .focus where findsInApps:
+            "Switch to an app, a saved app or link, or an open window or browser tab by name. App names work without setup. Add what you want in the app after its name to find it: \u{201C}open Slack general\u{201D} opens a channel, \u{201C}open Chrome github\u{201D} a tab."
         case .focus:
             "Switch to an app, a saved app or link, or an open window or browser tab by name. App names work without setup."
         case .run:
@@ -162,11 +174,11 @@ struct VoiceCommandsEditorView: View {
 
     private var commandsSection: some View {
         Section("Commands") {
-            Text("Save an app, a link, a browser tab search, a shortcut, or a script, then say its name. App names already work without saving anything.")
+            Text("Save a name of your own for an app or a link, or a script or shortcut to run, then say that name.")
                 .font(.callout).foregroundStyle(.secondary)
             addMenu
             if model.commands.isEmpty {
-                Text("No saved commands. You can already switch to apps by name.")
+                Text("No saved commands yet.")
                     .font(.callout).foregroundStyle(.secondary)
             }
             ForEach(model.commands, id: \.id) { command in
@@ -201,14 +213,9 @@ struct VoiceCommandsEditorView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Text(destination(place)).font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
-                if place.sidebarApp != nil, !model.sidebarSearchEnabled {
-                    IssueText(
-                        "Turned off. Turn on \u{201C}\(Feature.sidebarSearch.title)\u{201D} under Experimental features to use it.",
-                        severity: .advisory)
-                }
             }
             Spacer()
-            PaneBadge(place.isTabSearch ? "Tab search" : place.sidebarApp != nil ? "App" : place.isAppLink ? "App link" : place.isWebPage ? "Web page" : "App")
+            PaneBadge(place.isTabSearch ? "Tab search" : place.isAppLink ? "App link" : place.isWebPage ? "Web page" : "App")
             Button("Edit…") { edit(place: PlaceDraft(place)) }
                 .accessibilityLabel("Edit place \(place.name)")
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeEdit(VoiceCommandText.key(place.name).replacingOccurrences(of: " ", with: "-")))
@@ -253,8 +260,6 @@ struct VoiceCommandsEditorView: View {
             return place.browser.map { "\(url) in \(model.appName($0))" } ?? url
         case .tabSearch:
             return "Finds an open tab in " + (place.browser.map(model.appName) ?? "any browser")
-        case .sidebar(let bundleId):
-            return model.appName(bundleId) + " \u{00B7} finds items in its sidebar"
         }
     }
 
@@ -275,15 +280,17 @@ struct VoiceCommandsEditorView: View {
                 }
                 Divider()
             }
-            Button("Open an App or Link\u{2026}") { edit(place: PlaceDraft(name: "", kind: .app)) }
+            Button("Open an App\u{2026}") { edit(place: PlaceDraft(name: "", kind: .app)) }
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addApp)
-            Button("Find a Browser Tab\u{2026}") { edit(place: PlaceDraft(name: "", kind: .tabSearch)) }
-                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addTabSearch)
+            Button("Open a Link\u{2026}") { edit(place: PlaceDraft(name: "", kind: .webPage)) }
+                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addLink)
             Button("Run a Shortcut\u{2026}") { edit(shortcut: ShortcutDraft()) }
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addShortcut)
-            Divider()
             Button("Run a Script\u{2026}") { edit(script: ScriptDraft()) }
                 .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addScript)
+            Divider()
+            Button("Find a Browser Tab\u{2026}") { edit(place: PlaceDraft(name: "", kind: .tabSearch)) }
+                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.addTabSearch)
         }
         .fixedSize()
         .disabled(model.hasUnreadableFile)
@@ -382,16 +389,10 @@ struct PlaceDraft: Identifiable, Equatable {
     let originalName: String?
     var name: String
     var say: String
-    var kind: Kind
+    let kind: Kind
     var bundleId: String
     var url: String
     var browser: String
-    var quickSwitch = false
-    // An app command can also find items in that app's sidebar; saved as its own target so existing files load.
-    var findsItems = false
-    // Whether it found items when the sheet opened: with the experiment off, the option must stay on screen
-    // for the whole edit so switching it off can be undone without reopening the sheet.
-    private var foundItems = false
     var notice: String?
     private var suggestion: String?
 
@@ -419,14 +420,9 @@ struct PlaceDraft: Identifiable, Equatable {
             kind = .webPage; bundleId = ""; self.url = url
         case .tabSearch:
             kind = .tabSearch; bundleId = ""; url = ""
-        case .sidebar(let app):
-            kind = .app; bundleId = app; url = ""; findsItems = true; foundItems = true
         }
         browser = place.browser ?? ""
-        quickSwitch = place.quickSwitch
     }
-
-    func offersFindingItems(experimentOn: Bool) -> Bool { experimentOn || findsItems || foundItems }
 
     mutating func suggest(_ suggested: String) {
         let current = name.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -446,15 +442,14 @@ struct PlaceDraft: Identifiable, Equatable {
         let forms = say.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         let target: VoiceCommandPlace.Target
         switch kind {
-        case .app: target = findsItems ? .sidebar(bundleId: bundleId) : .app(bundleId: bundleId)
+        case .app: target = .app(bundleId: bundleId)
         case .webPage: target = .url(url.trimmingCharacters(in: .whitespacesAndNewlines))
         case .tabSearch: target = .tabSearch
         }
         let takesBrowser = kind == .tabSearch || (kind == .webPage && !VoiceCommandPlace.isAppLink(url))
         let browserValue = takesBrowser && !browser.isEmpty ? browser : nil
         return VoiceCommandPlace(
-            id: commandId, name: trimmedName, say: forms, target: target, browser: browserValue,
-            quickSwitch: kind == .tabSearch && quickSwitch)
+            id: commandId, name: trimmedName, say: forms, target: target, browser: browserValue)
     }
 }
 
@@ -466,44 +461,38 @@ private struct PlaceEditorSheet: View {
     @State private var confirmingDelete = false
     @State private var enteringBundleID = false
     @State private var browserDetailsExpanded = false
-    @State private var sidebarDetailsExpanded = false
-    @State private var checkingSidebar = false
-    @State private var sidebarCheck: VoiceCommandRunner.SidebarCheck?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(title).font(.title2.bold())
             Form {
-                if draft.originalName == nil {
-                    Section { notice }
-                }
+                whatShouldHappen
                 Section("What will you say?") {
                     CommandPhraseFields(
                         name: $draft.name, say: $draft.say,
                         caption: draft.kind == .tabSearch ? "Say this name, then words from the tab\u{2019}s title."
-                            : draft.kind == .app && draft.findsItems ? "Say this name to open the app, or add an item\u{2019}s name to find it in the app\u{2019}s sidebar."
+                            : draft.kind == .app && model.findsInApps
+                                ? "Say this name to open the app. Add more words to find a tab, channel, mailbox, or other item in it."
                             : "Say this name to open it.",
-                        namePrompt: draft.kind == .tabSearch ? "chrome" : "What would you like to call it?",
+                        namePrompt: draft.kind == .tabSearch ? "tabs" : "What would you like to call it?",
                         sayPrompt: "Optional, such as inbox, email",
-                        nameIssue: nameIssue, sayIssue: sayIssue,
+                        nameIssue: nameIssue,
                         advisories: model.conflicts(for: .place(draft.place)),
                         ids: .init(
                             name: AccessibilityID.Mode.VoiceCommands.placeName,
-                            say: AccessibilityID.Mode.VoiceCommands.placeSay))
+                            say: AccessibilityID.Mode.VoiceCommands.placeSay,
+                            otherNames: AccessibilityID.Mode.VoiceCommands.placeOtherNames))
                 }
-                whatShouldHappen
                 CommandPreviewSection(
                     example: canSave ? model.example(for: .place(draft.place)) : nil,
                     id: AccessibilityID.Mode.VoiceCommands.placeExample)
-                if draft.originalName != nil {
-                    Section { notice }
-                }
+                Section { notice }
             }
             .formStyle(.grouped)
             if draft.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || (draft.kind == .app && draft.bundleId.isEmpty)
                 || (draft.kind == .webPage && draft.url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) {
-                Text("Enter a spoken name and choose what should happen to continue.")
+                Text("Choose what should happen and enter a spoken name to continue.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let issue { IssueText(issue) }
@@ -535,8 +524,6 @@ private struct PlaceEditorSheet: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await model.loadBrowserChoices() }
         }
-        .onChange(of: draft.bundleId) { _, _ in sidebarCheck = nil }
-
         .onChange(of: draft.url) { _, url in
             if let host = Self.host(url) {
                 draft.suggest(host)
@@ -557,17 +544,9 @@ private struct PlaceEditorSheet: View {
 
     @ViewBuilder private var whatShouldHappen: some View {
         Section("What should happen?") {
-            Picker("Open", selection: $draft.kind) {
-                Text("An app").tag(PlaceDraft.Kind.app)
-                Text("A link").tag(PlaceDraft.Kind.webPage)
-                Text("A browser tab").tag(PlaceDraft.Kind.tabSearch)
-            }
-            .pickerStyle(.segmented)
-            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeKind)
             switch draft.kind {
             case .app:
                 appRow
-                findItems
             case .webPage:
                 VStack(alignment: .leading, spacing: 4) {
                     TextField("Link", text: $draft.url, prompt: Text("https://example.com/inbox"))
@@ -589,117 +568,19 @@ private struct PlaceEditorSheet: View {
                 }
                 if !isAppLink { browserChoice }
             case .tabSearch:
-                Text("Say the name, then words from the tab\u{2019}s title or site, such as github. It switches to the open tab that best matches them.")
+                Text("Say the name, then words from the tab\u{2019}s title or site, such as github. It switches to the open tab that best matches them; when several match equally, the frontmost one.")
                     .font(.caption).foregroundStyle(.secondary)
                 browserChoice
-                SettingRow(
-                    title: "Switch without asking",
-                    help: "When several tabs in one browser match equally well, switches to the leftmost match in the frontmost window that has one instead of asking which one you meant. Matches in different browsers still ask.")
-                {
-                    Toggle("", isOn: $draft.quickSwitch).labelsHidden()
-                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeQuickSwitch)
-                }
             }
-        }
-    }
-
-    @ViewBuilder private var findItems: some View {
-        if draft.offersFindingItems(experimentOn: model.sidebarSearchEnabled) {
-            SettingRow(
-                title: "Find items in this app",
-                help: "Open a mailbox, channel, or other item in the app\u{2019}s sidebar by saying its name after this command\u{2019}s name.")
-            {
-                Toggle("", isOn: $draft.findsItems).labelsHidden()
-                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeFindsItems)
-            }
-            if draft.findsItems {
-                if !model.sidebarSearchEnabled {
-                    IssueText(
-                        "Turned off. Turn on \u{201C}\(Feature.sidebarSearch.title)\u{201D} under Experimental features to use it.",
-                        severity: .advisory)
-                }
-                Text(findItemsExplanation).font(.caption).foregroundStyle(.secondary)
-                availableItems
-                DisclosureSection(isExpanded: $sidebarDetailsExpanded) {
-                    DisclosureSummaryLabel(title: "Reading the sidebar", summary: "Uses Accessibility")
-                } content: {
-                    Text("Reads the names listed in the sidebar of the app\u{2019}s front window, only when you say this command with more words or show its items here. Some apps, such as Slack, list their sidebar only after their accessibility support is turned on; that stays on until the app quits and can make it use more memory.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSidebarDetails)
-            }
-        }
-    }
-
-    private var findItemsExplanation: String {
-        let spoken = VoiceCommandText.key(draft.name)
-        let app = draft.bundleId.isEmpty ? "the app" : model.appName(draft.bundleId)
-        let said = spoken.isEmpty ? "Its name alone" : "\u{201C}\(spoken)\u{201D} alone"
-        let with = spoken.isEmpty ? "its name" : "\u{201C}\(spoken)\u{201D}"
-        return "\(said) brings \(app) forward. Say \(with) followed by an item\u{2019}s name to find that item in \(app)\u{2019}s sidebar and open it; when several match, it asks which one you meant. Only items currently shown in the app\u{2019}s sidebar can be found. Expand sections or scroll to reveal other items."
-    }
-
-    @ViewBuilder private var availableItems: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Button(checkingSidebar ? "Reading\u{2026}" : "Show Available Items") { checkSidebar() }
-                    .disabled(draft.bundleId.isEmpty || checkingSidebar || !model.sidebarSearchEnabled)
-                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeCheckSidebar)
-                Spacer()
-            }
-            Text("Reads the sidebar of the app\u{2019}s front window now. Some apps, such as Slack, first turn on their accessibility support, which stays on until the app quits and can make it use more memory.")
-                .font(.caption).foregroundStyle(.secondary)
-                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSidebarCheckNote)
-            switch sidebarCheck {
-            case .problem(let message):
-                IssueText(message, severity: .advisory)
-                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSidebarCheckResult)
-            case .listing(let listing, let appName):
-                VStack(alignment: .leading, spacing: 6) {
-                    if let example = model.sidebarExample(for: draft.place, items: listing) {
-                        Text("Say \u{201C}\(example.heard)\u{201D} to open \(example.item.name).")
-                    }
-                    if !listing.items.isEmpty {
-                        ScrollView {
-                            VStack(alignment: .leading, spacing: 6) {
-                                ForEach(Array(listing.sections.enumerated()), id: \.offset) { _, section in
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        if let title = section.title { Text(title).font(.caption.bold()) }
-                                        Text(section.names.joined(separator: ", ")).font(.caption)
-                                    }
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                        }
-                        .frame(maxHeight: 140)
-                    }
-                    ForEach(listing.notes(appName: appName), id: \.self) { note in
-                        Text(note).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeSidebarCheckResult)
-            case nil:
-                EmptyView()
-            }
-        }
-    }
-
-    private func checkSidebar() {
-        let bundleId = draft.bundleId
-        checkingSidebar = true
-        Task {
-            let check = await model.checkSidebar(of: bundleId)
-            checkingSidebar = false
-            if draft.bundleId == bundleId { sidebarCheck = check }
         }
     }
 
     private var title: String {
         guard draft.originalName == nil else { return "Edit Command" }
         switch draft.kind {
+        case .app: return "Open an App"
+        case .webPage: return "Open a Link"
         case .tabSearch: return "Find a Browser Tab"
-        case .app, .webPage: return "Open an App or Link"
         }
     }
 
@@ -727,7 +608,7 @@ private struct PlaceEditorSheet: View {
     }
 
     private var notice: some View {
-        VoiceCommandNoticeRow(kind: draft.kind == .app && draft.findsItems ? .sidebars : .places, needsAcknowledgment: draft.originalName == nil)
+        VoiceCommandNoticeRow(kind: .places, needsAcknowledgment: false)
             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeNotice)
     }
 
@@ -778,10 +659,6 @@ private struct PlaceEditorSheet: View {
         guard !name.isEmpty else { return nil }
         if let issue = UserInputValidation.nameIssue(name) { return issue.message }
         return model.nameTaken(name, except: draft.commandId) ? VoiceCommandsSettingsModel.nameTakenMessage : nil
-    }
-
-    private var sayIssue: String? {
-        draft.place.say.lazy.compactMap { UserInputValidation.phraseIssue($0)?.message }.first
     }
 
     private var urlIssue: String? {
@@ -859,15 +736,6 @@ private struct ScriptEditorSheet: View {
                 if draft.originalName == nil {
                     Section { notice }
                 }
-                Section("What will you say?") {
-                    CommandPhraseFields(
-                        name: $draft.name, say: $draft.say, caption: "Say this name to run the script.",
-                        namePrompt: "deploy", sayPrompt: "ship, release", nameIssue: nil, sayIssue: nil,
-                        advisories: model.conflicts(for: .script(draft.script)),
-                        ids: .init(
-                            name: AccessibilityID.Mode.VoiceCommands.scriptName,
-                            say: AccessibilityID.Mode.VoiceCommands.scriptSay))
-                }
                 Section("What should happen?") {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
@@ -884,6 +752,16 @@ private struct ScriptEditorSheet: View {
                         Text("Choose an executable file or enter its full path. Shell commands such as pipes and redirects do not work here.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
+                }
+                Section("What will you say?") {
+                    CommandPhraseFields(
+                        name: $draft.name, say: $draft.say, caption: "Say this name to run the script.",
+                        namePrompt: "deploy", sayPrompt: "ship, release", nameIssue: nil,
+                        advisories: model.conflicts(for: .script(draft.script)),
+                        ids: .init(
+                            name: AccessibilityID.Mode.VoiceCommands.scriptName,
+                            say: AccessibilityID.Mode.VoiceCommands.scriptSay,
+                            otherNames: AccessibilityID.Mode.VoiceCommands.scriptOtherNames))
                 }
                 Section("Arguments (optional)") {
                     VStack(alignment: .leading, spacing: 4) {
@@ -925,7 +803,7 @@ private struct ScriptEditorSheet: View {
                 IssueText(validationIssue)
             }
             if draft.name.isEmpty && draft.program.isEmpty {
-                Text("Enter a spoken name and choose a file to continue.")
+                Text("Choose a file and enter a spoken name to continue.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let issue { IssueText(issue) }
@@ -1013,7 +891,7 @@ struct PlaceKindIcon: View {
 
     private var appBundleId: String? {
         switch place.target {
-        case .app(let bundleId), .sidebar(let bundleId): bundleId
+        case .app(let bundleId): bundleId
         case .url, .tabSearch: place.browser
         }
     }
@@ -1099,18 +977,19 @@ private struct ShortcutEditorSheet: View {
                 if draft.originalName == nil {
                     Section { notice }
                 }
+                Section("What should happen?") {
+                    shortcutRow
+                }
                 Section("What will you say?") {
                     CommandPhraseFields(
                         name: $draft.name, say: $draft.say, caption: "Say this name to run the shortcut.",
                         namePrompt: "What would you like to call it?", sayPrompt: "Optional, such as log, note",
-                        nameIssue: nil, sayIssue: nil,
+                        nameIssue: nil,
                         advisories: model.conflicts(for: .script(draft.script)),
                         ids: .init(
                             name: AccessibilityID.Mode.VoiceCommands.shortcutName,
-                            say: AccessibilityID.Mode.VoiceCommands.shortcutSay))
-                }
-                Section("What should happen?") {
-                    shortcutRow
+                            say: AccessibilityID.Mode.VoiceCommands.shortcutSay,
+                            otherNames: AccessibilityID.Mode.VoiceCommands.shortcutOtherNames))
                 }
                 Section("Input (optional)") {
                     VStack(alignment: .leading, spacing: 4) {
@@ -1137,7 +1016,7 @@ private struct ShortcutEditorSheet: View {
                 IssueText(validationIssue)
             }
             if draft.name.isEmpty && draft.shortcut == nil {
-                Text("Enter a spoken name and choose a shortcut to continue.")
+                Text("Choose a shortcut and enter a spoken name to continue.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let issue { IssueText(issue) }
@@ -1249,6 +1128,7 @@ struct CommandPhraseFields: View {
     struct IDs {
         let name: String
         let say: String
+        let otherNames: String
     }
 
     @Binding var name: String
@@ -1257,9 +1137,14 @@ struct CommandPhraseFields: View {
     let namePrompt: String
     let sayPrompt: String
     let nameIssue: String?
-    let sayIssue: String?
     let advisories: [String]
     let ids: IDs
+    @State private var otherNamesExpanded = false
+
+    private var sayIssue: String? {
+        say.split(separator: ",").lazy.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            .compactMap { UserInputValidation.phraseIssue($0)?.message }.first
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1269,13 +1154,17 @@ struct CommandPhraseFields: View {
             if let nameIssue { IssueText(nameIssue) }
             Text(caption).font(.caption).foregroundStyle(.secondary)
         }
-        VStack(alignment: .leading, spacing: 4) {
-            TextField("Other names", text: $say, prompt: Text(sayPrompt))
-                .accessibilityIdentifier(ids.say)
-                .formFieldLabel("Other names")
-            if let sayIssue { IssueText(sayIssue) }
-            Text("Optional. Separate names with commas. Each works the same way as the spoken name. Add one for a word that is often misheard.")
-                .font(.caption).foregroundStyle(.secondary)
+        DisclosureSection(isExpanded: $otherNamesExpanded, hasError: sayIssue != nil, headerID: ids.otherNames) {
+            DisclosureSummaryLabel(title: "Other names (optional)", summary: say.isEmpty ? "None" : say)
+        } content: {
+            VStack(alignment: .leading, spacing: 4) {
+                TextField("Other names", text: $say, prompt: Text(sayPrompt))
+                    .accessibilityIdentifier(ids.say)
+                    .formFieldLabel("Other names")
+                if let sayIssue { IssueText(sayIssue) }
+                Text("Separate names with commas. Each works the same way as the spoken name. Add one for a word that is often misheard.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
         }
         ForEach(advisories, id: \.self) { advisory in
             IssueText(advisory, severity: .advisory)

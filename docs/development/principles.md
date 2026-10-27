@@ -35,6 +35,13 @@ The product is judged by how it feels, not how powerful it is on paper.
   never burdens the casual Settings path.
 - A new power feature is not "done" if it complicates the default path. Simple by default,
   powerful on demand.
+- **Asking is a last resort.** A question that stops the user mid-task (a confirmation, a
+  "which one?" list, a prompt that waits for an answer) breaks the flow this tool exists to
+  keep. Prefer acting on a sensible, predictable default and making the result easy to see
+  and to undo (the HUD says what happened; "go back" returns). Ask only when a wrong guess
+  is costly and hard to reverse: running the wrong script or Shortcut, or choosing among
+  options a script offered. Navigation that merely brings something into view settles
+  ties itself. A new prompt needs that justification in review.
 
 ## 5. Best-of-breed per feature
 For **any** feature we add, first research the best products that do it and build the best

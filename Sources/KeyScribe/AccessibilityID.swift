@@ -198,17 +198,18 @@ enum AccessibilityID {
             static let actionPermissions = "mode.voiceCommands.actionPermissions"
             static let addCommand = "mode.voiceCommands.addCommand"
             static let addTabSearch = "mode.voiceCommands.addTabSearch"
-            static let placeFindsItems = "mode.voiceCommands.place.findsItems"
             static let addCurrentApp = "mode.voiceCommands.addCurrentApp"
             static let addCurrentTab = "mode.voiceCommands.addCurrentTab"
             static let addApp = "mode.voiceCommands.addApp"
+            static let addLink = "mode.voiceCommands.addLink"
+            static let moreExamples = "mode.voiceCommands.moreExamples"
             static let tryIt = "mode.voiceCommands.tryIt"
             static let previewDetails = "mode.voiceCommands.previewDetails"
             static let excludeFromHistory = "mode.voiceCommands.excludeFromHistory"
             static let editVocabulary = "mode.voiceCommands.editVocabulary"
             static let placeName = "mode.voiceCommands.place.name"
             static let placeSay = "mode.voiceCommands.place.say"
-            static let placeKind = "mode.voiceCommands.place.kind"
+            static let placeOtherNames = "mode.voiceCommands.place.otherNames"
             static let placeApp = "mode.voiceCommands.place.app"
             static func placeAppChoice(_ bundleId: String) -> String { "mode.voiceCommands.place.app.\(bundleId)" }
             static let placeChooseFromApplications = "mode.voiceCommands.place.chooseFromApplications"
@@ -218,11 +219,6 @@ enum AccessibilityID {
             static let placeURL = "mode.voiceCommands.place.url"
             static let placeBrowser = "mode.voiceCommands.place.browser"
             static let placeBrowserDetails = "mode.voiceCommands.place.browserDetails"
-            static let placeQuickSwitch = "mode.voiceCommands.place.quickSwitch"
-            static let placeSidebarDetails = "mode.voiceCommands.place.sidebarDetails"
-            static let placeCheckSidebar = "mode.voiceCommands.place.checkSidebar"
-            static let placeSidebarCheckResult = "mode.voiceCommands.place.sidebarCheckResult"
-            static let placeSidebarCheckNote = "mode.voiceCommands.place.sidebarCheckNote"
             static let placeSave = "mode.voiceCommands.place.save"
             static let placeCancel = "mode.voiceCommands.place.cancel"
             static let placeDelete = "mode.voiceCommands.place.delete"
@@ -237,6 +233,7 @@ enum AccessibilityID {
             static let shortcutOpenApp = "mode.voiceCommands.shortcut.openApp"
             static let shortcutName = "mode.voiceCommands.shortcut.name"
             static let shortcutSay = "mode.voiceCommands.shortcut.say"
+            static let shortcutOtherNames = "mode.voiceCommands.shortcut.otherNames"
             static let shortcutInput = "mode.voiceCommands.shortcut.input"
             static let shortcutExample = "mode.voiceCommands.shortcut.example"
             static let shortcutSave = "mode.voiceCommands.shortcut.save"
@@ -245,6 +242,7 @@ enum AccessibilityID {
             static let shortcutDeleteConfirm = "mode.voiceCommands.shortcut.deleteConfirm.confirm"
             static let scriptName = "mode.voiceCommands.script.name"
             static let scriptSay = "mode.voiceCommands.script.say"
+            static let scriptOtherNames = "mode.voiceCommands.script.otherNames"
             static let scriptProgram = "mode.voiceCommands.script.program"
             static let scriptChooseProgram = "mode.voiceCommands.script.chooseProgram"
             static let scriptArguments = "mode.voiceCommands.script.arguments"
@@ -433,23 +431,21 @@ enum AccessibilityID {
         Mode.VoiceCommands.moveShortcut,
         Mode.VoiceCommands.scriptNotice, Mode.VoiceCommands.placeNotice, Mode.VoiceCommands.actionPermissions,
         Mode.VoiceCommands.addCommand, Mode.VoiceCommands.addTabSearch, Mode.VoiceCommands.addCurrentApp, Mode.VoiceCommands.addCurrentTab,
-        Mode.VoiceCommands.addApp, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.previewDetails, Mode.VoiceCommands.editVocabulary,
-        Mode.VoiceCommands.placeName, Mode.VoiceCommands.placeSay, Mode.VoiceCommands.placeKind,
+        Mode.VoiceCommands.addApp, Mode.VoiceCommands.addLink, Mode.VoiceCommands.moreExamples, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.previewDetails, Mode.VoiceCommands.editVocabulary,
+        Mode.VoiceCommands.placeName, Mode.VoiceCommands.placeSay, Mode.VoiceCommands.placeOtherNames,
         Mode.VoiceCommands.placeApp, Mode.VoiceCommands.placeURL, Mode.VoiceCommands.placeBrowser, Mode.VoiceCommands.placeBrowserDetails,
-        Mode.VoiceCommands.placeQuickSwitch, Mode.VoiceCommands.placeSidebarDetails, Mode.VoiceCommands.placeFindsItems,
-        Mode.VoiceCommands.placeCheckSidebar, Mode.VoiceCommands.placeSidebarCheckResult, Mode.VoiceCommands.placeSidebarCheckNote,
         Mode.VoiceCommands.placeChooseFromApplications, Mode.VoiceCommands.placeEnterBundleID,
         Mode.VoiceCommands.placeBundleID, Mode.VoiceCommands.placeExample, Mode.VoiceCommands.scriptArgumentDetails,
         Mode.VoiceCommands.placeSave, Mode.VoiceCommands.placeCancel, Mode.VoiceCommands.placeDelete,
         Mode.VoiceCommands.placeDeleteConfirm,
-        Mode.VoiceCommands.addScript, Mode.VoiceCommands.scriptName, Mode.VoiceCommands.scriptSay,
+        Mode.VoiceCommands.addScript, Mode.VoiceCommands.scriptName, Mode.VoiceCommands.scriptSay, Mode.VoiceCommands.scriptOtherNames,
         Mode.VoiceCommands.scriptProgram, Mode.VoiceCommands.scriptChooseProgram, Mode.VoiceCommands.scriptArguments, Mode.VoiceCommands.scriptExample,
         Mode.VoiceCommands.scriptSave, Mode.VoiceCommands.scriptCancel, Mode.VoiceCommands.scriptDelete,
         Mode.VoiceCommands.scriptDeleteConfirm,
         Mode.VoiceCommands.addShortcut, Mode.VoiceCommands.excludeFromHistory,
         Mode.VoiceCommands.shortcutNotice, Mode.VoiceCommands.shortcutChoice,
         Mode.VoiceCommands.shortcutRefresh, Mode.VoiceCommands.shortcutOpenApp,
-        Mode.VoiceCommands.shortcutName, Mode.VoiceCommands.shortcutSay, Mode.VoiceCommands.shortcutInput,
+        Mode.VoiceCommands.shortcutName, Mode.VoiceCommands.shortcutSay, Mode.VoiceCommands.shortcutOtherNames, Mode.VoiceCommands.shortcutInput,
         Mode.VoiceCommands.shortcutExample,
         Mode.VoiceCommands.shortcutSave, Mode.VoiceCommands.shortcutCancel,
         Mode.VoiceCommands.shortcutDelete, Mode.VoiceCommands.shortcutDeleteConfirm,
