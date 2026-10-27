@@ -131,12 +131,17 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
 
     func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
         try await loadIfNeeded()
+        let audioSeconds = sampleRate > 0 ? Double(samples.count) / Double(sampleRate) : 0
+        guard Qwen3OutputBudget.accepts(audioSeconds: audioSeconds) else {
+            throw EngineError.audioTooLong(seconds: audioSeconds, limit: Qwen3OutputBudget.maxAudioSeconds)
+        }
+        let maxTokens = Qwen3OutputBudget.maxTokens(audioSeconds: audioSeconds)
         let context = biasTerms.isEmpty ? nil : biasTerms.joined(separator: ", ")
         Log.bias.info("qwen3asr terms=\(biasTerms.joined(separator: "|"), privacy: .private) context=\(context != nil, privacy: .public)")
         let text = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<String, Error>) in
             inferenceQueue.async { [self] in
                 guard let model else { cont.resume(throwing: EngineError.notInitialized); return }
-                cont.resume(returning: model.transcribe(audio: samples, sampleRate: sampleRate, context: context))
+                cont.resume(returning: model.transcribe(audio: samples, sampleRate: sampleRate, maxTokens: maxTokens, context: context))
             }
         }
         return text.trimmingCharacters(in: .whitespacesAndNewlines)

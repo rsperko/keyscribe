@@ -155,6 +155,7 @@ enum BenchmarkRunner {
                 let hyp = (try? await engine.transcribe(wavURL: wav, biasTerms: entry.biasTerms)) ?? "<error>"
                 let line = hyp.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\t", with: " ")
                 print("RAW\t\(engine.id)\t\(entry.id)\t\(line)")
+                fflush(stdout)
             }
             await engine.evict()
             FileHandle.standardError.write("· \(engine.id): done\n".data(using: .utf8)!)
@@ -195,6 +196,7 @@ enum BenchmarkRunner {
                     }
                     let line = hyp.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\t", with: " ")
                     print("RAW\t\(engine.id)\t\(entry.id)\t\(line)")
+                    fflush(stdout)
                 }
                 await engine.evict()
                 FileHandle.standardError.write("· \(engine.id): done\n".data(using: .utf8)!)

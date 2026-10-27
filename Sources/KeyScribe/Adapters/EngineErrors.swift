@@ -5,6 +5,7 @@ enum EngineError: Error {
     case audioDecodeFailed
     // A streaming session failed mid-flight; the controller degrades to a batch transcribe of the audio.
     case streamingFailed
+    case audioTooLong(seconds: Double, limit: Double)
 }
 
 // The requested engine id isn't constructible in this build (no descriptor / not wired).
