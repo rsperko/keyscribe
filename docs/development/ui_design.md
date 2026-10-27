@@ -963,24 +963,26 @@ Its sections are, in order:
    Voice Commands paragraph above), and a shared shortcut written by hand shows a red caption here (“…
    also uses this shortcut, so it does not start Voice Commands”) with **Move Shortcut to Voice
    Commands…**, and marks the list row and the menu-bar badge as never firing.
-2. **What you can say** — leads with what already works, as a few short examples that need nothing saved
-   (`VoiceCommandsEditorView.examples`): “open Mail” (an app, window, or tab), “open Slack general” (something
-   inside an app, shown only while **Find items in apps by voice** is on), and “go back”. The longer guide sits
-   in a collapsed **More examples** disclosure: a **Your commands** row (say the name of a command saved
-   below, then any words it takes), then one row per taught phrase (`VoiceCommandPhrase`, which also writes
-   the “Not a command” guidance and the feature's summary): “switch to …” and “open …” for apps, places, and
-   open windows and browser tabs by name, “run …” for scripts and shortcuts, and “go back”, which returns to
-   the window or app you left. Other app-switching verbs, and common mishearings of them such as “witch to”,
-   are also accepted (`VoiceCommandGrammar.focusVerbs`). These prefix alternatives work in live commands and
-   Preview a command without changing the original heard text or action input; the panel continues to teach
-   the standard phrases. “run …” is presented as optional: a saved action's name alone runs it, including a
-   name that starts with an app-switching word (“open notes”); an app-switching word followed by anything
-   that is not a saved name never does. Each row briefly explains the result. A caption explains that
-   ambiguous commands offer a choice (click a row or use the start shortcut and say its number, or say
-   “cancel”) and that an unmatched command is reported instead of typed.
+2. **What you can say** — a brief introduction (“Open apps by name. Nothing to configure.”), then short,
+   concrete examples (`VoiceCommandsEditorView.examples`): “open Mail” opens Mail or brings it forward,
+   “open Slack general” opens general in Slack (shown only while **Find items in apps by voice** is on),
+   and “go back” returns to where you were. A final caption says users can also say the name of a command
+   saved below. There is no expanded phrase guide here. Spoken input is explained beside the script and
+   shortcut input controls; choosing a match is explained in the choice panel when it appears. The FAQ
+   carries the fuller phrase reference, including “switch to …” and optional “run …”. Alternative verbs
+   and their common mishearings (`VoiceCommandGrammar.focusVerbs`) still work in live commands and Preview
+   a command without changing the original heard text or action input. A saved name is checked first,
+   including one that starts with an app-switching word; a prefix alone never runs an unsaved action.
 3. **Preview a command** — a field that shows what a typed phrase would do, live, without running anything (a script
-   shows the exact command line it would run, a shortcut its name and input). A phrase that would ask which one
-   says so neutrally (“Would ask “Which one?””) and lists the numbered choices; it never invites an answer,
+   shows the exact command line it would run, a shortcut its name and input). A result is two short lines: the
+   outcome (“Switch to Gmail”, “Open Example Page”, “Run Deploy”) and what kind of thing it is and where (“Window
+   in Brave Browser”, “example.com in Google Chrome”). Window and tab titles carry whatever their app appends, so
+   the outcome names the parts of the title that hold the words the phrase used. A script's or shortcut's command is
+   shown in full. When the outcome shortened a title or a saved page shows only its site, a collapsed **Details**
+   disclosure under the result holds the full title or address, reachable by keyboard, and only then is the outcome
+   cut to one line; otherwise it wraps, so every name stays readable without hovering. A phrase that would ask which one
+   says so neutrally (“Would ask “Which one?””) and lists the numbered choices one per line, each name in full
+   (wrapping when long) beside the context that tells it apart (app, browser, or site); it never invites an answer,
    since a preview creates no question to answer. It sits beside the phrases it
    tests and re-checks the typed phrase whenever a place, an action, or the vocabulary changes. When the mode's vocabulary changed the
    phrase, it shows `Read as “…”` above the result. The introduction explicitly says nothing opens or

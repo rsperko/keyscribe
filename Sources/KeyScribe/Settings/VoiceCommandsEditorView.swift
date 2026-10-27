@@ -16,7 +16,7 @@ struct VoiceCommandsEditorView: View {
     @State private var pendingShortcut: Mode?
     @State private var actionPermissionsExpanded = false
     @State private var previewDetailsExpanded = false
-    @State private var moreExamplesExpanded = false
+    @State private var previewResultExpanded = false
     @State private var capturingTab: Task<Void, Never>?
 
     private var trigger: ModeTrigger { ModeTrigger(mode: mode, allModes: allModes, onUpdate: onUpdate) }
@@ -52,20 +52,13 @@ struct VoiceCommandsEditorView: View {
             }
 
             Section("What you can say") {
+                Text("Open apps by name. Nothing to configure.")
+                    .font(.callout).foregroundStyle(.secondary)
                 ForEach(Self.examples(findsInApps: model.findsInApps), id: \.phrase) { example in
                     phraseRow(example.phrase, example.meaning)
                 }
-                DisclosureSection(isExpanded: $moreExamplesExpanded) {
-                    DisclosureSummaryLabel(title: "More examples", summary: "Saved commands, scripts and shortcuts, and choosing from a list")
-                } content: {
-                    phraseRow("Your commands", "Say the name of a command you saved below, such as \u{201C}web hooks\u{201D}. If it takes words, say them after the name: \u{201C}note buy milk\u{201D}.")
-                    ForEach(VoiceCommandPhrase.allCases, id: \.self) { phrase in
-                        phraseRow(Self.label(for: phrase), Self.explanation(for: phrase, findsInApps: model.findsInApps))
-                    }
-                    Text("If more than one thing matches, choose from the list that appears. Click a choice, press its number, or use any shortcut and say its number. Press Esc or say \u{201C}cancel\u{201D} to dismiss it. If nothing matches, \(Branding.appName) tells you instead of typing your words.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.moreExamples)
+                Text("You can also say the name of any command you save below.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             trySection
@@ -142,27 +135,10 @@ struct VoiceCommandsEditorView: View {
     }
 
     static func examples(findsInApps: Bool) -> [(phrase: String, meaning: String)] {
-        let open = ("\u{201C}open Mail\u{201D}", "Switches to an app, window, or tab. Nothing to set up.")
-        let inside = ("\u{201C}open Slack general\u{201D}", "Opens something inside an app, such as a channel, mailbox, or tab.")
+        let open = ("\u{201C}open Mail\u{201D}", "Opens Mail or brings it forward.")
+        let inside = ("\u{201C}open Slack general\u{201D}", "Opens general in Slack.")
         let back = ("\u{201C}go back\u{201D}", "Returns to where you were.")
         return findsInApps ? [open, inside, back] : [open, back]
-    }
-
-    private static func label(for phrase: VoiceCommandPhrase) -> String {
-        phrase.words.map { phrase == .goBack ? "\u{201C}\($0)\u{201D}" : "\u{201C}\($0) …\u{201D}" }.joined(separator: "  ")
-    }
-
-    static func explanation(for phrase: VoiceCommandPhrase, findsInApps: Bool) -> String {
-        switch phrase {
-        case .focus where findsInApps:
-            "Switch to an app, a saved app or link, or an open window or browser tab by name. App names work without setup. Add what you want in the app after its name to find it: \u{201C}open Slack general\u{201D} opens a channel, \u{201C}open Chrome github\u{201D} a tab."
-        case .focus:
-            "Switch to an app, a saved app or link, or an open window or browser tab by name. App names work without setup."
-        case .run:
-            "Run a saved script or shortcut. Saying its name alone works too."
-        case .goBack:
-            "Return to the app or window you left. Say it again to switch back."
-        }
     }
 
     private func phraseRow(_ phrase: String, _ meaning: String) -> some View {
@@ -357,15 +333,41 @@ struct VoiceCommandsEditorView: View {
                         Text("Read as \u{201C}\(readAs)\u{201D}").font(.caption).foregroundStyle(.secondary)
                     }
                     if result.resolved {
-                        Label(result.summary, systemImage: "arrow.right.circle").font(.callout)
-                    } else if result.asksChoice {
-                        Label(result.summary, systemImage: "list.number").font(.callout)
+                        Label {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(result.summary).lineLimit(result.details == nil ? nil : 1).truncationMode(.tail)
+                                Text(result.detail).font(.caption).foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "arrow.right.circle")
+                        }
+                        .font(.callout)
                     } else {
-                        IssueText(result.summary, severity: .advisory, font: .callout)
+                        if result.asksChoice {
+                            Label(result.summary, systemImage: "list.number").font(.callout)
+                        } else {
+                            IssueText(result.summary, severity: .advisory, font: .callout)
+                        }
+                        if !result.detail.isEmpty {
+                            Text(result.detail).font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(result.choices, id: \.self) { choice in
+                            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                Text(choice.name)
+                                Text("\u{00B7} \(choice.detail)").lineLimit(1).fixedSize()
+                            }
+                            .font(.caption).foregroundStyle(.secondary)
+                            .accessibilityElement(children: .combine)
+                        }
                     }
-                    if !result.detail.isEmpty {
-                        Text(result.detail).font(.caption).foregroundStyle(.secondary)
+                }
+                if let details = result.details {
+                    DisclosureSection(isExpanded: $previewResultExpanded) {
+                        DisclosureSummaryLabel(title: "Details", summary: details.label)
+                    } content: {
+                        Text(details.value).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                     }
+                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.previewResultDetails)
                 }
             }
             DisclosureSection(isExpanded: $previewDetailsExpanded) {

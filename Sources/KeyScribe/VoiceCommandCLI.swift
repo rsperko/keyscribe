@@ -23,12 +23,12 @@ enum VoiceCommandCLI {
         let resolution = await runner.resolve(readAs, places: commands.places, scripts: commands.scripts)
         print("heard:      \(transcript)")
         if readAs != transcript { print("read as:    \(readAs)") }
-        print("resolution: \(describe(resolution, system: system))")
+        print("resolution: \(describe(resolution, spoken: readAs, system: system))")
         guard case .action = resolution else { return 1 }
         return 0
     }
 
-    private static func describe(_ resolution: VoiceCommandResolution, system: any VoiceCommandSystem) -> String {
+    private static func describe(_ resolution: VoiceCommandResolution, spoken: String, system: any VoiceCommandSystem) -> String {
         switch resolution {
         case .notACommand: return "not a command"
         case .noMatch(let target): return VoiceCommandRunner.noMatchMessage(target)
@@ -54,7 +54,9 @@ enum VoiceCommandCLI {
         case .takesNoText(let name): return VoiceCommandRunner.takesNoTextMessage(name)
         case .scriptNotFound(let target): return "no script or shortcut matches \u{201C}\(target)\u{201D}"
         case .action(let action):
-            return "\(action.summary(appName: system.appName(forBundleId:))) — \(action.detail(appName: system.appName(forBundleId:)))"
+            let preview = action.preview(spoken: spoken, appName: system.appName(forBundleId:))
+            let details = preview.details.map { "\n            \($0.label): \($0.value)" } ?? ""
+            return "\(preview.headline) — \(preview.context)\(details)"
         }
     }
 }

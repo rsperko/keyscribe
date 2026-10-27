@@ -29,6 +29,13 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         let resolved: Bool
         var readAs: String? = nil
         var asksChoice = false
+        var details: VoiceCommandPreview.Details? = nil
+        var choices: [Choice] = []
+    }
+
+    struct Choice: Equatable, Hashable {
+        let name: String
+        let detail: String
     }
 
     struct CurrentTab: Equatable {
@@ -269,17 +276,19 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     static func describe(
         _ resolution: VoiceCommandResolution, heard: String, readAs: String, appName: (String) -> String?
     ) -> TryResult {
-        var result = describe(resolution, heard: heard, appName: appName)
+        var result = describe(resolution, heard: heard, spoken: readAs, appName: appName)
         if readAs != heard { result.readAs = readAs }
         return result
     }
 
     static func describe(
-        _ resolution: VoiceCommandResolution, heard: String, appName: (String) -> String?
+        _ resolution: VoiceCommandResolution, heard: String, spoken: String? = nil, appName: (String) -> String?
     ) -> TryResult {
         switch resolution {
         case .action(let action):
-            return TryResult(heard: heard, summary: action.summary(appName: appName), detail: action.detail(appName: appName), resolved: true)
+            let preview = action.preview(spoken: spoken ?? heard, appName: appName)
+            return TryResult(
+                heard: heard, summary: preview.headline, detail: preview.context, resolved: true, details: preview.details)
         case .notACommand:
             return TryResult(heard: heard, summary: "Not a command", detail: VoiceCommandRunner.notACommandHint, resolved: false)
         case .scriptNotFound(let target):
@@ -298,12 +307,11 @@ final class VoiceCommandsSettingsModel: ObservableObject {
                 return TryResult(heard: heard, summary: "Too many matches", detail: choice.tooManyMessage, resolved: false)
             }
             let rows = choice.candidates.enumerated().map { index, candidate in
-                "\(index + 1). \(candidate.name) (\(candidate.detail(appName: appName, among: choice.candidates)))"
+                Choice(name: "\(index + 1). \(candidate.name)", detail: candidate.detail(appName: appName, among: choice.candidates))
             }
             return TryResult(
                 heard: heard, summary: "Would ask \u{201C}\(choice.title)\u{201D}",
-                detail: "When spoken, this command would ask you to choose: " + rows.joined(separator: "  "),
-                resolved: false, asksChoice: true)
+                detail: "When spoken, you choose one by number:", resolved: false, asksChoice: true, choices: rows)
         case .unavailable(let name):
             return TryResult(heard: heard, summary: "Not available", detail: VoiceCommandRunner.unavailableMessage(name), resolved: false)
         case .scriptNeedsText(let name):
@@ -314,8 +322,8 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             return TryResult(heard: heard, summary: "Could not read browser tabs", detail: "", resolved: false)
         case .needsSidebar(let app):
             let name = appName(app) ?? app
-            return TryResult(heard: heard, summary: "Looks in \(name)\u{2019}s sidebar",
-                             detail: "When spoken, this looks in \(name)\u{2019}s sidebar, opening \(name) first if needed, and opens the item that best matches. If several match equally, it opens the first in sidebar order. The preview does not read sidebars.",
+            return TryResult(heard: heard, summary: "Opens the best match in the \(name) sidebar",
+                             detail: "The preview does not read sidebars, so it cannot name the item. \(name) opens first if needed, and if several items match equally, the first one opens.",
                              resolved: false)
         case .sidebarUnreadable(let app, _):
             return TryResult(heard: heard, summary: "Could not read the sidebar",

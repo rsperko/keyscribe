@@ -82,7 +82,7 @@ struct VoiceCommandsSettingsModelTests {
         let action = VoiceCommandsSettingsModel.describe(
             .action(.app(.init(name: "Ghostty", bundleId: "com.mitchellh.ghostty"))), heard: "switch to ghostty", appName: { _ in nil })
         #expect(action.resolved)
-        #expect(action.summary == "Ghostty")
+        #expect(action.summary == "Switch to Ghostty")
     }
 
     @Test func tryItShowsTheChoiceItWouldOfferWithoutOfferingIt() {
@@ -93,9 +93,10 @@ struct VoiceCommandsSettingsModelTests {
         #expect(!asked.resolved)
         #expect(asked.summary == "Would ask \u{201C}Which one?\u{201D}")
         #expect(asked.asksChoice)
-        #expect(asked.detail.hasPrefix("When spoken, this command would ask you to choose: "))
-        #expect(asked.detail.contains("1. Personal Mail (Default browser \u{00B7} mail.example.net)"))
-        #expect(asked.detail.contains("2. Work Mail (Default browser \u{00B7} inbox.example.org)"))
+        #expect(asked.choices == [
+            .init(name: "1. Personal Mail", detail: "Default browser \u{00B7} mail.example.net"),
+            .init(name: "2. Work Mail", detail: "Default browser \u{00B7} inbox.example.org"),
+        ])
         let many = VoiceCommandChoice(
             family: .navigation, target: "note",
             matches: (1...6).map { .app(.init(name: "Note \($0)", bundleId: "com.example.\($0)")) })
@@ -188,7 +189,8 @@ struct VoiceCommandsSettingsModelTests {
         let result = VoiceCommandsSettingsModel.describe(
             .needsSidebar("com.tinyspeck.slackmacgap"), heard: "slack general", readAs: "slack general",
             appName: { _ in "Slack" })
-        #expect(result.detail == "When spoken, this looks in Slack\u{2019}s sidebar, opening Slack first if needed, and opens the item that best matches. If several match equally, it opens the first in sidebar order. The preview does not read sidebars.")
+        #expect(result.summary == "Opens the best match in the Slack sidebar")
+        #expect(result.detail == "The preview does not read sidebars, so it cannot name the item. Slack opens first if needed, and if several items match equally, the first one opens.")
     }
 
     @Test func tryItShowsWhatTheVocabularyChanged() {
@@ -218,7 +220,7 @@ struct VoiceCommandsSettingsModelTests {
         let place = VoiceCommandPlace(name: "Zzqvplace", target: .app(bundleId: "com.apple.finder"))
         #expect(model.save(place, replacing: nil) == nil)
         try await waitFor { model.tryResult?.resolved == true }
-        #expect(model.tryResult?.summary == "Zzqvplace")
+        #expect(model.tryResult?.summary == "Switch to Finder")
     }
 
     private func waitFor(_ condition: () -> Bool) async throws {
@@ -266,11 +268,6 @@ struct VoiceCommandsSettingsModelTests {
                 == ["\u{201C}open Mail\u{201D}", "\u{201C}open Slack general\u{201D}", "\u{201C}go back\u{201D}"])
         #expect(VoiceCommandsEditorView.examples(findsInApps: false).map(\.phrase)
                 == ["\u{201C}open Mail\u{201D}", "\u{201C}go back\u{201D}"])
-    }
-
-    @Test func findingInsideAppsIsTaughtOnlyWhileItIsOn() {
-        #expect(VoiceCommandsEditorView.explanation(for: .focus, findsInApps: true).contains("open Slack general"))
-        #expect(!VoiceCommandsEditorView.explanation(for: .focus, findsInApps: false).contains("open Slack general"))
     }
 
     @Test func anOldSidebarCommandEditsAsAPlainAppCommand() {
@@ -435,7 +432,7 @@ struct VoiceCommandsSettingsModelTests {
     @Test func tryItDescribesAScriptWithoutRunningIt() {
         let action = VoiceCommandAction.script(deploy, arguments: ["staging"])
         let result = VoiceCommandsSettingsModel.describe(.action(action), heard: "deploy staging", appName: { _ in nil })
-        #expect(result.summary == "Deploy")
+        #expect(result.summary == "Run Deploy")
         #expect(result.detail == "Runs /usr/bin/true staging in the background.")
         let wanting = VoiceCommandsSettingsModel.describe(.scriptNeedsText("Deploy"), heard: "deploy", appName: { _ in nil })
         #expect(!wanting.resolved)

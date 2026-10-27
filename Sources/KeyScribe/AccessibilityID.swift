@@ -202,9 +202,9 @@ enum AccessibilityID {
             static let addCurrentTab = "mode.voiceCommands.addCurrentTab"
             static let addApp = "mode.voiceCommands.addApp"
             static let addLink = "mode.voiceCommands.addLink"
-            static let moreExamples = "mode.voiceCommands.moreExamples"
             static let tryIt = "mode.voiceCommands.tryIt"
             static let previewDetails = "mode.voiceCommands.previewDetails"
+            static let previewResultDetails = "mode.voiceCommands.previewResultDetails"
             static let excludeFromHistory = "mode.voiceCommands.excludeFromHistory"
             static let editVocabulary = "mode.voiceCommands.editVocabulary"
             static let placeName = "mode.voiceCommands.place.name"
@@ -432,7 +432,7 @@ enum AccessibilityID {
         Mode.VoiceCommands.moveShortcut,
         Mode.VoiceCommands.scriptNotice, Mode.VoiceCommands.placeNotice, Mode.VoiceCommands.actionPermissions,
         Mode.VoiceCommands.addCommand, Mode.VoiceCommands.addTabSearch, Mode.VoiceCommands.addCurrentApp, Mode.VoiceCommands.addCurrentTab,
-        Mode.VoiceCommands.addApp, Mode.VoiceCommands.addLink, Mode.VoiceCommands.moreExamples, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.previewDetails, Mode.VoiceCommands.editVocabulary,
+        Mode.VoiceCommands.addApp, Mode.VoiceCommands.addLink, Mode.VoiceCommands.tryIt, Mode.VoiceCommands.previewDetails, Mode.VoiceCommands.previewResultDetails, Mode.VoiceCommands.editVocabulary,
         Mode.VoiceCommands.placeName, Mode.VoiceCommands.placeSay, Mode.VoiceCommands.placeOtherNames,
         Mode.VoiceCommands.placeApp, Mode.VoiceCommands.placeURL, Mode.VoiceCommands.placeBrowser, Mode.VoiceCommands.placeBrowserDetails,
         Mode.VoiceCommands.placeChooseFromApplications, Mode.VoiceCommands.placeEnterBundleID,
