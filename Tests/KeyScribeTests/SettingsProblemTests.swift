@@ -120,6 +120,24 @@ struct SettingsPaneMarkerTests {
         #expect(model.marker(for: .advanced) == .failure)
     }
 
+    @Test func theMenuBarDotFollowsEverySidebarRefreshIncludingThePoll() {
+        let model = SettingsProblemModel()
+        var dot: [Bool] = []
+        model.onErrorsChanged = { dot.append($0) }
+        model.update([.microphonePermission])
+        model.update([.microphonePermission])
+        model.update([])
+        #expect(dot == [true, false])
+    }
+
+    @Test func aWarningNeverLightsTheMenuBarDot() {
+        let model = SettingsProblemModel()
+        var dot: [Bool] = []
+        model.onErrorsChanged = { dot.append($0) }
+        model.updateAdvisories([.advanced])
+        #expect(dot.isEmpty)
+    }
+
     @Test func fixingTheWarningClearsTheMarker() {
         let model = SettingsProblemModel()
         model.updateAdvisories([.advanced])

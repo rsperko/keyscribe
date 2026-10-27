@@ -391,6 +391,7 @@ enum AccessibilityID {
         static let copyResult = "history.action.copyResult"
         static let pasteResult = "history.action.pasteResult"
         static let copyHeard = "history.action.copyHeard"
+        static let copyReport = "history.action.copyReport"
         static let delete = "history.action.delete"
         static let manageVocabulary = "history.action.manageVocabulary"
         static let createReplacement = "history.action.createReplacement"

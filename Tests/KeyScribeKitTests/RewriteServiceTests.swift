@@ -27,11 +27,65 @@ private func inputs(content: String = "hello") -> PromptInputs {
         appName: nil, bundleId: nil, fieldRole: nil, selectedText: nil)
 }
 
+// Each call sleeps for its own delay, so a test can make one attempt fast and the next one slow.
+private actor PacedClient: LLMClient {
+    private let delays: [Duration]
+    private let output: String
+    private(set) var calls = 0
+    private(set) var cancelled = false
+    init(delays: [Duration], output: String) { self.delays = delays; self.output = output }
+    func complete(system: String, user: String, connection: Connection) async throws -> String {
+        let delay = delays[min(calls, delays.count - 1)]
+        calls += 1
+        do { try await Task.sleep(for: delay) } catch { cancelled = true; throw error }
+        return output
+    }
+}
+
+private let protectedPayload = TokenizedPayload(text: "hi ⟦SN:REDACT:1⟧", issuedTokens: ["⟦SN:REDACT:1⟧"])
+
 struct RewriteServiceTests {
     @Test func returnsRewrittenOnCleanOutput() async {
         let svc = RewriteService(client: FakeClient([.success("Hello.")]), permits: { _ in true })
         let out = await svc.rewrite(payload: TokenizedPayload(text: "hello", issuedTokens: []), inputs: inputs(), connection: conn)
         #expect(out == .rewritten("Hello.", received: "Hello."))
+    }
+
+    @Test func oneDeadlineCoversTheWholeRewriteIncludingTheStricterRetry() async {
+        let client = PacedClient(delays: [.zero, .seconds(30)], output: "dropped the token")
+        let svc = RewriteService(client: client, permits: { _ in true }, deadlineSeconds: 0.3)
+        let start = ContinuousClock.now
+        let out = await svc.rewrite(payload: protectedPayload, inputs: inputs(), connection: conn)
+        #expect(ContinuousClock.now - start < .seconds(5))
+        guard case .localFallback(let text, let reason, let received) = out else { Issue.record("expected fallback"); return }
+        #expect(text == protectedPayload.text)
+        #expect(reason == RewriteService.deadlineReason(seconds: 0.3))
+        #expect(received == "dropped the token")
+        #expect(await client.calls == 2)
+    }
+
+    @Test func theDeadlineReasonNamesTheLimitInMinutes() {
+        #expect(RewriteService.deadlineReason(seconds: 300).contains("5-minute limit"))
+    }
+
+    @Test func aFailureBeforeTheDeadlineKeepsItsOwnReason() async {
+        let client = PacedClient(delays: [.zero], output: "dropped the token")
+        let svc = RewriteService(client: client, permits: { _ in true }, deadlineSeconds: 30)
+        let out = await svc.rewrite(payload: protectedPayload, inputs: inputs(), connection: conn)
+        guard case .localFallback(_, let reason, _) = out else { Issue.record("expected fallback"); return }
+        #expect(reason != RewriteService.deadlineReason(seconds: 30))
+        #expect(reason?.contains("protected text") == true)
+    }
+
+    @Test func cancellingTheCallerCancelsTheRequestInFlight() async {
+        let client = PacedClient(delays: [.seconds(30)], output: "late")
+        let svc = RewriteService(client: client, permits: { _ in true })
+        let task = Task { await svc.rewrite(payload: protectedPayload, inputs: inputs(), connection: conn) }
+        while await client.calls == 0 { await Task.yield() }
+        task.cancel()
+        guard case .localFallback = await task.value else { Issue.record("expected fallback"); return }
+        for _ in 0..<200 where !(await client.cancelled) { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(await client.cancelled)
     }
 
     @Test func fallsBackToLocalWhenClientThrows() async {

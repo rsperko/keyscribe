@@ -62,6 +62,17 @@
   `prompt`, never their originals) — behind History's "Show exactly what was received". Old rows
   lacking optional fields decode as absent — History renders without the corresponding line. Audio
   and the redaction map are never stored.
+  Support fields, all optional and absent on older rows: `app_version` and `os_version` (what the
+  dictation ran on), `target_app` (bundle id of the app focused when the dictation started — where the text was meant to
+  go, even if it was diverted), `delivery_attempted` (the insertion action chosen before actuating —
+  `paste`, `ax`, `type`, or `clipboard` with the reason it was diverted, e.g. `clipboard (appChanged)`;
+  an `ax` insert can still fall back to paste),
+  `stage_ms` (milliseconds per stage, keyed by `DictationRecord.Stage`), `audio_seconds`, `error`, and
+  `shortcut_candidates` — every enabled mode bound to the pressed key with its `verdict` (`chosen`,
+  `not_available_here`, `less_specific`, `later_in_list`) as decided by the shortcut alone, before
+  anything was said; a spoken phrase (`mode_choice = "spoken_phrase"`) can still move the dictation to
+  another mode afterward. Present only when another mode was on that key or the bound mode could not run
+  there. History's detail does not show them; **Copy Report** does.
   Each record also carries an optional `id`, fixed when it is written, which an in-place update (a late
   command result, a clicked choice) keeps; History matches rows and deletes by it. Older rows without one
   are matched by their content.

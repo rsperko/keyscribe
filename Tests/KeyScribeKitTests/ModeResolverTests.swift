@@ -389,6 +389,44 @@ struct ModeResolverTests {
     }
 
 
+    @Test func theKeyTraceSaysWhyEachModeOnThePressedKeyLost() {
+        let slack = mode("slack", keys: ["right_option"])
+        let ide = mode("ide", keys: ["right_option"], bundles: ["com.microsoft.VSCode"])
+        let mail = mode("mail", keys: ["right_option"], bundles: ["com.apple.mail"])
+        let notes = mode("notes", keys: ["right_option"])
+        let other = mode("other", keys: ["fn"])
+        let trace = ModeResolver.keyCandidates(
+            modes: [slack, ide, mail, notes, other], context: .init(bundleId: "com.microsoft.VSCode"),
+            triggerKey: "right_option")
+        #expect(trace.map(\.id) == ["slack", "ide", "mail", "notes"])
+        #expect(trace.map(\.verdict) == [.lessSpecific, .chosen, .notAvailableHere, .lessSpecific])
+    }
+
+    @Test func anEquallySpecificModeLosesToTheOneListedFirst() {
+        let slack = mode("slack", keys: ["right_option"])
+        let notes = mode("notes", keys: ["right_option"])
+        let trace = ModeResolver.keyCandidates(modes: [slack, notes], context: .init(), triggerKey: "right_option")
+        #expect(trace.map(\.verdict) == [.chosen, .laterInList])
+    }
+
+    @Test func aKeyOwnedByOneModeThatWonLeavesNoTrace() {
+        let slack = mode("slack", keys: ["right_option"])
+        #expect(ModeResolver.keyCandidates(modes: [slack], context: .init(), triggerKey: "right_option").isEmpty)
+        #expect(ModeResolver.keyCandidates(modes: [slack], context: .init(), triggerKey: nil).isEmpty)
+    }
+
+    @Test func aLoneModeThatCannotRunHereIsStillTraced() {
+        let mail = mode("mail", keys: ["fn"], bundles: ["com.apple.mail"])
+        let trace = ModeResolver.keyCandidates(modes: [mail], context: .init(bundleId: "com.apple.notes"), triggerKey: "fn")
+        #expect(trace.map(\.verdict) == [.notAvailableHere])
+    }
+
+    @Test func aDisabledModeIsLeftOutOfTheTrace() {
+        let slack = mode("slack", keys: ["right_option"])
+        let off = mode("off", enabled: false, keys: ["right_option"])
+        #expect(ModeResolver.keyCandidates(modes: [slack, off], context: .init(), triggerKey: "right_option").isEmpty)
+    }
+
     @Test func phaseAReasonIsTriggerKeyForAKeySelectedMode() {
         let polish = mode("polish", keys: ["right_option"])
         let r = ModeResolver.resolvePhaseAWithReason(

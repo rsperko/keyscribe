@@ -34,6 +34,22 @@ only the mode, speech model, microphone, outcome, and the names of the connectio
 The full local history — which *does* contain what you said — stays on your machine unless you
 choose to share it. See [Privacy](../PRIVACY.md).
 
+## Report one dictation that did not work
+
+When a particular dictation went wrong, open it in **History** and click **Copy Report**. That copies
+everything History recorded about it, plus the snapshot above:
+
+- what you said, what was inserted, and, for a mode that uses an AI service, the request and the reply;
+- the app the text was meant for, the delivery method that was attempted (paste, typing, or a copy to
+  the clipboard instead, and why), how long each step took, and any error;
+- which other modes share that shortcut and why they did not run, which explains a press that started
+  the wrong mode;
+- the version and macOS release it ran on.
+
+**This report is not redacted.** It contains what you said and, for an AI mode, the full request and
+reply, which can include text you had selected or text from the app you were typing in. Read it and
+remove anything private before you send it.
+
 ## "It said it worked, but nothing appeared"
 
 Read the outcome of the dictation in the `--diagnose` output. It splits the problem in half.

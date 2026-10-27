@@ -822,7 +822,7 @@ struct HTTPLLMClientTests {
         #expect(calls == 2)
     }
 
-    @Test func persistentServerErrorFailsAfterExactlyOneRetry() async {
+    @Test func persistentServerErrorFailsAfterTwoRetries() async {
         nonisolated(unsafe) var calls = 0
         LLMStubProtocol.handler = { request in
             calls += 1
@@ -831,7 +831,7 @@ struct HTTPLLMClientTests {
         await #expect(throws: ProviderTransportError.self) {
             _ = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection())
         }
-        #expect(calls == 2)
+        #expect(calls == 3)
     }
 
     @Test func timeoutDoesNotRetry() async {

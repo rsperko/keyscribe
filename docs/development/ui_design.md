@@ -330,7 +330,12 @@ governs it (KeyScribe does not currently distinguish a "polishing on this Mac" s
   expected result and showing it creates false confidence.
 - When the wait passes the **max-wait escape-hatch threshold** (`design.md` §4.1 latency
   budgets), show **Insert without rewriting**. This action is always explicit; the HUD never
-  auto-inserts the un-rewritten transcript early.
+  auto-inserts the un-rewritten transcript early. Until the user acts, the rewrite keeps waiting, so a
+  slow model can finish. Only the whole-rewrite backstop ends it on its own: a dictation then inserts
+  the local text with the Rewrite fallback state and History records a reason naming the limit; a
+  selection rewrite leaves the selection unchanged and shows the failure in the HUD, without a History
+  record. Escape and Insert without
+  rewriting both cancel the request, and a reply arriving afterwards is discarded.
 
 ### HUD copy rules
 
@@ -483,7 +488,9 @@ glance and can show simultaneously:
   and any mode wired to a failed connection (its row, red ⚠) are flagged in-pane. A mode whose shortcut
   can never fire is flagged the same way, in its Modes-list row (**Shortcut never fires**) as well as in
   its trigger row — the editor alone would hide it behind a selection. The sidebar polls
-  while open and clears the flag the moment it's fixed. A config **advisory** — a key a config file
+  while open and clears the flag the moment it's fixed. The menu-bar dot and the `Settings…` dot are
+  driven by the sidebar's flags, never by a check of their own, so every refresh — including that poll —
+  moves all three together and they cannot disagree. A config **advisory** — a key a config file
   carries that nothing reads, usually a typo — puts an **amber** dot on the Maintenance sidebar row
   instead, and nothing on the menu bar: it means "an edit did nothing", not "something is broken". Red
   outranks amber on the same row. **A missing key is not always an error** —
@@ -1250,7 +1257,11 @@ Correction actions are directly beside the relevant text:
 - **Create Replacement** for a repeated heard-to-intended correction.
 
 Reuse actions (**Copy Result**, **Paste Result**, **Copy Heard**) lead an action row at the top of the
-detail. The destructive **Delete Dictation** follows the shared delete convention: it sits alone at the
+detail, followed by **Copy Report**, which copies that one dictation for a bug report: every field the
+entry recorded, including what was said, the request sent to an AI service and its reply, plus the install
+summary Copy Diagnostics produces. Nothing is redacted. The report's first lines, the button's help, and
+the confirmation after copying all say it includes what was said and any AI request and reply (which can
+hold selected text or text from the app), so the user can remove anything private before sending. The destructive **Delete Dictation** follows the shared delete convention: it sits alone at the
 trailing edge of a footer at the bottom of the detail, in red with a trash icon, and opens a confirmation
 ("Delete this dictation?" — "This dictation will be removed from local history. This cannot be undone.")
 — the same trailing-edge, red, confirmed pattern as the Modes, AI Services, and Speech Models editors.

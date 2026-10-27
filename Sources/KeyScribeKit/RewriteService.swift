@@ -50,10 +50,26 @@ public actor RewriteService {
     private static let strictReminder =
         "IMPORTANT: Return ONLY the transformed text and reproduce every ⟦SN:…⟧ token verbatim, exactly once."
 
-    public init(client: LLMClient, permits: @escaping @Sendable (Connection) -> Bool) {
+    // Covers the whole rewrite — every attempt and retry — so a slow model may finish while a hung
+    // endpoint cannot hold the dictation forever. Waiting less is the user's call, via the HUD.
+    public static let defaultDeadlineSeconds: Double = 300
+    private let deadlineSeconds: Double
+
+    public init(
+        client: LLMClient, permits: @escaping @Sendable (Connection) -> Bool,
+        deadlineSeconds: Double = RewriteService.defaultDeadlineSeconds
+    ) {
         self.client = client
         self.permits = permits
+        self.deadlineSeconds = deadlineSeconds
     }
+
+    public static func deadlineReason(seconds: Double) -> String {
+        let limit = seconds >= 60 ? "\(Int((seconds / 60).rounded()))-minute" : "\(Int(seconds.rounded()))-second"
+        return "The rewrite took longer than the \(limit) limit, so your local version was kept."
+    }
+
+    static let cancelledReason = "The rewrite was cancelled."
 
     // Kept for callers written before the policy became an argument. It applies the build's own catalog rather
     // than allowing everything, so such a call can only be as strict as the build, never looser.
@@ -84,6 +100,25 @@ public actor RewriteService {
         }
         let base = prompt ?? PromptAssembler.assemble(inputs)
         let required = payload.issuedTokens.filter { payload.text.contains($0) }
+        let received = ReceivedReply()
+        do {
+            return try await runWithDeadline(seconds: deadlineSeconds) { [client] in
+                await Self.attempts(
+                    client: client, base: base, inputs: inputs, connection: connection, localText: localText,
+                    required: required, allowedTokens: allowedTokens, allowDeletion: allowDeletion, received: received)
+            }
+        } catch is DeadlineExceeded {
+            return .localFallback(
+                localText: localText, reason: Self.deadlineReason(seconds: deadlineSeconds), received: received.value)
+        } catch {
+            return .localFallback(localText: localText, reason: Self.cancelledReason, received: received.value)
+        }
+    }
+
+    private static func attempts(
+        client: LLMClient, base: RewritePrompt, inputs: PromptInputs, connection: Connection, localText: String,
+        required: [String], allowedTokens: [String], allowDeletion: Bool, received: ReceivedReply
+    ) async -> RewriteOutcome {
         var attempt = 0
         var lastReceived: String?
         while true {
@@ -96,6 +131,7 @@ public actor RewriteService {
                     localText: localText, reason: Self.sanitizedReason(for: error), received: lastReceived)
             }
             lastReceived = output
+            received.value = output
             // Unwrap a whole-output <content> echo BEFORE the gate, so an echo whose inside is empty
             // fails the gate (→ stricter retry) instead of inserting nothing.
             let candidate = PromptAssembler.unwrappingContentEcho(output, sentContent: inputs.content)
@@ -114,5 +150,15 @@ public actor RewriteService {
                 attempt += 1
             }
         }
+    }
+}
+
+// The latest provider reply, readable after the deadline abandons the attempts that produced it.
+private final class ReceivedReply: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: String?
+    var value: String? {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
     }
 }

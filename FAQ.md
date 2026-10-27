@@ -406,6 +406,9 @@ text, clipboard contents, or API keys. The same report is available from a termi
 `/Applications/KeyScribe.app/Contents/MacOS/KeyScribe --diagnose`. See
 [Troubleshooting](docs/troubleshooting.md) for how to read it.
 
+When one dictation went wrong, select it in **History** and click **Copy Report** instead. That
+report includes what you said, so check it before sending.
+
 ### My dictation said it worked, but the text never appeared.
 
 `inserted` means KeyScribe posted the paste keystroke, not that the app accepted it. See

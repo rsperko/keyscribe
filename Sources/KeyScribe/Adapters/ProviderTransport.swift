@@ -85,6 +85,7 @@ struct ProviderTransport: Sendable {
     var tokenCommandRunner: @Sendable (String) async throws -> String
     var tokenCache: TokenCommandCache
     var now: @Sendable () -> Date
+    var sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
 
     static func makeSession(requestTimeout: TimeInterval, resourceTimeout: TimeInterval) -> URLSession {
         let config = URLSessionConfiguration.ephemeral
@@ -131,33 +132,85 @@ struct ProviderTransport: Sendable {
         }
     }
 
+    // The common LLM-client policy: two retries on a temporary failure, backing off 0.5 s then 1 s with
+    // jitter, or waiting what the server asks when that is short. A longer ask falls back at once rather
+    // than holding the dictation; the whole rewrite stays under RewriteService's deadline either way.
+    static let maxRetries = 2
+    static let backoff: [Duration] = [.milliseconds(500), .seconds(1)]
+    static let longestServerWaitSeconds: Double = 10
+
     func send(_ request: URLRequest) async throws -> Data {
-        do {
-            return try await attempt(request)
-        } catch let error where Self.isTransient(error) {
-            // One quick retry, not exponential backoff: dictation is commit-on-release, so a persistent
-            // failure must fall back to the local transcript promptly, not stall the insert on a retry ladder.
-            try? await Task.sleep(for: Self.quickRetryDelay)
-            return try await attempt(request)
+        var retry = 0
+        while true {
+            do {
+                return try await attempt(request)
+            } catch let failure as HTTPFailure {
+                guard let wait = Self.retryWait(
+                    for: failure.error, serverAskedSeconds: failure.retryAfterSeconds, retry: retry)
+                else { throw failure.error }
+                try await sleep(wait)
+            } catch {
+                guard let wait = Self.retryWait(for: error, serverAskedSeconds: nil, retry: retry) else { throw error }
+                try await sleep(wait)
+            }
+            retry += 1
         }
     }
 
-    static let quickRetryDelay: Duration = .milliseconds(250)
+    // The server's ask is compared as a Double BEFORE it becomes a Duration: converting an enormous value
+    // traps, and a header is untrusted input.
+    static func retryWait(
+        for error: Error, serverAskedSeconds: Double?, retry: Int, jitter: Double = .random(in: 0.75...1)
+    ) -> Duration? {
+        guard retry < maxRetries, isTransient(error) else { return nil }
+        if let asked = serverAskedSeconds { return asked <= longestServerWaitSeconds ? .seconds(asked) : nil }
+        return backoff[min(retry, backoff.count - 1)] * jitter
+    }
+
+    private struct HTTPFailure: Error {
+        let error: ProviderTransportError
+        let retryAfterSeconds: Double?
+    }
 
     private func attempt(_ request: URLRequest) async throws -> Data {
         let (data, response) = try await session.data(for: request, delegate: OriginPinnedRedirects(request.url))
         guard let http = response as? HTTPURLResponse else { throw ProviderTransportError.badResponse }
         guard (200..<300).contains(http.statusCode) else {
-            throw ProviderTransportError.http(http.statusCode, body: Self.errorBody(from: data))
+            throw HTTPFailure(
+                error: .http(http.statusCode, body: Self.errorBody(from: data)),
+                retryAfterSeconds: serverWaitSeconds(http))
         }
         return data
     }
 
-    // Retry only genuinely transient failures. Not 4xx (deterministic — a 400 goes through param
-    // remediation instead), not timeouts (already waited the full request window), not offline (won't
-    // recover in 250 ms) — those fall straight back to the local transcript.
+    // `retry-after-ms`, then `Retry-After` as seconds or an HTTP date (RFC 9110 §10.2.3). Infinity is kept
+    // (it reads as "too long"); NaN, a negative, or anything unparseable is ignored for the normal backoff.
+    func serverWaitSeconds(_ response: HTTPURLResponse) -> Double? {
+        if let ms = response.value(forHTTPHeaderField: "retry-after-ms").flatMap(Double.init), ms >= 0 {
+            return ms / 1000
+        }
+        guard let value = response.value(forHTTPHeaderField: "Retry-After") else { return nil }
+        if let seconds = Double(value) { return seconds >= 0 ? seconds : nil }
+        guard let date = Self.httpDate(value) else { return nil }
+        return max(0, date.timeIntervalSince(now()))
+    }
+
+    private static func httpDate(_ value: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter.date(from: value)
+    }
+
+    // Temporary: the request timed out at the server, conflicted, was rate limited, or hit a server error
+    // (Anthropic's 529 "overloaded" included), or the connection dropped before an answer. Every other 4xx
+    // is deterministic — a 400 goes through param remediation instead. A local timeout is not retried: the
+    // rewrite already waited out its window, and the server may have done the work.
     static func isTransient(_ error: Error) -> Bool {
-        if case ProviderTransportError.http(let code, _) = error { return (500...599).contains(code) }
+        if case ProviderTransportError.http(let code, _) = error {
+            return code == 408 || code == 409 || code == 429 || (500...599).contains(code)
+        }
         if let urlError = error as? URLError {
             switch urlError.code {
             case .networkConnectionLost, .cannotConnectToHost, .dnsLookupFailed: return true

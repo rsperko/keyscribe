@@ -64,6 +64,16 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     public var stoppedAtLimit: Bool?
     public var failureReason: String?
     public var reported: String?
+    // Support evidence: what ran, where the text went, and how long each stage took. Never shown in the
+    // History detail; it reaches a person only through Copy Report. nil on older rows.
+    public var appVersion: String?
+    public var osVersion: String?
+    public var targetApp: String?
+    public var deliveryAttempted: String?
+    public var stageMillis: [String: Int]?
+    public var audioSeconds: Double?
+    public var error: String?
+    public var shortcutCandidates: [ModeCandidate]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -89,6 +99,14 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case stoppedAtLimit = "stopped_at_limit"
         case failureReason = "failure_reason"
         case reported
+        case appVersion = "app_version"
+        case osVersion = "os_version"
+        case targetApp = "target_app"
+        case deliveryAttempted = "delivery_attempted"
+        case stageMillis = "stage_ms"
+        case audioSeconds = "audio_seconds"
+        case error
+        case shortcutCandidates = "shortcut_candidates"
     }
 
     public init(

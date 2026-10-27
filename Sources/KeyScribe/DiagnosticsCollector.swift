@@ -29,15 +29,24 @@ enum DiagnosticsCollector {
     }
 
     private static func buildInfo() -> DiagnosticsReport.Build {
-        let info = Bundle.main.infoDictionary ?? [:]
-        return .init(
+        .init(
             appName: Branding.appName,
-            version: info["CFBundleShortVersionString"] as? String ?? "unknown",
-            build: info["CFBundleVersion"] as? String ?? "unknown",
-            revision: info["SCMRevision"] as? String ?? "unknown",
+            version: infoValue("CFBundleShortVersionString"),
+            build: infoValue("CFBundleVersion"),
+            revision: infoValue("SCMRevision"),
             bundleId: Bundle.main.bundleIdentifier ?? "unknown",
             variant: KeyScribePaths.variant.displayName,
-            osVersion: ProcessInfo.processInfo.operatingSystemVersionString)
+            osVersion: osVersion())
+    }
+
+    static func appVersion() -> String {
+        "\(infoValue("CFBundleShortVersionString")) (\(infoValue("CFBundleVersion")))"
+    }
+
+    static func osVersion() -> String { ProcessInfo.processInfo.operatingSystemVersionString }
+
+    private static func infoValue(_ key: String) -> String {
+        Bundle.main.infoDictionary?[key] as? String ?? "unknown"
     }
 
     private static func permissionState() -> DiagnosticsReport.PermissionState {

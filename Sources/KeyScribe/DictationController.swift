@@ -85,6 +85,7 @@ final class DictationController {
         var modeChoice: ModeChoiceReason = .fallback
         var routedPhrase: String?
         var triggerDisplay: String?
+        var shortcutCandidates: [ModeCandidate] = []
         var pendingLocalTranscript: String?
         var pendingLocalIssuedTokens: [String] = []
         var pendingHeardTranscript: String?
@@ -1676,6 +1677,8 @@ final class DictationController {
             return
         }
         session?.modeChoice = choice
+        session?.shortcutCandidates = override == nil
+            ? ModeResolver.keyCandidates(modes: modes, context: context, triggerKey: triggerKey) : []
         session?.triggerDisplay = choice == .triggerKey
             ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
         activeMode = securePolicyApplied(chosen)
@@ -2149,7 +2152,8 @@ final class DictationController {
         // Without Accessibility every synthetic insertion path is silently dropped by the OS. Divert to
         // the clipboard so the text survives and the outcome reports "copied" truthfully.
         let decision = accessibilityGranted() ? targetDecision : .clipboardFallback(reason: .accessibilityDenied)
-        building.targetBundleId = current.bundleId ?? capturedSnapshot?.bundleId
+        building.targetBundleId = capturedSnapshot?.bundleId ?? current.bundleId
+        building.delivery = Self.delivery(decision, method: activeMode?.insertion ?? .paste)
         // Don't clobber a rewrite fallback reason already recorded above — that cause (an LLM 400) is the
         // more surprising one; the insertion-clipboard reason only fills the slot when nothing else claimed it.
         if case .clipboardFallback(let reason) = decision, building.fallbackReason == nil {
@@ -2312,6 +2316,12 @@ final class DictationController {
     // map are never written; the stored prompt carries tokens, not their originals.
     func waitForHistoryWrites() { historyWriteQueue.sync {} }
 
+    static func delivery(_ decision: InsertionDecision, method: Mode.Insertion) -> String {
+        let action = String(describing: insertionAction(decision: decision, method: method))
+        guard case .clipboardFallback(let reason) = decision else { return action }
+        return "\(action) (\(reason))"
+    }
+
     private var targetMayHoldSecureText: Bool {
         capturedSnapshot?.isSecureField == true || session?.targetUnconfirmed == true
     }
@@ -2344,7 +2354,7 @@ final class DictationController {
         case .failed: base = isCommand ? .commandFailed : .failed
         }
         let outcome = override ?? base
-        let entry = HistoryEntry(
+        var entry = HistoryEntry(
             id: UUID().uuidString, timestamp: Date(), modeName: currentModeName, engine: activeEngine.displayName,
             device: session?.capturedInputDevice,
             heard: heard, transformed: transformed,
@@ -2359,6 +2369,17 @@ final class DictationController {
                 ? (rewriteSkipped ? Self.rewriteSkippedAtLimitReason : rewrite?.fallbackReason) : nil,
             stoppedAtLimit: session?.stoppedAtLimit == true ? true : nil,
             failureReason: failureReason, reported: reported)
+        entry.appVersion = DiagnosticsCollector.appVersion()
+        entry.osVersion = DiagnosticsCollector.osVersion()
+        entry.targetApp = building.targetBundleId
+        entry.deliveryAttempted = building.delivery
+        let stages = building.stageMillis
+        entry.stageMillis = stages.isEmpty
+            ? nil : Dictionary(uniqueKeysWithValues: stages.map { ($0.key.rawValue, Int($0.value.rounded())) })
+        entry.audioSeconds = building.audioSeconds
+        entry.error = building.error
+        let candidates = session?.shortcutCandidates ?? []
+        entry.shortcutCandidates = candidates.isEmpty ? nil : candidates
         guard let history else { return false }
         onRecorded?(entry)
         let retentionDays = settings.history.retentionDays
@@ -2656,7 +2677,10 @@ final class DictationController {
         }
 
         let rewriteStart = DispatchTime.now()
-        let outcome = await RewriteService(client: llmClient, permits: permits).rewrite(
+        let outcome = await RewriteService(
+            client: llmClient, permits: permits,
+            deadlineSeconds: rewriteDeadlineSecondsOverride ?? RewriteService.defaultDeadlineSeconds
+        ).rewrite(
             payload: payload, inputs: request.inputs, connection: request.sized,
             allowedTokens: instructionTokens, prompt: request.prompt)
         building.stageMillis[.rewrite] = elapsedMs(since: rewriteStart)
@@ -2830,6 +2854,8 @@ final class DictationController {
     // outlast this delay, racing two timers — which flakes under CPU contention rather than failing for a
     // real reason. Overriding it lets the delay be ~0 so the state is reached deterministically.
     var loadingModelHUDDelayOverride: Duration?
+    // Test seam for the whole-rewrite deadline, so a test can watch it fire without waiting minutes.
+    var rewriteDeadlineSecondsOverride: Double?
 
     private func scheduleLoadingModelHUD() -> Task<Void, Never> {
         Task { @MainActor [weak self, delay = loadingModelHUDDelayOverride ?? Self.loadingModelHUDDelay] in

@@ -86,6 +86,11 @@ private func report(
         #expect(line.fallbackReason == "The AI service could not be reached.")
     }
 
+    @Test func theNoTextPromiseCanBeLeftOutWhenTheReportCarriesText() {
+        #expect(report().render().contains(DiagnosticsReport.privacyNote))
+        #expect(!report().render(includingPrivacyNote: false).contains(DiagnosticsReport.privacyNote))
+    }
+
     @Test func renderIncludesBuildPermissionsAndEngine() {
         let rendered = report().render()
         #expect(rendered.contains("0.5.1"))

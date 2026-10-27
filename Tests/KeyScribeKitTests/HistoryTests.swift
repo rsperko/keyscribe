@@ -24,6 +24,24 @@ struct HistoryEntryCodecTests {
         #expect(decoded == entry)
     }
 
+    @Test func supportFieldsRoundTripUnderTheirOnDiskKeys() throws {
+        var entry = sampleEntry()
+        entry.appVersion = "0.9.2 (812)"
+        entry.osVersion = "Version 26.7.1 (Build 25H12)"
+        entry.targetApp = "com.microsoft.VSCode"
+        entry.deliveryAttempted = "clipboard (appChanged)"
+        entry.stageMillis = ["transcribe": 90, "insert": 12]
+        entry.audioSeconds = 2.5
+        entry.error = "Paste did not land"
+        entry.shortcutCandidates = [ModeCandidate(id: "ide", name: "IDE", verdict: .notAvailableHere)]
+        let line = try entry.jsonLine()
+        for key in ["app_version", "os_version", "target_app", "delivery_attempted", "stage_ms", "audio_seconds",
+                    "error", "shortcut_candidates", "not_available_here"] {
+            #expect(line.contains("\"\(key)\""), "\(key) missing from \(line)")
+        }
+        #expect(try HistoryEntry(jsonLine: line) == entry)
+    }
+
     @Test func modeChoiceAndRoutedPhraseRoundTrip() throws {
         let entry = HistoryEntry(
             timestamp: Date(timeIntervalSince1970: 1_700_000_000),

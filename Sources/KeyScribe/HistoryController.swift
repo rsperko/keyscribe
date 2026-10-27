@@ -83,6 +83,7 @@ final class HistoryPaneModel: ObservableObject {
     var openSettings: (SettingsDestination) -> Void
     var copyText: ((String) -> Void)?
     var pasteText: ((String) -> Void)?
+    var supportSetup: () -> String = { DiagnosticsCollector.collect().render(includingPrivacyNote: false) }
 
     // Shared across the main-actor load path and the detached search task; `nonisolated` opts out of the
     // enclosing @MainActor isolation the detached task cannot satisfy (DateFormatter is Sendable and
@@ -299,6 +300,11 @@ final class HistoryPaneModel: ObservableObject {
     func copyResult() { if let r = selected?.result, !r.isEmpty { copyText?(r) } }
     func copyHeard() { if let h = selected?.heard, !h.isEmpty { copyText?(h) } }
     func pasteResult() { if let r = selected?.result, !r.isEmpty { pasteText?(r) } }
+    func copyReport() {
+        guard let entry = selected else { return }
+        copyText?(SupportReport.render(entry: entry, appName: Branding.appName, setup: supportSetup()))
+        flash("Report copied. It includes what you said and any AI request — check it before sending.")
+    }
 
     var voiceCommandsEnabled: () -> Bool = { true }
     var correctsCommands: Bool { selected?.outcome.isCommand == true }
@@ -823,6 +829,9 @@ private struct HistoryDetailView: View {
                 Button { model.copyHeard() } label: { Label("Copy Heard", systemImage: "text.quote") }
                     .accessibilityIdentifier(AccessibilityID.History.copyHeard)
             }
+            Button { model.copyReport() } label: { Label("Copy Report", systemImage: "ladybug") }
+                .help("Copies this dictation for a bug report: what you said, the inserted text, any AI request and reply (which can include selected text or text from the app), and details about your setup.")
+                .accessibilityIdentifier(AccessibilityID.History.copyReport)
             Spacer()
             if let message = model.statusMessage {
                 Text(message).font(.caption).foregroundStyle(.secondary)

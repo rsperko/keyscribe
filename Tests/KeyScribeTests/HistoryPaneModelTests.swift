@@ -135,6 +135,17 @@ struct HistoryPaneModelTests {
         return model
     }
 
+    @Test func copyReportCopiesTheSelectedDictationWithTheSetupAndWarns() async throws {
+        let model = try await selectingOnly(entry("hello there"), corrections: Corrections())
+        var copied: String?
+        model.copyText = { copied = $0 }
+        model.supportSetup = { "SETUP SUMMARY" }
+        model.copyReport()
+        #expect(copied?.contains("hello there") == true)
+        #expect(copied?.contains("SETUP SUMMARY") == true)
+        #expect(model.statusMessage?.contains("what you said") == true)
+    }
+
     @Test func correctionsFromACommandGoToTheVoiceCommandsVocabulary() async throws {
         var command = entry("~/bin/deploy prod")
         command.outcome = .command

@@ -139,7 +139,7 @@ public struct DiagnosticsReport: Sendable {
         self.enabledFeatures = enabledFeatures
     }
 
-    public func render() -> String {
+    public func render(includingPrivacyNote: Bool = true) -> String {
         var out: [String] = []
         out.append("\(build.appName) diagnostics")
         out.append("")
@@ -177,8 +177,10 @@ public struct DiagnosticsReport: Sendable {
             out.append("Config errors")
             out.append(contentsOf: configErrors.map { "  \($0)" })
         }
-        out.append("")
-        out.append(Self.privacyNote)
+        if includingPrivacyNote {
+            out.append("")
+            out.append(Self.privacyNote)
+        }
         return out.joined(separator: "\n") + "\n"
     }
 

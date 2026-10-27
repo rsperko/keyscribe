@@ -215,3 +215,120 @@ struct ProviderTransportTests {
         }
     }
 }
+
+// Serves a scripted sequence of responses (status + headers), one per request, repeating the last.
+private final class ScriptedStubProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var script: [(Int, [String: String])] = []
+    nonisolated(unsafe) static var requests = 0
+
+    static func reset(_ script: [(Int, [String: String])]) {
+        self.script = script
+        requests = 0
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let (code, headers) = Self.script[min(Self.requests, Self.script.count - 1)]
+        Self.requests += 1
+        let resp = HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: nil, headerFields: headers)!
+        client?.urlProtocol(self, didReceive: resp, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("{}".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+private actor Sleeps {
+    private(set) var waits: [Duration] = []
+    func record(_ d: Duration) { waits.append(d) }
+}
+
+@Suite(.serialized)
+struct ProviderTransportRetryTests {
+    private func send(_ script: [(Int, [String: String])]) async -> (result: Result<Data, Error>, waits: [Duration]) {
+        ScriptedStubProtocol.reset(script)
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ScriptedStubProtocol.self]
+        let sleeps = Sleeps()
+        var t = transport(keyProvider: { _ in nil }, session: URLSession(configuration: config))
+        t.sleep = { await sleeps.record($0) }
+        let request = URLRequest(url: URL(string: "http://127.0.0.1/v1/chat/completions")!)
+        let result: Result<Data, Error>
+        do { result = .success(try await t.send(request)) } catch { result = .failure(error) }
+        return (result, await sleeps.waits)
+    }
+
+    private func status(_ result: Result<Data, Error>) -> Int? {
+        guard case .failure(ProviderTransportError.http(let code, _)) = result else { return nil }
+        return code
+    }
+
+    @Test(arguments: [408, 409, 429, 500, 503, 529])
+    func aTemporaryFailureIsRetriedTwiceWithGrowingWaits(code: Int) async {
+        let out = await send([(code, [:])])
+        #expect(status(out.result) == code)
+        #expect(ScriptedStubProtocol.requests == 3)
+        #expect(out.waits.count == 2)
+        #expect(out.waits[0] <= .milliseconds(500) && out.waits[0] >= .milliseconds(375))
+        #expect(out.waits[1] <= .seconds(1) && out.waits[1] >= .milliseconds(750))
+    }
+
+    @Test func aRetryThatSucceedsReturnsTheReply() async {
+        let out = await send([(503, [:]), (200, [:])])
+        #expect((try? out.result.get()) != nil)
+        #expect(ScriptedStubProtocol.requests == 2)
+    }
+
+    @Test(arguments: [400, 401, 403, 404, 422])
+    func aPermanentFailureIsNotRetried(code: Int) async {
+        let out = await send([(code, [:])])
+        #expect(status(out.result) == code)
+        #expect(ScriptedStubProtocol.requests == 1)
+        #expect(out.waits.isEmpty)
+    }
+
+    @Test func theServersRetryAfterSetsTheWait() async {
+        let out = await send([(429, ["Retry-After": "3"]), (200, [:])])
+        #expect(out.waits == [.seconds(3)])
+    }
+
+    @Test func retryAfterMillisecondsWinsOverSeconds() async {
+        let out = await send([(429, ["retry-after-ms": "1500", "Retry-After": "3"]), (200, [:])])
+        #expect(out.waits == [.milliseconds(1500)])
+    }
+
+    @Test(arguments: ["1e300", "inf", "99999999999999999999"])
+    func anEnormousRetryAfterFallsBackWithoutRetrying(value: String) async {
+        let out = await send([(429, ["Retry-After": value]), (200, [:])])
+        #expect(status(out.result) == 429)
+        #expect(ScriptedStubProtocol.requests == 1)
+    }
+
+    @Test(arguments: ["nan", "-5", "soon"])
+    func anUnusableRetryAfterFallsBackToTheNormalBackoff(value: String) async {
+        let out = await send([(429, ["Retry-After": value])])
+        #expect(ScriptedStubProtocol.requests == 3)
+        #expect(out.waits.count == 2 && out.waits.allSatisfy { $0 <= .seconds(1) })
+    }
+
+    @Test func aDateRetryAfterIsMeasuredFromNow() async {
+        let out = await send([(503, ["Retry-After": "Thu, 01 Jan 1970 00:00:03 GMT"]), (200, [:])])
+        #expect(out.waits == [.seconds(3)])
+    }
+
+    @Test func aDateRetryAfterTooFarAheadIsNotWaitedOut() async {
+        let out = await send([(503, ["Retry-After": "Thu, 01 Jan 1970 00:01:00 GMT"]), (200, [:])])
+        #expect(status(out.result) == 503)
+        #expect(ScriptedStubProtocol.requests == 1)
+    }
+
+    @Test func aServerAskingForALongWaitIsNotWaitedOut() async {
+        let out = await send([(429, ["Retry-After": "60"]), (200, [:])])
+        #expect(status(out.result) == 429)
+        #expect(ScriptedStubProtocol.requests == 1)
+        #expect(out.waits.isEmpty)
+    }
+}

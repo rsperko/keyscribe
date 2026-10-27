@@ -86,6 +86,16 @@ struct DictationPipelineWiringTests {
         }
     }
 
+    private actor CancellableLLM: LLMClient {
+        private(set) var started = false
+        private(set) var cancelled = false
+        func complete(system: String, user: String, connection: Connection) async throws -> String {
+            started = true
+            do { try await Task.sleep(for: .seconds(30)) } catch { cancelled = true; throw error }
+            return "late reply"
+        }
+    }
+
     private actor InsertSpy {
         private(set) var method: Mode.Insertion?
         private(set) var paste: ClipboardPaste?
@@ -126,6 +136,16 @@ struct DictationPipelineWiringTests {
             defer { calls += 1 }
             return TargetSnapshot(
                 bundleId: "test.bundle", focusedWindowId: calls < readsBeforeSubmit ? "w1" : "w2")
+        }
+    }
+
+    @MainActor private final class SnapshotReads {
+        private let sameUntil: Int
+        private var calls = 0
+        init(sameUntil: Int) { self.sameUntil = sameUntil }
+        func next() -> TargetSnapshot {
+            defer { calls += 1 }
+            return TargetSnapshot(bundleId: calls < sameUntil ? "notes.bundle" : "chrome.bundle")
         }
     }
 
@@ -175,6 +195,7 @@ struct DictationPipelineWiringTests {
         insertSucceeds: Bool = true,
         historyEnabled: Bool = true,
         snapshotProvider: (@MainActor () -> TargetSnapshot)? = nil,
+        triggerKey: String? = nil,
         updateSettingsAfterStart: ((inout Settings) -> Void)? = nil
     ) async -> Result {
         let supportDir = FileManager.default.temporaryDirectory
@@ -217,8 +238,8 @@ struct DictationPipelineWiringTests {
             accessibilityGranted: { accessibility },
             llmClient: llm)
 
-        controller.setNextModeOverride(id: defaultModeId)
-        controller.handleStart()
+        if triggerKey == nil { controller.setNextModeOverride(id: defaultModeId) }
+        controller.handleStart(triggerKey: triggerKey)
         if let updateSettingsAfterStart {
             updateSettingsAfterStart(&settings)
             controller.updateSettings(settings)
@@ -263,6 +284,50 @@ struct DictationPipelineWiringTests {
         return m
     }
 
+
+    @Test func aHistoryEntryRecordsWhereAndHowTheTextWasDelivered() async {
+        let out = await run(transcript: "hello", mode: mode(id: "code"))
+        let entry = out.historyEntry
+        #expect(entry?.targetApp == "test.bundle")
+        #expect(entry?.deliveryAttempted == "paste")
+        #expect(entry?.stageMillis?["transcribe"] != nil)
+        #expect(entry?.stageMillis?["insert"] != nil)
+        #expect(entry?.appVersion?.isEmpty == false)
+        #expect(entry?.osVersion?.isEmpty == false)
+    }
+
+    @Test func aDivertedDictationRecordsWhyItWasCopied() async {
+        let out = await run(transcript: "hello", mode: mode(id: "code"), accessibility: false)
+        #expect(out.outcome == .copied)
+        #expect(out.historyEntry?.deliveryAttempted == "clipboard (accessibilityDenied)")
+    }
+
+    @Test func switchingAppsMidDictationRecordsTheAppTheTextWasMeantFor() async {
+        let reads = SnapshotReads(sameUntil: Self.readsBeforeSubmit - 1)
+        let out = await run(transcript: "hello", modes: [mode(id: "code")], defaultModeId: "code",
+                            snapshotProvider: { reads.next() })
+        #expect(out.outcome == .copied)
+        #expect(out.historyEntry?.targetApp == "notes.bundle")
+        #expect(out.historyEntry?.deliveryAttempted == "clipboard (appChanged)")
+    }
+
+    @Test func aPressRecordsWhyTheOtherModesOnItsKeyLost() async {
+        var slack = mode(id: "slack")
+        slack.triggerKeys = [Mode.TriggerKey(key: "right_option")]
+        var ide = mode(id: "ide")
+        ide.triggerKeys = [Mode.TriggerKey(key: "right_option")]
+        ide.constraints = [Mode.Constraint(bundleId: "test.bundle")]
+        let out = await run(transcript: "hello", modes: [slack, ide], defaultModeId: "", triggerKey: "right_option")
+        #expect(out.historyEntry?.modeName == "ide")
+        let verdicts = Dictionary(
+            uniqueKeysWithValues: (out.historyEntry?.shortcutCandidates ?? []).map { ($0.id, $0.verdict) })
+        #expect(verdicts == ["slack": .lessSpecific, "ide": .chosen])
+    }
+
+    @Test func aOneShotPickRecordsNoKeyTrace() async {
+        let out = await run(transcript: "hello", mode: mode(id: "code"))
+        #expect(out.historyEntry?.shortcutCandidates == nil)
+    }
 
     @Test func aDeliveredDictationCountsEachReplacementThatChangedItOnce() async {
         let m = mode(id: "code", replacements: [
@@ -526,6 +591,97 @@ struct DictationPipelineWiringTests {
         #expect(entry?.cloudInvolved == true)
         #expect(entry?.outcome == .localFallback)
         #expect(await insertSpy.text == "draft the memo")
+    }
+
+    private struct RewriteRig {
+        let controller: DictationController
+        let history: HistoryStore
+        let inserts: InsertSpy
+        let llm: CancellableLLM
+        let supportDir: URL
+    }
+
+    private func rewriteRig(deadline: Double? = nil) -> RewriteRig {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-wiring-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
+        try? ModeStore.write(mode(id: "polish", connectionId: "c"), to: modesDir)
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        try? ConnectionStore.write(ConnectionSet(connections: [conn]), to: supportDir)
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "fixed", eviction: .frugal)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
+        let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: "draft the memo")], activeId: "fixed")
+        let history = HistoryStore(supportDir: supportDir)
+        let inserts = InsertSpy()
+        let llm = CancellableLLM()
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: history, hud: HUDSpy(), permits: { _ in true },
+            audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
+            insert: { _, method, paste, text, _ in await inserts.record(method, paste, text); return true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true },
+            llmClient: llm)
+        controller.rewriteDeadlineSecondsOverride = deadline
+        return RewriteRig(controller: controller, history: history, inserts: inserts, llm: llm, supportDir: supportDir)
+    }
+
+    private func startRewrite(_ rig: RewriteRig) async {
+        rig.controller.setNextModeOverride(id: "polish")
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        rig.controller.handleCommit()
+        while !(await rig.llm.started) { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    private func awaitCancelled(_ llm: CancellableLLM) async -> Bool {
+        for _ in 0..<200 where !(await llm.cancelled) { try? await Task.sleep(for: .milliseconds(10)) }
+        return await llm.cancelled
+    }
+
+    @Test func insertWithoutRewritingCancelsTheRequestInFlight() async {
+        let rig = rewriteRig()
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await startRewrite(rig)
+        rig.controller.insertLocalTranscriptNow()
+        #expect(await awaitCancelled(rig.llm))
+        _ = await firstHistoryEntry(in: rig.history)
+        #expect(await rig.inserts.text == "draft the memo")
+    }
+
+    @Test func escapeDuringARewriteCancelsTheRequestAndInsertsNothing() async {
+        let rig = rewriteRig()
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await startRewrite(rig)
+        rig.controller.cancel()
+        #expect(await awaitCancelled(rig.llm))
+        await rig.controller.dictationTask?.value
+        #expect(await rig.inserts.text == nil)
+    }
+
+    @Test func aRewritePastTheDeadlineInsertsLocalAndRecordsTheLimit() async {
+        let rig = rewriteRig(deadline: 0.2)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.controller.setNextModeOverride(id: "polish")
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        let entry = await firstHistoryEntry(in: rig.history)
+        #expect(entry?.outcome == .localFallback)
+        #expect(entry?.fallbackReason == RewriteService.deadlineReason(seconds: 0.2))
+        #expect(await rig.inserts.text == "draft the memo")
+        #expect(await awaitCancelled(rig.llm))
+    }
+
+    @Test func rewritesWaitAsLongAsTheDeadlineButConnectionTestsStayShort() {
+        let rewriteTimeouts = HTTPLLMClient().session.configuration
+        #expect(rewriteTimeouts.timeoutIntervalForRequest >= RewriteService.defaultDeadlineSeconds)
+        #expect(rewriteTimeouts.timeoutIntervalForResource >= RewriteService.defaultDeadlineSeconds)
+        let tester = ConnectionTester().client as? HTTPLLMClient
+        #expect(tester?.session.configuration.timeoutIntervalForResource ?? .infinity <= 60)
     }
 
     @Test func dictionaryRecoveryCorrectsTranscriptWhenDictionaryHasTerms() async {

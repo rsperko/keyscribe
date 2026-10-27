@@ -143,7 +143,10 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
 - **History** as JSONL, one file per day. Each entry holds what you said and what was inserted, and,
   for a mode that uses an AI service, the request sent to it. That request can include text from other
   apps: the text you selected for a rewrite mode, and whatever context the mode attaches, such as text
-  before the cursor. It is plain text, readable by anything running as you.
+  before the cursor. It is plain text, readable by anything running as you. Each entry also records
+  the app the text was meant for, the delivery method that was attempted, how long each step took, and the app and macOS
+  versions. History's **Copy Report** copies one entry, text included, to your clipboard for a bug
+  report; it is sent only if you paste it somewhere yourself.
 - **Replacement use counts** under `usage/`: for each of your replacements, how many dictations it
   changed and the day it was last used. No dictation text is stored there, and it is kept whether or
   not History is on.

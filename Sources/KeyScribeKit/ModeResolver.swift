@@ -43,6 +43,27 @@ public struct PhaseBResult: Equatable, Sendable {
     }
 }
 
+// One mode bound to the pressed key and why it did or did not run — kept so a support report can show
+// that another mode on the same key won, which the winner's name alone never reveals.
+public struct ModeCandidate: Codable, Equatable, Sendable {
+    public enum Verdict: String, Codable, Sendable {
+        case chosen
+        case notAvailableHere = "not_available_here"
+        case lessSpecific = "less_specific"
+        case laterInList = "later_in_list"
+    }
+
+    public var id: String
+    public var name: String
+    public var verdict: Verdict
+
+    public init(id: String, name: String, verdict: Verdict) {
+        self.id = id
+        self.name = name
+        self.verdict = verdict
+    }
+}
+
 // Two-phase routing (design.md §4.3). Phase A runs before STT from key + routing context;
 // Phase B runs after STT from trigger-phrase suffixes, constrained to Phase A's eligible set.
 public enum ModeResolver {
@@ -122,6 +143,30 @@ public enum ModeResolver {
         }
         // 3. Nothing else applies → the Direct floor (no separate "default mode"; design.md §4.3).
         return PhaseAResult(mode: directFallback, reason: .fallback)
+    }
+
+    // Phase A's key branch, replayed for every enabled mode bound to the key. Empty when the key is owned
+    // by a single mode that won, since that trace says nothing the mode name doesn't.
+    public static func keyCandidates(modes: [Mode], context: RoutingContext, triggerKey: String?) -> [ModeCandidate] {
+        guard let key = triggerKey else { return [] }
+        let wanted = normalizeKey(key)
+        let bound = modes.filter { $0.enabled && $0.triggerKeys.contains { normalizeKey($0.key) == wanted } }
+        let winner = mostSpecific(bound.filter { isEligible($0, context) }, context)
+        if bound.count == 1, bound.first?.id == winner?.id { return [] }
+        let winnerScore = winner.map { specificity($0, context) }
+        return bound.map { mode in
+            let verdict: ModeCandidate.Verdict
+            if mode.id == winner?.id {
+                verdict = .chosen
+            } else if !isEligible(mode, context) {
+                verdict = .notAvailableHere
+            } else if let winnerScore, specificity(mode, context) < winnerScore {
+                verdict = .lessSpecific
+            } else {
+                verdict = .laterInList
+            }
+            return ModeCandidate(id: mode.id, name: mode.name, verdict: verdict)
+        }
     }
 
     public static func resolvePhaseB(

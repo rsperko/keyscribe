@@ -149,7 +149,15 @@ measured (`principles.md` §1):
 - **release → local text ready:** p50/p95 per engine — a short utterance must feel instant.
 - **release → cloud-rewrite ready:** p50/p95 per provider/model (the LLM is the slow leg).
 - **max wait → escape hatch:** past a threshold the HUD offers "insert without rewriting," so the
-  user is never stuck waiting on the cloud.
+  user is never stuck waiting on the cloud. Waiting longer is the user's choice: a slow model is allowed
+  to finish. The only automatic limit is one backstop over the whole rewrite, every attempt and retry
+  included (`RewriteService.defaultDeadlineSeconds`), which exists to free a dictation from an endpoint
+  that never answers. Per-request network timeouts are at least that long, so they never cut a rewrite off
+  first; Settings' connection test keeps its own short timeout because a person is waiting on it.
+  A temporary failure — a dropped connection, a rate limit, or a server error — is retried twice with
+  short backoff, or after the server's own `Retry-After` when that is brief; a longer ask, and every other
+  error, falls back to the local text at once (`ProviderTransport.retryWait`). The waits between tries
+  are short, but each new request can itself run until the rewrite's deadline.
 
 A single `SpeechEngine` interface; concrete engines (the user selects exactly one as active).
 A **curated set** of models ships across the **Parakeet**, **Whisper**, **Apple Speech**, and

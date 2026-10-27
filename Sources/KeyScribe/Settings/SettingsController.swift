@@ -79,10 +79,15 @@ final class SettingsNavigationModel: ObservableObject {
 @MainActor
 final class SettingsProblemModel: ObservableObject {
     @Published var flaggedPanes: Set<SettingsDestination> = []
+    // The menu-bar dot reads this, never its own detection, so the Settings poll moves both together.
+    var onErrorsChanged: ((Bool) -> Void)?
     // Only republish when the set changes, so unchanged poll ticks don't re-render the whole split view.
     func update(_ problems: [SettingsProblem]) {
         let panes = Set(problems.map(\.pane))
-        if panes != flaggedPanes { flaggedPanes = panes }
+        guard panes != flaggedPanes else { return }
+        let hadErrors = !flaggedPanes.isEmpty
+        flaggedPanes = panes
+        if hadErrors != !panes.isEmpty { onErrorsChanged?(!panes.isEmpty) }
     }
 
     @Published private(set) var advisoryPanes: Set<SettingsDestination> = []
@@ -203,8 +208,10 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     func refreshProblems() { problems.update(detectProblems()) }
 
-    // For callers that already ran detection (the menu badge), so it doesn't run back-to-back.
-    func refreshProblems(_ detected: [SettingsProblem]) { problems.update(detected) }
+    var onErrorsChanged: ((Bool) -> Void)? {
+        get { problems.onErrorsChanged }
+        set { problems.onErrorsChanged = newValue }
+    }
 
     func refreshConfigIssues(_ issues: [ConfigFileIssue]) {
         if model.configIssues != issues { model.configIssues = issues }

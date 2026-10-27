@@ -70,6 +70,9 @@ public struct DictationRecord: Codable, Equatable, Sendable {
     public var model: String?
     public var error: String?
     public var targetBundleId: String?
+    // The insertion action chosen before actuating, plus the reason when it was diverted to the clipboard.
+    // An AX insert can still fall back to paste inside the inserter, so this is the attempt, not the result.
+    public var delivery: String?
     public var fallbackReason: String?
     public var stoppedAtLimit: Bool
 
@@ -86,6 +89,7 @@ public struct DictationRecord: Codable, Equatable, Sendable {
         self.model = nil
         self.error = nil
         self.targetBundleId = nil
+        self.delivery = nil
         self.fallbackReason = nil
         self.stoppedAtLimit = false
     }

@@ -6,7 +6,7 @@ struct ConnectionTester {
     // a fresh session that was never invalidated, accumulating one per Connect press.
     static let shared = ConnectionTester()
 
-    var client: any LLMClient = HTTPLLMClient()
+    var client: any LLMClient = HTTPLLMClient(session: HTTPLLMClient.settingsSession())
 
     func test(_ connection: Connection) async -> ConnectionTestState {
         do {

@@ -5,9 +5,14 @@ import KeyScribeKit
 // Keychain by the connection's key_ref. Provider-agnostic orchestration (assemble → gate → retry/fallback)
 // lives in KeyScribeKit.RewriteService.
 struct HTTPLLMClient: LLMClient {
-    // Bounded session, not URLSession.shared (60s default, doubled by the gate's stricter-retry). A hung
-    // BYOK endpoint must fall back to the local transcript promptly, so cap each attempt.
-    var session: URLSession = ProviderTransport.makeSession(requestTimeout: 30, resourceTimeout: 45)
+    // As long as RewriteService's whole-rewrite deadline, so that deadline is the only limit a slow model
+    // meets; a shorter per-request timeout here would quietly cut it off first. Anything a person waits on
+    // in Settings passes its own short session.
+    var session: URLSession = ProviderTransport.makeSession(
+        requestTimeout: RewriteService.defaultDeadlineSeconds, resourceTimeout: RewriteService.defaultDeadlineSeconds)
+    static func settingsSession() -> URLSession {
+        ProviderTransport.makeSession(requestTimeout: 30, resourceTimeout: 45)
+    }
     var keyProvider: @Sendable (String) -> SecretLookup = { KeychainStore.lookup($0) }
     var tokenCommandRunner: @Sendable (String) async throws -> String = { try await TokenCommandRunner.run($0) }
     var tokenCache: TokenCommandCache = .shared

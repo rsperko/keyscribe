@@ -313,6 +313,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() },
             onEraseAllData: { [weak self] in self?.eraseAllDataAndRelaunch() },
             clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
+        settingsController.onErrorsChanged = { [weak self] in self?.menu.setErrorBadge($0) }
         controller.onHistoryUpdated = { [weak self] in self?.settingsController.historyDidChange() }
         settingsController.recordingState.onChange = { [weak self] recording in
             self?.hotkey?.isSuspended = recording
@@ -848,9 +849,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshStatus() {
         menu.setHasResult(controller.hasResult)
-        let problems = currentProblems()
-        menu.setErrorBadge(!problems.isEmpty)
-        settingsController?.refreshProblems(problems)
+        settingsController?.refreshProblems()
         settingsController?.refreshConfigIssues(configProblems)
 
         if let summary = ConfigFileIssue.menuSummary(configErrors) {
