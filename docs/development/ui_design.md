@@ -34,6 +34,23 @@ or insertion methods. Those capabilities remain available and understandable in 
 - Prefer a visible explanation to a warning dialog. Ask for confirmation only before actions
   that lose data, send a request, grant a permission, or materially change future behavior.
 
+### Voice interactions and confirmations
+
+A prompt adds another interaction to the voice workflow: read the question, decide, start recording
+again, speak, and wait for recognition. Even a spoken “yes” adds interruption, latency, and another
+chance of being misheard. A small dialog or a voice-answer option does not make that cost negligible.
+
+Do not require a different mode or shortcut to answer a Voice Commands question. A necessary spoken
+answer uses the same Voice Commands shortcut; ordinary dictation keeps its own purpose (see §5).
+Do not require reaching for the mouse to complete a voice command. Reusing the shortcut preserves
+consistency, but the additional recording cycle still needs justification.
+
+Prefer clear intent in the initial command and explicit opt-in to a capability over repeated prompts
+or first-interaction approval for every app. One-time enabling consent and confirmations for costly,
+hard-to-reverse actions remain appropriate. A proposed prompt must explain the harm it prevents,
+why predictable behavior or a clearer command cannot adequately address it, and the complete path
+for answering it. Evaluate that path from the initial shortcut press through the final result.
+
 ---
 
 ## 2. First run

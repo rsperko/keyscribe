@@ -833,15 +833,16 @@ private struct HistoryDetailView: View {
                 .help("Copies this dictation for a bug report: what you said, the inserted text, the app it was for, your microphone's name, any AI request and reply (which can include your dictionary words, selected text, or text from the app), and details about your setup.")
                 .accessibilityIdentifier(AccessibilityID.History.copyReport)
             Spacer()
-            if let message = model.statusMessage {
-                Text(message).font(.caption).foregroundStyle(.secondary)
-            }
         }
     }
 
     private var deleteFooter: some View {
-        HStack {
-            Spacer()
+        HStack(spacing: 12) {
+            Text(model.statusMessage ?? "")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2, reservesSpace: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
             PaneDeleteButton(title: "Delete Dictation") { confirmingDelete = true }
                 .accessibilityIdentifier(AccessibilityID.History.delete)
         }

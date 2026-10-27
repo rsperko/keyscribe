@@ -42,6 +42,8 @@ The product is judged by how it feels, not how powerful it is on paper.
   is costly and hard to reverse: running the wrong script or Shortcut, or choosing among
   options a script offered. Navigation that merely brings something into view settles
   ties itself. A new prompt needs that justification in review.
+- **Count the whole voice interaction:** even with the same shortcut, a confirmation adds another
+  recording, delay, and recognition risk, so its benefit must justify the interruption.
 
 ## 5. Best-of-breed per feature
 For **any** feature we add, first research the best products that do it and build the best

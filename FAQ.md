@@ -288,8 +288,9 @@ Yes, with the experimental voice commands. In **Settings ▸ Modes ▸ Voice Com
 stands for whatever you say after the name: a script named "deploy" with the arguments `--env` and
 `{text}` turns "deploy staging" into `deploy --env staging`. "run deploy staging" works too. A script
 runs whenever what you say starts with one of its names, so a script named "open notes" runs when you
-say that. "switch to" or "open" with anything else never runs a script. If a replacement used to turn something you say into
-"run …", you can delete it and add that phrase as one of the script's **Other names** instead. The spoken
+say that. "switch to" or "open" with anything else never runs a script. If a replacement only gives a fixed
+phrase another name for a script, you can add that phrase as one of the script's **Other names** instead.
+Keep replacements that capture variable input, as in the recipe below. The spoken
 name can differ from the file name: a script named "foo" can run `~/bin/bar.sh` when you say "foo".
 
 For example, save this as `~/bin/note` and run `chmod +x ~/bin/note` so it can run:
@@ -316,6 +317,42 @@ wrong, add the misheard form as another spoken name.
 Every Add Script sheet warns that recognition mistakes can start an unintended script or pass it
 different words. A script runs with your account's permissions; for actions that cannot be undone, use
 a script that asks for confirmation.
+
+### How can I put spoken input in the middle of a command?
+
+Use a replacement in the **Voice Commands** vocabulary to turn your natural phrase into a saved
+command plus its input. For example, **“go to project alpha manager”** can run your navigation script
+with **“project alpha”** as its input, without saving a separate command for each project.
+
+1. Under **Settings ▸ Modes ▸ Voice Commands ▸ Commands**, add a **Run a Script** command named
+   **Manager**. Choose your existing navigation script and add `{text}` as one argument. Keep any
+   other fixed arguments your script needs.
+2. In that mode's **Vocabulary** row, choose **Edit Vocabulary…**. Add a replacement in the
+   **Voice Commands** scope, rather than Global:
+
+   | Field | Value |
+   |---|---|
+   | Word or heard phrase / Heard pattern | `(?i)^\s*go\s+to\s+(.+?)\s+manager[.!?]?\s*$` |
+   | Use instead | `run manager $1` |
+   | Match heard phrase as a regular expression (under Pattern matching) | On |
+
+   `(.+?)` captures the words between “go to” and “manager”; `$1` puts them after the saved command's
+   name. The pattern ignores capitalization and allows extra spaces and ending punctuation.
+3. Back in Voice Commands, type **“go to project alpha manager”** into **Preview a command**.
+   It should show **Read as “run manager project alpha”** and your script with **“project alpha”**
+   passed as one argument. The preview does not run it.
+4. Use your usual Voice Commands shortcut and say the phrase. No second shortcut or confirmation
+   is added by this recipe.
+
+**“Go to reviews manager”** passes `reviews`; **“go to alpha project manager”** passes `alpha project`.
+Your script handles any fuzzy or out-of-order matching of those words. KeyScribe selects the saved
+**Manager** action by name; it does not guess which script to run. This rule leaves **“go to Slack”**
+alone because it does not end in “manager”. Scoping it to Voice Commands leaves ordinary dictation
+unchanged.
+
+The same recipe works with a saved Shortcut named **Manager**: set its **Input** to `{text}` instead
+of adding a script argument. Use **Other names** for fixed alternative phrases; use a regex replacement
+when part of the phrase supplies variable input.
 
 ### Can a voice command run a Shortcut?
 
