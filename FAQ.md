@@ -144,7 +144,8 @@ Experimental features** (under **Voice Commands**) and say the app, then what yo
 
 - **“open Slack general”**, **“open Mail sent”**: opens the channel, mailbox, folder, or person shown in the
   app's sidebar. Only items the sidebar currently shows can be found, so expand a section or scroll if one is
-  missing, and two items with the same name ask which one you meant. It was tried in Slack, Mail, and Notes
+  missing. When two items have the same name, the one higher in the sidebar opens; say “go back” if it was the
+  wrong one. It was tried in Slack, Mail, and Notes
   (2026-10-25); other apps may not work.
 - **“open Chrome github”**: switches to the Chrome tab whose title or site best matches.
 

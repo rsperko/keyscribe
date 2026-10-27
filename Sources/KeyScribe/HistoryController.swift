@@ -830,7 +830,7 @@ private struct HistoryDetailView: View {
                     .accessibilityIdentifier(AccessibilityID.History.copyHeard)
             }
             Button { model.copyReport() } label: { Label("Copy Report", systemImage: "ladybug") }
-                .help("Copies this dictation for a bug report: what you said, the inserted text, any AI request and reply (which can include selected text or text from the app), and details about your setup.")
+                .help("Copies this dictation for a bug report: what you said, the inserted text, the app it was for, your microphone's name, any AI request and reply (which can include your dictionary words, selected text, or text from the app), and details about your setup.")
                 .accessibilityIdentifier(AccessibilityID.History.copyReport)
             Spacer()
             if let message = model.statusMessage {

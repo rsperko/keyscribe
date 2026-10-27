@@ -258,7 +258,6 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         return catalog
     }
 
-    // Each pass fills in only what the resolver asked for, so nothing is read that the phrase does not need.
     private func reading(
         _ start: VoiceCommandCatalog, stillWanted: @MainActor () -> Bool,
         _ resolve: (VoiceCommandCatalog) -> VoiceCommandResolution

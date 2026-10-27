@@ -147,8 +147,8 @@ enum ScriptLauncher {
         }
 
         func windowClosed() {
-            let result: ScriptRun = lock.withLock { status.map(finished) ?? .stillRunning }
-            resume(result)
+            guard lock.withLock({ status == nil }) else { return }
+            resume(.stillRunning)
         }
 
         private func graceEnded() {

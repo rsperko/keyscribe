@@ -1,4 +1,3 @@
-import AppKit
 import CoreGraphics
 import KeyScribeKit
 
@@ -46,13 +45,6 @@ struct VoiceCommandChoicePrompt: Equatable {
     let title: String
     let rows: [VoiceCommandChoiceRow]
     let hint: String
-
-    // Only a bare number key picks a row: ⌘1 or ⌥1 belongs to whatever shortcut the user meant.
-    func row(forKey characters: String?, modifiers: NSEvent.ModifierFlags) -> VoiceCommandChoiceRow? {
-        let held = modifiers.intersection(.deviceIndependentFlagsMask).subtracting([.numericPad, .capsLock, .function])
-        guard held.isEmpty, let characters, let number = Int(characters) else { return nil }
-        return rows.first { $0.number == number }
-    }
 
     var announcement: String {
         let rows = rows.map { "\($0.number), \($0.name), \($0.detail)" }
@@ -319,7 +311,7 @@ extension HUDState {
         switch self {
         case .transcribing(_, _?): return false
         case .recording, .loadingModel, .transcribing, .rewriting: return true
-        case .choice: return true
+        case .choice(_, .listening, _), .choice(_, .working, _): return true
         default: return false
         }
     }

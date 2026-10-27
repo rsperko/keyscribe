@@ -16,7 +16,6 @@ public struct Feature: CaseIterable, Hashable, Sendable {
     public let id: String
     public let title: String
     public let summary: String
-    // Shown nested under the feature it builds on, and unavailable while that one is off.
     private let requiresId: String?
 
     init(id: String, title: String, summary: String, requires: Feature? = nil) {

@@ -209,9 +209,9 @@ struct HUDStateTests {
         #expect(HUDState.transcribing(mode: "Voice Commands").holdsKeyFocus)
     }
 
-    @Test func aQuestionTakesKeyFocusWhileItIsShownLikeTheRecordingHUD() {
+    @Test func aWaitingQuestionNeverTakesKeyFocusButAnsweringItDoes() {
         let prompt = HUDPreview.choicePrompt
-        #expect(HUDState.choice(prompt, status: .waiting(note: nil)).holdsKeyFocus)
+        #expect(!HUDState.choice(prompt, status: .waiting(note: nil)).holdsKeyFocus)
         #expect(HUDState.choice(prompt, status: .listening(latchedTrigger: nil)).holdsKeyFocus)
         #expect(HUDState.choice(prompt, status: .working).holdsKeyFocus)
     }

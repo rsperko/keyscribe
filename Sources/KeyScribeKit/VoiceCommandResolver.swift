@@ -358,6 +358,15 @@ public enum VoiceCommandResolver {
 
     private static func findInApp(_ app: String, text: String, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
         if catalog.tabBrowsers.contains(app) { return findTab(text, in: app, catalog: catalog) }
+        switch catalog.windows {
+        case nil: return .needsWindows
+        case .complete(let listed):
+            let windows = Self.ordered(listed.filter { $0.bundleId == app }).map(VoiceCommandCandidate.window)
+            if let resolution = firstTier([(windows, .exact), (windows, .partial)], target: text, catalog: catalog) {
+                return resolution
+            }
+        case .incomplete, .needsAccessibility: break
+        }
         guard let listed = catalog.sidebarItems else { return .needsSidebar(app) }
         let entries = listed.filter { $0.bundleId == app }.map(VoiceCommandCandidate.sidebarItem)
         let named: [([VoiceCommandCandidate], Match)] = [(entries, .exact), (entries, .partial)]

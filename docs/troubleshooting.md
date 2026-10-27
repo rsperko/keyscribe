@@ -39,8 +39,9 @@ choose to share it. See [Privacy](../PRIVACY.md).
 When a particular dictation went wrong, open it in **History** and click **Copy Report**. That copies
 everything History recorded about it, plus the snapshot above:
 
-- what you said, what was inserted, and, for a mode that uses an AI service, the request and the reply;
-- the app the text was meant for, the delivery method that was attempted (paste, typing, or a copy to
+- what you said, what was inserted, and, for a mode that uses an AI service, the request and the reply,
+  which can include your dictionary words and text you selected or that the mode read from the app;
+- the app the text was meant for, the microphone used, the delivery method that was attempted (paste, typing, or a copy to
   the clipboard instead, and why), how long each step took, and any error;
 - which other modes share that shortcut and why they did not run, which explains a press that started
   the wrong mode;

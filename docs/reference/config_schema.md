@@ -64,12 +64,11 @@
   and the redaction map are never stored.
   Support fields, all optional and absent on older rows: `app_version` and `os_version` (what the
   dictation ran on), `target_app` (bundle id of the app focused when the dictation started — where the text was meant to
-  go, even if it was diverted), `delivery_attempted` (the insertion action chosen before actuating —
-  `paste`, `ax`, `type`, or `clipboard` with the reason it was diverted, e.g. `clipboard (appChanged)`;
+  go, even if it was diverted), `delivery_attempted` (the insertion action chosen before actuating, as
+  `DictationController.delivery` names it, with the reason when it was diverted, e.g. `clipboard (appChanged)`;
   an `ax` insert can still fall back to paste),
   `stage_ms` (milliseconds per stage, keyed by `DictationRecord.Stage`), `audio_seconds`, `error`, and
-  `shortcut_candidates` — every enabled mode bound to the pressed key with its `verdict` (`chosen`,
-  `not_available_here`, `less_specific`, `later_in_list`) as decided by the shortcut alone, before
+  `shortcut_candidates` — every enabled mode bound to the pressed key with its `verdict` (`ModeCandidate.Verdict`) as decided by the shortcut alone, before
   anything was said; a spoken phrase (`mode_choice = "spoken_phrase"`) can still move the dictation to
   another mode afterward. Present only when another mode was on that key or the bound mode could not run
   there. History's detail does not show them; **Copy Report** does.
@@ -683,8 +682,10 @@ link, or tab, and a *script* one that runs a program or shortcut.
   the command is. The recognition-bias switch for the engine turns both off. On a speech model that cannot
   steer recognition, a saved name helps nothing before matching; use `say` or a replacement for a name that
   is often misheard. Global vocabulary applies here as in every mode. A file written before that default carries the
-  seeded `include_global = false`; it is switched on once, recorded in the seed ledger, so a later hand
-  edit back to `false` is kept.
+  seeded `include_global = false`; it is switched on once, at the first launch of a build that has this
+  default (not when the feature is turned on), and recorded in the seed ledger, so a later hand edit back to
+  `false` is kept. A `false` written by hand before that launch is switched on too, since it cannot be told
+  apart from the seeded one.
 - **A repeatable mishearing** can be repaired in **Settings ▸ Vocabulary ▸ Voice Commands** with a
   literal replacement: **Word or heard phrase** `switch to male`, **Use instead** `switch to Mail`,
   with **Match heard phrase as a regular expression** off under **Pattern matching**.
@@ -736,7 +737,9 @@ link, or tab, and a *script* one that runs a program or shortcut.
   TextEdit), and Settings warns when a place's name is also an installed app's. Apps sharing that name are
   offered as a choice before anything is read. Then only that app is searched; nothing falls back to other
   apps' windows or tabs. A browser that can list its tabs (`installedSnapshot().tabBrowsers`) is searched by
-  its open tabs, with the tab-search matching above. Any other app is searched by the entries listed in the
+  its open tabs, with the tab-search matching above. Any other app is first searched by the titles of its
+  open windows (exact or a run of words, as for windows above) when every app listed its windows, so "open numbers budget" still focuses an open
+  "Budget — Numbers" window; only when none matches is it searched by the entries listed in the
   sidebar of its front window: the leftmost outline it shows, such as chat channels and people, mailboxes,
   or note folders. An entry is named by the text it shows, not its unread count or badge, and grouped under
   the row or level above it ("Channels", "Direct Messages", an account). Matching is the tab-title matching
@@ -748,7 +751,7 @@ link, or tab, and a *script* one that runs a program or shortcut.
   never read in the background, and Settings' preview never reads one. An app built on Electron whose
   sidebar is not exposed has its accessibility support turned on first (`AXManualAccessibility`), which
   stays on until that app quits. An app that is not running, a browser included, is opened first, and its
-  sidebar or tabs are read again for a bounded time (`VoiceCommandRunner.launchWaitSeconds`, one deadline across the waits and the reads) while the
+  sidebar or tabs are read again for a bounded time (`VoiceCommandRunner.launchWaitSeconds`; no new read starts after it, but a read already under way keeps its own short limit, so the wait can run a few seconds past it) while the
   HUD says it is opening the app and then looking in it. A sidebar that stays empty for a few reads in a row
   (`VoiceCommandRunner.emptySidebarSettleReads`) is taken as empty and reported as having no match; one that
   never appears is reported as not ready yet. Cancelling or replacing the command stops this:
@@ -778,7 +781,7 @@ link, or tab, and a *script* one that runs a program or shortcut.
   any order ("strava run" → `Afternoon Run | Run | Strava`). The fuzzy step runs the tiers above in the
   same order, so a fuzzy hit on a place still beats an equally close one on an app, window, or tab.
   Different targets tied at the winning step are offered as a numbered choice and nothing runs until one
-  is chosen; above `VoiceCommandChoice.displayLimit` targets the command fails and asks for more of the
+  is chosen, except tabs tied in one browser, which go to the frontmost as in a tab search; above `VoiceCommandChoice.displayLimit` targets the command fails and asks for more of the
   name. Places and actions keep their configured order in the choice, apps are sorted by name. A
   near-miss picks the closest target; targets tied for closest go through the same order, so a place
   still beats an app equally close, and two tied at the same step are offered whatever order they are

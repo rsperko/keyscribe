@@ -44,6 +44,20 @@ struct VoiceCommandSidebarTests {
         #expect(resolve("open slack general", items: [item("Threads"), general]) == .action(.sidebarItem(general)))
     }
 
+    @Test func anOpenWindowOfThatAppIsFoundBeforeItsSidebar() {
+        let budget = VoiceCommandCatalog.Window(bundleId: slackId, appName: "Slack", pid: 42, id: "1", title: "budget \u{2014} Slack")
+        let other = VoiceCommandCatalog.Window(bundleId: "com.apple.Notes", appName: "Notes", pid: 7, id: "2", title: "general")
+        var withWindows = catalog(items: nil)
+        withWindows.windows = .complete([other, budget])
+        #expect(VoiceCommandResolver.resolve("open slack budget", catalog: withWindows) == .action(.window(budget)))
+        #expect(VoiceCommandResolver.resolve("open slack general", catalog: withWindows) == .needsSidebar(slackId))
+        var unread = catalog(items: nil)
+        unread.windows = nil
+        #expect(VoiceCommandResolver.resolve("open slack budget", catalog: unread) == .needsWindows)
+        unread.windows = .needsAccessibility
+        #expect(VoiceCommandResolver.resolve("open slack budget", catalog: unread) == .needsSidebar(slackId))
+    }
+
     @Test func theAppNameAloneStillBringsTheAppForward() {
         #expect(resolve("open slack", items: nil) == .action(.app(slackApp)))
     }

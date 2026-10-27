@@ -230,7 +230,7 @@ not to its label.
 | Recording, near the limit | Same, plus an orange ring around the level circle that drains to empty | “Stops in 0:SS”, counting down | As Recording |
 | Transcribing | “Transcribing” | Mode name | Cancel when safe |
 | Voice command opening an app | Mode name | “Opening [app]…”, then “Looking in [app]…” while its tabs or sidebar fill | None; shown only once the command is acting, so it is not cancellable and does not take key focus away from the app being opened |
-| Rewriting | “Rewriting with [connection name]” | Boundary badges: `Cloud rewrite`, then `Best-effort redaction` or the exact shared context categories | Insert without rewriting after timeout |
+| Rewriting | “Rewriting with [connection name]” | Boundary badges: `Cloud rewrite`, then `Best-effort redaction` or the exact shared context categories | Insert without rewriting after timeout (the shortcut does the same once it is shown) |
 | Complete | “Inserted” | Mode name | None; dismiss automatically |
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
 | Stopped at the limit | “Stopped at the [limit] limit” (e.g. “5-minute”) | “Inserted without rewriting — dictate again to continue” when the mode rewrites, “Inserted — dictate again to continue” when it does not, or the copied explanation | Paste last dictation when copied |
@@ -267,10 +267,10 @@ command; the latter reports “Stopped at the [limit] limit — Return not press
 **Voice command choice.** The list interrupts the user, so it is used sparingly (`principles.md` §4,
 “Asking is a last resort”): navigation settles ties it can order by itself, and the list appears only when
 no predictable default exists or a wrong guess would run the wrong action. When a command matches more than
-one destination at the same step in those cases, the HUD asks instead of guessing. The user answers with any shortcut (“two”, “the second one”, “the last one”,
-“cancel”), by pressing a row's number key, or by clicking a row. A dictation mode's shortcut answers only when
-what was said is a number or “cancel”; anything else is dictated into the app as usual and the question
-closes, so a list left on screen never swallows real dictation. The list is frozen when it appears: rows never reorder or refill, and a chosen row
+one destination at the same step in those cases, the HUD asks instead of guessing. The user answers with the
+Voice Commands shortcut (“two”, “the second one”, “the last one”, “cancel”) or by clicking a row. Another
+mode's shortcut never answers: it closes the question and dictates as usual, so a list left on screen never
+turns real dictation into a command. The list is frozen when it appears: rows never reorder or refill, and a chosen row
 that has since disappeared reports that rather than choosing its neighbour. While answering, the list
 stays on screen with the normal status (`Listening`, `Transcribing`) in place of its subtitle — never a
 microphone-only HUD — and during microphone bring-up the question stays exactly as it was, so the timing
@@ -280,15 +280,16 @@ rows; a number outside the list keeps the list and says which numbers are valid.
 recording replaces that line, and nothing restores it afterwards. Silence, a failed transcription, or cancelling the answer recording also keep it; a failure that offers a repair (such as **Open Microphone Settings**) keeps the list and shows its message as the subtitle with the repair button beside **Cancel**. The question is
 neither success nor failure, so it plays no cue. It is dismissed by an answer, spoken or clicked
 **Cancel**, a new command, the idle timeout (`VoiceCommandRunner.choiceIdleSeconds`, restarted each
-time the list is shown again), a dictation that is not an answer, switching to an app other than the one the
+time the list is shown again), starting another mode, switching to an app other than the one the
 command was given in (any app, when it was given in KeyScribe's own window), locking the screen,
 sleep, turning Voice Commands off, or editing its saved commands. More matches than
 `VoiceCommandChoice.displayLimit` offer no list: the Error asks the user to say more of the name.
 A clicked row runs only if no new dictation starts while its destination is being looked up, and its
 result appears once any interrupted answer recording has finished unwinding.
-**Focus:** the question holds key focus whenever it is on screen, exactly like Recording, since it is
-visible and cancellable: **Esc** dismisses it like **Cancel**, and a row's number key, pressed without ⌘, ⌥, ⌃,
-or ⇧, chooses that row like a click. Clicking another app returns focus there. There are no arrows or Return for the list (see §9).
+**Focus:** the waiting question never takes key focus, including when a row is clicked, so typing
+keeps reaching the app the user was in; it holds key focus only while an answer is recording or being
+transcribed, exactly like Recording. There is no keyboard selection — no number keys, arrows, Return,
+or Escape for the list — because the answer is spoken (see §9).
 
 Badges and explanations never truncate: the badge row wraps to as many rows as needed and the HUD
 grows vertically (its per-state height is a minimum, not a cap).
@@ -335,8 +336,10 @@ governs it (KeyScribe does not currently distinguish a "polishing on this Mac" s
   slow model can finish. Only the whole-rewrite backstop ends it on its own: a dictation then inserts
   the local text with the Rewrite fallback state and History records a reason naming the limit; a
   selection rewrite leaves the selection unchanged and shows the failure in the HUD, without a History
-  record. Escape and Insert without
-  rewriting both cancel the request, and a reply arriving afterwards is discarded.
+  record. Once **Insert without rewriting** is on screen, pressing the dictation shortcut does the same
+  thing; before then a press is ignored with the busy cue, so dictating again right after a release never
+  skips that dictation's rewrite. Escape and Insert without rewriting both cancel the request, and a reply
+  arriving afterwards is discarded.
 
 ### HUD copy rules
 
@@ -1288,8 +1291,8 @@ controls and each mode's Result handling.
 ## 9. Accessibility and keyboard behavior
 
 - Every action is usable by keyboard and reachable through standard SwiftUI/AppKit accessibility
-  semantics. The Voice Commands choice (§5) is answered by voice, a row's number key, or a click, and
-  **Esc** dismisses it; it has no arrow-key or Return selection.
+  semantics. The Voice Commands choice (§5) is answered by voice or a click; it has no keyboard selection,
+  so it never takes typing away from the app the user was in.
   Its question, numbered rows with their details, status, and Cancel all carry accessibility labels,
   and a new question is announced once with its rows; a retained list is not announced again.
 - Status uses text labels in addition to color, glyphs, and motion.

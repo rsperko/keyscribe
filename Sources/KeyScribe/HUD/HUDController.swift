@@ -231,13 +231,7 @@ final class HUDController: HUDPresenting {
     private func installLocalKeyMonitor() {
         guard localKeyMonitor == nil else { return }
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self else { return event }
-            if case .choice(let prompt, .waiting, _) = self.model.state,
-               let row = prompt.row(forKey: event.charactersIgnoringModifiers, modifiers: event.modifierFlags) {
-                self.onChooseVoiceCommand?(prompt.id, row.identity)
-                return nil
-            }
-            guard event.keyCode == 53, self.canCancel?() == true else { return event }
+            guard let self, event.keyCode == 53, self.canCancel?() == true else { return event }
             self.onEscapeCancel?()
             return nil
         }

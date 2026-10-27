@@ -5,9 +5,10 @@ import Foundation
 // travels with every paste of it.
 public enum SupportReport {
     public static let warning = """
-        This report includes what you said, the text that was inserted, and for an AI mode the full AI request \
-        and reply, which can hold text you selected or text from the app you were typing in. Remove anything \
-        private before sending it.
+        This report includes what you said, the text that was inserted, the app you were typing in, your \
+        microphone's name, and for an AI mode the full AI request and reply, which can hold your dictionary \
+        words, text you selected, or text from the app you were typing in. Remove anything private before \
+        sending it.
         """
 
     private static let encoder: JSONEncoder = {

@@ -117,6 +117,10 @@ struct DictationPipelineWiringTests {
     private final class HUDSpy: HUDPresenting {
         private(set) var states: [HUDState] = []
         func render(_ state: HUDState) { states.append(state) }
+        var offersLocalTranscript: Bool {
+            if case .rewriting(_, _, _, _, true)? = states.last { return true }
+            return false
+        }
     }
 
     private static let readsBeforeSubmit = 3
@@ -598,10 +602,11 @@ struct DictationPipelineWiringTests {
         let history: HistoryStore
         let inserts: InsertSpy
         let llm: CancellableLLM
+        let hud: HUDSpy
         let supportDir: URL
     }
 
-    private func rewriteRig(deadline: Double? = nil) -> RewriteRig {
+    private func rewriteRig(deadline: Double? = nil, escapeDelay: Duration? = nil) -> RewriteRig {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-wiring-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
@@ -616,16 +621,18 @@ struct DictationPipelineWiringTests {
         let history = HistoryStore(supportDir: supportDir)
         let inserts = InsertSpy()
         let llm = CancellableLLM()
+        let hud = HUDSpy()
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
-            history: history, hud: HUDSpy(), permits: { _ in true },
+            history: history, hud: hud, permits: { _ in true },
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, method, paste, text, _ in await inserts.record(method, paste, text); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") },
             micStatus: { .granted }, accessibilityGranted: { true },
             llmClient: llm)
         controller.rewriteDeadlineSecondsOverride = deadline
-        return RewriteRig(controller: controller, history: history, inserts: inserts, llm: llm, supportDir: supportDir)
+        controller.rewriteEscapeDelayOverride = escapeDelay
+        return RewriteRig(controller: controller, history: history, inserts: inserts, llm: llm, hud: hud, supportDir: supportDir)
     }
 
     private func startRewrite(_ rig: RewriteRig) async {
@@ -633,7 +640,8 @@ struct DictationPipelineWiringTests {
         rig.controller.handleStart()
         await rig.controller.captureBringUpTask?.value
         rig.controller.handleCommit()
-        while !(await rig.llm.started) { try? await Task.sleep(for: .milliseconds(5)) }
+        for _ in 0..<400 where !(await rig.llm.started) { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(await rig.llm.started)
     }
 
     private func awaitCancelled(_ llm: CancellableLLM) async -> Bool {
@@ -649,6 +657,30 @@ struct DictationPipelineWiringTests {
         #expect(await awaitCancelled(rig.llm))
         _ = await firstHistoryEntry(in: rig.history)
         #expect(await rig.inserts.text == "draft the memo")
+    }
+
+    @Test func theTriggerInsertsWithoutRewritingOnceThatIsOffered() async {
+        let rig = rewriteRig(escapeDelay: .zero)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await startRewrite(rig)
+        for _ in 0..<200 where !rig.hud.offersLocalTranscript { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(rig.hud.offersLocalTranscript)
+        rig.controller.handleStart()
+        #expect(await awaitCancelled(rig.llm))
+        _ = await firstHistoryEntry(in: rig.history)
+        #expect(await rig.inserts.text == "draft the memo")
+    }
+
+    @Test func theTriggerDuringARewriteDoesNothingBeforeInsertWithoutRewritingIsOffered() async {
+        let rig = rewriteRig()
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await startRewrite(rig)
+        rig.controller.handleStart()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(!(await rig.llm.cancelled))
+        #expect(await rig.inserts.text == nil)
+        rig.controller.cancel()
+        await rig.controller.dictationTask?.value
     }
 
     @Test func escapeDuringARewriteCancelsTheRequestAndInsertsNothing() async {

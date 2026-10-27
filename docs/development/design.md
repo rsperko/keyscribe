@@ -157,7 +157,11 @@ measured (`principles.md` §1):
   A temporary failure — a dropped connection, a rate limit, or a server error — is retried twice with
   short backoff, or after the server's own `Retry-After` when that is brief; a longer ask, and every other
   error, falls back to the local text at once (`ProviderTransport.retryWait`). The waits between tries
-  are short, but each new request can itself run until the rewrite's deadline.
+  are short, but each new request can itself run until the rewrite's deadline. These transport retries sit
+  inside each attempt of the validation gate's stricter retry (§4.2), so one dictation can send the same
+  redacted request several times, all under the one deadline. A request is retried after a lost connection,
+  a 408, or a 409 even though the provider may already have finished it, so a provider can bill a rewrite
+  twice; this matches the vendor SDKs' policy.
 
 A single `SpeechEngine` interface; concrete engines (the user selects exactly one as active).
 A **curated set** of models ships across the **Parakeet**, **Whisper**, **Apple Speech**, and

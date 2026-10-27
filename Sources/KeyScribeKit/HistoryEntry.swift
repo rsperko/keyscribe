@@ -64,8 +64,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     public var stoppedAtLimit: Bool?
     public var failureReason: String?
     public var reported: String?
-    // Support evidence: what ran, where the text went, and how long each stage took. Never shown in the
-    // History detail; it reaches a person only through Copy Report. nil on older rows.
+    // Never shown in the History detail; it reaches a person only through Copy Report.
     public var appVersion: String?
     public var osVersion: String?
     public var targetApp: String?

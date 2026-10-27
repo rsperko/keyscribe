@@ -81,7 +81,8 @@ struct RewriteServiceTests {
         let client = PacedClient(delays: [.seconds(30)], output: "late")
         let svc = RewriteService(client: client, permits: { _ in true })
         let task = Task { await svc.rewrite(payload: protectedPayload, inputs: inputs(), connection: conn) }
-        while await client.calls == 0 { await Task.yield() }
+        for _ in 0..<200 where await client.calls == 0 { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(await client.calls > 0)
         task.cancel()
         guard case .localFallback = await task.value else { Issue.record("expected fallback"); return }
         for _ in 0..<200 where !(await client.cancelled) { try? await Task.sleep(for: .milliseconds(10)) }

@@ -21,6 +21,7 @@ struct HTTPLLMClient: LLMClient {
     var now: @Sendable () -> Date = { Date() }
 
     private static let maxRemediations = 4
+    static let preconnectTimeout: TimeInterval = 10
 
     private var transport: ProviderTransport {
         ProviderTransport(session: session, keyProvider: keyProvider,
@@ -33,6 +34,7 @@ struct HTTPLLMClient: LLMClient {
         guard let url = preconnectURL(for: connection) else { return }
         var req = URLRequest(url: url)
         req.httpMethod = "HEAD"
+        req.timeoutInterval = Self.preconnectTimeout
         _ = try? await session.data(for: req, delegate: OriginPinnedRedirects(req.url))
     }
 

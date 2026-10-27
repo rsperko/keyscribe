@@ -47,7 +47,8 @@ struct ResetTool {
     private func eraseAllData() -> [String] {
         var actions = wipeAll()
         actions += eraseCaptureArchive()
-        actions += eraseLeftovers()
+        actions += eraseInterruptedRecordings()
+        try? fileManager.removeItem(at: modelLoadDiagFile)
         actions += eraseKeychain()
         return actions
     }
@@ -61,8 +62,7 @@ struct ResetTool {
         return ["Erased \(contents.count) retained recording\(contents.count == 1 ? "" : "s") from \(captureArchiveDir.path)."]
     }
 
-    private func eraseLeftovers() -> [String] {
-        try? fileManager.removeItem(at: modelLoadDiagFile)
+    private func eraseInterruptedRecordings() -> [String] {
         let count = CaptureLeftovers.sweep(in: temporaryDir, isAlive: isProcessAlive)
         guard count > 0 else { return [] }
         return ["Erased \(count) recording\(count == 1 ? "" : "s") left behind by an interrupted dictation."]

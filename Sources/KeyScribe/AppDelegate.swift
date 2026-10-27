@@ -177,7 +177,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         configProblemAnnouncement = ConfigProblemAnnouncement(baseline: configProblems)
         history = HistoryStore(supportDir: KeyScribePaths.supportDir)
         history.applyRetention(retentionDays: settings.history.retentionDays)
-        BackupExclusion.ensureExcluded(history.dir)
+        excludeHistoryFromBackups(settings.history)
         Task.detached(priority: .utility) {
             CaptureLeftovers.sweep()
             try? await Task.sleep(for: .seconds(CaptureLeftovers.legacyMinimumAge))
@@ -206,10 +206,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hud.onCancelVoiceCommandChoice = { [weak self] id in self?.controller.cancelVoiceCommandChoice(choice: id) }
         hud.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
-        hud.canCancel = { [weak self] in self?.controller.escapeCancels ?? false }
+        hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
         hud.onEscapeCancel = { [weak self] in
             self?.hotkey.cancelGestures()
-            self?.controller.cancelFromEscape()
+            self?.controller.cancel()
             self?.refreshStatus()
         }
 
@@ -695,6 +695,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         settings = updated
         if updated.history != previousHistory {
             history?.applyRetention(retentionDays: updated.history.retentionDays)
+            excludeHistoryFromBackups(updated.history)
         }
         // Sweep on change too, so a lowered budget reclaims now rather than after the next dictation.
         if updated.audio != previousAudio {
@@ -713,6 +714,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         applyLoginItem(updated.loadOnLogin)
         settingsController.update(settings: updated)
         refreshStatus()
+    }
+
+    private func excludeHistoryFromBackups(_ setting: Settings.History) {
+        guard let history, setting.enabled || FileManager.default.fileExists(atPath: history.dir.path) else { return }
+        BackupExclusion.ensureExcluded(history.dir)
     }
 
     // Rebuilding the hotkey monitor replaces its bindings and clears gesture state; doing that while a

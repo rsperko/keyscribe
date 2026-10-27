@@ -132,9 +132,7 @@ struct ProviderTransport: Sendable {
         }
     }
 
-    // The common LLM-client policy: two retries on a temporary failure, backing off 0.5 s then 1 s with
-    // jitter, or waiting what the server asks when that is short. A longer ask falls back at once rather
-    // than holding the dictation; the whole rewrite stays under RewriteService's deadline either way.
+    // A longer server ask falls back at once rather than holding the dictation.
     static let maxRetries = 2
     static let backoff: [Duration] = [.milliseconds(500), .seconds(1)]
     static let longestServerWaitSeconds: Double = 10
