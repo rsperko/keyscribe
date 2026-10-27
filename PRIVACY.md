@@ -88,6 +88,15 @@ messages, change files, or send its input to online services, depending on its s
 everything your account can do, and a misheard command can run them, so choose what you connect this
 way with care.
 
+macOS may count a script's requests for protected access as coming from KeyScribe. A script can then use
+permission you already gave KeyScribe, such as Automation, Accessibility, or Microphone, without being asked
+again, and a new request can name KeyScribe even when a script caused it. This depends on what the script
+does and how macOS attributes it, so not every program gets every permission this way; permission you gave
+Terminal may not apply here, and a shortcut can have its own permissions and approval dialogs. Allowing
+KeyScribe to control your browser, which its tab features need, lets KeyScribe control that browser, not only
+read its tabs: a script you run by voice can use the same permission for something else. What the built-in
+features read is described below.
+
 Every Run a Script and Run a Shortcut sheet explains these consequences before saving, each in its own
 words, and every Open an App, Open a Link, and Find a Browser Tab sheet explains that it can bring an app's
 windows forward. Separately,
@@ -101,7 +110,7 @@ no app or place matched what you said. The titles are not sent anywhere or writt
 With finding items in apps turned on (an experimental feature, off unless you turn it on), saying an app's
 name followed by more words, such as "open Slack general", reads that app only: a browser's open tab titles
 and addresses, or the names listed in another app's sidebar, such as channels, people, or mailboxes. Nothing
-is read in the background. If the app is not open, it is opened first. These
+is read in the background. After "open", an app that is not open is opened first; "switch to" never opens one. These
 names are not sent anywhere or written to diagnostic logs; History records the command and what it opened,
 as described below. For some apps, such as Slack, reading the sidebar first turns on the app's own
 accessibility support, which stays on until that app quits.

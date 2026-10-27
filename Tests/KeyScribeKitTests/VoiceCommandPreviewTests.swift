@@ -46,11 +46,23 @@ struct VoiceCommandPreviewTests {
     }
 
     @Test func appsAndAppNicknamesNameTheAppOnce() {
-        let notes = VoiceCommandAction.app(.init(name: "Notes", bundleId: "com.apple.Notes")).preview(spoken: "switch to notes", appName: names)
-        #expect(notes == VoiceCommandPreview(headline: "Switch to Notes", context: "App \u{00B7} opens it if needed"))
+        let app = VoiceCommandAction.app(.init(name: "Notes", bundleId: "com.apple.Notes"))
+        let notes = app.preview(spoken: "switch to notes", appName: names, reach: .running, isRunning: { _ in true })
+        #expect(notes == VoiceCommandPreview(headline: "Switch to Notes", context: "App"))
         let nickname = VoiceCommandPlace(name: "Notebook", target: .app(bundleId: "com.apple.Notes"))
-        #expect(VoiceCommandAction.place(nickname, .app(bundleId: "com.apple.Notes")).preview(spoken: "notebook", appName: names)
-            == notes)
+        #expect(VoiceCommandAction.place(nickname, .app(bundleId: "com.apple.Notes"))
+            .preview(spoken: "notebook", appName: names, reach: .opening, isRunning: { _ in true }) == notes)
+    }
+
+    @Test func onlyOpeningAClosedAppSaysItWillStartIt() {
+        let app = VoiceCommandAction.app(.init(name: "Notes", bundleId: "com.apple.Notes"))
+        let starts = VoiceCommandPreview(headline: "Open Notes", context: "App \u{00B7} starts it if needed")
+        #expect(app.preview(spoken: "open notes", appName: names, reach: .opening, isRunning: { _ in false }) == starts)
+        #expect(app.preview(spoken: "open notes", appName: names, reach: .opening, isRunning: { _ in true })
+            == VoiceCommandPreview(headline: "Switch to Notes", context: "App"))
+        let nickname = VoiceCommandPlace(name: "Notebook", target: .app(bundleId: "com.apple.Notes"))
+        #expect(VoiceCommandAction.place(nickname, .app(bundleId: "com.apple.Notes"))
+            .preview(spoken: "notebook", appName: names, reach: .opening, isRunning: { _ in false }) == starts)
     }
 
     @Test func aSavedPageNamesTheSiteAndKeepsTheAddressForDetails() {

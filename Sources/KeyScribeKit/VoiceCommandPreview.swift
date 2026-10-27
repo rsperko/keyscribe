@@ -23,14 +23,19 @@ public struct VoiceCommandPreview: Equatable, Sendable {
 }
 
 extension VoiceCommandAction {
-    public func preview(spoken: String, appName: (String) -> String?) -> VoiceCommandPreview {
+    public func preview(
+        spoken: String, appName: (String) -> String?, reach: VoiceCommandReach = .opening, isRunning: (String) -> Bool = { _ in true }
+    ) -> VoiceCommandPreview {
         func name(_ bundleId: String) -> String { appName(bundleId) ?? bundleId }
-        let opensApp = "App \u{00B7} opens it if needed"
+        func app(_ bundleId: String, named shown: String) -> VoiceCommandPreview {
+            guard reach == .opening, !isRunning(bundleId) else { return VoiceCommandPreview(headline: "Switch to \(shown)", context: "App") }
+            return VoiceCommandPreview(headline: "Open \(shown)", context: "App \u{00B7} starts it if needed")
+        }
         switch self {
-        case .app(let app):
-            return VoiceCommandPreview(headline: "Switch to \(app.name)", context: opensApp)
+        case .app(let found):
+            return app(found.bundleId, named: found.name)
         case .place(_, .app(let bundleId)):
-            return VoiceCommandPreview(headline: "Switch to \(name(bundleId))", context: opensApp)
+            return app(bundleId, named: name(bundleId))
         case .window(let window):
             return Self.titled(window.title, spoken: spoken, context: "Window in \(window.appName)")
         case .tab(let tab):
@@ -59,7 +64,7 @@ extension VoiceCommandAction {
 
     private static func titled(_ title: String, spoken: String, context: String) -> VoiceCommandPreview {
         let target: String
-        if case .focus(let named) = VoiceCommandGrammar.parse(spoken) { target = named } else { target = spoken }
+        if case .focus(let named, _) = VoiceCommandGrammar.parse(spoken) { target = named } else { target = spoken }
         let said = Set(VoiceCommandText.key(target).split(separator: " ").map(String.init))
         let ranked = WindowTitle.segments(title).enumerated().map { index, segment in
             (index: index, segment: segment, said: said.intersection(VoiceCommandText.key(segment).split(separator: " ").map(String.init)),

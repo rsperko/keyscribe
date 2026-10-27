@@ -28,7 +28,7 @@ struct VoiceCommandNotices {
     }
 
     static var actionPermissions: String {
-        "Actions start without an extra confirmation from \(Branding.appName). Some run immediately. Others may wait for a dialog:\n\n• macOS may ask for permission the first time an action controls another app or accesses protected data. The dialog may name \(Branding.appName), even when a script caused it. Permission given through Terminal may not apply here.\n\n• Shortcuts may offer Allow Once or Always Allow. Allow Once can ask again next time; Always Allow remembers that permission.\n\n• A script or shortcut may include its own confirmation on every run.\n\nIf an action seems to be waiting, check for an approval dialog."
+        "Actions start without an extra confirmation from \(Branding.appName). Some run immediately. Others may wait for a dialog:\n\n• macOS may ask for permission the first time an action controls another app or accesses protected data. The dialog may name \(Branding.appName), even when a script caused it. Permission given through Terminal may not apply here. A script may also use permission you already gave \(Branding.appName), without asking again.\n\n• Shortcuts may offer Allow Once or Always Allow. Allow Once can ask again next time; Always Allow remembers that permission.\n\n• A script or shortcut may include its own confirmation on every run.\n\nIf an action seems to be waiting, check for an approval dialog."
     }
 
     private let defaults: UserDefaults

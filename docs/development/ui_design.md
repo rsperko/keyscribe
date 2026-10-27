@@ -246,13 +246,13 @@ not to its label.
 | Recording | Mode name + a red level circle (halo + dot; Reduce Motion: intensity-only dot) | “Listening”, or “Listening — tap [trigger] again to stop” for a latched tap-to-toggle recording | Stop if tap-to-toggle |
 | Recording, near the limit | Same, plus an orange ring around the level circle that drains to empty | “Stops in 0:SS”, counting down | As Recording |
 | Transcribing | “Transcribing” | Mode name | Cancel when safe |
-| Voice command opening an app | Mode name | “Opening [app]…”, then “Looking in [app]…” while its tabs or sidebar fill | None; shown only once the command is acting, so it is not cancellable and does not take key focus away from the app being opened |
+| Voice command opening an app | Mode name | “Opening [app]…” only while “open” starts an app, then “Looking in [app]…” while its tabs or sidebar fill; “switch to” never starts one, so never shows it | None; shown only once the command is acting, so it is not cancellable and does not take key focus away from the app being opened |
 | Rewriting | “Rewriting with [connection name]” | Boundary badges: `Cloud rewrite`, then `Best-effort redaction` or the exact shared context categories | Insert without rewriting after timeout (the shortcut does the same once it is shown) |
 | Complete | “Inserted” | Mode name | None; dismiss automatically |
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
 | Stopped at the limit | “Stopped at the [limit] limit” (e.g. “5-minute”) | “Inserted without rewriting — dictate again to continue” when the mode rewrites, “Inserted — dictate again to continue” when it does not, or the copied explanation | Paste last dictation when copied |
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
-| Voice command ran (Voice Commands mode, experimental) | Where it went — the app, the place and its browser (“Gmail · Google Chrome”), or the window and its app (“Budget — Numbers · Numbers”) — or the script or shortcut it ran (“Deploy”); a script that reported a result shows that message instead (“Switched to Inbox”) | “Voice command”, or “Started, still running” when the action has not finished; under a reported result, the script's name. A script's informational result (“Nothing waiting”) shows as an Advisory instead, with no failure styling. A window that closed, moved to another desktop, or could not be confirmed in front, and a search where some app did not list its windows, show an Error saying so (Accessibility off adds **Open Accessibility Settings**); if an action later fails, an Error naming the failure follows unless a dictation is in progress or a voice command choice is on screen, in which case History alone records it | None; dismiss automatically |
+| Voice command ran (Voice Commands mode, experimental) | Where it went — the app, the place and its browser (“Gmail · Google Chrome”), or the window and its app (“Budget — Numbers · Numbers”) — or the script or shortcut it ran (“Deploy”); a script that reported a result shows that message instead (“Switched to Inbox”) | “Voice command”, or “Started, still running” when the action has not finished; under a reported result, the script's name. A script's informational result (“Nothing waiting”) shows as an Advisory instead, with no failure styling. A window that closed, moved to another desktop, or could not be confirmed in front, and a search where some app did not list its windows, show an Error saying so (Accessibility off adds **Open Accessibility Settings**). A browser that refused control, and a script whose error output carries the Apple Events not-permitted code (`-1743`) on an error line, show an Error with **Open Automation Settings** (“Manager couldn’t control another app. Check Automation access for KeyScribe.”, followed by the script's denial line, which names the app that refused, even when later error lines follow); the button only opens that pane, never retries or asks again; if an action later fails, an Error naming the failure follows unless a dictation is in progress or a voice command choice is on screen, in which case History alone records it | None; dismiss automatically |
 | Voice command needs a choice (Voice Commands mode) | “Which one?” for apps, places, and a script's own options, “Which action?” for `run` | Numbered rows, each a name over a detail that tells it apart (app, browser and host, app identity where names repeat, a window's app plus its document or site when two titles are the same, Script/Shortcut, or the name of the script that offered the option), then how to answer with the actual Voice Commands shortcut, led by one line when window rows still read the same (“Same name; the lower number is further forward.” within one app instance, else “Same name; these windows can’t be told apart.”) | Click a row; Cancel. Stays until answered, dismissed, or idle for the timeout |
 | Voice command not recognized (Voice Commands mode) | “Command not recognized” | What the speech model heard, before any replacement: “Heard “stitch to Mail”” — omitted when the target was a password field or could not be confirmed | None; dismiss automatically |
 | Voice command matched nothing (Voice Commands mode) | What found nothing: “No script or shortcut is called “sorb legs”.”, “No matching app, place, or window found for “kiwi”.”, or “No open tab matches …” | The heard excerpt, under the same rules as above | None; dismiss automatically |
@@ -986,8 +986,9 @@ Its sections are, in order:
 2. **What you can say** — a brief introduction (“Open apps by name. Nothing to configure.”), then short,
    concrete examples (`VoiceCommandsEditorView.examples`): “open Mail” opens Mail or brings it forward,
    “open Slack general” opens general in Slack (shown only while **Find items in apps by voice** is on),
-   and “go back” returns to where you were. A final caption says users can also say the name of a command
-   saved below. There is no expanded phrase guide here. Spoken input is explained beside the script and
+   and “go back” returns to where you were. A caption then draws the one distinction a user must know
+   (“Open” can start an app. Use “switch to” to stay with what’s already running.), and a final caption
+   says users can also say the name of a command saved below. There is no expanded phrase guide here. Spoken input is explained beside the script and
    shortcut input controls; choosing a match is explained in the choice panel when it appears. The FAQ
    carries the fuller phrase reference, including “switch to …” and optional “run …”. Alternative verbs
    and their common mishearings (`VoiceCommandGrammar.focusVerbs`) still work in live commands and Preview
@@ -996,7 +997,12 @@ Its sections are, in order:
 3. **Preview a command** — a field that shows what a typed phrase would do, live, without running anything (a script
    shows the exact command line it would run, a shortcut its name and input). A result is two short lines: the
    outcome (“Switch to Gmail”, “Open Example Page”, “Run Deploy”) and what kind of thing it is and where (“Window
-   in Brave Browser”, “example.com in Google Chrome”). Window and tab titles carry whatever their app appends, so
+   in Brave Browser”, “example.com in Google Chrome”). An app reads “Open Slack” / “App · starts it if needed”
+   only when the phrase would start it; a running app, or any app after “switch to”, reads “Switch to Slack” /
+   “App”. “Switch to” naming something that is not open shows “Nothing to switch to” with the phrase that
+   would open it. “Open” searching a browser that is not running cannot be checked, since the preview starts
+   nothing: it reads “Open Chrome and find “github”” / “Chrome isn’t running, so the preview can’t check its
+   tabs.”, never a missing tab. Window and tab titles carry whatever their app appends, so
    the outcome names the parts of the title that hold the words the phrase used. A script's or shortcut's command is
    shown in full. When the outcome shortened a title or a saved page shows only its site, a collapsed **Details**
    disclosure under the result holds the full title or address, reachable by keyboard, and only then is the outcome
@@ -1036,7 +1042,7 @@ Its sections are, in order:
    answers to (saying it will ask which one), a longer saved name that takes over some of what this command
    would receive (“slack joe” runs Slack Joe instead), a longer name that takes words away from an existing
    command that takes them (adding Note work beside Note), and a name that catches a built-in command word
-   (“Saying “open …” will reach this command instead of switching apps. Say “switch to …” to switch apps.”).
+   (“Saying “open …” will reach this command instead of opening an app or place.”).
    **Preview** is an example card, “You say” → “What happens”, for a sample utterance (“buy milk” for words,
    “inbox” for a tab search), read through the mode's replacements and checked against the other saved
    commands exactly as a live command would be (`VoiceCommandExample`). When a replacement or another
@@ -1261,7 +1267,7 @@ recorded reads **Command started** until it finishes, when the entry is updated 
 **Command failed**. An open History pane refreshes when that happens and keeps the entry selected, and
 the entry can be deleted whether or not the pane saw the update. A command that asked which one is
 recorded as **Needs a choice**, its result listing the numbered rows. A spoken answer is its own entry —
-heard “two”, its result beginning “Selected Work Mail for “switch to mail”:” followed by what ran — so
+heard “two”, its result beginning “Selected Work Mail for “open mail”:” followed by what ran — so
 the pair reads correctly even when other entries fall between them or a filter hides one. A spoken
 cancel reads **Choice cancelled**, and a reply that was not an answer reads **Needs a choice** with the
 standard instruction for answering (“Choose 1–2, say “cancel”, or give a new command.”), even when the

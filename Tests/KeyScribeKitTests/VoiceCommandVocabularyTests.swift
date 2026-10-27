@@ -22,6 +22,19 @@ struct VoiceCommandVocabularyTests {
         #expect(plan(mode: mode).voiceCommandText(heard: "Bitch to Ghostty.", mode: mode) == "switch to Ghostty.")
     }
 
+    @Test func theMiddleInputRecipeRunsTheSavedActionWithTheCapturedWordsAndLeavesNavigationAlone() {
+        let rule = ReplacementsSet.Rule(
+            heard: #"(?i)^\s*go\s+to\s+(.+?)\s+manager[.!?]?\s*$"#, replace: "run manager $1", regex: true)
+        let mode = commands(rules: [rule])
+        let plan = plan(mode: mode)
+        let manager = VoiceCommandScript(name: "Manager", run: ["/bin/nav", "{text}"])
+        let read = plan.voiceCommandText(heard: "Go to project alpha manager.", mode: mode)
+        #expect(read == "run manager project alpha")
+        #expect(VoiceCommandResolver.resolve(read, catalog: VoiceCommandCatalog(scripts: [manager]))
+                == .action(.script(manager, arguments: ["project alpha"])))
+        #expect(plan.voiceCommandText(heard: "go to Slack", mode: mode) == "go to Slack")
+    }
+
     @Test func aRegexReplacementRepairsEveryMishearingItCovers() {
         let mode = commands(rules: [.init(heard: #"\b(?:bitch|which|stitch) to\b"#, replace: "switch to", regex: true)])
         let plan = plan(mode: mode)
@@ -43,7 +56,7 @@ struct VoiceCommandVocabularyTests {
         let heard = "\(prefix) herder"
         let corrected = plan(mode: mode).voiceCommandText(heard: heard, mode: mode)
         #expect(corrected == "\(prefix) herdr")
-        #expect(VoiceCommandGrammar.parse(corrected) == .focus(target: "herdr"))
+        #expect(VoiceCommandGrammar.parse(corrected) == .focus(target: "herdr", reach: .running))
     }
 
     @Test func aPunctuatedSoundAlikePrefixStillAllowsTargetCorrection() {

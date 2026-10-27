@@ -89,6 +89,19 @@ enum ScriptLauncher {
         }
     }
 
+    // Only the error-code form an Apple Event failure prints, on an error line of a process that failed: a number
+    // elsewhere in the output, or a generic permission error, says nothing about Automation.
+    // The denial line is kept over any later line, since it names the app that refused.
+    static func error(in data: Data, status: Int32) -> ScriptError? {
+        guard let line = lastLine(of: data) else { return nil }
+        guard status != 0 else { return ScriptError(line: line) }
+        let denial = String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline).last { line in
+            line.contains("(-1743)") && line.range(of: #"\berror\b|not authorized"#, options: [.regularExpression, .caseInsensitive]) != nil
+        }
+        guard let denial, let denied = lastLine(of: Data(denial.utf8)) else { return ScriptError(line: line) }
+        return ScriptError(line: denied, blocksAutomation: true)
+    }
+
     static func lastLine(of data: Data) -> String? {
         let text = String(decoding: data, as: UTF8.self)
         guard let line = text.split(whereSeparator: \.isNewline)
@@ -166,7 +179,7 @@ enum ScriptLauncher {
 
         private func finished(_ status: Int32) -> ScriptRun {
             var collected = output
-            return .finished(status: status, lastError: ScriptLauncher.lastLine(of: errorOutput), report: collected.finish())
+            return .finished(status: status, lastError: ScriptLauncher.error(in: errorOutput, status: status), report: collected.finish())
         }
 
         private func resume(_ result: ScriptRun) {

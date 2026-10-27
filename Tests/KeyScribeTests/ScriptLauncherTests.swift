@@ -39,6 +39,14 @@ struct ScriptLauncherTests {
             == .finished(status: 1, lastError: "REAL FINAL ERROR"))
     }
 
+    @Test func aScriptBlockedFromControllingAnAppIsRecognized() async throws {
+        let denied = "execution error: Not authorized to send Apple events to Music. (-1743)"
+        let (dir, file) = try script("echo '\(denied)' >&2\necho 'cleaning up' >&2\nexit 1")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 20)
+            == .finished(status: 1, lastError: ScriptError(line: denied, blocksAutomation: true)))
+    }
+
     @Test func reportLinesOnStandardOutputAreRead() async throws {
         let (dir, file) = try script("echo 'plain output'\necho '::choice::C1\t#general'\necho '::done::Opened #general'")
         defer { try? FileManager.default.removeItem(at: dir) }

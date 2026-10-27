@@ -63,7 +63,7 @@ struct VoiceCommandFuzzyTests {
     }
 
     @Test func aNearMissReachesAnInstalledApp() {
-        #expect(resolve("switch to ghosty", installed: [ghostty]) == .action(.app(ghostty)))
+        #expect(resolve("open ghosty", installed: [ghostty]) == .action(.app(ghostty)))
     }
 
     @Test func aNearMissOnARunningAppStillBeatsTheSameMissOnATab() {
@@ -91,6 +91,6 @@ struct VoiceCommandFuzzyTests {
 
     @Test func aChosenTabResolvesToFocusingIt() {
         let ha = tab("Home Assistant")
-        #expect(VoiceCommandResolver.resolve(.tab(ha), text: "", catalog: VoiceCommandCatalog()) == .action(.tab(ha)))
+        #expect(VoiceCommandResolver.resolve(.tab(ha), text: "", reach: .opening, catalog: VoiceCommandCatalog()) == .action(.tab(ha)))
     }
 }

@@ -144,13 +144,17 @@ public struct VoiceCommandChoice: Equatable, Sendable {
     public var candidates: [VoiceCommandCandidate]
     public var total: Int
     public var text: String
+    public var reach: VoiceCommandReach
 
-    public init(family: Family, target: String, matches: [VoiceCommandCandidate], text: String = "") {
+    public init(
+        family: Family, target: String, matches: [VoiceCommandCandidate], text: String = "", reach: VoiceCommandReach = .opening
+    ) {
         self.family = family
         self.target = target
         candidates = Array(matches.prefix(Self.displayLimit))
         total = matches.count
         self.text = text
+        self.reach = reach
     }
 
     public var isOffered: Bool { total <= Self.displayLimit }

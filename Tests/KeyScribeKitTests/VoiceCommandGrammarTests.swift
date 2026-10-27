@@ -3,19 +3,20 @@ import Testing
 
 struct VoiceCommandGrammarTests {
     @Test(arguments: [
-        ("switch to ghostty", "ghostty"),
-        ("Switch to Chrome.", "chrome"),
-        ("go to gmail", "gmail"),
-        ("focus vscode", "vscode"),
-        ("focus on the terminal", "terminal"),
-        ("open VS Code", "vs code"),
-        ("Launch Safari!", "safari"),
-        ("  switch   to   the   browser  ", "browser"),
-        ("Switch to, Slack.", "slack"),
-        ("switch to Mail?", "mail"),
+        ("switch to ghostty", "ghostty", VoiceCommandReach.running),
+        ("Switch to Chrome.", "chrome", .running),
+        ("go to gmail", "gmail", .running),
+        ("focus vscode", "vscode", .running),
+        ("focus on the terminal", "terminal", .running),
+        ("open VS Code", "vs code", .opening),
+        ("Launch Safari!", "safari", .opening),
+        ("  switch   to   the   browser  ", "browser", .running),
+        ("Switch to, Slack.", "slack", .running),
+        ("switch to Mail?", "mail", .running),
+        ("Open the Slack general", "slack general", .opening),
     ])
-    func parsesAFocusCommand(transcript: String, target: String) {
-        #expect(VoiceCommandGrammar.parse(transcript) == .focus(target: target))
+    func parsesANavigationCommand(transcript: String, target: String, reach: VoiceCommandReach) {
+        #expect(VoiceCommandGrammar.parse(transcript) == .focus(target: target, reach: reach))
     }
 
     @Test(arguments: [
@@ -23,15 +24,15 @@ struct VoiceCommandGrammarTests {
         "witch to", "witch two", "witch too", "go two", "go too",
     ])
     func acceptsSoundAlikesOnlyAsCommandPrefixes(_ prefix: String) {
-        #expect(VoiceCommandGrammar.parse("\(prefix) the Mail.") == .focus(target: "mail"))
+        #expect(VoiceCommandGrammar.parse("\(prefix) the Mail.") == .focus(target: "mail", reach: .running))
         #expect(VoiceCommandGrammar.parse(prefix) == nil)
         #expect(VoiceCommandGrammar.parse("\(prefix) the") == nil)
         #expect(VoiceCommandGrammar.parse("please \(prefix) Mail") == nil)
     }
 
     @Test func preservesSoundAlikesInsideTheTarget() {
-        #expect(VoiceCommandGrammar.parse("Which too Which to Choose") == .focus(target: "which to choose"))
-        #expect(VoiceCommandGrammar.parse("open Witch Too") == .focus(target: "witch too"))
+        #expect(VoiceCommandGrammar.parse("Which too Which to Choose") == .focus(target: "which to choose", reach: .running))
+        #expect(VoiceCommandGrammar.parse("open Witch Too") == .focus(target: "witch too", reach: .opening))
     }
 
     @Test(arguments: ["go back", "Go back.", "GO BACK!", "  go   back "])
@@ -85,7 +86,8 @@ struct VoiceCommandGrammarTests {
         for words in phrase.words {
             let intent = VoiceCommandGrammar.parse(phrase == .goBack ? words : "\(words) mail")
             switch phrase {
-            case .focus: #expect(intent == .focus(target: "mail"))
+            case .open: #expect(intent == .focus(target: "mail", reach: .opening))
+            case .switchTo: #expect(intent == .focus(target: "mail", reach: .running))
             case .run: #expect(intent == .runScript(target: "mail"))
             case .goBack: #expect(intent == .goBack)
             }
@@ -94,6 +96,6 @@ struct VoiceCommandGrammarTests {
 
     @Test func theGuidanceTeachesEveryPhrase() {
         #expect(VoiceCommandPhrase.guidance
-                == "say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}")
+                == "say \u{201C}open\u{201D} an app or place, \u{201C}switch to\u{201D} one that\u{2019}s already open, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}")
     }
 }

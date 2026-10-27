@@ -118,8 +118,10 @@ struct VoiceCommandResolverTests {
 
     @Test func aPlaceIsMatchedByItsName() {
         let place = VoiceCommandPlace(name: "Work Mail", target: .url("https://mail.google.com/mail/u/1/"))
-        #expect(resolve("switch to work mail", places: [place], tabs: [])
+        #expect(resolve("open work mail", places: [place], tabs: [])
                 == .action(.place(place, .openURL("https://mail.google.com/mail/u/1/", browser: nil))))
+        #expect(resolve("switch to work mail", places: [place], tabs: [])
+                == .closed(.link(say: "open Work Mail", checkedTabs: true)))
     }
 
     @Test func aURLPlaceNeedsTabsBeforeItCanResolve() {
@@ -152,7 +154,7 @@ struct VoiceCommandResolverTests {
         let place = VoiceCommandPlace(name: "Project", target: .url("https://example.com/Project?View=All#Top"))
         let other = Tab(browserBundleId: safari.bundleId, window: 1, tab: 1, url: "https://example.com/project?view=all#top", title: "Other")
         let same = Tab(browserBundleId: safari.bundleId, window: 1, tab: 2, url: "https://EXAMPLE.com/Project?View=All#Top", title: "Project")
-        #expect(resolve("go to project", places: [place], tabs: [other])
+        #expect(resolve("open project", places: [place], tabs: [other])
                 == .action(.place(place, .openURL("https://example.com/Project?View=All#Top", browser: nil))))
         #expect(resolve("go to project", places: [place], tabs: [other, same]) == .action(.place(place, .tab(same))))
     }
@@ -167,7 +169,7 @@ struct VoiceCommandResolverTests {
     @Test func tabMatchingRespectsHostBoundaries() {
         let place = VoiceCommandPlace(name: "Mail", target: .url("https://mail.example.com"))
         let tab = Tab(browserBundleId: safari.bundleId, window: 1, tab: 1, url: "https://mail.example.community/", title: "Other")
-        #expect(resolve("go to mail", places: [place], tabs: [tab])
+        #expect(resolve("open mail", places: [place], tabs: [tab])
                 == .action(.place(place, .openURL("https://mail.example.com", browser: nil))))
     }
 
@@ -175,7 +177,7 @@ struct VoiceCommandResolverTests {
         let place = VoiceCommandPlace(name: "Gmail", target: .url("https://mail.google.com/"), browser: safari.bundleId)
         let chromeTab = Tab(browserBundleId: chrome.bundleId, window: 1, tab: 1, url: "https://mail.google.com/", title: "Inbox")
         let safariTab = Tab(browserBundleId: safari.bundleId, window: 1, tab: 4, url: "https://mail.google.com/x", title: "Inbox")
-        #expect(resolve("switch to gmail", places: [place], tabs: [chromeTab])
+        #expect(resolve("open gmail", places: [place], tabs: [chromeTab])
                 == .action(.place(place, .openURL("https://mail.google.com/", browser: safari.bundleId))))
         #expect(resolve("switch to gmail", places: [place], tabs: [chromeTab, safariTab])
                 == .action(.place(place, .tab(safariTab))))
@@ -199,15 +201,15 @@ struct VoiceCommandResolverTests {
     @Test func everySpokenNameResolvesTheSameAppInEitherTier() {
         for name in ["visual studio code", "code"] {
             #expect(resolve("switch to \(name)", running: [aliasedCode]) == .action(.app(aliasedCode)))
-            #expect(resolve("switch to \(name)", installed: [aliasedCode], windows: nil) == .action(.app(aliasedCode)))
+            #expect(resolve("open \(name)", installed: [aliasedCode], windows: nil) == .action(.app(aliasedCode)))
         }
         #expect(VoiceCommandAction.app(aliasedCode).summary(appName: { _ in nil }) == "Visual Studio Code")
     }
 
     @Test func anInstalledAliasIsMatchedBeforeAnyWindowIsRead() {
         let titled = VoiceCommandCatalog.Window(bundleId: textEdit.bundleId, appName: "TextEdit", pid: 4, id: "cg:1", title: "Code")
-        #expect(resolve("switch to code", installed: [aliasedCode], windows: nil) == .action(.app(aliasedCode)))
-        #expect(resolve("switch to code", installed: [aliasedCode], windows: .complete([titled])) == .action(.app(aliasedCode)))
+        #expect(resolve("open code", installed: [aliasedCode], windows: nil) == .action(.app(aliasedCode)))
+        #expect(resolve("open code", installed: [aliasedCode], windows: .complete([titled])) == .action(.app(aliasedCode)))
     }
 
     @Test func oneBundleInBothPoolsIsNeverOfferedTwice() {
@@ -218,7 +220,7 @@ struct VoiceCommandResolverTests {
     @Test func twoAppsSharingASpokenNameAskWhichOne() {
         let codeShim = App(name: "Code Runner", bundleId: "com.example.coderunner", spokenNames: ["Code Runner", "Code"])
         #expect(ambiguousNames(resolve("switch to code", running: [codeShim, aliasedCode])) == ["Code Runner", "Visual Studio Code"])
-        #expect(ambiguousNames(resolve("switch to code", installed: [codeShim, aliasedCode])) == ["Code Runner", "Visual Studio Code"])
+        #expect(ambiguousNames(resolve("open code", installed: [codeShim, aliasedCode])) == ["Code Runner", "Visual Studio Code"])
     }
 
     @Test func aliasesMatchPartiallyAndThroughNearMisses() {
@@ -230,7 +232,7 @@ struct VoiceCommandResolverTests {
 
     @Test func anExactPlaceStillBeatsAnAppAlias() {
         let place = VoiceCommandPlace(name: "Code", target: .url("https://code.example.org/"))
-        #expect(resolve("switch to code", places: [place], running: [aliasedCode], tabs: [])
+        #expect(resolve("open code", places: [place], running: [aliasedCode], tabs: [])
                 == .action(.place(place, .openURL("https://code.example.org/", browser: nil))))
     }
 

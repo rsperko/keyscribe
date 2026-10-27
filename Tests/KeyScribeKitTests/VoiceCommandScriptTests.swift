@@ -453,19 +453,19 @@ struct VoiceCommandScriptOptionTests {
 
     @Test func choosingAnOptionRunsTheScriptAgainWithItsArgumentsAndTheChoice() {
         let catalog = VoiceCommandCatalog(places: [], scripts: [channels])
-        #expect(VoiceCommandResolver.resolve(option("C1", "#general"), text: "", catalog: catalog)
+        #expect(VoiceCommandResolver.resolve(option("C1", "#general"), text: "", reach: .opening, catalog: catalog)
             == .action(.script(channels, arguments: ["gen"], choice: "C1")))
     }
 
     @Test func anOptionWhoseScriptWasRemovedIsUnavailable() {
         let catalog = VoiceCommandCatalog(places: [], scripts: [])
-        #expect(VoiceCommandResolver.resolve(option("C1", "#general"), text: "", catalog: catalog) == .unavailable("Channel"))
+        #expect(VoiceCommandResolver.resolve(option("C1", "#general"), text: "", reach: .opening, catalog: catalog) == .unavailable("Channel"))
     }
 
     @Test func anOptionWhoseScriptChangedIsUnavailable() {
         let edited = VoiceCommandScript(name: "Channel", run: ["~/bin/other", "{text}"])
         let catalog = VoiceCommandCatalog(places: [], scripts: [edited])
-        #expect(VoiceCommandResolver.resolve(option("C1", "#general"), text: "", catalog: catalog) == .unavailable("Channel"))
+        #expect(VoiceCommandResolver.resolve(option("C1", "#general"), text: "", reach: .opening, catalog: catalog) == .unavailable("Channel"))
     }
 
     @Test func aTooLongOtherNameIsReportedAsAnOtherName() {

@@ -570,9 +570,11 @@ extension VoiceCommandConfig {
         if covers(VoiceCommandGrammar.run) {
             return "Saying \u{201C}\(VoiceCommandGrammar.run) \u{2026}\u{201D} will reach this command instead of your other actions."
         }
-        guard let verb = VoiceCommandGrammar.focusVerbs.first(where: covers) else { return nil }
-        let alternative = VoiceCommandPhrase.focus.words.first { !covers($0) }.map { " Say \u{201C}\($0) \u{2026}\u{201D} to switch apps." } ?? ""
-        return "Saying \u{201C}\(verb) \u{2026}\u{201D} will reach this command instead of switching apps.\(alternative)"
+        if let verb = VoiceCommandGrammar.openingVerbs.first(where: covers) {
+            return "Saying \u{201C}\(verb) \u{2026}\u{201D} will reach this command instead of opening an app or place."
+        }
+        guard let verb = VoiceCommandGrammar.runningVerbs.first(where: covers) else { return nil }
+        return "Saying \u{201C}\(verb) \u{2026}\u{201D} will reach this command instead of switching to an open app or place."
     }
 
     private static func list(_ names: [String]) -> String {

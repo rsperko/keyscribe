@@ -139,7 +139,8 @@ be shared with another mode: if you pick one that a dictation mode already uses,
 moving it, names the modes that lose it, and offers **Undo** afterwards.
 
 Use that shortcut, then say “open” and an app, window, or tab: **“open Mail”** works with nothing saved.
-To reach something inside an app, turn on **Find items in apps by voice** under **Maintenance ▸
+“Open” starts an app that isn't running. To use only what's already open, say **“switch to”** instead
+(below). To reach something inside an app, turn on **Find items in apps by voice** under **Maintenance ▸
 Experimental features** (under **Voice Commands**) and say the app, then what you want in it:
 
 - **“open Slack general”**, **“open Mail sent”**: opens the channel, mailbox, folder, or person shown in the
@@ -149,7 +150,7 @@ Experimental features** (under **Voice Commands**) and say the app, then what yo
   (2026-10-25); other apps may not work.
 - **“open Chrome github”**: switches to the Chrome tab whose title or site best matches.
 
-An app that isn't open is opened first. For anything else, save a command under **Commands ▸ Add
+With “open”, an app that isn't running is started first. For anything else, save a command under **Commands ▸ Add
 Command…** and say its name:
 
 - **“work general”**: choose **Open an App**, pick Slack, and name it `work`. A saved app name works like
@@ -176,10 +177,13 @@ say, and a name that will catch a built-in command, before you save.
 
 These also work without saving anything:
 
-- **“switch to Mail”** or **“open Safari”** brings the app forward, opening it if needed. App names
-  work without setup, and so does the name in an app's menu bar when it differs from the one in the
-  Applications folder (“switch to Code” for Visual Studio Code). Saved apps and links work after these
-  words too.
+- **“open Safari”** brings the app forward, starting it if needed. **“switch to Mail”** uses only what
+  is already running: if Mail is closed, it says so and how to open it, and starts nothing. “Go to” and
+  “focus” work like “switch to”; “launch” works like “open”. App names work without setup, and so does
+  the name in an app's menu bar when it differs from the one in the Applications folder (“open Code” for
+  Visual Studio Code). Saved apps and links work after either word and follow it: “switch to” uses a
+  saved link only when a matching tab is already open, and “open” loads the link when none is. A saved
+  name said on its own does what you saved it to do.
 - **“switch to budget”** brings forward an open window whose title says Budget. With two editor
   windows or two terminals open, say a word from the title of the one you want. Only windows on the
   current desktop can be found. **“switch to home assistant”** also finds an open browser tab by its
@@ -187,7 +191,8 @@ These also work without saving anything:
   any order, and a close mishearing still finds the window or tab.
 - **“run journal buy milk”** runs a saved script or shortcut, the same as saying its name.
 - **“go back”** returns to the window you were using before your last switch by voice, even in the
-  same app. Say it again to switch back. Running an action does not change that destination.
+  same app. Say it again to switch back. It never starts an app that has since quit. Running an action
+  does not change that destination.
 
 Commands never type your words. An unrecognized command shows an explanation and runs nothing, and a
 command that matches more than one saved command, app, or window asks which one (below). **Preview a command** previews
@@ -270,7 +275,7 @@ replacements there apply only to commands, and run before KeyScribe reads what y
   "switch to male", and "open male" then go to Mail, without rewriting other uses of the word. This is also useful
   for a preferred nickname, such as `email` for Mail.
 - **Your own spoken shortcuts:** saving a command is simplest. A replacement for a whole phrase also
-  becomes the command, so `code` → `switch to Visual Studio Code` lets you say just "code".
+  becomes the command, so `code` → `open Visual Studio Code` lets you say just "code".
 
 To check a phrase, open **Settings ▸ Modes ▸ Voice Commands** and type it into **Preview a command**: it shows what
 the phrase is read as after your replacements and what it would do. The preview reads what you type; it
@@ -290,6 +295,8 @@ stands for whatever you say after the name: a script named "deploy" with the arg
 runs whenever what you say starts with one of its names, so a script named "open notes" runs when you
 say that. "switch to" or "open" with anything else never runs a script. If a replacement only gives a fixed
 phrase another name for a script, you can add that phrase as one of the script's **Other names** instead.
+A script that controls another app may need Automation permission, and macOS may ask on KeyScribe's behalf
+(see [Which permissions does KeyScribe need](#which-permissions-does-keyscribe-need-and-why)).
 Keep replacements that capture variable input, as in the recipe below. The spoken
 name can differ from the file name: a script named "foo" can run `~/bin/bar.sh` when you say "foo".
 
@@ -419,11 +426,17 @@ Two for everyday dictation, granted in **System Settings ▸ Privacy & Security*
   transcribed text into the focused app. (A key+modifier trigger like ⌃⌥E is registered as a system
   hotkey and needs no permission.)
 
-A third, **Automation**, is requested only when KeyScribe has to ask your browser something: the
-current tab's address for a mode that routes by website, or, with the experimental voice commands, the
+A third, **Automation**, lets KeyScribe control another app. KeyScribe itself uses it to ask your browser for
+the current tab's address for a mode that routes by website, or, with the experimental voice commands, for the
 open tabs' addresses and titles (in every window, which can include private ones) so it can switch to a saved web
-page. Nothing it reads leaves your Mac.
-If you use neither, the request never appears.
+page. Those reads stay on your Mac. A script or shortcut you run by voice can also cause an Automation
+request, which may name KeyScribe, and may reuse a permission you already gave KeyScribe without asking
+again ([details](PRIVACY.md#programs-and-shortcuts-you-run-by-voice)).
+
+When a command fails because it was not allowed to control an app, its error offers **Open Automation
+Settings**. Nothing is retried; check the setting, then say the command again. If KeyScribe is missing from that
+list, macOS may have tied the request to a different identity, such as an earlier build's signature, rather than
+to a switched-off toggle.
 
 KeyScribe does **not** request Input Monitoring.
 

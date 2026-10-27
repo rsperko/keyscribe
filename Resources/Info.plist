@@ -22,8 +22,8 @@
        SPARKLE_PUBLIC_ED_KEY (or leaves it empty) on its target. -->
   <key>SUPublicEDKey</key><string>$(SPARKLE_PUBLIC_ED_KEY)</string>
   <key>NSMicrophoneUsageDescription</key>
-  <string>$(PRODUCT_NAME) transcribes your speech on this Mac. Audio is never sent to the cloud or stored.</string>
+  <string>$(PRODUCT_NAME) uses the microphone to transcribe your speech on this Mac.</string>
   <key>NSAppleEventsUsageDescription</key>
-  <string>$(PRODUCT_NAME) asks your browser for the current tab's address when a mode routes by website, and, if you use voice commands, for the addresses and titles of open tabs so it can switch to one. Nothing it reads leaves this Mac.</string>
+  <string>$(PRODUCT_NAME) uses Automation to read browser tabs and let scripts you run by voice control other apps.</string>
 </dict>
 </plist>

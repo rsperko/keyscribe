@@ -190,7 +190,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func anAmbiguousCommandShowsANumberedQuestionThatDoesNotTakeFocus() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let prompt = try #require(waiting(h.hud.last))
         #expect(prompt.title == "Which one?")
         #expect(prompt.rows.map(\.name) == ["Personal Mail", "Work Mail"])
@@ -204,7 +204,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func answeringKeepsTheListVisibleWhileRecordingAndTranscribing() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         let shownBefore = h.hud.states.count
         await h.dictate("two")
@@ -224,20 +224,20 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func historyRecordsTheQuestionAndAnUnderstandableAnswer() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         await h.dictate("two")
         let entries = h.history.entries()
         #expect(entries.map(\.outcome) == [.command, .commandNeedsChoice])
         let answer = try #require(entries.first)
         let question = try #require(entries.last)
         #expect(answer.heard == "two")
-        #expect(answer.result.hasPrefix("Selected Work Mail for \u{201C}switch to mail\u{201D}: "))
+        #expect(answer.result.hasPrefix("Selected Work Mail for \u{201C}open mail\u{201D}: "))
         #expect(question.result == "Asked to choose: 1. Personal Mail, 2. Work Mail")
     }
 
     @Test func anInvalidReplyKeepsTheListAndSaysHowToAnswer() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         await h.dictate("seven")
         let prompt = try #require(waiting(h.hud.last))
         #expect(h.hud.last == .choice(prompt, status: .waiting(
@@ -249,7 +249,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func silenceLeavesTheQuestionInPlace() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         await h.dictate("   ")
         #expect(waiting(h.hud.last) != nil)
         #expect(h.prompt != nil)
@@ -259,7 +259,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func cancellingTheAnswerRecordingKeepsTheQuestion() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         await h.press()
         h.controller.cancel()
         #expect(waiting(h.hud.last) != nil)
@@ -268,7 +268,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func spokenCancelDismissesNeutrally() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         await h.dictate("cancel")
         #expect(h.hud.last == .hidden)
         #expect(h.prompt == nil)
@@ -296,7 +296,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func anotherShortcutCannotAnswerTheQuestion() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         await h.dictate("two", trigger: "right_command")
         #expect(h.system.openedURLs.isEmpty)
         #expect(h.captured.inserted.map { $0.trimmingCharacters(in: .whitespaces) } == ["two"])
@@ -305,7 +305,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func anotherShortcutDictatesAnythingButAnAnswerAndClosesTheQuestion() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         await h.dictate("see you tomorrow", trigger: "right_command")
         #expect(h.captured.inserted.map { $0.trimmingCharacters(in: .whitespaces) } == ["see you tomorrow"])
         #expect(h.system.openedURLs.isEmpty)
@@ -315,7 +315,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func switchingToAnotherAppDismissesButTheOriginalAppDoesNot() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         h.controller.noteAppActivated(bundleId: "com.apple.TextEdit")
         #expect(h.prompt != nil)
         h.controller.noteAppActivated(bundleId: "com.apple.Notes")
@@ -325,11 +325,11 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func lockingTheScreenOrEditingVoiceCommandsDismisses() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         h.controller.handleScreenLocked()
         #expect(h.prompt == nil)
 
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         h.controller.voiceCommandConfigurationChanged()
         #expect(h.prompt != nil)
         try VoiceCommandStore.write(VoiceCommandConfig(places: [personal]), to: h.supportDir)
@@ -340,7 +340,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func theIdleTimeoutHidesOnlyItsOwnQuestion() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         await h.waitForSleepers(1)
         h.timer.advance(29)
         try await h.settle()
@@ -357,7 +357,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func aConfigProblemAnnouncedDuringAQuestionKeepsTheListAndShowsTheMessageAsItsNote() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         let issue = ConfigFileIssue.unreadable("modes/email.toml", error: .invalid("Expected a value"), recovery: .ignored)
         h.controller.announceConfigProblems([issue])
@@ -367,7 +367,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func aFailureWithARepairActionDuringAnAnswerKeepsTheListAndTheAction() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         h.captured.micDenied = true
         h.controller.handleStart(triggerKey: "right_option")
@@ -380,7 +380,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func aConfigAdvisoryDuringAQuestionIsANoteWithoutAnAction() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         let issue = ConfigFileIssue.unusedKeys("dictionary.toml", [UnknownConfigKey(path: "wrods", suggestion: nil)])
         h.controller.announceConfigProblems([issue])
@@ -390,7 +390,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func aStaleTimerCannotHideANewerQuestion() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         await h.waitForSleepers(1)
         h.timer.advance(20)
         try await h.settle()
@@ -408,7 +408,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func theListStaysWhileTheModeIsStillBeingWorkedOut() async throws {
         let h = try Harness(places: [personal, work], titleScopedMode: true)
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let shownBefore = h.hud.states.count
         await h.dictate("two")
         let answering = h.hud.states.dropFirst(shownBefore)
@@ -443,7 +443,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func aClickedRowThatIsStillLookingUpTabsIsDroppedWhenANewDictationStarts() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         let gate = Gate()
         h.system.whileReadingTabs = { await gate.wait() }
@@ -463,7 +463,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func anAbandonedClickNeverHidesTheResultOfANewerDictation() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         let gate = Gate()
         h.system.whileReadingTabs = { await gate.wait() }
@@ -485,7 +485,7 @@ struct VoiceCommandChoiceWiringTests {
     @Test(arguments: ClickStop.allCases)
     func aClickedRowThatIsStillLookingUpTabsStopsWhenVoiceCommandsCanNoLongerRun(_ stop: ClickStop) async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         let gate = Gate()
         h.system.whileReadingTabs = { await gate.wait() }
@@ -512,7 +512,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func aSpokenAnswerStillLookingUpTabsStopsWhenTheSystemSleeps() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         _ = try #require(h.prompt)
         let gate = Gate()
         h.system.whileReadingTabs = { await gate.wait() }
@@ -533,7 +533,7 @@ struct VoiceCommandChoiceWiringTests {
         let h = try Harness(places: [personal, work])
         let gate = Gate()
         h.engine.whileTranscribing = { await gate.wait() }
-        h.engine.text = "switch to mail"
+        h.engine.text = "open mail"
         await h.press()
         h.controller.handleCommit()
         for _ in 0..<500 where !gate.entered { await Task.yield() }
@@ -547,13 +547,13 @@ struct VoiceCommandChoiceWiringTests {
         #expect(!h.hud.states.contains { if case .choice = $0 { true } else { false } })
 
         h.engine.whileTranscribing = nil
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         #expect(h.prompt != nil)
     }
 
     @Test func aSpokenCommandRecordsTheReplacementsThatShapedIt() async throws {
         let h = try Harness(places: [personal], replacements: [.init(heard: "male", replace: "mail", regex: false)])
-        await h.dictate("switch to male")
+        await h.dictate("open male")
         #expect(h.system.openedURLs.map(\.0) == ["https://mail.example.net/"])
         h.usage.flush()
         #expect(h.usage.snapshot().rules["mode:\(Mode.voiceCommandsId)|l|male"]?.count == 1)
@@ -563,8 +563,8 @@ struct VoiceCommandChoiceWiringTests {
         let h = try Harness(
             places: [personal, work],
             replacements: [.init(heard: "male", replace: "mail", regex: false), .init(heard: "zork", replace: "nowhere", regex: false)])
-        await h.dictate("switch to zork")
-        await h.dictate("switch to male")
+        await h.dictate("open zork")
+        await h.dictate("open male")
         #expect(h.prompt != nil)
         h.usage.flush()
         #expect(h.usage.snapshot().rules["mode:\(Mode.voiceCommandsId)|l|zork"] == nil)
@@ -573,7 +573,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func aChoiceThatCannotBeClaimedIsClosedInTheRunnerToo() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         _ = try #require(h.runner.claimChoice())
         await h.press()
         #expect(h.runner.pendingChoice == nil)
@@ -583,7 +583,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func clickingARowRunsItAndCompletesTheQuestionInHistory() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         h.controller.chooseVoiceCommand(choice: prompt.id, candidate: prompt.rows[1].identity)
         try await h.settle()
@@ -593,7 +593,7 @@ struct VoiceCommandChoiceWiringTests {
         #expect(entries.count == 1)
         let entry = try #require(entries.first)
         #expect(entry.outcome == .command)
-        #expect(entry.result.hasPrefix("Selected Work Mail for \u{201C}switch to mail\u{201D}: "))
+        #expect(entry.result.hasPrefix("Selected Work Mail for \u{201C}open mail\u{201D}: "))
         h.controller.chooseVoiceCommand(choice: prompt.id, candidate: prompt.rows[0].identity)
         try await h.settle()
         #expect(h.system.openedURLs.count == 1)
@@ -601,7 +601,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func clickingDuringAnAnswerRunsOnlyTheClickedRow() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         h.engine.text = "two"
         await h.press()
@@ -696,7 +696,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func theCancelButtonDismissesAndMarksTheQuestion() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         h.controller.cancelVoiceCommandChoice(choice: prompt.id)
         try await h.settle()
@@ -707,7 +707,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func historyOffStillAsksButWritesNothing() async throws {
         let h = try Harness(places: [personal, work], historyEnabled: false)
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         await h.dictate("two")
         #expect(h.history.entries().isEmpty)
         #expect(h.system.openedURLs.count == 1)
@@ -716,13 +716,14 @@ struct VoiceCommandChoiceWiringTests {
     @Test func goBackReturnsToTheAppOfTheOriginalCommand() async throws {
         let h = try Harness(places: [personal, work])
         h.system.running.append(VoiceCommandCatalog.App(name: "TextEdit", bundleId: "com.apple.TextEdit"))
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         await h.dictate("two")
         #expect(h.runner.backTarget == VoiceCommandOrigin(bundleId: "com.apple.TextEdit", pid: 1))
     }
 
-    private static let notACommand = "Not a command. Say the name of a saved command. You can also say \u{201C}switch to\u{201D} "
-        + "or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}."
+    private static let notACommand = "Not a command. Say the name of a saved command. You can also say \u{201C}open\u{201D} "
+        + "an app or place, \u{201C}switch to\u{201D} one that\u{2019}s already open, \u{201C}run\u{201D} a script or shortcut, "
+        + "or \u{201C}go back\u{201D}."
     private static let retryNote = "Choose 1\u{2013}2, say \u{201C}cancel\u{201D}, or give a new command."
     nonisolated private static let secureTarget = TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 1, isSecureField: true)
     nonisolated private static let movedTarget = TargetSnapshot(bundleId: "com.example.Other", pid: 2)
@@ -736,7 +737,9 @@ struct VoiceCommandChoiceWiringTests {
         #expect(entry.transformed == "Witch too mail")
         #expect(entry.outcome == .commandNeedsChoice)
         await h.dictate("two")
-        #expect(h.system.openedURLs.map(\.0) == ["https://inbox.example.org/"])
+        #expect(h.system.openedURLs.isEmpty)
+        #expect(h.hud.last == .error(
+            message: "No matching tab is open. Say \u{201C}open Work Mail\u{201D} to open the saved link.", action: nil))
     }
 
     @Test func anUnrecognizedCommandShowsAShortTitleAndWhatTheSpeechModelHeard() async throws {
@@ -803,7 +806,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func anUnrecognizedAnswerReplacesTheNoteWithWhatWasHeardAndKeepsTheList() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         await h.dictate("tube")
         #expect(h.hud.last == .choice(prompt, status: .waiting(note: nil, heard: HeardExcerpt(heard: "tube"))))
@@ -816,7 +819,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func anEarlierExcerptIsNeverRestoredByALaterTake() async throws {
         let h = try Harness(places: [personal, work])
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         await h.dictate("tube")
         await h.press()
@@ -834,7 +837,7 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func aSecureTargetKeepsTheOrdinaryRetryNote() async throws {
         let h = try Harness(places: [personal, work], target: Self.secureTarget)
-        await h.dictate("switch to mail")
+        await h.dictate("open mail")
         let prompt = try #require(h.prompt)
         await h.dictate("tube")
         #expect(h.hud.last == .choice(prompt, status: .waiting(note: Self.retryNote)))

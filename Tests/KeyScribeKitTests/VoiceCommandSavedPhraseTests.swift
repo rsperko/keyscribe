@@ -75,7 +75,7 @@ struct VoiceCommandSavedPhraseTests {
         #expect(resolve("Web hooks.", places: [channel])
                 == .action(.place(channel, .openURL("slack://channel?team=T1&id=C1", browser: nil))))
         #expect(resolve("webhooks", places: [channel]) == .notACommand)
-        #expect(resolve("switch to web hooks", places: [channel])
+        #expect(resolve("open web hooks", places: [channel])
                 == .action(.place(channel, .openURL("slack://channel?team=T1&id=C1", browser: nil))))
         #expect(resolve("web hooks please", places: [channel]) == .takesNoText("Webhooks and Callbacks"))
     }
@@ -217,11 +217,11 @@ struct VoiceCommandIdentityTests {
         var renamed = deploy
         renamed.name = "Release"
         let catalog = VoiceCommandCatalog(scripts: [renamed])
-        #expect(VoiceCommandResolver.resolve(.script(deploy), text: "prod", catalog: catalog)
+        #expect(VoiceCommandResolver.resolve(.script(deploy), text: "prod", reach: .opening, catalog: catalog)
                 == .action(.script(renamed, arguments: ["prod"])))
         var changed = renamed
         changed.action = .program(["/bin/other", "{text}"])
-        #expect(VoiceCommandResolver.resolve(.script(deploy), text: "prod", catalog: VoiceCommandCatalog(scripts: [changed]))
+        #expect(VoiceCommandResolver.resolve(.script(deploy), text: "prod", reach: .opening, catalog: VoiceCommandCatalog(scripts: [changed]))
                 == .unavailable("Deploy"))
     }
 }
@@ -271,7 +271,10 @@ struct VoiceCommandConflictTests {
                 == ["Saying \u{201C}go back\u{201D} will run this command instead of returning to the previous window."])
         let open = VoiceCommandPlace(name: "Open", target: .app(bundleId: "com.example.open"))
         #expect(VoiceCommandConfig().conflicts(for: .place(open))
-                == ["Saying \u{201C}open \u{2026}\u{201D} will reach this command instead of switching apps. Say \u{201C}switch to \u{2026}\u{201D} to switch apps."])
+                == ["Saying \u{201C}open \u{2026}\u{201D} will reach this command instead of opening an app or place."])
+        let switchTo = VoiceCommandPlace(name: "Switch to", target: .app(bundleId: "com.example.switch"))
+        #expect(VoiceCommandConfig().conflicts(for: .place(switchTo))
+                == ["Saying \u{201C}switch to \u{2026}\u{201D} will reach this command instead of switching to an open app or place."])
         let run = VoiceCommandScript(name: "Run", run: ["/bin/run"])
         #expect(VoiceCommandConfig().conflicts(for: .script(run))
                 == ["Saying \u{201C}run \u{2026}\u{201D} will reach this command instead of your other actions."])
@@ -378,7 +381,7 @@ struct VoiceCommandExampleTests {
 
     @Test func aReplacementThatTurnsAPlaceIntoAVerbStillFindsIt() {
         let mail = VoiceCommandPlace(name: "Mail", target: .app(bundleId: "com.apple.mail"))
-        let example = VoiceCommandExample.make(for: .place(mail), readAs: { "switch to " + $0 }, appName: { _ in "Mail" })
+        let example = VoiceCommandExample.make(for: .place(mail), readAs: { "open " + $0 }, appName: { _ in "Mail" })
         #expect(example == VoiceCommandExample(heard: "mail", result: "Brings Mail to the front, opening it if needed."))
     }
 

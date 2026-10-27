@@ -128,6 +128,7 @@ final class HUDController: HUDPresenting {
                 switch action {
                 case .openMicrophoneSettings: Permissions.openSettings(.microphone)
                 case .openAccessibilitySettings: Permissions.openSettings(.accessibility)
+                case .openAutomationSettings: Permissions.openSettings(.automation)
                 case .openSpeechModels: self?.onOpenSpeechModels?()
                 }
             },

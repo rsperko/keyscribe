@@ -78,7 +78,7 @@ struct VoiceCommandWindowResolverTests {
         #expect(resolve("switch to visual studio code", running: [code], windows: .complete([named])) == .action(.app(code)))
         let place = VoiceCommandPlace(name: "Budget", target: .app(bundleId: code.bundleId))
         let budget = window("Budget", app: chrome)
-        #expect(resolve("switch to budget", places: [place], windows: .complete([budget]))
+        #expect(resolve("open budget", places: [place], windows: .complete([budget]))
                 == .action(.place(place, .app(bundleId: code.bundleId))))
     }
 
@@ -93,7 +93,8 @@ struct VoiceCommandWindowResolverTests {
         let studio = App(name: "Android Studio", bundleId: "com.google.android.studio")
         let doc = window("Studio \u{2014} Notes")
         #expect(resolve("switch to studio", installed: [studio], windows: .complete([doc])) == .action(.window(doc)))
-        #expect(resolve("switch to studio", installed: [studio], windows: .complete([])) == .action(.app(studio)))
+        #expect(resolve("open studio", installed: [studio], windows: .complete([])) == .action(.app(studio)))
+        #expect(resolve("switch to studio", installed: [studio], windows: .complete([])) == .noMatch("studio"))
     }
 
     @Test func windowsAreReadOnlyWhenTheEarlierTiersMiss() {
@@ -163,7 +164,7 @@ struct VoiceCommandWindowResolverTests {
     @Test func aChosenWindowResolvesToItselfEvenIfNamesChanged() {
         let chosen = window("Budget", id: "cg:7")
         let renamed = VoiceCommandCatalog(runningApps: [App(name: "Budget", bundleId: "com.example.budget")])
-        #expect(VoiceCommandResolver.resolve(.window(chosen), text: "", catalog: renamed) == .action(.window(chosen)))
+        #expect(VoiceCommandResolver.resolve(.window(chosen), text: "", reach: .opening, catalog: renamed) == .action(.window(chosen)))
     }
 
     @Test func windowCopy() {

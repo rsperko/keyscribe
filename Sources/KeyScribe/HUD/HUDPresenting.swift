@@ -6,12 +6,14 @@ import KeyScribeKit
 enum HUDErrorAction: Equatable {
     case openMicrophoneSettings
     case openAccessibilitySettings
+    case openAutomationSettings
     case openSpeechModels
 
     var buttonTitle: String {
         switch self {
         case .openMicrophoneSettings: "Open Microphone Settings"
         case .openAccessibilitySettings: "Open Accessibility Settings"
+        case .openAutomationSettings: "Open Automation Settings"
         case .openSpeechModels: "Open Speech Models"
         }
     }

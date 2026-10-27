@@ -28,7 +28,7 @@ struct VoiceCommandChoiceRunnerTests {
     }
 
     private func ask(_ runner: VoiceCommandRunner, places: [VoiceCommandPlace]? = nil) async -> VoiceCommandPendingChoice? {
-        let outcome = await runner.run(transcript: "switch to mail", places: places ?? [personal, work], origin: textEdit)
+        let outcome = await runner.run(transcript: "open mail", places: places ?? [personal, work], origin: textEdit)
         guard case .needsChoice(let pending) = outcome else { return nil }
         return pending
     }
@@ -47,7 +47,7 @@ struct VoiceCommandChoiceRunnerTests {
         let pending = try #require(await ask(runner))
         #expect(pending.rows.map(\.name) == ["Personal Mail", "Work Mail"])
         #expect(pending.rows.map(\.detail) == ["Safari \u{00B7} mail.example.net", "Google Chrome \u{00B7} inbox.example.org"])
-        #expect(pending.request == "switch to mail")
+        #expect(pending.request == "open mail")
         #expect(runner.pendingChoice == pending)
         #expect(system.opened.isEmpty && system.openedURLs.isEmpty && system.focused.isEmpty)
     }
@@ -58,7 +58,7 @@ struct VoiceCommandChoiceRunnerTests {
         let reply = await answer(runner, "the second one")
         guard case .selected(let selection) = reply else { Issue.record("expected a selection, got \(String(describing: reply))"); return }
         #expect(selection.name == "Work Mail")
-        #expect(selection.request == "switch to mail")
+        #expect(selection.request == "open mail")
         #expect(system.openedURLs.map(\.0) == ["https://inbox.example.org/"])
         #expect(runner.backTarget == textEdit)
         #expect(runner.pendingChoice == nil)
@@ -79,21 +79,44 @@ struct VoiceCommandChoiceRunnerTests {
         _ = try #require(await ask(runner))
         let reply = await answer(runner, "two", places: [personal])
         #expect(reply == .selected(VoiceCommandSelection(
-            name: "Work Mail", request: "switch to mail",
+            name: "Work Mail", request: "open mail",
             outcome: .failed(message: VoiceCommandRunner.unavailableMessage("Work Mail")))))
         #expect(system.openedURLs.isEmpty)
     }
 
-    @Test func aQuitButInstalledAppStillLaunches() async throws {
+    @Test func anAppThatQuitWhileChoosingLaunchesOnlyWhenOpening() async throws {
+        let notesA = VoiceCommandCatalog.App(name: "Notes Alpha", bundleId: "com.example.a")
+        let notesB = VoiceCommandCatalog.App(name: "Notes Beta", bundleId: "com.example.b")
+        for (verb, launches) in [("open", true), ("switch to", false)] {
+            let (runner, system, _) = make()
+            system.running = [notesA, notesB]
+            system.installed = [notesA, notesB]
+            let outcome = await runner.run(transcript: "\(verb) notes", places: [], origin: textEdit)
+            guard case .needsChoice = outcome else { Issue.record("expected a choice"); return }
+            system.running = []
+            let reply = await answer(runner, "2", places: [])
+            #expect(system.opened == (launches ? [notesB.bundleId] : []))
+            #expect(system.activatedPids.isEmpty)
+            if !launches {
+                #expect(reply == .selected(VoiceCommandSelection(name: "Notes Beta", request: "switch to notes", outcome: .failed(
+                    message: "Notes Beta isn\u{2019}t running. Say \u{201C}open Notes Beta\u{201D} to start it."))))
+            }
+        }
+    }
+
+    @Test func aSwitchChoiceKeepsItsReachForAClickedRow() async throws {
         let (runner, system, _) = make()
         let notesA = VoiceCommandCatalog.App(name: "Notes Alpha", bundleId: "com.example.a")
         let notesB = VoiceCommandCatalog.App(name: "Notes Beta", bundleId: "com.example.b")
         system.running = [notesA, notesB]
-        let outcome = await runner.run(transcript: "switch to notes", places: [], origin: textEdit)
-        guard case .needsChoice = outcome else { Issue.record("expected a choice"); return }
-        system.running = []
-        _ = await answer(runner, "2", places: [])
-        #expect(system.opened == [notesB.bundleId])
+        guard case .needsChoice(let pending) = await runner.run(transcript: "switch to notes", places: [], origin: textEdit) else {
+            Issue.record("expected a choice"); return
+        }
+        #expect(pending.choice.reach == .running)
+        system.running = [notesA]
+        _ = await runner.runChoice(pending, candidate: pending.rows[1].identity, places: [], scripts: [])
+        #expect(system.opened.isEmpty)
+        #expect(system.activatedPids.isEmpty)
     }
 
     @Test func aFreshCommandReplacesTheChoice() async throws {
@@ -131,7 +154,7 @@ struct VoiceCommandChoiceRunnerTests {
     @Test func spokenCancelDismissesWithoutRunningAnything() async throws {
         let (runner, system, _) = make()
         _ = try #require(await ask(runner))
-        #expect(await answer(runner, "never mind") == .cancelled(request: "switch to mail"))
+        #expect(await answer(runner, "never mind") == .cancelled(request: "open mail"))
         #expect(runner.pendingChoice == nil)
         #expect(system.openedURLs.isEmpty)
     }

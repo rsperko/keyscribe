@@ -68,7 +68,8 @@ struct VoiceCommandSidebarRunnerTests {
         _ = await runner.run(transcript: "switch to slack", places: [work], origin: nil)
         _ = await runner.run(transcript: "work", places: [work], origin: nil)
         #expect(system.sidebarReads.isEmpty)
-        #expect(system.opened == [slackId, slackId])
+        #expect(system.activatedPids == [system.runningPid(bundleId: slackId)])
+        #expect(system.opened == [slackId])
     }
 
     @Test func anAppThatIsNotRunningIsOpenedAndThenSearched() async {
@@ -171,8 +172,15 @@ struct VoiceCommandSidebarRunnerTests {
     @Test func thePreviewNeverOpensAClosedBrowser() async {
         let (runner, system) = make(isPreview: true)
         let chromeId = closedChrome(system)
-        #expect(await runner.resolve("open chrome github", places: []) == .noTabMatch("github", browser: chromeId))
+        #expect(await runner.resolve("open chrome github", places: []) == .uncheckedUntilOpened(app: chromeId, find: "github"))
         #expect(system.opened.isEmpty)
+    }
+
+    @Test func thePreviewOfARunningBrowserStillReportsAMiss() async {
+        let (runner, system) = make(isPreview: true)
+        let chromeId = closedChrome(system)
+        system.running = [VoiceCommandCatalog.App(name: "Chrome", bundleId: chromeId)]
+        #expect(await runner.resolve("open chrome github", places: []) == .noTabMatch("github", browser: chromeId))
     }
 
     @Test func aBrowserThatRefusesControlWhileStartingStopsAtOnce() async {
@@ -180,7 +188,7 @@ struct VoiceCommandSidebarRunnerTests {
         let chromeId = closedChrome(system)
         system.refused = [chromeId]
         #expect(await runner.run(transcript: "open chrome github", places: [], origin: nil)
-                == .failed(message: VoiceCommandRunner.notAllowedMessage(browser: "Chrome")))
+                == .failed(message: VoiceCommandRunner.notAllowedMessage(browser: "Chrome"), action: .openAutomationSettings))
         #expect(system.tabReads == [chromeId])
     }
 

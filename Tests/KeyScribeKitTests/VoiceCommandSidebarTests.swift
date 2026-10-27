@@ -115,8 +115,8 @@ struct VoiceCommandSidebarTests {
 
     @Test func choosingAnAppSearchesItForTheRestOfThePhrase() {
         let notes = App(name: "Notes", bundleId: "com.apple.Notes")
-        #expect(VoiceCommandResolver.resolve(.app(notes), text: "groceries", catalog: catalog()) == .needsSidebar("com.apple.Notes"))
-        #expect(VoiceCommandResolver.resolve(.app(notes), text: "", catalog: catalog()) == .action(.app(notes)))
+        #expect(VoiceCommandResolver.resolve(.app(notes), text: "groceries", reach: .opening, catalog: catalog()) == .needsSidebar("com.apple.Notes"))
+        #expect(VoiceCommandResolver.resolve(.app(notes), text: "", reach: .opening, catalog: catalog()) == .action(.app(notes)))
     }
 
     @Test func aBrowserIsSearchedByItsOpenTabs() {

@@ -1,6 +1,8 @@
 import AppKit
 import ApplicationServices
+import Carbon
 import KeyScribeKit
+import OSAKit
 
 struct VoiceCommandOrigin: Equatable, Sendable {
     let bundleId: String
@@ -75,8 +77,22 @@ enum BrowserTabsReply: Equatable, Sendable {
     case unavailable
 }
 
+struct ScriptError: Equatable, Sendable, ExpressibleByStringLiteral {
+    var line: String
+    var blocksAutomation = false
+
+    init(line: String, blocksAutomation: Bool = false) {
+        self.line = line
+        self.blocksAutomation = blocksAutomation
+    }
+
+    init(stringLiteral line: String) {
+        self.line = line
+    }
+}
+
 enum ScriptRun: Equatable, Sendable {
-    case finished(status: Int32, lastError: String?, report: ScriptReport = ScriptReport())
+    case finished(status: Int32, lastError: ScriptError?, report: ScriptReport = ScriptReport())
     case stillRunning
     case notRunnable
     case couldNotStart(String)
@@ -110,6 +126,7 @@ protocol VoiceCommandSystem: AnyObject {
     func tabBrowsers() async -> Set<String>
     func appName(forBundleId bundleId: String) -> String?
     func isRunning(bundleId: String) -> Bool
+    func runningPid(bundleId: String) -> Int32?
     func isInstalled(bundleId: String) -> Bool
     func openApp(bundleId: String) async -> Bool
     func focusTab(_ tab: VoiceCommandCatalog.Tab) async -> TabFocusResult
@@ -234,8 +251,9 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         _ transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = [],
         stillWanted: @MainActor () -> Bool = { true }
     ) async -> VoiceCommandResolution {
+        let reach = Self.reach(of: transcript, places: places, scripts: scripts)
         if Self.isSavedPhrase(transcript, places: places, scripts: scripts) {
-            return await reading(await catalog(places: places, scripts: scripts), stillWanted: stillWanted) {
+            return await reading(await catalog(places: places, scripts: scripts), reach: reach, stillWanted: stillWanted) {
                 VoiceCommandResolver.resolve(transcript, catalog: $0)
             }
         }
@@ -245,7 +263,11 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         let running = system.runningApps()
         let installed = VoiceCommandCatalog.reconciling(installed: await system.installedApps(), with: running)
         let catalog = await catalog(places: places, scripts: scripts, running: running, installed: installed)
-        return await reading(catalog, stillWanted: stillWanted) { VoiceCommandResolver.resolve(transcript, catalog: $0) }
+        return await reading(catalog, reach: reach, stillWanted: stillWanted) { VoiceCommandResolver.resolve(transcript, catalog: $0) }
+    }
+
+    static func reach(of transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript]) -> VoiceCommandReach {
+        VoiceCommandResolver.reach(transcript, catalog: VoiceCommandCatalog(places: places, scripts: scripts))
     }
 
     private func catalog(
@@ -259,24 +281,26 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     }
 
     private func reading(
-        _ start: VoiceCommandCatalog, stillWanted: @MainActor () -> Bool,
+        _ start: VoiceCommandCatalog, reach: VoiceCommandReach, stillWanted: @MainActor () -> Bool,
         _ resolve: (VoiceCommandCatalog) -> VoiceCommandResolution
     ) async -> VoiceCommandResolution {
         var catalog = start
         var tabRead: TabRead?
+        var unopened: String?
         while true {
             let resolution = resolve(catalog)
             switch resolution {
             case .needsWindows where catalog.windows == nil:
                 catalog.windows = await system.windows()
             case .needsTabs(let browser) where catalog.tabs == nil:
-                guard let read = await tabs(in: browser, stillWanted: stillWanted) else { return resolution }
+                if let browser, isPreview, wouldStart(browser, reach: reach) { unopened = browser }
+                guard let read = await tabs(in: browser, reach: reach, stillWanted: stillWanted) else { return resolution }
                 if let browser, read.refused.contains(browser) { return .browserNotAllowed(browser) }
                 if let browser, read.unavailable.contains(browser) { return resolution }
                 catalog.tabs = read.tabs
                 tabRead = read
             case .needsSidebar(let app) where catalog.sidebarItems == nil && !isPreview:
-                switch await sidebar(of: app, stillWanted: stillWanted) {
+                switch await sidebar(of: app, reach: reach, stillWanted: stillWanted) {
                 case .listing(let listing):
                     catalog.sidebarItems = listing.items
                 case .unreadable(let problem):
@@ -288,17 +312,24 @@ final class VoiceCommandRunner: VoiceCommandRunning {
                     if tabRead.refused.contains(destination) { return .browserNotAllowed(destination) }
                     if tabRead.unavailable.contains(destination) { return .needsTabs(browser: destination) }
                 }
+                if case .noTabMatch(let text, let browser?) = resolution, browser == unopened {
+                    return .uncheckedUntilOpened(app: browser, find: text)
+                }
+                if let tabRead, case .closed(.link(_, checkedTabs: true)) = resolution {
+                    if let refused = tabRead.refused.first { return .browserNotAllowed(refused) }
+                    if let unread = tabRead.unavailable.first { return .needsTabs(browser: unread) }
+                }
                 return resolution
             }
         }
     }
 
-    // Asking for something in an app that is not open opens it, then waits a bounded time for it to fill.
+    // Opening something in an app that is not open starts it, then waits a bounded time for it to fill.
     // A command abandoned meanwhile opens nothing more and stops waiting. A sidebar that stays empty for a
     // few reads is taken as empty rather than as still loading, so it reports what it shows.
-    private func sidebar(of app: String, stillWanted: @MainActor () -> Bool) async -> SidebarRead {
+    private func sidebar(of app: String, reach: VoiceCommandReach, stillWanted: @MainActor () -> Bool) async -> SidebarRead {
         let first = await system.sidebarItems(in: app)
-        guard case .unreadable(.notRunning) = first, stillWanted(), await launch(app) else { return first }
+        guard case .unreadable(.notRunning) = first, reach == .opening, stillWanted(), await launch(app) else { return first }
         let deadline = now() + Self.launchWaitSeconds
         var empties = 0
         while true {
@@ -331,10 +362,8 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     }
 
     // Only an empty list is worth waiting out while a browser starts; a refusal or a failed read will not change.
-    private func tabs(in browser: String?, stillWanted: @MainActor () -> Bool) async -> TabRead? {
-        guard let browser, findsInApps(), !isPreview, !system.isRunning(bundleId: browser) else {
-            return await system.browserTabs(in: browser)
-        }
+    private func tabs(in browser: String?, reach: VoiceCommandReach, stillWanted: @MainActor () -> Bool) async -> TabRead? {
+        guard let browser, !isPreview, wouldStart(browser, reach: reach) else { return await system.browserTabs(in: browser) }
         var read: TabRead? = TabRead(tabs: [])
         guard stillWanted(), await launch(browser) else { return read }
         let deadline = now() + Self.launchWaitSeconds
@@ -345,6 +374,14 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             guard let current = read, current.tabs.isEmpty, current.refused.isEmpty, current.unavailable.isEmpty else { break }
         }
         return read
+    }
+
+    private func wouldStart(_ browser: String, reach: VoiceCommandReach) -> Bool {
+        reach == .opening && findsInApps() && !system.isRunning(bundleId: browser)
+    }
+
+    nonisolated static func uncheckedMessage(app: String) -> String {
+        "\(app) isn\u{2019}t running, so the preview can\u{2019}t check its tabs."
     }
 
     func run(
@@ -359,6 +396,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             return .needsChoice(offer(choice, request: transcript, origin: origin, places: places, scripts: scripts))
         }
         return await run(resolution, origin: origin, asking: Asking(request: transcript, places: places, scripts: scripts),
+                         reach: Self.reach(of: transcript, places: places, scripts: scripts),
                          stillWanted: stillWanted, onLateResult: onLateResult)
     }
 
@@ -466,20 +504,22 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         if case .app(let app) = candidate, !system.isInstalled(bundleId: app.bundleId), !system.isRunning(bundleId: app.bundleId) {
             resolution = .unavailable(app.name)
         } else {
-            resolution = await reading(await catalog(places: places, scripts: scripts), stillWanted: stillWanted) {
-                VoiceCommandResolver.resolve(candidate, text: pending.choice.text, catalog: $0)
+            let reach = pending.choice.reach
+            let catalog = await catalog(places: places, scripts: scripts, running: system.runningApps())
+            resolution = await reading(catalog, reach: reach, stillWanted: stillWanted) {
+                VoiceCommandResolver.resolve(candidate, text: pending.choice.text, reach: reach, catalog: $0)
             }
         }
         guard stillWanted() else { return VoiceCommandSelection(name: candidate.name, request: pending.request, outcome: .abandoned) }
         let outcome = await run(resolution, origin: pending.origin,
                                 asking: Asking(request: pending.request, places: places, scripts: scripts),
-                                stillWanted: stillWanted, onLateResult: onLateResult)
+                                reach: pending.choice.reach, stillWanted: stillWanted, onLateResult: onLateResult)
         return VoiceCommandSelection(name: candidate.name, request: pending.request, outcome: outcome)
     }
 
     func run(
         _ resolution: VoiceCommandResolution, origin: VoiceCommandOrigin?, asking: Asking? = nil,
-        stillWanted: @MainActor () -> Bool = { true },
+        reach: VoiceCommandReach = .opening, stillWanted: @MainActor () -> Bool = { true },
         onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void = { _ in }
     ) async -> VoiceCommandOutcome {
         let origin = origin.flatMap { $0.bundleId == system.ownBundleId ? nil : $0 }
@@ -491,6 +531,10 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             return .failed(message: Self.notFoundMessage(target), kind: .nothingMatched)
         case .noMatch(let target):
             return .failed(message: Self.noMatchMessage(target), kind: .nothingMatched)
+        case .closed(let closed):
+            return .failed(message: closedMessage(closed))
+        case .uncheckedUntilOpened(let app, _):
+            return .failed(message: Self.uncheckedMessage(app: name(of: app)))
         case .noTabMatch(let target, let browser):
             return .failed(message: Self.noTabMatchMessage(target, browser: browser.map { system.appName(forBundleId: $0) ?? $0 }),
                            kind: .nothingMatched)
@@ -514,22 +558,24 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             let name = browser.flatMap(system.appName(forBundleId:)) ?? "The browser"
             return .failed(message: "\(name) did not list its open tabs, so no tab was opened.")
         case .browserNotAllowed(let browser):
-            return .failed(message: Self.notAllowedMessage(browser: system.appName(forBundleId: browser) ?? browser))
+            return .failed(
+                message: Self.notAllowedMessage(browser: system.appName(forBundleId: browser) ?? browser), action: .openAutomationSettings)
         case .scriptNeedsText(let name):
             return .failed(message: Self.needsTextMessage(script: name))
         case .takesNoText(let name):
             return .failed(message: Self.takesNoTextMessage(name))
         case .action(let action):
-            return await execute(action, origin: origin, asking: asking, stillWanted: stillWanted, onLateResult: onLateResult)
+            return await execute(
+                action, origin: origin, asking: asking, reach: reach, stillWanted: stillWanted, onLateResult: onLateResult)
         }
     }
 
     private func execute(
-        _ action: VoiceCommandAction, origin: VoiceCommandOrigin?, asking: Asking?, stillWanted: @MainActor () -> Bool,
-        onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
+        _ action: VoiceCommandAction, origin: VoiceCommandOrigin?, asking: Asking?, reach: VoiceCommandReach,
+        stillWanted: @MainActor () -> Bool, onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
     ) async -> VoiceCommandOutcome {
         let summary = action.summary(appName: system.appName(forBundleId:))
-        var command = action.command(appName: system.appName(forBundleId:))
+        var command = action.command(appName: system.appName(forBundleId:), reach: reach)
         let succeeded: Bool
         switch action {
         case .goBack:
@@ -555,7 +601,8 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             guard focus == .noResponse || stillWanted() else { return .abandoned }
             switch focus {
             case .focused:
-                succeeded = await system.openApp(bundleId: tab.browserBundleId)
+                guard let activated = bringForward(tab) else { return .failed(message: Self.tabGoneMessage, command: command) }
+                succeeded = activated
             case .noResponse:
                 let browser = system.appName(forBundleId: tab.browserBundleId) ?? "The browser"
                 return .failed(message: "\(browser) did not respond, so the tab was not brought forward.", command: command)
@@ -578,15 +625,22 @@ final class VoiceCommandRunner: VoiceCommandRunning {
                 return .failed(message: Self.sidebarNoResponseMessage(name(of: item.bundleId)), command: command)
             }
         case .app(let app):
-            succeeded = await system.openApp(bundleId: app.bundleId)
-        case .place(_, .app(let bundleId)):
-            succeeded = await system.openApp(bundleId: bundleId)
+            guard let opened = await bringForward(app.bundleId, reach: reach) else {
+                return .failed(message: closedMessage(.app(bundleId: app.bundleId, say: "open \(app.name)", find: nil)), command: command)
+            }
+            succeeded = opened
+        case .place(let place, .app(let bundleId)):
+            guard let opened = await bringForward(bundleId, reach: reach) else {
+                return .failed(message: closedMessage(.app(bundleId: bundleId, say: "open \(place.name)", find: nil)), command: command)
+            }
+            succeeded = opened
         case .place(let place, .tab(let tab)):
             let focus = await system.focusTab(tab)
             guard focus == .noResponse || stillWanted() else { return .abandoned }
             switch focus {
             case .focused:
-                succeeded = await system.openApp(bundleId: tab.browserBundleId)
+                guard let activated = bringForward(tab) else { return .failed(message: Self.tabGoneMessage, command: command) }
+                succeeded = activated
             case .noResponse:
                 let browser = system.appName(forBundleId: tab.browserBundleId) ?? "The browser"
                 return .failed(message: "\(browser) did not respond, so \(place.name) was not opened again.", command: command)
@@ -594,12 +648,18 @@ final class VoiceCommandRunner: VoiceCommandRunning {
                 guard case .url(let url) = place.target else {
                     return .failed(message: "Could not switch to \(summary).", command: command)
                 }
+                guard reach == .opening else {
+                    return .failed(message: closedMessage(.link(say: "open \(place.name)", checkedTabs: true)), command: command)
+                }
                 if let refusal = browserRefusal(place.browser, place: place) { return refusal }
                 command = VoiceCommandAction.place(place, .openURL(url, browser: place.browser))
                     .command(appName: system.appName(forBundleId:))
                 succeeded = await system.openURL(url, browser: place.browser)
             }
         case .place(let place, .openURL(let url, let browser)):
+            guard reach == .opening else {
+                return .failed(message: closedMessage(.link(say: "open \(place.name)", checkedTabs: !place.isAppLink)), command: command)
+            }
             if let refusal = browserRefusal(browser, place: place) { return refusal }
             if place.isAppLink, system.defaultBrowserId(for: url) == nil {
                 let scheme = URL(string: url)?.scheme ?? url
@@ -634,6 +694,37 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         }
     }
 
+    // Nil means the app is not running, which only `.running` reports instead of starting it.
+    private func bringForward(_ bundleId: String, reach: VoiceCommandReach) async -> Bool? {
+        if reach == .opening { return await system.openApp(bundleId: bundleId) }
+        guard let pid = system.runningPid(bundleId: bundleId) else { return nil }
+        return system.activate(pid: pid)
+    }
+
+    // A focused tab's browser is raised by its process, never by bundle, so one that quit is not restarted.
+    private func bringForward(_ tab: VoiceCommandCatalog.Tab) -> Bool? {
+        guard let pid = tab.pid ?? system.runningPid(bundleId: tab.browserBundleId),
+              system.isRunning(pid: pid, bundleId: tab.browserBundleId) else { return nil }
+        return system.activate(pid: pid)
+    }
+
+    private func closedMessage(_ closed: VoiceCommandClosed) -> String {
+        Self.closedMessage(closed, appName: name(of:))
+    }
+
+    nonisolated static func closedMessage(_ closed: VoiceCommandClosed, appName: (String) -> String) -> String {
+        switch closed {
+        case .app(let bundleId, let say, nil):
+            return "\(appName(bundleId)) isn\u{2019}t running. Say \u{201C}\(say)\u{201D} to start it."
+        case .app(let bundleId, let say, let find?):
+            return "\(appName(bundleId)) isn\u{2019}t running. Say \u{201C}\(say)\u{201D} to start it and find \(find)."
+        case .link(let say, true):
+            return "No matching tab is open. Say \u{201C}\(say)\u{201D} to open the saved link."
+        case .link(let say, false):
+            return "\u{201C}Switch to\u{201D} only uses what\u{2019}s already open. Say \u{201C}\(say)\u{201D} to open the saved link."
+        }
+    }
+
     private func goBack(to origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool) async -> VoiceCommandOutcome {
         let nothing = VoiceCommandOutcome.failed(message: "Nothing to go back to.")
         guard let back = backTarget else { return nothing }
@@ -665,8 +756,9 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             guard stillWanted() else { return .abandoned }
             succeeded = system.activate(pid: pid)
         } else {
-            guard system.isRunning(bundleId: back.bundleId) else { return nothing }
-            succeeded = await system.openApp(bundleId: back.bundleId)
+            guard let pid = system.runningPid(bundleId: back.bundleId) else { return nothing }
+            guard stillWanted() else { return .abandoned }
+            succeeded = system.activate(pid: pid)
         }
         guard succeeded else { return failure }
         backTarget = origin
@@ -786,9 +878,13 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             return .done(summary: script.name, command: command, report: report.message)
         case .stillRunning:
             return .started(summary: script.name, command: command)
+        case .finished(_, let lastError?, _) where lastError.blocksAutomation:
+            return .failed(
+                message: "\(script.name) couldn\u{2019}t control another app. Check Automation access for \(Branding.appName). Error: \(lastError.line)",
+                command: command, action: .openAutomationSettings)
         case .finished(let status, let lastError, let report):
             let exit = script.isShortcut ? "" : " (exit \(status))"
-            let reason = report.message?.text ?? lastError
+            let reason = report.message?.text ?? lastError?.line
             return .failed(message: "\(script.name) failed\(exit)" + (reason.map { ": \($0)" } ?? "."), command: command)
         case .notRunnable where script.isShortcut:
             return .failed(message: "Shortcuts could not be started from \(Branding.appName) on this Mac.", command: command)
@@ -962,6 +1058,10 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
         !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty
     }
 
+    func runningPid(bundleId: String) -> Int32? {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first { !$0.isTerminated }?.processIdentifier
+    }
+
     func isInstalled(bundleId: String) -> Bool {
         NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleId) != nil
     }
@@ -1076,8 +1176,12 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
         guard !Task.isCancelled else { return nil }
         var read = TabRead(tabs: [])
         if !consent.readable.isEmpty {
+            let pids = Dictionary(consent.readable.compactMap { id in runningPid(bundleId: id).map { (id, $0) } }) { first, _ in first }
             guard case .finished(let found) = await Self.scripts.run(within: Self.tabReadDeadline, { isCurrent in
-                Self.collectTabs(from: consent.readable, isCurrent: isCurrent) { BrowserScripting.tabs(of: $0, isCurrent: isCurrent) }
+                Self.collectTabs(from: consent.readable, isCurrent: isCurrent) { browser in
+                    guard let pid = pids[browser] else { return .tabs([]) }
+                    return BrowserScripting.tabs(of: browser, pid: pid, isCurrent: isCurrent)
+                }
             }) else {
                 Log.context.error("voice command: the browser tabs could not be read in time")
                 return nil
@@ -1111,7 +1215,8 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     }
 
     func focusTab(_ tab: VoiceCommandCatalog.Tab) async -> TabFocusResult {
-        switch await Self.scripts.run(within: Self.focusDeadline, { BrowserScripting.focus(tab, isCurrent: $0) }) {
+        guard let pid = tab.pid ?? runningPid(bundleId: tab.browserBundleId) else { return .gone }
+        switch await Self.scripts.run(within: Self.focusDeadline, { BrowserScripting.focus(tab, pid: pid, isCurrent: $0) }) {
         case .expired:
             Log.context.error("voice command: \(tab.browserBundleId, privacy: .public) did not answer the tab focus in time")
             return .noResponse
@@ -1234,10 +1339,10 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
 
     func frontTab(ofBrowser bundleId: String) async -> (url: String, title: String)? {
         let scan = await installedSnapshot()
-        guard isRunning(bundleId: bundleId), scan.tabBrowsers.contains(bundleId),
+        guard let pid = runningPid(bundleId: bundleId), scan.tabBrowsers.contains(bundleId),
               await AutomationConsent.settle([bundleId]).readable == [bundleId],
               case .finished(let tab) = await Self.scripts.run(within: Self.tabReadDeadline, {
-                  BrowserScripting.frontTab(of: bundleId, isCurrent: $0).map { FrontTab(url: $0.url, title: $0.title) }
+                  BrowserScripting.frontTab(of: bundleId, pid: pid, isCurrent: $0).map { FrontTab(url: $0.url, title: $0.title) }
               }), let tab else { return nil }
         return (tab.url, tab.title)
     }
@@ -1294,50 +1399,63 @@ enum BrowserScripting {
         }
     }
 
-    static func tabs(of bundleId: String, isCurrent: () -> Bool) -> BrowserTabsReply {
+    static func tabs(of bundleId: String, pid: Int32, isCurrent: () -> Bool) -> BrowserTabsReply {
         for shape in Shape.allCases {
             guard isCurrent() else { return .unavailable }
-            switch run(tabsSource(of: bundleId, shape: shape)) {
+            switch run(tabsSource(of: bundleId, shape: shape), pid: pid, isCurrent: isCurrent) {
             case .refused:
                 return .refused
+            case .gone:
+                return .tabs([])
             case .failed(let code) where code == timedOut:
                 return .unavailable
             case .failed:
                 continue
             case .value(let result):
                 guard result.numberOfItems == 2, let urls = result.atIndex(1), let titles = result.atIndex(2) else { continue }
-                return .tabs(parse(urls: urls, titles: titles, bundleId: bundleId))
+                return .tabs(parse(urls: urls, titles: titles, bundleId: bundleId, pid: pid))
             }
         }
         return .unavailable
     }
 
     static func tabsSource(of bundleId: String, shape: Shape) -> String {
-        bounded("""
-        tell application id \(literal(bundleId)) to return {URL of every tab of every window, \
-        \(shape.titleProperty) of every tab of every window}
+        pinned(to: bundleId, """
+        return {URL of every tab of every window, \(shape.titleProperty) of every tab of every window}
         """)
     }
 
     static func frontTabSource(of bundleId: String, shape: Shape) -> String {
         let tabRef = shape == .chromium ? "active tab of front window" : "current tab of front window"
-        return bounded("""
-        tell application id \(literal(bundleId)) to return {URL of \(tabRef), \(shape.titleProperty) of \(tabRef)}
-        """)
+        return pinned(to: bundleId, "return {URL of \(tabRef), \(shape.titleProperty) of \(tabRef)}")
     }
 
-    private static func bounded(_ statements: String) -> String {
-        "with timeout of \(replyTimeout) seconds\n\(statements)\nend timeout"
+    // AppleScript starts any app a script tells that is not running, so the script tells only itself and
+    // `run(_:pid:)` sends each event to the browser's process; a quit browser fails instead of restarting.
+    // Tab browsers have a static dictionary, so reading their terms does not start one either.
+    private static func pinned(to bundleId: String, _ statements: String) -> String {
+        """
+        with timeout of \(replyTimeout) seconds
+        using terms from application id \(literal(bundleId))
+        tell current application
+        \(statements)
+        end tell
+        end using terms from
+        end timeout
+        """
     }
 
-    static func focus(_ tab: VoiceCommandCatalog.Tab, isCurrent: () -> Bool) -> Bool {
+    static func focus(_ tab: VoiceCommandCatalog.Tab, pid: Int32, isCurrent: () -> Bool) -> Bool {
         let bodies = [
             "set active tab index of window w to t",
             "set current tab of window w to tab t of window w",
         ]
         return firstAnswer(bodies.map { focusSource(tab, selecting: $0) }, isCurrent: isCurrent) { source in
-            guard case .value(let result) = run(source) else { return nil }
-            return result.booleanValue
+            switch run(source, pid: pid, isCurrent: isCurrent) {
+            case .value(let result): return result.booleanValue
+            case .gone: return false
+            case .refused, .failed: return nil
+            }
         } ?? false
     }
 
@@ -1350,8 +1468,7 @@ enum BrowserScripting {
     }
 
     static func focusSource(_ tab: VoiceCommandCatalog.Tab, selecting body: String) -> String {
-        sameURLHandler + bounded("""
-        tell application id \(literal(tab.browserBundleId))
+        sameURLHandler + pinned(to: tab.browserBundleId, """
             set wanted to \(literal(tab.url))
             set found to missing value
             if (count of windows) \u{2265} \(tab.window) then
@@ -1376,7 +1493,6 @@ enum BrowserScripting {
             \(body)
             set index of window w to 1
             return true
-        end tell
         """)
     }
 
@@ -1393,15 +1509,17 @@ enum BrowserScripting {
         "\"" + value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
     }
 
-    static func frontTab(of bundleId: String, isCurrent: () -> Bool) -> (url: String, title: String)? {
+    static func frontTab(of bundleId: String, pid: Int32, isCurrent: () -> Bool) -> (url: String, title: String)? {
         firstAnswer(Shape.allCases.map { frontTabSource(of: bundleId, shape: $0) }, isCurrent: isCurrent) { source in
-            guard case .value(let result) = run(source), result.numberOfItems == 2,
+            guard case .value(let result) = run(source, pid: pid, isCurrent: isCurrent), result.numberOfItems == 2,
                   let url = result.atIndex(1)?.stringValue, !url.isEmpty else { return nil }
             return (url, result.atIndex(2)?.stringValue ?? "")
         }
     }
 
-    private static func parse(urls: NSAppleEventDescriptor, titles: NSAppleEventDescriptor, bundleId: String) -> [VoiceCommandCatalog.Tab] {
+    private static func parse(
+        urls: NSAppleEventDescriptor, titles: NSAppleEventDescriptor, bundleId: String, pid: Int32
+    ) -> [VoiceCommandCatalog.Tab] {
         var tabs: [VoiceCommandCatalog.Tab] = []
         guard urls.numberOfItems > 0 else { return tabs }
         for w in 1...urls.numberOfItems {
@@ -1410,7 +1528,7 @@ enum BrowserScripting {
             for t in 1...windowURLs.numberOfItems {
                 guard let url = windowURLs.atIndex(t)?.stringValue, !url.isEmpty else { continue }
                 let title = windowTitles?.atIndex(t)?.stringValue ?? ""
-                tabs.append(VoiceCommandCatalog.Tab(browserBundleId: bundleId, window: w, tab: t, url: url, title: title))
+                tabs.append(VoiceCommandCatalog.Tab(browserBundleId: bundleId, window: w, tab: t, url: url, title: title, pid: pid))
             }
         }
         return tabs
@@ -1419,18 +1537,60 @@ enum BrowserScripting {
     private enum Reply {
         case value(NSAppleEventDescriptor)
         case refused
+        case gone
         case failed(Int)
     }
 
     private static let notPermitted = -1743
     private static let timedOut = -1712
 
-    private static func run(_ source: String) -> Reply {
-        guard let script = NSAppleScript(source: source) else { return .failed(0) }
-        var error: NSDictionary?
-        let result = script.executeAndReturnError(&error)
-        guard let error else { return .value(result) }
-        let code = (error[NSAppleScript.errorNumber] as? Int) ?? 0
-        return code == notPermitted ? .refused : .failed(code)
+    private final class PinnedProcess {
+        let pid: pid_t
+        let isCurrent: () -> Bool
+        var gone = false
+        init(pid: pid_t, isCurrent: @escaping () -> Bool) {
+            self.pid = pid
+            self.isCurrent = isCurrent
+        }
+    }
+
+    // A command abandoned mid-script sends nothing more, so a slow browser cannot be acted on after the user moved on.
+    private static let sendToProcess: OSASendUPP = { event, reply, mode, _, timeout, _, _, refCon in
+        guard let event, let reply, let refCon else { return OSErr(paramErr) }
+        let process = Unmanaged<PinnedProcess>.fromOpaque(refCon).takeUnretainedValue()
+        guard process.isCurrent() else { return OSErr(userCanceledErr) }
+        var addressed = AppleEvent()
+        var status = AEDuplicateDesc(event, &addressed)
+        guard status == noErr else { return status }
+        defer { AEDisposeDesc(&addressed) }
+        var pid = process.pid
+        var address = AEAddressDesc()
+        status = AECreateDesc(DescType(typeKernelProcessID), &pid, MemoryLayout<pid_t>.size, &address)
+        guard status == noErr else { return status }
+        defer { AEDisposeDesc(&address) }
+        status = AEPutAttributeDesc(&addressed, AEKeyword(keyAddressAttr), &address)
+        guard status == noErr else { return status }
+        let sent = AESendMessage(&addressed, reply, mode, Int(timeout))
+        if sent == procNotFound || sent == connectionInvalid { process.gone = true }
+        return OSErr(truncatingIfNeeded: sent)
+    }
+
+    private static func run(_ source: String, pid: Int32, isCurrent: () -> Bool) -> Reply {
+        guard let language = OSALanguage(forName: "AppleScript") else { return .failed(0) }
+        let instance = OSALanguageInstance(language: language)
+        return withoutActuallyEscaping(isCurrent) { isCurrent in
+            let process = PinnedProcess(pid: pid, isCurrent: isCurrent)
+            return withExtendedLifetime(process) {
+                guard OSASetSendProc(instance.componentInstance, sendToProcess, Unmanaged.passUnretained(process).toOpaque()) == noErr
+                else { return .failed(0) }
+                let script = OSAScript(source: source, from: nil, languageInstance: instance, using: [])
+                var error: NSDictionary?
+                let result = script.executeAndReturnError(&error)
+                if process.gone { return .gone }
+                if let result, error == nil { return .value(result) }
+                let code = (error?[OSAScriptErrorNumber] as? Int) ?? 0
+                return code == notPermitted ? .refused : .failed(code)
+            }
+        }
     }
 }

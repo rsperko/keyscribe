@@ -107,37 +107,37 @@ struct VoiceCommandChoiceTests {
     @Test func aChosenPlaceResolvesOnItsOwnAgainstTheCurrentTabs() {
         let tab = Tab(browserBundleId: "com.google.Chrome", window: 1, tab: 3, url: "https://user:secret@inbox.example.org/inbox?folder=all", title: "Inbox")
         let catalog = VoiceCommandCatalog(places: [personal, work], tabs: [tab])
-        #expect(VoiceCommandResolver.resolve(.place(work), text: "", catalog: catalog) == .action(.place(work, .tab(tab))))
-        #expect(VoiceCommandResolver.resolve(.place(personal), text: "", catalog: catalog)
+        #expect(VoiceCommandResolver.resolve(.place(work), text: "", reach: .opening, catalog: catalog) == .action(.place(work, .tab(tab))))
+        #expect(VoiceCommandResolver.resolve(.place(personal), text: "", reach: .opening, catalog: catalog)
                 == .action(.place(personal, .openURL("https://mail.example.net/u/0", browser: "com.apple.Safari"))))
-        #expect(VoiceCommandResolver.resolve(.place(work), text: "", catalog: VoiceCommandCatalog(places: [work]))
+        #expect(VoiceCommandResolver.resolve(.place(work), text: "", reach: .opening, catalog: VoiceCommandCatalog(places: [work]))
                 == .needsTabs(browser: "com.google.Chrome"))
     }
 
     @Test func aChosenEntryThatWasRemovedOrRepointedIsUnavailable() {
         var moved = work
         moved.target = .url("https://elsewhere.example.org/")
-        #expect(VoiceCommandResolver.resolve(.place(work), text: "", catalog: VoiceCommandCatalog(places: [personal]))
+        #expect(VoiceCommandResolver.resolve(.place(work), text: "", reach: .opening, catalog: VoiceCommandCatalog(places: [personal]))
                 == .unavailable("Work Mail"))
-        #expect(VoiceCommandResolver.resolve(.place(work), text: "", catalog: VoiceCommandCatalog(places: [moved], tabs: []))
+        #expect(VoiceCommandResolver.resolve(.place(work), text: "", reach: .opening, catalog: VoiceCommandCatalog(places: [moved], tabs: []))
                 == .unavailable("Work Mail"))
         let deploy = VoiceCommandScript(name: "Deploy", run: ["/bin/deploy"])
         let changed = VoiceCommandScript(name: "Deploy", run: ["/bin/other"])
-        #expect(VoiceCommandResolver.resolve(.script(deploy), text: "", catalog: VoiceCommandCatalog(scripts: [changed]))
+        #expect(VoiceCommandResolver.resolve(.script(deploy), text: "", reach: .opening, catalog: VoiceCommandCatalog(scripts: [changed]))
                 == .unavailable("Deploy"))
     }
 
     @Test func aChosenActionGetsTheFrozenInputAndNeedsTextWhenItHasNone() {
         let deploy = VoiceCommandScript(name: "Deploy", run: ["/bin/deploy", "{text}"])
         let catalog = VoiceCommandCatalog(scripts: [deploy])
-        #expect(VoiceCommandResolver.resolve(.script(deploy), text: "staging", catalog: catalog)
+        #expect(VoiceCommandResolver.resolve(.script(deploy), text: "staging", reach: .opening, catalog: catalog)
                 == .action(.script(deploy, arguments: ["staging"])))
-        #expect(VoiceCommandResolver.resolve(.script(deploy), text: "", catalog: catalog) == .scriptNeedsText("Deploy"))
+        #expect(VoiceCommandResolver.resolve(.script(deploy), text: "", reach: .opening, catalog: catalog) == .scriptNeedsText("Deploy"))
     }
 
     @Test func aChosenAppResolvesByBundleIdentity() {
         let app = App(name: "Mail", bundleId: "com.apple.mail")
-        #expect(VoiceCommandResolver.resolve(.app(app), text: "", catalog: VoiceCommandCatalog()) == .action(.app(app)))
+        #expect(VoiceCommandResolver.resolve(.app(app), text: "", reach: .opening, catalog: VoiceCommandCatalog()) == .action(.app(app)))
     }
 }
 

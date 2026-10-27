@@ -1,7 +1,12 @@
 import Foundation
 
+public enum VoiceCommandReach: Equatable, Sendable {
+    case running
+    case opening
+}
+
 public enum VoiceCommandIntent: Equatable, Sendable {
-    case focus(target: String)
+    case focus(target: String, reach: VoiceCommandReach)
     case runScript(target: String)
     case goBack
 }
@@ -19,11 +24,12 @@ public enum VoiceCommandText {
 }
 
 public enum VoiceCommandPhrase: CaseIterable, Sendable {
-    case focus, run, goBack
+    case open, switchTo, run, goBack
 
     public var words: [String] {
         switch self {
-        case .focus: ["switch to", "open"]
+        case .open: ["open"]
+        case .switchTo: ["switch to"]
         case .run: [VoiceCommandGrammar.run]
         case .goBack: [VoiceCommandGrammar.goBack]
         }
@@ -31,7 +37,8 @@ public enum VoiceCommandPhrase: CaseIterable, Sendable {
 
     var reaches: String? {
         switch self {
-        case .focus: "an app or place"
+        case .open: "an app or place"
+        case .switchTo: "one that\u{2019}s already open"
         case .run: "a script or shortcut"
         case .goBack: nil
         }
@@ -47,13 +54,15 @@ public enum VoiceCommandPhrase: CaseIterable, Sendable {
 }
 
 public enum VoiceCommandGrammar {
-    static let focusVerbs = [
+    static let runningVerbs = [
         "switch to", "switch two", "switch too",
         "which to", "which two", "which too",
         "witch to", "witch two", "witch too",
         "go to", "go two", "go too",
-        "focus on", "focus", "open", "launch",
+        "focus on", "focus",
     ]
+    static let openingVerbs = ["open", "launch"]
+    static let focusVerbs = runningVerbs + openingVerbs
     static let goBack = "go back"
     static let run = "run"
 
@@ -118,7 +127,7 @@ public enum VoiceCommandGrammar {
             var target = String(words.dropFirst(verb.count + 1))
             if target.hasPrefix("the ") { target.removeFirst(4) }
             guard !target.isEmpty, target != "the" else { return nil }
-            return .focus(target: target)
+            return .focus(target: target, reach: openingVerbs.contains(verb) ? .opening : .running)
         }
         return nil
     }

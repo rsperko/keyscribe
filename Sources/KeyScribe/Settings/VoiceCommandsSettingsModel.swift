@@ -265,7 +265,10 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             let runner = VoiceCommandRunner(system: system, findsInApps: { findsInApps }, isPreview: true)
             let resolution = await runner.resolve(readAs, places: places, scripts: scripts)
             guard !Task.isCancelled, let self else { return }
-            self.tryResult = Self.describe(resolution, heard: heard, readAs: readAs, appName: { system.appName(forBundleId: $0) })
+            self.tryResult = Self.describe(
+                resolution, heard: heard, readAs: readAs, appName: { system.appName(forBundleId: $0) },
+                reach: VoiceCommandRunner.reach(of: readAs, places: places, scripts: scripts),
+                isRunning: { system.isRunning(bundleId: $0) })
         }
     }
 
@@ -274,19 +277,21 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     }
 
     static func describe(
-        _ resolution: VoiceCommandResolution, heard: String, readAs: String, appName: (String) -> String?
+        _ resolution: VoiceCommandResolution, heard: String, readAs: String, appName: (String) -> String?,
+        reach: VoiceCommandReach, isRunning: (String) -> Bool
     ) -> TryResult {
-        var result = describe(resolution, heard: heard, spoken: readAs, appName: appName)
+        var result = describe(resolution, heard: heard, spoken: readAs, appName: appName, reach: reach, isRunning: isRunning)
         if readAs != heard { result.readAs = readAs }
         return result
     }
 
     static func describe(
-        _ resolution: VoiceCommandResolution, heard: String, spoken: String? = nil, appName: (String) -> String?
+        _ resolution: VoiceCommandResolution, heard: String, spoken: String? = nil, appName: (String) -> String?,
+        reach: VoiceCommandReach = .opening, isRunning: (String) -> Bool = { _ in true }
     ) -> TryResult {
         switch resolution {
         case .action(let action):
-            let preview = action.preview(spoken: spoken ?? heard, appName: appName)
+            let preview = action.preview(spoken: spoken ?? heard, appName: appName, reach: reach, isRunning: isRunning)
             return TryResult(
                 heard: heard, summary: preview.headline, detail: preview.context, resolved: true, details: preview.details)
         case .notACommand:
@@ -295,6 +300,13 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             return TryResult(heard: heard, summary: "No matching action", detail: VoiceCommandRunner.notFoundMessage(target), resolved: false)
         case .noMatch(let target):
             return TryResult(heard: heard, summary: "No match", detail: VoiceCommandRunner.noMatchMessage(target), resolved: false)
+        case .uncheckedUntilOpened(let app, let find):
+            let name = appName(app) ?? app
+            return TryResult(heard: heard, summary: "Open \(name) and find \u{201C}\(find)\u{201D}",
+                             detail: VoiceCommandRunner.uncheckedMessage(app: name), resolved: false)
+        case .closed(let closed):
+            return TryResult(heard: heard, summary: "Nothing to switch to",
+                             detail: VoiceCommandRunner.closedMessage(closed) { appName($0) ?? $0 }, resolved: false)
         case .noTabMatch(let target, let browser):
             return TryResult(heard: heard, summary: "No matching tab",
                              detail: VoiceCommandRunner.noTabMatchMessage(target, browser: browser.map { appName($0) ?? $0 }), resolved: false)
@@ -323,7 +335,9 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         case .needsSidebar(let app):
             let name = appName(app) ?? app
             return TryResult(heard: heard, summary: "Opens the best match in the \(name) sidebar",
-                             detail: "The preview does not read sidebars, so it cannot name the item. \(name) opens first if needed, and if several items match equally, the first one opens.",
+                             detail: "The preview does not read sidebars, so it cannot name the item. "
+                                + (reach == .opening ? "\(name) opens first if needed, and if" : "If")
+                                + " several items match equally, the first one opens.",
                              resolved: false)
         case .sidebarUnreadable(let app, _):
             return TryResult(heard: heard, summary: "Could not read the sidebar",

@@ -28,7 +28,7 @@ struct VoiceCommandCLITests {
         let system = VoiceCommandRunnerTests.FakeSystem()
         system.installed = [.init(name: "Mail", bundleId: "com.apple.mail")]
         let status = await VoiceCommandCLI.run(
-            transcript: "switch to mail", supportDir: try supportDir(voiceCommandsOn: true), system: system)
+            transcript: "open mail", supportDir: try supportDir(voiceCommandsOn: true), system: system)
         #expect(status == 0)
         #expect(system.opened.isEmpty)
         #expect(system.activatedPids.isEmpty)

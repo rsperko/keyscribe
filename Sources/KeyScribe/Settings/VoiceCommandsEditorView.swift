@@ -57,6 +57,8 @@ struct VoiceCommandsEditorView: View {
                 ForEach(Self.examples(findsInApps: model.findsInApps), id: \.phrase) { example in
                     phraseRow(example.phrase, example.meaning)
                 }
+                Text(Self.switchingNote)
+                    .font(.caption).foregroundStyle(.secondary)
                 Text("You can also say the name of any command you save below.")
                     .font(.caption).foregroundStyle(.secondary)
             }
@@ -133,6 +135,8 @@ struct VoiceCommandsEditorView: View {
             onUpdate(updated)
         }
     }
+
+    static let switchingNote = "\u{201C}Open\u{201D} can start an app. Use \u{201C}switch to\u{201D} to stay with what\u{2019}s already running."
 
     static func examples(findsInApps: Bool) -> [(phrase: String, meaning: String)] {
         let open = ("\u{201C}open Mail\u{201D}", "Opens Mail or brings it forward.")

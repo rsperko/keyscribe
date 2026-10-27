@@ -494,6 +494,16 @@ utterance (case and punctuation ignored; a leading "the" is dropped from an app-
 `witch`, or `go`. These are exact prefix alternatives, not transcript replacements: target names,
 action input, and the original heard text are preserved. They apply equally to live commands and
 **Preview a command**. Other command words, including `run` and `go back`, have no sound-alike alternatives.
+The verbs differ in what they may start. An opening verb (`VoiceCommandGrammar.openingVerbs`) may start
+an app, load a saved link, or start an app before searching inside it. A switching verb
+(`VoiceCommandGrammar.runningVerbs`, sound-alikes included) reaches only a running app, an open window, or
+an open tab. After a switching verb, an app that is not running is reachable only by an exact name, which
+answers with the phrase that would open it; it never takes part in partial, any-order, or near-miss
+matching, so it cannot take a phrase from something open. A saved command named after a verb takes that
+verb's limit: `switch to` on a saved app does not start it, and on a saved link it reuses a matching open
+tab or says none is open. A saved name said on its own does what it is configured to do, and a complete
+saved name that starts with a verb (`switch to work`) still wins over the built-in reading. `go back` never
+starts an app.
 An app answers, in every tier, to the name shown in the Applications folder and to the name in its own
 menu bar when the two differ; the name KeyScribe shows and sorts by is the Applications-folder one.
 A target is a running app, an app installed in an Applications folder (or one folder down inside it),
@@ -507,11 +517,11 @@ schema_version = 1
 id = "3f2a9c1e-…"                # stable and never shown; Settings writes a random one. Optional when written by hand
 name = "Mail"                    # display name; also always a spoken name. Unique, ignoring case.
 say = ["male", "email"]          # optional misheard form or preferred nickname
-app = "com.apple.mail"           # bring this app forward, opening it if needed
+app = "com.apple.mail"           # bring this app forward; on its own or after "open", start it if needed
 
 [[command]]
 name = "Gmail"
-url = "https://mail.google.com/" # focus an open tab whose address starts with this; else open it (or an app link — below)
+url = "https://mail.google.com/" # focus an open tab whose address starts with this; else open it, except after "switch to" (or an app link — below)
 browser = "com.google.Chrome"    # optional: only look in, and open with, this browser
 
 [[command]]
@@ -674,7 +684,7 @@ link, or tab, and a *script* one that runs a program or shortcut.
   `Lunch` cannot turn "launch Safari" into something that no longer parses — which lets a target keep its
   real spelling (such as `Spotify`). Dictionary correction is best-effort and excludes terms shorter
   than four normalized characters. A replacement that owns the whole utterance becomes the command,
-  which makes custom spoken shortcuts (`code` → `switch to Visual Studio Code`). A terminal `<CR>` on a
+  which makes custom spoken shortcuts (`code` → `open Visual Studio Code`). A terminal `<CR>` on a
   regex replacement is dropped, since a command never presses Return; a literal replacement keeps `<CR>`
   as written, as everywhere else. On a speech model that can steer recognition, the dictionary steers it
   too, and so does every saved command's `name` and `say` entry: they are read from this file each time it
@@ -716,7 +726,7 @@ link, or tab, and a *script* one that runs a program or shortcut.
   with a command word (`go home`, `open notes`); because saved names come first, a name that is itself a
   command word or a prefix of one (`go`, `open`) catches those commands, and Settings says so while
   editing. The verb forms keep working for places and scripts, except that a tab search is never reached by
-  "switch to": "switch to chrome" still opens the browser.
+  "switch to": "switch to chrome" still reaches the browser itself, and "open chrome" starts it if needed.
 - **Tab searches** (`find_tab = true`) look only at tabs in their `browser`, or in every running browser that
   can list tabs when `browser` is absent, using the same title matching as an open browser tab below (exact,
   then a run of words, then words in any order or a near-miss). A tab is also known by its **site**, the
@@ -750,13 +760,15 @@ link, or tab, and a *script* one that runs a program or shortcut.
   a failed search says so. The sidebar is read through Accessibility only when such a phrase is said; it is
   never read in the background, and Settings' preview never reads one. An app built on Electron whose
   sidebar is not exposed has its accessibility support turned on first (`AXManualAccessibility`), which
-  stays on until that app quits. An app that is not running, a browser included, is opened first, and its
+  stays on until that app quits. After an opening verb, an app that is not running, a browser included, is
+  started first, and its
   sidebar or tabs are read again for a bounded time (`VoiceCommandRunner.launchWaitSeconds`; no new read starts after it, but a read already under way keeps its own short limit, so the wait can run a few seconds past it) while the
   HUD says it is opening the app and then looking in it. A sidebar that stays empty for a few reads in a row
   (`VoiceCommandRunner.emptySidebarSettleReads`) is taken as empty and reported as having no match; one that
   never appears is reported as not ready yet. Cancelling or replacing the command stops this:
   an app not yet opened is not opened, and no further reads are made, but an app that already started stays
-  open. Settings' preview and `--voice-command` never open an app.
+  open. After a switching verb nothing is started: an app that is not running, or that quits while it is
+  being read, is reported instead. Settings' preview and `--voice-command` never open an app.
   A sidebar that could not be read in full (it lists more than `SidebarOutline.itemLimit` entries, or the
   read was cut short) is still searched as read, and a match opens without asking. A sidebar whose window cannot be identified is not read, and an entry opens only in the
   window it was read from, and only if it is still at the same place under the same group; otherwise the
@@ -780,6 +792,9 @@ link, or tab, and a *script* one that runs a program or shortcut.
   window titles, and tab titles and sites, and a name or title also matches when it contains every spoken word in
   any order ("strava run" → `Afternoon Run | Run | Strava`). The fuzzy step runs the tiers above in the
   same order, so a fuzzy hit on a place still beats an equally close one on an app, window, or tab.
+  After a switching verb, installed apps that are not running, places for them, and saved links with no
+  matching open tab (an app link always) are left out of the partial, any-order, and near-miss steps; a
+  saved link that partly matches is checked against the open tabs before it can take part.
   Different targets tied at the winning step are offered as a numbered choice and nothing runs until one
   is chosen, except tabs tied in one browser, which go to the frontmost as in a tab search; above `VoiceCommandChoice.displayLimit` targets the command fails and asks for more of the
   name. Places and actions keep their configured order in the choice, apps are sorted by name. A

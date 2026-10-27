@@ -188,17 +188,39 @@ struct VoiceCommandsSettingsModelTests {
     @Test func aSidebarPreviewSaysTiesOpenTheFirstItemWithoutAsking() {
         let result = VoiceCommandsSettingsModel.describe(
             .needsSidebar("com.tinyspeck.slackmacgap"), heard: "slack general", readAs: "slack general",
-            appName: { _ in "Slack" })
+            appName: { _ in "Slack" }, reach: .opening, isRunning: { _ in false })
         #expect(result.summary == "Opens the best match in the Slack sidebar")
         #expect(result.detail == "The preview does not read sidebars, so it cannot name the item. Slack opens first if needed, and if several items match equally, the first one opens.")
+        let switching = VoiceCommandsSettingsModel.describe(
+            .needsSidebar("com.tinyspeck.slackmacgap"), heard: "switch to slack general", readAs: "switch to slack general",
+            appName: { _ in "Slack" }, reach: .running, isRunning: { _ in true })
+        #expect(switching.detail == "The preview does not read sidebars, so it cannot name the item. If several items match equally, the first one opens.")
+    }
+
+    @Test func tryItSaysWhenItCannotCheckAClosedBrowser() {
+        let result = VoiceCommandsSettingsModel.describe(
+            .uncheckedUntilOpened(app: "com.google.Chrome", find: "github"), heard: "open chrome github",
+            readAs: "open chrome github", appName: { _ in "Chrome" }, reach: .opening, isRunning: { _ in false })
+        #expect(!result.resolved)
+        #expect(result.summary == "Open Chrome and find \u{201C}github\u{201D}")
+        #expect(result.detail == "Chrome isn\u{2019}t running, so the preview can\u{2019}t check its tabs.")
+    }
+
+    @Test func tryItSaysWhenSwitchingFindsNothingOpen() {
+        let result = VoiceCommandsSettingsModel.describe(
+            .closed(.app(bundleId: "com.tinyspeck.slackmacgap", say: "open Slack", find: nil)), heard: "switch to slack",
+            readAs: "switch to slack", appName: { _ in "Slack" }, reach: .running, isRunning: { _ in false })
+        #expect(!result.resolved)
+        #expect(result.summary == "Nothing to switch to")
+        #expect(result.detail == "Slack isn\u{2019}t running. Say \u{201C}open Slack\u{201D} to start it.")
     }
 
     @Test func tryItShowsWhatTheVocabularyChanged() {
         let cleaned = VoiceCommandsSettingsModel.describe(
-            .noMatch("herdr"), heard: "bitch to herder", readAs: "switch to herdr", appName: { _ in nil })
+            .noMatch("herdr"), heard: "bitch to herder", readAs: "switch to herdr", appName: { _ in nil }, reach: .running, isRunning: { _ in true })
         #expect(cleaned.readAs == "switch to herdr")
         let unchanged = VoiceCommandsSettingsModel.describe(
-            .noMatch("herdr"), heard: "go to herdr", readAs: "go to herdr", appName: { _ in nil })
+            .noMatch("herdr"), heard: "go to herdr", readAs: "go to herdr", appName: { _ in nil }, reach: .running, isRunning: { _ in true })
         #expect(unchanged.readAs == nil)
     }
 

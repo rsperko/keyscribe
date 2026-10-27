@@ -23,12 +23,14 @@ public struct VoiceCommandCatalog: Equatable, Sendable {
         public var tab: Int
         public var url: String
         public var title: String
-        public init(browserBundleId: String, window: Int, tab: Int, url: String, title: String) {
+        public var pid: Int32?
+        public init(browserBundleId: String, window: Int, tab: Int, url: String, title: String, pid: Int32? = nil) {
             self.browserBundleId = browserBundleId
             self.window = window
             self.tab = tab
             self.url = url
             self.title = title
+            self.pid = pid
         }
 
         public var siteName: String? {
@@ -172,9 +174,10 @@ public enum VoiceCommandAction: Equatable, Sendable {
         }
     }
 
-    public func detail(appName: (String) -> String?) -> String {
+    public func detail(appName: (String) -> String?, reach: VoiceCommandReach = .opening) -> String {
+        let opening = reach == .opening ? ", opening it if needed" : ""
         switch self {
-        case .app(let app): return "Brings \(app.name) to the front, opening it if needed."
+        case .app(let app): return "Brings \(app.name) to the front\(opening)."
         case .window(let window):
             return "Brings the window \u{201C}\(window.title)\u{201D} in \(window.appName) to the front."
         case .tab(let tab):
@@ -183,7 +186,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
             return "Opens \u{201C}\(item.name)\u{201D} in the sidebar of \(appName(item.bundleId) ?? item.bundleId)."
         case .goBack: return "Returns to the window or app you were in before your last command."
         case .place(_, .app(let bundleId)):
-            return "Brings \(appName(bundleId) ?? bundleId) to the front, opening it if needed."
+            return "Brings \(appName(bundleId) ?? bundleId) to the front\(opening)."
         case .place(_, .tab(let tab)):
             return "Focuses the open tab \u{201C}\(tab.title)\u{201D} in \(appName(tab.browserBundleId) ?? tab.browserBundleId)."
         case .place(let place, .openURL(let url, _)) where place.isAppLink:
@@ -197,9 +200,9 @@ public enum VoiceCommandAction: Equatable, Sendable {
         }
     }
 
-    public func command(appName: (String) -> String?) -> String {
+    public func command(appName: (String) -> String?, reach: VoiceCommandReach = .opening) -> String {
         if case .script(let script, let arguments, _) = self { return script.commandLine(arguments: arguments) }
-        return detail(appName: appName)
+        return detail(appName: appName, reach: reach)
     }
 }
 
@@ -213,13 +216,20 @@ public enum SidebarProblem: Equatable, Sendable {
     case turnedOff
 }
 
+public enum VoiceCommandClosed: Equatable, Sendable {
+    case app(bundleId: String, say: String, find: String?)
+    case link(say: String, checkedTabs: Bool)
+}
+
 public enum VoiceCommandResolution: Equatable, Sendable {
     case notACommand
+    case closed(VoiceCommandClosed)
     case action(VoiceCommandAction)
     case ambiguous(VoiceCommandChoice)
     case unavailable(String)
     case noMatch(String)
     case noTabMatch(String, browser: String?)
+    case uncheckedUntilOpened(app: String, find: String)
     case needsTabs(browser: String?)
     case needsSidebar(String)
     case noSidebarMatch(String, app: String)
@@ -237,7 +247,7 @@ public enum VoiceCommandResolver {
     public enum Route: Equatable, Sendable {
         case saved(SavedMatch)
         case goBack
-        case focus(String)
+        case focus(String, VoiceCommandReach)
         case scriptNotFound(String)
         case notACommand
     }
@@ -247,7 +257,7 @@ public enum VoiceCommandResolver {
         switch VoiceCommandGrammar.parse(transcript) {
         case nil: return .notACommand
         case .goBack: return .goBack
-        case .focus(let target): return .focus(target)
+        case .focus(let target, let reach): return .focus(target, reach)
         case .runScript(let target):
             return savedMatch(transcript, from: 1, places: [], scripts: catalog.scripts).map(Route.saved) ?? .scriptNotFound(target)
         }
@@ -257,10 +267,15 @@ public enum VoiceCommandResolver {
         switch route(transcript, catalog: catalog) {
         case .saved(let match): return resolve(match, catalog: catalog)
         case .goBack: return .action(.goBack)
-        case .focus(let target): return resolve(target: target, catalog: catalog)
+        case .focus(let target, let reach): return resolve(target: target, reach: reach, catalog: catalog)
         case .scriptNotFound(let target): return .scriptNotFound(target)
         case .notACommand: return .notACommand
         }
+    }
+
+    public static func reach(_ transcript: String, catalog: VoiceCommandCatalog) -> VoiceCommandReach {
+        guard case .focus(_, let reach) = route(transcript, catalog: catalog) else { return .opening }
+        return reach
     }
 
     public struct SavedMatch: Equatable, Sendable {
@@ -314,7 +329,7 @@ public enum VoiceCommandResolver {
             return .ambiguous(VoiceCommandChoice(
                 family: allActions ? .action : .navigation, target: match.target, matches: match.candidates, text: match.text))
         }
-        return resolve(only, text: match.text, catalog: catalog)
+        return resolve(only, text: match.text, reach: .opening, catalog: catalog)
     }
 
     private indirect enum Match {
@@ -333,36 +348,54 @@ public enum VoiceCommandResolver {
         return [site]
     }
 
-    static func resolveTabSearch(_ place: VoiceCommandPlace, text: String, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
+    static func resolveTabSearch(
+        _ place: VoiceCommandPlace, text: String, reach: VoiceCommandReach, catalog: VoiceCommandCatalog
+    ) -> VoiceCommandResolution {
         guard !text.isEmpty else {
             guard let browser = place.browser else { return .scriptNeedsText(place.name) }
+            if let closed = closed(browser, say: place.name, find: nil, reach: reach, catalog: catalog) { return closed }
             return .action(.place(place, .app(bundleId: browser)))
         }
-        return findTab(text, in: place.browser, catalog: catalog)
+        if let browser = place.browser, let closed = closed(browser, say: "\(place.name) \(text)", find: text, reach: reach, catalog: catalog) {
+            return closed
+        }
+        return findTab(text, in: place.browser, reach: reach, catalog: catalog)
+    }
+
+    private static func closed(
+        _ app: String, say: String, find: String?, reach: VoiceCommandReach, catalog: VoiceCommandCatalog
+    ) -> VoiceCommandResolution? {
+        guard reach == .running, !catalog.runningApps.contains(where: { $0.bundleId == app }) else { return nil }
+        return .closed(.app(bundleId: app, say: "open \(say)", find: find))
     }
 
     // Navigation never asks between equal matches it can order: tabs tied in one browser go to the frontmost,
     // and sidebar items tied by name to the first in sidebar order.
-    private static func findTab(_ text: String, in browser: String?, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
+    private static func findTab(
+        _ text: String, in browser: String?, reach: VoiceCommandReach, catalog: VoiceCommandCatalog
+    ) -> VoiceCommandResolution {
         let settle: ([VoiceCommandCandidate]) -> VoiceCommandCandidate? = { frontmost($0) }
         guard let listed = catalog.tabs else { return .needsTabs(browser: browser) }
         let tabs = listed.filter { browser == nil || $0.browserBundleId == browser }.map(VoiceCommandCandidate.tab)
         let named: [([VoiceCommandCandidate], Match)] = [
             (tabs, .exact), (tabs, .partial), (tabs, .site(.exact)), (tabs, .site(.partial)),
         ]
-        if let resolution = firstTier(named, target: text, catalog: catalog, settle: settle) { return resolution }
+        if let resolution = firstTier(named, target: text, reach: reach, catalog: catalog, settle: settle) { return resolution }
         return nearestMiss(
-            text, among: tabs, tiers: named + [(tabs, .words), (tabs, .site(.words))], catalog: catalog, settle: settle)
+            text, among: tabs, tiers: named + [(tabs, .words), (tabs, .site(.words))], reach: reach, catalog: catalog,
+            settle: settle)
             ?? .noTabMatch(text, browser: browser)
     }
 
-    private static func findInApp(_ app: String, text: String, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
-        if catalog.tabBrowsers.contains(app) { return findTab(text, in: app, catalog: catalog) }
+    private static func findInApp(
+        _ app: String, text: String, reach: VoiceCommandReach, catalog: VoiceCommandCatalog
+    ) -> VoiceCommandResolution {
+        if catalog.tabBrowsers.contains(app) { return findTab(text, in: app, reach: reach, catalog: catalog) }
         switch catalog.windows {
         case nil: return .needsWindows
         case .complete(let listed):
             let windows = Self.ordered(listed.filter { $0.bundleId == app }).map(VoiceCommandCandidate.window)
-            if let resolution = firstTier([(windows, .exact), (windows, .partial)], target: text, catalog: catalog) {
+            if let resolution = firstTier([(windows, .exact), (windows, .partial)], target: text, reach: reach, catalog: catalog) {
                 return resolution
             }
         case .incomplete, .needsAccessibility: break
@@ -371,25 +404,39 @@ public enum VoiceCommandResolver {
         let entries = listed.filter { $0.bundleId == app }.map(VoiceCommandCandidate.sidebarItem)
         let named: [([VoiceCommandCandidate], Match)] = [(entries, .exact), (entries, .partial)]
         let first: ([VoiceCommandCandidate]) -> VoiceCommandCandidate? = { $0.first }
-        return firstTier(named, target: text, catalog: catalog, settle: first)
-            ?? nearestMiss(text, among: entries, tiers: named + [(entries, .words)], catalog: catalog, settle: first)
+        return firstTier(named, target: text, reach: reach, catalog: catalog, settle: first)
+            ?? nearestMiss(text, among: entries, tiers: named + [(entries, .words)], reach: reach, catalog: catalog, settle: first)
             ?? .noSidebarMatch(text, app: app)
     }
 
-    private static func resolve(target: String, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
-        let places = catalog.places.filter { !$0.isTabSearch }.map(VoiceCommandCandidate.place)
+    // Under `.running`, a closed app or a saved link with no open tab is only ever named exactly, which explains
+    // why nothing opened; it never competes in the looser tiers, where it could take a phrase from something open.
+    private static func resolve(target: String, reach: VoiceCommandReach, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
+        let runningIds = Set(catalog.runningApps.map(\.bundleId))
+        let named = catalog.places.filter { !$0.isTabSearch }
+        let places = named.map(VoiceCommandCandidate.place)
         let running = Self.ordered(catalog.runningApps).map(VoiceCommandCandidate.app)
-        let installed = Self.ordered(catalog.installedApps).map(VoiceCommandCandidate.app)
-        let named: [([VoiceCommandCandidate], Match)] = [
-            (places, .exact), (running, .exact), (running, .partial), (installed, .exact), (places, .partial),
-        ]
+        let installed = Self.ordered(catalog.installedApps.filter { reach == .opening || !runningIds.contains($0.bundleId) })
+            .map(VoiceCommandCandidate.app)
+        let guessed = reach == .opening ? installed : []
+        let leading: [([VoiceCommandCandidate], Match)] = [(places, .exact), (running, .exact), (running, .partial), (installed, .exact)]
         if catalog.findsInApps {
             let wholeName: [([VoiceCommandCandidate], Match)] = [(places, .exact), (running, .exact), (installed, .exact)]
-            if let resolution = firstTier(wholeName, target: target, catalog: catalog) ?? appScope(target, catalog: catalog) {
+            if let resolution = firstTier(wholeName, target: target, reach: reach, catalog: catalog)
+                ?? appScope(target, reach: reach, catalog: catalog) {
                 return resolution
             }
         }
-        if let resolution = firstTier(named, target: target, catalog: catalog) { return resolution }
+        if let resolution = firstTier(leading, target: target, reach: reach, catalog: catalog) { return resolution }
+        let linksNeedTabs = reach == .running && catalog.tabs == nil && named.contains { place in
+            guard case .url = place.target, !place.isAppLink else { return false }
+            return place.spokenForms.contains { matches(target, $0, .partial) }
+        }
+        if linksNeedTabs { return .needsTabs(browser: nil) }
+        let open = reach == .opening ? places : named.filter { isOpen($0, runningIds: runningIds, tabs: catalog.tabs ?? []) }
+            .map(VoiceCommandCandidate.place)
+        let byName = leading + [(open, .partial)]
+        if let resolution = firstTier([(open, .partial)], target: target, reach: reach, catalog: catalog) { return resolution }
 
         let windows: [VoiceCommandCandidate]
         switch catalog.windows {
@@ -399,29 +446,39 @@ public enum VoiceCommandResolver {
         case .complete(let listed): windows = Self.ordered(listed).map(VoiceCommandCandidate.window)
         }
         let early: [([VoiceCommandCandidate], Match)] = [(windows, .exact), (windows, .partial)]
-        if let resolution = firstTier(early, target: target, catalog: catalog) { return resolution }
+        if let resolution = firstTier(early, target: target, reach: reach, catalog: catalog) { return resolution }
 
         guard let listed = catalog.tabs else { return .needsTabs(browser: nil) }
         let tabs = listed.map(VoiceCommandCandidate.tab)
         let rest: [([VoiceCommandCandidate], Match)] = [
-            (tabs, .exact), (tabs, .partial), (tabs, .site(.exact)), (tabs, .site(.partial)), (installed, .partial),
+            (tabs, .exact), (tabs, .partial), (tabs, .site(.exact)), (tabs, .site(.partial)), (guessed, .partial),
         ]
         let settle: ([VoiceCommandCandidate]) -> VoiceCommandCandidate? = { frontmost($0) }
-        if let resolution = firstTier(rest, target: target, catalog: catalog, settle: settle) { return resolution }
+        if let resolution = firstTier(rest, target: target, reach: reach, catalog: catalog, settle: settle) { return resolution }
 
-        let exhaustive = named + early + rest
+        let exhaustive = byName + early + rest
         let unordered: [([VoiceCommandCandidate], Match)] = [
-            (places, .words), (running, .words), (windows, .words), (tabs, .words), (tabs, .site(.words)), (installed, .words),
+            (open, .words), (running, .words), (windows, .words), (tabs, .words), (tabs, .site(.words)), (guessed, .words),
         ]
         return nearestMiss(
-            target, among: places + running + installed + windows + tabs, tiers: exhaustive + unordered, catalog: catalog,
-            settle: settle)
+            target, among: open + running + guessed + windows + tabs, tiers: exhaustive + unordered, reach: reach,
+            catalog: catalog, settle: settle)
             ?? .noMatch(target)
+    }
+
+    private static func isOpen(_ place: VoiceCommandPlace, runningIds: Set<String>, tabs: [VoiceCommandCatalog.Tab]) -> Bool {
+        switch place.target {
+        case .app(let bundleId): return runningIds.contains(bundleId)
+        case .tabSearch: return true
+        case .url(let url):
+            guard !place.isAppLink else { return false }
+            return tabs.contains { (place.browser == nil || place.browser == $0.browserBundleId) && urlMatches($0.url, place: url) }
+        }
     }
 
     // The longest app name or app nickname at the start of the target scopes the rest of it to that app.
     // Saved nicknames outrank running apps, which outrank installed ones, so a nickname can stand in for an app.
-    private static func appScope(_ target: String, catalog: VoiceCommandCatalog) -> VoiceCommandResolution? {
+    private static func appScope(_ target: String, reach: VoiceCommandReach, catalog: VoiceCommandCatalog) -> VoiceCommandResolution? {
         let words = target.split(separator: " ")
         let nicknames = catalog.places.filter { if case .app = $0.target { true } else { false } }.map(VoiceCommandCandidate.place)
         let tiers = [nicknames, catalog.runningApps.map(VoiceCommandCandidate.app), catalog.installedApps.map(VoiceCommandCandidate.app)]
@@ -436,9 +493,9 @@ public enum VoiceCommandResolver {
                 guard let first = hits.first else { continue }
                 let rest = words.dropFirst(length).joined(separator: " ")
                 guard hits.count == 1 else {
-                    return .ambiguous(VoiceCommandChoice(family: .navigation, target: prefix, matches: hits, text: rest))
+                    return .ambiguous(VoiceCommandChoice(family: .navigation, target: prefix, matches: hits, text: rest, reach: reach))
                 }
-                return resolve(first, text: rest, catalog: catalog)
+                return resolve(first, text: rest, reach: reach, catalog: catalog)
             }
         }
         return nil
@@ -463,8 +520,8 @@ public enum VoiceCommandResolver {
     }
 
     private static func nearestMiss(
-        _ target: String, among pool: [VoiceCommandCandidate], tiers: [([VoiceCommandCandidate], Match)], catalog: VoiceCommandCatalog,
-        settle: (([VoiceCommandCandidate]) -> VoiceCommandCandidate?)? = nil
+        _ target: String, among pool: [VoiceCommandCandidate], tiers: [([VoiceCommandCandidate], Match)],
+        reach: VoiceCommandReach, catalog: VoiceCommandCatalog, settle: (([VoiceCommandCandidate]) -> VoiceCommandCandidate?)? = nil
     ) -> VoiceCommandResolution? {
         let spoken = VoiceCommandText.key(target)
         var nearest: [(candidate: VoiceCommandCandidate, snapped: String, bySite: Bool)] = []
@@ -491,13 +548,13 @@ public enum VoiceCommandResolver {
                     && forms(entry.candidate, match).contains { matches(entry.snapped, $0, match) }
                     && seen.insert(entry.candidate.identity).inserted
             }.map(\.candidate)
-            if let result = settled(hits, target: target, catalog: catalog, settle: settle) { return result }
+            if let result = settled(hits, target: target, reach: reach, catalog: catalog, settle: settle) { return result }
         }
         return nil
     }
 
     private static func firstTier(
-        _ tiers: [([VoiceCommandCandidate], Match)], target: String, catalog: VoiceCommandCatalog,
+        _ tiers: [([VoiceCommandCandidate], Match)], target: String, reach: VoiceCommandReach, catalog: VoiceCommandCatalog,
         settle: (([VoiceCommandCandidate]) -> VoiceCommandCandidate?)? = nil
     ) -> VoiceCommandResolution? {
         for (pool, match) in tiers {
@@ -505,19 +562,19 @@ public enum VoiceCommandResolver {
             let hits = pool.filter { candidate in
                 forms(candidate, match).contains { matches(target, $0, match) } && seen.insert(candidate.identity).inserted
             }
-            if let result = settled(hits, target: target, catalog: catalog, settle: settle) { return result }
+            if let result = settled(hits, target: target, reach: reach, catalog: catalog, settle: settle) { return result }
         }
         return nil
     }
 
     private static func settled(
-        _ hits: [VoiceCommandCandidate], target: String, catalog: VoiceCommandCatalog,
+        _ hits: [VoiceCommandCandidate], target: String, reach: VoiceCommandReach, catalog: VoiceCommandCatalog,
         settle: (([VoiceCommandCandidate]) -> VoiceCommandCandidate?)?
     ) -> VoiceCommandResolution? {
         guard let first = hits.first else { return nil }
-        if hits.count == 1 { return action(for: first, catalog: catalog) }
-        if let pick = settle?(hits) { return action(for: pick, catalog: catalog) }
-        return .ambiguous(VoiceCommandChoice(family: .navigation, target: target, matches: hits))
+        if hits.count == 1 { return action(for: first, reach: reach, catalog: catalog) }
+        if let pick = settle?(hits) { return action(for: pick, reach: reach, catalog: catalog) }
+        return .ambiguous(VoiceCommandChoice(family: .navigation, target: target, matches: hits, reach: reach))
     }
 
     private static func frontmost(_ hits: [VoiceCommandCandidate]) -> VoiceCommandCandidate? {
@@ -539,12 +596,15 @@ public enum VoiceCommandResolver {
     }
 
     public static func resolve(
-        _ candidate: VoiceCommandCandidate, text: String, catalog: VoiceCommandCatalog
+        _ candidate: VoiceCommandCandidate, text: String, reach: VoiceCommandReach, catalog: VoiceCommandCatalog
     ) -> VoiceCommandResolution {
         switch candidate {
         case .app(let app):
-            guard catalog.findsInApps, !text.isEmpty else { return .action(.app(app)) }
-            return findInApp(app.bundleId, text: text, catalog: catalog)
+            guard catalog.findsInApps, !text.isEmpty else { return action(for: candidate, reach: reach, catalog: catalog) }
+            if let closed = closed(app.bundleId, say: "\(app.name) \(text)", find: text, reach: reach, catalog: catalog) {
+                return closed
+            }
+            return findInApp(app.bundleId, text: text, reach: reach, catalog: catalog)
         case .window(let window):
             return .action(.window(window))
         case .tab(let tab):
@@ -555,10 +615,13 @@ public enum VoiceCommandResolver {
             guard let current = catalog.places.first(where: { $0.hasSameDestination(as: chosen) }) else {
                 return .unavailable(chosen.name)
             }
-            if current.isTabSearch { return resolveTabSearch(current, text: text, catalog: catalog) }
-            guard !text.isEmpty else { return action(for: .place(current), catalog: catalog) }
+            if current.isTabSearch { return resolveTabSearch(current, text: text, reach: reach, catalog: catalog) }
+            guard !text.isEmpty else { return action(for: .place(current), reach: reach, catalog: catalog) }
             guard catalog.findsInApps, case .app(let bundleId) = current.target else { return .takesNoText(current.name) }
-            return findInApp(bundleId, text: text, catalog: catalog)
+            if let closed = closed(bundleId, say: "\(current.name) \(text)", find: text, reach: reach, catalog: catalog) {
+                return closed
+            }
+            return findInApp(bundleId, text: text, reach: reach, catalog: catalog)
         case .script(let chosen):
             guard let current = catalog.scripts.first(where: { $0.id == chosen.id && $0.action == chosen.action }) else {
                 return .unavailable(chosen.name)
@@ -595,10 +658,12 @@ public enum VoiceCommandResolver {
         }
     }
 
-    private static func action(for candidate: VoiceCommandCandidate, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
+    private static func action(
+        for candidate: VoiceCommandCandidate, reach: VoiceCommandReach, catalog: VoiceCommandCatalog
+    ) -> VoiceCommandResolution {
         switch candidate {
         case .app(let app):
-            return .action(.app(app))
+            return closed(app.bundleId, say: app.name, find: nil, reach: reach, catalog: catalog) ?? .action(.app(app))
         case .script(let script):
             return .unavailable(script.name)
         case .option(let option):
@@ -612,17 +677,23 @@ public enum VoiceCommandResolver {
         case .place(let place):
             switch place.target {
             case .app(let bundleId):
-                return .action(.place(place, .app(bundleId: bundleId)))
+                return closed(bundleId, say: place.name, find: nil, reach: reach, catalog: catalog)
+                    ?? .action(.place(place, .app(bundleId: bundleId)))
             case .url(let url):
-                if place.isAppLink { return .action(.place(place, .openURL(url, browser: nil))) }
+                let say = "open \(place.name)"
+                if place.isAppLink {
+                    guard reach == .opening else { return .closed(.link(say: say, checkedTabs: false)) }
+                    return .action(.place(place, .openURL(url, browser: nil)))
+                }
                 guard let tabs = catalog.tabs else { return .needsTabs(browser: place.browser) }
                 let open = tabs.first { tab in
                     (place.browser == nil || place.browser == tab.browserBundleId) && urlMatches(tab.url, place: url)
                 }
                 if let open { return .action(.place(place, .tab(open))) }
+                guard reach == .opening else { return .closed(.link(say: say, checkedTabs: true)) }
                 return .action(.place(place, .openURL(url, browser: place.browser)))
             case .tabSearch:
-                return resolveTabSearch(place, text: "", catalog: catalog)
+                return resolveTabSearch(place, text: "", reach: reach, catalog: catalog)
             }
         }
     }

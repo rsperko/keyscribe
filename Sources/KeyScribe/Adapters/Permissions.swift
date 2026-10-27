@@ -31,13 +31,14 @@ enum Permissions {
     }
 
     enum SettingsPane {
-        case microphone, accessibility
+        case microphone, accessibility, automation
 
         var urlString: String {
             let base = "x-apple.systempreferences:com.apple.preference.security?"
             switch self {
             case .microphone: return base + "Privacy_Microphone"
             case .accessibility: return base + "Privacy_Accessibility"
+            case .automation: return base + "Privacy_Automation"
             }
         }
     }

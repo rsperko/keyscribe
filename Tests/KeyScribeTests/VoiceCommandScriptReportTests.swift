@@ -15,7 +15,7 @@ struct VoiceCommandScriptReportTests {
         return (VoiceCommandRunner(system: system), system)
     }
 
-    private func finished(_ report: ScriptReport, status: Int32 = 0, error: String? = nil) -> ScriptRun {
+    private func finished(_ report: ScriptReport, status: Int32 = 0, error: ScriptError? = nil) -> ScriptRun {
         .finished(status: status, lastError: error, report: report)
     }
 

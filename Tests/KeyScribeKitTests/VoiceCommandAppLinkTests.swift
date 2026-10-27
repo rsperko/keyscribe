@@ -34,8 +34,10 @@ struct VoiceCommandAppLinkTests {
 
     @Test func anAppLinkPlaceOpensWithoutReadingTabs() {
         let place = VoiceCommandPlace(name: "Web Hooks", target: .url("slack://channel?team=T1&id=C1"))
-        let resolution = VoiceCommandResolver.resolve(
-            "switch to web hooks", catalog: VoiceCommandCatalog(places: [place], tabs: nil, windows: nil))
-        #expect(resolution == .action(.place(place, .openURL("slack://channel?team=T1&id=C1", browser: nil))))
+        let catalog = VoiceCommandCatalog(places: [place], tabs: nil, windows: nil)
+        #expect(VoiceCommandResolver.resolve("open web hooks", catalog: catalog)
+                == .action(.place(place, .openURL("slack://channel?team=T1&id=C1", browser: nil))))
+        #expect(VoiceCommandResolver.resolve("switch to web hooks", catalog: catalog)
+                == .closed(.link(say: "open Web Hooks", checkedTabs: false)))
     }
 }

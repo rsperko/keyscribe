@@ -464,6 +464,17 @@ A script is never matched by a near-miss, and its name and arguments are never f
 dictionary. Dictionary correction applies only to an app or place target after a verb, so a guess cannot turn an
 app-switching command into script execution, and a saved name is never snapped to. It is never the Direct fallback and is
 reachable only by its own shortcut.
+**What a verb may start is part of the parse, not a check before acting.** An opening verb may start an
+app or load a saved link; a switching verb reaches only what is already running (`VoiceCommandReach`). The
+reach travels with the command through matching (a closed app answers only to an exact name, with an
+explanation instead of an action, and never enters the looser tiers where it could take a phrase from
+something open), through a pending choice (`VoiceCommandChoice.reach`), through the sidebar and tab reads
+(only an opening command starts an app in order to read it), and into execution, which raises a switching
+target by its process rather than through a call that can launch it, since a running check followed by a
+launch-capable call would race. Browser scripts address the browser's process as well
+(`BrowserScripting.run(_:pid:)`), because AppleScript starts any app a script names: a browser that quit makes
+the script fail instead of restarting. A saved name said on its own does what it is configured to do, and
+**go back** never starts an app.
 **Ambiguity asks; it never guesses.** Ties at the winning match step resolve to a typed
 `VoiceCommandChoice` (frozen candidate identities and order, the spoken target, any `{text}` input, and
 the full match count) rather than to a recency or intent tie-break, because a wrong switch can expose a
