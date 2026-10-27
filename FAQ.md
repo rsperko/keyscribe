@@ -232,16 +232,20 @@ Some command-word mishearings work automatically: `which to Mail` and `witch to 
 as “switch to Mail”. The word `to` can also arrive as `two` or `too` after `switch`, `which`, `witch`,
 or `go`. These alternatives work in **Preview a command**, too, and leave the original words in History.
 
-When KeyScribe does not recognize a command, or an answer to “Which one?”, it briefly shows what it
-heard, such as **Heard “stitch to Mail”**. That is what your speech model wrote, before any of your
-replacements, and a long phrase is shortened. Other problems, such as a name that matches nothing, say
-what went wrong instead. The heard phrase is hidden, leaving only **Command not recognized**, when you
-were in a password field or KeyScribe could not confirm which field you were in. When the command is saved to History, its entry has the complete
+When KeyScribe does not recognize a command, finds nothing by the name you said, or does not understand
+an answer to “Which one?”, it briefly shows what it heard, such as **Heard “stitch to Mail”**. That is what
+your speech model wrote, before any of your replacements, and a long phrase is shortened. Other
+problems, such as an app that would not open, say what went wrong instead. The heard phrase is omitted when you were in a password field or KeyScribe could
+not confirm which field you were in. When the command is saved to History, its entry has the complete
 phrase.
 
 With the experimental voice commands, open **Settings ▸ Vocabulary ▸ Voice Commands**. Words and
 replacements there apply only to commands, and run before KeyScribe reads what you said:
 
+- **A saved command's name or other names that come out wrong:** on a speech model your vocabulary can
+  steer, the names of your saved commands already steer it while you give a command, and never during
+  ordinary dictation. On other models they do not, so add the misheard form as one of the command's
+  **Other names**, or add a replacement as below.
 - **A name that sometimes comes out wrong:** add the app's real spelling, such as `Spotify`, to the
   dictionary. This is a best-effort spelling hint, not an explicit mapping from one word to another.
   Dictionary correction applies only to app and place names, never command words or script names and

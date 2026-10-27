@@ -238,6 +238,7 @@ not to its label.
 | Voice command ran (Voice Commands mode, experimental) | Where it went — the app, the place and its browser (“Gmail · Google Chrome”), or the window and its app (“Budget — Numbers · Numbers”) — or the script or shortcut it ran (“Deploy”); a script that reported a result shows that message instead (“Switched to Inbox”) | “Voice command”, or “Started, still running” when the action has not finished; under a reported result, the script's name. A script's informational result (“Nothing waiting”) shows as an Advisory instead, with no failure styling. A window that closed, moved to another desktop, or could not be confirmed in front, and a search where some app did not list its windows, show an Error saying so (Accessibility off adds **Open Accessibility Settings**); if an action later fails, an Error naming the failure follows unless a dictation is in progress or a voice command choice is on screen, in which case History alone records it | None; dismiss automatically |
 | Voice command needs a choice (Voice Commands mode) | “Which one?” for apps, places, and a script's own options, “Which action?” for `run` | Numbered rows, each a name over a detail that tells it apart (app, browser and host, app identity where names repeat, a window's app plus its document or site when two titles are the same, Script/Shortcut, or the name of the script that offered the option), then how to answer with the actual Voice Commands shortcut, led by one line when window rows still read the same (“Same name; the lower number is further forward.” within one app instance, else “Same name; these windows can’t be told apart.”) | Click a row; Cancel. Stays until answered, dismissed, or idle for the timeout |
 | Voice command not recognized (Voice Commands mode) | “Command not recognized” | What the speech model heard, before any replacement: “Heard “stitch to Mail”” — omitted when the target was a password field or could not be confirmed | None; dismiss automatically |
+| Voice command matched nothing (Voice Commands mode) | What found nothing: “No script or shortcut is called “sorb legs”.”, “No matching app, place, or window found for “kiwi”.”, or “No open tab matches …” | The heard excerpt, under the same rules as above | None; dismiss automatically |
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
@@ -292,8 +293,8 @@ or ⇧, chooses that row like a click. Clicking another app returns focus there.
 Badges and explanations never truncate: the badge row wraps to as many rows as needed and the HUD
 grows vertically (its per-state height is a minimum, not a cap).
 
-**Heard excerpt.** An unrecognized voice command, and an answer to a choice that was not understood,
-show what the speech model heard so a mishearing is visible at a glance. It is the raw transcript,
+**Heard excerpt.** An unrecognized voice command, a command whose script, shortcut, app, place, window,
+or tab matched nothing, and an answer to a choice that was not understood, show what the speech model heard so a mishearing is visible at a glance. It is the raw transcript,
 never the text after vocabulary replacements, and the HUD does not claim it is what the command
 reader received: Preview a command (§7) shows how a typed phrase reads after replacements. It is the one HUD text
 that truncates. Whitespace is folded to single spaces, the phrase is cut to

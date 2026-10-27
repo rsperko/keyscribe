@@ -65,7 +65,7 @@ struct VoiceCommandWindowRunnerTests {
 
     @Test func aCompletedMissSaysWindowsWereChecked() async {
         let (runner, _) = make()
-        #expect(await switchTo(runner, "banana", from: textEdit) == .failed(message: VoiceCommandRunner.noMatchMessage("banana")))
+        #expect(await switchTo(runner, "banana", from: textEdit) == .failed(message: VoiceCommandRunner.noMatchMessage("banana"), kind: .nothingMatched))
         #expect(VoiceCommandRunner.noMatchMessage("banana") == "No matching app, place, or window found for \u{201C}banana\u{201D}.")
     }
 

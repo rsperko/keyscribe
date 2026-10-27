@@ -474,11 +474,11 @@ struct VoiceCommandRunnerTests {
                 == .failed(message: "Not a command. Say the name of a saved command. You can also say \u{201C}switch to\u{201D} or \u{201C}open\u{201D} an app or place, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}.",
                            kind: .unrecognizedCommand))
         #expect(await runner.run(transcript: "switch to banana", places: [], origin: nil)
-                == .failed(message: "No matching app, place, or window found for \u{201C}banana\u{201D}."))
+                == .failed(message: "No matching app, place, or window found for \u{201C}banana\u{201D}.", kind: .nothingMatched))
     }
 
-    @Test func onlyAGrammarMissIsMarkedUnrecognizedOnEveryEntryPath() async {
-        let (runner, _) = make()
+    @Test func onlyAGrammarMissIsMarkedUnrecognizedAndOnlyAMissMatchedNothing() async {
+        let (runner, system) = make()
         guard case .failed(_, _, _, let kind) = await runner.run(.notACommand, origin: nil) else {
             Issue.record("expected a failure"); return
         }
@@ -486,7 +486,12 @@ struct VoiceCommandRunnerTests {
         guard case .failed(_, _, _, let other) = await runner.run(transcript: "switch to banana", places: [], origin: nil) else {
             Issue.record("expected a failure"); return
         }
-        #expect(other == .other)
+        #expect(other == .nothingMatched)
+        system.openSucceeds = false
+        guard case .failed(_, _, _, let failedToOpen) = await runner.run(transcript: "switch to chrome", places: [], origin: nil) else {
+            Issue.record("expected a failure"); return
+        }
+        #expect(failedToOpen == .other)
     }
 
     @Test func anAppThatWillNotOpenFails() async {
@@ -619,7 +624,7 @@ struct VoiceCommandRunnerTests {
     @Test func anUnknownRunTargetNeverSearchesOrOpensApps() async {
         let (runner, system) = make()
         #expect(await runner.run(transcript: "run ghostty", places: [], scripts: [deploy], origin: nil)
-            == .failed(message: "No script or shortcut is called \u{201C}ghostty\u{201D}."))
+            == .failed(message: "No script or shortcut is called \u{201C}ghostty\u{201D}.", kind: .nothingMatched))
         #expect(system.installedScans == 0)
         #expect(system.opened.isEmpty)
         #expect(system.scriptRuns.isEmpty)

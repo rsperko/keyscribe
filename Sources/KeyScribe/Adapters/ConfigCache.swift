@@ -123,7 +123,8 @@ final class ConfigCache {
         }
         let resolved = ResolvedConfig(
             modes: modes, dictionary: dictionary, replacements: replacements,
-            connections: connections, fragments: fragments)
+            connections: connections, fragments: fragments,
+            voiceCommands: modes.contains(where: \.runsVoiceCommands) ? voiceCommands : VoiceCommandConfig())
         resolvedCache = resolved
         return resolved
     }

@@ -110,6 +110,28 @@ struct ResolvedConfigTests {
         #expect(rc.recognitionBiasTerms(for: nil) == ["Global"])
     }
 
+    private func withCommands(_ modes: [Mode], dictionary: [String] = []) -> ResolvedConfig {
+        ResolvedConfig(
+            modes: modes, dictionary: DictionarySet(words: dictionary), replacements: ReplacementsSet(),
+            connections: ConnectionSet(), fragments: [:],
+            voiceCommands: VoiceCommandConfig(
+                places: [VoiceCommandPlace(name: "Zorblex", say: ["zorb", "Postgres"], target: .app(bundleId: "a"))],
+                scripts: [VoiceCommandScript(name: "next unread", say: ["NEXT UNREAD"], run: ["/bin/echo"])]))
+    }
+
+    @Test func theVoiceCommandsModeHintsEverySavedCommandNameOnce() {
+        let rc = withCommands([Mode.voiceCommands], dictionary: ["Postgres"])
+        #expect(rc.recognitionBiasTerms(for: Mode.voiceCommands) == ["Postgres", "Zorblex", "zorb", "next unread"])
+    }
+
+    @Test func commandNamesNeverReachOrdinaryDictation() {
+        let mode = Mode(id: "m", name: "M")
+        let rc = withCommands([mode, Mode.voiceCommands], dictionary: ["Postgres"])
+        #expect(rc.recognitionBiasTerms(for: mode) == ["Postgres"])
+        #expect(rc.recognitionBiasTerms(for: nil) == ["Postgres"])
+        #expect(rc.mergedDictionary(for: Mode.voiceCommands) == ["Postgres"])
+    }
+
     @Test func mergedDictionaryAndBiasShareCache() {
         var mode = Mode(id: "m", name: "M")
         mode.dictionary = Mode.ModeDictionary(includeGlobal: true, words: ["ChargeBee", "Postgres"])

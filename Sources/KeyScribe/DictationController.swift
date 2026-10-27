@@ -1104,9 +1104,8 @@ final class DictationController {
                                 cue: .success, hideAfter: 1.5, outcome: .commandStarted, result: resultPrefix + command,
                                 failure: nil)
         case .failed(let message, let command, let action, let kind):
-            CommandPresentation(state: kind == .unrecognizedCommand
-                                    ? .error(message: unrecognizedCommandTitle, action: action, heard: excerpt)
-                                    : .error(message: message, action: action),
+            CommandPresentation(state: .error(message: kind == .unrecognizedCommand ? unrecognizedCommandTitle : message,
+                                              action: action, heard: kind == .other ? nil : excerpt),
                                 cue: .error, hideAfter: 3,
                                 outcome: .commandFailed, result: resultPrefix + (command ?? ""), failure: message)
         case .needsChoice, .abandoned:

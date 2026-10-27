@@ -16,6 +16,7 @@ struct VoiceCommandOrigin: Equatable, Sendable {
 
 enum VoiceCommandFailureKind: Equatable, Sendable {
     case unrecognizedCommand
+    case nothingMatched
     case other
 }
 
@@ -488,11 +489,12 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             return .failed(message: "Not a command. \(Self.notACommandHint)",
                            kind: .unrecognizedCommand)
         case .scriptNotFound(let target):
-            return .failed(message: Self.notFoundMessage(target))
+            return .failed(message: Self.notFoundMessage(target), kind: .nothingMatched)
         case .noMatch(let target):
-            return .failed(message: Self.noMatchMessage(target))
+            return .failed(message: Self.noMatchMessage(target), kind: .nothingMatched)
         case .noTabMatch(let target, let browser):
-            return .failed(message: Self.noTabMatchMessage(target, browser: browser.map { system.appName(forBundleId: $0) ?? $0 }))
+            return .failed(message: Self.noTabMatchMessage(target, browser: browser.map { system.appName(forBundleId: $0) ?? $0 }),
+                           kind: .nothingMatched)
         case .needsWindows, .windowsIncomplete:
             return .failed(message: Self.windowsIncompleteMessage)
         case .windowsNeedAccessibility:

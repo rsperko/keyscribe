@@ -626,6 +626,31 @@ link, or tab, and a *script* one that runs a program or shortcut.
   by name), and while KeyScribe is running it keeps the last version that loaded. The Voice Commands
   editor names the offending entry and why it is invalid. Fix or remove that entry in
   `voice_commands.toml` and save; the file is read again automatically.
+- **Editing this file from another program.** It is TOML, and any valid TOML is accepted: a string can
+  be written in any of the forms the [TOML specification](https://toml.io/en/v1.0.0#string) allows. Saving
+  from Settings rewrites the whole file in KeyScribe's own layout, which may change quoting, key order, and
+  spacing, and drops comments. Saving re-reads the file first and changes only the entry being edited, so
+  an edit made outside the app before the save starts is kept; an edit to an entry that has been
+  removed is refused rather than bringing it back. A program that edits the file at the same moment can
+  still be overwritten. So a tool should parse the file with a TOML library, change only its own entries,
+  keep every `id` and every entry it does not own, and write the result back, never search and replace
+  text. Give each entry the tool owns a fixed `id` of its own and find it by that `id`, not by name, since
+  the person can rename it in Settings. Change only the fields the tool sets, so the person's other
+  names (`say`) survive. For example, in Python 3.11 or later with the `tomli-w` package:
+
+  ```python
+  import pathlib, tomllib, tomli_w
+  path = pathlib.Path.home() / "Library/Application Support/KeyScribe/voice_commands.toml"
+  data = tomllib.loads(path.read_text())
+  commands = data.setdefault("command", [])
+  mine = next((c for c in commands if c.get("id") == "my-tool-note"), None)
+  if mine is None:
+      commands.append({"id": "my-tool-note", "name": "Note", "run": ["~/bin/note", "{text}"]})
+  else:
+      mine["run"] = ["~/bin/note", "{text}"]
+  path.write_text(tomli_w.dumps(data))
+  ```
+
 - **A complete example.** A file `~/bin/note` containing
 
   ```sh
@@ -653,7 +678,11 @@ link, or tab, and a *script* one that runs a program or shortcut.
   which makes custom spoken shortcuts (`code` → `switch to Visual Studio Code`). A terminal `<CR>` on a
   regex replacement is dropped, since a command never presses Return; a literal replacement keeps `<CR>`
   as written, as everywhere else. On a speech model that can steer recognition, the dictionary steers it
-  too. Global vocabulary applies here as in every mode. A file written before that default carries the
+  too, and so does every saved command's `name` and `say` entry: they are read from this file each time it
+  loads, used only while the Voice Commands mode is listening, never added to any word list, and gone when
+  the command is. The recognition-bias switch for the engine turns both off. On a speech model that cannot
+  steer recognition, a saved name helps nothing before matching; use `say` or a replacement for a name that
+  is often misheard. Global vocabulary applies here as in every mode. A file written before that default carries the
   seeded `include_global = false`; it is switched on once, recorded in the seed ledger, so a later hand
   edit back to `false` is kept.
 - **A repeatable mishearing** can be repaired in **Settings ▸ Vocabulary ▸ Voice Commands** with a

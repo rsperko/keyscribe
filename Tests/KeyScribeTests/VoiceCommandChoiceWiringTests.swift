@@ -779,11 +779,20 @@ struct VoiceCommandChoiceWiringTests {
         #expect(entry.outcome == .commandFailed)
     }
 
-    @Test func otherCommandFailuresDoNotGainATranscript() async throws {
-        let h = try Harness(places: [personal, work])
-        await h.dictate("switch to banana")
+    @Test func aDestinationThatMatchesNothingAlsoShowsWhatTheSpeechModelHeard() async throws {
+        let h = try Harness(places: [personal, work], replacements: [.init(heard: "banana", replace: "kiwi", regex: false)])
+        await h.dictate("switch to  banana")
         #expect(h.hud.last == .error(
-            message: "No matching app, place, or window found for \u{201C}banana\u{201D}.", action: nil))
+            message: "No matching app, place, or window found for \u{201C}kiwi\u{201D}.", action: nil,
+            heard: HeardExcerpt(heard: "switch to banana")))
+    }
+
+    @Test func aScriptThatMatchesNothingAlsoShowsWhatTheSpeechModelHeard() async throws {
+        let h = try Harness(places: [], scripts: [VoiceCommandScript(name: "Zorblex", run: ["/bin/echo"])])
+        await h.dictate("run sorb legs")
+        #expect(h.hud.last == .error(
+            message: "No script or shortcut is called \u{201C}sorb legs\u{201D}.", action: nil,
+            heard: HeardExcerpt(heard: "run sorb legs")))
     }
 
     @Test(arguments: [secureTarget, movedTarget])

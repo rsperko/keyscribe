@@ -619,34 +619,37 @@ private struct PlaceEditorSheet: View {
     }
 
     private var appRow: some View {
-        LabeledContent("App") {
-            VStack(alignment: .trailing, spacing: 4) {
-                HStack(spacing: 6) {
-                    if draft.bundleId.isEmpty {
-                        Text("None chosen").foregroundStyle(.secondary)
-                    } else {
-                        if let icon = InstalledApps.menuIcon(forBundleId: draft.bundleId) { Image(nsImage: icon) }
-                        Text(model.appName(draft.bundleId))
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent("App") {
+                VStack(alignment: .trailing, spacing: 4) {
+                    HStack(spacing: 6) {
+                        if draft.bundleId.isEmpty {
+                            Text("None chosen").foregroundStyle(.secondary)
+                        } else {
+                            if let icon = InstalledApps.menuIcon(forBundleId: draft.bundleId) { Image(nsImage: icon) }
+                            Text(model.appName(draft.bundleId)).lineLimit(1).truncationMode(.middle)
+                        }
+                        AppChooserMenu(
+                            title: draft.bundleId.isEmpty ? "Choose App" : "Change",
+                            ids: .init(
+                                menu: AccessibilityID.Mode.VoiceCommands.placeApp,
+                                app: AccessibilityID.Mode.VoiceCommands.placeAppChoice,
+                                chooseFromApplications: AccessibilityID.Mode.VoiceCommands.placeChooseFromApplications,
+                                enterBundleID: AccessibilityID.Mode.VoiceCommands.placeEnterBundleID),
+                            onChoose: { draft.choose(VoiceCommandCatalog.App(name: $0.name, bundleId: $0.bundleId)) },
+                            onEnterBundleID: { enteringBundleID = true })
                     }
-                    AppChooserMenu(
-                        title: draft.bundleId.isEmpty ? "Choose App" : "Change",
-                        ids: .init(
-                            menu: AccessibilityID.Mode.VoiceCommands.placeApp,
-                            app: AccessibilityID.Mode.VoiceCommands.placeAppChoice,
-                            chooseFromApplications: AccessibilityID.Mode.VoiceCommands.placeChooseFromApplications,
-                            enterBundleID: AccessibilityID.Mode.VoiceCommands.placeEnterBundleID),
-                        onChoose: { draft.choose(VoiceCommandCatalog.App(name: $0.name, bundleId: $0.bundleId)) },
-                        onEnterBundleID: { enteringBundleID = true })
-                }
-                if enteringBundleID {
-                    TextField("Bundle ID", text: $draft.bundleId, prompt: Text("com.apple.mail"))
-                        .multilineTextAlignment(.leading)
-                        .labelsHidden()
-                        .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeBundleID)
-                    if !draft.bundleId.isEmpty, let invalid = UserInputValidation.identifierIssue(draft.bundleId, required: true) {
-                        IssueText(invalid.message)
+                    if enteringBundleID {
+                        TextField("Bundle ID", text: $draft.bundleId, prompt: Text("com.apple.mail"))
+                            .multilineTextAlignment(.leading)
+                            .labelsHidden()
+                            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeBundleID)
                     }
                 }
+            }
+            if enteringBundleID, !draft.bundleId.isEmpty,
+               let invalid = UserInputValidation.identifierIssue(draft.bundleId, required: true) {
+                IssueText(invalid.message)
             }
         }
     }
@@ -1069,12 +1072,12 @@ private struct ShortcutEditorSheet: View {
     }
 
     private var shortcutRow: some View {
-        LabeledContent("Shortcut") {
-            VStack(alignment: .trailing, spacing: 4) {
+        VStack(alignment: .leading, spacing: 4) {
+            LabeledContent("Shortcut") {
                 HStack(spacing: 6) {
                     if let shortcut = draft.shortcut {
                         ActionKindIcon(isShortcut: true)
-                        Text(shortcut.name)
+                        Text(shortcut.name).lineLimit(1).truncationMode(.middle)
                     } else {
                         Text("None chosen").foregroundStyle(.secondary)
                     }
@@ -1104,18 +1107,18 @@ private struct ShortcutEditorSheet: View {
                     .fixedSize()
                     .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutChoice)
                 }
-                switch model.shortcutChoices {
-                case .unavailable:
-                    IssueText("Could not load your shortcuts. Open Shortcuts, then choose Refresh List.", severity: .advisory)
-                case .loaded(let choices) where choices.isEmpty:
-                    Text("Create a shortcut in Shortcuts, then choose Refresh List.")
-                        .font(.caption).foregroundStyle(.secondary)
-                default:
-                    EmptyView()
-                }
-                if let shortcut = draft.shortcut, model.shortcutIsMissing(shortcut) {
-                    IssueText("This shortcut is no longer in Shortcuts. Choose another.", severity: .advisory)
-                }
+            }
+            switch model.shortcutChoices {
+            case .unavailable:
+                IssueText("Could not load your shortcuts. Open Shortcuts, then choose Refresh List.", severity: .advisory)
+            case .loaded(let choices) where choices.isEmpty:
+                Text("Create a shortcut in Shortcuts, then choose Refresh List.")
+                    .font(.caption).foregroundStyle(.secondary)
+            default:
+                EmptyView()
+            }
+            if let shortcut = draft.shortcut, model.shortcutIsMissing(shortcut) {
+                IssueText("This shortcut is no longer in Shortcuts. Choose another.", severity: .advisory)
             }
         }
     }

@@ -11,6 +11,7 @@ public final class ResolvedConfig: @unchecked Sendable {
     public let replacements: ReplacementsSet
     public let connections: ConnectionSet
     private let fragments: [String: String]
+    private let voiceCommands: VoiceCommandConfig
 
     private let lock = NSLock()
     private var mergedDictionaryCache: [String: [String]] = [:]
@@ -21,16 +22,16 @@ public final class ResolvedConfig: @unchecked Sendable {
 
     public convenience init(
         modes: [Mode], dictionary: DictionarySet, replacements: ReplacementsSet,
-        connections: ConnectionSet, fragments: [String: String]
+        connections: ConnectionSet, fragments: [String: String], voiceCommands: VoiceCommandConfig = VoiceCommandConfig()
     ) {
         self.init(
             modes: modes, dictionary: dictionary, replacements: replacements, connections: connections,
-            fragments: fragments, onBuildTextStages: nil)
+            fragments: fragments, voiceCommands: voiceCommands, onBuildTextStages: nil)
     }
 
     init(
         modes: [Mode], dictionary: DictionarySet, replacements: ReplacementsSet,
-        connections: ConnectionSet, fragments: [String: String],
+        connections: ConnectionSet, fragments: [String: String], voiceCommands: VoiceCommandConfig = VoiceCommandConfig(),
         onBuildTextStages: (@Sendable (String) -> Void)?
     ) {
         self.modes = modes
@@ -38,6 +39,7 @@ public final class ResolvedConfig: @unchecked Sendable {
         self.replacements = replacements
         self.connections = connections
         self.fragments = fragments
+        self.voiceCommands = voiceCommands
         self.onBuildTextStages = onBuildTextStages
     }
 
@@ -63,8 +65,14 @@ public final class ResolvedConfig: @unchecked Sendable {
     // Memoized per mode so the per-dictation bias path is a cache hit, not a fresh map+filter.
     public func recognitionBiasTerms(for mode: Mode?) -> [String] {
         memoized(mode, in: \.biasTermsCache) {
-            mergedDictionary(for: mode)
+            let words = mergedDictionary(for: mode)
                 .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            guard mode?.runsVoiceCommands == true else { return words }
+            var seen = Set(words.map { $0.lowercased() })
+            let names = voiceCommands.commands.flatMap(\.candidate.spokenForms)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+            return words + names
         }
     }
 
