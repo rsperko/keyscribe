@@ -82,12 +82,12 @@ struct VoiceCommandVocabularyTests {
         #expect(plan(mode: mode).voiceCommandText(heard: "Code.", mode: mode) == "switch to Visual Studio Code")
     }
 
-    @Test func globalVocabularyStaysOutUnlessTheModeIncludesIt() {
+    @Test func globalVocabularyAppliesUnlessTheModeLeavesItOut() {
         let global = [ReplacementsSet.Rule(heard: "switch to", replace: "swap", regex: false)]
         var mode = commands()
-        #expect(plan(mode: mode, globalRules: global).voiceCommandText(heard: "switch to Safari", mode: mode) == "switch to Safari")
-        mode.replacements.includeGlobal = true
         #expect(plan(mode: mode, globalRules: global).voiceCommandText(heard: "switch to Safari", mode: mode) == "swap Safari")
+        mode.replacements.includeGlobal = false
+        #expect(plan(mode: mode, globalRules: global).voiceCommandText(heard: "switch to Safari", mode: mode) == "switch to Safari")
     }
 
     @Test func withoutTheVoiceCommandsModeACommandIsReadAsHeard() {

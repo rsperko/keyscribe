@@ -43,8 +43,8 @@
 - **`_voice_commands.toml`** is a built-in system mode, behind the `voice_commands` experimental flag.
   It is seeded (with no shortcut) only while the flag is on; turning the flag off hides it but leaves the
   file, so a later opt-in keeps the shortcut. Only `trigger_keys[]`, `enabled`, and its own vocabulary
-  (`[dictionary]` and `[replacements]`, which leave out global vocabulary unless `include_global` says
-  otherwise) are honored; everything else is forced (`output = "voice_command"`, no rewrite, no spoken
+  (`[dictionary]` and `[replacements]`, which include global vocabulary unless `include_global = false`, as
+  in every mode) are honored; everything else is forced (`output = "voice_command"`, no rewrite, no spoken
   editing commands, no phrases or constraints). `exclude_from_history` is honored too and defaults to
   `false`, so a voice command is recorded like a dictation: Heard is the transcript and Result is the
   command it ran (a script's program and arguments, quoted the way a shell would), with the reason
@@ -642,8 +642,9 @@ link, or tab, and a *script* one that runs a program or shortcut.
   which makes custom spoken shortcuts (`code` → `switch to Visual Studio Code`). A terminal `<CR>` on a
   regex replacement is dropped, since a command never presses Return; a literal replacement keeps `<CR>`
   as written, as everywhere else. On a speech model that can steer recognition, the dictionary steers it
-  too. When the file has no `[dictionary]` or `[replacements]` table, or one without `include_global`,
-  global vocabulary is left out.
+  too. Global vocabulary applies here as in every mode. A file written before that default carries the
+  seeded `include_global = false`; it is switched on once, recorded in the seed ledger, so a later hand
+  edit back to `false` is kept.
 - **A repeatable mishearing** can be repaired in **Settings ▸ Vocabulary ▸ Voice Commands** with a
   literal replacement: **Word or heard phrase** `switch to male`, **Use instead** `switch to Mail`,
   with **Match heard phrase as a regular expression** off under **Pattern matching**.
@@ -712,7 +713,7 @@ link, or tab, and a *script* one that runs a program or shortcut.
   (`VoiceCommandRunner.emptySidebarSettleReads`) is taken as empty and reported as having no match; one that
   never appears is reported as not ready yet. Cancelling or replacing the command stops this:
   an app not yet opened is not opened, and no further reads are made, but an app that already started stays
-  open. Settings' preview and `--voice-command --dry-run` never open an app.
+  open. Settings' preview and `--voice-command` never open an app.
   A sidebar that could not be read in full (it lists more than `SidebarOutline.itemLimit` entries, or the
   read was cut short) is still searched as read, and a match opens without asking. A sidebar whose window cannot be identified is not read, and an entry opens only in the
   window it was read from, and only if it is still at the same place under the same group; otherwise the
@@ -727,8 +728,9 @@ link, or tab, and a *script* one that runs a program or shortcut.
   matches, so "open mail inbox" searches Mail even beside a running app called Mail Inbox Helper.
 - **Matching order** for an app-switching verb while finding items in apps is off (the change when it is on is
   described above), first hit wins: a place's spoken name exactly; a running app's name exactly; a
-  contiguous run of words in a running app's name ("chrome" → Google Chrome); the same partial rule on
-  place names; an installed app's name exactly; then an **open window's title**, exactly and then as a
+  contiguous run of words in a running app's name ("chrome" → Google Chrome); an installed app's name
+  exactly; the same partial rule on place names, so a place named "Mail Check" never takes "open mail" from
+  Mail; then an **open window's title**, exactly and then as a
   contiguous run of words; then an **open browser tab's title** the same two ways, then its **site** the same
   two ways; then installed apps partially. Only if nothing matches is the target matched fuzzily against every one of those: a
   near-miss is snapped, using the dictionary's fuzzy rule, against places, running and installed apps,

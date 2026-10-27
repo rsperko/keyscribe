@@ -5,7 +5,12 @@ import KeyScribeKit
 
 @MainActor
 final class HUDModel: ObservableObject {
-    @Published var state: HUDState = .hidden
+    var state: HUDState = .hidden {
+        didSet { if state != .hidden { shown = state } }
+    }
+    // What the card draws. Hiding keeps the last card so the panel fades out whole; redrawing it as hidden
+    // mid-fade dropped the card's background while the buttons' bezels lingered.
+    @Published private(set) var shown: HUDState = .hidden
 }
 
 // Kept separate from HUDModel so only `LevelIndicator` rebuilds on each per-buffer level tick, not
@@ -379,7 +384,7 @@ private struct HUDView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        if case .choice(let prompt, _, _) = model.state {
+        if case .choice(let prompt, _, _) = model.shown {
             card(choiceBody(prompt))
         } else {
             card(standardBody)
@@ -390,8 +395,8 @@ private struct HUDView: View {
         content
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .frame(width: model.state.panelWidth, alignment: .leading)
-            .frame(minHeight: model.state.contentHeight, alignment: .leading)
+            .frame(width: model.shown.panelWidth, alignment: .leading)
+            .frame(minHeight: model.shown.contentHeight, alignment: .leading)
             // A light card usually floats over dark content, which bleeds through the standard material as grey.
             .background(colorScheme == .light ? .thickMaterial : .regularMaterial, in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(
@@ -431,7 +436,7 @@ private struct HUDView: View {
             Text(prompt.hint).font(.system(size: 11)).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
-                if let action = model.state.errorAction {
+                if let action = model.shown.errorAction {
                     Button { onErrorAction(action) } label: {
                         Label(action.buttonTitle, systemImage: "gearshape")
                     }
@@ -458,7 +463,7 @@ private struct HUDView: View {
 
     private func secondaryText(_ text: String) -> some View {
         Text(text).font(.system(size: 11)).foregroundStyle(.secondary)
-            .lineLimit(model.state.secondaryIsHeardExcerpt ? 2 : nil)
+            .lineLimit(model.shown.secondaryIsHeardExcerpt ? 2 : nil)
             .truncationMode(.tail)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -471,11 +476,11 @@ private struct HUDView: View {
                     Text(primary).font(.system(size: 13, weight: .semibold))
                         .fixedSize(horizontal: false, vertical: true)
                     if let secondary { secondaryText(secondary) }
-                    if !model.state.dataBoundaryBadges.isEmpty {
+                    if !model.shown.dataBoundaryBadges.isEmpty {
                         // Wrap to as many rows as needed so badges never clip; each is `.fixedSize()` so a
                         // label never ellipsizes.
                         WrapLayout(spacing: 4) {
-                            ForEach(model.state.dataBoundaryBadges, id: \.self) {
+                            ForEach(model.shown.dataBoundaryBadges, id: \.self) {
                                 DataBoundaryBadge(label: $0).fixedSize()
                             }
                         }
@@ -491,23 +496,23 @@ private struct HUDView: View {
     }
 
     private var hasAction: Bool {
-        model.state.offersLocalTranscript || model.state.offersPasteLast || model.state.errorAction != nil
+        model.shown.offersLocalTranscript || model.shown.offersPasteLast || model.shown.errorAction != nil
     }
 
     @ViewBuilder private var actionButtons: some View {
-        if model.state.offersLocalTranscript {
+        if model.shown.offersLocalTranscript {
             Button { onInsertLocalTranscript() } label: {
                 Label("Insert without rewriting", systemImage: "text.insert")
             }
             .accessibilityIdentifier(AccessibilityID.HUD.insertWithoutRewriting)
         }
-        if model.state.offersPasteLast {
+        if model.shown.offersPasteLast {
             Button { onPasteLast() } label: {
                 Label("Paste last dictation", systemImage: "doc.on.clipboard")
             }
             .accessibilityIdentifier(AccessibilityID.HUD.pasteLast)
         }
-        if let action = model.state.errorAction {
+        if let action = model.shown.errorAction {
             Button { onErrorAction(action) } label: {
                 Label(action.buttonTitle, systemImage: "gearshape")
             }
@@ -516,7 +521,7 @@ private struct HUDView: View {
     }
 
     @ViewBuilder private var icon: some View {
-        switch model.state.indicator {
+        switch model.shown.indicator {
         case .ready:
             Image(systemName: "mic").foregroundStyle(.secondary)
         case .choice:
@@ -527,16 +532,16 @@ private struct HUDView: View {
         case .preparing:
             PreparingIcon()
         case .recording:
-            RecordingIcon(level: level, countdown: model.state.recordingCountdown)
+            RecordingIcon(level: level, countdown: model.shown.recordingCountdown)
         case .processing:
             ProcessingIcon()
         case .complete:
-            if case .complete(let outcome, _) = model.state {
+            if case .complete(let outcome, _) = model.shown {
                 Image(systemName: outcomeSymbol(outcome))
                     .font(.system(size: outcomeIconSize(outcome), weight: .semibold))
                     .foregroundStyle(outcomeStyle(outcome))
                     .frame(width: 30, height: 30)
-            } else if case .commandDone = model.state {
+            } else if case .commandDone = model.shown {
                 Image(systemName: "arrow.right.circle.fill")
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.green)
@@ -555,14 +560,14 @@ private struct HUDView: View {
         }
     }
 
-    private var primary: String { model.state.primaryText ?? "" }
-    private var secondary: String? { model.state.secondaryText }
+    private var primary: String { model.shown.primaryText ?? "" }
+    private var secondary: String? { model.shown.secondaryText }
 
     private var accessibilityLabel: String {
         var parts = [primary]
         if let secondary { parts.append(secondary) }
-        if !model.state.dataBoundaryBadges.isEmpty {
-            parts.append(contentsOf: model.state.dataBoundaryBadges)
+        if !model.shown.dataBoundaryBadges.isEmpty {
+            parts.append(contentsOf: model.shown.dataBoundaryBadges)
         }
         return parts.joined(separator: ". ")
     }

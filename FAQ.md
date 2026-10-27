@@ -272,9 +272,9 @@ the phrase is read as after your replacements and what it would do. The preview 
 does not listen. It works without opening an app or running a script or shortcut.
 For the example above, type `switch to male` and check that it resolves to Mail.
 
-Keep these corrections scoped to **Voice Commands**. Global words and replacements apply here only if
-you explicitly include them for this mode; they are left out by default. A Global replacement for a
-common word such as `male` could also change ordinary dictation in modes that include it.
+Your Global words and replacements apply to voice commands too, so a name you already taught
+KeyScribe is heard the same way here. Keep command-only corrections scoped to **Voice Commands**: a
+Global replacement for a common word such as `male` would also change ordinary dictation.
 
 ### Can a voice command run my own script?
 

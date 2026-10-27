@@ -340,6 +340,18 @@ struct VoiceCommandExampleTests {
         #expect(kept == VoiceCommandExample(heard: "note buy milk", result: "Runs /bin/note 'buy eggs' in the background."))
     }
 
+    @Test func everyNameIsCheckedSoAnOtherNameARuleTakesAwayIsReported() {
+        let slack = VoiceCommandScript(name: "Slack", say: ["slack unread"], run: ["/bin/slack", "{text}"])
+        let jump = VoiceCommandScript(name: "Jump", run: ["/bin/jump", "{text}"])
+        let saved = VoiceCommandConfig(scripts: [slack, jump])
+        let readAs: (String) -> String = { $0.hasPrefix("slack unread") ? "jump " + $0 : $0 }
+        #expect(VoiceCommandExample.make(for: .script(slack), among: saved, readAs: readAs).conflict == nil)
+        #expect(VoiceCommandExample.namesLostToReplacements(for: .script(slack), among: saved, readAs: readAs) == [
+            "Your replacements read \u{201C}slack unread buy milk\u{201D} as \u{201C}jump slack unread buy milk\u{201D}, so it runs Jump instead.",
+        ])
+        #expect(VoiceCommandExample.namesLostToReplacements(for: .script(slack), among: saved).isEmpty)
+    }
+
     @Test func aRedirectToTwoOtherCommandsSaysItWouldAsk() {
         let note = VoiceCommandScript(name: "Note", run: ["/bin/note", "{text}"])
         let shop = VoiceCommandScript(name: "Shop", run: ["/bin/shop", "{text}"])

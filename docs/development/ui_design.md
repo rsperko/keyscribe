@@ -1012,7 +1012,8 @@ Its sections are, in order:
    commands exactly as a live command would be (`VoiceCommandExample`). When a replacement or another
    command would send the sample elsewhere, or it would ask which one, the card is replaced by an orange
    advisory saying so, quoting what the replacements read it as. It shows only once the draft is
-   valid. A sheet's title names the starting point when adding (**Open an App**, **Open a Link**,
+   valid. The same check runs on each **other name** the replacements rewrite, and a lost one is listed
+   with the advisories below the fields (`VoiceCommandExample.namesLostToReplacements`). A sheet's title names the starting point when adding (**Open an App**, **Open a Link**,
    **Run a Shortcut**, **Run a Script**, **Find a Browser Tab**) and reads **Edit Command** when editing; its buttons
    are **Add Command**, and **Delete Command** in red at the trailing edge, with a confirmation.
 
@@ -1024,7 +1025,8 @@ Its sections are, in order:
    then a badge: **App**, **Web page**, **App link**, **Tab search**, **Script**, or **Shortcut**. A script row
    shows its command line and an orange advisory when the program is missing or not executable; a shortcut
    row shows the shortcut's name and input, and an orange advisory when that shortcut is no longer in
-   Shortcuts. Under the list sit the **Using Voice Commands** notice and a collapsed **Permissions and confirmations**
+   Shortcuts. Any row also shows an orange advisory when your replacements send one of its names to
+   something else, so a rule that takes a name away is visible without opening the command. Under the list sit the **Using Voice Commands** notice and a collapsed **Permissions and confirmations**
    disclosure explaining that macOS may request access when an action first controls another app or
    accesses protected data; Shortcuts can offer **Allow Once** or **Always Allow**, and actions can include
    confirmations on every run. A macOS dialog may name the app even when a script triggered it, and a

@@ -179,7 +179,13 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     var saved: VoiceCommandConfig { VoiceCommandConfig(commands: commands) }
 
     func conflicts(for candidate: VoiceCommandCandidate) -> [String] {
-        saved.conflicts(for: candidate) + VoiceCommandConfig.hiddenApps(by: candidate, installed: installedApps)
+        let previewed = example(for: candidate).conflict
+        return saved.conflicts(for: candidate) + VoiceCommandConfig.hiddenApps(by: candidate, installed: installedApps)
+            + namesLostToReplacements(for: candidate).filter { $0 != previewed }
+    }
+
+    func namesLostToReplacements(for candidate: VoiceCommandCandidate) -> [String] {
+        VoiceCommandExample.namesLostToReplacements(for: candidate, among: saved, readAs: readAs)
     }
 
     func example(for candidate: VoiceCommandCandidate) -> VoiceCommandExample {
@@ -309,7 +315,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         case .needsSidebar(let app):
             let name = appName(app) ?? app
             return TryResult(heard: heard, summary: "Looks in \(name)\u{2019}s sidebar",
-                             detail: "When spoken, this reads \(name)\u{2019}s sidebar, opening \(name) first if needed, and opens the item that best matches. If several match equally, or the sidebar could not be read in full, it asks which one you meant. The preview does not read sidebars.",
+                             detail: "When spoken, this looks in \(name)\u{2019}s sidebar, opening \(name) first if needed, and opens the item that best matches. If several match equally, it opens the first in sidebar order. The preview does not read sidebars.",
                              resolved: false)
         case .sidebarUnreadable(let app, _):
             return TryResult(heard: heard, summary: "Could not read the sidebar",

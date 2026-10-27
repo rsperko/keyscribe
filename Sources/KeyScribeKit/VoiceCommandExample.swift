@@ -12,7 +12,25 @@ public struct VoiceCommandExample: Equatable, Sendable {
         for candidate: VoiceCommandCandidate, among saved: VoiceCommandConfig = VoiceCommandConfig(),
         readAs: (String) -> String = { $0 }, appName: (String) -> String? = { _ in nil }
     ) -> VoiceCommandExample {
-        let heard = heard(for: candidate)
+        make(for: candidate, heard: heard(for: candidate, saying: candidate.name), among: saved, readAs: readAs, appName: appName)
+    }
+
+    // Only names a replacement rewrites: a name another command shares is already reported by `conflicts`.
+    public static func namesLostToReplacements(
+        for candidate: VoiceCommandCandidate, among saved: VoiceCommandConfig = VoiceCommandConfig(),
+        readAs: (String) -> String = { $0 }
+    ) -> [String] {
+        candidate.spokenForms.compactMap { name in
+            let heard = heard(for: candidate, saying: name)
+            guard readAs(heard) != heard else { return nil }
+            return make(for: candidate, heard: heard, among: saved, readAs: readAs, appName: { _ in nil }).conflict
+        }
+    }
+
+    private static func make(
+        for candidate: VoiceCommandCandidate, heard: String, among saved: VoiceCommandConfig,
+        readAs: (String) -> String, appName: (String) -> String?
+    ) -> VoiceCommandExample {
         let read = readAs(heard)
         let catalog = catalog(with: candidate, among: saved)
         let lead = read == heard
@@ -50,8 +68,8 @@ public struct VoiceCommandExample: Equatable, Sendable {
         return candidate.spokenForms.map { $0 + more }
     }
 
-    private static func heard(for candidate: VoiceCommandCandidate) -> String {
-        let phrase = VoiceCommandText.key(candidate.name)
+    private static func heard(for candidate: VoiceCommandCandidate, saying name: String) -> String {
+        let phrase = VoiceCommandText.key(name)
         switch candidate {
         case .place(let place) where place.isTabSearch: return "\(phrase) \(sampleTabWords)"
         case .script(let script) where script.takesText: return "\(phrase) \(sampleWords)"

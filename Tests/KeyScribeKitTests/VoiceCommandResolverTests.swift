@@ -50,6 +50,14 @@ struct VoiceCommandResolverTests {
         #expect(resolve("open safari", running: [chrome], installed: [safari, chrome]) == .action(.app(safari)))
     }
 
+    @Test func anInstalledAppsWholeNameBeatsPartOfASavedName() {
+        let mail = App(name: "Mail", bundleId: "com.apple.mail")
+        let check = VoiceCommandPlace(name: "Mail Check", target: .url("https://example.com/check"))
+        #expect(resolve("open mail", places: [check], installed: [mail]) == .action(.app(mail)))
+        #expect(resolve("open check", places: [check], installed: [mail])
+                == .action(.place(check, .openURL("https://example.com/check", browser: nil))))
+    }
+
     @Test func runningBeatsInstalledForTheSameWords() {
         let otherChrome = App(name: "Chrome", bundleId: "com.example.chrome-shim")
         #expect(resolve("switch to chrome", running: [chrome], installed: [otherChrome]) == .action(.app(chrome)))

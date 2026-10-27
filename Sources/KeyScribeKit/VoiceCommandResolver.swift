@@ -372,7 +372,7 @@ public enum VoiceCommandResolver {
         let running = Self.ordered(catalog.runningApps).map(VoiceCommandCandidate.app)
         let installed = Self.ordered(catalog.installedApps).map(VoiceCommandCandidate.app)
         let named: [([VoiceCommandCandidate], Match)] = [
-            (places, .exact), (running, .exact), (running, .partial), (places, .partial), (installed, .exact),
+            (places, .exact), (running, .exact), (running, .partial), (installed, .exact), (places, .partial),
         ]
         if catalog.findsInApps {
             let wholeName: [([VoiceCommandCandidate], Match)] = [(places, .exact), (running, .exact), (installed, .exact)]

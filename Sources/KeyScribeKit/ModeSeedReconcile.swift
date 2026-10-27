@@ -299,7 +299,28 @@ extension ModeStore {
             if writeAndRecord(updated, to: modesDir, ledger: &ledger) { outcome.updated.append(mode.id) }
         }
 
+        includeGlobalVocabularyInVoiceCommands(modesDir: modesDir, ledger: &ledger)
+
         saveLedger(ledger, in: ledgerDir)
         return outcome
+    }
+
+    // Voice Commands used to be seeded with Global vocabulary left out. Settings never offered that
+    // choice, so an older file's `false` came from the seed: include Global once, then honor the file.
+    static let voiceCommandsGlobalVocabularyVersion = 2
+
+    private static func includeGlobalVocabularyInVoiceCommands(modesDir: URL, ledger: inout SeedLedger) {
+        guard (ledger.entry(Mode.voiceCommandsId)?.version ?? 0) < voiceCommandsGlobalVocabularyVersion else { return }
+        let url = modesDir.appendingPathComponent(fileName(for: Mode.voiceCommandsId))
+        guard let onDisk = try? String(contentsOf: url, encoding: .utf8),
+              unknownKeys(in: onDisk).isEmpty,
+              var mode = try? decode(from: onDisk, id: Mode.voiceCommandsId) else { return }
+        if !mode.dictionary.includeGlobal || !mode.replacements.includeGlobal {
+            mode.dictionary.includeGlobal = true
+            mode.replacements.includeGlobal = true
+            guard let toml = try? encode(mode),
+                  (try? toml.write(to: url, atomically: true, encoding: .utf8)) != nil else { return }
+        }
+        ledger.upsert(Mode.voiceCommandsId, version: voiceCommandsGlobalVocabularyVersion, fingerprint: nil)
     }
 }

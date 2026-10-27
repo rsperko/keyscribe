@@ -149,6 +149,25 @@ struct VoiceCommandsSettingsModelTests {
                 == "Your replacements read \u{201C}inbox\u{201D} as \u{201C}switch to inbox\u{201D}, so it does not run this command.")
     }
 
+    @Test func anOtherNameAReplacementTakesAwayIsFlaggedOnceInTheEditor() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-vcsettings-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let config = ConfigCache(supportDir: dir)
+        config.voiceCommandsEnabled = true
+        let repository = ConfigRepository(supportDir: dir, config: config)
+        var commands = Mode.voiceCommands
+        commands.replacements.rules = [.init(heard: "inbox", replace: "switch to inbox", regex: false)]
+        try repository.writeMode(commands)
+        let model = isolatedModel(repository)
+        let mail = VoiceCommandScript(name: "Mail", say: ["inbox"], run: ["/usr/bin/true"])
+        let lost = "Your replacements read \u{201C}inbox\u{201D} as \u{201C}switch to inbox\u{201D}, so it does not run this command."
+        #expect(model.example(for: .script(mail)).conflict == nil)
+        #expect(model.namesLostToReplacements(for: .script(mail)) == [lost])
+        #expect(model.conflicts(for: .script(mail)) == [lost])
+        let inbox = VoiceCommandScript(name: "Inbox", run: ["/usr/bin/true"])
+        #expect(model.conflicts(for: .script(inbox)).isEmpty)
+    }
+
     @Test func tryItNeverCountsAReplacementAsUsed() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-vcsettings-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -163,6 +182,13 @@ struct VoiceCommandsSettingsModelTests {
         #expect(model.readAs("switch to male") == "switch to mail")
         usage.flush()
         #expect(usage.snapshot().rules["mode:\(Mode.voiceCommandsId)|l|male"]?.count == 0)
+    }
+
+    @Test func aSidebarPreviewSaysTiesOpenTheFirstItemWithoutAsking() {
+        let result = VoiceCommandsSettingsModel.describe(
+            .needsSidebar("com.tinyspeck.slackmacgap"), heard: "slack general", readAs: "slack general",
+            appName: { _ in "Slack" })
+        #expect(result.detail == "When spoken, this looks in Slack\u{2019}s sidebar, opening Slack first if needed, and opens the item that best matches. If several match equally, it opens the first in sidebar order. The preview does not read sidebars.")
     }
 
     @Test func tryItShowsWhatTheVocabularyChanged() {

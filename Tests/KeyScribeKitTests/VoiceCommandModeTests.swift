@@ -20,8 +20,8 @@ struct VoiceCommandModeTests {
         #expect(mode.constraints.isEmpty)
         #expect(mode.triggerPhrases.isEmpty)
         #expect(!mode.commands.liveEdits)
-        #expect(!mode.dictionary.includeGlobal)
-        #expect(!mode.replacements.includeGlobal)
+        #expect(mode.dictionary.includeGlobal)
+        #expect(mode.replacements.includeGlobal)
     }
 
     @Test func outputRoundTripsThroughTOML() throws {
@@ -68,26 +68,26 @@ struct VoiceCommandModeTests {
         #expect(normalized.replacements == mode.replacements)
     }
 
-    @Test func aFileWithoutVocabularySectionsLeavesGlobalOut() throws {
+    @Test func aFileWithoutVocabularySectionsIncludesGlobal() throws {
         let toml = "schema_version = \(ModeStore.currentSchemaVersion)\nname = \"Voice Commands\"\noutput = \"voice_command\"\n"
         let decoded = try ModeStore.decode(from: toml, id: Mode.voiceCommandsId).systemNormalized()
-        #expect(!decoded.dictionary.includeGlobal)
-        #expect(!decoded.replacements.includeGlobal)
+        #expect(decoded.dictionary.includeGlobal)
+        #expect(decoded.replacements.includeGlobal)
     }
 
-    @Test func aFileThatOptsIntoGlobalVocabularyKeepsIt() throws {
+    @Test func aFileThatLeavesGlobalVocabularyOutKeepsThatChoice() throws {
         let toml = """
             schema_version = \(ModeStore.currentSchemaVersion)
             name = "Voice Commands"
             output = "voice_command"
             [dictionary]
-            include_global = true
+            include_global = false
             [replacements]
             rules = []
             """
         let decoded = try ModeStore.decode(from: toml, id: Mode.voiceCommandsId).systemNormalized()
-        #expect(decoded.dictionary.includeGlobal)
-        #expect(!decoded.replacements.includeGlobal)
+        #expect(!decoded.dictionary.includeGlobal)
+        #expect(decoded.replacements.includeGlobal)
     }
 
     @Test func everyModeButPlainDictationHasItsOwnVocabulary() {

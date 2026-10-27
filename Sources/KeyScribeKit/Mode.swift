@@ -346,8 +346,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public static var voiceCommands: Mode {
         var mode = Mode(id: voiceCommandsId, name: "Voice Commands")
         mode.output = .voiceCommand
-        mode.dictionary = ModeDictionary(includeGlobal: false, words: [])
-        mode.replacements = ModeReplacements(includeGlobal: false, rules: [])
         mode.trailing = .none
         return mode
     }
@@ -452,12 +450,7 @@ public enum ModeStore {
 
     public static func decode(from toml: String, id: String) throws -> Mode {
         var mode = try ConfigDecode.table(toml, supportedVersion: currentSchemaVersion, migrations: migrations) { table in
-            var mode = try TOMLDecoder().decode(Mode.self, from: table)
-            if id == Mode.voiceCommandsId {
-                if table["dictionary"]?["include_global"] == nil { mode.dictionary.includeGlobal = false }
-                if table["replacements"]?["include_global"] == nil { mode.replacements.includeGlobal = false }
-            }
-            return mode
+            try TOMLDecoder().decode(Mode.self, from: table)
         }
         if mode.output == .voiceCommand && id != Mode.voiceCommandsId {
             throw ConfigError.invalid("output = \"voice_command\" belongs to the built-in Voice Commands mode")

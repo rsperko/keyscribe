@@ -414,8 +414,8 @@ once dictation has started.
 mode identity: the pipeline branches on the output kind. Such a take skips Phase B entirely (a spoken
 suffix never re-routes a command into a dictation mode), and skips the rewrite and insertion; History
 records it as a command (Result is what it ran, plus why it failed) under the usual History rules —
-the heard transcript, after the mode's own replacements and dictionary clean it (its vocabulary leaves out
-the global one unless it opts in), is matched first against the user's saved commands by spoken name, then
+the heard transcript, after the mode's replacements and dictionary clean it (Global vocabulary included,
+like every other mode, unless its file sets `include_global = false`), is matched first against the user's saved commands by spoken name, then
 parsed as a closed set of command words. A saved name matches in whole words at the start of the
 utterance; the longest wins, and only then are the words after it checked against what that command
 accepts, so a failed check explains instead of falling back to a shorter name. **Run** resolves only against

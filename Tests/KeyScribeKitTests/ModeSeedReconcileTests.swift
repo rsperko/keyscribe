@@ -512,4 +512,60 @@ struct ModeSeedReconcileTests {
         let second = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
         #expect(second.isEmpty)
     }
+
+    private func writeVoiceCommands(includeGlobal: Bool, to modesDir: URL) throws {
+        var mode = Mode.voiceCommands
+        mode.triggerKeys = [.init(key: "right_command")]
+        mode.dictionary = .init(includeGlobal: includeGlobal, words: ["herdr"])
+        mode.replacements = .init(includeGlobal: includeGlobal, rules: [])
+        try ModeStore.write(mode, to: modesDir)
+    }
+
+    private func loadVoiceCommands(in modesDir: URL) throws -> Mode {
+        try #require(ModeStore.loadAll(in: modesDir).first { $0.id == Mode.voiceCommandsId })
+    }
+
+    @Test func voiceCommandsSeededWithoutGlobalVocabularyIncludesItOnce() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        ModeStore.seedStarterFilesAndLedgerForTesting(in: d.modes, ledgerDir: d.ledger)
+        try writeVoiceCommands(includeGlobal: false, to: d.modes)
+
+        ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+        let migrated = try loadVoiceCommands(in: d.modes)
+        #expect(migrated.dictionary.includeGlobal)
+        #expect(migrated.replacements.includeGlobal)
+        #expect(migrated.dictionary.words == ["herdr"])
+        #expect(migrated.triggerKeys == [.init(key: "right_command")])
+
+        try writeVoiceCommands(includeGlobal: false, to: d.modes)
+        ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+        #expect(try !loadVoiceCommands(in: d.modes).dictionary.includeGlobal)
+    }
+
+    @Test func voiceCommandsVocabularyIsLeftAloneWhenItsFileCarriesAnUnreadKey() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        ModeStore.seedStarterFilesAndLedgerForTesting(in: d.modes, ledgerDir: d.ledger)
+        try writeVoiceCommands(includeGlobal: false, to: d.modes)
+        let url = d.modes.appendingPathComponent(ModeStore.fileName(for: Mode.voiceCommandsId))
+        let withUnreadKey = "future_setting = 1\n" + (try String(contentsOf: url, encoding: .utf8))
+        try withUnreadKey.write(to: url, atomically: true, encoding: .utf8)
+
+        ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+        #expect(try String(contentsOf: url, encoding: .utf8) == withUnreadKey)
+    }
+
+    @Test func aPreLedgerInstallStillBootstrapsItsLegacySeedsAlongsideVoiceCommands() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        ModeStore.seedStarterFilesAndLedgerForTesting(in: d.modes, ledgerDir: d.ledger)
+        try FileManager.default.removeItem(at: d.ledger)
+        try writeVoiceCommands(includeGlobal: false, to: d.modes)
+
+        ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+        let ledger = try #require(ModeStore.loadLedger(in: d.ledger))
+        #expect(ModeStore.legacySeedIds.isSubset(of: Set(ledger.entries.map(\.seedId))))
+        #expect(try loadVoiceCommands(in: d.modes).replacements.includeGlobal)
+    }
 }

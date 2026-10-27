@@ -213,6 +213,9 @@ struct VoiceCommandsEditorView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Text(destination(place)).font(.caption).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
+                if let unreachable = model.namesLostToReplacements(for: .place(place)).first {
+                    IssueText(unreachable, severity: .advisory)
+                }
             }
             Spacer()
             PaneBadge(place.isTabSearch ? "Tab search" : place.isAppLink ? "App link" : place.isWebPage ? "Web page" : "App")
@@ -241,6 +244,9 @@ struct VoiceCommandsEditorView: View {
                     if let issue = VoiceCommandsSettingsModel.programIssue(script.program) {
                         IssueText(issue, severity: .advisory)
                     }
+                }
+                if let unreachable = model.namesLostToReplacements(for: .script(script)).first {
+                    IssueText(unreachable, severity: .advisory)
                 }
             }
             Spacer()
