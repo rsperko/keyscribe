@@ -16,19 +16,26 @@ struct HTTPModelLister {
     }
 
     func listModels(for connection: Connection, apiKey: String?) async throws -> [String] {
+        try await listModelDetails(for: connection, apiKey: apiKey).map(\.id)
+    }
+
+    // Reasoning support is read only where a service publishes it per model; elsewhere it stays unknown,
+    // which Settings reports as unverified rather than guessing.
+    func listModelDetails(for connection: Connection, apiKey: String?) async throws -> [ModelListing] {
         let storedKey = try await transport.credential(for: connection, apiKey: apiKey)
-        var ids: [String] = []
+        var listings: [ModelListing] = []
         var pageToken: String?
         var pages = 0
         repeat {
             let request = try request(for: connection, key: storedKey, pageToken: pageToken)
             let data = try await transport.send(request)
             let page = try parsePage(data, provider: connection.provider)
-            ids.append(contentsOf: page.ids)
+            listings.append(contentsOf: page.listings)
             pageToken = page.nextPageToken
             pages += 1
         } while pageToken != nil && pages < Self.maxPages
-        return ids.orderedUnique
+        var seen = Set<String>()
+        return listings.filter { seen.insert($0.id).inserted }
     }
 
     private func request(for connection: Connection, key: String?, pageToken: String?) throws -> URLRequest {
@@ -79,7 +86,7 @@ struct HTTPModelLister {
     }
 
     private struct Page {
-        let ids: [String]
+        let listings: [ModelListing]
         let nextPageToken: String?
     }
 
@@ -90,34 +97,37 @@ struct HTTPModelLister {
         switch provider {
         case .openai, .openaiCompatible:
             guard let data = json["data"] as? [[String: Any]] else { throw ProviderTransportError.badResponse }
-            let ids = data.compactMap { $0["id"] as? String }.filter { !$0.isEmpty }
-            return Page(ids: ids, nextPageToken: nil)
+            let listings = data.compactMap { entry -> ModelListing? in
+                guard let id = entry["id"] as? String, !id.isEmpty else { return nil }
+                return ModelListing(id: id, reasoning: ModelReasoningSupport.openRouter(entry))
+            }
+            return Page(listings: listings, nextPageToken: nil)
         case .anthropic:
             guard let data = json["data"] as? [[String: Any]] else { throw ProviderTransportError.badResponse }
-            let ids = data.compactMap { $0["id"] as? String }.filter { !$0.isEmpty }
+            let listings = data.compactMap { entry -> ModelListing? in
+                guard let id = entry["id"] as? String, !id.isEmpty else { return nil }
+                return ModelListing(id: id, reasoning: ModelReasoningSupport.anthropic(entry))
+            }
             let hasMore = json["has_more"] as? Bool ?? false
             let lastId = (json["last_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            return Page(ids: ids, nextPageToken: hasMore ? lastId : nil)
+            return Page(listings: listings, nextPageToken: hasMore ? lastId : nil)
         case .gemini:
             guard let models = json["models"] as? [[String: Any]] else { throw ProviderTransportError.badResponse }
-            let ids = models.compactMap { model -> String? in
+            let listings = models.compactMap { model -> ModelListing? in
                 let methods = model["supportedGenerationMethods"] as? [String]
                 guard methods?.contains("generateContent") == true else { return nil }
-                if let base = model["baseModelId"] as? String, !base.isEmpty { return base }
-                if let name = model["name"] as? String, !name.isEmpty {
-                    return name.replacingOccurrences(of: "models/", with: "")
+                let id: String
+                if let base = model["baseModelId"] as? String, !base.isEmpty {
+                    id = base
+                } else if let name = model["name"] as? String, !name.isEmpty {
+                    id = name.replacingOccurrences(of: "models/", with: "")
+                } else {
+                    return nil
                 }
-                return nil
+                return ModelListing(id: id, reasoning: ModelReasoningSupport.gemini(model))
             }
             let nextPageToken = (json["nextPageToken"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            return Page(ids: ids, nextPageToken: nextPageToken)
+            return Page(listings: listings, nextPageToken: nextPageToken)
         }
-    }
-}
-
-private extension Array where Element == String {
-    var orderedUnique: [String] {
-        var seen = Set<String>()
-        return filter { seen.insert($0).inserted }
     }
 }

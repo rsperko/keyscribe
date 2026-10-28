@@ -115,7 +115,7 @@ struct ConfigKeyCheckTests {
             Connection(
                 id: "c", name: "C", provider: .openaiCompatible, model: "m", keyRef: "k",
                 baseUrl: "http://127.0.0.1:1/v1", tokenCommand: "printf token",
-                params: .init(temperature: 0.4, maxTokens: 100, reasoningEffort: "low", geminiThinkingLevel: "low"))
+                params: .init(temperature: 0.4, maxTokens: 100, reasoning: .level("low"), outputCeiling: 4096))
         ])
         #expect(ConnectionStore.unknownKeys(in: try ConfigEncode.toml(connections)).isEmpty)
         #expect(DictionaryStore.unknownKeys(in: try ConfigEncode.toml(DictionarySet(words: ["Postgres"]))).isEmpty)

@@ -96,7 +96,7 @@ struct SpeechPresenceGateWiringTests {
         let (record, states) = await runWithHUD(detector: StubPresence(presence: .noSpeech, peak: 0.5))
         #expect(record?.outcome == .noSpeech)
         let terminal = states.last
-        if case .complete(let outcome, _) = terminal {
+        if case .complete(let outcome, _, _) = terminal {
             #expect(outcome == .noSpeech)
         } else {
             Issue.record("expected a complete render, got \(String(describing: terminal))")

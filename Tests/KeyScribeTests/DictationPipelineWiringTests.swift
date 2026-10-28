@@ -114,6 +114,18 @@ struct DictationPipelineWiringTests {
     }
 
     @MainActor
+    private struct ReasoningReportingLLM: LLMClient {
+        let outcome: ReasoningOutcome
+        func complete(system: String, user: String, connection: Connection) async throws -> String { "Drafted." }
+        func reasoningOutcome(for connection: Connection) async -> ReasoningOutcome? { outcome }
+    }
+
+    private struct ExhaustedLLM: LLMClient {
+        func complete(system: String, user: String, connection: Connection) async throws -> String {
+            throw ProviderTransportError.limitBeforeAnswer(reasoningEvidence: true)
+        }
+    }
+
     private final class HUDSpy: HUDPresenting {
         private(set) var states: [HUDState] = []
         func render(_ state: HUDState) { states.append(state) }
@@ -706,6 +718,72 @@ struct DictationPipelineWiringTests {
         #expect(entry?.fallbackReason == RewriteService.deadlineReason(seconds: 0.2))
         #expect(await rig.inserts.text == "draft the memo")
         #expect(await awaitCancelled(rig.llm))
+    }
+
+    @Test func aRewriteRecordsWhereReasoningLanded() async {
+        let m = mode(id: "polish", connectionId: "c")
+        let conn = Connection(id: "c", name: "C", provider: .openaiCompatible, model: "kimi-k3", keyRef: "k",
+                              baseUrl: "http://127.0.0.1:1/v1")
+        let out = await run(
+            transcript: "draft the memo", mode: m, connection: conn,
+            llm: ReasoningReportingLLM(outcome: ReasoningOutcome(kind: .lowestAccepted, level: "low")))
+        #expect(out.outcome == .inserted)
+        #expect(out.historyEntry?.reasoning == "Low — the lowest this model accepts")
+    }
+
+    @Test func aRewriteThatRanOutOfRoomSaysWhyInTheHUD() async {
+        let m = mode(id: "polish", connectionId: "c")
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let out = await run(transcript: "draft the memo", mode: m, connection: conn, llm: ExhaustedLLM())
+        let reason = ProviderTransportError.limitBeforeAnswer(reasoningEvidence: true).rewriteFailureReason
+        #expect(out.outcome == .localFallback)
+        #expect(out.historyEntry?.fallbackReason == reason)
+        guard case .localFallback(.inserted, _, let shown, let connectionID)? = out.lastHUD else {
+            Issue.record("expected the fallback HUD, got \(String(describing: out.lastHUD))")
+            return
+        }
+        #expect(shown == reason)
+        #expect(connectionID == "c")
+        #expect(out.lastHUD?.secondaryText == "The model reached its output limit while reasoning.")
+    }
+
+    @Test func aReasoningSettingThatCouldNotBeAppliedIsAnnouncedOncePerLaunch() async {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-wiring-\(UUID().uuidString)", isDirectory: true)
+        let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
+        try? FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        try? ModeStore.write(mode(id: "polish", connectionId: "c"), to: modesDir)
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        try? ConnectionStore.write(ConnectionSet(connections: [conn]), to: supportDir)
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "fixed", eviction: .frugal)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
+        let hud = HUDSpy()
+        let outcome = ReasoningOutcome(kind: .uncontrolledReasoning)
+        let controller = DictationController(
+            settings: settings,
+            provider: try! SpeechEngineProvider(engines: [FixedEngine(text: "draft the memo")], activeId: "fixed"),
+            config: ConfigCache(supportDir: supportDir), history: HistoryStore(supportDir: supportDir),
+            hud: hud, permits: { _ in true },
+            audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
+            insert: { _, _, _, _, _ in true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true },
+            llmClient: ReasoningReportingLLM(outcome: outcome))
+        let notice = outcome.notice(service: "C", model: "m")
+        func noticesShown() -> Int {
+            hud.states.filter { if case .complete(.inserted, _, let shown?) = $0 { shown == notice } else { false } }.count
+        }
+        for _ in 0..<2 {
+            controller.setNextModeOverride(id: "polish")
+            controller.handleStart()
+            await controller.captureBringUpTask?.value
+            controller.handleCommit()
+            await controller.dictationTask?.value
+        }
+        #expect(noticesShown() == 1)
+        #expect(!hud.states.contains { if case .advisory = $0 { true } else { false } })
     }
 
     @Test func rewritesWaitAsLongAsTheDeadlineButConnectionTestsStayShort() {

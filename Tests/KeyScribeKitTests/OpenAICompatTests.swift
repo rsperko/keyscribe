@@ -12,7 +12,19 @@ struct OpenAICompatTests {
             #expect(d.includeTemperature)
             #expect(!d.foldSystemIntoUser)
             #expect(!d.indicatesReasoningModel)
+            #expect(d.reasoningEvidence == .unreported)
+            #expect(d.tokenLimitCap == nil)
         }
+    }
+
+    @Test func initialAdaptationsStartAtTheConnectionsFirstReasoningRung() {
+        let compat = Connection(id: "c", name: "C", provider: .openaiCompatible, model: "m", keyRef: "k")
+        #expect(RequestAdaptations.initial(for: compat).reasoning == .rung(.effort("none")))
+        let claude = Connection(id: "a", name: "A", provider: .anthropic, model: "m", keyRef: "k")
+        #expect(RequestAdaptations.initial(for: claude).reasoning == .rung(.anthropicThinking("disabled")))
+        var auto = compat
+        auto.params.reasoning = .modelDefault
+        #expect(RequestAdaptations.initial(for: auto).reasoning == .modelDefault(exhausted: false))
     }
 
     @Test func parsesUnsupportedMaxTokens() {
@@ -51,7 +63,8 @@ struct OpenAICompatTests {
         let error = OpenAIAPIError.parse(body: wrapped)
         #expect(error?.code == "400")
         #expect(error?.message?.contains("reasoning_effort") == true)
-        #expect(remediatedAdaptations(.default(for: .openai), for: error!)?.includeReasoningEffort == false)
+        let start = RequestAdaptations.initial(for: Connection(id: "o", name: "O", provider: .openai, model: "m", keyRef: "k"))
+        #expect(remediatedAdaptations(start, for: error!)?.reasoning == .rung(.effort("minimal")))
     }
 
     @Test func parsesMessageOnlyError() {
@@ -106,13 +119,57 @@ struct OpenAICompatTests {
         #expect(afterTemp?.indicatesReasoningModel == true)
     }
 
-    @Test func remediatesUnsupportedReasoningEffortByDroppingIt() {
-        let start = RequestAdaptations.default(for: .openai)
+    @Test func anUnknownReasoningParameterIsRecordedAsUnknownInOneStep() {
+        var start = RequestAdaptations.default(for: .openai)
+        start.reasoning = .rung(.effort("none"))
         let after = remediatedAdaptations(start, for: OpenAIAPIError(code: "unsupported_parameter", param: "reasoning_effort"))
-        #expect(after?.includeReasoningEffort == false)
+        #expect(after?.reasoning == .unknown)
         #expect(after?.includeTemperature == true)
 
         #expect(remediatedAdaptations(after!, for: OpenAIAPIError(code: "unsupported_parameter", param: "reasoning_effort")) == nil)
+    }
+
+    @Test func anUnsupportedReasoningValueStepsDownTheLadder() {
+        var start = RequestAdaptations.default(for: .openai)
+        start.reasoning = .rung(.effort("none"))
+        let error = OpenAIAPIError(code: "unsupported_value", param: "reasoning_effort", message: "Unsupported value: 'none'")
+        #expect(remediatedAdaptations(start, for: error)?.reasoning == .rung(.effort("minimal")))
+    }
+
+    @Test func anExplicitLevelTheServerRejectsIsRefused() {
+        var start = RequestAdaptations.default(for: .openaiCompatible)
+        start.reasoning = .rung(.effort("medium"))
+        let error = OpenAIAPIError(code: nil, param: nil, message: "reasoning_effort must be one of low, high, max")
+        #expect(remediation(start, for: error, preference: .level("medium")) == .refuse(level: "medium"))
+    }
+
+    @Test func aTooLargeTokenValueCapsTheLimitOnlyWhenItWouldChangeTheRequest() {
+        let start = RequestAdaptations.default(for: .openaiCompatible)
+        let error = OpenAIAPIError(code: nil, param: nil, message: "max_tokens must be less than or equal to 4096")
+        #expect(remediatedAdaptations(start, for: error) != nil)
+        guard case .retry(let capped)? = remediation(start, for: error, sentTokenLimit: 8192) else {
+            Issue.record("expected a cap")
+            return
+        }
+        #expect(capped.tokenLimitCap == 4096)
+        #expect(capped.tokenLimitField == .maxTokens)
+        #expect(remediation(capped, for: error, sentTokenLimit: 4096)?.retried?.tokenLimitField == .maxCompletionTokens)
+    }
+
+    @Test func anthropicAndGeminiOnlyRemediateTheirReasoningControls() {
+        var claude = RequestAdaptations.default(for: .anthropic)
+        claude.reasoning = .rung(.anthropicThinking("disabled"))
+        let thinking = OpenAIAPIError(code: nil, param: nil, message: "thinking.type: Input tag 'disabled' found using 'type' does not match any of the expected tags")
+        #expect(remediatedAdaptations(claude, for: thinking, provider: .anthropic)?.reasoning
+            == .rung(.anthropicThinking("between_tools")))
+        let unrelated = OpenAIAPIError(code: nil, param: nil, message: "max_tokens: field required")
+        #expect(remediatedAdaptations(claude, for: unrelated, provider: .anthropic) == nil)
+
+        var gemini = RequestAdaptations.default(for: .gemini)
+        gemini.reasoning = .rung(.geminiLevel("minimal"))
+        let unknownLevel = OpenAIAPIError(code: "400", param: nil, message: "Unknown name \"thinkingLevel\" at 'generation_config.thinking_config': Cannot find field.")
+        #expect(remediatedAdaptations(gemini, for: unknownLevel, provider: .gemini)?.reasoning == .rung(.geminiBudget(0)))
+        #expect(remediatedAdaptations(gemini, for: OpenAIAPIError(code: "400", param: nil, message: "model not found"), provider: .gemini) == nil)
     }
 
     @Test func remediatesRoleByFolding() {
@@ -138,14 +195,14 @@ struct OpenAICompatTests {
     }
 
     @Test func remediatesReasoningEffortFromMessageOnly400() {
-        let start = RequestAdaptations.default(for: .openai)
+        var start = RequestAdaptations.default(for: .openai)
+        start.reasoning = .rung(.effort("none"))
         let error = OpenAIAPIError(
             code: nil, param: nil,
             message: "Invalid value for 'reasoning_effort': 'none'. Supported values: high, low, medium, minimal.")
         let after = remediatedAdaptations(start, for: error)
-        #expect(after?.includeReasoningEffort == false)
+        #expect(after?.reasoning == .rung(.effort("minimal")))
         #expect(after?.includeTemperature == true)
-        #expect(remediatedAdaptations(after!, for: error) == nil)
     }
 
     @Test func remediatesTemperatureAndMaxTokensFromMessage() {
@@ -165,13 +222,20 @@ struct OpenAICompatTests {
         #expect(remediatedAdaptations(current, for: error) == nil)
     }
 
-    @Test func messageScanDropsReasoningEffortBeforeTemperature() {
-        let start = RequestAdaptations.default(for: .openai)
+    @Test func messageScanAdjustsReasoningBeforeTemperature() {
+        var start = RequestAdaptations.default(for: .openai)
+        start.reasoning = .rung(.effort("none"))
         let error = OpenAIAPIError(code: nil, param: nil,
             message: "unsupported: reasoning_effort and temperature are not allowed together")
         let after = remediatedAdaptations(start, for: error)
-        #expect(after?.includeReasoningEffort == false)
+        #expect(after?.reasoning == .unknown)
         #expect(after?.includeTemperature == true)
+    }
+
+    @Test func aReasoningMessageIsIgnoredWhenNoReasoningWasSent() {
+        let start = RequestAdaptations.default(for: .openai)
+        let error = OpenAIAPIError(code: nil, param: nil, message: "reasoning_effort not supported")
+        #expect(remediatedAdaptations(start, for: error) == nil)
     }
 
     @Test func messageScanIgnoresUnactionableAndAlreadyDroppedParams() {
@@ -247,12 +311,28 @@ struct OpenAICompatTests {
 
     @Test func cleanReturnsNilWhenNothingRemains() {
         #expect(ReasoningOutput.clean("<think>only reasoning</think>") == nil)
+        #expect(ReasoningOutput.clean("<think>cut off before the tag closed") == nil)
+        #expect(ReasoningOutput.containsReasoning("<think>cut off"))
+        #expect(!ReasoningOutput.containsReasoning("plain answer"))
         #expect(ReasoningOutput.clean("   \n  ") == nil)
         #expect(ReasoningOutput.clean("") == nil)
     }
 
-    @Test func reasoningFloorRaisesOnlyBelowFloor() {
-        #expect(reasoningSafeMaxTokens(2048) == 8192)
-        #expect(reasoningSafeMaxTokens(16000) == 16000)
+    @Test func outputTokensAddHeadroomUnlessReasoningIsHonoredOff() {
+        var adaptations = RequestAdaptations.default(for: .openaiCompatible)
+        adaptations.reasoning = .rung(.effort("none"))
+        #expect(adaptations.outputTokens(base: 2048, ceiling: nil) == 2048)
+        adaptations.reasoningEvidence = .reasoned
+        #expect(adaptations.outputTokens(base: 2048, ceiling: nil) == 8192)
+        adaptations.tokenLimitCap = 4096
+        #expect(adaptations.outputTokens(base: 2048, ceiling: 6000) == 4096)
+        #expect(adaptations.outputTokens(base: 2048, ceiling: 3000) == 3000)
+    }
+}
+
+private extension Remediation {
+    var retried: RequestAdaptations? {
+        if case .retry(let next) = self { return next }
+        return nil
     }
 }

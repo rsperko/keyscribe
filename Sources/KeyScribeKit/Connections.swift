@@ -17,13 +17,7 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
         case openai, anthropic, gemini
         case openaiCompatible = "openai_compatible"
 
-        public var defaultParams: Params {
-            switch self {
-            case .openai: Params(reasoningEffort: "none")
-            case .gemini: Params(geminiThinkingLevel: "minimal")
-            case .anthropic, .openaiCompatible: Params()
-            }
-        }
+        public var defaultParams: Params { Params() }
     }
 
     public enum AuthMethod: String, Codable, Sendable {
@@ -39,29 +33,45 @@ public struct Connection: Codable, Equatable, Sendable, Identifiable {
     }
 
     public struct Params: Codable, Equatable, Sendable {
+        public static let minimumMaxTokens = 256
+
         public var temperature: Double
         public var maxTokens: Int
-        public var reasoningEffort: String?
-        public var geminiThinkingLevel: String?
+        public var reasoning: ReasoningPreference
+        public var outputCeiling: Int?
         enum CodingKeys: String, CodingKey {
-            case temperature, reasoningEffort = "reasoning_effort", geminiThinkingLevel = "gemini_thinking_level"
+            case temperature, reasoning
             case maxTokens = "max_tokens"
+            case outputCeiling = "output_ceiling"
+            case legacyReasoningEffort = "reasoning_effort"
+            case legacyGeminiThinkingLevel = "gemini_thinking_level"
         }
         public init(
             temperature: Double = 0.2, maxTokens: Int = 2048,
-            reasoningEffort: String? = nil, geminiThinkingLevel: String? = nil
+            reasoning: ReasoningPreference = .lowestAvailable, outputCeiling: Int? = nil
         ) {
             self.temperature = temperature
             self.maxTokens = maxTokens
-            self.reasoningEffort = reasoningEffort
-            self.geminiThinkingLevel = geminiThinkingLevel
+            self.reasoning = reasoning
+            self.outputCeiling = outputCeiling
         }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             temperature = try c.decodeIfPresent(Double.self, forKey: .temperature) ?? 0.2
             maxTokens = try c.decodeIfPresent(Int.self, forKey: .maxTokens) ?? 2048
-            reasoningEffort = try c.decodeIfPresent(String.self, forKey: .reasoningEffort)
-            geminiThinkingLevel = try c.decodeIfPresent(String.self, forKey: .geminiThinkingLevel)
+            outputCeiling = try c.decodeIfPresent(Int.self, forKey: .outputCeiling)
+            let stored = try c.decodeIfPresent(ReasoningPreference.self, forKey: .reasoning)
+            let effort = ReasoningPreference(legacyEffort: try c.decodeIfPresent(String.self, forKey: .legacyReasoningEffort))
+            let gemini = ReasoningPreference(
+                legacyGeminiLevel: try c.decodeIfPresent(String.self, forKey: .legacyGeminiThinkingLevel))
+            reasoning = stored ?? effort ?? gemini ?? .lowestAvailable
+        }
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(temperature, forKey: .temperature)
+            try c.encode(maxTokens, forKey: .maxTokens)
+            try c.encode(reasoning, forKey: .reasoning)
+            try c.encodeIfPresent(outputCeiling, forKey: .outputCeiling)
         }
     }
 

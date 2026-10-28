@@ -298,29 +298,92 @@ struct AIConnectionDraftTests {
         #expect(draft.baseURL == (AIServiceCatalog.defaultPreset.baseURL ?? ""))
     }
 
-    @Test func resolvedParamsPreservesStoredParamsForTheSameProvider() {
+    @Test func draftRoundTripsReasoningOutputRoomAndTemperature() {
         let stored = Connection(
-            id: "o", name: "OpenAI", provider: .openai, model: "gpt-5.6-luna",
-            keyRef: "k", params: .init(temperature: 0.7, maxTokens: 4096, reasoningEffort: "low"))
-        let draft = AIConnectionDraft(connection: stored)
+            id: "o", name: "OpenAI", provider: .openai, model: "gpt-5.6-luna", keyRef: "k",
+            params: .init(temperature: 0.7, maxTokens: 4096, reasoning: .level("xhigh"), outputCeiling: 16384))
+        var draft = AIConnectionDraft(connection: stored)
+        #expect(draft.connection(id: "o", keyRef: "k").params == stored.params)
 
-        #expect(draft.resolvedParams(for: stored) == stored.params)
+        draft.params.reasoning = .lowestAvailable
+        draft.params.maxTokens = 3000
+        let edited = draft.connection(id: "o", keyRef: "k").params
+        #expect(edited.reasoning == .lowestAvailable)
+        #expect(edited.maxTokens == 3000)
+        #expect(edited.temperature == 0.7)
     }
 
-    @Test func resolvedParamsRestampsProviderDefaultsOnProviderSwitch() {
+    @Test func switchingProviderKeepsTheChosenReasoning() {
         let geminiPreset = ConnectionPreset(
             id: "gemini-fixture", name: "Gemini Fixture", provider: .gemini, defaultModel: "gemini-model")
         let stored = Connection(
-            id: "o", name: "OpenAI", provider: .openai, model: "gpt-5.6-luna", keyRef: "k")
-        #expect(stored.params.reasoningEffort == "none")
-
-        var toCompat = AIConnectionDraft(connection: stored)
-        toCompat.applyPreset(keyedGateway, updateDefaultName: false)
-        #expect(toCompat.resolvedParams(for: stored).reasoningEffort == nil)
-
+            id: "o", name: "OpenAI", provider: .openai, model: "gpt-5.6-luna", keyRef: "k",
+            params: .init(reasoning: .level("high"), outputCeiling: 128_000))
         var toGemini = AIConnectionDraft(connection: stored)
         toGemini.applyPreset(geminiPreset, updateDefaultName: false)
-        #expect(toGemini.resolvedParams(for: stored).reasoningEffort == nil)
-        #expect(toGemini.resolvedParams(for: stored).geminiThinkingLevel == "minimal")
+        let params = toGemini.connection(id: "o", keyRef: "k").params
+        #expect(params.reasoning == .level("high"))
+        #expect(params.outputCeiling == nil)
+    }
+
+    @Test func aSavedCeilingFollowsOnlyTheModelAndServiceItWasLearnedFor() {
+        let stored = Connection(
+            id: "c", name: "Router", provider: .openaiCompatible, model: "small-model", keyRef: "k",
+            baseUrl: "https://router.example/v1", params: .init(outputCeiling: 4096))
+        let untouched = AIConnectionDraft(connection: stored)
+        #expect(untouched.outputCeiling == 4096)
+        #expect(untouched.connection(id: "c", keyRef: "k").params.outputCeiling == 4096)
+
+        var newModel = AIConnectionDraft(connection: stored)
+        newModel.model = "large-model"
+        #expect(newModel.outputCeiling == nil)
+        #expect(newModel.connection(id: "c", keyRef: "k").params.outputCeiling == nil)
+
+        var newEndpoint = AIConnectionDraft(connection: stored)
+        newEndpoint.baseURL = "https://other.example/v1"
+        #expect(newEndpoint.connection(id: "c", keyRef: "k").params.outputCeiling == nil)
+    }
+
+    @Test func fetchedModelDetailsDescribeOnlyTheEndpointTheyCameFrom() {
+        let stored = Connection(
+            id: "c", name: "Router", provider: .openaiCompatible, model: "kimi", keyRef: "k",
+            baseUrl: "https://router.example/v1", authMethod: Connection.AuthMethod.none)
+        var draft = AIConnectionDraft(connection: stored)
+        draft.modelReasoning = ModelReasoningCatalog(for: stored, models: [
+            "kimi": ModelReasoningSupport(levels: ["low", "high"], canTurnOff: false, maxOutputTokens: 32768),
+        ])
+        #expect(draft.reasoningSupport != nil)
+        #expect(draft.outputCeiling == 32768)
+
+        draft.baseURL = "https://router.example/v2"
+        #expect(draft.reasoningSupport == nil)
+        #expect(draft.outputCeiling == nil)
+        #expect(draft.reasoningOptions == [.lowestAvailable] + ReasoningPreference.levels.map(ReasoningPreference.level) + [.modelDefault])
+        #expect(draft.connection(id: "c", keyRef: "k").params.outputCeiling == nil)
+    }
+
+    @Test func outputRoomBelowTheMinimumIsAnIssue() {
+        var draft = AIConnectionDraft()
+        #expect(draft.outputRoomIssue == nil)
+        draft.params.maxTokens = 100
+        #expect(draft.outputRoomIssue == .wholeNumberAtLeast(Connection.Params.minimumMaxTokens))
+        #expect(UserInputValidation.outputRoomIssue("abc") != nil)
+        #expect(UserInputValidation.outputRoomIssue(" 4096 ") == nil)
+    }
+
+    @Test func pickerOffersOnlyListedLevelsWhenMetadataIsKnown() {
+        var draft = AIConnectionDraft()
+        draft.model = "moonshotai/kimi-k3"
+        #expect(draft.reasoningOptions == [.lowestAvailable] + ReasoningPreference.levels.map(ReasoningPreference.level) + [.modelDefault])
+
+        draft.applyFetchedModels(["moonshotai/kimi-k3"], reasoning: ModelReasoningCatalog(endpoint: draft.endpointIdentity, models: [
+            "moonshotai/kimi-k3": ModelReasoningSupport(levels: ["low", "high", "max"], canTurnOff: false, maxOutputTokens: 32768),
+        ]))
+        #expect(draft.reasoningOptions == [.lowestAvailable, .level("low"), .level("high"), .level("max"), .modelDefault])
+        #expect(draft.connection(id: "c", keyRef: "k").params.outputCeiling == 32768)
+
+        draft.params.reasoning = .level("medium")
+        #expect(draft.reasoningOptions.contains(.level("medium")))
+        #expect(!ReasoningChoices.isListed(draft.params.reasoning, support: draft.reasoningSupport))
     }
 }

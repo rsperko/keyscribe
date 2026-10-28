@@ -192,6 +192,13 @@ Large context causes latency, cost, and provider-side context limits. The policy
 - **`max_tokens` scales with edit-in-place** — a long selection needs output room ≥ its own
   length; the connection default (`config_schema.md`, 2048) is a floor, raised per request when
   the content demands it.
+- **Reasoning shares the output limit.** Every provider counts reasoning tokens against the same limit
+  as the answer, so a request whose reasoning is not proven off gets a fixed extra room on top of the
+  content-scaled value (`ReasoningHeadroom`). It is headroom, not a reservation: the model may still spend
+  all of it reasoning, which is why the default asks for the least reasoning the model accepts
+  (`config_schema.md`, `reasoning`) and why an answer-less reply at the limit is reported as such rather
+  than as a malformed response. Rewriting dictation rarely benefits from reasoning; a mode that does
+  (editing a selection by instruction) can point at a connection with a higher level.
 
 ## Structure scope
 - The structure above is **fixed**: context chunks are appended in this stable order. User-defined

@@ -8,6 +8,7 @@ enum HUDErrorAction: Equatable {
     case openAccessibilitySettings
     case openAutomationSettings
     case openSpeechModels
+    case openAIService(String)
 
     var buttonTitle: String {
         switch self {
@@ -15,6 +16,7 @@ enum HUDErrorAction: Equatable {
         case .openAccessibilitySettings: "Open Accessibility Settings"
         case .openAutomationSettings: "Open Automation Settings"
         case .openSpeechModels: "Open Speech Models"
+        case .openAIService: "AI Service Settings…"
         }
     }
 }
@@ -67,8 +69,8 @@ enum HUDState: Equatable {
     case loadingModel(mode: String)
     case transcribing(mode: String, status: String? = nil)
     case rewriting(connection: String, mode: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
-    case localFallback(outcome: DictationOutcome, mode: String)
-    case complete(outcome: DictationOutcome, mode: String)
+    case localFallback(outcome: DictationOutcome, mode: String, reason: String? = nil, connectionId: String? = nil)
+    case complete(outcome: DictationOutcome, mode: String, notice: String? = nil)
     case commandDone(summary: String, detail: String = HUDState.commandDetail)
     case stoppedAtLimit(outcome: DictationOutcome, limit: String, rewriteSkipped: Bool)
     case error(message: String, action: HUDErrorAction?, heard: HeardExcerpt? = nil)
@@ -136,10 +138,10 @@ extension HUDState {
             return mode
         case .rewriting(_, let mode, _, _, _):
             return mode
-        case .localFallback(let outcome, _):
+        case .localFallback(let outcome, _, _, _):
             if case .copied = outcome { return "Copied without rewriting" }
             return "Inserted without rewriting"
-        case .complete(let outcome, _):
+        case .complete(let outcome, _, _):
             return Self.completePrimary(outcome)
         case .commandDone(let summary, _):
             return summary
@@ -155,6 +157,7 @@ extension HUDState {
     var errorAction: HUDErrorAction? {
         switch self {
         case .error(_, let action, _), .choice(_, .waiting(_, _, let action), _): action
+        case .localFallback(_, _, _?, let connectionId?): .openAIService(connectionId)
         default: nil
         }
     }
@@ -173,19 +176,23 @@ extension HUDState {
             return status ?? "Transcribing"
         case .rewriting(let connection, _, _, _, _):
             return "Rewriting with \(connection)"
-        case .complete(.copied(let reason), _), .localFallback(.copied(let reason), _),
+        case .localFallback(.copied(let copied), _, let reason?, _):
+            return Self.joined(Self.copiedSecondary(copied), Self.rewriteFailureSummary(reason))
+        case .complete(.copied(let copied), _, let notice?):
+            return Self.joined(Self.copiedSecondary(copied), Self.noticeLine(notice))
+        case .complete(.copied(let reason), _, _), .localFallback(.copied(let reason), _, _, _),
              .stoppedAtLimit(.copied(let reason), _, _):
             return Self.copiedSecondary(reason)
         case .stoppedAtLimit(_, _, let rewriteSkipped):
             return rewriteSkipped
                 ? "Inserted without rewriting — dictate again to continue"
                 : "Inserted — dictate again to continue"
-        case .complete(_, let mode):
-            return mode
+        case .complete(_, let mode, let notice):
+            return notice.map(Self.noticeLine) ?? mode
         case .commandDone(_, let detail):
             return detail
-        case .localFallback:
-            return "Rewrite could not be completed"
+        case .localFallback(_, _, let reason, _):
+            return Self.rewriteFailureSummary(reason)
         case .choice(_, .waiting(let note, let heard, _), _):
             return heard?.text ?? note
         case .choice(_, .listening(let latchedTrigger), _):
@@ -221,7 +228,7 @@ extension HUDState {
 
     var offersPasteLast: Bool {
         switch self {
-        case .complete(.copied(let reason), _), .localFallback(.copied(let reason), _),
+        case .complete(.copied(let reason), _, _), .localFallback(.copied(let reason), _, _, _),
              .stoppedAtLimit(.copied(let reason), _, _):
             // A synthetic ⌘V is itself blocked without Accessibility, so don't offer a button that can't
             // work — the text is already on the clipboard for a manual paste.
@@ -255,10 +262,32 @@ extension HUDState {
     }
 
     var contentHeight: CGFloat {
+        let base: CGFloat
         if offersLocalTranscript || offersPasteLast || errorAction != nil {
-            return dataBoundaryBadges.isEmpty ? 92 : 104
+            base = dataBoundaryBadges.isEmpty ? 92 : 104
+        } else {
+            base = dataBoundaryBadges.isEmpty ? 64 : 78
         }
-        return dataBoundaryBadges.isEmpty ? 64 : 78
+        return base + fallbackReasonHeight
+    }
+
+    var fallbackReasonHeight: CGFloat {
+        guard hasLongSecondary, let secondaryText else { return 0 }
+        let lines = (Double(secondaryText.count) / 40).rounded(.up)
+        return CGFloat(max(0, lines - 1)) * 14
+    }
+
+    var hidesAfterSeconds: Double {
+        if hasLongSecondary { return 5 }
+        if case .stoppedAtLimit = self { return 5 }
+        return 2
+    }
+
+    private var hasLongSecondary: Bool {
+        switch self {
+        case .localFallback(_, _, _?, _), .complete(_, _, _?): true
+        default: false
+        }
     }
 
     // A stable VoiceOver announcement per state-change edge (ui_design.md §9). Level ticks are
@@ -303,6 +332,7 @@ extension HUDState {
 
     var panelWidth: CGFloat {
         if case .choice = self { return 320 }
+        if offersPasteLast && errorAction != nil { return 380 }
         return 280
     }
 
@@ -316,6 +346,30 @@ extension HUDState {
         case .choice(_, .listening, _), .choice(_, .working, _): return true
         default: return false
         }
+    }
+
+    private static func noticeLine(_ notice: String) -> String {
+        ReasoningOutcome.noticeTitle + ". " + notice
+    }
+
+    private static func rewriteFailureSummary(_ reason: String?) -> String {
+        switch reason {
+        case ProviderTransportError.limitBeforeAnswer(reasoningEvidence: true).rewriteFailureReason:
+            return "The model reached its output limit while reasoning."
+        case ProviderTransportError.limitBeforeAnswer(reasoningEvidence: false).rewriteFailureReason:
+            return "The model reached its output limit before writing an answer."
+        case ProviderTransportError.truncated.rewriteFailureReason:
+            return "The model reached its output limit."
+        case RewriteService.deadlineReason(seconds: RewriteService.defaultDeadlineSeconds):
+            return "The rewrite took too long."
+        default:
+            return reason ?? "Rewrite could not be completed"
+        }
+    }
+
+    // Where the text went is read first; a cause or caveat follows as its own sentence.
+    private static func joined(_ disposition: String, _ detail: String) -> String {
+        disposition + (disposition.hasSuffix(".") ? " " : ". ") + detail
     }
 
     private static func completePrimary(_ outcome: DictationOutcome) -> String {

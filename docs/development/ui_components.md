@@ -46,7 +46,7 @@ it as a shared type — never a one-off inline pattern. (Anatomy, behavior, and 
 
 | Component | Use for |
 |---|---|
-| Setting row with help | Every non-obvious, consequential, advanced, permission-gated, or privacy-relevant setting — label, one-line result, control, inline `Learn more`. No hover-only tooltip for anything affecting data/privacy/output. |
+| Setting row with help | Every non-obvious, consequential, advanced, permission-gated, or privacy-relevant setting — label, one-line result, control, inline `Learn more`. A wide control may sit below its label to preserve both in narrow panes. No hover-only tooltip for anything affecting data/privacy/output. |
 | Advanced disclosure | Advanced/rare config, collapsed by default. Full header row is the toggle target, chevron trailing; the label names the capability, not the mechanism. |
 | Data boundary badge | HUD (cloud rewrite only), mode list, History, connection summaries. Categories stay separate badges, never a vague `Context shared`. |
 | Recording level indicator | The HUD recording icon — a level-driven `state.recording` halo + dot. |
@@ -123,6 +123,8 @@ it as a shared type — never a one-off inline pattern. (Anatomy, behavior, and 
 | `compatibility mode` (Apple Dictation standing in for Apple Speech) | fallback, legacy, older model, degraded |
 | `Rewrite selected text` | edit mode, work on selection |
 | `Reusable writing instruction` | prompt fragment |
+| `Reasoning`, `Recommended — least reasoning`, `Model default` | thinking, effort, reasoning effort, auto |
+| `Minimum output allowance` (with `tokens` beside the field) | max tokens, max_tokens, token limit |
 
 ---
 

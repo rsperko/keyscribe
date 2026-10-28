@@ -8,6 +8,10 @@ struct ConnectionTester {
 
     var client: any LLMClient = HTTPLLMClient(session: HTTPLLMClient.settingsSession())
 
+    func reasoningSummary(for connection: Connection) async -> String? {
+        await client.reasoningOutcome(for: connection).map { "Reasoning: \($0.summary)" }
+    }
+
     func test(_ connection: Connection) async -> ConnectionTestState {
         do {
             let reply = try await client.complete(
@@ -52,6 +56,8 @@ final class AIServiceSettingsModel: ObservableObject {
     @Published private(set) var testStates: [String: ConnectionTestState] = [:]
     @Published private(set) var modelSuggestionsByConnection: [String: [String]] = [:]
     @Published private(set) var modelDiscoveryStates: [String: ModelDiscoveryState] = [:]
+    @Published private(set) var modelReasoningByConnection: [String: ModelReasoningCatalog] = [:]
+    @Published private(set) var reasoningSummaries: [String: String] = [:]
     @Published private(set) var keyedRefs: Set<String> = []
     @Published var pendingConnectOffer: ConnectModesOffer?
     @Published private(set) var dependentNamesByConnection: [String: [String]] = [:]
@@ -64,7 +70,7 @@ final class AIServiceSettingsModel: ObservableObject {
     private var modesDir: URL { repository.modesDir }
     private var loadedSignature: String?
     private let tester: ConnectionTester
-    private let listModels: (Connection, String?) async throws -> [String]
+    private let listModels: (Connection, String?) async throws -> [ModelListing]
     private let saveAPIKey: (String, String) -> Bool
     private let deleteAPIKey: (String) -> Void
     private(set) var testTask: Task<Void, Never>?
@@ -77,8 +83,9 @@ final class AIServiceSettingsModel: ObservableObject {
         repository: ConfigRepository,
         permits: @escaping (Connection) -> Bool,
         tester: ConnectionTester = ConnectionTester(),
-        listModels: @escaping (Connection, String?) async throws -> [String] = {
-            try await HTTPModelLister().listModels(for: $0, apiKey: $1)
+        listModels: ((Connection, String?) async throws -> [String])? = nil,
+        listModelDetails: @escaping (Connection, String?) async throws -> [ModelListing] = {
+            try await HTTPModelLister().listModelDetails(for: $0, apiKey: $1)
         },
         saveAPIKey: @escaping (String, String) -> Bool = { KeychainStore.set($1, for: $0) && KeychainStore.has($0) },
         deleteAPIKey: @escaping (String) -> Void = { KeychainStore.delete($0) }
@@ -86,7 +93,11 @@ final class AIServiceSettingsModel: ObservableObject {
         self.repository = repository
         self.permits = permits
         self.tester = tester
-        self.listModels = listModels
+        if let listModels {
+            self.listModels = { try await listModels($0, $1).map { ModelListing(id: $0) } }
+        } else {
+            self.listModels = listModelDetails
+        }
         self.saveAPIKey = saveAPIKey
         self.deleteAPIKey = deleteAPIKey
         reload()
@@ -95,6 +106,8 @@ final class AIServiceSettingsModel: ObservableObject {
     func testState(for id: String) -> ConnectionTestState? { testStates[id] }
     func modelSuggestions(for id: String) -> [String] { modelSuggestionsByConnection[id] ?? [] }
     func modelDiscoveryState(for id: String) -> ModelDiscoveryState? { modelDiscoveryStates[id] }
+    func modelReasoning(for id: String) -> ModelReasoningCatalog? { modelReasoningByConnection[id] }
+    func reasoningSummary(for id: String) -> String? { reasoningSummaries[id] }
 
     var failedTestIds: Set<String> {
         let present = Set(connections.map(\.id))
@@ -110,10 +123,13 @@ final class AIServiceSettingsModel: ObservableObject {
         let generation = (testGeneration[id] ?? 0) + 1
         testGeneration[id] = generation
         testStates[id] = .testing
+        reasoningSummaries[id] = nil
         testTask = Task {
             let result = await tester.test(connection)
+            let summary = result == .passed ? await tester.reasoningSummary(for: connection) : nil
             guard testGeneration[id] == generation else { return }
             testStates[id] = result
+            reasoningSummaries[id] = summary
             if case .passed = result, pendingOfferConnectionId == id,
                let current = connections.first(where: { $0.id == id }),
                current.configIssue(permits: permits) == nil {
@@ -136,7 +152,8 @@ final class AIServiceSettingsModel: ObservableObject {
         }
         modelDiscoveryStates[id] = .loading
         do {
-            let models = try await listModels(connection, apiKey)
+            let listings = try await listModels(connection, apiKey)
+            let models = listings.map(\.id)
             // Re-read the live connection by id: a focus-loss commit can land while the fetch is in flight.
             // If the provider or base URL changed (or the connection was deleted) meanwhile, the fetched
             // list describes a now-stale endpoint — don't offer it as suggestions or auto-select from it.
@@ -145,18 +162,23 @@ final class AIServiceSettingsModel: ObservableObject {
                 modelDiscoveryStates[id] = nil
                 return
             }
+            let reasoning = Dictionary(
+                listings.compactMap { listing in listing.reasoning.map { (listing.id, $0) } },
+                uniquingKeysWith: { first, _ in first })
             modelSuggestionsByConnection[id] = models
+            modelReasoningByConnection[id] = ModelReasoningCatalog(for: latest, models: reasoning)
             modelDiscoveryStates[id] = .loaded
             // Auto-select requires the model to be unchanged — a changed model is the user's own
             // deliberate pick and must not be overwritten.
+            var updated = latest
             if !models.isEmpty, latest.model == connection.model {
-                var updated = latest
                 let current = latest.model.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !models.contains(current) {
-                    updated.model = models[0]
-                    save(updated)
-                }
+                if !models.contains(current) { updated.model = models[0] }
             }
+            if !reasoning.isEmpty {
+                updated.params.outputCeiling = reasoning[updated.model.trimmingCharacters(in: .whitespacesAndNewlines)]?.maxOutputTokens
+            }
+            if updated != latest { save(updated) }
         } catch {
             let message = (error as? ProviderTransportError)?.description ?? error.localizedDescription
             modelDiscoveryStates[id] = .failed(message)
@@ -255,6 +277,10 @@ final class AIServiceSettingsModel: ObservableObject {
 
     func update(_ connection: Connection, apiKey: String?) {
         if pendingConnectOffer?.connectionId == connection.id { pendingConnectOffer = nil }
+        if let catalog = modelReasoningByConnection[connection.id],
+           catalog.endpoint != ModelReasoningCatalog(for: connection, models: [:]).endpoint {
+            modelReasoningByConnection[connection.id] = nil
+        }
         testStates[connection.id] = nil
         testGeneration[connection.id, default: 0] += 1
         save(connection)
@@ -281,6 +307,7 @@ final class AIServiceSettingsModel: ObservableObject {
         keyedRefs.remove(connection.keyRef)
         modelDiscoveryStates[connection.id] = nil
         modelSuggestionsByConnection[connection.id] = nil
+        modelReasoningByConnection[connection.id] = nil
         var connection = connection
         connection.keyRef = "\(rotationBase(connection.keyRef)).\(UUID().uuidString)"
         update(connection, apiKey: nil)
@@ -297,6 +324,7 @@ final class AIServiceSettingsModel: ObservableObject {
             testGeneration[connection.id, default: 0] += 1
             modelDiscoveryStates[connection.id] = nil
             modelSuggestionsByConnection[connection.id] = nil
+            modelReasoningByConnection[connection.id] = nil
             if pendingOfferConnectionId == connection.id { pendingOfferConnectionId = nil }
             if pendingConnectOffer?.connectionId == connection.id { pendingConnectOffer = nil }
             connections = updated
@@ -430,6 +458,8 @@ struct AIServiceSettingsView: View {
                 testState: model.testState(for: connection.id),
                 modelSuggestions: model.modelSuggestions(for: connection.id),
                 modelDiscoveryState: model.modelDiscoveryState(for: connection.id),
+                modelReasoning: model.modelReasoning(for: connection.id),
+                reasoningSummary: model.reasoningSummary(for: connection.id),
                 onUpdate: model.update,
                 onBoundaryUpdate: model.updateAcrossCredentialBoundary,
                 onFetchModels: { connection, apiKey in
@@ -559,6 +589,8 @@ private struct AIServiceEditor: View {
     let testState: ConnectionTestState?
     let modelSuggestions: [String]
     let modelDiscoveryState: ModelDiscoveryState?
+    var modelReasoning: ModelReasoningCatalog? = nil
+    var reasoningSummary: String? = nil
     var autofocusName = false
     let onUpdate: (Connection, String?) -> Void
     let onBoundaryUpdate: (Connection) -> Void
@@ -577,6 +609,8 @@ private struct AIServiceEditor: View {
         testState: ConnectionTestState?,
         modelSuggestions: [String],
         modelDiscoveryState: ModelDiscoveryState?,
+        modelReasoning: ModelReasoningCatalog? = nil,
+        reasoningSummary: String? = nil,
         autofocusName: Bool = false,
         onUpdate: @escaping (Connection, String?) -> Void,
         onBoundaryUpdate: @escaping (Connection) -> Void,
@@ -592,6 +626,8 @@ private struct AIServiceEditor: View {
         self.testState = testState
         self.modelSuggestions = modelSuggestions
         self.modelDiscoveryState = modelDiscoveryState
+        self.modelReasoning = modelReasoning
+        self.reasoningSummary = reasoningSummary
         self.autofocusName = autofocusName
         self.onUpdate = onUpdate
         self.onBoundaryUpdate = onBoundaryUpdate
@@ -599,11 +635,13 @@ private struct AIServiceEditor: View {
         self.onTest = onTest
         self.onConsumeFocus = onConsumeFocus
         self.onDelete = onDelete
-        _draft = State(initialValue: Self.draft(
+        var initial = Self.draft(
             from: connection,
             apiKey: "",
             modelSuggestions: modelSuggestions,
-            modelDiscoveryState: modelDiscoveryState))
+            modelDiscoveryState: modelDiscoveryState)
+        initial.modelReasoning = modelReasoning
+        _draft = State(initialValue: initial)
     }
 
     var body: some View {
@@ -615,6 +653,7 @@ private struct AIServiceEditor: View {
                 permits: permits,
                 dependentModeNames: dependentModeNames,
                 testState: testState,
+                reasoningSummary: reasoningSummary,
                 autofocusName: autofocusName,
                 onCommit: commit,
                 onFetchModels: { fetchModels(apiKey: $0) },
@@ -625,8 +664,9 @@ private struct AIServiceEditor: View {
         .onChange(of: connection) { _, connection in refreshDraft(from: connection) }
         .onChange(of: modelSuggestions) { _, suggestions in
             guard !suggestions.isEmpty else { return }
-            draft.applyFetchedModels(suggestions)
+            draft.applyFetchedModels(suggestions, reasoning: modelReasoning)
         }
+        .onChange(of: modelReasoning) { _, reasoning in draft.modelReasoning = reasoning }
         .onChange(of: modelDiscoveryState) { _, _ in refreshDraft(from: connection) }
         .confirmationDialog("Change AI service?", isPresented: Binding(
             get: { pendingBoundaryConnection != nil },
@@ -674,12 +714,12 @@ private struct AIServiceEditor: View {
             modelDiscoveryState: modelDiscoveryState)
         next.presetId = draft.presetId
         next.stashedServiceValues = draft.stashedServiceValues
+        next.modelReasoning = modelReasoning
         draft = next
     }
 
     private func commit(_ draft: AIConnectionDraft, apiKey: String?) {
-        var updated = draft.connection(id: connection.id, keyRef: connection.keyRef)
-        updated.params = draft.resolvedParams(for: connection)
+        let updated = draft.connection(id: connection.id, keyRef: connection.keyRef)
         if hasKey, connection.crossesCredentialBoundary(to: updated) {
             pendingBoundaryConnection = updated
             return
@@ -705,8 +745,7 @@ private struct AIServiceEditor: View {
     }
 
     private func fetchModels(apiKey: String?) {
-        var updated = draft.connection(id: connection.id, keyRef: connection.keyRef)
-        updated.params = draft.resolvedParams(for: connection)
+        let updated = draft.connection(id: connection.id, keyRef: connection.keyRef)
         onFetchModels(updated, apiKey)
     }
 }

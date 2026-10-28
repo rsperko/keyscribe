@@ -13,6 +13,7 @@ struct AIConnectionDraftEditor: View {
     let permits: (Connection) -> Bool
     var dependentModeNames: [String] = []
     let testState: ConnectionTestState?
+    var reasoningSummary: String? = nil
     var autofocusName = false
     let onCommit: (AIConnectionDraft, String?) -> Void
     let onFetchModels: (String?) -> Void
@@ -21,7 +22,9 @@ struct AIConnectionDraftEditor: View {
     var onDelete: (() -> Void)?
     @State private var replacingAPIKey = false
     @State private var connectionOptionsExpanded = false
+    @State private var rewriteSettingsExpanded = false
     @State private var modelInputIssue: UserInputValidation.Issue?
+    @State private var outputRoomInputIssue: UserInputValidation.Issue?
 
     var body: some View {
         switch presentation {
@@ -66,8 +69,17 @@ struct AIConnectionDraftEditor: View {
             Section("Model") {
                 modelRows
             }
+            if onTest != nil {
+                Section {
+                    connectionTest
+                }
+            }
             Section {
-                DisclosureSection(isExpanded: $connectionOptionsExpanded, hasError: connectionOptionsError) {
+                DisclosureSection(
+                    isExpanded: $connectionOptionsExpanded,
+                    hasError: connectionOptionsError,
+                    headerID: AccessibilityID.Settings.AI.Editor.connectionOptions
+                ) {
                     DisclosureSummaryLabel(title: "Connection options", summary: connectionOptionsSummary)
                 } content: {
                     serviceTypeRow
@@ -78,31 +90,33 @@ struct AIConnectionDraftEditor: View {
                         authenticationMechanismRow
                     }
                 }
-                .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.connectionOptions)
+            }
+            Section {
+                DisclosureSection(
+                    isExpanded: $rewriteSettingsExpanded,
+                    hasError: draft.outputRoomIssue != nil || outputRoomInputIssue != nil,
+                    headerID: AccessibilityID.Settings.AI.Editor.rewriteSettings
+                ) {
+                    DisclosureSummaryLabel(
+                        title: "Rewrite settings",
+                        summary: ReasoningReport.preferenceName(draft.params.reasoning))
+                } content: {
+                    reasoningRow
+                    outputRoomRow
+                }
             }
             Section("Used by") {
                 usedByRow
                 Text("Cloud rewrite sends text to this named provider only when a mode explicitly selects it.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Section {
-                HStack(spacing: 10) {
-                    if let onTest {
-                        Button("Test Connection", action: onTest)
-                            .disabled(testState == .testing || !draft.canTestInSettings(hasStoredKey: hasStoredKey, permits: permits))
-                            .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.testConnection)
-                        if testState == .testing { ProgressView().controlSize(.small) }
-                        testStatus
-                    }
-                    Spacer()
-                    if let onDelete {
+            if let onDelete {
+                Section {
+                    HStack {
+                        Spacer()
                         PaneDeleteButton(title: "Delete AI Service", action: onDelete)
                             .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.delete)
                     }
-                }
-                if case .failed(let message) = testState { IssueText(message) }
-                if let reason = draft.testDisabledReasonInSettings(hasStoredKey: hasStoredKey, permits: permits) {
-                    Text(reason).font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
@@ -112,6 +126,29 @@ struct AIConnectionDraftEditor: View {
         .onAppear {
             if autofocusName { onConsumeFocus() }
             normalizeAuthForProvider()
+        }
+    }
+
+    private var connectionTest: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                if let onTest {
+                    Button("Test Connection", action: onTest)
+                        .disabled(testState == .testing || !draft.canTestInSettings(hasStoredKey: hasStoredKey, permits: permits))
+                        .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.testConnection)
+                }
+                if testState == .testing { ProgressView().controlSize(.small) }
+                testStatus
+                Spacer()
+            }
+            if case .failed(let message) = testState { IssueText(message) }
+            if testState == .passed, let reasoningSummary {
+                Text(reasoningSummary).font(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.reasoningSummary)
+            }
+            if let reason = draft.testDisabledReasonInSettings(hasStoredKey: hasStoredKey, permits: permits) {
+                Text(reason).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -470,6 +507,61 @@ struct AIConnectionDraftEditor: View {
         case nil:
             EmptyView()
         }
+    }
+
+    private var reasoningRow: some View {
+        SettingRow(
+            title: "Reasoning",
+            result: reasoningStatus,
+            help: ReasoningChoices.caption(support: draft.reasoningSupport)
+                + " Model default sends no setting and lets the model decide.",
+            combinesAccessibilityChildren: false,
+            controlBelowLabel: true
+        ) {
+            Picker("Reasoning", selection: Binding(
+                get: { draft.params.reasoning },
+                set: { draft.params.reasoning = $0; commit(nil) }
+            )) {
+                ForEach(draft.reasoningOptions, id: \.storedValue) { option in
+                    Text(ReasoningReport.preferenceName(option)).tag(option)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+            .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.reasoning)
+        }
+    }
+
+    private var reasoningStatus: String? {
+        guard ReasoningChoices.isListed(draft.params.reasoning, support: draft.reasoningSupport) else {
+            return "Not listed for this model"
+        }
+        return draft.reasoningSupport?.publishesReasoning == true ? nil : "Supported levels unknown"
+    }
+
+    private var outputRoomRow: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            CommittedTextField(
+                "Minimum output allowance", text: String(draft.params.maxTokens), suffix: "tokens",
+                validation: UserInputValidation.outputRoomIssue,
+                onIssueChange: { outputRoomInputIssue = $0 }
+            ) { next in
+                guard let value = Int(next.trimmingCharacters(in: .whitespacesAndNewlines)),
+                      value >= Connection.Params.minimumMaxTokens else { return }
+                draft.params.maxTokens = value
+                commit(nil)
+            }
+            .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.outputRoom)
+            Text(outputRoomCaption).font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var outputRoomCaption: String {
+        var caption = "\(Branding.appName) increases this for longer dictations and reasoning. Increase it if rewrites are cut off."
+        if let ceiling = draft.outputCeiling { caption += " This model's limit is \(ceiling.formatted())." }
+        if outputRoomInputIssue != nil { caption += " Rewrites use \(draft.params.maxTokens.formatted()) until a valid number is entered." }
+        return caption
     }
 
     private var connectionOptionsSummary: String {

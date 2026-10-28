@@ -147,7 +147,7 @@ struct HTTPLLMClientTests {
         let connection = Connection(
             id: "gateway", name: "Gateway", provider: .openaiCompatible,
             model: "new-model", keyRef: "k", baseUrl: "https://gateway.example/v1",
-            params: .init(reasoningEffort: "none"), wireAPI: .responses)
+            params: .init(), wireAPI: .responses)
 
         let output = try await stubbedClient().complete(system: "System instruction", user: "User input", connection: connection)
 
@@ -255,7 +255,7 @@ struct HTTPLLMClientTests {
         let connection = Connection(
             id: "gateway", name: "Gateway", provider: .openaiCompatible,
             model: "reasoner", keyRef: "k", baseUrl: "https://gateway.example/v1",
-            params: .init(maxTokens: 2048, reasoningEffort: "high"), wireAPI: .responses)
+            params: .init(maxTokens: 2048, reasoning: .level("high")), wireAPI: .responses)
 
         _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
 
@@ -317,10 +317,30 @@ struct HTTPLLMClientTests {
         #expect((responseBody?["reasoning"] as? [String: Any])?["effort"] as? String == "none")
     }
 
-    @Test func incompleteResponsesOutputIsTruncated() async {
+    @Test func incompleteResponsesWithoutAReasonIsAnIncompleteReplyNotTheLimit() async {
         LLMStubProtocol.handler = { request in
             let response = try! JSONSerialization.data(withJSONObject: [
                 "status": "incomplete",
+                "output": [["type": "message", "content": [["type": "output_text", "text": "Partial"]]]],
+            ])
+            return (resp(request.url!, 200), response)
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "new-model", keyRef: "k", baseUrl: "https://gateway.example/v1", wireAPI: .responses)
+        do {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+            Issue.record("expected an incomplete reply")
+        } catch ProviderTransportError.incompleteReply {
+        } catch {
+            Issue.record("expected incompleteReply, got \(error)")
+        }
+    }
+
+    @Test func incompleteResponsesOutputIsTruncated() async {
+        LLMStubProtocol.handler = { request in
+            let response = try! JSONSerialization.data(withJSONObject: [
+                "status": "incomplete", "incomplete_details": ["reason": "max_output_tokens"],
                 "output": [["type": "message", "content": [["type": "output_text", "text": "Partial"]]]],
             ])
             return (resp(request.url!, 200), response)
@@ -549,9 +569,11 @@ struct HTTPLLMClientTests {
         #expect(bodies.count == 2)
         #expect(bodies[0]?["reasoning_effort"] as? String == "none")
         #expect(bodies[1]?["reasoning_effort"] == nil)
+        #expect(bodies[0]?["max_completion_tokens"] as? Int == 2048)
+        #expect(bodies[1]?["max_completion_tokens"] as? Int == 8192)
     }
 
-    @Test func geminiRejectingThinkingConfigRetriesWithoutItAndCaches() async throws {
+    @Test func geminiRejectingThinkingLevelMovesToABudgetAndCaches() async throws {
         let cache = RequestAdaptationCache()
         let client = stubbedClient(cache: cache)
         let connection = Connection(
@@ -561,21 +583,23 @@ struct HTTPLLMClientTests {
             "candidates": [["content": ["parts": [["text": "OK"]]]]],
         ])
         let bad = try! JSONSerialization.data(withJSONObject: [
-            "error": ["code": 400, "message": "Unknown name \"thinkingLevel\"", "status": "INVALID_ARGUMENT"],
+            "error": ["code": 400, "message": "Unknown name \"thinkingLevel\" at 'generation_config.thinking_config': Cannot find field.", "status": "INVALID_ARGUMENT"],
         ])
 
         nonisolated(unsafe) var firstRun: [[String: Any]?] = []
         LLMStubProtocol.handler = { request in
             let body = request.decodedBody()
             firstRun.append(body)
-            let hasThinking = (body?["generationConfig"] as? [String: Any])?["thinkingConfig"] != nil
-            return (resp(request.url!, hasThinking ? 400 : 200), hasThinking ? bad : ok)
+            let thinking = (body?["generationConfig"] as? [String: Any])?["thinkingConfig"] as? [String: Any]
+            let rejected = thinking?["thinkingLevel"] != nil
+            return (resp(request.url!, rejected ? 400 : 200), rejected ? bad : ok)
         }
         let out = try await client.complete(system: "s", user: "u", connection: connection)
         #expect(out == "OK")
         #expect(firstRun.count == 2)
-        #expect((firstRun[0]?["generationConfig"] as? [String: Any])?["thinkingConfig"] != nil)
-        #expect((firstRun[1]?["generationConfig"] as? [String: Any])?["thinkingConfig"] == nil)
+        let retried = (firstRun[1]?["generationConfig"] as? [String: Any])?["thinkingConfig"] as? [String: Any]
+        #expect(retried?["thinkingBudget"] as? Int == 0)
+        #expect(retried?["thinkingLevel"] == nil)
 
         nonisolated(unsafe) var secondRun: [[String: Any]?] = []
         LLMStubProtocol.handler = { request in
@@ -584,7 +608,31 @@ struct HTTPLLMClientTests {
         }
         _ = try await client.complete(system: "s", user: "u", connection: connection)
         #expect(secondRun.count == 1)
-        #expect((secondRun[0]?["generationConfig"] as? [String: Any])?["thinkingConfig"] == nil)
+        let cached = (secondRun[0]?["generationConfig"] as? [String: Any])?["thinkingConfig"] as? [String: Any]
+        #expect(cached?["thinkingBudget"] as? Int == 0)
+    }
+
+    @Test func geminiLowestWalksMinimalLowBudgetZeroBudget128() async throws {
+        let connection = Connection(id: "g", name: "G", provider: .gemini, model: "gemini-x", keyRef: "k")
+        let ok = try! JSONSerialization.data(withJSONObject: [
+            "candidates": [["content": ["parts": [["text": "OK"]]]]],
+        ])
+        let valueError = try! JSONSerialization.data(withJSONObject: [
+            "error": ["code": 400, "message": "This thinking setting is not valid for this model.", "status": "INVALID_ARGUMENT"],
+        ])
+        nonisolated(unsafe) var configs: [[String: Any]] = []
+        LLMStubProtocol.handler = { request in
+            let thinking = ((request.decodedBody()?["generationConfig"] as? [String: Any])?["thinkingConfig"] as? [String: Any]) ?? [:]
+            configs.append(thinking)
+            let accepted = thinking["thinkingBudget"] as? Int == 128
+            return (resp(request.url!, accepted ? 200 : 400), accepted ? ok : valueError)
+        }
+        _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+        #expect(configs.count == 4)
+        #expect(configs[0]["thinkingLevel"] as? String == "minimal")
+        #expect(configs[1]["thinkingLevel"] as? String == "low")
+        #expect(configs[2]["thinkingBudget"] as? Int == 0)
+        #expect(configs[3]["thinkingBudget"] as? Int == 128)
     }
 
     @Test func geminiUnrelated400StillFailsAndCachesNothing() async throws {
@@ -605,7 +653,7 @@ struct HTTPLLMClientTests {
         await #expect(throws: ProviderTransportError.self) {
             _ = try await client.complete(system: "s", user: "u", connection: connection)
         }
-        #expect(calls == 2)
+        #expect(calls == 1)
 
         nonisolated(unsafe) var nextBody: [String: Any]?
         let ok = try! JSONSerialization.data(withJSONObject: [
@@ -1307,6 +1355,497 @@ struct HTTPLLMClientTests {
         _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
         #expect(header == "secret")
         #expect(seenURL?.contains("key=") == false)
+    }
+
+    @Test func nullContentAtLengthWithReasoningUsageIsLimitBeforeAnswerWithEvidence() async {
+        LLMStubProtocol.handler = { request in
+            let body = try! JSONSerialization.data(withJSONObject: [
+                "choices": [["message": ["role": "assistant", "content": NSNull()], "finish_reason": "length"]],
+                "usage": ["completion_tokens": 2048, "completion_tokens_details": ["reasoning_tokens": 2048]],
+            ])
+            return (resp(request.url!, 200), body)
+        }
+        do {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection(model: "kimi-k3"))
+            Issue.record("expected the reasoning-exhaustion error")
+        } catch ProviderTransportError.limitBeforeAnswer(let evidence) {
+            #expect(evidence)
+        } catch {
+            Issue.record("expected limitBeforeAnswer, got \(error)")
+        }
+    }
+
+    @Test func nullContentAtLengthWithoutUsageIsLimitBeforeAnswerWithoutEvidence() async {
+        LLMStubProtocol.handler = { request in
+            let body = try! JSONSerialization.data(withJSONObject: [
+                "choices": [["message": ["content": NSNull()], "finish_reason": "length"]],
+            ])
+            return (resp(request.url!, 200), body)
+        }
+        do {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection())
+            Issue.record("expected a limit error")
+        } catch ProviderTransportError.limitBeforeAnswer(let evidence) {
+            #expect(!evidence)
+        } catch {
+            Issue.record("expected limitBeforeAnswer, got \(error)")
+        }
+    }
+
+    @Test func lengthWithTextIsTruncatedAnswer() async {
+        LLMStubProtocol.handler = { request in
+            (resp(request.url!, 200), okBody("half a sentence", finishReason: "length"))
+        }
+        do {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection())
+            Issue.record("expected truncation")
+        } catch ProviderTransportError.truncated {
+        } catch {
+            Issue.record("expected truncated, got \(error)")
+        }
+    }
+
+    @Test func geminiMaxTokensWithEmptyTextUsesThoughtsTokenCountAsEvidence() async {
+        LLMStubProtocol.handler = { request in
+            let body = try! JSONSerialization.data(withJSONObject: [
+                "candidates": [["content": ["parts": []], "finishReason": "MAX_TOKENS"]],
+                "usageMetadata": ["thoughtsTokenCount": 2048],
+            ])
+            return (resp(request.url!, 200), body)
+        }
+        let connection = Connection(id: "g", name: "G", provider: .gemini, model: "gemini-3", keyRef: "k")
+        do {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+            Issue.record("expected a limit error")
+        } catch ProviderTransportError.limitBeforeAnswer(let evidence) {
+            #expect(evidence)
+        } catch {
+            Issue.record("expected limitBeforeAnswer, got \(error)")
+        }
+    }
+
+    @Test func anthropicMaxTokensWithOnlyThinkingBlocksIsLimitBeforeAnswer() async {
+        LLMStubProtocol.handler = { request in
+            let body = try! JSONSerialization.data(withJSONObject: [
+                "content": [["type": "thinking", "thinking": ""]],
+                "stop_reason": "max_tokens",
+            ])
+            return (resp(request.url!, 200), body)
+        }
+        let connection = Connection(id: "a", name: "A", provider: .anthropic, model: "claude-x", keyRef: "k")
+        do {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+            Issue.record("expected a limit error")
+        } catch ProviderTransportError.limitBeforeAnswer(let evidence) {
+            #expect(evidence)
+        } catch {
+            Issue.record("expected limitBeforeAnswer, got \(error)")
+        }
+    }
+
+    @Test func responsesIncompleteAttributesOnlyMaxOutputTokens() async {
+        func incomplete(_ reason: String) -> Data {
+            try! JSONSerialization.data(withJSONObject: [
+                "status": "incomplete", "incomplete_details": ["reason": reason], "output": [],
+            ])
+        }
+        let connection = Connection(
+            id: "gateway", name: "Gateway", provider: .openaiCompatible,
+            model: "m", keyRef: "k", baseUrl: "https://gateway.example/v1", wireAPI: .responses)
+        LLMStubProtocol.handler = { request in (resp(request.url!, 200), incomplete("content_filter")) }
+        do {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+            Issue.record("expected an incomplete reply")
+        } catch ProviderTransportError.incompleteReply {
+        } catch {
+            Issue.record("expected incompleteReply, got \(error)")
+        }
+        LLMStubProtocol.handler = { request in (resp(request.url!, 200), incomplete("max_output_tokens")) }
+        do {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+            Issue.record("expected a limit error")
+        } catch ProviderTransportError.limitBeforeAnswer {
+        } catch {
+            Issue.record("expected limitBeforeAnswer, got \(error)")
+        }
+    }
+
+    @Test func openAICompatibleStartsAtNoneWithoutHeadroom() async throws {
+        nonisolated(unsafe) var body: [String: Any]?
+        LLMStubProtocol.handler = { request in
+            body = request.decodedBody()
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+        _ = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection())
+        #expect(body?["reasoning_effort"] as? String == "none")
+        #expect(body?["max_tokens"] as? Int == 2048)
+    }
+
+    @Test func anUnsupportedValueClimbsTheLadderAndCachesTheAcceptedRung() async throws {
+        let client = stubbedClient(cache: RequestAdaptationCache())
+        let connection = compatConnection(model: "kimi-k3")
+        let rejected = try! JSONSerialization.data(withJSONObject: [
+            "error": ["message": "Invalid value for reasoning_effort. This model always reasons.", "type": "invalid_request_error"]])
+        nonisolated(unsafe) var efforts: [String?] = []
+        nonisolated(unsafe) var tokens: [Int?] = []
+        LLMStubProtocol.handler = { request in
+            let body = request.decodedBody()
+            let effort = body?["reasoning_effort"] as? String
+            efforts.append(effort)
+            tokens.append(body?["max_tokens"] as? Int)
+            return effort == "low" ? (resp(request.url!, 200), okBody("OK")) : (resp(request.url!, 400), rejected)
+        }
+        #expect(try await client.complete(system: "s", user: "u", connection: connection) == "OK")
+        #expect(efforts == ["none", "minimal", "low"])
+        #expect(tokens.last == 8192)
+        #expect(await client.reasoningOutcome(for: connection)?.summary == "Low — the lowest this model accepts")
+
+        efforts = []
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(efforts == ["low"])
+    }
+
+    @Test func aListedSupportedValueSkipsRungs() async throws {
+        let rejected = try! JSONSerialization.data(withJSONObject: [
+            "error": ["message": "reasoning_effort must be one of low, high, max"]])
+        nonisolated(unsafe) var efforts: [String?] = []
+        LLMStubProtocol.handler = { request in
+            let effort = request.decodedBody()?["reasoning_effort"] as? String
+            efforts.append(effort)
+            return effort == "low" ? (resp(request.url!, 200), okBody("OK")) : (resp(request.url!, 400), rejected)
+        }
+        _ = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection(model: "kimi-k3"))
+        #expect(efforts == ["none", "low"])
+    }
+
+    @Test func anUnknownParameterIsRecordedInOneRoundTripAndKeepsHeadroom() async throws {
+        let client = stubbedClient(cache: RequestAdaptationCache())
+        let connection = compatConnection()
+        let unknown = try! JSONSerialization.data(withJSONObject: [
+            "error": ["message": "Unrecognized request argument supplied: reasoning_effort"]])
+        nonisolated(unsafe) var bodies: [[String: Any]?] = []
+        LLMStubProtocol.handler = { request in
+            let body = request.decodedBody()
+            bodies.append(body)
+            return body?["reasoning_effort"] == nil ? (resp(request.url!, 200), okBody("OK")) : (resp(request.url!, 400), unknown)
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(bodies.count == 2)
+        #expect(bodies[1]?["max_tokens"] as? Int == 8192)
+        let outcome = await client.reasoningOutcome(for: connection)
+        #expect(outcome?.kind == .notSettable)
+        #expect(outcome?.deservesNotice == true)
+    }
+
+    @Test func aRemovedControlOnAModelThatReportsNoReasoningIsNotAnnounced() async throws {
+        let client = stubbedClient(cache: RequestAdaptationCache())
+        let connection = compatConnection(model: "gpt-4o-mini")
+        let unknown = try! JSONSerialization.data(withJSONObject: [
+            "error": ["message": "Unrecognized request argument supplied: reasoning_effort"]])
+        LLMStubProtocol.handler = { request in
+            guard request.decodedBody()?["reasoning_effort"] == nil else { return (resp(request.url!, 400), unknown) }
+            let body = try! JSONSerialization.data(withJSONObject: [
+                "choices": [["message": ["content": "OK"], "finish_reason": "stop"]],
+                "usage": ["completion_tokens": 3, "completion_tokens_details": ["reasoning_tokens": 0]],
+            ])
+            return (resp(request.url!, 200), body)
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        let outcome = await client.reasoningOutcome(for: connection)
+        #expect(outcome?.kind == .notAdjustable)
+        #expect(outcome?.deservesNotice == false)
+    }
+
+    @Test func anAcceptedOffWithoutAReasoningCountIsReportedAsUnconfirmed() async throws {
+        let client = stubbedClient(cache: RequestAdaptationCache())
+        let connection = compatConnection()
+        LLMStubProtocol.handler = { request in (resp(request.url!, 200), okBody("OK")) }
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(await client.reasoningOutcome(for: connection)?.kind == .offUnconfirmed)
+    }
+
+    @Test func aServerThatCannotTakeTheSettingButReasonsAnywayIsReported() async throws {
+        let client = stubbedClient(cache: RequestAdaptationCache())
+        let connection = compatConnection(model: "qwen3")
+        let unknown = try! JSONSerialization.data(withJSONObject: [
+            "error": ["message": "Unrecognized request argument supplied: reasoning_effort"]])
+        LLMStubProtocol.handler = { request in
+            guard request.decodedBody()?["reasoning_effort"] == nil else { return (resp(request.url!, 400), unknown) }
+            let body = try! JSONSerialization.data(withJSONObject: [
+                "choices": [["message": ["content": "OK", "reasoning_content": "let me think"], "finish_reason": "stop"]],
+            ])
+            return (resp(request.url!, 200), body)
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        let outcome = await client.reasoningOutcome(for: connection)
+        #expect(outcome?.kind == .uncontrolledReasoning)
+        #expect(outcome?.deservesNotice == true)
+    }
+
+    @Test func anAcceptedNoneThatStillReportsReasoningTokensIsNotHonored() async throws {
+        let client = stubbedClient(cache: RequestAdaptationCache())
+        let connection = compatConnection()
+        nonisolated(unsafe) var tokens: [Int?] = []
+        LLMStubProtocol.handler = { request in
+            tokens.append(request.decodedBody()?["max_tokens"] as? Int)
+            let body = try! JSONSerialization.data(withJSONObject: [
+                "choices": [["message": ["content": "OK"], "finish_reason": "stop"]],
+                "usage": ["completion_tokens": 300, "completion_tokens_details": ["reasoning_tokens": 290]],
+            ])
+            return (resp(request.url!, 200), body)
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(await client.reasoningOutcome(for: connection)?.kind == .notHonored)
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(tokens == [2048, 8192])
+    }
+
+    @Test func openRouterRequestsRequireParametersAndUseItsReasoningObject() async throws {
+        nonisolated(unsafe) var body: [String: Any]?
+        LLMStubProtocol.handler = { request in
+            body = request.decodedBody()
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+        _ = try await stubbedClient().complete(
+            system: "s", user: "u", connection: compatConnection(baseUrl: "https://openrouter.ai/api/v1"))
+        #expect((body?["reasoning"] as? [String: Any])?["effort"] as? String == "none")
+        #expect((body?["provider"] as? [String: Any])?["require_parameters"] as? Bool == true)
+        #expect(body?["reasoning_effort"] == nil)
+    }
+
+    private struct RoutedRequest: Sendable {
+        let effort: String?
+        let required: Bool
+        let temperature: Bool
+    }
+
+    private static func routed(_ request: URLRequest) -> RoutedRequest {
+        let body = request.decodedBody()
+        return RoutedRequest(
+            effort: (body?["reasoning"] as? [String: Any])?["effort"] as? String,
+            required: (body?["provider"] as? [String: Any])?["require_parameters"] as? Bool == true,
+            temperature: body?["temperature"] != nil)
+    }
+
+    private static let noRouteBody = try! JSONSerialization.data(withJSONObject: [
+        "error": ["message": "No endpoints found that can handle the requested parameters.", "code": 404]])
+
+    @Test func aRouterThatCannotRouteTemperatureDropsItAndKeepsTheReasoningEnforced() async throws {
+        var connection = compatConnection(baseUrl: "https://openrouter.ai/api/v1")
+        connection.params.reasoning = .level("high")
+        nonisolated(unsafe) var sent: [RoutedRequest] = []
+        LLMStubProtocol.handler = { request in
+            let routed = Self.routed(request)
+            sent.append(routed)
+            return routed.temperature ? (resp(request.url!, 404), Self.noRouteBody) : (resp(request.url!, 200), okBody("OK"))
+        }
+        let client = stubbedClient(cache: RequestAdaptationCache())
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(sent.map(\.effort) == ["high", "high"])
+        #expect(sent.map(\.required) == [true, true])
+        #expect(sent.map(\.temperature) == [true, false])
+        #expect(await client.reasoningOutcome(for: connection)?.kind == .level)
+    }
+
+    @Test func aChosenLevelWithNoRouteFailsInsteadOfBeingSentUnenforced() async {
+        var connection = compatConnection(baseUrl: "https://openrouter.ai/api/v1")
+        connection.params.reasoning = .level("high")
+        nonisolated(unsafe) var sent: [RoutedRequest] = []
+        LLMStubProtocol.handler = { request in
+            let routed = Self.routed(request)
+            sent.append(routed)
+            return routed.required ? (resp(request.url!, 404), Self.noRouteBody) : (resp(request.url!, 200), okBody("OK"))
+        }
+        do {
+            _ = try await stubbedClient(cache: RequestAdaptationCache()).complete(system: "s", user: "u", connection: connection)
+            Issue.record("expected the rewrite to fail")
+        } catch ProviderTransportError.noRouteForReasoningLevel(let level) {
+            #expect(level == "high")
+        } catch {
+            Issue.record("expected noRouteForReasoningLevel, got \(error)")
+        }
+        #expect(sent.allSatisfy { $0.required })
+    }
+
+    @Test func lowestAvailableWithNoEnforcedRouteIsReportedAsNotGuaranteed() async throws {
+        let connection = compatConnection(baseUrl: "https://openrouter.ai/api/v1")
+        nonisolated(unsafe) var sent: [RoutedRequest] = []
+        LLMStubProtocol.handler = { request in
+            let routed = Self.routed(request)
+            sent.append(routed)
+            return routed.required ? (resp(request.url!, 404), Self.noRouteBody) : (resp(request.url!, 200), okBody("OK"))
+        }
+        let client = stubbedClient(cache: RequestAdaptationCache())
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(sent.map(\.required) == [true, true, false])
+        let outcome = await client.reasoningOutcome(for: connection)
+        #expect(outcome?.kind == .unenforced)
+        #expect(outcome?.deservesNotice == true)
+    }
+
+    @Test func aRouterWithNoEndpointsForTheModelFailsWithoutTouchingReasoning() async {
+        let unavailable = try! JSONSerialization.data(withJSONObject: [
+            "error": ["message": "No endpoints found for moonshotai/kimi-k3.", "code": 404]])
+        nonisolated(unsafe) var efforts: [String?] = []
+        LLMStubProtocol.handler = { request in
+            let body = request.decodedBody()
+            efforts.append((body?["reasoning"] as? [String: Any])?["effort"] as? String)
+            return (resp(request.url!, 404), unavailable)
+        }
+        await #expect(throws: (any Error).self) {
+            _ = try await stubbedClient(cache: RequestAdaptationCache()).complete(
+                system: "s", user: "u", connection: compatConnection(baseUrl: "https://openrouter.ai/api/v1"))
+        }
+        #expect(!efforts.isEmpty)
+        #expect(efforts.allSatisfy { $0 == "none" })
+    }
+
+    @Test func anExplicitLevelThatIsRejectedFailsWithTheRefusedReason() async {
+        var connection = compatConnection(model: "kimi-k3")
+        connection.params.reasoning = .level("medium")
+        nonisolated(unsafe) var calls = 0
+        LLMStubProtocol.handler = { request in
+            calls += 1
+            return (resp(request.url!, 400), try! JSONSerialization.data(withJSONObject: [
+                "error": ["message": "reasoning_effort must be one of low, high, max"]]))
+        }
+        do {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+            Issue.record("expected a refusal")
+        } catch ProviderTransportError.reasoningLevelRefused(let level) {
+            #expect(level == "medium")
+            #expect(ProviderTransportError.reasoningLevelRefused(level).rewriteFailureReason.contains("Medium"))
+        } catch {
+            Issue.record("expected reasoningLevelRefused, got \(error)")
+        }
+        #expect(calls == 1)
+    }
+
+    @Test func anthropicLowestWalksDisabledBetweenToolsEffortLow() async throws {
+        let cache = RequestAdaptationCache()
+        let client = stubbedClient(cache: cache)
+        let connection = Connection(id: "a", name: "A", provider: .anthropic, model: "claude-opus-5-5", keyRef: "k")
+        let rejected = try! JSONSerialization.data(withJSONObject: [
+            "type": "error", "error": ["type": "invalid_request_error", "message": "thinking.type: this model does not accept this value"]])
+        let ok = try! JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": "OK"]], "stop_reason": "end_turn"])
+        nonisolated(unsafe) var bodies: [[String: Any]] = []
+        LLMStubProtocol.handler = { request in
+            let body = request.decodedBody() ?? [:]
+            bodies.append(body)
+            return body["thinking"] == nil ? (resp(request.url!, 200), ok) : (resp(request.url!, 400), rejected)
+        }
+        #expect(try await client.complete(system: "s", user: "u", connection: connection) == "OK")
+        #expect(bodies.count == 3)
+        #expect((bodies[0]["thinking"] as? [String: Any])?["type"] as? String == "disabled")
+        #expect((bodies[1]["thinking"] as? [String: Any])?["type"] as? String == "between_tools")
+        #expect((bodies[2]["output_config"] as? [String: Any])?["effort"] as? String == "low")
+        #expect(bodies[2]["thinking"] == nil)
+        #expect(bodies[0]["max_tokens"] as? Int == 2048)
+        #expect(bodies[2]["max_tokens"] as? Int == 8192)
+
+        bodies = []
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(bodies.count == 1)
+        #expect((bodies[0]["output_config"] as? [String: Any])?["effort"] as? String == "low")
+    }
+
+    @Test func anthropicExplicitLevelSendsAdaptiveWithEffort() async throws {
+        var connection = Connection(id: "a", name: "A", provider: .anthropic, model: "claude-sonnet-4-6", keyRef: "k")
+        connection.params.reasoning = .level("high")
+        nonisolated(unsafe) var body: [String: Any]?
+        LLMStubProtocol.handler = { request in
+            body = request.decodedBody()
+            return (resp(request.url!, 200), try! JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": "OK"]]]))
+        }
+        _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+        #expect((body?["thinking"] as? [String: Any])?["type"] as? String == "adaptive")
+        #expect((body?["output_config"] as? [String: Any])?["effort"] as? String == "high")
+    }
+
+    @Test func anthropicDropsTemperatureWhenThinkingRequiresTheDefault() async throws {
+        var connection = Connection(id: "a", name: "A", provider: .anthropic, model: "claude-sonnet-4-6", keyRef: "k")
+        connection.params.reasoning = .level("high")
+        let rejected = try! JSONSerialization.data(withJSONObject: [
+            "type": "error", "error": ["type": "invalid_request_error",
+                                       "message": "`temperature` may only be set to 1 when thinking is enabled or in adaptive mode."]])
+        nonisolated(unsafe) var bodies: [[String: Any]] = []
+        LLMStubProtocol.handler = { request in
+            let body = request.decodedBody() ?? [:]
+            bodies.append(body)
+            return body["temperature"] == nil
+                ? (resp(request.url!, 200), try! JSONSerialization.data(withJSONObject: ["content": [["type": "text", "text": "OK"]]]))
+                : (resp(request.url!, 400), rejected)
+        }
+        #expect(try await stubbedClient().complete(system: "s", user: "u", connection: connection) == "OK")
+        #expect(bodies.count == 2)
+        #expect((bodies[1]["output_config"] as? [String: Any])?["effort"] as? String == "high")
+    }
+
+    @Test func changingThePreferenceDoesNotReplayTheOldLadder() async throws {
+        let client = stubbedClient(cache: RequestAdaptationCache())
+        var connection = compatConnection()
+        LLMStubProtocol.handler = { request in
+            let effort = request.decodedBody()?["reasoning_effort"] as? String
+            return effort == "none"
+                ? (resp(request.url!, 400), errBody("unsupported_value", "reasoning_effort"))
+                : (resp(request.url!, 200), okBody("OK"))
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+
+        connection.params.reasoning = .level("high")
+        nonisolated(unsafe) var effort: String?
+        LLMStubProtocol.handler = { request in
+            effort = request.decodedBody()?["reasoning_effort"] as? String
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(effort == "high")
+    }
+
+    @Test func aServerCeilingClampsTheTokenValueAndIsCached() async throws {
+        let client = stubbedClient(cache: RequestAdaptationCache())
+        var connection = compatConnection()
+        connection.params.reasoning = .modelDefault
+        nonisolated(unsafe) var tokens: [Int?] = []
+        LLMStubProtocol.handler = { request in
+            let value = request.decodedBody()?["max_tokens"] as? Int
+            tokens.append(value)
+            guard let value, value <= 4096 else {
+                return (resp(request.url!, 400), try! JSONSerialization.data(withJSONObject: [
+                    "error": ["message": "max_tokens must be less than or equal to 4096"]]))
+            }
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(tokens == [8192, 4096, 4096])
+    }
+
+    @Test func aPublishedOutputCeilingClampsBeforeTheFirstRequest() async throws {
+        var connection = compatConnection()
+        connection.params.reasoning = .modelDefault
+        connection.params.outputCeiling = 5000
+        nonisolated(unsafe) var tokens: Int?
+        LLMStubProtocol.handler = { request in
+            tokens = request.decodedBody()?["max_tokens"] as? Int
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+        _ = try await stubbedClient().complete(system: "s", user: "u", connection: connection)
+        #expect(tokens == 5000)
+    }
+
+    @Test func anUnclosedThinkBlockAtTheLimitIsReasoningNotAnAnswer() async {
+        LLMStubProtocol.handler = { request in
+            (resp(request.url!, 200), okBody("<think>still working through it", finishReason: "length"))
+        }
+        do {
+            _ = try await stubbedClient().complete(system: "s", user: "u", connection: compatConnection())
+            Issue.record("expected a limit error")
+        } catch ProviderTransportError.limitBeforeAnswer(let evidence) {
+            #expect(evidence)
+        } catch {
+            Issue.record("expected limitBeforeAnswer, got \(error)")
+        }
     }
 }
 

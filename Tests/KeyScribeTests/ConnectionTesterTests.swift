@@ -10,6 +10,12 @@ private struct FakeClient: LLMClient {
     }
 }
 
+private struct ReportingClient: LLMClient {
+    let outcome: ReasoningOutcome?
+    func complete(system: String, user: String, connection: Connection) async throws -> String { "OK" }
+    func reasoningOutcome(for connection: Connection) async -> ReasoningOutcome? { outcome }
+}
+
 private struct BlockingClient: LLMClient {
     let result: Result<String, Error>
     let gate: Signal
@@ -52,6 +58,13 @@ struct ConnectionTesterTests {
     @Test func passesWhenClientReplies() async {
         let tester = ConnectionTester(client: FakeClient(result: .success("OK")))
         #expect(await tester.test(connection) == .passed)
+    }
+
+    @Test func aPassedTestReportsWhereReasoningLanded() async {
+        let tester = ConnectionTester(client: ReportingClient(outcome: ReasoningOutcome(kind: .lowestAccepted, level: "low")))
+        #expect(await tester.test(connection) == .passed)
+        #expect(await tester.reasoningSummary(for: connection) == "Reasoning: Low — the lowest this model accepts")
+        #expect(await ConnectionTester(client: ReportingClient(outcome: nil)).reasoningSummary(for: connection) == nil)
     }
 
     @Test func failureCarriesTheProviderMessage() async {

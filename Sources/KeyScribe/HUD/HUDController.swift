@@ -39,6 +39,7 @@ final class HUDController: HUDPresenting {
     var onInsertLocalTranscript: (() -> Void)?
     var onPasteLast: (() -> Void)?
     var onOpenSpeechModels: (() -> Void)?
+    var onOpenAIService: ((String) -> Void)?
     var onEscapeCancel: (() -> Void)?
     var onChooseVoiceCommand: ((Int, String) -> Void)?
     var onCancelVoiceCommandChoice: ((Int) -> Void)?
@@ -130,6 +131,7 @@ final class HUDController: HUDPresenting {
                 case .openAccessibilitySettings: Permissions.openSettings(.accessibility)
                 case .openAutomationSettings: Permissions.openSettings(.automation)
                 case .openSpeechModels: self?.onOpenSpeechModels?()
+                case .openAIService(let id): self?.onOpenAIService?(id)
                 }
             },
             onChoose: { [weak self] id, identity in self?.onChooseVoiceCommand?(id, identity) },
@@ -484,7 +486,7 @@ private struct HUDView: View {
                 Spacer(minLength: 0)
             }
             if hasAction {
-                actionButtons
+                HStack(spacing: 8) { actionButtons }
                     .buttonStyle(HUDActionButtonStyle())
             }
         }
@@ -531,7 +533,7 @@ private struct HUDView: View {
         case .processing:
             ProcessingIcon()
         case .complete:
-            if case .complete(let outcome, _) = model.shown {
+            if case .complete(let outcome, _, _) = model.shown {
                 Image(systemName: outcomeSymbol(outcome))
                     .font(.system(size: outcomeIconSize(outcome), weight: .semibold))
                     .foregroundStyle(outcomeStyle(outcome))

@@ -11,21 +11,27 @@ public struct RequestAdaptations: Equatable, Sendable {
     public var tokenLimitField: TokenLimitField
     public var includeTemperature: Bool
     public var foldSystemIntoUser: Bool
-    public var includeReasoningEffort: Bool
-    public var includeThinkingConfig: Bool
+    public var reasoning: ReasoningShape
+    public var reasoningEvidence: ReasoningEvidence
+    public var tokenLimitCap: Int?
+    public var requireAllParameters: Bool
 
     public init(
         tokenLimitField: TokenLimitField,
         includeTemperature: Bool = true,
         foldSystemIntoUser: Bool = false,
-        includeReasoningEffort: Bool = true,
-        includeThinkingConfig: Bool = true
+        reasoning: ReasoningShape = .modelDefault(exhausted: false),
+        reasoningEvidence: ReasoningEvidence = .unreported,
+        tokenLimitCap: Int? = nil,
+        requireAllParameters: Bool = true
     ) {
         self.tokenLimitField = tokenLimitField
         self.includeTemperature = includeTemperature
         self.foldSystemIntoUser = foldSystemIntoUser
-        self.includeReasoningEffort = includeReasoningEffort
-        self.includeThinkingConfig = includeThinkingConfig
+        self.reasoning = reasoning
+        self.reasoningEvidence = reasoningEvidence
+        self.tokenLimitCap = tokenLimitCap
+        self.requireAllParameters = requireAllParameters
     }
 
     public static func `default`(for provider: Connection.Provider) -> RequestAdaptations {
@@ -35,8 +41,26 @@ public struct RequestAdaptations: Equatable, Sendable {
         }
     }
 
+    public static func initial(for connection: Connection) -> RequestAdaptations {
+        var adaptations = RequestAdaptations.default(for: connection.provider)
+        adaptations.reasoning = ReasoningLadder.initialShape(for: connection.params.reasoning, provider: connection.provider)
+        return adaptations
+    }
+
     public var indicatesReasoningModel: Bool {
         !includeTemperature || foldSystemIntoUser
+    }
+
+    public func outputTokens(base: Int, ceiling: Int?) -> Int {
+        let cap = [ceiling, tokenLimitCap].compactMap { $0 }.min()
+        return ReasoningHeadroom.outputTokens(
+            base: base, shape: reasoning, honored: reasoningEvidence != .reasoned,
+            reasoningModelHint: indicatesReasoningModel, ceiling: cap)
+    }
+
+    public func outcome(for preference: ReasoningPreference) -> ReasoningOutcome {
+        ReasoningOutcome.resolve(
+            preference: preference, shape: reasoning, evidence: reasoningEvidence, enforced: requireAllParameters)
     }
 }
 
@@ -140,40 +164,112 @@ public struct OpenAIAPIError: Equatable, Sendable {
     }
 }
 
+public enum Remediation: Equatable, Sendable {
+    case retry(RequestAdaptations)
+    case refuse(level: String)
+}
+
 // Params we can safely drop or remap when a server rejects them. Bounded on purpose: message-scanning
 // never strips something we didn't send or can't act on, so a stray param name in an error message can't
 // silently disable an unrelated part of the request.
-private let messageScannableParams = ["reasoning_effort", "temperature", "max_tokens"]
+private let messageScannableParams = ["temperature", "max_tokens"]
 
-public func remediatedAdaptations(
-    _ current: RequestAdaptations, for error: OpenAIAPIError
-) -> RequestAdaptations? {
-    // Structured path: a well-formed OpenAI error names the offending param directly. Precise, so it wins.
-    let remediableCodes: Set<String> = ["unsupported_parameter", "unsupported_value"]
-    if let code = error.code, remediableCodes.contains(code), let param = error.param,
-       let next = adaptationDroppingParam(param, from: current) {
-        return next
+private let reasoningParams: Set<String> = [
+    "reasoning_effort", "reasoning", "reasoning.effort", "thinking", "thinking.type", "output_config",
+    "output_config.effort", "thinkingconfig", "thinkinglevel", "thinkingbudget",
+    "generationconfig.thinkingconfig", "generation_config.thinking_config",
+]
+
+private func reasoningMessageTokens(for provider: Connection.Provider) -> [String] {
+    switch provider {
+    case .openai, .openaiCompatible: ["reasoning"]
+    case .anthropic: ["thinking", "output_config", "effort"]
+    case .gemini: ["thinking", "budget"]
+    }
+}
+
+public func remediation(
+    _ current: RequestAdaptations, for error: OpenAIAPIError,
+    preference: ReasoningPreference = .lowestAvailable, provider: Connection.Provider = .openaiCompatible,
+    sentTokenLimit: Int? = nil
+) -> Remediation? {
+    let openAIShaped = provider == .openai || provider == .openaiCompatible
+    let remediableCodes: Set<String> = ["unsupported_parameter", "unsupported_value", "invalid_value"]
+    if let code = error.code, remediableCodes.contains(code), let param = error.param {
+        if reasoningParams.contains(param.lowercased()) {
+            let rejection: ReasoningRejection = code == "unsupported_parameter"
+                ? .unknownField : .value(listed: ReasoningLadder.listedEffortValues(in: error.message ?? ""))
+            if let step = reasoningRemediation(current, rejection: rejection, preference: preference, provider: provider) {
+                return step
+            }
+        } else if openAIShaped, let next = adaptationDroppingParam(param, from: current) {
+            return .retry(next)
+        }
     }
 
-    // Message-scan fallback: no usable structured param, so recover from the prose. Strip the first param we
-    // sent that the message names, most-specific intent first. `contains` is safe here because "max_tokens"
-    // is not a substring of "max_completion_tokens", and each drop is guarded on the param currently being
-    // enabled — so we never remap the token field the wrong way or drop a param twice. The remediation loop
-    // is bounded, and RequestAdaptationCache remembers the result, so this self-heals after the first hit.
-    if let message = error.message?.lowercased() {
-        for param in messageScannableParams where message.contains(param) {
-            if let next = adaptationDroppingParam(param, from: current) { return next }
-        }
-        // System-role rejection: some models/proxies reject the `system` role with a generic 400 (no
-        // structured `messages[N].role` param). Fold the system message into the user turn — `user` is
-        // universally accepted. Two-token guard — BOTH a role word AND a role name — so an incidental
-        // "system" ("system is busy") or "role" ("your account role") can't trigger a pointless fold.
-        if message.contains("role"), message.contains("system") || message.contains("assistant"),
-           let next = adaptationDroppingParam("messages[0].role", from: current) {
-            return next
-        }
+    guard let message = error.message?.lowercased() else { return nil }
+
+    if let cap = TokenLimitCap.parse(message: message), let sent = sentTokenLimit, cap < sent,
+       current.tokenLimitCap.map({ cap < $0 }) ?? true {
+        var next = current
+        next.tokenLimitCap = cap
+        return .retry(next)
+    }
+
+    if !openAIShaped, current.includeTemperature, message.contains("temperature") {
+        var next = current
+        next.includeTemperature = false
+        return .retry(next)
+    }
+
+    if reasoningMessageTokens(for: provider).contains(where: message.contains),
+       let step = reasoningRemediation(
+           current, rejection: ReasoningLadder.classify(message: message), preference: preference, provider: provider) {
+        return step
+    }
+
+    guard openAIShaped else { return nil }
+    // Message-scan fallback: no usable structured param, so recover from the prose. `contains` is safe here
+    // because "max_tokens" is not a substring of "max_completion_tokens", and each drop is guarded on the
+    // param currently being enabled — so we never remap the token field the wrong way or drop a param twice.
+    for param in messageScannableParams where message.contains(param) {
+        if let next = adaptationDroppingParam(param, from: current) { return .retry(next) }
+    }
+    // System-role rejection: some models/proxies reject the `system` role with a generic 400 (no
+    // structured `messages[N].role` param). Fold the system message into the user turn — `user` is
+    // universally accepted. Two-token guard — BOTH a role word AND a role name — so an incidental
+    // "system" ("system is busy") or "role" ("your account role") can't trigger a pointless fold.
+    if message.contains("role"), message.contains("system") || message.contains("assistant"),
+       let next = adaptationDroppingParam("messages[0].role", from: current) {
+        return .retry(next)
     }
     return nil
+}
+
+public func remediatedAdaptations(
+    _ current: RequestAdaptations, for error: OpenAIAPIError,
+    preference: ReasoningPreference = .lowestAvailable, provider: Connection.Provider = .openaiCompatible
+) -> RequestAdaptations? {
+    guard case .retry(let next) = remediation(current, for: error, preference: preference, provider: provider) else {
+        return nil
+    }
+    return next
+}
+
+private func reasoningRemediation(
+    _ current: RequestAdaptations, rejection: ReasoningRejection, preference: ReasoningPreference,
+    provider: Connection.Provider
+) -> Remediation? {
+    guard let step = ReasoningLadder.step(
+        from: current.reasoning, preference: preference, provider: provider, rejection: rejection) else { return nil }
+    switch step {
+    case .refuse(let level):
+        return .refuse(level: level)
+    case .to(let shape):
+        var next = current
+        next.reasoning = shape
+        return next == current ? nil : .retry(next)
+    }
 }
 
 private func adaptationDroppingParam(
@@ -187,9 +283,6 @@ private func adaptationDroppingParam(
     case "temperature":
         guard current.includeTemperature else { return nil }
         next.includeTemperature = false
-    case "reasoning_effort", "reasoning", "reasoning.effort":
-        guard current.includeReasoningEffort else { return nil }
-        next.includeReasoningEffort = false
     default:
         guard param.range(of: #"^messages\[\d+\]\.role$"#, options: .regularExpression) != nil,
               !current.foldSystemIntoUser else { return nil }
@@ -199,18 +292,23 @@ private func adaptationDroppingParam(
 }
 
 public enum ReasoningOutput {
+    private static let tags = ["think", "thinking", "reasoning", "thought"]
+
     public static func clean(_ raw: String) -> String? {
         var text = raw
-        for tag in ["think", "thinking", "reasoning", "thought"] {
+        for tag in tags {
             text = text.replacingOccurrences(
                 of: "<\(tag)>[\\s\\S]*?</\(tag)>", with: "",
+                options: [.regularExpression, .caseInsensitive])
+            text = text.replacingOccurrences(
+                of: "^\\s*<\(tag)>[\\s\\S]*$", with: "",
                 options: [.regularExpression, .caseInsensitive])
         }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
-}
 
-public func reasoningSafeMaxTokens(_ current: Int, floor: Int = 8192) -> Int {
-    max(current, floor)
+    public static func containsReasoning(_ raw: String) -> Bool {
+        tags.contains { raw.range(of: "<\($0)>", options: .caseInsensitive) != nil }
+    }
 }

@@ -891,6 +891,9 @@ private struct HistoryDetailView: View {
                     detailRow("How chosen", howChosen)
                 }
                 detailRow("AI rewrite", rewriteSummary)
+                if let reasoning = entry.reasoning {
+                    detailRow("Reasoning", reasoning)
+                }
                 if entry.stoppedAtLimit == true {
                     detailRow("Recording", "Stopped at the time limit")
                 }

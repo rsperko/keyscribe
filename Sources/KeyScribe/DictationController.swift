@@ -142,6 +142,7 @@ final class DictationController {
     func transcribeGateBusy() async -> Bool { await transcribeGate.isBusy }
 
     private var hideTask: Task<Void, Never>?
+    private var noticedReasoning: Set<String> = []
     private var choicePrompt: VoiceCommandChoicePrompt?
     private var choiceEntry: HistoryEntry?
     private var choiceExpiryTask: Task<Void, Never>?
@@ -1214,7 +1215,7 @@ final class DictationController {
         switch state {
         case .error(let message, let action, _): .waiting(note: message, action: action)
         case .advisory(let message): .waiting(note: message)
-        case .complete(.noSpeech, _): .waiting(note: "No speech detected")
+        case .complete(.noSpeech, _, _): .waiting(note: "No speech detected")
         case .choice(_, .waiting(let note, let heard, let action), _): .waiting(note: note, heard: heard, action: action)
         default: .waiting(note: nil)
         }
@@ -1248,7 +1249,7 @@ final class DictationController {
         }
         guard let prompt = answeringChoicePrompt ?? pendingVoiceCommandChoice else { return state }
         switch state {
-        case .hidden, .error, .advisory, .complete(.noSpeech, _):
+        case .hidden, .error, .advisory, .complete(.noSpeech, _, _):
             return .choice(prompt, status: Self.choiceWaiting(after: state))
         default:
             return state
@@ -2272,13 +2273,16 @@ final class DictationController {
             completedState = .stoppedAtLimit(
                 outcome: outcome, limit: limitPhrase, rewriteSkipped: session?.rewriteSkippedAtLimit == true)
         } else if rewrite?.fellBack == true {
-            completedState = .localFallback(outcome: outcome, mode: currentModeName)
+            completedState = .localFallback(
+                outcome: outcome, mode: currentModeName,
+                reason: rewrite?.fallbackReason, connectionId: rewrite?.connectionId)
         } else {
-            completedState = .complete(outcome: outcome, mode: currentModeName)
+            completedState = .complete(
+                outcome: outcome, mode: currentModeName, notice: textLanded ? reasoningNotice(for: rewrite) : nil)
         }
         finish(machine: .alreadyTransitioned, cue: endCue,
                state: completedState,
-               hideAfter: stoppedAtLimit ? 5 : 2,
+               hideAfter: completedState.hidesAfterSeconds,
                record: (recordOutcome, nil),
                history: HistoryWrite(heard: heard, transformed: transformed, result: transcript,
                                      insertion: outcome, rewrite: rewrite),
@@ -2367,6 +2371,7 @@ final class DictationController {
                 ? (rewriteSkipped ? Self.rewriteSkippedAtLimitReason : rewrite?.fallbackReason) : nil,
             stoppedAtLimit: session?.stoppedAtLimit == true ? true : nil,
             failureReason: failureReason, reported: reported)
+        entry.reasoning = rewrite?.reasoning?.summary
         entry.appVersion = DiagnosticsCollector.appVersion()
         entry.osVersion = DiagnosticsCollector.osVersion()
         entry.targetApp = building.targetBundleId
@@ -2470,7 +2475,16 @@ final class DictationController {
 
     // What a cloud rewrite involved, captured for the History detail view. Built only when a rewrite
     // actually ran; the prompt carries the ⟦SN:…⟧ tokens, never their originals.
+    // Shown on the completion HUD itself, so a following dictation cannot cancel it unseen.
+    private func reasoningNotice(for rewrite: RewriteDetails?) -> String? {
+        guard let rewrite, !rewrite.fellBack, let reasoning = rewrite.reasoning,
+              let notice = reasoning.notice(service: rewrite.connection, model: rewrite.model),
+              noticedReasoning.insert(rewrite.connectionId + "\n" + rewrite.model).inserted else { return nil }
+        return notice
+    }
+
     private struct RewriteDetails {
+        let connectionId: String
         let connection: String
         let model: String
         let redaction: Bool
@@ -2483,6 +2497,7 @@ final class DictationController {
         // The provider's raw reply, verbatim (RewriteOutcome.received) — for the history record's
         // "Show exactly what was received". nil when no reply arrived or on the pre-committed paths.
         var received: String? = nil
+        var reasoning: ReasoningOutcome? = nil
     }
 
     private func trimmedIfNeeded(_ tokenizedText: String, mode: Mode?) -> String {
@@ -2653,7 +2668,8 @@ final class DictationController {
         // caller re-checks isCancelled before any insert or history write.
         if Task.isCancelled {
             return (localProcessed, false, RewriteDetails(
-                connection: connection.name, model: connection.model, redaction: mode.commands.privacy,
+                connectionId: connection.id, connection: connection.name, model: connection.model,
+                redaction: mode.commands.privacy,
                 contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: true))
         }
 
@@ -2670,7 +2686,8 @@ final class DictationController {
 
         if mode.source != .selection {
             session?.pendingLocalRewriteDetails = RewriteDetails(
-                connection: connection.name, model: connection.model, redaction: mode.commands.privacy,
+                connectionId: connection.id, connection: connection.name, model: connection.model,
+                redaction: mode.commands.privacy,
                 contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: true)
         }
 
@@ -2700,9 +2717,11 @@ final class DictationController {
         // ordering is structural now that `rewrite` owns the gate and returns the vetted string.
         let text = pipeline.restore(trimmedIfNeeded(gateApproved, mode: mode))
         let details = RewriteDetails(
-            connection: connection.name, model: connection.model, redaction: mode.commands.privacy,
+            connectionId: connection.id, connection: connection.name, model: connection.model,
+            redaction: mode.commands.privacy,
             contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: fellBack,
-            fallbackReason: fallbackReason, received: received)
+            fallbackReason: fallbackReason, received: received,
+            reasoning: fellBack ? nil : await llmClient.reasoningOutcome(for: request.sized))
         return (text, !fellBack, details)
     }
 

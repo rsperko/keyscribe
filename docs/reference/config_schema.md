@@ -415,18 +415,61 @@ key_ref = "keyscribe.llm.gemini-flash-lite"   # Keychain item id — the key its
 # token_command = "..."         # required when auth_method = "token_command"
 [connection.params]
 temperature = 0.2
-max_tokens = 2048   # floor; raised per request for long edit-in-place selections (prompt_design.md budget policy)
-reasoning_effort = "none"      # OpenAI defaults only
-gemini_thinking_level = "minimal" # Gemini defaults only
+max_tokens = 2048     # base output room; raised per request for long content and when the model may reason
+reasoning = "lowest"  # "lowest" | "model_default" | a level: "minimal" "low" "medium" "high" "xhigh" "max"
+# output_ceiling = 32768  # written by Settings when the service publishes the model's output limit
 ```
 
-**`reasoning_effort` is provider-specific — do not copy it across providers.** Valid values differ by
-backend and even by model (native OpenAI accepts `none`; many OpenAI-*compatible* proxies require one of
-`minimal|low|medium|high` and reject `none` with a 400). KeyScribe does not validate the value on our
-side, because "valid" is defined by the server, not us. Instead, if the endpoint rejects the parameter,
-the client automatically drops `reasoning_effort` and retries (remembering the working shape for that
-connection), and any rewrite that still cannot run records the reason in History under *Why local was
-kept* instead of falling back silently. Use **Test** in the connection editor to confirm a value works.
+**`reasoning` is provider-neutral; each provider adapter translates it.** Settings edits it as
+**Reasoning**, and `max_tokens` as **Minimum output allowance**, with tokens as the unit. Both live under
+**Rewrite settings**. The default `lowest` is labeled **Recommended — least reasoning**.
+
+- **`lowest`** (the default on every provider) negotiates. The first request asks for reasoning off; when
+  the service rejects that *value*, the client steps to the next lower-cost setting the provider family
+  offers, jumping straight to the lowest value the error lists when it lists any. The setting that
+  produced a reply is remembered for the connection, model, and endpoint until the app quits. If no step is
+  accepted, the model runs at its own default and that is reported. Read
+  `ReasoningLadder.rungs(for:provider:)` for the steps.
+- **A level** (`minimal`…`max`) is sent exactly. If the model rejects it, the rewrite falls back to local
+  text with a reason naming the level; it is never quietly replaced by another level. The only retry is
+  the same level in another wire shape (a Gemini model that has no `thinkingLevel` gets the equivalent
+  `thinkingBudget`).
+- **`model_default`** sends no reasoning setting at all.
+
+A service that rejects the reasoning *parameter itself* (unknown field) is recorded as **couldn't be set**,
+not as "reasoning off": the model may still reason, so the extra output room stays on. Only a reply that
+reports an explicit reasoning count of zero confirms no reasoning; a reply that reports reasoning tokens or
+reasoning text after a request for none, or from a service that could not take the setting, is recorded as
+**not honored** or **reasoned on its own**, and a reply with no count at all leaves the setting
+unconfirmed. A dropped setting the service never confirmed, a model that reasoned anyway, and a ladder that
+ran out are announced on the completion HUD once per connection and model each launch; a model that took no
+setting and reported zero reasoning produces no notice. An accepted "off" the service does not confirm is
+recorded as requested, not as verified. Every History entry names where reasoning landed. OpenRouter
+requests that carry a reasoning setting also send `provider.require_parameters = true`, so a route that
+would silently ignore the setting is skipped. When that leaves no route ("no endpoints … requested
+parameters"), the router does not say which parameter was the problem, so the reasoning setting is not
+blamed. The retry first drops temperature and keeps the reasoning setting required. If that still finds no
+route, a level the person chose fails the rewrite with that reason rather than being sent unenforced, and
+**Recommended — least reasoning** stops requiring every parameter and is recorded and announced as **not guaranteed**.
+A bare "no endpoints" for the model is an availability failure and is not retried.
+
+`max_tokens` is the base room for the visible answer. Long content raises it per request (prompt_design.md
+budget policy), and a fixed extra room is added whenever reasoning is not proven off — reasoning and
+answer share one limit on every provider, so this is headroom, not a reservation. A ceiling the service
+publishes for the model (`output_ceiling`), or one a too-large-value error names, caps the result.
+
+Older files are read as before: `reasoning_effort = "none"` and `gemini_thinking_level = "minimal"` mean
+`lowest`; any other value of either becomes that exact level, `xhigh` and `max` included. Neither key warns
+as unknown, and the next save writes only `reasoning`. Reasoning text the model returns
+(`reasoning_content`, `message.reasoning`, `<think>` blocks) is never pasted; it is read only as evidence
+for the failure reason below.
+
+When a reply stops at the output limit before any answer text, History and the HUD say *"The model reached
+its output limit while reasoning…"* only when usage or reasoning text shows the model reasoned, and
+*"The reply hit the output limit before any answer text…"* otherwise. A Responses reply marked incomplete
+is attributed to the limit only when it says `max_output_tokens`; any other or missing reason is reported
+as an incomplete reply. Use
+**Test** in the connection editor to see where reasoning landed for a model before dictating.
 
 The editor's hosted quick-setup presets (OpenRouter, Groq, Mistral) are **not** distinct providers on
 disk — each persists as a `provider = "openai_compatible"` connection with the preset's `base_url` and a
@@ -445,10 +488,10 @@ user just adds a key; reopening the connection recovers the preset from its base
 
 For OpenAI-shaped connections, KeyScribe automatically selects the compatible request format for each model
 endpoint. Responses requests map the rewrite system instruction to `instructions` and the user text to `input`,
-send `reasoning.effort` when set, and size `max_output_tokens` with the reasoning-safe floor when a reasoning
-effort is active. Every Responses request is stateless — `store = false` is load-bearing for privacy and is never
+send `reasoning.effort` when a reasoning step is in play, and size `max_output_tokens` by the same output
+room rule as Chat. Every Responses request is stateless — `store = false` is load-bearing for privacy and is never
 dropped: an endpoint that rejects it fails the rewrite rather than silently allowing server-side storage. A
-gateway that rejects `reasoning` self-heals by dropping it (remembered per host). KeyScribe reads typed
+gateway that rejects `reasoning` steps or drops it by the rules above. KeyScribe reads typed
 `output_text` content and treats an incomplete response as a rewrite failure, preserving the existing validation,
 retry, and local-fallback path.
 

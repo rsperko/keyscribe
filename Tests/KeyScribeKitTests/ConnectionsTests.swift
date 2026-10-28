@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import TOMLKit
 @testable import KeyScribeKit
 
 struct ConnectionsTests {
@@ -178,7 +179,7 @@ struct ConnectionsTests {
         """
         let c = try #require(try ConnectionStore.decode(from: t).connection(id: "x"))
         #expect(c.params.maxTokens == 2048)   // floor default
-        #expect(c.params.geminiThinkingLevel == "minimal")
+        #expect(c.params.reasoning == .lowestAvailable)
     }
 
     @Test func wireAPIDefaultsToAutoAndDecodesResponses() throws {
@@ -212,10 +213,9 @@ struct ConnectionsTests {
             """
             return try ConnectionStore.decode(from: t).connection(id: "x")
         }
-        #expect(try decode("openai")?.params.reasoningEffort == "none")
-        #expect(try decode("anthropic")?.params.reasoningEffort == nil)
-        #expect(try decode("openai_compatible")?.params.reasoningEffort == nil)
-        #expect(try decode("openai_compatible")?.params.geminiThinkingLevel == nil)
+        for provider in ["openai", "anthropic", "gemini", "openai_compatible"] {
+            #expect(try decode(provider)?.params.reasoning == .lowestAvailable, "\(provider)")
+        }
     }
 
     @Test func missingSchemaVersionThrows() {
@@ -291,13 +291,67 @@ struct ConnectionsTests {
         #expect(ConnectionStore.newID(for: "My Local AI", existing: ["my-local-ai"]) == "my-local-ai-2")
     }
 
-    @Test func newConnectionsUseProviderSpecificReasoningDefaults() {
-        let openAI = Connection(id: "openai", name: "OpenAI", provider: .openai, model: "gpt-5.6-luna", keyRef: "k")
-        let anthropic = Connection(id: "anthropic", name: "Anthropic", provider: .anthropic, model: "claude-haiku-4-5", keyRef: "k")
-        let gemini = Connection(id: "gemini", name: "Gemini", provider: .gemini, model: "gemini-flash-lite-latest", keyRef: "k")
+    @Test func newConnectionsStartAtLowestAvailableOnEveryProvider() {
+        for provider in [Connection.Provider.openai, .anthropic, .gemini, .openaiCompatible] {
+            let connection = Connection(id: "c", name: "C", provider: provider, model: "m", keyRef: "k")
+            #expect(connection.params.reasoning == .lowestAvailable)
+            #expect(connection.params.outputCeiling == nil)
+        }
+    }
 
-        #expect(openAI.params.reasoningEffort == "none")
-        #expect(anthropic.params.reasoningEffort == nil)
-        #expect(gemini.params.geminiThinkingLevel == "minimal")
+    private func decodeParams(_ params: String) throws -> Connection.Params? {
+        let t = """
+        schema_version = 1
+        [[connection]]
+        id = "x"
+        name = "X"
+        provider = "openai_compatible"
+        model = "m"
+        key_ref = "k"
+        [connection.params]
+        \(params)
+        """
+        return try ConnectionStore.decode(from: t).connection(id: "x")?.params
+    }
+
+    @Test func reasoningDecodesTheUnifiedKeyAndBothLegacyKeys() throws {
+        #expect(try decodeParams(#"reasoning = "high""#)?.reasoning == .level("high"))
+        #expect(try decodeParams(#"reasoning = "model_default""#)?.reasoning == .modelDefault)
+        #expect(try decodeParams(#"reasoning_effort = "none""#)?.reasoning == .lowestAvailable)
+        #expect(try decodeParams(#"reasoning_effort = "xhigh""#)?.reasoning == .level("xhigh"))
+        #expect(try decodeParams(#"gemini_thinking_level = "minimal""#)?.reasoning == .lowestAvailable)
+        #expect(try decodeParams(#"gemini_thinking_level = "medium""#)?.reasoning == .level("medium"))
+        #expect(try decodeParams("reasoning = \"low\"\nreasoning_effort = \"high\"")?.reasoning == .level("low"))
+        #expect(try decodeParams("output_ceiling = 16384")?.outputCeiling == 16384)
+    }
+
+    @Test func legacyReasoningKeysProduceNoUnknownKeyWarning() {
+        let t = """
+        schema_version = 1
+        [[connection]]
+        id = "x"
+        name = "X"
+        provider = "gemini"
+        model = "m"
+        key_ref = "k"
+        [connection.params]
+        reasoning_effort = "none"
+        gemini_thinking_level = "minimal"
+        """
+        #expect(ConnectionStore.unknownKeys(in: t).isEmpty)
+    }
+
+    @Test func writeDropsLegacyReasoningKeys() throws {
+        let set = ConnectionSet(connections: [
+            Connection(id: "x", name: "X", provider: .openai, model: "m", keyRef: "k",
+                       params: .init(reasoning: .level("xhigh"))),
+        ])
+        let toml = try ConfigEncode.toml(set)
+        let table = try TOMLTable(string: toml)
+        let params = table["connection"]?.array?[0]?.table?["params"]?.table
+        #expect(params?["reasoning"]?.string == "xhigh")
+        #expect(!toml.contains("reasoning_effort"))
+        #expect(!toml.contains("gemini_thinking_level"))
+        #expect(try ConnectionStore.decode(from: toml) == set)
     }
 }

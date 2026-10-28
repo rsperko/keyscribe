@@ -140,6 +140,10 @@ enum AccessibilityID {
                 static let foundModel = "settings.ai.editor.foundModel"
                 static let getKeyLink = "settings.ai.editor.getKeyLink"
                 static let connectionOptions = "settings.ai.editor.connectionOptions"
+                static let rewriteSettings = "settings.ai.editor.rewriteSettings"
+                static let reasoning = "settings.ai.editor.reasoning"
+                static let outputRoom = "settings.ai.editor.outputRoom"
+                static let reasoningSummary = "settings.ai.editor.reasoningSummary"
                 static let testConnection = "settings.ai.editor.testConnection"
                 static let delete = "settings.ai.editor.delete"
             }
@@ -494,6 +498,9 @@ enum AccessibilityID {
         Settings.AI.Editor.auth, Settings.AI.Editor.apiKey, Settings.AI.Editor.saveKey, Settings.AI.Editor.replaceKey,
         Settings.AI.Editor.tokenCommand, Settings.AI.Editor.model, Settings.AI.Editor.fetchModels,
         Settings.AI.Editor.foundModel, Settings.AI.Editor.getKeyLink, Settings.AI.Editor.connectionOptions,
+        Settings.AI.Editor.rewriteSettings,
+        Settings.AI.Editor.reasoning, Settings.AI.Editor.outputRoom,
+        Settings.AI.Editor.reasoningSummary,
         Settings.AI.Editor.testConnection,
         Settings.AI.Editor.delete,
         Settings.Advanced.revealConfig, Settings.Advanced.reloadConfig, Settings.Advanced.resetHUDPosition,

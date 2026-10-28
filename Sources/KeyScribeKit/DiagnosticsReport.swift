@@ -86,6 +86,7 @@ public struct DiagnosticsReport: Sendable {
         public var model: String?
         public var modeChoice: String?
         public var fallbackReason: String?
+        public var reasoning: String?
 
         public init(_ entry: HistoryEntry) {
             self.timestamp = DiagnosticsReport.isoTimestamp(entry.timestamp)
@@ -99,6 +100,7 @@ public struct DiagnosticsReport: Sendable {
             self.model = entry.model
             self.modeChoice = entry.modeChoice?.rawValue
             self.fallbackReason = entry.fallbackReason
+            self.reasoning = entry.reasoning
         }
     }
 
@@ -229,6 +231,9 @@ public struct DiagnosticsReport: Sendable {
             out.append("  \(d.timestamp)  \(parts.joined(separator: "  "))")
             if let reason = d.fallbackReason {
                 out.append("    fallback: \(reason)")
+            }
+            if let reasoning = d.reasoning {
+                out.append("    reasoning: \(reasoning)")
             }
         }
         out.append(contentsOf: Self.outcomeLegend(includeCopiedCaveat: sawCopied))

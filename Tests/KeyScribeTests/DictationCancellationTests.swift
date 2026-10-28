@@ -781,7 +781,7 @@ struct DictationCancellationTests {
         #expect(h.controller.lastResult == "hello world")
         #expect(await awaitFirstHistoryEntry(h.history)?.outcome == .copied)
         let completeOutcomes = h.hud.states.compactMap { state -> DictationOutcome? in
-            if case .complete(let outcome, _) = state { return outcome }
+            if case .complete(let outcome, _, _) = state { return outcome }
             return nil
         }
         #expect(completeOutcomes.contains(.copied(.accessibilityDenied)))

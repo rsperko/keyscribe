@@ -142,6 +142,7 @@ struct SettingRow<Control: View>: View {
     let help: String
     var dependencyReason: String? = nil
     var combinesAccessibilityChildren = true
+    var controlBelowLabel = false
     @ViewBuilder var control: () -> Control
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -156,13 +157,15 @@ struct SettingRow<Control: View>: View {
 
     private var content: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                    if let result { Text(result).font(.caption).foregroundStyle(.secondary) }
-                }
-                Spacer()
+            if controlBelowLabel {
+                rowLabel.accessibilityElement(children: .combine)
                 control()
+            } else {
+                HStack(alignment: .firstTextBaseline) {
+                    rowLabel
+                    Spacer()
+                    control()
+                }
             }
             Button {
                 withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.15)) { expanded.toggle() }
@@ -186,6 +189,13 @@ struct SettingRow<Control: View>: View {
             }
         }
         .accessibilityLabel([title, result].compactMap { $0 }.joined(separator: ", "))
+    }
+
+    private var rowLabel: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            if let result { Text(result).font(.caption).foregroundStyle(.secondary) }
+        }
     }
 }
 
@@ -211,30 +221,43 @@ struct CommittedTextField: View {
     let title: String
     let text: String
     let prompt: String?
+    let suffix: String?
     let autofocus: Bool
     let validation: ((String) -> UserInputValidation.Issue?)?
+    let onIssueChange: ((UserInputValidation.Issue?) -> Void)?
     let commit: (String) -> Void
     @State private var draft: String
     @State private var validationIssue: UserInputValidation.Issue?
     @FocusState private var focused: Bool
 
     init(
-        _ title: String, text: String, prompt: String? = nil,
+        _ title: String, text: String, prompt: String? = nil, suffix: String? = nil,
         autofocus: Bool = false, validation: ((String) -> UserInputValidation.Issue?)? = nil,
+        onIssueChange: ((UserInputValidation.Issue?) -> Void)? = nil,
         commit: @escaping (String) -> Void
     ) {
         self.title = title
         self.text = text
         self.prompt = prompt
+        self.suffix = suffix
         self.autofocus = autofocus
         self.validation = validation
+        self.onIssueChange = onIssueChange
         self.commit = commit
         _draft = State(initialValue: text)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let prompt {
+            if let suffix {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    TextField(title, text: $draft, prompt: prompt.map(Text.init))
+                        .frame(width: 64)
+                    Text(suffix).foregroundStyle(.secondary).fixedSize()
+                    Spacer(minLength: 0)
+                }
+                .formFieldLabel(title)
+            } else if let prompt {
                 TextField(title, text: $draft, prompt: Text(prompt))
                     .formFieldLabel(title)
             } else {
@@ -250,9 +273,11 @@ struct CommittedTextField: View {
             .onExitCommand { draft = text; validationIssue = nil }
             .onChange(of: focused) { _, nowFocused in if !nowFocused { commitIfChanged() } }
             .onChange(of: text) { _, newValue in if !focused { draft = newValue; validationIssue = nil } }
+            .onChange(of: validationIssue) { _, issue in onIssueChange?(issue) }
             // A container teardown (`.id` swap, pane switch) can remove the field without a focus-loss commit.
             .onDisappear { commitIfChanged() }
             .onAppear {
+                onIssueChange?(validationIssue)
                 guard autofocus else { return }
                 Task { @MainActor in
                     try? await Task.sleep(for: .milliseconds(50))
@@ -262,7 +287,10 @@ struct CommittedTextField: View {
     }
 
     private func commitIfChanged() {
-        guard draft != text else { return }
+        guard draft != text else {
+            validationIssue = nil
+            return
+        }
         if let issue = validation?(draft) {
             validationIssue = issue
             return

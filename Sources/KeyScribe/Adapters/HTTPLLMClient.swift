@@ -20,7 +20,7 @@ struct HTTPLLMClient: LLMClient {
     var wireOverrideCache: WireAPIOverrideCache = .shared
     var now: @Sendable () -> Date = { Date() }
 
-    private static let maxRemediations = 4
+    private static let maxRemediations = 7
     static let preconnectTimeout: TimeInterval = 10
 
     private var transport: ProviderTransport {
@@ -59,41 +59,84 @@ struct HTTPLLMClient: LLMClient {
         switch connection.provider {
         case .openai, .openaiCompatible:
             return try await completeOpenAICompatible(system: system, user: user, connection: connection, key: key)
-        case .anthropic:
-            let request = try buildRequest(
-                system: system, user: user, connection: connection, key: key,
-                adaptations: .default(for: .anthropic))
-            let data = try await transport.send(request)
-            return try parse(data, provider: .anthropic)
-        case .gemini:
-            return try await completeGemini(system: system, user: user, connection: connection, key: key)
+        case .anthropic, .gemini:
+            return try await completeNegotiated(system: system, user: user, connection: connection, key: key)
         }
     }
 
-    // Gemini has no structured unsupported-parameter error to key a remediation loop on, but a model that
-    // rejects thinkingConfig (e.g. one that takes thinkingBudget instead of thinkingLevel) must not break
-    // every rewrite permanently. On a 400 with thinkingConfig in the payload, retry once without it and
-    // remember only if the retry succeeds — a 400 with an unrelated cause fails again identically and
-    // caches nothing.
-    private func completeGemini(system: String, user: String, connection: Connection, key: String?) async throws -> String {
-        let cacheKey = adaptationCacheKey(for: connection)
-        let adaptations = await adaptationCache.lookup(cacheKey) ?? .default(for: .gemini)
-        let request = try buildRequest(
-            system: system, user: user, connection: connection, key: key, adaptations: adaptations)
-        do {
-            return try parse(try await transport.send(request), provider: .gemini)
-        } catch let ProviderTransportError.http(status, body) where status == 400 {
-            guard adaptations.includeThinkingConfig, connection.params.geminiThinkingLevel != nil else {
-                throw ProviderTransportError.http(status, body: body)
-            }
-            var next = adaptations
-            next.includeThinkingConfig = false
-            let retry = try buildRequest(
-                system: system, user: user, connection: connection, key: key, adaptations: next)
-            let output = try parse(try await transport.send(retry), provider: .gemini)
-            await adaptationCache.remember(next, for: cacheKey)
-            return output
+    func reasoningOutcome(for connection: Connection) async -> ReasoningOutcome? {
+        var wired = connection
+        if connection.provider == .openai || connection.provider == .openaiCompatible {
+            wired.wireAPI = await wireOverrideCache.lookup(Self.hostKey(for: connection)) ?? Self.startingWire(for: connection)
         }
+        let adaptations = await adaptationCache.lookup(adaptationCacheKey(for: wired)) ?? .initial(for: wired)
+        return adaptations.outcome(for: connection.params.reasoning)
+    }
+
+    // Anthropic and Gemini have no structured unsupported-parameter error, so only a 400 whose message names
+    // the reasoning control, a too-large token value, or temperature is remediated; any other 400 fails once
+    // and caches nothing.
+    private func completeNegotiated(system: String, user: String, connection: Connection, key: String?) async throws -> String {
+        let cacheKey = adaptationCacheKey(for: connection)
+        let initial = await adaptationCache.lookup(cacheKey) ?? .initial(for: connection)
+        var adaptations = initial
+        var attempts = 0
+        while true {
+            let request = try buildRequest(
+                system: system, user: user, connection: connection, key: key, adaptations: adaptations)
+            do {
+                let reply = try parse(try await transport.send(request), provider: connection.provider)
+                await settle(adaptations, initial: initial, reply: reply, cacheKey: cacheKey, connection: connection)
+                return reply.text
+            } catch let ProviderTransportError.http(status, body) where status == 400 {
+                guard attempts < Self.maxRemediations, let apiError = OpenAIAPIError.parse(body: body),
+                      let next = try remediate(adaptations, for: apiError, connection: connection, status: status)
+                else { throw ProviderTransportError.http(status, body: body) }
+                adaptations = next
+                attempts += 1
+            }
+        }
+    }
+
+    private func remediate(
+        _ adaptations: RequestAdaptations, for apiError: OpenAIAPIError, connection: Connection, status: Int
+    ) throws -> RequestAdaptations? {
+        let sent = adaptations.outputTokens(base: connection.params.maxTokens, ceiling: connection.params.outputCeiling)
+        switch remediation(
+            adaptations, for: apiError, preference: connection.params.reasoning, provider: connection.provider,
+            sentTokenLimit: sent) {
+        case .refuse(let level):
+            Log.models.notice(
+                "rewrite reasoning level refused connection=\(connection.id, privacy: .public) model=\(connection.model, privacy: .public) level=\(level, privacy: .public) status=\(status)")
+            throw ProviderTransportError.reasoningLevelRefused(level)
+        case .retry(let next):
+            Log.models.notice(
+                "rewrite request adapted connection=\(connection.id, privacy: .public) model=\(connection.model, privacy: .public) reasoning=\(adaptations.reasoning.logDescription, privacy: .public)->\(next.reasoning.logDescription, privacy: .public) cap=\(next.tokenLimitCap.map(String.init) ?? "none", privacy: .public) status=\(status) cause=\(apiError.code ?? "message-scan", privacy: .public)")
+            return next
+        case nil:
+            return nil
+        }
+    }
+
+    // Remember only what the server actually accepted. When the request asked for no reasoning, or the
+    // service would not take a reasoning setting at all, the reply's usage is the only evidence of what the
+    // model did: a reply that reasoned anyway is worth telling the person about and keeps the extra output
+    // room on, and a reply without a reasoning count leaves the setting unconfirmed rather than proven.
+    private func settle(
+        _ adaptations: RequestAdaptations, initial: RequestAdaptations, reply: ParsedReply, cacheKey: String,
+        connection: Connection
+    ) async {
+        var accepted = adaptations
+        let expectedNone = accepted.reasoning.request?.disablesReasoning == true || accepted.reasoning == .unknown
+        if expectedNone || !accepted.requireAllParameters {
+            let merged = accepted.reasoningEvidence.merged(with: reply.usage.evidence)
+            if merged == .reasoned, accepted.reasoningEvidence != .reasoned {
+                Log.models.notice(
+                    "rewrite reasoning not honored connection=\(connection.id, privacy: .public) model=\(connection.model, privacy: .public) reasoning=\(accepted.reasoning.logDescription, privacy: .public) reasoningTokens=\(reply.usage.reasoningTokens ?? -1)")
+            }
+            accepted.reasoningEvidence = merged
+        }
+        if accepted != initial { await adaptationCache.remember(accepted, for: cacheKey) }
     }
 
     // The configured wireAPI is a starting hint; the SERVER is authoritative about which wire a model
@@ -161,21 +204,21 @@ struct HTTPLLMClient: LLMClient {
         var wired = connection
         wired.wireAPI = wire
         let cacheKey = adaptationCacheKey(for: wired)
-        let initial = await adaptationCache.lookup(cacheKey) ?? .default(for: connection.provider)
+        let initial = await adaptationCache.lookup(cacheKey) ?? .initial(for: wired)
         var adaptations = initial
         var attempts = 0
         while true {
             let request = try buildRequest(
                 system: system, user: user, connection: wired, key: key, adaptations: adaptations)
             do {
-                let output = try parse(
+                let reply = try parse(
                     try await transport.send(request), provider: connection.provider, wireAPI: wire)
-                // Remember only a remediation the server actually accepted (as completeGemini does).
-                // Caching before the retry proves it lets one 400 with an unrelated cause pin a wrong
-                // remediation for the process lifetime — a max_tokens VALUE error, for instance, message-
-                // scans to a max_completion_tokens FIELD remap that no reverse remediation can undo.
-                if adaptations != initial { await adaptationCache.remember(adaptations, for: cacheKey) }
-                return output
+                // Remember only a remediation the server actually accepted. Caching before the retry proves it
+                // lets one 400 with an unrelated cause pin a wrong remediation for the process lifetime — a
+                // max_tokens VALUE error, for instance, message-scans to a max_completion_tokens FIELD remap
+                // that no reverse remediation can undo.
+                await settle(adaptations, initial: initial, reply: reply, cacheKey: cacheKey, connection: wired)
+                return reply.text
             } catch let ProviderTransportError.http(status, body) where Self.adaptableStatuses.contains(status) {
                 let apiError = OpenAIAPIError.parse(body: body)
                 let other = Self.otherWire(than: wire)
@@ -199,14 +242,48 @@ struct HTTPLLMClient: LLMClient {
                     await wireOverrideCache.remember(other, for: Self.hostKey(for: connection))
                     return output
                 }
-                guard status == 400, attempts < Self.maxRemediations,
-                      let apiError, let next = remediatedAdaptations(adaptations, for: apiError) else {
-                    throw ProviderTransportError.http(status, body: body)
+                if attempts < Self.maxRemediations, adaptations.requireAllParameters,
+                   Self.indicatesNoRouteForParameters(apiError, url: request.url) {
+                    adaptations = try relaxedRoute(adaptations, connection: wired, status: status)
+                    attempts += 1
+                    continue
                 }
+                guard attempts < Self.maxRemediations, let apiError, status == 400,
+                      let next = try remediate(adaptations, for: apiError, connection: wired, status: status)
+                else { throw ProviderTransportError.http(status, body: body) }
                 adaptations = next
                 attempts += 1
             }
         }
+    }
+
+    // A router asked to honor every parameter answers with a missing-route error when no provider behind the
+    // model takes ALL of them, and it does not say which one. Temperature goes first, keeping the reasoning
+    // setting enforced. A level the person chose is never sent unenforced: past that point the honest answer
+    // is that no route takes it. Lowest available may stop requiring every parameter, and is then reported as
+    // not guaranteed rather than as applied. A bare "no endpoints" (the model is unavailable) is not a
+    // parameter problem and fails as it is.
+    private func relaxedRoute(
+        _ adaptations: RequestAdaptations, connection: Connection, status: Int
+    ) throws -> RequestAdaptations {
+        var next = adaptations
+        if next.includeTemperature {
+            next.includeTemperature = false
+        } else if case .level(let level) = connection.params.reasoning {
+            Log.models.notice(
+                "rewrite reasoning level has no route connection=\(connection.id, privacy: .public) model=\(connection.model, privacy: .public) level=\(level, privacy: .public) status=\(status)")
+            throw ProviderTransportError.noRouteForReasoningLevel(level)
+        } else {
+            next.requireAllParameters = false
+        }
+        Log.models.notice(
+            "rewrite request adapted connection=\(connection.id, privacy: .public) model=\(connection.model, privacy: .public) temperature=\(next.includeTemperature, privacy: .public) require-parameters=\(next.requireAllParameters, privacy: .public) status=\(status)")
+        return next
+    }
+
+    private static func indicatesNoRouteForParameters(_ error: OpenAIAPIError?, url: URL?) -> Bool {
+        guard isOpenRouter(url?.host()), let message = error?.message?.lowercased() else { return false }
+        return message.contains("requested parameters")
     }
 
     private static let adaptableStatuses: Set<Int> = [400, 404, 405, 422]
@@ -227,7 +304,8 @@ struct HTTPLLMClient: LLMClient {
     // system-fold). Editing a connection's base URL points it at a different server, so the base URL is
     // part of the identity — keying on id+model alone would replay adaptations learned from the old host.
     private func adaptationCacheKey(for connection: Connection) -> String {
-        [connection.id, connection.model, connection.baseUrl ?? "", connection.wireAPI.rawValue]
+        [connection.id, connection.model, connection.baseUrl ?? "", connection.wireAPI.rawValue,
+         connection.params.reasoning.storedValue]
             .joined(separator: "\n")
     }
 
@@ -239,7 +317,8 @@ struct HTTPLLMClient: LLMClient {
         system: String, user: String, connection: Connection, key: String?, adaptations: RequestAdaptations
     ) throws -> URLRequest {
         let temp = connection.params.temperature
-        let maxTokens = connection.params.maxTokens
+        let maxTokens = adaptations.outputTokens(base: connection.params.maxTokens, ceiling: connection.params.outputCeiling)
+        let reasoning = adaptations.reasoning.request
 
         switch connection.provider {
         case .openai, .openaiCompatible:
@@ -251,20 +330,16 @@ struct HTTPLLMClient: LLMClient {
             }
             var req = jsonRequest(url)
             transport.applyAuth(key, for: connection.provider, to: &req)
+            let openRouter = Self.isOpenRouter(url.host())
             applyOpenRouterHeaders(to: &req, host: url.host())
+            var effort: String?
+            if case .effort(let value)? = reasoning { effort = value }
             if connection.wireAPI == .responses {
-                let reasoningEffort = adaptations.includeReasoningEffort ? connection.params.reasoningEffort : nil
-                // Reasoning tokens are billed against max_output_tokens on Responses, so a reasoning model
-                // needs the same safety floor the Chat path applies — otherwise reasoning can consume the
-                // whole budget and the reply comes back status:"incomplete".
-                let usesReasoning = reasoningEffort.map { $0.lowercased() != "none" } ?? false
-                let reasoningModel = adaptations.indicatesReasoningModel || usesReasoning
-                let sizedTokens = reasoningModel ? reasoningSafeMaxTokens(maxTokens) : maxTokens
                 var payload: [String: Any] = [
                     "model": connection.model,
                     "instructions": system,
                     "input": user,
-                    "max_output_tokens": sizedTokens,
+                    "max_output_tokens": maxTokens,
                 ]
                 payload["store"] = false
                 // Responses lists temperature as an optional request parameter, so a connection's
@@ -272,19 +347,26 @@ struct HTTPLLMClient: LLMClient {
                 // mid-lifetime, and sampling must not change with it. A server that rejects it self-heals
                 // through the same remediation loop the chat payload relies on.
                 if adaptations.includeTemperature { payload["temperature"] = temp }
-                if let reasoningEffort { payload["reasoning"] = ["effort": reasoningEffort] }
+                if let effort { payload["reasoning"] = ["effort": effort] }
+                if openRouter, effort != nil, adaptations.requireAllParameters {
+                    payload["provider"] = ["require_parameters": true]
+                }
                 req.httpBody = try body(payload)
                 return req
             }
-            let sizedTokens = adaptations.indicatesReasoningModel ? reasoningSafeMaxTokens(maxTokens) : maxTokens
             var payload: [String: Any] = [
                 "model": connection.model,
-                adaptations.tokenLimitField.jsonKey: sizedTokens,
+                adaptations.tokenLimitField.jsonKey: maxTokens,
                 "messages": chatMessages(system: system, user: user, fold: adaptations.foldSystemIntoUser),
             ]
             if adaptations.includeTemperature { payload["temperature"] = temp }
-            if adaptations.includeReasoningEffort, let reasoningEffort = connection.params.reasoningEffort {
-                payload["reasoning_effort"] = reasoningEffort
+            if let effort {
+                if openRouter {
+                    payload["reasoning"] = ["effort": effort]
+                    if adaptations.requireAllParameters { payload["provider"] = ["require_parameters": true] }
+                } else {
+                    payload["reasoning_effort"] = effort
+                }
             }
             req.httpBody = try body(payload)
             return req
@@ -293,13 +375,23 @@ struct HTTPLLMClient: LLMClient {
             guard let url = URL(string: "https://api.anthropic.com/v1/messages") else { throw ProviderTransportError.badResponse }
             var req = jsonRequest(url)
             transport.applyAuth(key, for: connection.provider, to: &req)
-            req.httpBody = try body([
+            var payload: [String: Any] = [
                 "model": connection.model,
                 "max_tokens": maxTokens,
-                "temperature": temp,
                 "system": system,
                 "messages": [["role": "user", "content": user]],
-            ])
+            ]
+            if adaptations.includeTemperature { payload["temperature"] = temp }
+            switch reasoning {
+            case .anthropicThinking(let type)?:
+                payload["thinking"] = ["type": type]
+            case .anthropicEffort(let effort, let adaptive)?:
+                payload["output_config"] = ["effort": effort]
+                if adaptive { payload["thinking"] = ["type": "adaptive"] }
+            default:
+                break
+            }
+            req.httpBody = try body(payload)
             return req
 
         case .gemini:
@@ -309,12 +401,12 @@ struct HTTPLLMClient: LLMClient {
             }
             var req = jsonRequest(url)
             transport.applyAuth(key, for: connection.provider, to: &req)
-            var generationConfig: [String: Any] = [
-                "temperature": temp,
-                "maxOutputTokens": maxTokens,
-            ]
-            if adaptations.includeThinkingConfig, let thinkingLevel = connection.params.geminiThinkingLevel {
-                generationConfig["thinkingConfig"] = ["thinkingLevel": thinkingLevel]
+            var generationConfig: [String: Any] = ["maxOutputTokens": maxTokens]
+            if adaptations.includeTemperature { generationConfig["temperature"] = temp }
+            switch reasoning {
+            case .geminiLevel(let level)?: generationConfig["thinkingConfig"] = ["thinkingLevel": level]
+            case .geminiBudget(let budget)?: generationConfig["thinkingConfig"] = ["thinkingBudget": budget]
+            default: break
             }
             req.httpBody = try body([
                 "systemInstruction": ["parts": [["text": system]]],
@@ -333,18 +425,27 @@ struct HTTPLLMClient: LLMClient {
         return [["role": "user", "content": combined]]
     }
 
+    private static func isOpenRouter(_ host: String?) -> Bool {
+        guard let host = host?.lowercased() else { return false }
+        return host == "openrouter.ai" || host.hasSuffix(".openrouter.ai")
+    }
+
     private func applyOpenRouterHeaders(to req: inout URLRequest, host: String?) {
-        guard let host = host?.lowercased(),
-              host == "openrouter.ai" || host.hasSuffix(".openrouter.ai") else { return }
+        guard Self.isOpenRouter(host) else { return }
         req.setValue(Self.openRouterReferer, forHTTPHeaderField: "HTTP-Referer")
         req.setValue(Branding.appName, forHTTPHeaderField: "X-Title")
     }
 
     private static let openRouterReferer = "https://keyscribe.app"
 
+    struct ParsedReply {
+        let text: String
+        let usage: ReplyUsage
+    }
+
     private func parse(
         _ data: Data, provider: Connection.Provider, wireAPI: Connection.WireAPI = .chatCompletions
-    ) throws -> String {
+    ) throws -> ParsedReply {
         // A proxy fronting another backend can wrap the whole payload in a single-element top-level array
         // (`[{...}]`), the same shape it uses for errors. Unwrap it so a success body is read, not rejected.
         guard let root = try? JSONSerialization.jsonObject(with: data),
@@ -357,33 +458,43 @@ struct HTTPLLMClient: LLMClient {
                 throw ProviderTransportError.http(400, body: String(data: data, encoding: .utf8))
             }
             if wireAPI == .responses {
-                return try responsesText(from: json)
+                return try responsesReply(from: json)
             }
             guard let choices = json["choices"] as? [[String: Any]],
                   let choice = choices.first,
-                  let message = choice["message"] as? [String: Any],
-                  let content = Self.messageText(message["content"]) else { throw ProviderTransportError.badResponse }
+                  let message = choice["message"] as? [String: Any] else { throw ProviderTransportError.badResponse }
+            let raw = Self.messageText(message["content"])
+            var usage = ReplyUsage.openAIChat(json)
+            if raw.map(ReasoningOutput.containsReasoning) == true { usage.hadReasoningContent = true }
             // A response cut off at max_tokens passes the gate when no sentinels were issued (common
             // privacy-off case), pasting half a sentence. Treat truncation as an error → local fallback.
-            if (choice["finish_reason"] as? String) == "length" { throw ProviderTransportError.truncated }
-            guard let cleaned = ReasoningOutput.clean(content) else { throw ProviderTransportError.badResponse }
-            return cleaned
+            return try Self.checked(
+                text: raw.flatMap(ReasoningOutput.clean),
+                limitHit: (choice["finish_reason"] as? String) == "length", usage: usage)
         case .anthropic:
-            if (json["stop_reason"] as? String) == "max_tokens" { throw ProviderTransportError.truncated }
-            guard let content = json["content"] as? [[String: Any]],
-                  let text = anthropicText(from: content) else { throw ProviderTransportError.badResponse }
-            return text
+            let blocks = json["content"] as? [[String: Any]] ?? []
+            return try Self.checked(
+                text: anthropicText(from: blocks).flatMap(ReasoningOutput.clean),
+                limitHit: (json["stop_reason"] as? String) == "max_tokens", usage: .anthropic(json))
         case .gemini:
             guard let candidates = json["candidates"] as? [[String: Any]],
-                  let candidate = candidates.first,
-                  let content = candidate["content"] as? [String: Any],
-                  let parts = content["parts"] as? [[String: Any]] else { throw ProviderTransportError.badResponse }
-            // Join every text part, not just the first — Gemini can split the reply across parts (or lead
+                  let candidate = candidates.first else { throw ProviderTransportError.badResponse }
+            // Join every answer part, not just the first — Gemini can split the reply across parts (or lead
             // with a non-text part), and reading `parts.first` alone would drop or miss the answer.
-            let text = parts.compactMap { $0["text"] as? String }.joined()
-            guard !text.isEmpty else { throw ProviderTransportError.badResponse }
-            if (candidate["finishReason"] as? String) == "MAX_TOKENS" { throw ProviderTransportError.truncated }
-            return text
+            let parts = (candidate["content"] as? [String: Any])?["parts"] as? [[String: Any]] ?? []
+            let text = parts.filter { ($0["thought"] as? Bool) != true }.compactMap { $0["text"] as? String }.joined()
+            return try Self.checked(
+                text: text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text,
+                limitHit: (candidate["finishReason"] as? String) == "MAX_TOKENS", usage: .gemini(json))
+        }
+    }
+
+    private static func checked(text: String?, limitHit: Bool, usage: ReplyUsage) throws -> ParsedReply {
+        switch ReplyLimit.verdict(limitHit: limitHit, hasVisibleText: text != nil, usage: usage) {
+        case .limitBeforeAnswer(let evidence): throw ProviderTransportError.limitBeforeAnswer(reasoningEvidence: evidence)
+        case .truncatedAnswer: throw ProviderTransportError.truncated
+        case .empty: throw ProviderTransportError.badResponse
+        case .ok: return ParsedReply(text: text ?? "", usage: usage)
         }
     }
 
@@ -407,24 +518,28 @@ struct HTTPLLMClient: LLMClient {
         return nil
     }
 
-    private func responsesText(from json: [String: Any]) throws -> String {
+    private func responsesReply(from json: [String: Any]) throws -> ParsedReply {
         let status = json["status"] as? String
-        if status == "incomplete" { throw ProviderTransportError.truncated }
-        // A minimal proxy can implement /responses without the `status` field at all. Accept that when the
-        // output itself is well-formed rather than dropping a good reply to local. A status that IS present
-        // must still say completed, so a genuinely unfinished reply is never inserted.
-        guard status == nil || status == "completed",
-              let output = json["output"] as? [[String: Any]] else {
-            throw ProviderTransportError.badResponse
-        }
-        let text = output
+        let usage = ReplyUsage.openAIResponses(json)
+        let text = (json["output"] as? [[String: Any]] ?? [])
             .filter { ($0["type"] as? String) == "message" }
             .flatMap { $0["content"] as? [[String: Any]] ?? [] }
             .filter { ($0["type"] as? String) == "output_text" }
             .compactMap { $0["text"] as? String }
             .joined()
-        guard let cleaned = ReasoningOutput.clean(text) else { throw ProviderTransportError.badResponse }
-        return cleaned
+        if status == "incomplete" {
+            // Only an explicit token-limit reason is attributed to the limit; without one the cause is unknown.
+            let reason = (json["incomplete_details"] as? [String: Any])?["reason"] as? String
+            guard reason == "max_output_tokens" else { throw ProviderTransportError.incompleteReply }
+            return try Self.checked(text: ReasoningOutput.clean(text), limitHit: true, usage: usage)
+        }
+        // A minimal proxy can implement /responses without the `status` field at all. Accept that when the
+        // output itself is well-formed rather than dropping a good reply to local. A status that IS present
+        // must still say completed, so a genuinely unfinished reply is never inserted.
+        guard status == nil || status == "completed", json["output"] is [[String: Any]] else {
+            throw ProviderTransportError.badResponse
+        }
+        return try Self.checked(text: ReasoningOutput.clean(text), limitHit: false, usage: usage)
     }
 
     private func anthropicText(from blocks: [[String: Any]]) -> String? {

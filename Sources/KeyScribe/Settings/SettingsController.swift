@@ -221,6 +221,12 @@ final class SettingsController: NSObject, NSWindowDelegate {
     // Connections whose last user-run Test Connection failed — drives the error badge.
     var failedConnectionIds: Set<String> { aiServices.failedTestIds }
 
+    func presentAIService(id: String) {
+        aiServices.reload()
+        aiServices.selectedID = aiServices.connections.first(where: { $0.id == id })?.id
+        present(.aiServices)
+    }
+
     func present(_ destination: SettingsDestination? = nil) {
         // Capture BEFORE activating our own window — after NSApp.activate the frontmost app is KeyScribe.
         // Skip when we are already frontmost (a re-invoke while Settings is key) so a real prior app isn't

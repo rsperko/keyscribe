@@ -61,6 +61,9 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     // Why a `localFallback` entry kept the local text (an HTTP error, missing key, or validation failure).
     // Provider error text or a fixed local string, never user content. nil on non-fallback and older rows.
     public var fallbackReason: String?
+    // Where a cloud rewrite's reasoning setting landed ("Off", "Low — the lowest this model accepts"). A fixed
+    // local summary, never provider text. nil on local-only and older rows.
+    public var reasoning: String?
     public var stoppedAtLimit: Bool?
     public var failureReason: String?
     public var reported: String?
@@ -95,6 +98,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case routedPhrase = "routed_phrase"
         case triggerKey = "trigger_key"
         case fallbackReason = "fallback_reason"
+        case reasoning
         case stoppedAtLimit = "stopped_at_limit"
         case failureReason = "failure_reason"
         case reported

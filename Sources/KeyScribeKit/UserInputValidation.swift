@@ -10,6 +10,7 @@ public enum UserInputValidation {
         case credentialsNotAllowed
         case invalidRegex
         case unsafeRegex
+        case wholeNumberAtLeast(Int)
 
         public var message: String {
             switch self {
@@ -21,6 +22,7 @@ public enum UserInputValidation {
             case .credentialsNotAllowed: "Remove the username and password from this URL."
             case .invalidRegex: "That is not a valid regular expression."
             case .unsafeRegex: "That regular expression could make routing unresponsive."
+            case .wholeNumberAtLeast(let minimum): "Enter a whole number of at least \(minimum.formatted())."
             }
         }
     }
@@ -32,6 +34,14 @@ public enum UserInputValidation {
     public static let endpointLimit = 2_048
     public static let secretLimit = 16_384
     public static let promptLimit = 65_536
+
+    public static func outputRoomIssue(_ value: String) -> Issue? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let number = Int(trimmed), number >= Connection.Params.minimumMaxTokens else {
+            return .wholeNumberAtLeast(Connection.Params.minimumMaxTokens)
+        }
+        return nil
+    }
 
     public static func nameIssue(_ value: String) -> Issue? {
         singleLineIssue(value, required: true, limit: nameLimit)

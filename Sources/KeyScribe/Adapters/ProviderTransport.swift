@@ -8,6 +8,10 @@ enum ProviderTransportError: Error, CustomStringConvertible, LocalizedError {
     case http(Int, body: String?)
     case badResponse
     case truncated
+    case limitBeforeAnswer(reasoningEvidence: Bool)
+    case incompleteReply
+    case reasoningLevelRefused(String)
+    case noRouteForReasoningLevel(String)
 
     // Routes `description` through localizedDescription so a caught rewrite error carries the real cause
     // into logs and history, instead of the generic "The operation couldn't be completed" a bare Error yields.
@@ -26,8 +30,8 @@ enum ProviderTransportError: Error, CustomStringConvertible, LocalizedError {
                 return "The model service returned an error (\(code)): \(snippet)"
             }
             return "The model service returned an error (\(code))."
-        case .badResponse: return "The model service returned an unexpected response."
-        case .truncated: return "The model service cut the response off at its length limit."
+        case .badResponse, .truncated, .limitBeforeAnswer, .incompleteReply, .reasoningLevelRefused, .noRouteForReasoningLevel:
+            return rewriteFailureReason
         }
     }
 }
@@ -46,6 +50,15 @@ extension ProviderTransportError: RewriteFailureReporting {
         case .http(let code, _): return "The model service returned an error (\(code))."
         case .badResponse: return "The model service returned an unexpected response."
         case .truncated: return "The model service cut the response off at its length limit."
+        case .limitBeforeAnswer(true):
+            return "The model reached its output limit while reasoning, before writing an answer. Lower Reasoning or raise Minimum output allowance in Settings."
+        case .limitBeforeAnswer(false):
+            return "The reply hit the output limit before any answer text. Raise Minimum output allowance or lower Reasoning in Settings."
+        case .incompleteReply: return "The model service returned an incomplete reply."
+        case .reasoningLevelRefused(let level):
+            return "This model doesn't accept the reasoning level “\(ReasoningReport.displayName(level))”. Change it in Settings."
+        case .noRouteForReasoningLevel(let level):
+            return "No provider for this model accepts every setting sent, including the reasoning level “\(ReasoningReport.displayName(level))”. Choose another level or Recommended in Settings."
         }
     }
 }

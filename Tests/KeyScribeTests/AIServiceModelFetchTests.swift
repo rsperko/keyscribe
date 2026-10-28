@@ -65,4 +65,36 @@ struct AIServiceModelFetchTests {
         #expect(model.modelDiscoveryState(for: id) == .loaded)
     }
 
+
+    @Test func fetchedMetadataIsKeptPerModelAndItsOutputCeilingIsSaved() async {
+        let fm = FileManager.default
+        let support = fm.temporaryDirectory.appendingPathComponent("keyscribe-ai-\(UUID().uuidString)")
+        try! fm.createDirectory(at: support.appendingPathComponent("modes"), withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: support) }
+        let repository = ConfigRepository(supportDir: support, config: ConfigCache(supportDir: support))
+        let seed = Connection(
+            id: "router", name: "Router", provider: .openaiCompatible, model: "moonshotai/kimi-k3",
+            keyRef: "k", baseUrl: "https://openrouter.ai/api/v1")
+        try! repository.upsertConnection(seed)
+        let support3 = ModelReasoningSupport(levels: ["low", "high", "max"], canTurnOff: false, maxOutputTokens: 32768)
+        let model = AIServiceSettingsModel(
+            repository: repository, permits: { _ in true },
+            listModelDetails: { _, _ in [ModelListing(id: "moonshotai/kimi-k3", reasoning: support3), ModelListing(id: "other")] })
+
+        await model.fetchModels(for: seed, apiKey: nil)
+
+        #expect(model.modelSuggestions(for: "router") == ["moonshotai/kimi-k3", "other"])
+        #expect(model.modelReasoning(for: "router")?.models == ["moonshotai/kimi-k3": support3])
+        #expect(model.connections.first?.params.outputCeiling == 32768)
+
+        var samePath = seed
+        samePath.name = "Renamed"
+        model.update(samePath, apiKey: nil)
+        #expect(model.modelReasoning(for: "router") != nil)
+
+        var moved = seed
+        moved.baseUrl = "https://openrouter.ai/api/v2"
+        model.update(moved, apiKey: nil)
+        #expect(model.modelReasoning(for: "router") == nil)
+    }
 }

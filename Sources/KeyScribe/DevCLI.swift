@@ -100,7 +100,9 @@ public enum DevCLI {
               --hud-preview <state>  Render a stable HUD fixture for visual review without starting dictation.
                                       States: ready, recording, loading-model, transcribing, rewriting,
                                       redacted-rewrite, rewriting-with-local-transcript, inserted, copied,
-                                      no-speech, failed, rewrite-fallback, microphone-error, accessibility-error.
+                                      no-speech, failed, rewrite-fallback, rewrite-fallback-reasoning,
+                                      rewrite-fallback-copied, reasoning-notice, microphone-error,
+                                      accessibility-error (HUDPreview.names lists every fixture).
               --hud-appearance <a>   With --hud-preview: render under system, opposite, light, or dark.
                 --seconds <n>           Record for n seconds (default 5).
                 --tone <hz>             Expected input tone in Hz (default 440).

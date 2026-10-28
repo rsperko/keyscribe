@@ -6,10 +6,13 @@ public protocol LLMClient: Sendable {
     func complete(system: String, user: String, connection: Connection) async throws -> String
     // Optional: warm the endpoint's connection during recording so the rewrite doesn't pay setup. No content.
     func preconnect(connection: Connection) async
+    // What reasoning setting the service last accepted for this connection, for History and Settings.
+    func reasoningOutcome(for connection: Connection) async -> ReasoningOutcome?
 }
 
 public extension LLMClient {
     func preconnect(connection: Connection) async {}
+    func reasoningOutcome(for connection: Connection) async -> ReasoningOutcome? { nil }
 }
 
 public enum RewriteOutcome: Equatable, Sendable {

@@ -206,6 +206,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hud.onCancelVoiceCommandChoice = { [weak self] id in self?.controller.cancelVoiceCommandChoice(choice: id) }
         hud.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
+        hud.onOpenAIService = { [weak self] id in self?.settingsController.presentAIService(id: id) }
         hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
         hud.onEscapeCancel = { [weak self] in
             self?.hotkey.cancelGestures()

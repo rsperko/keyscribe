@@ -10,6 +10,8 @@ struct HUDStateTests {
             "ready", "recording", "recording-latched", "loading-model", "transcribing",
             "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
             "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
+            "rewrite-fallback-reasoning", "rewrite-fallback-copied", "rewrite-fallback-copied-accessibility",
+            "reasoning-notice",
             "microphone-error", "command-not-recognized", "command-not-recognized-long", "accessibility-error",
             "recording-countdown", "stopped-at-limit", "stopped-at-limit-local", "choice", "choice-five",
             "choice-listening", "choice-retry", "choice-heard", "choice-heard-long",
@@ -51,6 +53,71 @@ struct HUDStateTests {
         #expect(state.primaryText == "Copied without rewriting")
         #expect(state.secondaryText == "Focus changed while \(Branding.appName) was working")
         #expect(state.offersPasteLast)
+    }
+
+    @Test func localFallbackSecondaryCarriesTheReasonAndStaysFiveSeconds() {
+        let reason = ProviderTransportError.limitBeforeAnswer(reasoningEvidence: true).rewriteFailureReason
+        let state = HUDState.localFallback(outcome: .inserted, mode: "Polish", reason: reason)
+        #expect(state.primaryText == "Inserted without rewriting")
+        #expect(state.secondaryText == "The model reached its output limit while reasoning.")
+        #expect(state.hidesAfterSeconds == 5)
+        #expect(state.contentHeight > HUDState.localFallback(outcome: .inserted, mode: "Polish").contentHeight)
+        #expect(state.voiceOverAnnouncement == "Inserted without rewriting. The model reached its output limit while reasoning.")
+        #expect(HUDState.localFallback(outcome: .inserted, mode: "Polish").hidesAfterSeconds == 2)
+    }
+
+    @Test func aFailedRewriteOffersTheAffectedAIService() {
+        let state = HUDState.localFallback(
+            outcome: .inserted, mode: "Cleanup",
+            reason: ProviderTransportError.limitBeforeAnswer(reasoningEvidence: true).rewriteFailureReason,
+            connectionId: "cleanup-service")
+        #expect(state.errorAction == .openAIService("cleanup-service"))
+        #expect(state.errorAction?.buttonTitle == "AI Service Settings…")
+        #expect(state.indicator == .warning)
+        #expect(!state.holdsKeyFocus)
+    }
+
+    @Test func aCopiedRewriteFailureKeepsBothRepairAndPasteActions() {
+        let reason = ProviderTransportError.limitBeforeAnswer(reasoningEvidence: true).rewriteFailureReason
+        let copied = HUDState.localFallback(
+            outcome: .copied(.focusChanged), mode: "Cleanup", reason: reason, connectionId: "c")
+        #expect(copied.secondaryText == "Focus changed while \(Branding.appName) was working. The model reached its output limit while reasoning.")
+        #expect(copied.offersPasteLast)
+        #expect(copied.errorAction == .openAIService("c"))
+        let noAccessibility = HUDState.localFallback(
+            outcome: .copied(.accessibilityDenied), mode: "Cleanup", reason: reason, connectionId: "c")
+        #expect(!noAccessibility.offersPasteLast)
+        #expect(noAccessibility.errorAction == .openAIService("c"))
+    }
+
+    @Test func explicitlyKeepingTheLocalTextDoesNotOfferAServiceRepair() {
+        let state = HUDState.localFallback(outcome: .inserted, mode: "Cleanup", connectionId: "c")
+        #expect(state.errorAction == nil)
+    }
+
+    @Test func copiedFallbackShowsTheRewriteReasonAndTheCopiedClause() {
+        let state = HUDState.localFallback(
+            outcome: .copied(.focusChanged), mode: "Polish", reason: "The model service returned an incomplete reply.")
+        #expect(state.primaryText == "Copied without rewriting")
+        #expect(state.secondaryText
+            == "Focus changed while \(Branding.appName) was working. The model service returned an incomplete reply.")
+        #expect(state.offersPasteLast)
+    }
+
+    @Test func aReasoningNoticeRidesTheCompletionAndStaysFiveSeconds() {
+        let state = HUDState.complete(outcome: .inserted, mode: "Polish", notice: "Example didn't accept a reasoning setting.")
+        #expect(state.primaryText == "Inserted")
+        #expect(state.secondaryText == "Reasoning setting not applied. Example didn't accept a reasoning setting.")
+        #expect(state.hidesAfterSeconds == 5)
+        #expect(HUDState.complete(outcome: .inserted, mode: "Polish").secondaryText == "Polish")
+    }
+
+    @Test func aCopiedCompletionCarriesTheNoticeAfterSayingWhereTheTextWent() {
+        let state = HUDState.complete(outcome: .copied(.focusChanged), mode: "Polish", notice: "Example didn't accept it.")
+        #expect(state.secondaryText
+            == "Focus changed while \(Branding.appName) was working. Reasoning setting not applied. Example didn't accept it.")
+        #expect(state.offersPasteLast)
+        #expect(state.hidesAfterSeconds == 5)
     }
 
     @Test func readyAcknowledgesTheOneShotMode() {

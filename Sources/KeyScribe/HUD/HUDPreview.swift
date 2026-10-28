@@ -5,10 +5,14 @@ enum HUDPreview {
         "ready", "recording", "recording-latched", "loading-model", "transcribing",
         "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
         "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
+        "rewrite-fallback-reasoning", "rewrite-fallback-copied", "rewrite-fallback-copied-accessibility",
+        "reasoning-notice",
         "microphone-error", "command-not-recognized", "command-not-recognized-long", "accessibility-error",
         "recording-countdown", "stopped-at-limit", "stopped-at-limit-local", "choice", "choice-five",
         "choice-listening", "choice-retry", "choice-heard", "choice-heard-long",
     ]
+
+    static let reasoningLimitReason = ProviderTransportError.limitBeforeAnswer(reasoningEvidence: true).rewriteFailureReason
 
     static let choicePrompt = VoiceCommandChoicePrompt(
         id: 1, title: "Which one?",
@@ -90,6 +94,16 @@ enum HUDPreview {
             .complete(outcome: .failed, mode: "Plain Dictation")
         case "rewrite-fallback":
             .localFallback(outcome: .inserted, mode: "Cleanup")
+        case "rewrite-fallback-reasoning":
+            .localFallback(outcome: .inserted, mode: "Cleanup", reason: reasoningLimitReason, connectionId: "preview-service")
+        case "rewrite-fallback-copied":
+            .localFallback(outcome: .copied(.focusChanged), mode: "Cleanup", reason: reasoningLimitReason, connectionId: "preview-service")
+        case "rewrite-fallback-copied-accessibility":
+            .localFallback(outcome: .copied(.accessibilityDenied), mode: "Cleanup", reason: reasoningLimitReason, connectionId: "preview-service")
+        case "reasoning-notice":
+            .complete(
+                outcome: .inserted, mode: "Cleanup",
+                notice: ReasoningOutcome(kind: .notSettable).notice(service: "Example Service", model: "example-model"))
         case "microphone-error":
             .error(message: "Nothing heard — check your microphone", action: .openMicrophoneSettings)
         case "command-not-recognized":

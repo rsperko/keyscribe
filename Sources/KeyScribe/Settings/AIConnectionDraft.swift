@@ -13,6 +13,25 @@ enum ModelDiscoveryState: Equatable {
     case failed(String)
 }
 
+struct ModelReasoningCatalog: Equatable {
+    var endpoint: String
+    var models: [String: ModelReasoningSupport]
+
+    init(endpoint: String, models: [String: ModelReasoningSupport]) {
+        self.endpoint = endpoint
+        self.models = models
+    }
+
+    init(for connection: Connection, models: [String: ModelReasoningSupport]) {
+        self.init(endpoint: Self.endpoint(provider: connection.provider, baseURL: connection.baseUrl ?? ""), models: models)
+    }
+
+    static func endpoint(provider: Connection.Provider, baseURL: String) -> String {
+        let url = provider == .openaiCompatible ? baseURL.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        return provider.rawValue + "\n" + url
+    }
+}
+
 struct AIConnectionDraft: Equatable {
     // Kept per preset so an accidental Service flip is restorable within the editing session
     // (ui_components.md: never silently reset a dependent user value).
@@ -38,6 +57,9 @@ struct AIConnectionDraft: Equatable {
     // hide the very fields being edited.
     var presetId: String
     var stashedServiceValues: [String: ServiceValues] = [:]
+    var params = Connection.Params()
+    var modelReasoning: ModelReasoningCatalog?
+    private var ceilingSource: String?
 
     init(
         name: String = AIServiceCatalog.defaultPreset.name,
@@ -93,6 +115,42 @@ struct AIConnectionDraft: Equatable {
             wireAPI: connection.wireAPI,
             availableModels: availableModels,
             modelDiscoveryState: modelDiscoveryState)
+        params = connection.params
+        ceilingSource = ceilingIdentity
+    }
+
+    // Fetched details describe the models of one endpoint; once the draft points elsewhere they say nothing.
+    private var currentModelReasoning: [String: ModelReasoningSupport] {
+        guard let modelReasoning, modelReasoning.endpoint == endpointIdentity else { return [:] }
+        return modelReasoning.models
+    }
+
+    var endpointIdentity: String {
+        ModelReasoningCatalog.endpoint(provider: provider, baseURL: baseURL)
+    }
+
+    var outputCeiling: Int? {
+        if !currentModelReasoning.isEmpty { return reasoningSupport?.maxOutputTokens }
+        return ceilingIdentity == ceilingSource ? params.outputCeiling : nil
+    }
+
+    // A saved output ceiling was learned for one model on one service; carried to another it would cut off a
+    // larger model's rewrites or overshoot a smaller one's limit.
+    private var ceilingIdentity: String {
+        [provider.rawValue, baseURL.trimmingCharacters(in: .whitespacesAndNewlines),
+         model.trimmingCharacters(in: .whitespacesAndNewlines)].joined(separator: "\n")
+    }
+
+    var reasoningSupport: ModelReasoningSupport? {
+        currentModelReasoning[model.trimmingCharacters(in: .whitespacesAndNewlines)]
+    }
+
+    var reasoningOptions: [ReasoningPreference] {
+        ReasoningChoices.options(support: reasoningSupport, current: params.reasoning)
+    }
+
+    var outputRoomIssue: UserInputValidation.Issue? {
+        params.maxTokens >= Connection.Params.minimumMaxTokens ? nil : .wholeNumberAtLeast(Connection.Params.minimumMaxTokens)
     }
 
     var effectiveAuthMethod: Connection.AuthMethod {
@@ -315,14 +373,8 @@ struct AIConnectionDraft: Equatable {
         // A typed key belongs to the API-key flow only — carrying it into a no-auth/token-command preset
         // leaves hasUnsavedAPIKey blocking Test/fetch behind a hidden field.
         if authMethod != .apiKey { apiKey = "" }
+        params.outputCeiling = nil
         resetModelDiscovery()
-    }
-
-    // Params aren't editable in the form, so an edit preserves the stored connection's params — unless the
-    // provider changed, where carrying them over would send one provider's reasoning knob to another
-    // (e.g. reasoning_effort to Gemini).
-    func resolvedParams(for existing: Connection) -> Connection.Params {
-        provider == existing.provider ? existing.params : provider.defaultParams
     }
 
     mutating func changeAuthMethod(
@@ -337,8 +389,9 @@ struct AIConnectionDraft: Equatable {
         resetModelDiscovery()
     }
 
-    mutating func applyFetchedModels(_ models: [String]) {
+    mutating func applyFetchedModels(_ models: [String], reasoning: ModelReasoningCatalog? = nil) {
         availableModels = models
+        modelReasoning = reasoning
         modelDiscoveryState = .loaded
         if !models.isEmpty, !models.contains(model.trimmingCharacters(in: .whitespacesAndNewlines)) {
             model = models[0]
@@ -347,6 +400,7 @@ struct AIConnectionDraft: Equatable {
 
     mutating func resetModelDiscovery() {
         availableModels = []
+        modelReasoning = nil
         modelDiscoveryState = nil
     }
 
@@ -360,7 +414,9 @@ struct AIConnectionDraft: Equatable {
             keyRef: keyRef,
             authMethod: effectiveAuthMethod,
             tokenCommand: effectiveAuthMethod == .tokenCommand && !command.isEmpty ? command : nil,
+            params: params,
             wireAPI: wireAPI)
+        connection.params.outputCeiling = outputCeiling
         if provider == .openaiCompatible {
             let trimmedBaseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
             connection.baseUrl = trimmedBaseURL.isEmpty ? nil : trimmedBaseURL

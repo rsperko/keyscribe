@@ -251,7 +251,8 @@ not to its label.
 | Complete | “Inserted” | Mode name | None; dismiss automatically |
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
 | Stopped at the limit | “Stopped at the [limit] limit” (e.g. “5-minute”) | “Inserted without rewriting — dictate again to continue” when the mode rewrites, “Inserted — dictate again to continue” when it does not, or the copied explanation | Paste last dictation when copied |
-| Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | “Rewrite could not be completed”, or the focus-change explanation when copied | Paste last dictation when copied; otherwise View details in History when enabled |
+| Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | A short cause, such as “The model reached its output limit while reasoning.”, or “Rewrite could not be completed” when none was recorded. History keeps the full reason and advice. When copied, the focus-change or Accessibility explanation comes first. Stays five seconds when it carries a reason | AI Service Settings… opens the affected service when the failure names one. Paste last dictation also remains available when copied and Accessibility permits it |
+| Reasoning setting not applied | The completed state’s own title (“Inserted”, or “Copied instead of inserted”) | “Reasoning setting not applied.” followed by a plain explanation naming the service and model — e.g. “[service] didn't accept a reasoning setting for [model], so the model uses its own. Rewrites may be slower.” Stays five seconds | None. Carried by the completion itself — never a second, delayed HUD that a following dictation could cancel unseen — once per connection and model each time the app runs. Shown when a requested reasoning setting had to be dropped and the service did not confirm the model used no reasoning, when no lower level was accepted, or when the model reasoned with reasoning off. Also shown when an OpenRouter route could only be found without guaranteeing the setting. Never after a fallback, whose reason already says what happened. On a copied completion it follows the explanation of where the text went, which is read first |
 | Voice command ran (Voice Commands mode, experimental) | Where it went — the app, the place and its browser (“Gmail · Google Chrome”), or the window and its app (“Budget — Numbers · Numbers”) — or the script or shortcut it ran (“Deploy”); a script that reported a result shows that message instead (“Switched to Inbox”) | “Voice command”, or “Started, still running” when the action has not finished; under a reported result, the script's name. A script's informational result (“Nothing waiting”) shows as an Advisory instead, with no failure styling. A window that closed, moved to another desktop, or could not be confirmed in front, and a search where some app did not list its windows, show an Error saying so (Accessibility off adds **Open Accessibility Settings**). A browser that refused control, and a script whose error output carries the Apple Events not-permitted code (`-1743`) on an error line, show an Error with **Open Automation Settings** (“Manager couldn’t control another app. Check Automation access for KeyScribe.”, followed by the script's denial line, which names the app that refused, even when later error lines follow); the button only opens that pane, never retries or asks again; if an action later fails, an Error naming the failure follows unless a dictation is in progress or a voice command choice is on screen, in which case History alone records it | None; dismiss automatically |
 | Voice command needs a choice (Voice Commands mode) | “Which one?” for apps, places, and a script's own options, “Which action?” for `run` | Numbered rows, each a name over a detail that tells it apart (app, browser and host, app identity where names repeat, a window's app plus its document or site when two titles are the same, Script/Shortcut, or the name of the script that offered the option), then how to answer with the actual Voice Commands shortcut, led by one line when window rows still read the same (“Same name; the lower number is further forward.” within one app instance, else “Same name; these windows can’t be told apart.”) | Click a row; Cancel. Stays until answered, dismissed, or idle for the timeout |
 | Voice command not recognized (Voice Commands mode) | “Command not recognized” | What the speech model heard, before any replacement: “Heard “stitch to Mail”” — omitted when the target was a password field or could not be confirmed | None; dismiss automatically |
@@ -365,6 +366,10 @@ governs it (KeyScribe does not currently distinguish a "polishing on this Mac" s
 - Describe the current operation, not the pipeline stage number.
 - Do not say “secure”, “safe”, “private”, or “protected” for best-effort redaction.
 - Completion must report the actual outcome: inserted, copied, local fallback, or no result.
+- A completed rewrite stays a success when its reasoning preference could not be applied. Amber
+  rewrite fallback means the local text was kept instead. A fallback shows a short cause and, when
+  its service is known, **AI Service Settings…** opens that named service. History retains the full
+  reason and advice. The repair action does not replace **Paste last dictation** when paste is available.
 - Inserted-versus-copied is reported even in the fallback states: a local fallback whose target
   changed says it copied, not inserted. Whenever the outcome is copied, the HUD offers Paste last
   dictation.
@@ -834,8 +839,9 @@ surface has one shot to produce a working service. The Settings pane deliberatel
 across both surfaces via one helper.
 
 The editor answers the ready path first: its header shows the service name, provider, and latest status;
-**Connection** keeps the credential action and **Test Connection** together; **Model** and **Used by**
-follow. The latest test result remains in the header and beside the test action.
+**Connection** holds credentials, then **Model** leads directly to **Test Connection** and its result.
+**Connection options** and **Rewrite settings** follow, then **Used by** and the separate delete action.
+The latest test result remains in the header and beside the test action.
 
 - Known providers keep their type, endpoint, and authentication mechanism out of the first scan.
   **Connection options** reveals changing the service type; Custom then exposes the endpoint and
@@ -845,10 +851,31 @@ follow. The latest test result remains in the header and beside the test action.
   Generated tokens stay in memory only.
 - **Model** — model id is always visible. Fetching models is a helper; when fetched models exist, a
   visible picker selects one while the chosen id remains visible in the model field.
-- **Connection test** — user-initiated only, disabled until the visible prerequisites are met.
+- **Connection test** — user-initiated only, disabled until the visible prerequisites are met. A passed
+  test adds one secondary line naming where reasoning landed for this model (“Reasoning: Off”,
+  “Reasoning: Low — the lowest this model accepts”, “Reasoning: Off — requested; the service doesn't confirm it”), so
+  a model that would not lower its reasoning is visible before the first dictation.
 
-Do not present API parameters until the connection works. Put temperature, output limits, and
-compatible endpoint configuration under `Connection options`.
+Keep API parameters out of the first scan. Endpoint and authentication configuration live under
+**Connection options**. **Reasoning** and **Minimum output allowance** live under **Rewrite settings**;
+its summary names the reasoning choice. They
+are not gated on a passed test, because a model that reasons too much is exactly the case where the
+connection only half works.
+
+- **Reasoning** — **Recommended — least reasoning** (the default) asks for the least reasoning the model accepts and
+  may land on a low level rather than off; **Model default** sends no setting. Between them, only the
+  levels the service lists for the selected model, when it publishes that (fetched with the models);
+  otherwise the full vocabulary, with the row reading “Supported levels unknown” and help saying that a
+  level the model rejects stops the rewrite and says so. A chosen level is used exactly or the rewrite falls back with
+  that reason — it is never silently swapped for another level. A stored level the model does not list
+  stays selectable and reads “Not listed for this model”. A model that always reasons says so.
+- **Minimum output allowance** — the base room for the rewritten text, a whole number of at least 256,
+  with **tokens** beside the field. The caption explains that the app increases the allowance for longer
+  dictations and reasoning, and suggests increasing it when rewrites are cut off.
+  Long dictations are given more, and extra room is added whenever the model may reason; a ceiling the
+  service publishes for the model is shown and never exceeded. A ceiling saved for one model or endpoint
+  is dropped when either changes, rather than applied to the new one. An entry that is not a valid number
+  marks the section like any other error, and the caption names the value rewrites still use.
 
 ### Modes
 
@@ -1272,7 +1299,8 @@ Heard → Transformed → Result
 
 It shows the mode, insertion outcome, correction actions, and a `Result` view with a separate
 `Details` view for processing details.
-section. Details reveal the exact connection/model when used, whether best-effort redaction was
+section. Details reveal the exact connection/model when used, where its reasoning setting landed
+(**Reasoning**, the same words as the connection test), whether best-effort redaction was
 enabled, which context categories were sent, and the raw cloud exchange as sibling disclosures:
 **Show exactly what was sent** (the stored prompt) and **Show exactly what was received** (the
 provider's reply, verbatim — before any output enforcement, so model misbehavior stays visible
