@@ -90,6 +90,7 @@ final class DictationController {
         var pendingLocalIssuedTokens: [String] = []
         var pendingHeardTranscript: String?
         var pendingLocalRewriteDetails: RewriteDetails?
+        var rewriteStartedAt: DispatchTime?
         var dictationTask: Task<Void, Never>?
         var rewriteEscapeTask: Task<Void, Never>?
         var recordingLimitTask: Task<Void, Never>?
@@ -97,7 +98,7 @@ final class DictationController {
         var recordingLimitSeconds: Double?
         var stoppedAtLimit = false
         var rewriteSkippedAtLimit = false
-        var firedReplacements: [ReplacementRule] = []
+        var replacementEffects: [ReplacementEffect] = []
         var replacementUsageEpoch: Int?
         var modeResolveTask: Task<Void, Never>?
         var snapshotAdoptionTask: Task<Void, Never>?
@@ -2265,13 +2266,15 @@ final class DictationController {
         case .noSpeech, .failed: false
         }
         let stoppedAtLimit = session?.stoppedAtLimit == true && textLanded
-        if textLanded, let fired = session?.firedReplacements {
-            replacementUsage?.record(fired, capturedAt: session?.replacementUsageEpoch)
+        if textLanded, let effects = session?.replacementEffects {
+            replacementUsage?.record(effects: effects, capturedAt: session?.replacementUsageEpoch)
         }
         let completedState: HUDState
         if stoppedAtLimit {
             completedState = .stoppedAtLimit(
                 outcome: outcome, limit: limitPhrase, rewriteSkipped: session?.rewriteSkippedAtLimit == true)
+        } else if let skippedAfterMs = rewrite?.skippedAfterMs {
+            completedState = .rewriteSkipped(outcome: outcome, mode: currentModeName, seconds: skippedAfterMs / 1000)
         } else if rewrite?.fellBack == true {
             completedState = .localFallback(
                 outcome: outcome, mode: currentModeName,
@@ -2372,6 +2375,7 @@ final class DictationController {
             stoppedAtLimit: session?.stoppedAtLimit == true ? true : nil,
             failureReason: failureReason, reported: reported)
         entry.reasoning = rewrite?.reasoning?.summary
+        entry.rewriteSkippedMs = rewrite?.skippedAfterMs.map { Int($0.rounded()) }
         entry.appVersion = DiagnosticsCollector.appVersion()
         entry.osVersion = DiagnosticsCollector.osVersion()
         entry.targetApp = building.targetBundleId
@@ -2498,6 +2502,7 @@ final class DictationController {
         // "Show exactly what was received". nil when no reply arrived or on the pre-committed paths.
         var received: String? = nil
         var reasoning: ReasoningOutcome? = nil
+        var skippedAfterMs: Double? = nil
     }
 
     private func trimmedIfNeeded(_ tokenizedText: String, mode: Mode?) -> String {
@@ -2537,7 +2542,7 @@ final class DictationController {
         let localStart = DispatchTime.now()
         let payload = pipeline.forward(transcript)
         let tokenized = payload.text
-        session?.firedReplacements = payload.firedReplacements
+        session?.replacementEffects = payload.replacementEffects
 
         // Whole-utterance replacement: one rule owned the entire utterance, so insert its generated
         // value verbatim — bypassing the LLM (the model never sees it; redaction is moot) and the
@@ -2675,7 +2680,9 @@ final class DictationController {
 
         // Edit-in-place must leave the selection untouched on abandon, so the local-transcript
         // escape hatch is dictation-only — never offer to paste the captured selection back.
+        let rewriteStart = DispatchTime.now()
         if mode.source != .selection {
+            session?.rewriteStartedAt = rewriteStart
             session?.pendingLocalTranscript = localProcessed
             session?.pendingLocalIssuedTokens = issuedTokens
             scheduleRewriteEscapeHatch(connection: connection, mode: mode, contextCategories: request.contextCategories)
@@ -2691,13 +2698,20 @@ final class DictationController {
                 contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: true)
         }
 
-        let rewriteStart = DispatchTime.now()
         let outcome = await RewriteService(
             client: llmClient, permits: permits,
             deadlineSeconds: rewriteDeadlineSecondsOverride ?? RewriteService.defaultDeadlineSeconds
         ).rewrite(
             payload: payload, inputs: request.inputs, connection: request.sized,
             allowedTokens: instructionTokens, prompt: request.prompt)
+        // A skip already froze the timing and owns the record; the cancelled request must not overwrite it, or
+        // reach a later session's record once this one is gone.
+        if Task.isCancelled {
+            return (localProcessed, false, RewriteDetails(
+                connectionId: connection.id, connection: connection.name, model: connection.model,
+                redaction: mode.commands.privacy,
+                contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: true))
+        }
         building.stageMillis[.rewrite] = elapsedMs(since: rewriteStart)
         let gateApproved: String
         let fellBack: Bool
@@ -2845,7 +2859,13 @@ final class DictationController {
         guard let transcript = session?.pendingLocalTranscript, let heard = session?.pendingHeardTranscript,
               machine.state == .transcribing else { return }
         let issuedTokens = session?.pendingLocalIssuedTokens ?? []
-        let rewrite = session?.pendingLocalRewriteDetails
+        var rewrite = session?.pendingLocalRewriteDetails
+        if let start = session?.rewriteStartedAt {
+            let elapsed = elapsedMs(since: start)
+            rewrite?.skippedAfterMs = elapsed
+            building.stageMillis[.rewrite] = elapsed
+            building.fallbackReason = "skipped by the user"
+        }
         dictationTask?.cancel()
         clearRewriteEscapeHatch()
         switch guardedInsert(transcript, issuedTokens: issuedTokens) {
@@ -2893,6 +2913,7 @@ final class DictationController {
         session?.pendingLocalIssuedTokens = []
         session?.pendingHeardTranscript = nil
         session?.pendingLocalRewriteDetails = nil
+        session?.rewriteStartedAt = nil
     }
 
     private func elapsedMs(since start: DispatchTime) -> Double {

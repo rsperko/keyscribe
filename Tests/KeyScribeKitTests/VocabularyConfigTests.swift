@@ -25,6 +25,69 @@ struct VocabularyConfigTests {
         #expect(r.toRules() == [ReplacementRule(heard: "teh", replace: "the", isRegex: false)])
     }
 
+    @Test func aWholeDictationRuleRoundTripsAndAnOrdinaryRuleOmitsTheKey() throws {
+        let toml = """
+        schema_version = 1
+        [[rules]]
+        heard = 'slash resume'
+        replace = '/resume<CR>'
+        regex = true
+        whole_dictation = true
+        """
+        let set = try ReplacementsStore.decode(from: toml)
+        #expect(set.rules.first?.wholeDictation == true)
+        #expect(set.toRules().first?.wholeDictation == true)
+        #expect(ReplacementsStore.unknownKeys(in: toml).isEmpty)
+        let written = try ConfigEncode.toml(set)
+        #expect(written.contains("whole_dictation = true"))
+        #expect(try ReplacementsStore.decode(from: written) == set)
+        let plain = ReplacementsSet(rules: [.init(heard: "teh", replace: "the", regex: false)])
+        #expect(!(try ConfigEncode.toml(plain)).contains("whole_dictation"))
+    }
+
+    @Test func addingAndEditingKeepTheWholeDictationScope() {
+        let added = ReplacementsSet().adding(heard: "slash resume", replace: "/resume<CR>", regex: true, wholeDictation: true)
+        #expect(added.rules.first?.wholeDictation == true)
+        let original = added.rules[0]
+        var edited = original
+        edited.replace = "/resume"
+        #expect(added.replacing(original, with: edited).rules.first?.wholeDictation == true)
+        edited.wholeDictation = false
+        #expect(added.replacing(original, with: edited).rules.first?.wholeDictation == false)
+        #expect(ReplacementsSet().adding(heard: "teh", replace: "the", regex: false).rules.first?.wholeDictation == false)
+    }
+
+    @Test func aCorrectionThatOnlyChangesTheTextKeepsAWholeDictationRuleWholeOnly() {
+        let saved = ReplacementsSet(rules: [.init(heard: "slash resume", replace: "/resume", regex: false, wholeDictation: true)])
+        let corrected = saved.adding(heard: "Slash Resume", replace: "/resume now", regex: false)
+        #expect(corrected.rules == [.init(heard: "Slash Resume", replace: "/resume now", regex: false, wholeDictation: true)])
+        let regex = ReplacementsSet(rules: [.init(heard: "pi", replace: "pi<CR>", regex: true, wholeDictation: true)])
+        #expect(regex.addingRegex(heard: "pi", replace: "π<CR>").rules.first?.wholeDictation == true)
+        #expect(saved.addingLiteral(heard: "slash resume", replace: "x").rules.first?.wholeDictation == true)
+    }
+
+    @Test func aWordListsTheSpellingsItsReplacementsCorrect() {
+        let rules: [ReplacementsSet.Rule] = [
+            .init(heard: "Cryden", replace: "Kryten", regex: false),
+            .init(heard: "croydon", replace: "Kryten", regex: false),
+            .init(heard: "kryten", replace: "Kryten", regex: false),
+            .init(heard: "cr[ay]+ton", replace: "Kryten", regex: true),
+            .init(heard: "teh", replace: "the", regex: false),
+        ]
+        #expect(VocabularyScope.taughtSpellings(of: "Kryten", in: rules) == ["Cryden", "croydon"])
+        #expect(VocabularyScope.taughtSpellings(of: "Postgres", in: rules).isEmpty)
+    }
+
+    @Test func aModeWordAlsoCountsGlobalCorrectionsItIncludes() {
+        let global: [ReplacementsSet.Rule] = [.init(heard: "Cryden", replace: "Kryten", regex: false)]
+        let local: [ReplacementsSet.Rule] = [.init(heard: "Crayton", replace: "Kryten", regex: false)]
+        let included = VocabularyScope(globalRules: global, local: .init(rules: local, includeGlobalRules: true))
+        #expect(included.taughtSpellings(of: "Kryten") == ["Crayton", "Cryden"])
+        let alone = VocabularyScope(globalRules: global, local: .init(rules: local, includeGlobalRules: false))
+        #expect(alone.taughtSpellings(of: "Kryten") == ["Crayton"])
+        #expect(VocabularyScope(globalRules: global).taughtSpellings(of: "Kryten") == ["Cryden"])
+    }
+
     @Test func regexEscapeExpansionRunsThroughTheTomlLiteralStringPath() throws {
         let toml = """
         schema_version = 1

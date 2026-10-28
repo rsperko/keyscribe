@@ -228,8 +228,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             addDictionaryWord: { [weak self] word, destination in
                 self?.configRepository.addDictionaryWord(word, to: destination.scope) ?? .failed
             },
-            addReplacement: { [weak self] heard, replace, regex, destination in
-                self?.configRepository.addReplacement(heard: heard, replace: replace, regex: regex, to: destination.scope) ?? .failed
+            addReplacement: { [weak self] heard, replace, regex, wholeDictation, destination in
+                self?.configRepository.addReplacement(
+                    heard: heard, replace: replace, regex: regex, wholeDictation: wholeDictation, to: destination.scope) ?? .failed
+            },
+            existingRule: { [weak self] heard, regex, destination in
+                self?.configRepository.vocabularyScope(for: destination.scope).ownRule(heard: heard, regex: regex)
             },
             clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
 
@@ -315,6 +319,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             onEraseAllData: { [weak self] in self?.eraseAllDataAndRelaunch() },
             clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
         settingsController.onErrorsChanged = { [weak self] in self?.menu.setErrorBadge($0) }
+        correctionPanel.mishearingsFinder = { [weak self] word, destination, onSaved in
+            self?.settingsController.mishearingsFinder(word, destination.scope, onSaved)
+        }
         controller.onHistoryUpdated = { [weak self] in self?.settingsController.historyDidChange() }
         settingsController.recordingState.onChange = { [weak self] recording in
             self?.hotkey?.isSuspended = recording

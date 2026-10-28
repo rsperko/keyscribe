@@ -103,6 +103,89 @@ struct HistoryPaneModelTests {
         return (HistoryStore(supportDir: dir), dir)
     }
 
+    private func finder(word: String, heard: [String]) -> HistoryReplacementsModel {
+        let items = heard.enumerated().map { i, text in
+            HistorySnapshot.Item(reference: .init(dayFile: "d.jsonl", line: i), entry: entry(text))
+        }
+        let snapshot = HistorySnapshot(
+            items: items, unreadableLines: 0, fingerprint: HistorySnapshot.Fingerprint(files: ["d.jsonl": items.count]))
+        return HistoryReplacementsModel(
+            word: word, destination: .global, destinationName: "Global", historyEnabled: true,
+            dependencies: .init(
+                loadSnapshot: { snapshot }, fingerprint: { snapshot.fingerprint },
+                vocabulary: { .init(global: ReplacementsSet(), globalWords: [word], modes: []) },
+                save: { _, _, _, _ in .saved }),
+            onSaved: { _ in })
+    }
+
+    @Test func addingAWordFromHistoryOffersItsMishearings() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = model(store)
+        model.mishearingsFinder = { word, _, _ in self.finder(word: word, heard: ["Croydon, create a pane", "Cryden, pair"]) }
+        #expect(model.saveDictionaryWord("Kryten", .addWord) == nil)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(model.mishearings == nil)
+        model.dictionarySheetDidClose()
+        for _ in 0..<200 where model.mishearings == nil { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(model.mishearings?.offeredAfterAdding == true)
+        #expect(Set(model.mishearings?.findings.map(\.phrase) ?? []) == ["Croydon", "Cryden"])
+    }
+
+    @Test func aSingleSuggestionIsConfirmedInOneStep() async throws {
+        let items = [HistorySnapshot.Item(reference: .init(dayFile: "d.jsonl", line: 0), entry: entry("Ask Cryden for help"))]
+        let snapshot = HistorySnapshot(
+            items: items, unreadableLines: 0, fingerprint: HistorySnapshot.Fingerprint(files: ["d.jsonl": 1]))
+        var saved: [ReplacementsSet.Rule] = []
+        let finder = HistoryReplacementsModel(
+            word: "Kryten", destination: .global, destinationName: "Global", historyEnabled: true,
+            dependencies: .init(
+                loadSnapshot: { snapshot }, fingerprint: { snapshot.fingerprint },
+                vocabulary: { .init(global: ReplacementsSet(), globalWords: ["Kryten"], modes: []) },
+                save: { _, _, proposed, _ in saved = proposed; return .saved }),
+            onSaved: { _ in })
+        finder.offeredAfterAdding = true
+        await finder.refresh()
+        #expect(finder.singleSuggestion?.heard == "Cryden")
+        await finder.confirmSingleSuggestion()
+        #expect(saved == [ReplacementsSet.Rule(heard: "Cryden", replace: "Kryten", regex: false)])
+    }
+
+    @Test func theFinderOpensEvenWhenTheAddSheetClosedBeforeTheSearchFinished() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = model(store)
+        model.mishearingsFinder = { word, _, _ in self.finder(word: word, heard: ["Ask Cryden for help"]) }
+        #expect(model.saveDictionaryWord("Kryten", .addWord) == nil)
+        model.dictionarySheetDidClose()
+        for _ in 0..<200 where model.mishearings == nil { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(model.mishearings != nil)
+    }
+
+    @Test func addingAWordWithNoLikelyMishearingsOpensNothing() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = model(store)
+        var built: HistoryReplacementsModel?
+        model.mishearingsFinder = { word, _, _ in
+            let made = self.finder(word: word, heard: ["nothing like it"])
+            built = made
+            return made
+        }
+        #expect(model.saveDictionaryWord("Kryten", .addWord) == nil)
+        for _ in 0..<50 where built?.isWorking != false { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(model.mishearings == nil)
+    }
+
+    @Test func aSkippedRewriteIsLabelledAsSkippedNotAsAFallback() {
+        var skipped = entry("hello")
+        skipped.outcome = .localFallback
+        #expect(outcomeLabel(skipped) == "Local fallback")
+        skipped.rewriteSkippedMs = 17_460
+        #expect(outcomeLabel(skipped) == "Rewrite skipped")
+    }
+
     private func entry(_ result: String) -> HistoryEntry {
         HistoryEntry(
             timestamp: Date(timeIntervalSince1970: 1_000_000), modeName: "Plain Dictation",

@@ -41,7 +41,7 @@ struct CorrectionDestinationTests {
 
         #expect(draft.feedback == .existing("Already in Words to Recognize."))
         #expect(!draft.canCommit)
-        #expect(draft.buttonTitle == "Add")
+        #expect(draft.buttonTitle == "Add Word")
     }
 
     @Test func replacementUpdateExplainsTheChangeAndUsesUpdateAction() {
@@ -51,7 +51,7 @@ struct CorrectionDestinationTests {
 
         #expect(draft.feedback == .update("Updates the existing replacement — “key scribe” currently becomes “Keyscribe”."))
         #expect(draft.canCommit)
-        #expect(draft.buttonTitle == "Update")
+        #expect(draft.buttonTitle == "Update Replacement")
     }
 
     @Test func aLiteralReplacementWithAReturnMarkerWarnsItTypesTheTextButStillSaves() {
@@ -70,7 +70,7 @@ struct CorrectionDestinationTests {
 
         #expect(draft.feedback == .update("Updates the existing word — “GitHub” is currently spelled “github”."))
         #expect(draft.canCommit)
-        #expect(draft.buttonTitle == "Update")
+        #expect(draft.buttonTitle == "Update Word")
     }
 
     @Test func globalCoverageProducesVisibleExistingStatusAndDisablesCommit() {
@@ -119,5 +119,47 @@ struct CorrectionDestinationTests {
         #expect(conflict.hasReplacementIdentityConflict)
         #expect(!conflict.canUpdateReplacement(from: original))
         #expect(invalidRegex.validationIssue == .invalidRegex)
+    }
+
+    @Test func theButtonSaysWhatItWillAdd() {
+        let replacement = VocabularyDraftAnalysis(
+            term: "Cryden", replacement: "Kryten", regex: false, analyze: { _ in VocabularyAnalysis(action: .addReplacement) })
+        #expect(replacement.buttonTitle == "Add Replacement")
+        let empty = VocabularyDraftAnalysis(term: "", replacement: "", regex: false, analyze: { _ in VocabularyAnalysis(action: .addWord) })
+        #expect(empty.buttonTitle == "Add")
+    }
+
+    @Test func aReplacementSaysWhatItReplacesAndWhere() {
+        let draft = VocabularyDraftAnalysis(
+            term: "Cryden", replacement: "Kryten", regex: false, analyze: { _ in VocabularyAnalysis(action: .addReplacement) })
+        #expect(draft.replacementSummary(in: .global) == "Replace “Cryden” with “Kryten” in modes that include Global vocabulary.")
+        #expect(draft.replacementSummary(in: .mode(id: "email", name: "Email")) == "Replace “Cryden” with “Kryten” in Email.")
+        let word = VocabularyDraftAnalysis(term: "Kryten", replacement: "", regex: false, analyze: { _ in VocabularyAnalysis(action: .addWord) })
+        #expect(word.replacementSummary(in: .global) == nil)
+    }
+
+    @Test func theScopeIsSaidPrecisely() {
+        #expect(CorrectionDestination.global.scopeLine == "Saved on this Mac. Applies in modes that include Global vocabulary.")
+        #expect(CorrectionDestination.mode(id: "email", name: "Email").scopeLine == "Saved on this Mac. Applies only in Email.")
+    }
+
+    @Test func aNameAlreadyAddedLeadsToTeachingTheSelectedSpelling() {
+        let offer = VocabularyDraftAnalysis.teachableCorrection(
+            selected: " Crayton ", term: "Kryten", action: .noChange(.wordAlreadyListed))
+        #expect(offer?.heard == "Crayton")
+        #expect(offer?.word == "Kryten")
+        #expect(VocabularyDraftAnalysis.teachableCorrection(
+            selected: "Kryten", term: "Kryten", action: .noChange(.wordAlreadyListed)) == nil)
+        #expect(VocabularyDraftAnalysis.isAlreadyAdded(.noChange(.wordCoveredByGlobal)))
+        #expect(!VocabularyDraftAnalysis.isAlreadyAdded(.noChange(.replacementAlreadyListed)))
+    }
+
+    @Test func aScopeFindsTheRuleAnAddWouldUpdate() {
+        let scope = VocabularyScope(
+            globalRules: [.init(heard: "slash resume", replace: "/resume<CR>", regex: true, wholeDictation: true)])
+        #expect(scope.ownRule(heard: "slash resume", regex: true)?.wholeDictation == true)
+        #expect(scope.ownRule(heard: "slash resume", regex: false) == nil)
+        let mode = VocabularyScope(globalRules: [], local: .init(rules: [.init(heard: "Teh", replace: "the", regex: false)]))
+        #expect(mode.ownRule(heard: "teh", regex: false)?.replace == "the")
     }
 }

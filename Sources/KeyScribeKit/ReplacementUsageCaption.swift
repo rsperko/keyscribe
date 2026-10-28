@@ -15,11 +15,35 @@ public enum ReplacementUsageCaption {
             else { return "No uses recorded yet" }
             return "No uses recorded since \(began)"
         }
-        let uses = entry.count == 1 ? "Used once" : "Used \(entry.count) times"
+        let uses = "Used in \(dictations(entry.count))"
         guard let lastUsed = entry.lastUsed, let last = relative(lastUsed, today: today, locale: locale) else {
             return uses
         }
         return "\(uses) · last used \(last)"
+    }
+
+    // Problems the rule caused as it is now. Recorded when the dictations happened, so it describes what took
+    // place then, not what today's rules would do to them.
+    public static func health(for entry: ReplacementUsage.Entry?, rule: ReplacementsSet.Rule) -> [String] {
+        let current = ReplacementUsage.fingerprint(
+            heard: rule.heard, replace: rule.replace, regex: rule.regex, wholeDictation: rule.wholeDictation)
+        guard let health = entry?.health, health.fingerprint == current else { return [] }
+        var lines: [String] = []
+        if health.insideWord > 0 {
+            lines.append("changed text inside other words in \(dictations(health.insideWord))")
+        }
+        if health.returnOmitted > 0 {
+            lines.append("did not press Return in \(dictations(health.returnOmitted)), because it matched mid-sentence")
+        }
+        guard !lines.isEmpty else { return [] }
+        if health.editedOn != nil {
+            return ["Since you edited it: " + lines.joined(separator: "; ")]
+        }
+        return lines.map { $0.prefix(1).uppercased() + $0.dropFirst() }
+    }
+
+    private static func dictations(_ count: Int) -> String {
+        count == 1 ? "1 dictation" : "\(count) dictations"
     }
 
     private static func relative(_ day: String, today: String, locale: Locale) -> String? {

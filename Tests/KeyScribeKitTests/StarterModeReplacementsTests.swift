@@ -72,11 +72,11 @@ struct StarterModeReplacementsTests {
         #expect(ctx.bareReplacement?.text == #"¯\_(ツ)_/¯"#)
     }
 
-    @Test func emailMySignOffAppendsTheSignatureStub() {
+    @Test func emailMySignOffAppendsAClosingWithNoPlaceholderName() {
         let email = rules("email")
         #expect(run(email, on: "let me know if thursday works. my sign off")
-            == "let me know if thursday works.\n\nBest,\nYour Name")
-        #expect(run(email, on: "talk soon, my sign-off") == "talk soon\n\nBest,\nYour Name")
+            == "let me know if thursday works.\n\nBest,")
+        #expect(run(email, on: "talk soon, my sign-off") == "talk soon\n\nBest,")
     }
 
     @Test func markdownPromptDelegatesSpokenMarkersToTheSeededRules() {

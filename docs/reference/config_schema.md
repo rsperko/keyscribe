@@ -359,7 +359,7 @@ like the live-edit commands) and paired spans say **"begin …" / "end …"** (l
 | `markdown` | "begin/end code block" (or "… code fence") | `\n```\n` | a symmetric block marker eats both sides so fences land on their own lines |
 | `code` | "insert todo" | `\n// TODO: ` | `to[- ]?do` alternation for STT's "todo" / "to do" / "to-do" renderings |
 | `message` | "shrug emoji" | `¯\_(ツ)_/¯` | a literal rule inserts its output verbatim; spoken alone it is a whole-utterance replacement and skips the rewrite |
-| `email` | "my sign off" | `\n\nBest,\nYour Name` | a personalizable stub — say it once, then edit the rule into your own signature |
+| `email` | "my sign off" | `\n\nBest,` | a closing with no name — edit the rule to add your own signature |
 
 There is deliberately **no bare "begin/end code"** inline pair — "front end code" is everyday dev
 prose and would false-fire; inline code stays a judgment call in the Markdown prompt. The prompts
@@ -741,7 +741,7 @@ link, or tab, and a *script* one that runs a program or shortcut.
   apart from the seeded one.
 - **A repeatable mishearing** can be repaired in **Settings ▸ Vocabulary ▸ Voice Commands** with a
   literal replacement: **Word or heard phrase** `switch to male`, **Use instead** `switch to Mail`,
-  with **Match heard phrase as a regular expression** off under **Pattern matching**.
+  with **Match heard phrase as a regular expression** off under **Advanced**.
   A full-command rule avoids changing the common word `male` elsewhere, including in words passed to
   scripts and shortcuts. Alternatively, the Mail place above accepts `male` and `email` as spoken names, so both
   `switch to male` and `open email` reach Mail without rewriting the transcript. Keep these fixes in the
@@ -965,6 +965,26 @@ How a rule behaves once it matches:
   rule is "one replacement owned the whole thing," so it never fires for a fuzzy-dictionary
   correction — only an explicit replacement that consumed the entire utterance.
 
+- **`whole_dictation = true` makes a rule a spoken command only.** The rule then acts only when it owns
+  the whole utterance, as above, and leaves the same words in an ordinary sentence untouched. Without
+  it (the default, and every rule written before the key existed), a rule acts anywhere it matches.
+  Settings keeps the choice under **Advanced** (**Anywhere in a sentence** / **Only when said alone**), and a new rule whose replacement ends in `<CR>` starts as the latter:
+
+  ```toml
+  [[rules]]
+  heard = 'slash resume'
+  replace = '/resume<CR>'
+  regex = true
+  whole_dictation = true    # "send slash resume to Sam" is left as said
+  ```
+
+- **A regex rule matches inside words unless the pattern says otherwise.** `p[iy]e?` also changes
+  "copy" and "pieces". The Settings editor checks a rule against a sample sentence and your recent
+  History, flags matches inside other words, and offers **Match whole words**, which rewrites the
+  pattern so neither end of a match can split a word. It writes the change into the pattern itself,
+  so a hand-edited rule can use the same form:
+  `(?:(?<!\w)|(?!\w))(?:p[iy]e?)(?:(?!\w)|(?<!\w))`.
+
 - **A regex replacement can press Return with a terminal `<CR>`.** Appending `<CR>` to the *end* of a
   **regex** replacement template requests a physical **Return** key press after the whole-utterance
   insert — for a command like `slash resume` → `/resume` that then runs, sends, or activates a default
@@ -980,7 +1000,8 @@ How a rule behaves once it matches:
   - `<CR>` is stripped from the inserted text (with any whitespace right before it) — it never appears
     as literal text, and never reaches the AI rewrite. Capture expansion still works: `'/$1<CR>'`.
   - It is honored **only** when the rule owns the whole utterance (the bare path above). In the middle
-    of a longer sentence the rule does its ordinary text replacement and presses nothing.
+    of a longer sentence the rule does its ordinary text replacement and presses nothing, unless
+    `whole_dictation = true` keeps it out of sentences altogether.
   - It is recognized **only** in a regex rule and **only** at the very end. `<CR>` in a *literal* rule
     is inserted verbatim (Settings flags such a rule); a `<CR>` anywhere but the end of a regex template is invalid and the rule is
     ignored. Write `\<CR>` to emit the literal text `<CR>` in a regex replacement.

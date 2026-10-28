@@ -7,12 +7,43 @@ public struct ReplacementUsage: Codable, Equatable, Sendable {
         public var count: Int
         public var lastUsed: String?
         public var since: String?
+        public var health: Health?
 
-        public init(count: Int, lastUsed: String?, since: String?) {
+        public init(count: Int, lastUsed: String?, since: String?, health: Health? = nil) {
             self.count = count
             self.lastUsed = lastUsed
             self.since = since
+            self.health = health
         }
+    }
+
+    // Dictations in which the rule did something the user probably did not mean, counted for one version of
+    // the rule only: a repair changes the fingerprint and starts the count over, so an old problem never
+    // sticks to the fixed rule.
+    public struct Health: Codable, Equatable, Sendable {
+        public var fingerprint: String
+        public var insideWord: Int
+        public var returnOmitted: Int
+        public var editedOn: String?
+
+        public init(fingerprint: String, insideWord: Int = 0, returnOmitted: Int = 0, editedOn: String? = nil) {
+            self.fingerprint = fingerprint
+            self.insideWord = insideWord
+            self.returnOmitted = returnOmitted
+            self.editedOn = editedOn
+        }
+    }
+
+    public static func fingerprint(heard: String, replace: String, regex: Bool, wholeDictation: Bool) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in "\(heard)\u{0}\(replace)\u{0}\(regex)\u{0}\(wholeDictation)".utf8 {
+            hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01b3
+        }
+        return String(hash, radix: 16)
+    }
+
+    public static func fingerprint(of rule: ReplacementRule) -> String {
+        fingerprint(heard: rule.heard, replace: rule.replace, regex: rule.isRegex, wholeDictation: rule.wholeDictation)
     }
 
     public private(set) var rules: [String: Entry]
@@ -74,6 +105,40 @@ public struct ReplacementUsage: Codable, Equatable, Sendable {
             else { continue }
             entry.count += 1
             entry.lastUsed = day
+            next.rules[key] = entry
+        }
+        return next
+    }
+
+    // A use is a dictation the rule actually affected; a match that left the text and the behaviour as they
+    // were is not one. Problems are recorded either way: a dropped Return can leave every word the same.
+    public func recording(effects: [ReplacementEffect], on day: String) -> ReplacementUsage {
+        var merged: [String: ReplacementEffect] = [:]
+        var order: [String] = []
+        for effect in effects {
+            guard let key = Self.key(for: effect.rule) else { continue }
+            if var existing = merged[key] {
+                existing.changedText = existing.changedText || effect.changedText
+                existing.ownsWholeDictation = existing.ownsWholeDictation || effect.ownsWholeDictation
+                existing.insideWord = existing.insideWord || effect.insideWord
+                existing.returnOmitted = existing.returnOmitted || effect.returnOmitted
+                merged[key] = existing
+            } else {
+                merged[key] = effect
+                order.append(key)
+            }
+        }
+        var next = recording(order.compactMap { merged[$0] }.filter(\.isMeaningful).map(\.rule), on: day)
+        for key in order {
+            guard let effect = merged[key], effect.isMeaningful || effect.insideWord || effect.returnOmitted else { continue }
+            guard var entry = next.rules[key] ?? (trackingSince == nil ? Entry(count: 0, lastUsed: nil, since: nil) : nil)
+            else { continue }
+            let fingerprint = Self.fingerprint(of: effect.rule)
+            if entry.health?.fingerprint != fingerprint {
+                entry.health = Health(fingerprint: fingerprint, editedOn: entry.health == nil ? nil : day)
+            }
+            if effect.insideWord { entry.health?.insideWord += 1 }
+            if effect.returnOmitted { entry.health?.returnOmitted += 1 }
             next.rules[key] = entry
         }
         return next
@@ -149,6 +214,22 @@ public final class ReplacementUsageStore: @unchecked Sendable {
             return rule.from(.mode(id))
         }
         mutate { $0.recording(current, on: today) }
+    }
+
+    public func record(
+        effects: [ReplacementEffect], capturedAt epoch: Int? = nil, today: String = HistoryStore.todayString()
+    ) {
+        guard effects.contains(where: { $0.rule.origin != nil && ($0.isMeaningful || $0.insideWord || $0.returnOmitted) })
+        else { return }
+        let later = renameLock.withLock { renames.dropFirst(epoch ?? renames.count) }
+        let current = effects.map { effect in
+            guard case .mode(var id)? = effect.rule.origin else { return effect }
+            for rename in later where rename.old == id { id = rename.new }
+            var moved = effect
+            moved.rule = effect.rule.from(.mode(id))
+            return moved
+        }
+        mutate { $0.recording(effects: current, on: today) }
     }
 
     public func reconcile(keys: Set<String>, today: String = HistoryStore.todayString()) {

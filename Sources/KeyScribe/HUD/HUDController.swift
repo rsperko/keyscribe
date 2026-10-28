@@ -554,6 +554,18 @@ private struct HUDView: View {
             Image(systemName: "arrow.uturn.backward.circle").foregroundStyle(.orange)
         case .limit:
             Image(systemName: "timer").foregroundStyle(.orange)
+        case .skipped:
+            if case .rewriteSkipped(let outcome, _, _) = model.shown, case .copied = outcome {
+                Image(systemName: outcomeSymbol(outcome))
+                    .font(.system(size: outcomeIconSize(outcome), weight: .semibold))
+                    .foregroundStyle(outcomeStyle(outcome))
+                    .frame(width: 30, height: 30)
+            } else {
+                Image(systemName: "forward.end.circle")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30)
+            }
         }
     }
 

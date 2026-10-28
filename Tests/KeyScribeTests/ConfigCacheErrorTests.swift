@@ -104,6 +104,34 @@ struct ConfigCacheErrorTests {
         #expect(cache.fileWarnings.isEmpty)
     }
 
+    @Test func aHandWrittenRuleThatCanNeverRunIsReportedWithoutBlockingTheFile() throws {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try """
+        schema_version = 1
+        [[rules]]
+        heard = 'p('
+        replace = 'pi'
+        regex = true
+        [[rules]]
+        heard = 'slash resume'
+        replace = '/resume<CR> now'
+        regex = true
+        [[rules]]
+        heard = 'teh'
+        replace = 'the'
+        """.write(to: dir.appendingPathComponent(ReplacementsStore.fileName), atomically: true, encoding: .utf8)
+
+        let cache = ConfigCache(supportDir: dir)
+        #expect(cache.configFileError == nil)
+        let issue = try #require(cache.fileWarnings.first)
+        #expect(cache.fileWarnings.count == 1)
+        #expect(!issue.isError)
+        #expect(issue.kind == .inactiveRules)
+        #expect(issue.oneLine == "replacements.toml — “p(” (pattern doesn’t compile), “slash resume” (<CR> not at the end) never run")
+        #expect(cache.replacements.rules.count == 3)
+    }
+
     @Test func malformedModeFileSurfacesAsFileError() throws {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

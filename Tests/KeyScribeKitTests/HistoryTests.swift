@@ -193,6 +193,18 @@ struct HistoryEntryCodecTests {
         #expect(try HistoryEntry(jsonLine: line) == entry)
     }
 
+    @Test func aSkippedRewriteRoundTripsWithHowLongItRan() throws {
+        var entry = HistoryEntry(
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            modeName: "Cleanup", heard: "hello", result: "hello",
+            outcome: .localFallback, cloudInvolved: true, redaction: false, contextCategories: [])
+        entry.rewriteSkippedMs = 17_460
+        let line = try entry.jsonLine()
+        #expect(line.contains("\"rewrite_skipped_ms\":17460"))
+        #expect(try HistoryEntry(jsonLine: line) == entry)
+        #expect(!(try sampleEntry().jsonLine()).contains("rewrite_skipped_ms"))
+    }
+
     @Test func anOrdinaryEntryOmitsTheLimitMarker() throws {
         let line = try sampleEntry().jsonLine()
         #expect(!line.contains("stopped_at_limit"))

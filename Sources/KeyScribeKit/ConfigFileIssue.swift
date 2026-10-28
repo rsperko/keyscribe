@@ -2,9 +2,10 @@ import Foundation
 
 public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
     public enum Recovery: Equatable, Sendable { case previousVersion, ignored, defaults }
-    public enum Kind: Equatable, Sendable { case unreadable(Recovery), unusedKeys }
+    public enum Kind: Equatable, Sendable { case unreadable(Recovery), unusedKeys, inactiveRules }
     public enum Cause: Equatable, Sendable {
         case syntax(line: Int, column: Int), unreadableFile, newerSchema, missingSchema, invalidValue, unusedKeys
+        case inactiveRules
     }
 
     public let fileName: String
@@ -13,7 +14,7 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
     public let detail: String
     public let cause: Cause
 
-    public var id: String { "\(relativePath)|\(isError)" }
+    public var id: String { "\(relativePath)|\(isError)|\(kind == .inactiveRules)" }
     public var isError: Bool { if case .unreadable = kind { true } else { false } }
 
     public static func unreadable(
@@ -39,8 +40,17 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
             detail: keys.map(\.description).joined(separator: ", "), cause: .unusedKeys)
     }
 
+    public static func inactiveRules(
+        _ fileName: String, relativePath: String? = nil, _ rules: [(heard: String, reason: ReplacementsStage.InactiveReason)]
+    ) -> ConfigFileIssue {
+        ConfigFileIssue(
+            fileName: fileName, relativePath: relativePath ?? fileName, kind: .inactiveRules,
+            detail: rules.map { "“\($0.heard)” (\($0.reason.phrase))" }.joined(separator: ", "), cause: .inactiveRules)
+    }
+
     public var title: String {
-        isError ? "Couldn’t read \(relativePath)" : "\(relativePath) has a key nothing reads"
+        if kind == .inactiveRules { return "\(relativePath) has a replacement that never runs" }
+        return isError ? "Couldn’t read \(relativePath)" : "\(relativePath) has a key nothing reads"
     }
 
     public var technicalDetails: String {
@@ -61,6 +71,7 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
         case .unreadableFile: "It couldn’t be opened as text. Check that you can read it and that it’s saved as UTF-8."
         case .invalidValue: "Something in it isn’t valid for this app."
         case .unusedKeys: "It has a key this app doesn’t read, usually a typo, so that line has no effect."
+        case .inactiveRules: "A replacement rule in it can’t run as written, so it never changes anything."
         }
     }
 
@@ -72,6 +83,7 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
         case .unreadable(.defaults): "Default settings are in use until it’s fixed."
         case .unreadable(.ignored): "It’s ignored until it’s fixed."
         case .unusedKeys: "It has no effect, and changes to this file aren’t saved from the app until that line is fixed or removed."
+        case .inactiveRules: "The rest of the file works normally. Fix or remove the rule to clear this."
         }
         if kind == .unusedKeys, relativePath == SettingsStore.fileName {
             return state + " App-wide settings you change meanwhile are temporary."
@@ -92,6 +104,8 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
             return "Couldn’t read \(fileName) — \(message) — \(state)"
         case .unusedKeys:
             return "\(fileName) — \(detail) has no effect"
+        case .inactiveRules:
+            return "\(fileName) — \(detail) never run"
         }
     }
 

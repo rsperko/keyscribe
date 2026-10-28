@@ -927,6 +927,7 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     private var generations = 0
     private let roots: [URL]
     private let handlers: @Sendable () -> [URL]
+    private let windowScan: (@MainActor () async -> VoiceCommandCatalog.WindowScan)?
     private let now: () -> ContinuousClock.Instant
     private static let installedTTL: Duration = .seconds(60)
     private static let scripts = DeadlineQueue(
@@ -941,10 +942,12 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     init(
         roots: [URL] = LiveVoiceCommandSystem.applicationRoots,
         handlers: @escaping @Sendable () -> [URL] = LiveVoiceCommandSystem.httpsHandlerURLs,
+        windowScan: (@MainActor () async -> VoiceCommandCatalog.WindowScan)? = nil,
         now: @escaping () -> ContinuousClock.Instant = { .now }
     ) {
         self.roots = roots
         self.handlers = handlers
+        self.windowScan = windowScan
         self.now = now
     }
 
@@ -1265,6 +1268,7 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     }
 
     func windows() async -> VoiceCommandCatalog.WindowScan {
+        if let windowScan { return await windowScan() }
         let processes = AppWindows.processes(excluding: ProcessInfo.processInfo.processIdentifier, named: runningApps())
         let trusted = AXIsProcessTrusted()
         let started = DispatchTime.now()

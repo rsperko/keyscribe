@@ -120,14 +120,17 @@ final class ConfigRepository {
         }
     }
 
-    func addReplacement(heard: String, replace: String, regex: Bool = false, to scope: CorrectionDestination.Scope) -> AddResult {
+    func addReplacement(
+        heard: String, replace: String, regex: Bool = false, wholeDictation: Bool? = nil, to scope: CorrectionDestination.Scope
+    ) -> AddResult {
         addResult {
             switch scope {
-            case .global: try mutateReplacements { $0 = $0.adding(heard: heard, replace: replace, regex: regex) }
+            case .global:
+                try mutateReplacements { $0 = $0.adding(heard: heard, replace: replace, regex: regex, wholeDictation: wholeDictation) }
             case .mode(let id):
                 try mutateMode(id: id) { mode in
                     mode.replacements.rules = ReplacementsSet(rules: mode.replacements.rules)
-                        .adding(heard: heard, replace: replace, regex: regex).rules
+                        .adding(heard: heard, replace: replace, regex: regex, wholeDictation: wholeDictation).rules
                 }
             }
         }

@@ -368,6 +368,39 @@ struct ModeSeedReconcileTests {
         #expect(after.aiRewrite?.prompt == "my own message prompt")
     }
 
+    private func seedPlaceholderSignOffEmail(modes: URL, ledger ledgerDir: URL, edited: Bool) throws {
+        ModeStore.seedStarterFilesAndLedgerForTesting(in: modes, ledgerDir: ledgerDir)
+        var old = try #require(ModeStore.starterModes().first { $0.id == "email" })
+        old.seedVersion = 3
+        let retired = ReplacementAuthoring.retiredSignOffRule
+        old.replacements.rules = [.init(heard: retired.heard, replace: retired.replace, regex: true)]
+        var ledger = try #require(ModeStore.loadLedger(in: ledgerDir))
+        ledger.upsert("email", version: 3, fingerprint: ModeStore.seedTemplateFingerprint(old))
+        ModeStore.saveLedger(ledger, in: ledgerDir)
+        if edited { old.aiRewrite?.prompt = "my own email prompt" }
+        try ModeStore.write(old, to: modes)
+    }
+
+    @Test func anUntouchedEmailModeLosesThePlaceholderSignOff() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        try seedPlaceholderSignOffEmail(modes: d.modes, ledger: d.ledger, edited: false)
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+        #expect(outcome.updated.contains("email"))
+        let email = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "email" })
+        #expect(email.replacements.rules.map(\.replace) == [#"\n\nBest,"#])
+    }
+
+    @Test func anEditedEmailModeKeepsItsSignOffForTheUserToFix() throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        try seedPlaceholderSignOffEmail(modes: d.modes, ledger: d.ledger, edited: true)
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+        #expect(!outcome.updated.contains("email"))
+        let rule = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == "email" }?.replacements.rules.first)
+        #expect(ReplacementAuthoring.placeholderAdvisory(heard: rule.heard, replace: rule.replace, regex: rule.regex) != nil)
+    }
+
     // Reconstructs an install seeded before replacement-example rules existed: same starters, no rules,
     // previous seed_version, ledger fingerprinted from that older template. One mode's connection/enabled
     // edit stands in for onboarding.
@@ -444,7 +477,7 @@ struct ModeSeedReconcileTests {
         let pinned: [String: (version: Int, fingerprint: String)] = [
             "polish": (5, "f69ef368dd964eed"),
             "message": (4, "4ed26688a8e2db27"),
-            "email": (3, "dcb65eb2acecbd9d"),
+            "email": (4, "1adad971c4148aae"),
             "edit-selection": (4, "8a301c3a95672266"),
             "ai-prompt": (5, "bce63766ad4c94fd"),
             "code": (4, "cf077d166866bfc"),

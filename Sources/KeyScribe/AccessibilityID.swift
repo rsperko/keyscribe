@@ -86,12 +86,43 @@ enum AccessibilityID {
             static let replacementEditorAdvanced = "settings.vocabulary.replacements.editor.advanced"
             static let replacementEditorStatus = "settings.vocabulary.replacements.editor.status"
             static let replacementEditorUpdate = "settings.vocabulary.replacements.editor.update"
+            static let replacementEditorCancel = "settings.vocabulary.replacements.editor.cancel"
+            static let replacementEditorExpand = "settings.vocabulary.replacements.editor.expand"
+            static let replacementEditorLarge = "settings.vocabulary.replacements.editor.large"
+            static let replacementEditorLargeDone = "settings.vocabulary.replacements.editor.largeDone"
             static func replacementEdit(_ index: Int) -> String { "settings.vocabulary.replacements.edit.\(index)" }
             static func replacementRemove(_ index: Int) -> String { "settings.vocabulary.replacements.remove.\(index)" }
             static let replacementDeleteConfirmConfirm = "settings.vocabulary.replacements.deleteConfirm.confirm"
             static let replacementDeleteConfirmCancel = "settings.vocabulary.replacements.deleteConfirm.cancel"
             static func findReplacementsForWord(_ word: String) -> String { "settings.vocabulary.dictionary.findReplacements.\(word)" }
             static let replacementsAdded = "settings.vocabulary.replacements.added"
+            static let checkRules = "settings.vocabulary.replacements.checkRules"
+            static let checkRulesResults = "settings.vocabulary.replacements.checkRules.results"
+            static let checkRulesEdit = "settings.vocabulary.replacements.checkRules.edit"
+            static let composerRule = RulePreviewIDs(owner: "settings.vocabulary.composer")
+            static let replacementEditorRule = RulePreviewIDs(owner: "settings.vocabulary.replacements.editor")
+        }
+
+        struct RulePreviewIDs {
+            let scope: String
+            let sample: String
+            let history: String
+            let wholeWords: String
+            let usePattern: String
+            let showAll: String
+            let matchAlone: String
+
+            init(owner: String) {
+                scope = "\(owner).scope"
+                sample = "\(owner).sample"
+                history = "\(owner).history"
+                wholeWords = "\(owner).wholeWords"
+                usePattern = "\(owner).usePattern"
+                showAll = "\(owner).showAll"
+                matchAlone = "\(owner).matchAlone"
+            }
+
+            var all: [String] { [scope, sample, history, wholeWords, usePattern, showAll, matchAlone] }
         }
 
         enum HistoryReplacements {
@@ -418,6 +449,7 @@ enum AccessibilityID {
             static let term = "history.dictionarySheet.term"
             static let status = "history.dictionarySheet.status"
             static let save = "history.dictionarySheet.save"
+            static let correct = "history.dictionarySheet.correct"
         }
     }
 
@@ -430,6 +462,11 @@ enum AccessibilityID {
         static let add = "correction.add"
         static let addAndReplace = "correction.addAndReplace"
         static let cancel = "correction.cancel"
+        static let advanced = "correction.advanced"
+        static let scope = "correction.scope"
+        static let teach = "correction.teach"
+        static let review = "correction.review"
+        static let done = "correction.done"
     }
 
     // The status menu (NSMenu/NSMenuItem/NSStatusBarButton) has no entries here: AppKit derives a menu
@@ -491,7 +528,11 @@ enum AccessibilityID {
         Settings.Vocabulary.replacementEditorHeard, Settings.Vocabulary.replacementEditorUseInstead,
         Settings.Vocabulary.replacementEditorRegex, Settings.Vocabulary.replacementEditorAdvanced,
         Settings.Vocabulary.replacementEditorStatus, Settings.Vocabulary.replacementEditorUpdate,
+        Settings.Vocabulary.replacementEditorCancel, Settings.Vocabulary.replacementEditorExpand,
+        Settings.Vocabulary.replacementEditorLarge, Settings.Vocabulary.replacementEditorLargeDone,
         Settings.Vocabulary.replacementDeleteConfirmConfirm, Settings.Vocabulary.replacementDeleteConfirmCancel,
+        Settings.Vocabulary.checkRules, Settings.Vocabulary.checkRulesResults, Settings.Vocabulary.checkRulesEdit,
+    ] + Settings.Vocabulary.composerRule.all + Settings.Vocabulary.replacementEditorRule.all + [
         Settings.AI.list, Settings.AI.add, Settings.AI.chooserCancel, Settings.AI.deleteConfirmConfirm,
         Settings.AI.deleteConfirmCancel, Settings.AI.connectOfferConnect, Settings.AI.connectOfferDismiss,
         Settings.AI.Editor.name, Settings.AI.Editor.provider, Settings.AI.Editor.baseURL,
@@ -544,7 +585,9 @@ enum AccessibilityID {
         History.retentionConfirm, History.retentionCancel,
         History.ReplacementSheet.source, History.ReplacementSheet.replace, History.ReplacementSheet.save,
         History.DictionarySheet.term, History.DictionarySheet.status, History.DictionarySheet.save,
+        History.DictionarySheet.correct,
         Correction.term, Correction.useInstead, Correction.regexToggle, Correction.destination, Correction.status,
-        Correction.add, Correction.addAndReplace, Correction.cancel,
+        Correction.add, Correction.addAndReplace, Correction.cancel, Correction.advanced, Correction.scope,
+        Correction.teach, Correction.review, Correction.done,
     ]
 }

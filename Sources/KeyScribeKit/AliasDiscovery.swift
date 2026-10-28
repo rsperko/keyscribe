@@ -61,11 +61,13 @@ public enum AliasDiscovery {
         let norm: String
         let latin: [UInt8]?
         let sound: [UInt8]
+        let key: String
 
         init(_ norm: String) {
             self.norm = norm
             latin = FuzzyCorrector.latinized(norm).map { Array($0.utf8) }
             sound = latin.map(AliasDiscovery.phoneticSpelling) ?? []
+            key = FuzzyCorrector.phoneticKey(norm)
         }
     }
 
@@ -79,7 +81,11 @@ public enum AliasDiscovery {
         }
         let a = phoneticSpelling(heardLatin), b = target.sound
         let sound = 1 - weightedDistance(a, b) / Double(max(a.count, b.count, 1))
-        return 0.5 * similarity(heardLatin, targetLatin) + 0.5 * sound
+        let combined = 0.5 * similarity(heardLatin, targetLatin) + 0.5 * sound
+        // The same consonant skeleton is evidence the spelling alone undersells: "Croydon" is four edits from
+        // "Kryten" yet sounds like it. Such a candidate is judged on sound.
+        guard !target.key.isEmpty, FuzzyCorrector.phoneticKey(heard) == target.key else { return combined }
+        return max(combined, sound)
     }
 
     private struct Token {

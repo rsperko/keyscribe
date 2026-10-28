@@ -70,6 +70,7 @@ enum HUDState: Equatable {
     case transcribing(mode: String, status: String? = nil)
     case rewriting(connection: String, mode: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
     case localFallback(outcome: DictationOutcome, mode: String, reason: String? = nil, connectionId: String? = nil)
+    case rewriteSkipped(outcome: DictationOutcome, mode: String, seconds: Double)
     case complete(outcome: DictationOutcome, mode: String, notice: String? = nil)
     case commandDone(summary: String, detail: String = HUDState.commandDetail)
     case stoppedAtLimit(outcome: DictationOutcome, limit: String, rewriteSkipped: Bool)
@@ -88,6 +89,7 @@ enum HUDIndicator: Equatable {
     case complete
     case warning
     case limit
+    case skipped
     case error
     case advisory
 }
@@ -107,6 +109,10 @@ extension HUDState {
             return .processing
         case .complete, .commandDone:
             return .complete
+        case .rewriteSkipped(.failed, _, _):
+            return .error
+        case .rewriteSkipped:
+            return .skipped
         case .localFallback:
             return .warning
         case .stoppedAtLimit:
@@ -138,7 +144,9 @@ extension HUDState {
             return mode
         case .rewriting(_, let mode, _, _, _):
             return mode
-        case .localFallback(let outcome, _, _, _):
+        case .rewriteSkipped(.failed, _, _):
+            return Self.completePrimary(.failed)
+        case .localFallback(let outcome, _, _, _), .rewriteSkipped(let outcome, _, _):
             if case .copied = outcome { return "Copied without rewriting" }
             return "Inserted without rewriting"
         case .complete(let outcome, _, _):
@@ -178,6 +186,10 @@ extension HUDState {
             return "Rewriting with \(connection)"
         case .localFallback(.copied(let copied), _, let reason?, _):
             return Self.joined(Self.copiedSecondary(copied), Self.rewriteFailureSummary(reason))
+        case .rewriteSkipped(.copied(let copied), _, let seconds):
+            return Self.joined(Self.copiedSecondary(copied), Self.skippedLine(seconds))
+        case .rewriteSkipped(_, _, let seconds):
+            return Self.skippedLine(seconds)
         case .complete(.copied(let copied), _, let notice?):
             return Self.joined(Self.copiedSecondary(copied), Self.noticeLine(notice))
         case .complete(.copied(let reason), _, _), .localFallback(.copied(let reason), _, _, _),
@@ -229,7 +241,7 @@ extension HUDState {
     var offersPasteLast: Bool {
         switch self {
         case .complete(.copied(let reason), _, _), .localFallback(.copied(let reason), _, _, _),
-             .stoppedAtLimit(.copied(let reason), _, _):
+             .stoppedAtLimit(.copied(let reason), _, _), .rewriteSkipped(.copied(let reason), _, _):
             // A synthetic ⌘V is itself blocked without Accessibility, so don't offer a button that can't
             // work — the text is already on the clipboard for a manual paste.
             return reason != .accessibilityDenied
@@ -285,7 +297,7 @@ extension HUDState {
 
     private var hasLongSecondary: Bool {
         switch self {
-        case .localFallback(_, _, _?, _), .complete(_, _, _?): true
+        case .localFallback(_, _, _?, _), .complete(_, _, _?), .rewriteSkipped: true
         default: false
         }
     }
@@ -307,7 +319,7 @@ extension HUDState {
             return status ?? "Transcribing"
         case .rewriting(let connection, _, _, _, _):
             return "Rewriting with \(connection)"
-        case .localFallback, .complete, .commandDone, .stoppedAtLimit, .error, .advisory:
+        case .localFallback, .rewriteSkipped, .complete, .commandDone, .stoppedAtLimit, .error, .advisory:
             return [primaryText, secondaryText].compactMap { $0 }.joined(separator: ". ")
         case .choice(let prompt, _, _):
             return prompt.announcement
@@ -350,6 +362,10 @@ extension HUDState {
 
     private static func noticeLine(_ notice: String) -> String {
         ReasoningOutcome.noticeTitle + ". " + notice
+    }
+
+    static func skippedLine(_ seconds: Double) -> String {
+        "You skipped the rewrite after \(String(format: "%.1f", seconds)) seconds."
     }
 
     private static func rewriteFailureSummary(_ reason: String?) -> String {

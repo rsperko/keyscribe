@@ -24,7 +24,7 @@ struct ReplacementUsageSettingsTests {
         for _ in 0..<50 where model.usageCaption(for: rule, in: .global) == "No uses recorded yet" {
             try await Task.sleep(for: .milliseconds(10))
         }
-        #expect(model.usageCaption(for: rule, in: .global) == "Used once · last used today")
+        #expect(model.usageCaption(for: rule, in: .global) == "Used in 1 dictation · last used today")
         #expect(model.usageCaption(for: rule, in: .mode("code")) == nil)
     }
 

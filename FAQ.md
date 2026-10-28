@@ -116,8 +116,26 @@ speech model: some models can also steer recognition toward your terms as they l
 Speech Models** says which — and on every model KeyScribe fixes near-misses right after
 transcription. The fix sticks for next time.
 
+A near-miss fix only reaches spellings a letter or two away. A name your speech model hears as a
+different word (Kryten as "Croydon") needs a replacement. When you add a word and your History already
+holds likely mishearings of it, KeyScribe offers them straight away, unchecked, each with the sentence
+it came from: tick the ones that really were your word.
+
 If a word comes out correctly spelled but mis-capitalized or punctuated (say `pi` → `Pi.`), see
 [Tips & Tricks](docs/tips.md) for how to pin the exact output.
+
+### How do I check that a replacement does what I meant?
+
+The replacement editor shows it before you save. Type into **Try a sentence**, and the editor replays
+the rule over your recent dictations; expand the line under it to see the ones it would change. It warns
+when a rule changes text inside other words ("copy" → "copi") and offers **Match Whole Words…**. It
+also warns when a rule ends in `<CR>` but can act mid-sentence, where it presses nothing, and offers
+**Only Match When Said Alone**. A new rule ending in `<CR>` already matches only when said alone;
+**Advanced** lets you change where any rule acts. After saving, a rule's line in Vocabulary says when it changed text inside
+other words or dropped its Return, and **Check Rules Against History** replays every rule in a scope,
+including ones you edited by hand in the files. A hand-edited rule that cannot run at all is reported
+as a config problem. These checks show what KeyScribe does locally; an AI rewrite can still change the
+result afterwards.
 
 ### What does the dictionary do — and not do?
 

@@ -76,6 +76,8 @@ final class HistoryReplacementsModel: ObservableObject, Identifiable {
     let destination: ReplacementPreview.Destination
     let destinationName: String
     let historyEnabled: Bool
+    // Opened by adding the word itself, which is already saved: the sheet then only offers its mishearings.
+    var offeredAfterAdding = false
     private let dependencies: Dependencies
     private let onSaved: (Int) -> Void
 
@@ -283,6 +285,19 @@ final class HistoryReplacementsModel: ObservableObject, Identifiable {
         handledCount = result.handled.count
         preview = nil
         needsSearch = false
+    }
+
+    // Right after a word is added, one mishearing is offered as a single yes-or-no question.
+    var singleSuggestion: Phrase? {
+        guard offeredAfterAdding, phrases.count == 1, let only = phrases.first, only.discovered else { return nil }
+        return only
+    }
+
+    func confirmSingleSuggestion() async {
+        guard let suggestion = singleSuggestion else { return }
+        if !selected.contains(suggestion.id) { toggle(suggestion.id) }
+        await refresh()
+        await add()
     }
 
     func toggle(_ id: String) {

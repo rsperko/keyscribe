@@ -134,6 +134,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
     // capturing so the chord can't fire an existing shortcut.
     let recordingState = HotkeyRecordingState()
     private var historyReplacementsLauncher: HistoryReplacementsLauncher?
+    private let modesDir: URL
+    private var rulePreviewSource: ((ReplacementPreview.Destination) -> RulePreviewModel.Source)?
 
     init(
         settings: Settings, speechModels: SpeechModelsModel, repository: ConfigRepository,
@@ -157,6 +159,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
             onEraseAllData: onEraseAllData,
             voiceCommandNotices: VoiceCommandNotices(supportDir: repository.supportDir))
         self.speechModels = speechModels
+        modesDir = repository.modesDir
         dictionary = DictionarySettingsModel(repository: repository)
         replacements = ReplacementsSettingsModel(repository: repository)
         modes = ModesSettingsModel(repository: repository, voiceCommandsEnabled: settings.features.isEnabled(.voiceCommands))
@@ -187,6 +190,19 @@ final class SettingsController: NSObject, NSWindowDelegate {
                     }),
                 onSaved: onSaved)
         }
+        rulePreviewSource = { [weak self] scope in
+            let loadHistory: @Sendable () throws -> [HistorySnapshot.Item] = { try historyStore.snapshot().items }
+            let (modesDir, supportDir) = (repository.modesDir, repository.supportDir)
+            let config: @Sendable () -> RuleEffectPreview.Config = {
+                RuleEffectPreview.Config(
+                    modes: ModeStore.loadAll(in: modesDir),
+                    dictionary: DictionaryStore.loadOrDefault(supportDir: supportDir),
+                    replacements: ReplacementsStore.loadOrDefault(supportDir: supportDir))
+            }
+            let historyEnabled = self?.model.historyEnabled ?? true
+            return RulePreviewModel.Source(scope: scope, config: config, history: historyEnabled ? loadHistory : nil)
+        }
+        history.mishearingsFinder = { [weak self] word, scope, onSaved in self?.mishearingsFinder(word, scope, onSaved) }
         history.openSettings = { [weak self] destination in self?.navigation.destination = destination }
         history.voiceCommandsEnabled = { repository.voiceCommandsEnabled }
         modes.voiceCommands.previousApp = { [weak self] in self?.historyPreviousApp }
@@ -197,6 +213,24 @@ final class SettingsController: NSObject, NSWindowDelegate {
             self.modes.createWithConnection(connectionId: connectionId)
             self.navigation.destination = .modes
         }
+    }
+
+    // The History finder for a word in a correction scope; nil when there is no saved History to search.
+    func mishearingsFinder(
+        _ word: String, _ scope: CorrectionDestination.Scope, _ onSaved: @escaping (Int) -> Void
+    ) -> HistoryReplacementsModel? {
+        guard let launcher = historyReplacementsLauncher else { return nil }
+        let destination: ReplacementPreview.Destination
+        let name: String
+        switch scope {
+        case .global:
+            destination = .global
+            name = "Global"
+        case .mode(let id):
+            destination = .mode(id)
+            name = ModeStore.loadAll(in: modesDir).first { $0.id == id }?.name ?? id
+        }
+        return launcher.make(word, destination, name, onSaved)
     }
 
     func update(settings: Settings) {
@@ -250,7 +284,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
             problems: problems, navigation: navigation, recordingState: recordingState,
             accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch,
             onHistoryPaneChange: { [weak self] active in self?.handleHistoryPaneChange(active: active) },
-            historyReplacements: historyReplacementsLauncher)
+            historyReplacements: historyReplacementsLauncher,
+            rulePreviewSource: rulePreviewSource)
         let hosting = NSHostingController(rootView: root)
         let window = NSWindow(contentViewController: hosting)
         window.title = "\(Branding.appName) Settings"
@@ -393,6 +428,7 @@ struct SettingsRootView: View {
     var onRelaunch: () -> Void = {}
     var onHistoryPaneChange: (Bool) -> Void = { _ in }
     var historyReplacements: HistoryReplacementsLauncher? = nil
+    var rulePreviewSource: ((ReplacementPreview.Destination) -> RulePreviewModel.Source)? = nil
     // The sidebar selection is mirrored through local @State so SwiftUI's selection write never mutates the
     // navigation ObservableObject during a view update (which logs "Publishing changes from within view
     // updates" and re-enters the backing NSTableView). navigation.destination is synced in `.onChange`,
@@ -452,7 +488,8 @@ struct SettingsRootView: View {
                 VocabularySettingsView(
                     dictionary: dictionary, replacements: replacements, modes: modes,
                     navigationSelection: $navigation.vocabularyScope,
-                    historyReplacements: history.hasStoredHistory ? historyReplacements : nil)
+                    historyReplacements: history.hasStoredHistory ? historyReplacements : nil,
+                    rulePreviewSource: rulePreviewSource)
                     .task {
                         if historyReplacements != nil { await history.refreshHistoryAvailability() }
                     }

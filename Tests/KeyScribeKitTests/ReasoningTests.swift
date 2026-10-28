@@ -321,9 +321,9 @@ struct ReasoningTests {
     }
 
     @Test func pickerCaptionSaysWhenSupportIsUnverifiedOrMandatory() {
-        #expect(ReasoningChoices.caption(support: nil).contains("doesn't say"))
-        #expect(ReasoningChoices.caption(support: ModelReasoningSupport(maxOutputTokens: 1)).contains("doesn't say"))
-        #expect(ReasoningChoices.caption(support: ModelReasoningSupport(levels: ["low"], canTurnOff: false)).contains("always reasons"))
+        #expect(ReasoningChoices.caption(support: nil).contains("doesn't list supported levels"))
+        #expect(ReasoningChoices.caption(support: ModelReasoningSupport(maxOutputTokens: 1)).contains("doesn't list supported levels"))
+        #expect(ReasoningChoices.caption(support: ModelReasoningSupport(levels: ["low"], canTurnOff: false)).contains("always uses some reasoning"))
         #expect(ReasoningChoices.options(support: ModelReasoningSupport(levels: ["low"]), current: .level("max"))
             == [.lowestAvailable, .level("low"), .level("max"), .modelDefault])
     }

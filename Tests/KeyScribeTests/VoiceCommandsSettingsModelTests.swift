@@ -8,7 +8,8 @@ struct VoiceCommandsSettingsModelTests {
     // No installed apps or browsers: a preview that falls through to browser tabs would otherwise ask macOS for
     // Automation consent on behalf of the test runner and wait on a prompt nobody answers.
     private func isolatedModel(_ repository: ConfigRepository) -> VoiceCommandsSettingsModel {
-        VoiceCommandsSettingsModel(repository: repository, system: LiveVoiceCommandSystem(roots: [], handlers: { [] }))
+        VoiceCommandsSettingsModel(
+            repository: repository, system: LiveVoiceCommandSystem(roots: [], handlers: { [] }, windowScan: { .complete([]) }))
     }
 
     private func make() -> (VoiceCommandsSettingsModel, URL) {

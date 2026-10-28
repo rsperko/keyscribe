@@ -319,13 +319,82 @@ struct ReplacementUsageCaptionTests {
     }
 
     @Test func aUsedRuleSaysHowOftenAndWhenLast() {
-        #expect(caption(.init(count: 1, lastUsed: "2026-10-21", since: nil)) == "Used once · last used today")
-        #expect(caption(.init(count: 3, lastUsed: "2026-10-20", since: "2026-10-01")) == "Used 3 times · last used yesterday")
-        #expect(caption(.init(count: 14, lastUsed: "2026-10-19", since: nil)) == "Used 14 times · last used Oct 19")
+        #expect(caption(.init(count: 1, lastUsed: "2026-10-21", since: nil)) == "Used in 1 dictation · last used today")
+        #expect(caption(.init(count: 3, lastUsed: "2026-10-20", since: "2026-10-01")) == "Used in 3 dictations · last used yesterday")
+        #expect(caption(.init(count: 14, lastUsed: "2026-10-19", since: nil)) == "Used in 14 dictations · last used Oct 19")
     }
 
     @Test func anUnreadableDateFallsBackToTheCount() {
-        #expect(caption(.init(count: 2, lastUsed: "garbage", since: "garbage")) == "Used 2 times")
+        #expect(caption(.init(count: 2, lastUsed: "garbage", since: "garbage")) == "Used in 2 dictations")
         #expect(caption(.init(count: 0, lastUsed: nil, since: "garbage")) == "No uses recorded since Aug 1")
+    }
+
+    // MARK: Health
+
+    private static let piRule = ReplacementRule(heard: "p[iy]e?", replace: "pi<CR>", isRegex: true, origin: .global)
+
+    private static func effect(
+        _ rule: ReplacementRule = piRule, changed: Bool = true, insideWord: Bool = false,
+        returnOmitted: Bool = false, owns: Bool = false
+    ) -> ReplacementEffect {
+        ReplacementEffect(rule: rule, changedText: changed, insideWord: insideWord, returnOmitted: returnOmitted, ownsWholeDictation: owns)
+    }
+
+    private static let key = ReplacementUsage.key(for: piRule)!
+
+    @Test func onlyMeaningfulEffectsCountAsUses() {
+        let usage = ReplacementUsage()
+            .recording(effects: [Self.effect(changed: false)], on: "2026-10-20")
+            .recording(effects: [Self.effect(changed: false, owns: true)], on: "2026-10-21")
+        #expect(usage.rules[Self.key]?.count == 1)
+        #expect(usage.rules[Self.key]?.lastUsed == "2026-10-21")
+    }
+
+    @Test func aDroppedReturnIsRecordedEvenWhenTheWordsStayTheSame() {
+        let usage = ReplacementUsage().recording(effects: [Self.effect(changed: false, returnOmitted: true)], on: "2026-10-20")
+        #expect(usage.rules[Self.key]?.count == 0)
+        #expect(usage.rules[Self.key]?.health?.returnOmitted == 1)
+    }
+
+    @Test func eachDictationCountsItsProblemsOnceWhateverTheMatchCount() {
+        let usage = ReplacementUsage()
+            .recording(effects: [Self.effect(insideWord: true, returnOmitted: true)], on: "2026-10-20")
+            .recording(effects: [Self.effect(insideWord: true)], on: "2026-10-21")
+        let health = usage.rules[Self.key]?.health
+        #expect(health?.insideWord == 2)
+        #expect(health?.returnOmitted == 1)
+        #expect(usage.rules[Self.key]?.count == 2)
+    }
+
+    @Test func editingTheRuleStartsItsHealthOverAndKeepsItsUses() {
+        let edited = ReplacementRule(heard: "p[iy]e?", replace: "pi", isRegex: true, origin: .global)
+        let usage = ReplacementUsage()
+            .recording(effects: [Self.effect(insideWord: true)], on: "2026-10-20")
+            .recording(effects: [Self.effect(edited)], on: "2026-10-22")
+        let entry = usage.rules[Self.key]
+        #expect(entry?.count == 2)
+        #expect(entry?.health?.insideWord == 0)
+        #expect(entry?.health?.editedOn == "2026-10-22")
+    }
+
+    @Test func healthIsShownOnlyForTheRuleAsItIsNow() {
+        let usage = ReplacementUsage().recording(effects: [Self.effect(insideWord: true, returnOmitted: true)], on: "2026-10-20")
+        let entry = usage.rules[Self.key]
+        let current = ReplacementsSet.Rule(heard: "p[iy]e?", replace: "pi<CR>", regex: true)
+        #expect(ReplacementUsageCaption.health(for: entry, rule: current)
+            == ["Changed text inside other words in 1 dictation", "Did not press Return in 1 dictation, because it matched mid-sentence"])
+        var repaired = current
+        repaired.wholeDictation = true
+        #expect(ReplacementUsageCaption.health(for: entry, rule: repaired).isEmpty)
+    }
+
+    @Test func problemsAfterAnEditSayWhenTheyStarted() {
+        let edited = ReplacementRule(heard: "p[iy]e?", replace: "pi!", isRegex: true, origin: .global)
+        let usage = ReplacementUsage()
+            .recording(effects: [Self.effect()], on: "2026-10-20")
+            .recording(effects: [Self.effect(edited, insideWord: true)], on: "2026-10-22")
+        let rule = ReplacementsSet.Rule(heard: "p[iy]e?", replace: "pi!", regex: true)
+        #expect(ReplacementUsageCaption.health(for: usage.rules[Self.key], rule: rule)
+            == ["Since you edited it: changed text inside other words in 1 dictation"])
     }
 }

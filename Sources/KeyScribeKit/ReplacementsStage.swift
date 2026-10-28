@@ -9,18 +9,45 @@ public struct ReplacementRule: Sendable, Equatable {
     public let heard: String
     public let replace: String
     public let isRegex: Bool
+    // Acts only when it matches everything said — a spoken command, never a word fix inside a sentence.
+    public let wholeDictation: Bool
     public let origin: ReplacementOrigin?
 
-    public init(heard: String, replace: String, isRegex: Bool, origin: ReplacementOrigin? = nil) {
+    public init(
+        heard: String, replace: String, isRegex: Bool, wholeDictation: Bool = false, origin: ReplacementOrigin? = nil
+    ) {
         self.heard = heard
         self.replace = replace
         self.isRegex = isRegex
+        self.wholeDictation = wholeDictation
         self.origin = origin
     }
 
     public func from(_ origin: ReplacementOrigin) -> ReplacementRule {
-        ReplacementRule(heard: heard, replace: replace, isRegex: isRegex, origin: origin)
+        ReplacementRule(heard: heard, replace: replace, isRegex: isRegex, wholeDictation: wholeDictation, origin: origin)
     }
+}
+
+// What one rule did to one dictation, from its winning matches. The flags are independent: a match can both
+// land inside a word and drop its Return.
+public struct ReplacementEffect: Sendable, Equatable {
+    public var rule: ReplacementRule
+    public var changedText: Bool
+    public var insideWord: Bool
+    public var returnOmitted: Bool
+    public var ownsWholeDictation: Bool
+
+    public init(rule: ReplacementRule, changedText: Bool, insideWord: Bool, returnOmitted: Bool, ownsWholeDictation: Bool) {
+        self.rule = rule
+        self.changedText = changedText
+        self.insideWord = insideWord
+        self.returnOmitted = returnOmitted
+        self.ownsWholeDictation = ownsWholeDictation
+    }
+
+    // Owning the dictation is an effect even when the words come out the same: it skips the AI rewrite and can
+    // press Return.
+    public var isMeaningful: Bool { changedText || ownsWholeDictation }
 }
 
 // Post-STT text stage. Literal matches are case-insensitive and word-boundary constrained ("pipe" never
@@ -40,6 +67,7 @@ public struct ReplacementsStage: PipelineStage {
         let regex: NSRegularExpression
         let template: String
         let submit: Mode.Submit?
+        var wholeDictation: Bool { source.wholeDictation }
     }
 
     private struct PreparedMatch {
@@ -55,6 +83,7 @@ public struct ReplacementsStage: PipelineStage {
     // rule is identity-capable iff heard == replace (case-insensitively); a regex can reproduce its input in
     // ways we can't cheaply rule out, so every regex is treated as identity-capable.
     private let mayHaveIdentityReplacement: Bool
+    private let hasWholeDictationRule: Bool
 
     // Rules dropped specifically because their expanded template has an unescaped non-terminal `<CR>` (a key
     // action is only valid at the very end). Surfaced so the host can log a vanished rule — the drop itself is
@@ -96,6 +125,32 @@ public struct ReplacementsStage: PipelineStage {
         return .ready(regex: re, template: NSRegularExpression.escapedTemplate(for: rule.replace), submit: nil)
     }
 
+    public enum InactiveReason: Sendable, Equatable {
+        case invalidPattern, unsafePattern, returnNotAtEnd
+
+        public var phrase: String {
+            switch self {
+            case .invalidPattern: "pattern doesn’t compile"
+            case .unsafePattern: "pattern could take too long to match"
+            case .returnNotAtEnd: "<CR> not at the end"
+            }
+        }
+    }
+
+    // Rules this stage would drop. Settings refuses to save them, so they come from a hand-edited file, where
+    // a rule that silently never runs is otherwise invisible.
+    public static func inactiveRules(_ rules: [ReplacementRule]) -> [(heard: String, reason: InactiveReason)] {
+        rules.compactMap { rule in
+            switch prepare(rule) {
+            case .ready: return nil
+            case .droppedForReturnMarker: return (rule.heard, .returnNotAtEnd)
+            case .dropped:
+                guard rule.isRegex else { return nil }
+                return (rule.heard, ReplacementSafety.isSafe(rule.heard) ? .invalidPattern : .unsafePattern)
+            }
+        }
+    }
+
     public init(rules: [ReplacementRule]) {
         self.rules = rules
         var prepared: [PreparedRule] = []
@@ -112,6 +167,7 @@ public struct ReplacementsStage: PipelineStage {
         }
         self.preparedRulesHighestTiePriorityFirst = prepared
         self.droppedForReturnMarker = droppedForReturnMarker
+        self.hasWholeDictationRule = prepared.contains(where: \.wholeDictation)
         self.mayHaveIdentityReplacement = rules.contains { rule in
             guard !rule.heard.isEmpty else { return false }
             return rule.isRegex || rule.heard.lowercased() == rule.replace.lowercased()
@@ -120,28 +176,44 @@ public struct ReplacementsStage: PipelineStage {
 
     public func apply(_ context: inout PipelineContext) {
         let input = context.text
-        let (transformed, fired) = transform(input)
+        let (transformed, effects) = transform(input)
         context.text = transformed
-        // Scan for a whole-utterance owner unless nothing could match: text unchanged, no identity rule,
+        // Scan for a whole-utterance owner unless nothing could match: text unchanged, no identity rule, no
+        // whole-dictation rule (the transform never runs those, so an unchanged text says nothing about them),
         // and no pause punctuation to bridge.
-        let mayOwnUtterance = transformed != input || mayHaveIdentityReplacement || Self.containsPauseMark(input)
+        let mayOwnUtterance = transformed != input || mayHaveIdentityReplacement || hasWholeDictationRule
+            || Self.containsPauseMark(input)
         let owner = mayOwnUtterance ? owningReplacement(for: input) : nil
         context.bareReplacement = owner?.replacement
-        context.firedReplacements = owner.map { [$0.rule] } ?? fired
+        context.firedReplacements = owner.map { [$0.rule] } ?? effects.map(\.rule)
+        context.replacementEffects = owner.map {
+            [ReplacementEffect(rule: $0.rule, changedText: $0.changed, insideWord: false, returnOmitted: false, ownsWholeDictation: true)]
+        } ?? effects
     }
 
     // Transform only the plain runs between ⟦SN:…⟧ tokens so a rule can never rewrite a verbatim/clipboard
     // token body minted upstream (design.md §4.2).
-    private func transform(_ text: String) -> (text: String, fired: [ReplacementRule]) {
-        var winners: [ReplacementRule] = []
+    private func transform(_ text: String) -> (text: String, effects: [ReplacementEffect]) {
+        var effects: [ReplacementEffect] = []
         let transformed = SentinelText.mappingOutsideSentinels(text) { run in
             var result = ""
             var cursor = run.startIndex
             while cursor < run.endIndex {
-                if let winner = winningMatch(in: run, at: cursor) {
-                    if !winners.contains(winner.rule.source) { winners.append(winner.rule.source) }
-                    result += winner.rule.regex.replacementString(
+                if let winner = winningMatch(in: run, at: cursor, includingWholeDictation: false) {
+                    let output = winner.rule.regex.replacementString(
                         for: winner.result, in: run, offset: 0, template: winner.rule.template)
+                    let changed = output != run[winner.range]
+                    let effect = ReplacementEffect(
+                        rule: winner.rule.source, changedText: changed,
+                        insideWord: changed && Self.landsInsideWord(winner.range, in: run),
+                        returnOmitted: winner.rule.submit != nil, ownsWholeDictation: false)
+                    if let i = effects.firstIndex(where: { $0.rule == effect.rule }) {
+                        effects[i].changedText = effects[i].changedText || effect.changedText
+                        effects[i].insideWord = effects[i].insideWord || effect.insideWord
+                    } else {
+                        effects.append(effect)
+                    }
+                    result += output
                     cursor = winner.range.upperBound
                 } else {
                     let next = run.index(after: cursor)
@@ -151,16 +223,35 @@ public struct ReplacementsStage: PipelineStage {
             }
             return SentinelText.neutralizeOpen(result)
         }
-        return (transformed, winners)
+        return (transformed, effects)
     }
 
-    private func winningMatch(in text: String, at cursor: String.Index) -> PreparedMatch? {
+    // A match edge that splits two word characters cut a word in half ("copy" → "co|py"). Uses the same
+    // regex `\w` a pattern's own boundaries use, so a rule wrapped to match whole words is never flagged.
+    static func landsInsideWord(_ range: Range<String.Index>, in text: String) -> Bool {
+        guard !range.isEmpty else { return false }
+        let first = text[range.lowerBound]
+        let last = text[text.index(before: range.upperBound)]
+        if range.lowerBound > text.startIndex,
+           isRegexWordCharacter(text[text.index(before: range.lowerBound)]), isRegexWordCharacter(first) { return true }
+        if range.upperBound < text.endIndex,
+           isRegexWordCharacter(text[range.upperBound]), isRegexWordCharacter(last) { return true }
+        return false
+    }
+
+    private static let wordCharacter = try! NSRegularExpression(pattern: #"^\w+$"#)
+    static func isRegexWordCharacter(_ c: Character) -> Bool {
+        let s = String(c)
+        return wordCharacter.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
+    }
+
+    private func winningMatch(in text: String, at cursor: String.Index, includingWholeDictation: Bool) -> PreparedMatch? {
         let searchRange = NSRange(cursor..<text.endIndex, in: text)
         let options: NSRegularExpression.MatchingOptions = [
             .anchored, .withTransparentBounds, .withoutAnchoringBounds,
         ]
         var winner: PreparedMatch?
-        for rule in preparedRulesHighestTiePriorityFirst {
+        for rule in preparedRulesHighestTiePriorityFirst where includingWholeDictation || !rule.wholeDictation {
             guard let result = rule.regex.firstMatch(in: text, options: options, range: searchRange),
                   result.range.length > 0,
                   let range = Range(result.range, in: text)
@@ -176,27 +267,28 @@ public struct ReplacementsStage: PipelineStage {
         owningReplacement(for: input)?.replacement
     }
 
-    private func owningReplacement(for input: String) -> (replacement: BareReplacement, rule: ReplacementRule)? {
+    private func owningReplacement(for input: String) -> (replacement: BareReplacement, rule: ReplacementRule, changed: Bool)? {
         let (core, leading, trailing) = utteranceCore(of: input)
         guard !core.isEmpty else { return nil }
         // A protected token (verbatim/clipboard) means no single rule cleanly owns the utterance — fall
         // through rather than let a rule match across the opaque token.
         guard !SentinelText.containsSentinel(core) else { return nil }
         if let owned = wholeUtteranceOutput(of: core) {
-            return (BareReplacement(text: leading + owned.text + trailing, submit: owned.submit), owned.rule)
+            return (BareReplacement(text: leading + owned.text + trailing, submit: owned.submit), owned.rule, owned.text != core)
         }
         // A mid-utterance pause is sentence punctuation the contiguous match can't cross; retry across a
         // de-paused core (whole-utterance only — still requires an end-to-end match).
         let dePaused = Self.dePause(core)
         if dePaused != core, let owned = wholeUtteranceOutput(of: dePaused) {
-            return (BareReplacement(text: leading + owned.text + trailing, submit: owned.submit), owned.rule)
+            return (BareReplacement(text: leading + owned.text + trailing, submit: owned.submit), owned.rule, owned.text != core)
         }
         return nil
     }
 
     private func wholeUtteranceOutput(of core: String) -> (text: String, submit: Mode.Submit?, rule: ReplacementRule)? {
         let coreRange = NSRange(core.startIndex..., in: core)
-        guard let winner = winningMatch(in: core, at: core.startIndex), winner.result.range == coreRange else { return nil }
+        guard let winner = winningMatch(in: core, at: core.startIndex, includingWholeDictation: true),
+              winner.result.range == coreRange else { return nil }
         let generated = SentinelText.neutralizeOpen(
             winner.rule.regex.replacementString(
                 for: winner.result, in: core, offset: 0, template: winner.rule.template))

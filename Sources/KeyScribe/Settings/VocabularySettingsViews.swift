@@ -52,29 +52,36 @@ struct DictionaryRows: View {
     let deleteConfirmConfirmID: String
     let deleteConfirmCancelID: String
     var onFindReplacements: ((String) -> Void)? = nil
+    var taughtSpellings: (String) -> [String] = { _ in [] }
     let onRemove: (String) -> Void
 
     var body: some View {
         ForEach(words, id: \.self) { word in
             HStack(alignment: .firstTextBaseline, spacing: 16) {
-                if let onFindReplacements {
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(word)
-                            historyAction(word, action: onFindReplacements)
+                VStack(alignment: .leading, spacing: 2) {
+                    if let onFindReplacements {
+                        ViewThatFits(in: .horizontal) {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(word)
+                                historyAction(word, action: onFindReplacements)
+                            }
+                            .fixedSize(horizontal: true, vertical: false)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(word).fixedSize(horizontal: false, vertical: true)
+                                historyAction(word, action: onFindReplacements)
+                            }
                         }
-                        .fixedSize(horizontal: true, vertical: false)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(word).fixedSize(horizontal: false, vertical: true)
-                            historyAction(word, action: onFindReplacements)
-                        }
+                    } else {
+                        Text(word).fixedSize(horizontal: false, vertical: true)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    Text(word)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    let spellings = taughtSpellings(word)
+                    if !spellings.isEmpty {
+                        Text("Also corrects \(spellings.joined(separator: ", "))")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 RemoveButton(
                     confirmation: VocabularyRemovalCopy.dictionary(word, scope: deletionScope),
                     accessibilityLabel: "Delete word",
@@ -87,7 +94,7 @@ struct DictionaryRows: View {
     }
 
     private func historyAction(_ word: String, action: @escaping (String) -> Void) -> some View {
-        Button("Mishearings in History…") { action(word) }
+        Button("Review mishearings…") { action(word) }
             .font(.caption)
             .buttonStyle(.link)
             .accessibilityLabel("Find mishearings of \(word) in History")
@@ -99,12 +106,11 @@ struct ReplacementRows: View {
     let rules: [ReplacementsSet.Rule]
     let ids: ReplacementRowAccessibilityIDs
     let deletionScope: VocabularyRemovalScope
-    let analyzeEdit: (ReplacementsSet.Rule, VocabularyProposal) -> VocabularyAnalysis
-    let onUpdate: (ReplacementsSet.Rule, ReplacementsSet.Rule) -> Bool
+    @Binding var editingRule: ReplacementsSet.Rule?
     let onMove: (IndexSet, Int) -> Void
     let onRemove: (Int) -> Void
     var usageCaption: (ReplacementsSet.Rule) -> String? = { _ in nil }
-    @State private var editingRule: ReplacementsSet.Rule?
+    var usageHealth: (ReplacementsSet.Rule) -> [String] = { _ in [] }
     @State private var tableHeight: CGFloat = 76
 
     var body: some View {
@@ -158,6 +164,12 @@ struct ReplacementRows: View {
                 if let advisory = ReplacementAuthoring.literalReturnMarkerAdvisory(replace: rule.replace, regex: rule.regex) {
                     IssueText(advisory, severity: .advisory, font: .caption)
                 }
+                if let advisory = ReplacementAuthoring.placeholderAdvisory(heard: rule.heard, replace: rule.replace, regex: rule.regex) {
+                    IssueText(advisory, severity: .advisory, font: .caption)
+                }
+                ForEach(usageHealth(rule), id: \.self) { line in
+                    IssueText(line, severity: .advisory, font: .caption)
+                }
             }
             Spacer()
             Button { editingRule = rule } label: {
@@ -166,18 +178,6 @@ struct ReplacementRows: View {
             .buttonStyle(.borderless)
             .accessibilityLabel("Edit replacement")
             .accessibilityIdentifier(ids.edit(index))
-            .popover(isPresented: Binding(
-                get: { editingRule == rule },
-                set: { if !$0, editingRule == rule { editingRule = nil } })) {
-                    ReplacementEditor(
-                        rule: rule,
-                        ids: ids.editor,
-                        analyze: { analyzeEdit(rule, $0) }) { updated in
-                            guard onUpdate(rule, updated) else { return false }
-                            editingRule = nil
-                            return true
-                        }
-                }
             RemoveButton(
                 confirmation: VocabularyRemovalCopy.replacement(rule.heard, scope: deletionScope),
                 accessibilityLabel: "Delete replacement",
@@ -455,7 +455,6 @@ struct ReplacementRowAccessibilityIDs {
     let remove: (Int) -> String
     let deleteConfirmConfirm: String
     let deleteConfirmCancel: String
-    let editor: ReplacementEditorAccessibilityIDs
 }
 
 struct ReplacementEditorAccessibilityIDs {
@@ -465,72 +464,131 @@ struct ReplacementEditorAccessibilityIDs {
     let advanced: String
     let status: String
     let update: String
+    let cancel: String
+
+    static let vocabulary = ReplacementEditorAccessibilityIDs(
+        heard: AccessibilityID.Settings.Vocabulary.replacementEditorHeard,
+        useInstead: AccessibilityID.Settings.Vocabulary.replacementEditorUseInstead,
+        regex: AccessibilityID.Settings.Vocabulary.replacementEditorRegex,
+        advanced: AccessibilityID.Settings.Vocabulary.replacementEditorAdvanced,
+        status: AccessibilityID.Settings.Vocabulary.replacementEditorStatus,
+        update: AccessibilityID.Settings.Vocabulary.replacementEditorUpdate,
+        cancel: AccessibilityID.Settings.Vocabulary.replacementEditorCancel)
 }
 
-private struct ReplacementEditor: View {
+// Presented as a sheet by the Vocabulary pane, never from the row: the rule's preview needs the width and
+// height of a sheet, and a popover cannot host one without nesting scroll views.
+struct ReplacementEditor: View {
     let rule: ReplacementsSet.Rule
     let ids: ReplacementEditorAccessibilityIDs
     let analyze: (VocabularyProposal) -> VocabularyAnalysis
     let onUpdate: (ReplacementsSet.Rule) -> Bool
+    let onCancel: () -> Void
+    let showsPreview: Bool
     @State private var heard: String
     @State private var replace: String
     @State private var regex: Bool
+    @State private var wholeDictation: Bool
     @State private var advancedExpanded: Bool
     @State private var staleUpdate = false
+    @State private var contentHeight: CGFloat = 0
+    @StateObject private var preview: RulePreviewModel
     @FocusState private var heardFocused: Bool
+
+    static let maxContentHeight: CGFloat = 420
 
     init(
         rule: ReplacementsSet.Rule,
         ids: ReplacementEditorAccessibilityIDs,
+        previewSource: RulePreviewModel.Source?,
         analyze: @escaping (VocabularyProposal) -> VocabularyAnalysis,
-        onUpdate: @escaping (ReplacementsSet.Rule) -> Bool
+        onUpdate: @escaping (ReplacementsSet.Rule) -> Bool,
+        onCancel: @escaping () -> Void
     ) {
         self.rule = rule
         self.ids = ids
         self.analyze = analyze
         self.onUpdate = onUpdate
+        self.onCancel = onCancel
+        showsPreview = previewSource != nil
         _heard = State(initialValue: rule.heard)
         _replace = State(initialValue: rule.replace)
         _regex = State(initialValue: rule.regex)
-        _advancedExpanded = State(initialValue: rule.regex)
-    }
-
-    private var advancedBinding: Binding<Bool> {
-        Binding(get: { advancedExpanded || regex }, set: { advancedExpanded = $0 })
+        _wholeDictation = State(initialValue: rule.wholeDictation)
+        _advancedExpanded = State(initialValue: false)
+        _preview = StateObject(wrappedValue: RulePreviewModel(source: previewSource ?? .unavailable))
     }
 
     var body: some View {
         let draft = draft
         return VStack(alignment: .leading, spacing: 12) {
-            Text("Edit replacement").font(.headline)
-            TextField(regex ? "Heard pattern" : "When heard", text: $heard)
-                .multilineTextAlignment(.leading)
-                .textFieldStyle(.roundedBorder)
-                .focused($heardFocused)
-                .accessibilityIdentifier(ids.heard)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Use instead")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                ReplacementTextEditor(
-                    title: "Use instead",
-                    placeholder: "Replacement text",
-                    text: $replace,
-                    editorID: ids.useInstead)
-            }
-            DisclosureSection(isExpanded: advancedBinding) {
-                Text("Pattern matching")
-                    .accessibilityIdentifier(ids.advanced)
-            } content: {
-                Toggle("Match heard phrase as a regular expression", isOn: $regex)
-                    .toggleStyle(.checkbox)
-                    .accessibilityIdentifier(ids.regex)
-                if regex {
-                    Text("Use captures like $1.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            Text("Edit Replacement").font(.title2.bold())
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 8) {
+                        GridRow {
+                            Text("Heard phrase")
+                            TextField("Heard phrase", text: $heard, prompt: Text(regex ? "Regular expression" : "slash resume"))
+                                .labelsHidden()
+                                .multilineTextAlignment(.leading)
+                                .textFieldStyle(.roundedBorder)
+                                .font(regex ? .body.monospaced() : .body)
+                                .frame(maxWidth: .infinity)
+                                .focused($heardFocused)
+                                .accessibilityIdentifier(ids.heard)
+                        }
+                        GridRow {
+                            Text("Use instead")
+                            VStack(alignment: .leading, spacing: 4) {
+                                ReplacementValueField(
+                                    title: "Use instead", placeholder: "Replacement text", text: $replace,
+                                    fieldID: ids.useInstead)
+                                    .frame(maxWidth: .infinity)
+                                ReplacementExpandedEditorButton(
+                                    title: "Use instead", placeholder: "Replacement text", text: $replace,
+                                    ids: ReplacementExpandedEditorIDs(
+                                        expand: AccessibilityID.Settings.Vocabulary.replacementEditorExpand,
+                                        editor: AccessibilityID.Settings.Vocabulary.replacementEditorLarge,
+                                        done: AccessibilityID.Settings.Vocabulary.replacementEditorLargeDone))
+                            }
+                        }
+                        GridRow {
+                            Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: 4) {
+                                    Text(regex ? "Regular expression" : "Plain phrase").foregroundStyle(.secondary)
+                                    Text("·").foregroundStyle(.secondary)
+                                    Button(regex ? "Use a plain phrase" : "Use a regular expression") { regex.toggle() }
+                                        .buttonStyle(.link)
+                                        .accessibilityIdentifier(ids.regex)
+                                }
+                                if regex {
+                                    Text("Use captures like $1 in Use instead.").foregroundStyle(.secondary)
+                                }
+                            }
+                            .font(.caption)
+                        }
                     }
+                    if showsPreview, let draftRule = draftRule(draft) {
+                        RulePreviewSection(
+                            model: preview, draft: draftRule, ids: AccessibilityID.Settings.Vocabulary.replacementEditorRule,
+                            onUsePattern: { heard = $0 }, onMatchAlone: { wholeDictation = true })
+                    }
+                    DisclosureSection(isExpanded: $advancedExpanded) {
+                        Text("Advanced").accessibilityIdentifier(ids.advanced)
+                    } content: {
+                        RuleScopePicker(wholeDictation: $wholeDictation, id: AccessibilityID.Settings.Vocabulary.replacementEditorRule.scope)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                // Room for the focus ring, which the scroll view would otherwise clip.
+                .padding(4)
+                .padding(.trailing, 4)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { contentHeight = $0 }
             }
+            // As tall as the content up to a bound, so a short rule leaves no gap above the buttons and
+            // expanded examples scroll inside the sheet instead of growing it past the window.
+            .frame(height: min(max(contentHeight, 1), Self.maxContentHeight))
             if let issue = draft.validationIssue {
                 VocabularyDraftIssueText(issue: issue)
                     .accessibilityIdentifier(ids.status)
@@ -546,16 +604,23 @@ private struct ReplacementEditor: View {
             }
             HStack {
                 Spacer()
-                Button("Update", action: commit)
-                    .buttonStyle(.borderedProminent)
+                Button("Cancel", role: .cancel, action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier(ids.cancel)
+                Button("Save Changes", action: commit)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!draft.canUpdateReplacement(from: rule))
+                    .disabled(!canUpdate(draft))
                     .accessibilityIdentifier(ids.update)
             }
         }
-        .padding(16)
-        .frame(width: 420)
-        .onAppear { heardFocused = true }
+        .padding(24)
+        .frame(width: 600)
+        .onAppear {
+            heardFocused = true
+            preview.update(draft: draftRule(draft), original: rule)
+        }
+        .onChange(of: draftRule(draft)) { _, current in preview.update(draft: current, original: rule) }
+        .onDisappear { preview.close() }
     }
 
     private var draft: VocabularyDraftAnalysis {
@@ -563,9 +628,20 @@ private struct ReplacementEditor: View {
             replacementTerm: heard, replacement: replace, regex: regex, analyze: analyze)
     }
 
+    private func draftRule(_ draft: VocabularyDraftAnalysis) -> ReplacementsSet.Rule? {
+        guard var rule = draft.replacementRule else { return nil }
+        rule.wholeDictation = wholeDictation
+        return rule
+    }
+
+    private func canUpdate(_ draft: VocabularyDraftAnalysis) -> Bool {
+        guard let updated = draftRule(draft) else { return false }
+        return updated != rule && !draft.hasReplacementIdentityConflict
+    }
+
     private func commit() {
         let draft = draft
-        guard draft.canUpdateReplacement(from: rule), let updatedRule = draft.replacementRule else { return }
+        guard canUpdate(draft), let updatedRule = draftRule(draft) else { return }
         staleUpdate = !onUpdate(updatedRule)
     }
 }
@@ -573,12 +649,50 @@ private struct ReplacementEditor: View {
 struct VocabularyComposer: View {
     let analyze: (VocabularyProposal) -> VocabularyAnalysis
     let onAddWord: (String) -> Bool
-    let onAddReplacement: (String, String, Bool) -> Bool
+    let onAddReplacement: (ReplacementsSet.Rule) -> Bool
+    let existingRules: [ReplacementsSet.Rule]
+    @StateObject private var preview: RulePreviewModel
+    private let showsPreview: Bool
     @State private var heard = ""
     @State private var replace = ""
     @State private var regex = false
+    @State private var chosenWholeDictation: Bool?
     @State private var advancedExpanded = false
     @FocusState private var focus: Field?
+
+    init(
+        analyze: @escaping (VocabularyProposal) -> VocabularyAnalysis,
+        onAddWord: @escaping (String) -> Bool,
+        onAddReplacement: @escaping (ReplacementsSet.Rule) -> Bool,
+        existingRules: [ReplacementsSet.Rule] = [],
+        previewSource: RulePreviewModel.Source? = nil
+    ) {
+        self.analyze = analyze
+        self.onAddWord = onAddWord
+        self.onAddReplacement = onAddReplacement
+        self.existingRules = existingRules
+        showsPreview = previewSource != nil
+        _preview = StateObject(wrappedValue: RulePreviewModel(source: previewSource ?? .unavailable))
+    }
+
+    // A new rule that presses Return starts as a command; an update keeps the saved rule's choice. Either way
+    // until the user picks otherwise.
+    private var wholeDictation: Binding<Bool> {
+        Binding(
+            get: {
+                chosenWholeDictation ?? existingRule?.wholeDictation
+                    ?? ReplacementAuthoring.pressesReturn(replace: replace, regex: regex)
+            },
+            set: { chosenWholeDictation = $0 })
+    }
+
+    // The saved rule Add would update in place, matched the way ReplacementsSet.adding matches it.
+    private var existingRule: ReplacementsSet.Rule? {
+        let h = heardTrimmed
+        return existingRules.first {
+            $0.regex == regex && (regex ? $0.heard == h : $0.heard.caseInsensitiveCompare(h) == .orderedSame)
+        }
+    }
 
     private enum Field { case heard, replace }
 
@@ -639,7 +753,17 @@ struct VocabularyComposer: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerStatus)
             }
-            DisclosureSection("Pattern matching", isExpanded: advancedBinding) {
+            if let rule = draftRule(draft) {
+                if showsPreview {
+                    RulePreviewSection(
+                        model: preview, draft: rule, ids: AccessibilityID.Settings.Vocabulary.composerRule,
+                        onUsePattern: { heard = $0 }, onMatchAlone: { chosenWholeDictation = true })
+                } else if let summary = ReplacementAuthoring.behaviorSummary(
+                    replace: rule.replace, regex: rule.regex, wholeDictation: rule.wholeDictation) {
+                    Text(summary).font(.callout)
+                }
+            }
+            DisclosureSection("Advanced", isExpanded: advancedBinding) {
                 Toggle("Match heard phrase as a regular expression", isOn: $regex)
                     .toggleStyle(.checkbox)
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerRegexToggle)
@@ -648,6 +772,9 @@ struct VocabularyComposer: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+                if draftRule(draft) != nil {
+                    RuleScopePicker(wholeDictation: wholeDictation, id: AccessibilityID.Settings.Vocabulary.composerRule.scope)
                 }
             }
             .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerAdvanced)
@@ -664,6 +791,14 @@ struct VocabularyComposer: View {
             }
         }
         .onAppear { focus = .heard }
+        .onChange(of: draftRule(draft)) { _, current in
+            if let current { preview.update(draft: current, original: existingRule) }
+        }
+    }
+
+    private func draftRule(_ draft: VocabularyDraftAnalysis) -> ReplacementsSet.Rule? {
+        guard case .replacement(let heard, let replace, let regex)? = draft.proposal else { return nil }
+        return ReplacementsSet.Rule(heard: heard, replace: replace, regex: regex, wholeDictation: wholeDictation.wrappedValue)
     }
 
     private var heardTrimmed: String { heard.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -683,7 +818,9 @@ struct VocabularyComposer: View {
         guard draft.canCommit, let proposal = draft.proposal else { return }
         let saved = switch proposal {
         case .word(let word): onAddWord(word)
-        case .replacement(let heard, let replace, let regex): onAddReplacement(heard, replace, regex)
+        case .replacement(let heard, let replace, let regex):
+            onAddReplacement(ReplacementsSet.Rule(
+                heard: heard, replace: replace, regex: regex, wholeDictation: wholeDictation.wrappedValue))
         }
         if saved { reset() }
     }
@@ -692,6 +829,7 @@ struct VocabularyComposer: View {
         heard = ""
         replace = ""
         regex = false
+        chosenWholeDictation = nil
         advancedExpanded = false
         focus = .heard
     }
@@ -740,6 +878,7 @@ struct VocabularySettingsView: View {
     @ObservedObject var modes: ModesSettingsModel
     @Binding var navigationSelection: VocabularyScopeDestination
     var historyReplacements: HistoryReplacementsLauncher? = nil
+    var rulePreviewSource: ((ReplacementPreview.Destination) -> RulePreviewModel.Source)? = nil
     @State private var selection: VocabularyScopeDestination = .global
 
     var body: some View {
@@ -846,11 +985,13 @@ struct VocabularySettingsView: View {
                 },
                 onAddWord: { dictionary.add($0) },
                 onRemoveWord: dictionary.remove,
-                onAddReplacement: { replacements.add(heard: $0, replace: $1, regex: $2) },
+                onAddReplacement: { replacements.add(heard: $0.heard, replace: $0.replace, regex: $0.regex, wholeDictation: $0.wholeDictation) },
                 onUpdateReplacement: replacements.update,
+                rulePreviewSource: rulePreviewSource?(.global),
                 onMoveReplacement: replacements.move,
                 onRemoveReplacement: replacements.remove(at:),
-                replacementUsageCaption: { replacements.usageCaption(for: $0, in: .global) })
+                replacementUsageCaption: { replacements.usageCaption(for: $0, in: .global) },
+                replacementUsageHealth: { replacements.usageHealth(for: $0, in: .global) })
         case let .mode(id):
             if let mode = modes.modes.first(where: { $0.id == id && $0.hasOwnVocabulary }) {
                 modeDetail(mode)
@@ -894,10 +1035,10 @@ struct VocabularySettingsView: View {
                 updated.dictionary.words.removeAll { $0 == word }
                 modes.update(updated)
             },
-            onAddReplacement: { heard, replace, regex in
+            onAddReplacement: { rule in
                 var updated = mode
                 updated.replacements.rules = ReplacementsSet(rules: mode.replacements.rules)
-                    .adding(heard: heard, replace: replace, regex: regex).rules
+                    .adding(heard: rule.heard, replace: rule.replace, regex: rule.regex, wholeDictation: rule.wholeDictation).rules
                 return modes.update(updated)
             },
             onUpdateReplacement: { original, replacement in
@@ -907,6 +1048,7 @@ struct VocabularySettingsView: View {
                 updated.replacements.rules = set.rules
                 return modes.update(updated)
             },
+            rulePreviewSource: rulePreviewSource?(.mode(mode.id)),
             onMoveReplacement: { source, destination in
                 var rules = mode.replacements.rules
                 guard ReplacementMoveValidation.isValid(source: source, destination: destination, count: rules.count)
@@ -922,7 +1064,8 @@ struct VocabularySettingsView: View {
                 updated.replacements.rules.remove(at: index)
                 modes.update(updated)
             },
-            replacementUsageCaption: { replacements.usageCaption(for: $0, in: .mode(mode.id)) })
+            replacementUsageCaption: { replacements.usageCaption(for: $0, in: .mode(mode.id)) },
+            replacementUsageHealth: { replacements.usageHealth(for: $0, in: .mode(mode.id)) })
     }
 
     private func modeScopeDescription(_ mode: Mode) -> String {
@@ -946,14 +1089,17 @@ private struct VocabularyEditor: View {
     var historyReplacements: ((String, @escaping (Int) -> Void) -> HistoryReplacementsModel)? = nil
     let onAddWord: (String) -> Bool
     let onRemoveWord: (String) -> Void
-    let onAddReplacement: (String, String, Bool) -> Bool
+    let onAddReplacement: (ReplacementsSet.Rule) -> Bool
     let onUpdateReplacement: (ReplacementsSet.Rule, ReplacementsSet.Rule) -> Bool
+    var rulePreviewSource: RulePreviewModel.Source? = nil
     let onMoveReplacement: (IndexSet, Int) -> Void
     let onRemoveReplacement: (Int) -> Void
     var replacementUsageCaption: (ReplacementsSet.Rule) -> String? = { _ in nil }
+    var replacementUsageHealth: (ReplacementsSet.Rule) -> [String] = { _ in [] }
     @State private var recognitionHelpExpanded = false
     @State private var discovery: HistoryReplacementsModel?
     @State private var addedMessage: String?
+    @State private var editingRule: ReplacementsSet.Rule?
 
     var body: some View {
         Form {
@@ -963,8 +1109,14 @@ private struct VocabularyEditor: View {
             Section("Add to Vocabulary") {
                 VocabularyComposer(
                     analyze: { [scope] in VocabularyAdvisor.analyze($0, in: scope) },
-                    onAddWord: onAddWord,
-                    onAddReplacement: onAddReplacement)
+                    onAddWord: { word in
+                        guard onAddWord(word) else { return false }
+                        offerMishearings(of: word)
+                        return true
+                    },
+                    onAddReplacement: onAddReplacement,
+                    existingRules: rules,
+                    previewSource: rulePreviewSource)
             }
             Section("Words to Recognize") {
                 Text(wordsDescription)
@@ -982,6 +1134,7 @@ private struct VocabularyEditor: View {
                     deleteConfirmConfirmID: AccessibilityID.Settings.Vocabulary.dictionaryDeleteConfirmConfirm,
                     deleteConfirmCancelID: AccessibilityID.Settings.Vocabulary.dictionaryDeleteConfirmCancel,
                     onFindReplacements: findAction,
+                    taughtSpellings: { [scope] in scope.taughtSpellings(of: $0) },
                     onRemove: onRemoveWord)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.dictionaryList)
@@ -1001,20 +1154,16 @@ private struct VocabularyEditor: View {
                         edit: AccessibilityID.Settings.Vocabulary.replacementEdit,
                         remove: AccessibilityID.Settings.Vocabulary.replacementRemove,
                         deleteConfirmConfirm: AccessibilityID.Settings.Vocabulary.replacementDeleteConfirmConfirm,
-                        deleteConfirmCancel: AccessibilityID.Settings.Vocabulary.replacementDeleteConfirmCancel,
-                        editor: ReplacementEditorAccessibilityIDs(
-                            heard: AccessibilityID.Settings.Vocabulary.replacementEditorHeard,
-                            useInstead: AccessibilityID.Settings.Vocabulary.replacementEditorUseInstead,
-                            regex: AccessibilityID.Settings.Vocabulary.replacementEditorRegex,
-                            advanced: AccessibilityID.Settings.Vocabulary.replacementEditorAdvanced,
-                            status: AccessibilityID.Settings.Vocabulary.replacementEditorStatus,
-                            update: AccessibilityID.Settings.Vocabulary.replacementEditorUpdate)),
+                        deleteConfirmCancel: AccessibilityID.Settings.Vocabulary.replacementDeleteConfirmCancel),
                     deletionScope: deletionScope,
-                    analyzeEdit: analyzeReplacementEdit,
-                    onUpdate: onUpdateReplacement,
+                    editingRule: $editingRule,
                     onMove: onMoveReplacement,
                     onRemove: onRemoveReplacement,
-                    usageCaption: replacementUsageCaption)
+                    usageCaption: replacementUsageCaption,
+                    usageHealth: replacementUsageHealth)
+                if let rulePreviewSource, rulePreviewSource.history != nil, !rules.isEmpty {
+                    RuleAuditSection(source: rulePreviewSource, rules: rules) { editingRule = $0 }
+                }
                 if let addedMessage {
                     Label(addedMessage, systemImage: "checkmark.circle.fill")
                         .font(.caption.weight(.medium))
@@ -1025,6 +1174,19 @@ private struct VocabularyEditor: View {
         }
         .formStyle(.grouped)
         .padding(16)
+        .sheet(isPresented: Binding(get: { editingRule != nil }, set: { if !$0 { editingRule = nil } })) {
+            if let rule = editingRule {
+                ReplacementEditor(
+                    rule: rule, ids: .vocabulary, previewSource: rulePreviewSource,
+                    analyze: { analyzeReplacementEdit(rule, $0) },
+                    onUpdate: { updated in
+                        guard onUpdateReplacement(rule, updated) else { return false }
+                        editingRule = nil
+                        return true
+                    },
+                    onCancel: { editingRule = nil })
+            }
+        }
         .sheet(item: $discovery, onDismiss: { discovery?.close() }) { model in
             HistoryReplacementsSheet(model: model) {
                 model.close()
@@ -1039,12 +1201,31 @@ private struct VocabularyEditor: View {
     }
 
     private func openDiscovery(_ word: String) {
-        guard let make = historyReplacements else { return }
         addedMessage = nil
-        discovery = make(word) { count in
+        discovery = makeDiscovery(word)
+    }
+
+    private func makeDiscovery(_ word: String) -> HistoryReplacementsModel? {
+        historyReplacements?(word) { count in
             discovery?.close()
             discovery = nil
             addedMessage = count == 1 ? "Added 1 replacement" : "Added \(count) replacements"
+        }
+    }
+
+    // A new word is checked against History straight away, so the spellings it was already misheard as are
+    // offered in the same step. Nothing opens when History holds no likely mishearing.
+    private func offerMishearings(of word: String) {
+        guard discovery == nil, let model = makeDiscovery(word) else { return }
+        model.offeredAfterAdding = true
+        Task {
+            await model.refresh()
+            if model.findings.isEmpty || discovery != nil {
+                model.close()
+            } else {
+                addedMessage = nil
+                discovery = model
+            }
         }
     }
 
@@ -1194,12 +1375,16 @@ final class ReplacementsSettingsModel: ObservableObject {
             today: HistoryStore.todayString())
     }
 
+    func usageHealth(for rule: ReplacementsSet.Rule, in origin: ReplacementOrigin) -> [String] {
+        ReplacementUsageCaption.health(for: usage.entry(for: rule, in: origin), rule: rule)
+    }
+
     @discardableResult
-    func add(heard: String, replace: String, regex: Bool) -> Bool {
+    func add(heard: String, replace: String, regex: Bool, wholeDictation: Bool = false) -> Bool {
         let trimmed = heard.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         return mutate("Replacement wasn’t saved") { set in
-            set = set.adding(heard: trimmed, replace: replace, regex: regex)
+            set = set.adding(heard: trimmed, replace: replace, regex: regex, wholeDictation: wholeDictation)
         }
     }
 

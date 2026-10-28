@@ -218,4 +218,67 @@ struct ReplacementsStageTests {
         let payload = Pipeline([ReplacementsStage(rules: [teh])]).forward("teh cat")
         #expect(payload.firedReplacements == [teh])
     }
+
+    // MARK: Whole-dictation scope and per-match effects
+
+    private func context(_ rules: [ReplacementRule], _ text: String) -> PipelineContext {
+        var ctx = PipelineContext(text: text)
+        ReplacementsStage(rules: rules).apply(&ctx)
+        return ctx
+    }
+
+    @Test func aWholeDictationRuleLeavesTheMiddleOfASentenceAlone() {
+        let rule = ReplacementRule(heard: "slash resume", replace: "/resume<CR>", isRegex: true, wholeDictation: true)
+        let mid = context([rule], "please slash resume now")
+        #expect(mid.text == "please slash resume now")
+        #expect(mid.bareReplacement == nil)
+        #expect(mid.replacementEffects.isEmpty)
+        let whole = context([rule], "Slash resume.")
+        #expect(whole.bareReplacement == BareReplacement(text: "/resume", submit: .return))
+    }
+
+    @Test func aWholeDictationLiteralStillGetsItsOwnershipCheck() {
+        let rule = ReplacementRule(heard: "ship it", replace: "Shipped!", isRegex: false, wholeDictation: true)
+        #expect(context([rule], "ship it").bareReplacement?.text == "Shipped!")
+        #expect(context([rule], "we ship it today").text == "we ship it today")
+    }
+
+    @Test func aRuleMatchingInsideWordsIsFlaggedOnItsWinningMatches() {
+        let rule = ReplacementRule(heard: "p[iy]e?", replace: "pi<CR>", isRegex: true)
+        let ctx = context([rule], "I copy the pieces")
+        #expect(ctx.text == "I copi the pices")
+        #expect(ctx.replacementEffects == [
+            ReplacementEffect(rule: rule, changedText: true, insideWord: true, returnOmitted: true, ownsWholeDictation: false),
+        ])
+    }
+
+    @Test func aRuleOwningTheWholeDictationIsAMeaningfulEffectEvenWithoutAChange() {
+        let rule = ReplacementRule(heard: "p[iy]e?", replace: "pi<CR>", isRegex: true)
+        let ctx = context([rule], "pi")
+        #expect(ctx.replacementEffects == [
+            ReplacementEffect(rule: rule, changedText: false, insideWord: false, returnOmitted: false, ownsWholeDictation: true),
+        ])
+        #expect(ctx.replacementEffects.map(\.isMeaningful) == [true])
+    }
+
+    @Test func anIdentityMatchInASentenceIsNotMeaningful() {
+        let rule = ReplacementRule(heard: "(hello)", replace: "$1", isRegex: true)
+        let ctx = context([rule], "say hello there")
+        #expect(ctx.replacementEffects.map(\.isMeaningful) == [false])
+    }
+
+    @Test func aWordFixAtWordEdgesIsNotInsideAWord() {
+        let rule = ReplacementRule(heard: "sean", replace: "Shawn", isRegex: true)
+        #expect(context([rule], "ask sean about it").replacementEffects.map(\.insideWord) == [false])
+        #expect(context([rule], "ask seanna about it").replacementEffects.map(\.insideWord) == [true])
+        let edgeSpace = ReplacementRule(heard: #"[\s,]*my sign off"#, replace: "\n\nBest,", isRegex: true)
+        #expect(context([edgeSpace], "talk soon, my sign off").replacementEffects.map(\.insideWord) == [false])
+    }
+
+    @Test func aMatchInsideAWordThatChangesNothingIsNotFlagged() {
+        let rule = ReplacementRule(heard: "sean", replace: "Sean", isRegex: true)
+        let ctx = context([rule], "ask Seanna about it")
+        #expect(ctx.text == "ask Seanna about it")
+        #expect(ctx.replacementEffects.map(\.insideWord) == [false])
+    }
 }

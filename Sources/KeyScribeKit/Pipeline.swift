@@ -37,6 +37,7 @@ public struct PipelineContext: Sendable {
     public var text: String
     public var bareReplacement: BareReplacement?
     public var firedReplacements: [ReplacementRule] = []
+    public var replacementEffects: [ReplacementEffect] = []
     public init(text: String) { self.text = text }
 }
 
@@ -63,15 +64,17 @@ public struct TokenizedPayload: Sendable {
     public let issuedTokens: [String]
     public let bareReplacement: BareReplacement?
     public let firedReplacements: [ReplacementRule]
+    public let replacementEffects: [ReplacementEffect]
 
     init(
         text: String, issuedTokens: [String], bareReplacement: BareReplacement? = nil,
-        firedReplacements: [ReplacementRule] = []
+        firedReplacements: [ReplacementRule] = [], replacementEffects: [ReplacementEffect] = []
     ) {
         self.text = text
         self.issuedTokens = issuedTokens
         self.bareReplacement = bareReplacement
         self.firedReplacements = firedReplacements
+        self.replacementEffects = replacementEffects
     }
 }
 
@@ -91,7 +94,8 @@ public struct Pipeline: Sendable {
             text: context.text,
             issuedTokens: stages.flatMap { $0.issuedTokens },
             bareReplacement: context.bareReplacement,
-            firedReplacements: context.firedReplacements)
+            firedReplacements: context.firedReplacements,
+            replacementEffects: context.replacementEffects)
     }
 
     public func restore(_ text: String) -> String {

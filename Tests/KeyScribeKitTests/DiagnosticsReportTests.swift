@@ -86,6 +86,16 @@ private func report(
         #expect(line.fallbackReason == "The AI service could not be reached.")
     }
 
+    @Test func aSkippedRewriteSaysSoAndHowLongItRan() {
+        var entry = contentBearingEntry(outcome: .localFallback)
+        entry.fallbackReason = nil
+        entry.rewriteSkippedMs = 17_460
+        let rendered = report(dictations: [.init(entry)]).render()
+        #expect(rendered.contains("    rewrite: skipped by the user after 17460 ms"))
+        #expect(!rendered.contains("    fallback:"))
+        #expect(rendered.contains("skipped by the user"))
+    }
+
     @Test func theNoTextPromiseCanBeLeftOutWhenTheReportCarriesText() {
         #expect(report().render().contains(DiagnosticsReport.privacyNote))
         #expect(!report().render(includingPrivacyNote: false).contains(DiagnosticsReport.privacyNote))

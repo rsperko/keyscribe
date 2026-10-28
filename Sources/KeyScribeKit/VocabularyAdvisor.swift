@@ -141,3 +141,27 @@ public enum VocabularyAdvisor {
         text.isEmpty ? "nothing" : "“\(ReplacementAuthoring.preview(for: text).text)”"
     }
 }
+
+extension VocabularyScope {
+    // The misheard spellings a word is already corrected from: literal rules in effect here whose output is
+    // exactly the word. Shown beside the word so teaching it another spelling has an obvious place to start.
+    public static func taughtSpellings(of word: String, in rules: [ReplacementsSet.Rule]) -> [String] {
+        rules.filter { !$0.regex && $0.replace == word && $0.heard.caseInsensitiveCompare(word) != .orderedSame }
+            .map(\.heard)
+    }
+
+    public func taughtSpellings(of word: String) -> [String] {
+        let rules = local.map { $0.rules + ($0.includeGlobalRules ? globalRules : []) } ?? globalRules
+        var seen = Set<String>()
+        return Self.taughtSpellings(of: word, in: rules).filter { seen.insert($0.lowercased()).inserted }
+    }
+
+    // The rule in this scope's own list that adding `heard` would update in place, matched the way
+    // ReplacementsSet.adding matches it.
+    public func ownRule(heard: String, regex: Bool) -> ReplacementsSet.Rule? {
+        let h = heard.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (local?.rules ?? globalRules).first {
+            $0.regex == regex && (regex ? $0.heard == h : $0.heard.caseInsensitiveCompare(h) == .orderedSame)
+        }
+    }
+}

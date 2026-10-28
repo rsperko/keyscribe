@@ -99,8 +99,40 @@ struct VocabularyDraftAnalysis {
         }
     }
 
+    // Says what the button will save, so a filled or empty Use instead is never a guess.
     var buttonTitle: String {
-        isUpdate ? "Update" : "Add"
+        let verb = isUpdate ? "Update" : "Add"
+        switch proposal {
+        case .word: return "\(verb) Word"
+        case .replacement: return "\(verb) Replacement"
+        case nil: return verb
+        }
+    }
+
+    func replacementSummary(in destination: CorrectionDestination) -> String? {
+        guard case let .replacement(heard, replace, regex) = proposal else { return nil }
+        let place = switch destination.scope {
+        case .global: "modes that include Global vocabulary"
+        case .mode: destination.title
+        }
+        let what = regex ? "matches of “\(heard)”" : "“\(heard)”"
+        return "Replace \(what) with “\(ReplacementAuthoring.preview(for: replace).text)” in \(place)."
+    }
+
+    static func isAlreadyAdded(_ action: VocabularyAnalysis.Action?) -> Bool {
+        guard case .noChange(let reason)? = action else { return false }
+        return reason == .wordAlreadyListed || reason == .wordCoveredByGlobal
+    }
+
+    // The selected words were a known name misheard: adding the name again does nothing, but correcting that
+    // spelling from now on is what the user came for.
+    static func teachableCorrection(
+        selected: String, term: String, action: VocabularyAnalysis.Action?
+    ) -> (heard: String, word: String)? {
+        guard isAlreadyAdded(action) else { return nil }
+        let heard = selected.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !heard.isEmpty, heard.caseInsensitiveCompare(term) != .orderedSame else { return nil }
+        return (heard, term)
     }
 
     var replacementRule: ReplacementsSet.Rule? {

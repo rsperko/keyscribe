@@ -500,6 +500,22 @@ Rules this supports:
 Split forms and dropped-letter forms therefore recover only through a literal replacement, written
 by the user or learned from History.
 
+### The History finder judges a same-consonant spelling on sound (2026-10-28)
+
+A user added "Kryten" and Parakeet heard it as "Croydon", "Cryden" and "Crayton". The near match above
+recovers none of them, by design: they are two to four edits away. The History finder, which suggests
+literal replacements the user confirms, missed "Croydon": four edits drag its spelling score down,
+though its sound score was 0.80 and its consonant key matched the term's exactly. A candidate whose
+consonant key equals the term's is now judged on its sound score when that is the higher of the two.
+
+Measured with `--alias-discovery corpus/aliases` on Parakeet TDT v3, Ultra and Unified, before and after:
+wrong suggestions unchanged on each engine (5 over 146 term×record negatives), one more recovery on TDT
+v3 ("see a bun" for Siobhan). The cost is in the suggestion list, never in the transcript: common words
+with the same skeleton now qualify too ("curtain" and "carton" score about 0.78 against Kryten), and
+are offered unchecked beside their sentences. Adding a word to the dictionary now runs this finder at
+once, so the near match stays as strict as the sections above require and the misheard spellings are
+learned as replacements in the same step.
+
 ### What a whole-list competitor actually sends (2026-10-20, live capture)
 
 One MacWhisper (build 1553) request to an OpenAI-compatible endpoint was captured through a logging

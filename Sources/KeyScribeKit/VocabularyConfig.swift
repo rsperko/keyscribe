@@ -49,16 +49,33 @@ public struct ReplacementsSet: Codable, Equatable, Sendable {
         public var heard: String
         public var replace: String
         public var regex: Bool
-        public init(heard: String, replace: String, regex: Bool) {
+        public var wholeDictation: Bool
+        public init(heard: String, replace: String, regex: Bool, wholeDictation: Bool = false) {
             self.heard = heard
             self.replace = replace
             self.regex = regex
+            self.wholeDictation = wholeDictation
         }
+
+        enum CodingKeys: String, CodingKey {
+            case heard, replace, regex
+            case wholeDictation = "whole_dictation"
+        }
+
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             heard = try c.decode(String.self, forKey: .heard)
             replace = try c.decode(String.self, forKey: .replace)
             regex = try c.decodeIfPresent(Bool.self, forKey: .regex) ?? false
+            wholeDictation = try c.decodeIfPresent(Bool.self, forKey: .wholeDictation) ?? false
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(heard, forKey: .heard)
+            try c.encode(replace, forKey: .replace)
+            try c.encode(regex, forKey: .regex)
+            if wholeDictation { try c.encode(true, forKey: .wholeDictation) }
         }
     }
 
@@ -87,8 +104,9 @@ public struct ReplacementsSet: Codable, Equatable, Sendable {
         let h = heard.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !h.isEmpty else { return self }
         var copy = self
-        let rule = Rule(heard: h, replace: replace, regex: false)
+        var rule = Rule(heard: h, replace: replace, regex: false)
         if let i = copy.rules.firstIndex(where: { !$0.regex && $0.heard.caseInsensitiveCompare(h) == .orderedSame }) {
+            rule.wholeDictation = copy.rules[i].wholeDictation
             copy.rules[i] = rule
         } else {
             copy.rules.append(rule)
@@ -101,8 +119,9 @@ public struct ReplacementsSet: Codable, Equatable, Sendable {
         let h = heard.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !h.isEmpty else { return self }
         var copy = self
-        let rule = Rule(heard: h, replace: replace, regex: true)
+        var rule = Rule(heard: h, replace: replace, regex: true)
         if let i = copy.rules.firstIndex(where: { $0.regex && $0.heard == h }) {
+            rule.wholeDictation = copy.rules[i].wholeDictation
             copy.rules[i] = rule
         } else {
             copy.rules.append(rule)
@@ -110,14 +129,24 @@ public struct ReplacementsSet: Codable, Equatable, Sendable {
         return copy
     }
 
-    public func adding(heard: String, replace: String, regex: Bool) -> ReplacementsSet {
-        regex ? addingRegex(heard: heard, replace: replace) : addingLiteral(heard: heard, replace: replace)
+    // An update in place keeps the saved rule's scope unless the caller sets one: a correction that only
+    // changes the text must not let a command rule start acting inside sentences.
+    public func adding(heard: String, replace: String, regex: Bool, wholeDictation: Bool? = nil) -> ReplacementsSet {
+        var copy = regex ? addingRegex(heard: heard, replace: replace) : addingLiteral(heard: heard, replace: replace)
+        guard let wholeDictation else { return copy }
+        let h = heard.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let i = copy.rules.firstIndex(where: {
+            $0.regex == regex && (regex ? $0.heard == h : $0.heard.caseInsensitiveCompare(h) == .orderedSame)
+        }) {
+            copy.rules[i].wholeDictation = wholeDictation
+        }
+        return copy
     }
 
     public func replacing(_ original: Rule, with updated: Rule) -> ReplacementsSet {
         let heard = updated.heard.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !heard.isEmpty, let index = rules.firstIndex(of: original) else { return self }
-        let replacement = Rule(heard: heard, replace: updated.replace, regex: updated.regex)
+        let replacement = Rule(heard: heard, replace: updated.replace, regex: updated.regex, wholeDictation: updated.wholeDictation)
         guard !rules.indices.contains(where: {
             $0 != index && Self.sameIdentity(rules[$0], replacement)
         }) else { return self }
@@ -145,7 +174,7 @@ public struct ReplacementsSet: Codable, Equatable, Sendable {
 
 extension [ReplacementsSet.Rule] {
     public func toReplacementRules() -> [ReplacementRule] {
-        map { ReplacementRule(heard: $0.heard, replace: $0.replace, isRegex: $0.regex) }
+        map { ReplacementRule(heard: $0.heard, replace: $0.replace, isRegex: $0.regex, wholeDictation: $0.wholeDictation) }
     }
 }
 

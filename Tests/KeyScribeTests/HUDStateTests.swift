@@ -10,7 +10,7 @@ struct HUDStateTests {
             "ready", "recording", "recording-latched", "loading-model", "transcribing",
             "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
             "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
-            "rewrite-fallback-reasoning", "rewrite-fallback-copied", "rewrite-fallback-copied-accessibility",
+            "rewrite-fallback-reasoning", "rewrite-fallback-copied", "rewrite-fallback-copied-accessibility", "rewrite-skipped",
             "reasoning-notice",
             "microphone-error", "command-not-recognized", "command-not-recognized-long", "accessibility-error",
             "recording-countdown", "stopped-at-limit", "stopped-at-limit-local", "choice", "choice-five",
@@ -93,6 +93,35 @@ struct HUDStateTests {
     @Test func explicitlyKeepingTheLocalTextDoesNotOfferAServiceRepair() {
         let state = HUDState.localFallback(outcome: .inserted, mode: "Cleanup", connectionId: "c")
         #expect(state.errorAction == nil)
+    }
+
+    @Test func aSkippedRewriteSaysTheUserChoseItAndHowLongItRan() {
+        let state = HUDState.rewriteSkipped(outcome: .inserted, mode: "Cleanup", seconds: 17.46)
+        #expect(state.primaryText == "Inserted without rewriting")
+        #expect(state.secondaryText == "You skipped the rewrite after 17.5 seconds.")
+        #expect(state.indicator == .skipped)
+        #expect(state.errorAction == nil)
+        #expect(!state.offersPasteLast)
+        #expect(state.hidesAfterSeconds == 5)
+        #expect(state.voiceOverAnnouncement == "Inserted without rewriting. You skipped the rewrite after 17.5 seconds.")
+    }
+
+    @Test func aSkipThatThenFailedToInsertLeadsWithTheFailure() {
+        let state = HUDState.rewriteSkipped(outcome: .failed, mode: "Cleanup", seconds: 6)
+        #expect(state.primaryText == "Dictation failed")
+        #expect(state.secondaryText == "You skipped the rewrite after 6.0 seconds.")
+        #expect(state.indicator == .error)
+        #expect(state.errorAction == nil)
+    }
+
+    @Test func aSkippedRewriteThatWasCopiedStillSaysWhereTheTextWent() {
+        let state = HUDState.rewriteSkipped(outcome: .copied(.focusChanged), mode: "Cleanup", seconds: 6)
+        #expect(state.primaryText == "Copied without rewriting")
+        #expect(state.secondaryText
+            == "Focus changed while \(Branding.appName) was working. You skipped the rewrite after 6.0 seconds.")
+        #expect(state.offersPasteLast)
+        #expect(state.errorAction == nil)
+        #expect(!HUDState.rewriteSkipped(outcome: .copied(.accessibilityDenied), mode: "Cleanup", seconds: 6).offersPasteLast)
     }
 
     @Test func copiedFallbackShowsTheRewriteReasonAndTheCopiedClause() {

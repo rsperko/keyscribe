@@ -87,6 +87,7 @@ public struct DiagnosticsReport: Sendable {
         public var modeChoice: String?
         public var fallbackReason: String?
         public var reasoning: String?
+        public var rewriteSkippedMs: Int?
 
         public init(_ entry: HistoryEntry) {
             self.timestamp = DiagnosticsReport.isoTimestamp(entry.timestamp)
@@ -101,6 +102,7 @@ public struct DiagnosticsReport: Sendable {
             self.modeChoice = entry.modeChoice?.rawValue
             self.fallbackReason = entry.fallbackReason
             self.reasoning = entry.reasoning
+            self.rewriteSkippedMs = entry.rewriteSkippedMs
         }
     }
 
@@ -235,6 +237,9 @@ public struct DiagnosticsReport: Sendable {
             if let reasoning = d.reasoning {
                 out.append("    reasoning: \(reasoning)")
             }
+            if let skipped = d.rewriteSkippedMs {
+                out.append("    rewrite: skipped by the user after \(skipped) ms")
+            }
         }
         out.append(contentsOf: Self.outcomeLegend(includeCopiedCaveat: sawCopied))
         return out.joined(separator: "\n")
@@ -249,6 +254,8 @@ public struct DiagnosticsReport: Sendable {
             "    copied    delivery was diverted to the clipboard instead of inserted.",
             "    local_fallback  the AI rewrite fell back to local text. This value replaces",
             "              inserted/copied, so it does not say how the text was delivered.",
+            "              A \"rewrite: skipped by the user\" line under it means the user chose",
+            "              to insert the local text; without one, the rewrite failed.",
             "    A secure (password) field diverts delivery and is never written to history at all,",
             "    so a dictation that produced no row may have landed in one.",
         ]

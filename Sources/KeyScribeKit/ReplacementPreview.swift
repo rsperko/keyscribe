@@ -167,7 +167,7 @@ public struct ReplacementPreview: Sendable {
         text.split(whereSeparator: \.isWhitespace)
     }
 
-    private static func hunks(from old: String, to new: String) -> [(range: Range<String.Index>, before: String, after: String)] {
+    static func hunks(from old: String, to new: String) -> [(range: Range<String.Index>, before: String, after: String)] {
         let a = words(old), b = words(new)
         let difference = b.map(String.init).difference(from: a.map(String.init))
         var removed = Set<Int>(), inserted = Set<Int>()

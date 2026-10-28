@@ -252,6 +252,7 @@ not to its label.
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
 | Stopped at the limit | “Stopped at the [limit] limit” (e.g. “5-minute”) | “Inserted without rewriting — dictate again to continue” when the mode rewrites, “Inserted — dictate again to continue” when it does not, or the copied explanation | Paste last dictation when copied |
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | A short cause, such as “The model reached its output limit while reasoning.”, or “Rewrite could not be completed” when none was recorded. History keeps the full reason and advice. When copied, the focus-change or Accessibility explanation comes first. Stays five seconds when it carries a reason | AI Service Settings… opens the affected service when the failure names one. Paste last dictation also remains available when copied and Accessibility permits it |
+| Rewrite skipped | “Inserted without rewriting” — or “Copied without rewriting”; “Dictation failed” when the local text then could not be inserted | “You skipped the rewrite after 17.5 seconds.”, timed from when the rewrite started. The user chose this, so a delivered skip has its own neutral indicator, never success or failure styling; a failed delivery shows the failure styling first and keeps this line as context. When copied, the focus-change or Accessibility explanation comes first. Stays five seconds | No AI Service Settings… action. Paste last dictation remains available when copied and Accessibility permits it |
 | Reasoning setting not applied | The completed state’s own title (“Inserted”, or “Copied instead of inserted”) | “Reasoning setting not applied.” followed by a plain explanation naming the service and model — e.g. “[service] didn't accept a reasoning setting for [model], so the model uses its own. Rewrites may be slower.” Stays five seconds | None. Carried by the completion itself — never a second, delayed HUD that a following dictation could cancel unseen — once per connection and model each time the app runs. Shown when a requested reasoning setting had to be dropped and the service did not confirm the model used no reasoning, when no lower level was accepted, or when the model reasoned with reasoning off. Also shown when an OpenRouter route could only be found without guaranteeing the setting. Never after a fallback, whose reason already says what happened. On a copied completion it follows the explanation of where the text went, which is read first |
 | Voice command ran (Voice Commands mode, experimental) | Where it went — the app, the place and its browser (“Gmail · Google Chrome”), or the window and its app (“Budget — Numbers · Numbers”) — or the script or shortcut it ran (“Deploy”); a script that reported a result shows that message instead (“Switched to Inbox”) | “Voice command”, or “Started, still running” when the action has not finished; under a reported result, the script's name. A script's informational result (“Nothing waiting”) shows as an Advisory instead, with no failure styling. A window that closed, moved to another desktop, or could not be confirmed in front, and a search where some app did not list its windows, show an Error saying so (Accessibility off adds **Open Accessibility Settings**). A browser that refused control, and a script whose error output carries the Apple Events not-permitted code (`-1743`) on an error line, show an Error with **Open Automation Settings** (“Manager couldn’t control another app. Check Automation access for KeyScribe.”, followed by the script's denial line, which names the app that refused, even when later error lines follow); the button only opens that pane, never retries or asks again; if an action later fails, an Error naming the failure follows unless a dictation is in progress or a voice command choice is on screen, in which case History alone records it | None; dismiss automatically |
 | Voice command needs a choice (Voice Commands mode) | “Which one?” for apps, places, and a script's own options, “Which action?” for `run` | Numbered rows, each a name over a detail that tells it apart (app, browser and host, app identity where names repeat, a window's app plus its document or site when two titles are the same, Script/Shortcut, or the name of the script that offered the option), then how to answer with the actual Voice Commands shortcut, led by one line when window rows still read the same (“Same name; the lower number is further forward.” within one app instance, else “Same name; these windows can’t be told apart.”) | Click a row; Cancel. Stays until answered, dismissed, or idle for the timeout |
@@ -359,7 +360,8 @@ governs it (KeyScribe does not currently distinguish a "polishing on this Mac" s
   record. Once **Insert without rewriting** is on screen, pressing the dictation shortcut does the same
   thing; before then a press is ignored with the busy cue, so dictating again right after a release never
   skips that dictation's rewrite. Escape and Insert without rewriting both cancel the request, and a reply
-  arriving afterwards is discarded.
+  arriving afterwards is discarded. Inserting without rewriting is a choice, not a failure: the HUD shows
+  Rewrite skipped, and History labels the entry `Rewrite skipped` and records how long the rewrite ran.
 
 ### HUD copy rules
 
@@ -711,23 +713,52 @@ composer and lists do not live inside the mode editor.
   the current spelling and uses **Update** rather than **Add**. The first field keeps focus after
   adding so repeated entries are fast. The composer's first level is just the two
   fields, the leave-empty hint, and the Add button; **Match heard phrase as a regular expression**
-  lives behind the composer's **Pattern matching** disclosure (regex stays fully available, one disclosure
+  lives behind the composer's **Advanced** disclosure (regex stays fully available, one disclosure
   away). When regex is on the first label becomes **Heard pattern**, **Use instead** is required, the
   composer can create only a replacement — the leave-empty hint disappears and only the regex help
   shows — and the disclosure stays open so an ON regex toggle is never hidden.
   **Use instead** grows from one line to a few on every surface. Global and mode Settings place **Open
   in a larger editor…** directly beneath the field for deliberate macro authoring; quick corrections
-  in History and the standalone panel stay compact. A saved rule opens a roomy edit popover with its
-  multiline replacement editor already visible, never a sheet over a popover. Replacement content is
+  in History and the standalone panel stay compact. A saved rule opens the **Edit Replacement** sheet with
+  its multiline replacement editor already visible. Replacement content is
   stored exactly as authored (only the heard phrase is trimmed); the editor caps a single replacement at
   **65,536 characters** and refuses to save an over-limit draft rather than silently truncating it.
+- **What a rule will do, before it is saved.** Where a rule acts is a default, not a question asked of
+  every rule: an ordinary replacement fixes words inside sentences, and a new rule whose replacement
+  ends in `<CR>` matches only when said alone. Existing rules keep what they do; editing one never
+  changes it. The explicit override (**Anywhere in a sentence** / **Only when said alone**) sits
+  under **Advanced**. When the composer or the Edit Replacement sheet holds a replacement, it shows, in
+  order:
+  - one sentence when the rule is not an ordinary word fix: **Matches only when said alone. Presses
+    Return.** (or without the second sentence);
+  - an advisory when a Return-pressing rule can act mid-sentence (**This rule also replaces words within
+    sentences, where Return is skipped.**), shown whether or not History has an example, with **Only
+    Match When Said Alone** beside it. That repair changes where the rule matches — the same setting as
+    under Advanced — and takes effect on save; it never runs anything. It is distinct from **Match Whole
+    Words…**, which stops the rule changing parts of words;
+  - an advisory when the rule changes text inside other words, naming one example. For a regex rule,
+    **Match Whole Words…** first shows the rewritten pattern, and **Use This Pattern** puts it in the
+    draft. It is an advisory, not an error: a substring rule can be intended;
+  - **Try a sentence**, directly below, which shows the result and whether the rule would press Return or skip
+    the AI rewrite, so a rule can be checked with no History;
+  - the rule replayed over the user's recent dictations in that scope, as one collapsed line that
+    expands to the examples. An edit is compared with today's saved rules (**Saving this changes N of M
+    recent dictations**), so a repair shows the damaged text coming back; a rule opened unchanged is
+    compared with the scope without it (**Changes N of M recent dictations**). Warnings stay above the
+    line, never inside it. A change in behaviour (Return, skipping the AI rewrite) counts as a change even when
+    the words are the same. Each example names its mode and time, lists every changed span, and expands
+    to the whole dictation; the first few show, and **Show All N Changes** lists the rest. It is labelled
+    as local processing with today's settings, because an AI rewrite can still change the result. With
+    History off it says there is nothing to check against.
 - Dictionary: edit/remove saved words, import/export later only if needed. The first scan says only
   that terms use the intended spelling; model-specific recognition behavior and rewrite sharing live
   behind **How recognition works** inline help. Dictionary and replacement rows use the shared red
   trash action; deleting either opens an item-specific confirmation that distinguishes global entries
   from mode-only entries.
-- **Find replacements in History.** Each Words to Recognize row offers **Mishearings in History…**
-  directly when readable saved History exists. The action moves below the word when they cannot fit on
+- **Find replacements in History.** Each Words to Recognize row lists the spellings the word already
+  corrects (**Also corrects Cryden, Crayton**) and offers **Review mishearings…**, so teaching a name its
+  next mishearing has one obvious place to return to. The action appears when readable saved History
+  exists. The action moves below the word when they cannot fit on
   one line; long words wrap, and delete remains at the trailing edge. There is no word-selection state or separate launch
   button below the list. Availability follows saved records, independently of the History recording
   toggle or History pane filters, and refreshes while Vocabulary is visible. Without readable saved
@@ -740,6 +771,15 @@ composer and lists do not live inside the mode editor.
   **Use instead** is always editable and starts with the launching word. Edits change the proposed
   replacement text and previews; they do not rename the saved dictionary word or change the discovery
   target. The launching scope is shown once as **Add to**, with a short explanation of where it applies.
+  Adding a dictionary word, from the Vocabulary composer or from History, runs this search at once and
+  opens the sheet only when it finds likely mishearings, so a new name is taught in one step. Opened
+  that way, the sheet is titled **“{word}” added** and its dismiss button reads **Not Now**, because the
+  word is already saved. A single suggestion is asked as one question — **Also correct “Cryden” to
+  “Kryten”?** with its sentence and **Correct “Cryden”** — rather than a list to tick. Suggestions lead
+  the sheet, followed by one line, **Selected spellings will always become “Kryten” in this scope.**;
+  the replacement text and its scope sit in a collapsed **Replacement and scope** disclosure below, which
+  opens itself when the text has a problem, and **Search options** follows it. With nothing found the
+  sheet says **No other spellings found in saved History yet.** and how to teach the next mishearing.
   Discovered phrases start unchecked. An unchecked suggestion shows its Heard sentence context and how
   many times it matched **in search**, straight from discovery; more examples expand in place. Checking
   phrases builds one combined replacement-stage preview over all saved Heard text, and each checked row
@@ -768,6 +808,10 @@ composer and lists do not live inside the mode editor.
   Automatic Replacements as **Added {n} replacements**. Searching never contacts a network service and
   never changes saved History or the dictionary word. Replacement text remains subject to a later AI
   rewrite unless it consumes the whole utterance.
+- **History's Add to Dictionary never dead-ends on a known name.** When the selected words differ from a
+  term already in Words to Recognize (select “Crayton”, enter “Kryten”), the sheet offers **Correct
+  “Crayton” to “Kryten” from now on** with the one-line scope warning, and saves that literal correction
+  through the same path as History's other corrections, instead of a disabled Add.
 - **Set expectations honestly in the Dictionary copy** (do not overstate — say what actually
   happens). Recognition bias is a best-effort hint that only some models can take, so let each
   model's own capability drive the copy rather than naming engines here. A model that supports it
@@ -793,28 +837,64 @@ composer and lists do not live inside the mode editor.
   or below the row's current position. A context menu and accessibility actions provide **Move up**/**Move
   down** without permanent arrow-button clutter. The list expands to fit its rows and relies on the
   Settings pane's scrollbar instead of introducing nested scrolling.
-  A trailing pencil opens a roomy popover for changing the heard phrase, replacement text, or regex
-  behavior; **Update** applies the fields atomically and preserves the rule's position. Dismissing the
-  popover leaves the rule unchanged. If the rule changes or disappears outside the editor before Update,
-  the popover stays open and explains that it must be reopened instead of pretending the stale edit saved.
+  A trailing pencil (and **Edit Rule** in a rule check) opens one **Edit Replacement** sheet, presented by
+  the Vocabulary pane rather than anchored to the row, in the same treatment as the voice command editor
+  sheets' title and padding, and is laid out so an ordinary short rule fits without scrolling: one compact
+  group (**Heard phrase**, **Use instead** — one line that grows for multiline text, with **Open in a
+  larger editor…** — and beneath them **Plain phrase · Use a regular expression**, or **Regular
+  expression** with its capture help), then the rule preview above, then **Advanced** (the scope
+  override). Fields span the sheet's width. The sheet is as tall as its content, so a short rule leaves no
+  gap above the buttons; expanded examples scroll within a bounded height instead of growing the sheet,
+  and **Cancel** / **Save Changes** stay fixed at the trailing edge below it. The character count appears only near the limit.
+  **Save Changes** applies the fields atomically and preserves the rule's position; **Cancel** leaves the
+  rule unchanged. If the rule changes or disappears outside the editor before saving, the sheet stays
+  open and explains that it must be reopened instead of pretending the stale edit saved.
   Mode rules with the same identity override their included Global counterpart. Reordering changes only
   the tie priority between rules in the displayed scope.
   Each row's label line carries a right-aligned, single-line secondary-text usage caption (it truncates
   rather than wrapping, so it never adds height) so the user can see which rules earn their place:
-  `Used 14 times · last used Oct 19` (`today`/`yesterday` when recent), `Not used since added Aug 2`, or
+  `Used in 14 dictations · last used Oct 19` (`today`/`yesterday` when recent), `Not used since added Aug 2`, or
   `Added today`. A rule that already existed when counting began has no known add date, so it never
   claims one: it reads `No uses recorded since <the day counting began>` (`No uses recorded yet` on that
-  day). It counts dictations that reached their destination, independent of History. It is read-only:
-  rows keep the user's order because order is tie priority, and nothing is ever removed automatically.
+  day). It counts dictations that reached their destination and that the rule actually affected — a
+  match that left the words and the behaviour unchanged is not a use — independent of History. It is
+  read-only: rows keep the user's order because order is tie priority, and nothing is ever removed
+  automatically. Below the row, an advisory names problems the rule caused as it is now: `Changed text
+  inside other words in 6 dictations`, `Did not press Return in 2 dictations, because it matched
+  mid-sentence`. Editing the rule starts these counts over (`Since you edited it: …`), so a fixed rule
+  never carries an old warning; the use count carries over. These describe what happened when the
+  dictations were made.
+- **Check Rules Against History** (Automatic Replacements, when History exists) reads History again on
+  every click, replays every rule in the scope over recent dictations with today's rules, says how many
+  dictations it checked, and lists each rule that changes text inside other words or would drop its
+  Return (even where the words come out the same), with one example and **Edit Rule**, which opens that
+  rule's editor. With no dictations in scope it says there is nothing to check. It is labelled as what
+  today's rules would do, not a record of what happened, and covers rules edited by hand. A hand-edited rule that cannot run at
+  all (a pattern that does not compile or could take too long, or `<CR>` not at the end) is reported as
+  a config advisory naming the file and rule; the rest of the file keeps working.
 - **The composer says what Add will do before it is pressed in Settings, mode settings, and the standalone panel.** A live status directly below the relevant fields covers
   the non-obvious cases: a duplicate word ("Already in Words to Recognize", or "…already included from
-  your global vocabulary" in a mode), an identical replacement, and an update — the button relabels to
-  **Update** and the caption names the current output ("…“foo” currently becomes “barn”"). Duplicates
+  your global vocabulary" in a mode), an identical replacement, and an update. The button always says
+  what it will save — **Add Word**, **Add Replacement**, **Update Word**, or **Update Replacement** — and
+  an update's caption names the current output ("…“foo” currently becomes “barn”"). Duplicates
   disable the button but keep the composer populated (a clearly visible existing-entry status, never an error);
   a mode-local rule that overrides a global one adds normally with a caption naming the overridden
   output. Nothing here blocks — deliberate re-entry is answered with facts, not warnings.
   In the standalone correction panel, an already-saved replacement still allows **Add & Replace Selection**;
   the existing rule needs no write, but its correction is still applied to the selected text.
+- **The standalone Add to Vocabulary panel is the quick correction surface, with the same behaviour as
+  Settings and History.** It keeps two fields, the **Save to** destination, and the action row, with one
+  hint beneath **Use instead** (**Leave Use instead empty to add a word.**) and no repeated explanation.
+  Regex and the where-it-acts override sit under **Advanced**; the matching defaults, behaviour sentence,
+  and Return advisory with **Only Match When Said Alone** are the composer's. A replacement shows one
+  summary line (**Replace “Cryden” with “Kryten” in modes that include Global vocabulary.**), and the
+  destination reads **Saved on this Mac.** followed by **Applies in modes that include Global
+  vocabulary.** or **Applies only in {mode}.** It has no History preview. A word already added never
+  dead-ends: it offers **Review Mishearings…**, and when the panel opened on selected words that differ
+  from it (“Crayton”), **Correct “Crayton” to “Kryten”**. Adding a word runs the same mishearing review
+  as Settings: it opens over the panel only when History holds likely mishearings, offered unchecked;
+  otherwise the word is saved and the panel says **“Kryten” added**, that no other spellings were found
+  yet, and how to teach the next one, with **Done**.
 ### AI Services
 
 An AI service is a named connection, not a global provider choice. The persistent list is **Your
@@ -1284,7 +1364,7 @@ The list is grouped by day and supports search over locally stored text. Each ro
   recording limit), what was heard, in secondary text, so the entry the error pointed to is
   recognizable without opening it;
 - time and mode;
-- outcome (`Inserted`, `Copied`, `Local fallback`, or `Failed`; a voice command reads `Command`,
+- outcome (`Inserted`, `Copied`, `Local fallback`, `Rewrite skipped`, or `Failed`; a voice command reads `Command`,
   `Command failed`, `Command started`, `Needs a choice`, or `Choice cancelled`);
 - data-boundary badges relevant to that dictation;
 - no audio indicator because audio is never stored.

@@ -5,7 +5,7 @@ enum HUDPreview {
         "ready", "recording", "recording-latched", "loading-model", "transcribing",
         "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
         "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
-        "rewrite-fallback-reasoning", "rewrite-fallback-copied", "rewrite-fallback-copied-accessibility",
+        "rewrite-fallback-reasoning", "rewrite-fallback-copied", "rewrite-fallback-copied-accessibility", "rewrite-skipped",
         "reasoning-notice",
         "microphone-error", "command-not-recognized", "command-not-recognized-long", "accessibility-error",
         "recording-countdown", "stopped-at-limit", "stopped-at-limit-local", "choice", "choice-five",
@@ -100,6 +100,8 @@ enum HUDPreview {
             .localFallback(outcome: .copied(.focusChanged), mode: "Cleanup", reason: reasoningLimitReason, connectionId: "preview-service")
         case "rewrite-fallback-copied-accessibility":
             .localFallback(outcome: .copied(.accessibilityDenied), mode: "Cleanup", reason: reasoningLimitReason, connectionId: "preview-service")
+        case "rewrite-skipped":
+            .rewriteSkipped(outcome: .inserted, mode: "Cleanup", seconds: 17.5)
         case "reasoning-notice":
             .complete(
                 outcome: .inserted, mode: "Cleanup",

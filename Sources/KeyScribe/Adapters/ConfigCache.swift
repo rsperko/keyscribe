@@ -84,8 +84,24 @@ final class ConfigCache {
             voiceCommandsEnabled
                 ? warning(VoiceCommandStore.fileName, in: supportDir, VoiceCommandStore.unknownKeys(in:)) : nil,
         ] + modeFiles.map { warning($0, in: modesDir, ModeStore.unknownKeys(in:)) }).compactMap { $0 }
+            + ([inactiveRules(ReplacementsStore.fileName, in: supportDir) { try ReplacementsStore.decode(from: $0).toRules() }]
+                + modeFiles.map { file in
+                    inactiveRules(file, in: modesDir) {
+                        try ModeStore.decode(from: $0, id: String(file.dropLast(".toml".count))).replacements.toRules()
+                    }
+                }).compactMap { $0 }
         fileWarningsCache = warnings
         return warnings
+    }
+
+    private func inactiveRules(
+        _ fileName: String, in dir: URL, _ rules: (String) throws -> [ReplacementRule]
+    ) -> ConfigFileIssue? {
+        let url = dir.appendingPathComponent(fileName)
+        guard let toml = try? String(contentsOf: url, encoding: .utf8), let decoded = try? rules(toml) else { return nil }
+        let inactive = ReplacementsStage.inactiveRules(decoded)
+        guard !inactive.isEmpty else { return nil }
+        return .inactiveRules(fileName, relativePath: relativePath(of: url), inactive)
     }
 
     private func warning(

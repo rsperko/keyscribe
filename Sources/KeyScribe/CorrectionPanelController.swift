@@ -17,8 +17,11 @@ final class CorrectionPanelController {
     private let destinations: () -> [CorrectionDestination]
     private let analyze: (VocabularyProposal, CorrectionDestination) -> VocabularyAnalysis
     private let addDictionaryWord: (String, CorrectionDestination) -> ConfigRepository.AddResult
-    private let addReplacement: (String, String, Bool, CorrectionDestination) -> ConfigRepository.AddResult
+    private let addReplacement: (String, String, Bool, Bool?, CorrectionDestination) -> ConfigRepository.AddResult
+    private let existingRule: (String, Bool, CorrectionDestination) -> ReplacementsSet.Rule?
     private let captureSelection: () async -> String?
+    // Set once Settings exists: the History finder for a word in a destination. nil means no History to search.
+    var mishearingsFinder: ((String, CorrectionDestination, @escaping (Int) -> Void) -> HistoryReplacementsModel?)?
     private let clipboardPaste: () -> ClipboardPaste
     private var previousApp: NSRunningApplication?
     private let status = CorrectionPanelStatus()
@@ -27,7 +30,8 @@ final class CorrectionPanelController {
         destinations: @escaping () -> [CorrectionDestination] = { [.global] },
         analyze: @escaping (VocabularyProposal, CorrectionDestination) -> VocabularyAnalysis,
         addDictionaryWord: @escaping (String, CorrectionDestination) -> ConfigRepository.AddResult,
-        addReplacement: @escaping (String, String, Bool, CorrectionDestination) -> ConfigRepository.AddResult,
+        addReplacement: @escaping (String, String, Bool, Bool?, CorrectionDestination) -> ConfigRepository.AddResult,
+        existingRule: @escaping (String, Bool, CorrectionDestination) -> ReplacementsSet.Rule? = { _, _, _ in nil },
         captureSelection: @escaping () async -> String? = { await TextInserter.captureSelection(requirePerfectRestore: true) },
         clipboardPaste: @escaping () -> ClipboardPaste = { ClipboardPaste() }
     ) {
@@ -35,6 +39,7 @@ final class CorrectionPanelController {
         self.analyze = analyze
         self.addDictionaryWord = addDictionaryWord
         self.addReplacement = addReplacement
+        self.existingRule = existingRule
         self.captureSelection = captureSelection
         self.clipboardPaste = clipboardPaste
     }
@@ -55,17 +60,24 @@ final class CorrectionPanelController {
     private func show(prefill: String?) {
         window?.close()
         status.message = nil
+        status.addedWord = nil
+        status.mishearings = nil
         let view = CorrectionPanelView(
             prefill: prefill ?? "",
             canCorrect: prefill != nil && hasPasteTarget,
             destinations: destinations(),
             analyze: analyze,
+            existingRule: existingRule,
             status: status,
             onSave: { [weak self] result in
                 guard let self else { return }
                 switch self.apply(result) {
                 case .saved:
-                    self.window?.close()
+                    if case .dictionary(let word, let destination) = result {
+                        self.offerMishearings(of: word, in: destination, afterAdding: true)
+                    } else {
+                        self.window?.close()
+                    }
                 case .noChange:
                     self.status.refresh()
                 case .failed(let refusal):
@@ -73,6 +85,7 @@ final class CorrectionPanelController {
                 }
             },
             onCorrect: { [weak self] result, pasteText in self?.applyAndCorrect(result, pasteText: pasteText) },
+            onReview: { [weak self] word, destination in self?.offerMishearings(of: word, in: destination, afterAdding: false) },
             onCancel: { [weak self] in self?.window?.close() })
         let window = NSWindow(contentViewController: NSHostingController(rootView: view))
         window.title = "Add to Vocabulary"
@@ -84,6 +97,49 @@ final class CorrectionPanelController {
         self.window = window
     }
 
+    var canReviewMishearings: Bool { mishearingsFinder != nil }
+
+    // After a word is added the review opens only when History holds likely mishearings; otherwise the panel
+    // says how to teach a spelling later. Asked for explicitly, the review always opens.
+    private func offerMishearings(of word: String, in destination: CorrectionDestination, afterAdding: Bool) {
+        let finder = mishearingsFinder?(word, destination) { [weak self] count in
+            self?.status.mishearings = nil
+            self?.status.message = nil
+            if afterAdding { self?.window?.close() } else {
+                self?.status.notice = count == 1 ? "Added 1 replacement." : "Added \(count) replacements."
+            }
+        }
+        guard let finder else {
+            if afterAdding { status.addedWord = word }
+            return
+        }
+        finder.offeredAfterAdding = afterAdding
+        Task { @MainActor [weak self] in
+            if afterAdding {
+                guard let shown = await Self.reviewWorthShowing(finder) else {
+                    self?.status.addedWord = word
+                    return
+                }
+                self?.status.mishearings = shown
+            } else {
+                self?.status.mishearings = finder
+            }
+        }
+    }
+
+    static func reviewWorthShowing(_ finder: HistoryReplacementsModel) async -> HistoryReplacementsModel? {
+        await finder.refresh()
+        guard !finder.findings.isEmpty else { finder.close(); return nil }
+        return finder
+    }
+
+    func dismissMishearings() {
+        let afterAdding = status.mishearings?.offeredAfterAdding == true
+        status.mishearings?.close()
+        status.mishearings = nil
+        if afterAdding { window?.close() }
+    }
+
     private enum SaveOutcome { case saved, noChange, failed(refusal: String?) }
 
     private func apply(_ result: CorrectionPanelView.SaveResult) -> SaveOutcome {
@@ -93,8 +149,8 @@ final class CorrectionPanelController {
         let added: ConfigRepository.AddResult
         switch result {
         case .dictionary(let word, let destination): added = addDictionaryWord(word, destination)
-        case .replacement(let heard, let replace, let regex, let destination):
-            added = addReplacement(heard, replace, regex, destination)
+        case .replacement(let heard, let replace, let regex, let wholeDictation, let destination):
+            added = addReplacement(heard, replace, regex, wholeDictation, destination)
         }
         switch added {
         case .saved: return .saved
@@ -115,14 +171,14 @@ final class CorrectionPanelController {
     private static func destination(of result: CorrectionPanelView.SaveResult) -> CorrectionDestination {
         switch result {
         case .dictionary(_, let d): return d
-        case .replacement(_, _, _, let d): return d
+        case .replacement(_, _, _, _, let d): return d
         }
     }
 
     private static func proposal(of result: CorrectionPanelView.SaveResult) -> VocabularyProposal {
         switch result {
         case .dictionary(let word, _): return .word(word)
-        case .replacement(let heard, let replace, let regex, _):
+        case .replacement(let heard, let replace, let regex, _, _):
             return .replacement(heard: heard, replace: replace, regex: regex)
         }
     }
@@ -156,6 +212,9 @@ final class CorrectionPanelController {
 @MainActor
 final class CorrectionPanelStatus: ObservableObject {
     @Published var message: String?
+    @Published var notice: String?
+    @Published var addedWord: String?
+    @Published var mishearings: HistoryReplacementsModel?
     @Published private(set) var revision = 0
 
     func refresh() { revision += 1 }
@@ -179,6 +238,13 @@ struct CorrectionDestination: Hashable, Identifiable {
         CorrectionDestination(scope: .mode(id), title: name, menuTitle: name)
     }
 
+    var scopeLine: String {
+        switch scope {
+        case .global: "Saved on this Mac. Applies in modes that include Global vocabulary."
+        case .mode: "Saved on this Mac. Applies only in \(title)."
+        }
+    }
+
     // Global plus the user's enabled, non-system modes. A disabled mode is excluded: a term routed there
     // would do nothing until the mode is enabled, with no hint at the panel.
     static func list(for modes: [Mode]) -> [CorrectionDestination] {
@@ -189,7 +255,7 @@ struct CorrectionDestination: Hashable, Identifiable {
 private struct CorrectionPanelView: View {
     enum SaveResult {
         case dictionary(word: String, destination: CorrectionDestination)
-        case replacement(heard: String, replace: String, regex: Bool, destination: CorrectionDestination)
+        case replacement(heard: String, replace: String, regex: Bool, wholeDictation: Bool?, destination: CorrectionDestination)
     }
 
     // The selection captured when the panel opened. "Add & Replace Selection" pastes the rule's effect
@@ -198,14 +264,18 @@ private struct CorrectionPanelView: View {
     let canCorrect: Bool
     let destinations: [CorrectionDestination]
     let analyze: (VocabularyProposal, CorrectionDestination) -> VocabularyAnalysis
+    let existingRule: (String, Bool, CorrectionDestination) -> ReplacementsSet.Rule?
     let onSave: (SaveResult) -> Void
     let onCorrect: (SaveResult, String) -> Void
+    let onReview: (String, CorrectionDestination) -> Void
     let onCancel: () -> Void
     @ObservedObject var status: CorrectionPanelStatus
 
     @State private var term: String
     @State private var replace: String
     @State private var regex = false
+    @State private var chosenWholeDictation: Bool?
+    @State private var advancedExpanded = false
     @State private var destination: CorrectionDestination
     @FocusState private var focus: Field?
 
@@ -215,8 +285,10 @@ private struct CorrectionPanelView: View {
         prefill: String, canCorrect: Bool,
         destinations: [CorrectionDestination],
         analyze: @escaping (VocabularyProposal, CorrectionDestination) -> VocabularyAnalysis,
+        existingRule: @escaping (String, Bool, CorrectionDestination) -> ReplacementsSet.Rule?,
         status: CorrectionPanelStatus,
         onSave: @escaping (SaveResult) -> Void, onCorrect: @escaping (SaveResult, String) -> Void,
+        onReview: @escaping (String, CorrectionDestination) -> Void,
         onCancel: @escaping () -> Void
     ) {
         let destinations = destinations.isEmpty ? [.global] : destinations
@@ -224,9 +296,11 @@ private struct CorrectionPanelView: View {
         self.canCorrect = canCorrect
         self.destinations = destinations
         self.analyze = analyze
+        self.existingRule = existingRule
         self.status = status
         self.onSave = onSave
         self.onCorrect = onCorrect
+        self.onReview = onReview
         self.onCancel = onCancel
         _term = State(initialValue: prefill)
         _replace = State(initialValue: "")
@@ -234,36 +308,74 @@ private struct CorrectionPanelView: View {
     }
 
     var body: some View {
-        let draft = draft
-        return VStack(alignment: .leading, spacing: 14) {
-            Text("Add a word \(Branding.appName) should recognize, or fill in Use instead to replace a phrase \(Branding.appName) keeps hearing wrong.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+        Group {
+            if let added = status.addedWord {
+                addedConfirmation(added)
+            } else {
+                form
+            }
+        }
+        .padding(20)
+        .frame(width: 520)
+        .sheet(item: Binding(get: { status.mishearings }, set: { if $0 == nil { status.mishearings = nil } })) { finder in
+            HistoryReplacementsSheet(model: finder) { onCancelReview(finder) }
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(regex ? "Heard pattern" : "Word or heard phrase")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField(regex ? "Regular expression" : "e.g. Kubernetes", text: $term)
-                        .multilineTextAlignment(.leading)
-                        .textFieldStyle(.roundedBorder)
-                        .focused($focus, equals: .term)
-                        .onSubmit(commitSave)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier(AccessibilityID.Correction.term)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(regex ? "Use instead" : "Use instead (optional)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    ReplacementValueField(
-                        title: regex ? "Use instead" : "Use instead (optional)",
-                        placeholder: regex ? "Replacement text" : "Optional correction",
-                        text: $replace,
-                        fieldID: AccessibilityID.Correction.useInstead,
-                        onSubmit: commitSave)
+    private func onCancelReview(_ finder: HistoryReplacementsModel) {
+        finder.close()
+        status.mishearings = nil
+        if finder.offeredAfterAdding { onCancel() }
+    }
+
+    private func addedConfirmation(_ word: String) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("“\(word)” added").font(.headline)
+            Text("No other spellings found in saved History yet. When “\(word)” is misheard, select the wrong words and open Add to Vocabulary again to correct them.")
+                .font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(destination.scopeLine).font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("Done", action: onCancel)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier(AccessibilityID.Correction.done)
+            }
+        }
+    }
+
+    private var form: some View {
+        let draft = draft
+        let rule = draftRule(draft)
+        let teach = regex ? nil : VocabularyDraftAnalysis.teachableCorrection(
+            selected: originalSelection, term: trimmedTerm, action: draft.analysis?.action)
+        let alreadyAdded = !regex && replace.isEmpty && VocabularyDraftAnalysis.isAlreadyAdded(draft.analysis?.action)
+        return VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(regex ? "Heard pattern" : "Word or heard phrase")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField(regex ? "Regular expression" : "e.g. Kubernetes", text: $term)
+                    .multilineTextAlignment(.leading)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($focus, equals: .term)
+                    .onSubmit(commitSave)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier(AccessibilityID.Correction.term)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                Text(regex ? "Use instead" : "Use instead (optional)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ReplacementValueField(
+                    title: regex ? "Use instead" : "Use instead (optional)",
+                    placeholder: regex ? "Replacement text" : "Optional correction",
+                    text: $replace,
+                    fieldID: AccessibilityID.Correction.useInstead,
+                    onSubmit: commitSave)
+                if !regex {
+                    Text("Leave Use instead empty to add a word.")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
 
@@ -272,10 +384,34 @@ private struct CorrectionPanelView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier(AccessibilityID.Correction.status)
             }
-
-            Toggle("Match heard phrase as a regular expression", isOn: $regex)
-                .toggleStyle(.checkbox)
-                .accessibilityIdentifier(AccessibilityID.Correction.regexToggle)
+            if alreadyAdded {
+                HStack(spacing: 12) {
+                    if let teach {
+                        Button("Correct “\(teach.heard)” to “\(teach.word)”") {
+                            onSave(.replacement(heard: teach.heard, replace: teach.word, regex: false, wholeDictation: nil, destination: destination))
+                        }
+                        .accessibilityIdentifier(AccessibilityID.Correction.teach)
+                    }
+                    Button("Review Mishearings…") { onReview(trimmedTerm, destination) }
+                        .accessibilityIdentifier(AccessibilityID.Correction.review)
+                }
+                .controlSize(.small)
+            }
+            if let summary = draft.replacementSummary(in: destination) {
+                Text(summary).font(.callout).fixedSize(horizontal: false, vertical: true)
+            }
+            if let rule {
+                if let behavior = ReplacementAuthoring.behaviorSummary(
+                    replace: rule.replace, regex: rule.regex, wholeDictation: rule.wholeDictation) {
+                    Text(behavior).font(.callout)
+                }
+                if let advisory = ReplacementAuthoring.returnScopeAdvisory(
+                    replace: rule.replace, regex: rule.regex, wholeDictation: rule.wholeDictation) {
+                    IssueText(advisory, severity: .advisory)
+                    Button("Only Match When Said Alone") { chosenWholeDictation = true }
+                        .controlSize(.small)
+                }
+            }
 
             HStack(spacing: 10) {
                 Text("Save to")
@@ -297,25 +433,33 @@ private struct CorrectionPanelView: View {
                 }
                 Spacer()
             }
-
-            Text(helpText)
+            Text(destination.scopeLine)
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+
+            DisclosureSection("Advanced", isExpanded: Binding(get: { advancedExpanded || regex }, set: { advancedExpanded = $0 })) {
+                Toggle("Match heard phrase as a regular expression", isOn: $regex)
+                    .toggleStyle(.checkbox)
+                    .accessibilityIdentifier(AccessibilityID.Correction.regexToggle)
+                if regex {
+                    Text("Use captures like $1.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if rule != nil {
+                    RuleScopePicker(wholeDictation: wholeDictation, id: AccessibilityID.Correction.scope)
+                }
+            }
+            .accessibilityIdentifier(AccessibilityID.Correction.advanced)
 
             if let issue = draft.validationIssue {
                 VocabularyDraftIssueText(issue: issue)
             }
-
-            Text(saveDestinationText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
             if let message = status.message {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                IssueText(message, severity: .advisory)
                     .fixedSize(horizontal: false, vertical: true)
+            } else if let notice = status.notice {
+                Label(notice, systemImage: "checkmark.circle.fill")
+                    .font(.caption).foregroundStyle(.green)
             }
 
             HStack {
@@ -332,8 +476,6 @@ private struct CorrectionPanelView: View {
                     .accessibilityIdentifier(AccessibilityID.Correction.add)
             }
         }
-        .padding(20)
-        .frame(width: 560)
         .onAppear {
             Task {
                 try? await Task.sleep(for: .milliseconds(50))
@@ -348,10 +490,6 @@ private struct CorrectionPanelView: View {
         replace.isEmpty ? trimmedTerm : replace
     }
 
-    private var canSave: Bool {
-        draft.canCommit
-    }
-
     private var hasReplacementValue: Bool { !replace.isEmpty }
 
     private var draft: VocabularyDraftAnalysis {
@@ -361,17 +499,20 @@ private struct CorrectionPanelView: View {
             analyze: { analyze($0, destination) })
     }
 
-    private var entryKind: String {
-        (!regex && replace.isEmpty) ? "vocabulary" : "replacements"
+    // The same default as the Settings composer: a new Return-pressing rule matches only when said alone, an
+    // update keeps the saved rule's choice, until the user picks under Advanced.
+    private var wholeDictation: Binding<Bool> {
+        Binding(
+            get: {
+                chosenWholeDictation ?? existingRule(trimmedTerm, regex, destination)?.wholeDictation
+                    ?? ReplacementAuthoring.pressesReturn(replace: replace, regex: regex)
+            },
+            set: { chosenWholeDictation = $0 })
     }
 
-    private var saveDestinationText: String {
-        switch destination.scope {
-        case .global:
-            return "Saves to global \(entryKind). Nothing leaves this Mac."
-        case .mode:
-            return "Saves to \(destination.title) \(entryKind). Nothing leaves this Mac."
-        }
+    private func draftRule(_ draft: VocabularyDraftAnalysis) -> ReplacementsSet.Rule? {
+        guard case let .replacement(heard, replace, regex)? = draft.proposal else { return nil }
+        return ReplacementsSet.Rule(heard: heard, replace: replace, regex: regex, wholeDictation: wholeDictation.wrappedValue)
     }
 
     // What "Add & Replace Selection" pastes over the captured selection: the replacement text, or — for a
@@ -384,15 +525,8 @@ private struct CorrectionPanelView: View {
             replacement: replace)
     }
 
-    private var helpText: String {
-        if regex {
-            return "Regex always creates a replacement, so Use instead is required. Use captures like $1. Replacements run before any AI rewrite."
-        }
-        return "Leave Use instead empty to add a word. Fill it in to create an automatic replacement. Dictionary entries are hints; replacements run before any AI rewrite."
-    }
-
     private func commitSave() {
-        guard canSave else { return }
+        guard draft.canCommit else { return }
         onSave(buildResult())
     }
 
@@ -400,7 +534,9 @@ private struct CorrectionPanelView: View {
         if !regex && replace.isEmpty {
             return .dictionary(word: trimmedTerm, destination: destination)
         }
-        return .replacement(heard: trimmedTerm, replace: replace, regex: regex, destination: destination)
+        return .replacement(
+            heard: trimmedTerm, replace: replace, regex: regex, wholeDictation: wholeDictation.wrappedValue,
+            destination: destination)
     }
 }
 

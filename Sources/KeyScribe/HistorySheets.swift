@@ -84,6 +84,7 @@ struct AddToDictionarySheet: View {
     let initialTerm: String
     let analyze: (VocabularyProposal) -> VocabularyAnalysis
     let onSave: (String, VocabularyAnalysis.Action) -> String?
+    let onCorrect: (String, String) -> String?
     @Environment(\.dismiss) private var dismiss
     @State private var term: String
     @State private var saveFailure: String?
@@ -92,11 +93,13 @@ struct AddToDictionarySheet: View {
     init(
         initialTerm: String,
         analyze: @escaping (VocabularyProposal) -> VocabularyAnalysis,
-        onSave: @escaping (String, VocabularyAnalysis.Action) -> String?
+        onSave: @escaping (String, VocabularyAnalysis.Action) -> String?,
+        onCorrect: @escaping (String, String) -> String? = { _, _ in nil }
     ) {
         self.initialTerm = initialTerm
         self.analyze = analyze
         self.onSave = onSave
+        self.onCorrect = onCorrect
         _term = State(initialValue: initialTerm)
     }
 
@@ -122,15 +125,30 @@ struct AddToDictionarySheet: View {
                 VocabularyFeedbackView(feedback: feedback)
                     .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.status)
             }
-            Text("Next time you say this, \(Branding.appName) will prefer your spelling. A phrase that is always misheard the same way works better as a Replacement, which changes it exactly.")
-                .font(.caption).foregroundStyle(.secondary)
+            let correction = VocabularyDraftAnalysis.teachableCorrection(selected: initialTerm, term: trimmed, action: draft.analysis?.action)
+            if let correction {
+                Text("“\(correction.heard)” will always become “\(correction.word)” in this scope.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Next time you say this, \(Branding.appName) will prefer your spelling. A phrase that is always misheard the same way works better as a Replacement, which changes it exactly.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if let saveFailure { IssueText(saveFailure) }
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(draft.buttonTitle) { save() }
-                    .keyboardShortcut(.defaultAction).disabled(!draft.canCommit)
-                    .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.save)
+                if let correction {
+                    Button("Correct “\(correction.heard)” to “\(correction.word)” from now on") {
+                        saveFailure = onCorrect(correction.heard, correction.word)
+                        if saveFailure == nil { dismiss() }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.correct)
+                } else {
+                    Button(draft.buttonTitle) { save() }
+                        .keyboardShortcut(.defaultAction).disabled(!draft.canCommit)
+                        .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.save)
+                }
             }
         }
         .padding(20).frame(width: 400)

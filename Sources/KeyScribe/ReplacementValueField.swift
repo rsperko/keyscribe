@@ -84,10 +84,12 @@ struct ReplacementTextEditor: View {
                     IssueText("Too long by \(overflow.formatted()) characters. Shorten it to save.")
                 }
                 Spacer()
-                Text("\(text.count.formatted()) / \(ReplacementAuthoring.maxCharacters.formatted())")
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(isOverLimit ? Color.red : Color.secondary)
+                if text.count >= ReplacementAuthoring.maxCharacters * 9 / 10 {
+                    Text("\(text.count.formatted()) / \(ReplacementAuthoring.maxCharacters.formatted())")
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(isOverLimit ? Color.red : Color.secondary)
+                }
             }
         }
         .onChange(of: text) { _, newValue in

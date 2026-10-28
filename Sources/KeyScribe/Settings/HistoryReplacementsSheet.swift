@@ -6,6 +6,7 @@ struct HistoryReplacementsSheet: View {
     let onCancel: () -> Void
     @State private var searchExpanded = false
     @State private var combinedExpanded = false
+    @State private var detailsExpanded = false
     @FocusState private var focusedPhrase: String?
 
     private typealias IDs = AccessibilityID.Settings.HistoryReplacements
@@ -13,26 +14,18 @@ struct HistoryReplacementsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Mishearings of “\(model.word)”").font(.title2.bold())
-                Text("Review similar phrases from saved History and choose which to correct.").foregroundStyle(.secondary)
+                if let one = model.singleSuggestion {
+                    Text("Also correct “\(one.heard)” to “\(model.replacement)”?").font(.title2.bold())
+                    Text("“\(model.word)” added.").foregroundStyle(.secondary)
+                } else if model.offeredAfterAdding {
+                    Text("“\(model.word)” added").font(.title2.bold())
+                    Text("Also correct any of these spellings to “\(model.replacement)”?").foregroundStyle(.secondary)
+                } else {
+                    Text("Mishearings of “\(model.word)”").font(.title2.bold())
+                    Text("Review similar phrases from saved History and choose which to correct.").foregroundStyle(.secondary)
+                }
             }
             Form {
-                Section {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ReplacementValueField(
-                            title: "Use instead", placeholder: "Text to insert", text: $model.replacement,
-                            fieldID: IDs.useInstead)
-                            .formFieldLabel("Use instead")
-                        if let issue = model.replacementIssue {
-                            IssueText(issue)
-                        } else if let advisory = model.replacementAdvisory {
-                            IssueText(advisory, severity: .advisory)
-                        }
-                        Text("Add to \(model.destinationName). \(destinationScopeLine)")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                searchSection
                 Section {
                     if model.loadFailed {
                         IssueText("Could not read History. Refresh the search to try again.")
@@ -48,13 +41,25 @@ struct HistoryReplacementsSheet: View {
                         if model.phrases.isEmpty, !model.isWorking {
                             Text(model.handledCount > 0
                                  ? "Similar phrases are already corrected automatically."
-                                 : "No possible mishearings found.")
+                                 : "No other spellings found in saved History yet.")
                                 .font(.headline)
-                            Text("You can enter a heard phrase yourself.")
+                            Text("When “\(model.word)” is misheard again, select those words in History and choose Add to Dictionary, or come back here with Review mishearings… beside the word. You can also enter a heard phrase yourself.")
                                 .font(.caption).foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        ForEach(model.phrases) { phrase in
-                            HistoryReplacementDraftRow(model: model, phrase: phrase, focus: $focusedPhrase)
+                        if let one = model.singleSuggestion {
+                            ForEach(Array(model.discoveryExcerpts(for: one.id).prefix(3).enumerated()), id: \.offset) { _, excerpt in
+                                (Text("“" + excerpt.before) + Text(excerpt.match).bold() + Text(excerpt.after + "”"))
+                                    .font(.callout)
+                            }
+                        } else {
+                            ForEach(model.phrases) { phrase in
+                                HistoryReplacementDraftRow(model: model, phrase: phrase, focus: $focusedPhrase)
+                            }
+                        }
+                        if !model.phrases.isEmpty {
+                            Text("Selected spellings will always become “\(model.replacement)” in this scope.")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                         Button("Add a phrase manually…") { model.addPhrase() }
                             .accessibilityIdentifier(IDs.addPhrase)
@@ -72,6 +77,29 @@ struct HistoryReplacementsSheet: View {
                         .accessibilityIdentifier(IDs.combinedPreview)
                     }
                 }
+                Section {
+                    DisclosureSection(
+                        isExpanded: $detailsExpanded,
+                        hasError: model.replacementIssue != nil
+                    ) {
+                        DisclosureSummaryLabel(title: "Replacement and scope", summary: "“\(model.replacement)” · \(model.destinationName)")
+                    } content: {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ReplacementValueField(
+                                title: "Use instead", placeholder: "Text to insert", text: $model.replacement,
+                                fieldID: IDs.useInstead)
+                                .formFieldLabel("Use instead")
+                            if let issue = model.replacementIssue {
+                                IssueText(issue)
+                            } else if let advisory = model.replacementAdvisory {
+                                IssueText(advisory, severity: .advisory)
+                            }
+                            Text("Add to \(model.destinationName). \(destinationScopeLine)")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                searchSection
             }
             .formStyle(.grouped)
             if let problem = model.problem {
@@ -90,15 +118,24 @@ struct HistoryReplacementsSheet: View {
             Divider()
             HStack {
                 if model.isWorking { ProgressView().controlSize(.small) }
-                Text(model.addGuidance).font(.caption).foregroundStyle(.secondary)
+                if model.singleSuggestion == nil {
+                    Text(model.addGuidance).font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
-                Button("Cancel", role: .cancel, action: onCancel)
+                Button(model.offeredAfterAdding ? "Not Now" : "Cancel", role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier(IDs.cancel)
-                Button(addTitle) { model.perform { await $0.add() } }
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!model.canAdd)
-                    .accessibilityIdentifier(IDs.add)
+                if let one = model.singleSuggestion {
+                    Button("Correct “\(one.heard)”") { model.perform { await $0.confirmSingleSuggestion() } }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(model.isWorking || model.replacementIssue != nil)
+                        .accessibilityIdentifier(IDs.add)
+                } else {
+                    Button(addTitle) { model.perform { await $0.add() } }
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(!model.canAdd)
+                        .accessibilityIdentifier(IDs.add)
+                }
             }
         }
         .padding(20)

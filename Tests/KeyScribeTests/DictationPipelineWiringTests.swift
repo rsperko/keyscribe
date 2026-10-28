@@ -370,6 +370,21 @@ struct DictationPipelineWiringTests {
         #expect(out.usage.rules["mode:code|l|slash resume"]?.count == 1)
     }
 
+    @Test func aRuleThatChangedTextInsideAWordIsRecordedAsSuch() async {
+        let m = mode(id: "code", replacements: [ReplacementsSet.Rule(heard: "p[iy]e?", replace: "pi<CR>", regex: true)])
+        let out = await run(transcript: "I copy the pieces", mode: m)
+        let entry = out.usage.rules[#"mode:code|r|p[iy]e?"#]
+        #expect(entry?.count == 1)
+        #expect(entry?.health?.insideWord == 1)
+        #expect(entry?.health?.returnOmitted == 1)
+    }
+
+    @Test func aMatchThatChangedNothingIsNotAUse() async {
+        let m = mode(id: "code", replacements: [ReplacementsSet.Rule(heard: "(hello)", replace: "$1", regex: true)])
+        let out = await run(transcript: "say hello there", mode: m)
+        #expect(out.usage.rules[#"mode:code|r|(hello)"#] == nil)
+    }
+
     @Test func aDictationThatFailedToLandCountsNothing() async {
         let m = mode(id: "code", replacements: [ReplacementsSet.Rule(heard: "cat", replace: "dog", regex: false)])
         let out = await run(transcript: "a cat", modes: [m], defaultModeId: m.id, insertSucceeds: false)
@@ -681,6 +696,37 @@ struct DictationPipelineWiringTests {
         #expect(await awaitCancelled(rig.llm))
         _ = await firstHistoryEntry(in: rig.history)
         #expect(await rig.inserts.text == "draft the memo")
+    }
+
+    @Test func aSkippedRewriteIsRecordedAsSkippedWithHowLongItRan() async {
+        let rig = rewriteRig(escapeDelay: .milliseconds(200))
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await startRewrite(rig)
+        for _ in 0..<200 where !rig.hud.offersLocalTranscript { try? await Task.sleep(for: .milliseconds(10)) }
+        rig.controller.handleStart()
+        #expect(await awaitCancelled(rig.llm))
+        await rig.controller.dictationTask?.value
+        let entry = await firstHistoryEntry(in: rig.history)
+        #expect(entry?.outcome == .localFallback)
+        #expect(entry?.fallbackReason == nil)
+        let skipped = entry?.rewriteSkippedMs ?? 0
+        #expect(skipped >= 200)
+        #expect(entry?.stageMillis?["rewrite"] == skipped)
+        guard case .rewriteSkipped(.inserted, _, let seconds)? = rig.hud.states.last else {
+            Issue.record("expected the skipped state, got \(String(describing: rig.hud.states.last))"); return
+        }
+        #expect(Int((seconds * 1000).rounded()) == skipped)
+    }
+
+    @Test func aRewriteThatFailsOnItsOwnIsNotRecordedAsSkipped() async {
+        let rig = rewriteRig(deadline: 0.05)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await startRewrite(rig)
+        await rig.controller.dictationTask?.value
+        let entry = await firstHistoryEntry(in: rig.history)
+        #expect(entry?.outcome == .localFallback)
+        #expect(entry?.rewriteSkippedMs == nil)
+        #expect(entry?.fallbackReason != nil)
     }
 
     @Test func theTriggerDuringARewriteDoesNothingBeforeInsertWithoutRewritingIsOffered() async {

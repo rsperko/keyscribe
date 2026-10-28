@@ -16,6 +16,16 @@ struct AliasDiscoveryTests {
         #expect(phrases(["The patient presented with tachardia."], "tachycardia") == ["tachardia"])
     }
 
+    @Test func aSpellingFarOffButWithTheSameConsonantsAsTheNameIsFound() {
+        let texts = ["Croydon, create a pane for me", "Cryden, pair with me", "Crayton, open it"]
+        #expect(Set(phrases(texts, "Kryten")) == ["Croydon", "Cryden", "Crayton"])
+    }
+
+    @Test func sameConsonantsAloneDoNotFlagAWordThatSoundsDifferent() {
+        #expect(phrases(["The courtyard is quiet."], "Kryten").isEmpty)
+        #expect(phrases(["Order a crate and a tin."], "Kryten").isEmpty)
+    }
+
     @Test func soundAlikesBuiltFromDifferentWordsAreOutOfReach() {
         #expect(phrases(["I expect you to fight for this."], "Yugabyte").isEmpty)
         #expect(phrases(["Pull the masks over the cluster."], "Postgres").isEmpty)

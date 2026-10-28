@@ -64,6 +64,9 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     // Where a cloud rewrite's reasoning setting landed ("Off", "Low — the lowest this model accepts"). A fixed
     // local summary, never provider text. nil on local-only and older rows.
     public var reasoning: String?
+    // How long the rewrite had run when the user inserted the local text instead. Its presence is what tells a
+    // deliberate skip from a rewrite that failed; nil otherwise and on older rows.
+    public var rewriteSkippedMs: Int?
     public var stoppedAtLimit: Bool?
     public var failureReason: String?
     public var reported: String?
@@ -99,6 +102,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case triggerKey = "trigger_key"
         case fallbackReason = "fallback_reason"
         case reasoning
+        case rewriteSkippedMs = "rewrite_skipped_ms"
         case stoppedAtLimit = "stopped_at_limit"
         case failureReason = "failure_reason"
         case reported

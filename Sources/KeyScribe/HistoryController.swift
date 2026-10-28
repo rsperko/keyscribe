@@ -95,6 +95,12 @@ final class HistoryPaneModel: ObservableObject {
         return f
     }()
 
+    // Set by Settings: builds the History finder for a word just added, in the scope it was added to.
+    var mishearingsFinder: ((String, CorrectionDestination.Scope, @escaping (Int) -> Void) -> HistoryReplacementsModel?)?
+    @Published private(set) var mishearings: HistoryReplacementsModel?
+    private var foundMishearings: HistoryReplacementsModel?
+    private var dictionarySheetClosed = true
+
     init(
         store: HistoryStore,
         addDictionaryWord: @escaping (String, CorrectionDestination.Scope) -> ConfigRepository.AddResult,
@@ -328,6 +334,7 @@ final class HistoryPaneModel: ObservableObject {
     func saveDictionaryWord(_ term: String, _ action: VocabularyAnalysis.Action) -> String? {
         let added = addDictionaryWord(term)
         guard added == .saved else { return Self.failureMessage(added) }
+        offerMishearings(of: term)
         let destination = correctsCommands
             ? "the Voice Commands dictionary."
             : "your dictionary — a recognition hint for future dictations."
@@ -354,6 +361,42 @@ final class HistoryPaneModel: ObservableObject {
 
     static let saveFailedMessage =
         "Couldn't save — a configuration file may be malformed. Open Settings ▸ Maintenance to fix it."
+
+    // The same one step as Vocabulary: a word added from History is checked against History at once, and the
+    // finder opens only when it finds likely mishearings.
+    // The word is saved from the Add to Dictionary sheet, so the finder waits for that sheet to finish closing:
+    // a second sheet presented while the first is still animating out can be dropped, and would then never show.
+    private func offerMishearings(of word: String) {
+        guard mishearings == nil, foundMishearings == nil,
+              let model = mishearingsFinder?(word, correctionScope, { [weak self] count in
+                  self?.dismissMishearings()
+                  self?.flash(count == 1 ? "Added 1 replacement" : "Added \(count) replacements")
+              }) else { return }
+        model.offeredAfterAdding = true
+        dictionarySheetClosed = false
+        Task { [weak self] in
+            await model.refresh()
+            guard let self, self.mishearings == nil, !model.findings.isEmpty else { model.close(); return }
+            self.foundMishearings = model
+            self.showFoundMishearings()
+        }
+    }
+
+    func dictionarySheetDidClose() {
+        dictionarySheetClosed = true
+        showFoundMishearings()
+    }
+
+    private func showFoundMishearings() {
+        guard dictionarySheetClosed, let found = foundMishearings else { return }
+        foundMishearings = nil
+        mishearings = found
+    }
+
+    func dismissMishearings() {
+        mishearings?.close()
+        mishearings = nil
+    }
 
     func flash(_ message: String) {
         statusMessage = message
@@ -622,7 +665,7 @@ private struct HistoryRowView: View {
             HStack(spacing: 6) {
                 Text(entry.timestamp, style: .time)
                 Text("·"); Text(entry.modeName)
-                Text("·"); Text(outcomeLabel(entry.outcome))
+                Text("·"); Text(outcomeLabel(entry))
             }
             .font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 4) {
@@ -701,13 +744,16 @@ private struct HistoryDetailView: View {
         .sheet(isPresented: $showReplacementSheet) {
             CreateReplacementSheet(initialSource: replacementSource, onSave: model.saveReplacement)
         }
-        .sheet(isPresented: $showDictionarySheet) {
+        .sheet(isPresented: $showDictionarySheet, onDismiss: { model.dictionarySheetDidClose() }) {
             AddToDictionarySheet(initialTerm: dictionarySource, analyze: { proposal in
                 guard case let .word(word) = proposal else {
                     return VocabularyAnalysis(action: .addWord)
                 }
                 return model.analyzeDictionaryWord(word)
-            }, onSave: model.saveDictionaryWord)
+            }, onSave: model.saveDictionaryWord, onCorrect: model.saveReplacement)
+        }
+        .sheet(item: Binding(get: { model.mishearings }, set: { if $0 == nil { model.dismissMishearings() } })) { finder in
+            HistoryReplacementsSheet(model: finder) { model.dismissMishearings() }
         }
     }
 
@@ -804,7 +850,7 @@ private struct HistoryDetailView: View {
             symbolStyle: AnyShapeStyle(.secondary),
             title: entry.modeName,
             badges: {
-                PaneBadge(outcomeLabel(entry.outcome))
+                PaneBadge(outcomeLabel(entry))
                 ForEach(entry.dataBoundaryLabels, id: \.self) { DataBoundaryBadge(label: $0) }
             },
             trailing: {
@@ -897,7 +943,9 @@ private struct HistoryDetailView: View {
                 if entry.stoppedAtLimit == true {
                     detailRow("Recording", "Stopped at the time limit")
                 }
-                if entry.outcome == .localFallback, let reason = entry.fallbackReason {
+                if let skipped = entry.rewriteSkippedMs {
+                    detailRow("Why local was kept", HUDState.skippedLine(Double(skipped) / 1000))
+                } else if entry.outcome == .localFallback, let reason = entry.fallbackReason {
                     detailRow("Why local was kept", reason)
                 }
                 if let reason = entry.failureReason {
@@ -959,8 +1007,9 @@ private struct HistoryDetailView: View {
     }
 }
 
-private func outcomeLabel(_ outcome: HistoryEntry.Outcome) -> String {
-    switch outcome {
+func outcomeLabel(_ entry: HistoryEntry) -> String {
+    if entry.outcome == .localFallback, entry.rewriteSkippedMs != nil { return "Rewrite skipped" }
+    return switch entry.outcome {
     case .inserted: "Inserted"
     case .copied: "Copied instead of inserted"
     case .localFallback: "Local fallback"

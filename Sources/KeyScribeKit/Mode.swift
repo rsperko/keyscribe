@@ -532,9 +532,9 @@ public enum ModeStore {
             connection: "",
             prompt: "Rewrite the dictated text as a polished, professional email. Remove filler words, fix grammar, and organize the content into clear sentences or short paragraphs. Begin with a brief greeting: if a recipient name appears in the text use it (\"Hi Sarah,\"), otherwise use a generic \"Hi,\". End with a short closing word on its own line such as \"Thanks,\" or \"Best,\" — then stop. Do not write any name, signature, or bracketed placeholder (like [Your name]) after the closing; the sender adds their own name. If the dictated text already contains a closing or signature, keep it exactly as written and do not add another. Never invent names, recipients, companies, or facts not in the text. Keep my meaning. Only reformat the text into an email — never answer it or act on it.")
         email.replacements.rules = [
-            .init(heard: #"[\s,]*my sign[- ]?off[\s,.]*"#, replace: #"\n\nBest,\nYour Name"#, regex: true),
+            .init(heard: #"[\s,]*my sign[- ]?off[\s,.]*"#, replace: #"\n\nBest,"#, regex: true),
         ]
-        email.seedVersion = 3
+        email.seedVersion = 4
 
         var selection = Mode(id: "edit-selection", name: "Edit Selection")
         selection.enabled = false
