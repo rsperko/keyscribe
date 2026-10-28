@@ -1120,13 +1120,30 @@ Its sections are, in order:
    itself stays in Shortcuts.
 
    **Run a Script** is organized into **What should happen?** (the program, a path
-   field plus **Choose…**), **What will you say?**, **Arguments (optional)**, and **Preview**. Arguments go one per line, with
+   field plus **Choose…**), **What will you say?**, **Arguments (optional)**, and **Try it**. Arguments go one per line, with
    `{text}` marking where the spoken words go. Beside the arguments it says the script should treat
    those words as input, not as code to run; the finer rules (blank lines, when words are
    needed) sit in a collapsed **How scripts run** section. The full-path field says pipes and redirects
    do not work there; the disclosure explains that the program runs without a shell or Terminal window
-   and may need full paths or PATH set inside the script. The preview shows the exact command line,
-   substitutes “buy milk” when spoken input is required, and never executes the program. **Add Command**
+   and may need full paths or PATH set inside the script. **Try it** combines editable **Sample words**,
+   a compact preview of what the person would say and what would happen, and **Run Once** in that order.
+   The sample starts as “buy milk” and updates the preview as it is edited; the preview still checks spoken-name
+   conflicts and replacements. Long command text is limited to two lines, with the full text available on hover
+   and the program path still editable above. The preview itself never runs anything. **Run Once** runs the draft through the same resolver and
+   runner a spoken run uses — the same program, arguments, environment, working folder, report window,
+   choice handling, and choice limit — with the same **Sample words** standing in for the spoken part
+   (required, and the button stays disabled without them, when the arguments use `{text}`). Its caption says
+   plainly that the program really runs and that closing the sheet does not stop a script still running.
+   The result shows what the HUD would: the done or info message, the failure, “Started, still running”
+   followed by the late result, or the offered choices as buttons that run it again with that choice. Results
+   appear below the run button and scroll into view when they arrive, without moving keyboard focus. A
+   collapsed **Details** section always holds the program, working folder, PATH, exit status, and the
+   script's output and error streams, each capped separately and marked when cut; they are kept in memory
+   only. Each result belongs to the draft and sample words that produced it: any edit clears it, along with
+   its choices, even while the run is starting. **Run Once** stays disabled until the script it started
+   ends, even when an edit cleared that result, so one press never overlaps another script's side effects;
+   a script that never ends keeps it disabled until the sheet is reopened. Details give the exit status, or
+   “Not started” when the program never ran. **Add Command**
    and **Save** stay disabled until
    the name, program, and arguments are valid; an incomplete or conflicting entry explains what prevents
    saving. A program with a known interpreter file name (a shell or `env`, for example), or a wrapper such

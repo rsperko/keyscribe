@@ -743,77 +743,88 @@ private struct ScriptEditorSheet: View {
     @State private var issue: String?
     @State private var confirmingDelete = false
     @State private var argumentDetailsExpanded = false
+    @State private var sample = VoiceCommandExample.sampleWords
+    @StateObject private var trial = ScriptTrialModel()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(draft.originalName == nil ? "Run a Script" : "Edit Command").font(.title2.bold())
-            Form {
-                if draft.originalName == nil {
-                    Section { notice }
-                }
-                Section("What should happen?") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            TextField("Program", text: $draft.program, prompt: Text("~/bin/deploy"))
-                                .font(.body.monospaced())
-                                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptProgram)
-                            Button("Choose\u{2026}") { chooseProgram() }
-                                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptChooseProgram)
-                        }
-                        .formFieldLabel("Program")
-                        if let programIssue = VoiceCommandsSettingsModel.programIssue(draft.program) {
-                            IssueText(programIssue, severity: .advisory)
-                        }
-                        Text("Choose an executable file or enter its full path. Shell commands such as pipes and redirects do not work here.")
-                            .font(.caption).foregroundStyle(.secondary)
+            ScrollViewReader { scroll in
+                Form {
+                    if draft.originalName == nil {
+                        Section { notice }
                     }
-                }
-                Section("What will you say?") {
-                    CommandPhraseFields(
-                        name: $draft.name, say: $draft.say, caption: "Say this name to run the script.",
-                        namePrompt: "deploy", sayPrompt: "ship, release", nameIssue: nil,
-                        advisories: model.conflicts(for: .script(draft.script)),
-                        ids: .init(
-                            name: AccessibilityID.Mode.VoiceCommands.scriptName,
-                            say: AccessibilityID.Mode.VoiceCommands.scriptSay,
-                            otherNames: AccessibilityID.Mode.VoiceCommands.scriptOtherNames))
-                }
-                Section("Arguments (optional)") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if draft.fixedArguments != nil {
-                            Text(draft.arguments).font(.body.monospaced()).textSelection(.enabled)
-                            Text("These arguments end with an empty one, which this editor cannot show, so they are kept as they are. Change them in \(VoiceCommandStore.fileName).")
-                                .font(.caption).foregroundStyle(.secondary)
-                        } else {
-                            TextEditor(text: $draft.arguments)
-                                .font(.body.monospaced())
-                                .multilineTextAlignment(.leading)
-                                .ghostText("--env\n\(VoiceCommandScript.textPlaceholder)", visible: draft.arguments.isEmpty)
-                                .frame(minHeight: 72)
-                                .padding(4)
-                                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
-                                .accessibilityLabel("Arguments")
-                                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptArguments)
-                            Text("One per line. \(VoiceCommandScript.textPlaceholder) is replaced by what you say after the name. Your script should treat those words as input, not as code to run.")
-                                .font(.caption).foregroundStyle(.secondary)
-                            DisclosureSection(isExpanded: $argumentDetailsExpanded) {
-                                DisclosureSummaryLabel(title: "How scripts run", summary: "Arguments, spoken input, and the script’s environment")
-                            } content: {
-                                Text("Each line is one argument, including blank lines between arguments. Spaces stay within that argument. \(VoiceCommandScript.textPlaceholder) requires words after the spoken name; without it, say only the name.\n\nThe file runs directly, without a shell or Terminal window. It uses \(Branding.appName)’s environment, so tools used by the script may need full paths or a PATH set inside the script.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                    Section("What should happen?") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                TextField("Program", text: $draft.program, prompt: Text("~/bin/deploy"))
+                                    .font(.body.monospaced())
+                                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptProgram)
+                                Button("Choose\u{2026}") { chooseProgram() }
+                                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptChooseProgram)
                             }
-                            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptArgumentDetails)
+                            .formFieldLabel("Program")
+                            if let programIssue = VoiceCommandsSettingsModel.programIssue(draft.program) {
+                                IssueText(programIssue, severity: .advisory)
+                            }
+                            Text("Choose an executable file or enter its full path. Shell commands such as pipes and redirects do not work here.")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
+                    Section("What will you say?") {
+                        CommandPhraseFields(
+                            name: $draft.name, say: $draft.say, caption: "Say this name to run the script.",
+                            namePrompt: "deploy", sayPrompt: "ship, release", nameIssue: nil,
+                            advisories: model.conflicts(for: .script(draft.script)),
+                            ids: .init(
+                                name: AccessibilityID.Mode.VoiceCommands.scriptName,
+                                say: AccessibilityID.Mode.VoiceCommands.scriptSay,
+                                otherNames: AccessibilityID.Mode.VoiceCommands.scriptOtherNames))
+                    }
+                    Section("Arguments (optional)") {
+                        VStack(alignment: .leading, spacing: 4) {
+                            if draft.fixedArguments != nil {
+                                Text(draft.arguments).font(.body.monospaced()).textSelection(.enabled)
+                                Text("These arguments end with an empty one, which this editor cannot show, so they are kept as they are. Change them in \(VoiceCommandStore.fileName).")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            } else {
+                                TextEditor(text: $draft.arguments)
+                                    .font(.body.monospaced())
+                                    .multilineTextAlignment(.leading)
+                                    .ghostText("--env\n\(VoiceCommandScript.textPlaceholder)", visible: draft.arguments.isEmpty)
+                                    .frame(minHeight: 72)
+                                    .padding(4)
+                                    .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.separator))
+                                    .accessibilityLabel("Arguments")
+                                    .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptArguments)
+                                Text("One per line. \(VoiceCommandScript.textPlaceholder) is replaced by what you say after the name. Your script should treat those words as input, not as code to run.")
+                                    .font(.caption).foregroundStyle(.secondary)
+                                DisclosureSection(isExpanded: $argumentDetailsExpanded) {
+                                    DisclosureSummaryLabel(title: "How scripts run", summary: "Arguments, spoken input, and the script’s environment")
+                                } content: {
+                                    Text("Each line is one argument, including blank lines between arguments. Spaces stay within that argument. \(VoiceCommandScript.textPlaceholder) requires words after the spoken name; without it, say only the name.\n\nThe file runs directly, without a shell or Terminal window. It uses \(Branding.appName)’s environment, so tools used by the script may need full paths or a PATH set inside the script. Run Once below shows the PATH it gets.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptArgumentDetails)
+                            }
+                        }
+                    }
+                    ScriptTrialSection(
+                        script: draft.script, blockedBy: validationIssue,
+                        example: draft.script.issue == nil ? model.example(for: .script(draft.script), sample: sample) : nil,
+                        sample: $sample, trial: trial)
+                    if draft.originalName != nil {
+                        Section { notice }
+                    }
                 }
-                CommandPreviewSection(
-                    example: draft.script.issue == nil ? model.example(for: .script(draft.script)) : nil,
-                    id: AccessibilityID.Mode.VoiceCommands.scriptExample)
-                if draft.originalName != nil {
-                    Section { notice }
+                .formStyle(.grouped)
+                .onChange(of: draft.script) { trial.draftChanged(to: draft.script, sample: sample) }
+                .onChange(of: sample) { trial.draftChanged(to: draft.script, sample: sample) }
+                .onChange(of: trial.result) { _, result in
+                    guard result != nil else { return }
+                    scroll.scrollTo(AccessibilityID.Mode.VoiceCommands.scriptTrialResult, anchor: .bottom)
                 }
             }
-            .formStyle(.grouped)
             if let validationIssue, !draft.name.isEmpty || !draft.program.isEmpty {
                 IssueText(validationIssue)
             }

@@ -9,10 +9,11 @@ public struct VoiceCommandExample: Equatable, Sendable {
     public var conflict: String?
 
     public static func make(
-        for candidate: VoiceCommandCandidate, among saved: VoiceCommandConfig = VoiceCommandConfig(),
+        for candidate: VoiceCommandCandidate, sample: String? = nil, among saved: VoiceCommandConfig = VoiceCommandConfig(),
         readAs: (String) -> String = { $0 }, appName: (String) -> String? = { _ in nil }
     ) -> VoiceCommandExample {
-        make(for: candidate, heard: heard(for: candidate, saying: candidate.name), among: saved, readAs: readAs, appName: appName)
+        make(for: candidate, heard: heard(for: candidate, saying: candidate.name, sample: sample), among: saved,
+             readAs: readAs, appName: appName)
     }
 
     // Only names a replacement rewrites: a name another command shares is already reported by `conflicts`.
@@ -68,11 +69,13 @@ public struct VoiceCommandExample: Equatable, Sendable {
         return candidate.spokenForms.map { $0 + more }
     }
 
-    private static func heard(for candidate: VoiceCommandCandidate, saying name: String) -> String {
+    private static func heard(for candidate: VoiceCommandCandidate, saying name: String, sample: String? = nil) -> String {
         let phrase = VoiceCommandText.key(name)
         switch candidate {
         case .place(let place) where place.isTabSearch: return "\(phrase) \(sampleTabWords)"
-        case .script(let script) where script.takesText: return "\(phrase) \(sampleWords)"
+        case .script(let script) where script.takesText:
+            let words = (sample ?? sampleWords).trimmingCharacters(in: .whitespacesAndNewlines)
+            return words.isEmpty ? phrase : "\(phrase) \(words)"
         default: return phrase
         }
     }

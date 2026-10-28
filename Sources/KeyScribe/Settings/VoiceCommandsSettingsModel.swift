@@ -195,9 +195,9 @@ final class VoiceCommandsSettingsModel: ObservableObject {
         VoiceCommandExample.namesLostToReplacements(for: candidate, among: saved, readAs: readAs)
     }
 
-    func example(for candidate: VoiceCommandCandidate) -> VoiceCommandExample {
+    func example(for candidate: VoiceCommandCandidate, sample: String? = nil) -> VoiceCommandExample {
         VoiceCommandExample.make(
-            for: candidate, among: saved, readAs: readAs,
+            for: candidate, sample: sample, among: saved, readAs: readAs,
             appName: { [system] in system.appName(forBundleId: $0) })
     }
 

@@ -288,6 +288,30 @@ struct VoiceCommandConflictTests {
 }
 
 struct VoiceCommandExampleTests {
+    @Test func aScriptExampleFollowsTheEditedSampleWords() {
+        let probe = VoiceCommandScript(name: "Probe", run: ["/bin/probe", "--find", "{text}"])
+        let example = VoiceCommandExample.make(for: .script(probe), sample: "  release notes  ")
+        #expect(example.heard == "probe release notes")
+        #expect(example.result == "Runs /bin/probe --find 'release notes' in the background.")
+        #expect(example.conflict == nil)
+    }
+
+    @Test func aCustomSampleStillChecksWhichCommandWouldHearIt() {
+        let note = VoiceCommandScript(name: "Note", run: ["/bin/note", "{text}"])
+        let meeting = VoiceCommandScript(name: "Note meeting", run: ["/bin/meeting", "{text}"])
+        let example = VoiceCommandExample.make(
+            for: .script(note), sample: "meeting agenda", among: VoiceCommandConfig(scripts: [meeting]))
+        #expect(example.conflict == "Saying \u{201C}note meeting agenda\u{201D} runs Note meeting instead, because its name is longer.")
+    }
+
+    @Test func anEmptySampleExplainsTheMissingSpokenInput() {
+        let probe = VoiceCommandScript(name: "Probe", run: ["/bin/probe", "{text}"])
+        let example = VoiceCommandExample.make(for: .script(probe), sample: "   ")
+        #expect(example.heard == "probe")
+        #expect(example.result.isEmpty)
+        #expect(example.conflict == "Saying \u{201C}probe\u{201D} gives this command no words after its name.")
+    }
+
     @Test func anActionExampleUsesItsOwnNameAndWords() {
         let probe = VoiceCommandScript(name: "Probe", say: ["memo"], run: ["/bin/probe", "{text}"])
         let example = VoiceCommandExample.make(for: .script(probe))

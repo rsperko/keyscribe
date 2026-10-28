@@ -297,7 +297,10 @@ say that. "switch to" or "open" with anything else never runs a script. If a rep
 phrase another name for a script, you can add that phrase as one of the script's **Other names** instead.
 A script that controls another app may need Automation permission, and macOS may ask on KeyScribe's behalf
 (see [Which permissions does KeyScribe need](#which-permissions-does-keyscribe-need-and-why)).
-Keep replacements that capture variable input, as in the recipe below. The spoken
+To check a script before relying on it, use **Run Once** under **Try it** in its editor. It runs the
+program the way saying its name would, with sample words in place of what you say, and shows the result,
+the script's output, and the PATH it ran with, which helps when a tool works in Terminal but not when spoken.
+It really runs the script, so it can do anything the script does. Keep replacements that capture variable input, as in the recipe below. The spoken
 name can differ from the file name: a script named "foo" can run `~/bin/bar.sh` when you say "foo".
 
 For example, save this as `~/bin/note` and run `chmod +x ~/bin/note` so it can run:

@@ -248,6 +248,11 @@ enum AccessibilityID {
             static let scriptArguments = "mode.voiceCommands.script.arguments"
             static let scriptArgumentDetails = "mode.voiceCommands.script.argumentDetails"
             static let scriptExample = "mode.voiceCommands.script.example"
+            static let scriptTrialSample = "mode.voiceCommands.script.trial.sample"
+            static let scriptTrialRun = "mode.voiceCommands.script.trial.run"
+            static let scriptTrialResult = "mode.voiceCommands.script.trial.result"
+            static let scriptTrialDetails = "mode.voiceCommands.script.trial.details"
+            static func scriptTrialChoice(_ number: Int) -> String { "mode.voiceCommands.script.trial.choice.\(number)" }
             static let scriptSave = "mode.voiceCommands.script.save"
             static let scriptCancel = "mode.voiceCommands.script.cancel"
             static let scriptDelete = "mode.voiceCommands.script.delete"
@@ -441,6 +446,8 @@ enum AccessibilityID {
         Mode.VoiceCommands.placeDeleteConfirm,
         Mode.VoiceCommands.addScript, Mode.VoiceCommands.scriptName, Mode.VoiceCommands.scriptSay, Mode.VoiceCommands.scriptOtherNames,
         Mode.VoiceCommands.scriptProgram, Mode.VoiceCommands.scriptChooseProgram, Mode.VoiceCommands.scriptArguments, Mode.VoiceCommands.scriptExample,
+        Mode.VoiceCommands.scriptTrialSample, Mode.VoiceCommands.scriptTrialRun, Mode.VoiceCommands.scriptTrialResult,
+        Mode.VoiceCommands.scriptTrialDetails,
         Mode.VoiceCommands.scriptSave, Mode.VoiceCommands.scriptCancel, Mode.VoiceCommands.scriptDelete,
         Mode.VoiceCommands.scriptDeleteConfirm,
         Mode.VoiceCommands.addShortcut, Mode.VoiceCommands.excludeFromHistory,

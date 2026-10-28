@@ -138,7 +138,7 @@ protocol VoiceCommandSystem: AnyObject {
     func activate(pid: Int32) -> Bool
     func openURL(_ url: String, browser: String?) async -> Bool
     func runScript(
-        _ script: VoiceCommandScript, arguments: [String], choice: String?,
+        _ script: VoiceCommandScript, arguments: [String], choice: String?, capture: ScriptOutputCapture?,
         onLateFinish: @escaping @MainActor (ScriptRun) -> Void
     ) async -> ScriptRun
 }
@@ -217,6 +217,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     private let system: VoiceCommandSystem
     private let findsInApps: @MainActor () -> Bool
     private let isPreview: Bool
+    private let scriptCapture: ScriptOutputCapture?
     private let pause: (Double) async -> Void
     private let now: () -> Double
     private let idleSeconds: Double
@@ -235,6 +236,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         system: VoiceCommandSystem = LiveVoiceCommandSystem.shared,
         findsInApps: @escaping @MainActor () -> Bool = { false },
         isPreview: Bool = false,
+        scriptCapture: ScriptOutputCapture? = nil,
         pause: @escaping (Double) async -> Void = { try? await Task.sleep(for: .seconds($0)) },
         now: @escaping () -> Double = { ProcessInfo.processInfo.systemUptime },
         idleSeconds: Double = VoiceCommandRunner.choiceIdleSeconds
@@ -242,6 +244,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         self.system = system
         self.findsInApps = findsInApps
         self.isPreview = isPreview
+        self.scriptCapture = scriptCapture
         self.pause = pause
         self.now = now
         self.idleSeconds = idleSeconds
@@ -670,7 +673,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             if let refusal = script.executionRefusal(resolvedProgram: ScriptLauncher.resolvedPath(script.program)) {
                 return .failed(message: "\(script.name) was not run. \(refusal)", command: command)
             }
-            let run = await system.runScript(script, arguments: arguments, choice: choice) { late in
+            let run = await system.runScript(script, arguments: arguments, choice: choice, capture: scriptCapture) { late in
                 onLateResult(Self.outcome(of: late, script: script, command: command))
             }
             if case .finished(0, _, let report) = run, !script.isShortcut, !report.options.isEmpty {
@@ -1105,19 +1108,19 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     nonisolated static let shortcutsTool = "/usr/bin/shortcuts"
 
     func runScript(
-        _ script: VoiceCommandScript, arguments: [String], choice: String?,
+        _ script: VoiceCommandScript, arguments: [String], choice: String?, capture: ScriptOutputCapture?,
         onLateFinish: @escaping @MainActor (ScriptRun) -> Void
     ) async -> ScriptRun {
         let late: @Sendable (ScriptRun) -> Void = { run in Task { @MainActor in onLateFinish(run) } }
         guard let shortcut = script.shortcut else {
             return await ScriptLauncher.run(
                 program: script.program, arguments: arguments,
-                environment: choice.map { [ScriptLauncher.choiceVariable: $0] } ?? [:], onLateFinish: late)
+                environment: choice.map { [ScriptLauncher.choiceVariable: $0] } ?? [:], capture: capture, onLateFinish: late)
         }
         let input = arguments.first
         return await ScriptLauncher.run(
             program: Self.shortcutsTool, arguments: Self.shortcutArguments(shortcut, input: input), input: input,
-            onLateFinish: late)
+            capture: capture, onLateFinish: late)
     }
 
     nonisolated static func shortcutArguments(_ shortcut: VoiceCommandShortcut, input: String?) -> [String] {

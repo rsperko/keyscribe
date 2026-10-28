@@ -159,6 +159,57 @@ struct ScriptLauncherTests {
         #expect(await ScriptLauncher.run(program: file.path, arguments: []) == .notRunnable)
     }
 
+    @Test func capturedOutputKeepsEachStreamAndTheExitStatus() async throws {
+        let (dir, file) = try script("echo 'to output'\necho 'to errors' >&2\nexit 3")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let capture = ScriptOutputCapture()
+        _ = await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 20, capture: capture)
+        let captured = capture.snapshot
+        #expect(captured.output.text == "to output\n")
+        #expect(captured.errors.text == "to errors\n")
+        #expect(captured.status == 3)
+    }
+
+    @Test func eachStreamIsCappedOnItsOwnAndKeepsDrainingPastTheCap() async throws {
+        let (dir, file) = try script(
+            "i=0\nwhile [ $i -lt 20000 ]; do echo \"output line $i\"; i=$((i+1)); done\necho 'short' >&2\necho '::done::Reported after the cap'")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let capture = ScriptOutputCapture(limit: 64)
+        let run = await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 20, capture: capture)
+        #expect(run == .finished(status: 0, lastError: "short",
+                                 report: ScriptReport(message: .init(level: .done, text: "Reported after the cap"))))
+        let captured = capture.snapshot
+        #expect(captured.output.truncated)
+        #expect(captured.output.text.hasPrefix("output line 0\n"))
+        #expect(captured.output.data.count == 64)
+        #expect(!captured.errors.truncated)
+        #expect(captured.errors.text == "short\n")
+    }
+
+    @Test func aScriptStillRunningAtTheReportKeepsFillingItsCapture() async throws {
+        let (dir, file) = try script("sleep 1\necho 'later'\nexit 2")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let capture = ScriptOutputCapture()
+        let late = AsyncStream<ScriptRun>.makeStream()
+        let run = await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 0.2, capture: capture) { result in
+            late.continuation.yield(result)
+            late.continuation.finish()
+        }
+        #expect(run == .stillRunning)
+        #expect(capture.snapshot.status == nil)
+        for await _ in late.stream {}
+        #expect(capture.snapshot.output.text == "later\n")
+        #expect(capture.snapshot.status == 2)
+    }
+
+    @Test func theWorkingFolderAndPathAreTheOnesTheScriptGets() async throws {
+        let (dir, file) = try script("printf '%s|%s' \"$(pwd -P)\" \"$PATH\" > \"$(dirname \"$0\")/env\"")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        _ = await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 20)
+        let env = try String(contentsOf: dir.appendingPathComponent("env"), encoding: .utf8)
+        #expect(env == "\(ScriptLauncher.workingDirectory.resolvingSymlinksInPath().path)|\(ScriptLauncher.searchPath ?? "")")
+    }
+
     @Test func aTildeProgramIsExpanded() {
         #expect(ScriptLauncher.expandedPath("~/bin/x") == FileManager.default.homeDirectoryForCurrentUser.path + "/bin/x")
         #expect(ScriptLauncher.expandedPath("/usr/bin/true") == "/usr/bin/true")

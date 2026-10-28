@@ -19,9 +19,13 @@ enum ScriptLauncher {
         return URL(fileURLWithPath: expandedPath(program)).resolvingSymlinksInPath().path
     }
 
+    static var workingDirectory: URL { FileManager.default.homeDirectoryForCurrentUser }
+
+    static var searchPath: String? { ProcessInfo.processInfo.environment["PATH"] }
+
     static func run(
         program: String, arguments: [String], input: String? = nil, environment: [String: String] = [:],
-        reportWithin window: TimeInterval = reportWindow,
+        reportWithin window: TimeInterval = reportWindow, capture: ScriptOutputCapture? = nil,
         onLateFinish: @escaping @Sendable (ScriptRun) -> Void = { _ in }
     ) async -> ScriptRun {
         let path = expandedPath(program)
@@ -32,7 +36,7 @@ enum ScriptLauncher {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments
-        process.currentDirectoryURL = FileManager.default.homeDirectoryForCurrentUser
+        process.currentDirectoryURL = workingDirectory
         if !environment.isEmpty {
             process.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }
         }
@@ -51,6 +55,7 @@ enum ScriptLauncher {
                     handle.readabilityHandler = nil
                     report.streamClosed()
                 } else {
+                    capture?.appendError(data)
                     report.appendError(data)
                 }
             }
@@ -60,11 +65,13 @@ enum ScriptLauncher {
                     handle.readabilityHandler = nil
                     report.streamClosed()
                 } else {
+                    capture?.appendOutput(data)
                     report.appendOutput(data)
                 }
             }
             process.terminationHandler = { finished in
                 running.remove(finished)
+                capture?.exited(finished.terminationStatus)
                 report.exited(finished.terminationStatus)
             }
             running.insert(process)
@@ -197,4 +204,22 @@ enum ScriptLauncher {
             late?(result)
         }
     }
+}
+
+// Kept apart from report parsing, so clipping what is displayed can never change the outcome.
+final class ScriptOutputCapture: @unchecked Sendable {
+    static let streamLimit = 65_536
+
+    private let lock = NSLock()
+    private var captured: ScriptOutput
+
+    init(limit: Int = streamLimit) {
+        captured = ScriptOutput(output: CappedOutput(limit: limit), errors: CappedOutput(limit: limit))
+    }
+
+    func appendOutput(_ data: Data) { lock.withLock { captured.output.append(data) } }
+    func appendError(_ data: Data) { lock.withLock { captured.errors.append(data) } }
+    func exited(_ status: Int32) { lock.withLock { captured.status = status } }
+
+    var snapshot: ScriptOutput { lock.withLock { captured } }
 }
