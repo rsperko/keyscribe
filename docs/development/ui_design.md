@@ -268,7 +268,9 @@ failure: it shows with an info icon rather than the error triangle, and a batch 
 unreadable file shows as the failure. While a voice-command question is waiting, the announcement becomes
 the question's note instead of covering the list.
 
-**Recording limit.** A single take has a length limit (`design.md` §4.8). Reaching it ends the take
+**Recording limit.** A single take has a length limit, which can be shorter for a speech model that
+loses accuracy on long takes (`design.md` §4.8); the countdown and the stopped-at-limit copy always name
+the limit that applied. Reaching it ends the take
 the way a release does — the recording is transcribed and inserted, never discarded. The warning
 reuses what the Recording HUD already shows rather than adding to it: in the final stretch a thin
 orange ring drains around the level circle and the “Listening” line becomes a countdown. VoiceOver

@@ -689,10 +689,16 @@ also fix the currently selected text.
 
 HUD states, data-boundary wording, and fallback behavior are normative in `ui_design.md`.
 
-**Recording limit.** One take is bounded (`DictationController.maxRecordingSeconds`) because the whole
-take is transcribed in one batch after release: an unbounded take means an unbounded wait, and memory,
-at the end. The limit bounds that wait, never the user's words — **reaching it commits the take exactly
-as a release would; recorded speech is never discarded.** It follows that:
+**Recording limit.** One take is bounded. The wait after release scales with the model's real-time
+factor, and memory stays small (a 15-minute take is tens of megabytes of samples), so the global bound
+(`RecordingLimit.backstopSeconds`) is a backstop for a forgotten or stuck take. Long-take accuracy is a
+property of the model, not a given — some engines chunk long audio and some decode the whole take in
+one pass — so a model whose accuracy collapses on long takes carries its own lower limit (`SpeechModelInfo.maxRecordingSeconds`), set from the
+long-take measurements in `docs/reference/stt_benchmarks.md`, and a take stops at whichever is lower —
+re-measure before raising either. The backstop must also stay inside every engine's input ceiling:
+Qwen3-ASR drops audio past 20 minutes, so its adapter refuses such a take rather than transcribing part of
+it. The limit bounds the wait, never the user's words — **reaching it commits the take exactly as a
+release would; recorded speech is never discarded.** It follows that:
 
 - **Warn before it lands.** For the final stretch (`limitWarningSeconds`) the recording HUD counts down
   (`ui_design.md` §5). It is visual only: a warning sound would be recorded into the take, and the

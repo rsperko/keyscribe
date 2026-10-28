@@ -398,10 +398,15 @@ rule outside its browser, add the browser to the same rule; see
 
 ### Is there a limit on how long one dictation can be?
 
-Yes — five minutes per dictation. Thirty seconds before the limit, the recording indicator gets an
-orange ring that runs down and the HUD counts down ("Stops in 0:30"). When time runs out, KeyScribe
-stops listening and inserts everything you said, just as if you had released the key. Start another
-dictation to keep going.
+Yes — 15 minutes per dictation on most speech models. A model that loses accuracy on long recordings
+stops sooner (as of October 2026, the Qwen3-ASR models). Thirty seconds before the limit, the
+recording indicator gets an orange ring that runs down and the HUD counts down ("Stops in 0:30"). When
+time runs out, KeyScribe stops listening and inserts everything you said, just as if you had released
+the key. Start another dictation to keep going.
+
+A long dictation is transcribed after you stop, so the wait grows with its length. On the Parakeet
+models it stays at a few seconds even for 15 minutes; on Whisper Large v3 Turbo it can reach a
+minute or more. If a mode uses `insertion = "type"`, a long dictation also takes a while to type out.
 
 A dictation stopped by the limit is inserted **without** its AI rewrite, even in a mode that normally
 uses one. It ends mid-thought, and a rewrite would treat the fragment as a finished piece. The HUD

@@ -94,6 +94,7 @@ final class DictationController {
         var rewriteEscapeTask: Task<Void, Never>?
         var recordingLimitTask: Task<Void, Never>?
         var recordingDeadline: ContinuousClock.Instant?
+        var recordingLimitSeconds: Double?
         var stoppedAtLimit = false
         var rewriteSkippedAtLimit = false
         var firedReplacements: [ReplacementRule] = []
@@ -168,6 +169,7 @@ final class DictationController {
     private var voiceCommandStops = 0
 
     private let maxRecordingSeconds: Double
+    private let modelRecordingLimit: (String) -> Double?
     private let limitWarningSeconds: Double
 
     private var plan: ResolvedConfig { session?.capturedPlan ?? config.resolved }
@@ -280,7 +282,8 @@ final class DictationController {
         recordModelLoadFailure: @escaping @MainActor (String, Bool, String) -> Void = {
             ModelLoadDiagnosticsWriter.record(engineId: $0, timedOut: $1, error: $2)
         },
-        maxRecordingSeconds: Double = 300,
+        maxRecordingSeconds: Double = RecordingLimit.backstopSeconds,
+        modelRecordingLimit: @escaping (String) -> Double? = RecordingLimit.modelLimit(engineId:),
         limitWarningSeconds: Double = 30,
         warmupClip: URL? = DictationController.bundledWarmupClip
     ) {
@@ -311,6 +314,7 @@ final class DictationController {
         self.permits = permits
         self.recordModelLoadFailure = recordModelLoadFailure
         self.maxRecordingSeconds = maxRecordingSeconds
+        self.modelRecordingLimit = modelRecordingLimit
         self.limitWarningSeconds = limitWarningSeconds
         self.warmupClip = warmupClip
         self.audio.setPreferredInputUID(settings.audio.inputDeviceUID)
@@ -841,7 +845,8 @@ final class DictationController {
 
     private func startRecordingLimit() {
         session?.recordingLimitTask?.cancel()
-        let limit = maxRecordingSeconds
+        let limit = RecordingLimit.seconds(backstop: maxRecordingSeconds, modelLimit: modelRecordingLimit(activeEngine.id))
+        session?.recordingLimitSeconds = limit
         session?.recordingDeadline = ContinuousClock.now.advanced(by: .seconds(limit))
         session?.recordingLimitTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(limit))
@@ -853,11 +858,12 @@ final class DictationController {
     private func commitAtRecordingLimit() {
         session?.stoppedAtLimit = true
         building.stoppedAtLimit = true
-        log.notice("recording limit reached after \(self.maxRecordingSeconds, privacy: .public)s — committing the take")
+        log.notice("recording limit reached after \(self.recordingLimitSeconds, privacy: .public)s — committing the take")
         handleCommit()
     }
 
-    private var limitPhrase: String { RecordingLimit.phrase(seconds: maxRecordingSeconds) }
+    private var recordingLimitSeconds: Double { session?.recordingLimitSeconds ?? maxRecordingSeconds }
+    private var limitPhrase: String { RecordingLimit.phrase(seconds: recordingLimitSeconds) }
 
     static let rewriteSkippedAtLimitReason = "The recording limit stopped this dictation, so the rewrite was skipped."
 

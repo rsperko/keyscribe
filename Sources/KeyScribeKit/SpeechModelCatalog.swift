@@ -56,12 +56,15 @@ public struct SpeechModelInfo: Equatable, Sendable, Identifiable {
     // Still works and stays installable, but is no longer offered to new users; it is retired (moved to
     // `retiredDisplayNames`) no sooner than a release after it turns legacy.
     public let isLegacy: Bool
+    // Measured on long takes: past this the model's transcript degrades sharply, so a take stops here
+    // rather than at the global backstop. Nil means the model held up through the backstop.
+    public let maxRecordingSeconds: Double?
 
     public init(
         id: String, kind: EngineKind, displayName: String, summary: String, languageCount: Int?,
         approxDownloadBytes: Int64, systemManaged: Bool, isDefaultEnglish: Bool,
         supportsRecognitionBias: Bool, averageWER: Double, realTimeFactor: Double, approxMemoryBytes: Int64 = 0,
-        isLegacy: Bool = false
+        isLegacy: Bool = false, maxRecordingSeconds: Double? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -76,6 +79,7 @@ public struct SpeechModelInfo: Equatable, Sendable, Identifiable {
         self.averageWER = averageWER
         self.realTimeFactor = realTimeFactor
         self.isLegacy = isLegacy
+        self.maxRecordingSeconds = maxRecordingSeconds
     }
 
     public var accuracy: SpeechAccuracy {
@@ -125,13 +129,13 @@ public enum SpeechModelCatalog {
             summary: "Smaller than Qwen3-ASR 1.7B, with lower accuracy.",
             languageCount: 52, approxDownloadBytes: 713_000_000, systemManaged: false,
             isDefaultEnglish: false, supportsRecognitionBias: true, averageWER: 12.45, realTimeFactor: 0.015,
-            approxMemoryBytes: 1_700_000_000),
+            approxMemoryBytes: 1_700_000_000, maxRecordingSeconds: 480),
         SpeechModelInfo(
             id: "qwen3-asr-1.7b", kind: .qwen3asr, displayName: "Qwen3-ASR 1.7B",
             summary: "Multilingual, and faster than Whisper Large v3 Turbo.",
             languageCount: 52, approxDownloadBytes: 2_470_000_000, systemManaged: false,
             isDefaultEnglish: false, supportsRecognitionBias: true, averageWER: 8.2, realTimeFactor: 0.039,
-            approxMemoryBytes: 3_300_000_000),
+            approxMemoryBytes: 3_300_000_000, maxRecordingSeconds: 720),
         SpeechModelInfo(
             id: "apple", kind: .apple, displayName: "Apple Speech",
             summary: "Native macOS transcription. No download, fastest startup.",

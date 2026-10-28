@@ -47,6 +47,44 @@ already knows, not as everyday accuracy.
 | Whisper Small (English) | 6.0% | 11.9% | 66% → 97% |
 | Qwen3-ASR 0.6B | 8.2% | 13.2% | 71% → 91% |
 
+## Long dictations
+
+As measured, 2026-10-27, with no dictionary. These numbers set each model's recording limit
+(`SpeechModelInfo.maxRecordingSeconds`, below the global backstop in `RecordingLimit`). The "joined"
+takes are `corpus/stt` clips joined with 0.7 s pauses, which makes clip boundaries easier than continuous
+speech. The "continuous" take is the same sentences read aloud without pauses by macOS's `say` (Samantha,
+140 words per minute). Every model in the table transcribed every take through to its last words unless a
+cell says otherwise.
+
+| Model | 4 min | 8 min | 13.4 min | 15.8 min | Continuous 14.9 min |
+|---|---|---|---|---|---|
+| Parakeet Ultra | 6.1% | 5.9% | 5.7% | 6.7% | 3.3% |
+| Parakeet Unified 0.6B (English) | 5.1% | 5.1% | 5.4% | 6.3% | 3.5% |
+| Parakeet TDT v3 | 9.4% | 7.5% | 7.6% | 8.3% | 4.0% |
+| Parakeet TDT-CTC 110M (legacy) | 11.9% | 9.1% | 9.1% | 9.4% | 6.2% |
+| Whisper Large v3 Turbo | 6.3% | 5.8% | 6.0% | 6.9% | 1.9% |
+| Whisper Small (English) | 6.5% | 6.7% | 7.1% | 7.5% | 6.4% |
+| Apple Speech | 10.2% | 9.2% | 9.2% | 10.0% | 7.0% |
+| Apple Dictation (fallback) | 15.7% | 12.9% | 12.6% | 13.9% | 9.5% |
+| Qwen3-ASR 1.7B | 8.5% | 9.8% | 10.5% | 15.2%, drops short words | 98.7%, degenerates |
+| Qwen3-ASR 0.6B | 9.7% | 8.8% | 28.2% | 54.5% | 67.3%, degenerates |
+
+Apple Speech and Apple Dictation were also run through the streaming path, replayed at real time over the
+same takes: both streamed every take to completion without falling back to batch, with the same word error
+rate as batch on every take.
+
+Qwen3-ASR decodes a take in one pass, and both sizes degrade past a length the others do not reach. At
+10 minutes 0.6B measured 29.2% joined and 23.3% continuous, while 1.7B measured 11.2% and 6.0%, and 4.2%
+on a 12-minute continuous take. On the 14.9-minute continuous take both sizes degenerated into word
+fragments and stray punctuation partway through; 1.7B kept going until it reached its output budget
+(`Qwen3OutputBudget`). Their limits sit at the last
+length measured clean: 8 minutes for 0.6B and 12 minutes for 1.7B.
+
+Qwen3's output budget allows 8 tokens per second of audio. Counted with the model's own tokenizer, these
+takes used 3.5 tokens per second in English, 2.6 in Chinese (`say` Tingting) and 3.5 in Japanese (`say`
+Kyoko). The Chinese and Japanese figures are synthetic speech at the voice's default pace, so they bound
+ordinary speech, not the fastest speaker.
+
 ## Earlier runs
 
 The tables below are older runs on earlier app versions, kept for their recall, download, and

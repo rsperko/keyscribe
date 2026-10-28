@@ -6,11 +6,11 @@ import Testing
 @MainActor
 struct RecordingLimitTests {
     private final class FixedEngine: SpeechEngine, @unchecked Sendable {
-        let id = "fixed"
+        let id: String
         let displayName = "Fixed"
         let supportsRecognitionBias = false
         private let text: String
-        init(text: String) { self.text = text }
+        init(text: String, id: String = "fixed") { self.text = text; self.id = id }
         func loadIfNeeded() async throws {}
         func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String { text }
         func evict() async {}
@@ -68,7 +68,8 @@ struct RecordingLimitTests {
     private func makeHarness(
         mode: Mode, connection: Connection? = nil, transcript: String = "hello world",
         maxRecordingSeconds: Double = 0.05, limitWarningSeconds: Double = 0.02, selection: String? = nil,
-        historyUnwritable: Bool = false
+        historyUnwritable: Bool = false, engineId: String = "fixed",
+        modelLimit: @escaping (String) -> Double? = RecordingLimit.modelLimit(engineId:)
     ) -> Harness {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-limit-\(UUID().uuidString)", isDirectory: true)
@@ -78,7 +79,7 @@ struct RecordingLimitTests {
         if let connection { try? ConnectionStore.write(ConnectionSet(connections: [connection]), to: supportDir) }
 
         var settings = Settings.defaults
-        settings.stt = .init(engine: "fixed", eviction: .frugal)
+        settings.stt = .init(engine: engineId, eviction: .frugal)
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
 
         let hud = HUDSpy()
@@ -88,7 +89,7 @@ struct RecordingLimitTests {
         let historyDir = supportDir.appendingPathComponent("history-root")
         if historyUnwritable { FileManager.default.createFile(atPath: historyDir.path, contents: Data()) }
         let history = HistoryStore(supportDir: historyUnwritable ? historyDir : supportDir)
-        let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: transcript)], activeId: "fixed")
+        let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: transcript, id: engineId)], activeId: engineId)
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: hud, permits: { _ in true },
@@ -101,6 +102,7 @@ struct RecordingLimitTests {
             micStatus: { .granted }, accessibilityGranted: { true },
             llmClient: llm,
             maxRecordingSeconds: maxRecordingSeconds,
+            modelRecordingLimit: modelLimit,
             limitWarningSeconds: limitWarningSeconds,
             warmupClip: nil)
         controller.setNextModeOverride(id: mode.id)
@@ -166,6 +168,17 @@ struct RecordingLimitTests {
         #expect(idleCount == 1)
         #expect(stoppedStates(h.hud) == [.stoppedAtLimit(outcome: .inserted, limit: limitPhrase, rewriteSkipped: false)])
         #expect(!h.hud.states.contains { if case .error = $0 { true } else { false } })
+    }
+
+    @Test func aTakeStopsByItselfAtTheModelsOwnLimitAndNamesIt() async {
+        let h = makeHarness(mode: plainMode(), maxRecordingSeconds: 300, modelLimit: { _ in 0.05 })
+        defer { try? FileManager.default.removeItem(at: h.supportDir) }
+
+        await runUntilIdle(h)
+
+        #expect(await h.inserts.texts == ["hello world"])
+        #expect(h.controller.lastRecord?.stoppedAtLimit == true)
+        #expect(stoppedStates(h.hud) == [.stoppedAtLimit(outcome: .inserted, limit: "1-second", rewriteSkipped: false)])
     }
 
     @Test func historyMarksATakeTheLimitStopped() async {
@@ -309,6 +322,20 @@ struct RecordingLimitTests {
         let seconds = countdowns(h.hud).compactMap { $0?.secondsLeft }
         #expect(seconds.first == 3)
         #expect(Set(seconds).count >= 2)
+    }
+
+    @Test func theActiveModelsOwnLimitShortensTheBackstop() async {
+        let h = makeHarness(mode: plainMode(), maxRecordingSeconds: 900, limitWarningSeconds: 900, engineId: "qwen3-asr-0.6b")
+        defer { try? FileManager.default.removeItem(at: h.supportDir) }
+
+        h.controller.handleStart()
+        await h.controller.captureBringUpTask?.value
+        h.controller.handleCommit()
+        await h.controller.dictationTask?.value
+
+        let seconds = countdowns(h.hud).compactMap { $0?.secondsLeft }
+        #expect(!seconds.isEmpty)
+        #expect(seconds.allSatisfy { $0 <= 480 })
     }
 
     @Test func noCountdownShowsBeforeTheWarningWindow() async {
