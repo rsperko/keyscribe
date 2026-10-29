@@ -764,9 +764,12 @@ link, or tab, and a *script* one that runs a program or shortcut.
 - **What is matched is the cleaned transcript.** Before anything is matched, the Voice Commands mode's own
   replacements run over the whole utterance, so one can repair other misheard verbs
   (`stitch to Mail` → `switch to Mail`).
-  Then its dictionary fixes near-misses in the **target only** — never in the command words, so a term like
-  `Lunch` cannot turn "launch Safari" into something that no longer parses — which lets a target keep its
-  real spelling (such as `Spotify`). Dictionary correction is best-effort and excludes terms shorter
+  Then its dictionary fixes near-misses in the **target and in the words after a saved command's name** —
+  never in the command words or the name itself, so a term like `Lunch` cannot turn "launch Safari" into
+  something that no longer parses — which lets a target keep its real spelling (such as `Spotify`) and the
+  words a script receives get the same spelling fixes as dictation. A correction that would change which
+  saved command the words name (say "Deploy postgrass" becoming the separate command "Deploy Postgres") is
+  not applied, and a whole-utterance replacement's own text is never corrected, only the words it captured. Dictionary correction is best-effort and excludes terms shorter
   than four normalized characters. A replacement that owns the whole utterance becomes the command,
   which makes custom spoken shortcuts (`code` → `open Visual Studio Code`). A terminal `<CR>` on a
   regex replacement is dropped, since a command never presses Return; a literal replacement keeps `<CR>`
@@ -1005,6 +1008,12 @@ How a rule behaves once it matches:
   `trailing`); only the first row, where the command *is* the whole utterance, comes out bare. The
   rule is "one replacement owned the whole thing," so it never fires for a fuzzy-dictionary
   correction — only an explicit replacement that consumed the entire utterance.
+
+  Only the rule's own text is frozen. Words a regex rule **captured** and placed with `$1` are still
+  dictation, so numbers and the dictionary reach them: with `^(.*) end of transmission$` → `jasper $1` and
+  `Metafield` in the dictionary, "fix the meta field errors, end of transmission" gives
+  `jasper fix the Metafield errors`. A rule with no capture (`^p[ie]e?$` → `pi<CR>`) comes out exactly as
+  written, and Return is still pressed only when one rule owns the whole utterance.
 
 - **`whole_dictation = true` makes a rule a spoken command only.** The rule then acts only when it owns
   the whole utterance, as above, and leaves the same words in an ordinary sentence untouched. Without

@@ -1034,10 +1034,11 @@ final class DictationController {
             snapshot.bundleId.map { VoiceCommandOrigin(bundleId: $0, pid: snapshot.pid, windowId: snapshot.focusedWindowId) }
         }
         let start = DispatchTime.now()
-        let reading = plan.voiceCommandReading(heard: heard, mode: activeMode)
+        let commands = config.voiceCommands
+        let reading = plan.voiceCommandReading(
+            heard: heard, mode: activeMode, places: commands.places, scripts: commands.scripts)
         let transcript = reading.text
         let late = LateCommandResult()
-        let commands = config.voiceCommands
         let stopsAtStart = session?.voiceCommandStopsAtPress
         // Lookup stays cancellable (still transcribing); the first check that passes is where acting begins.
         let stillWanted: @MainActor () -> Bool = { [weak self] in

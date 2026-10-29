@@ -272,8 +272,8 @@ replacements there apply only to commands, and run before KeyScribe reads what y
   **Other names**, or add a replacement as below.
 - **A name that sometimes comes out wrong:** add the app's real spelling, such as `Spotify`, to the
   dictionary. This is a best-effort spelling hint, not an explicit mapping from one word to another.
-  Dictionary correction applies only to app and place names, never command words or script names and
-  arguments. Its fuzzy correction excludes dictionary terms shorter than four characters.
+  Dictionary correction applies to app and place names and to the words you say after a command's name,
+  never to the command words or the command's name itself. Its fuzzy correction excludes dictionary terms shorter than four characters.
 - **A phrase that consistently comes out wrong:** add a replacement for the complete command. For
   example, if you say "switch to Mail" but your speech model hears "switch to male", use these fields:
 

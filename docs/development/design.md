@@ -338,8 +338,11 @@ Ordering rules that matter (the footguns):
   rule owns the entire utterance (modulo trailing whitespace/`.!?`), the replacements stage reports
   a bare value on the `PipelineContext`; the host inserts it verbatim and skips the LLM, redaction,
   `trailing`, and `trim`. Detected **at the replacements stage** (not as a pre-pass) so it honors
-  live-edits-before-replacements and freezes the value before numbers/fuzzy can mutate it. The value
-  is the winning rule's generated output. Bypassing the LLM makes redaction moot — nothing leaves the
+  live-edits-before-replacements and freezes the rule's own text before numbers/fuzzy can mutate it.
+  The value is the winning rule's generated output, except that the words a regex rule **captured**
+  (`$1`) are still dictation: `Pipeline.forward` runs the later text stages (numbers, fuzzy) on each
+  capture, keeping the whitespace that joins it to the rule's text. A capture split that does not
+  reproduce the regex engine's output leaves the whole value frozen. Bypassing the LLM makes redaction moot — nothing leaves the
   machine.
 - **Redaction tokenizes LAST of the post-STT steps** — nothing after it (until restore) should mutate
   its tokens; it captures secrets in the final outbound text.

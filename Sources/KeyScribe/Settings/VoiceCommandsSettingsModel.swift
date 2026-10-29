@@ -273,7 +273,7 @@ final class VoiceCommandsSettingsModel: ObservableObject {
     }
 
     func readAs(_ heard: String) -> String {
-        repository.resolved.voiceCommandText(heard: heard)
+        repository.resolved.voiceCommandText(heard: heard, places: places, scripts: scripts)
     }
 
     static func describe(

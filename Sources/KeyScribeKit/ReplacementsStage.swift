@@ -185,6 +185,7 @@ public struct ReplacementsStage: PipelineStage {
             || Self.containsPauseMark(input)
         let owner = mayOwnUtterance ? owningReplacement(for: input) : nil
         context.bareReplacement = owner?.replacement
+        context.bareSegments = owner?.segments
         context.firedReplacements = owner.map { [$0.rule] } ?? effects.map(\.rule)
         context.replacementEffects = owner.map {
             [ReplacementEffect(rule: $0.rule, changedText: $0.changed, insideWord: false, returnOmitted: false, ownsWholeDictation: true)]
@@ -267,32 +268,78 @@ public struct ReplacementsStage: PipelineStage {
         owningReplacement(for: input)?.replacement
     }
 
-    private func owningReplacement(for input: String) -> (replacement: BareReplacement, rule: ReplacementRule, changed: Bool)? {
+    private func owningReplacement(
+        for input: String
+    ) -> (replacement: BareReplacement, rule: ReplacementRule, changed: Bool, segments: [BareSegment]?)? {
         let (core, leading, trailing) = utteranceCore(of: input)
         guard !core.isEmpty else { return nil }
         // A protected token (verbatim/clipboard) means no single rule cleanly owns the utterance — fall
         // through rather than let a rule match across the opaque token.
         guard !SentinelText.containsSentinel(core) else { return nil }
-        if let owned = wholeUtteranceOutput(of: core) {
-            return (BareReplacement(text: leading + owned.text + trailing, submit: owned.submit), owned.rule, owned.text != core)
-        }
         // A mid-utterance pause is sentence punctuation the contiguous match can't cross; retry across a
         // de-paused core (whole-utterance only — still requires an end-to-end match).
         let dePaused = Self.dePause(core)
-        if dePaused != core, let owned = wholeUtteranceOutput(of: dePaused) {
-            return (BareReplacement(text: leading + owned.text + trailing, submit: owned.submit), owned.rule, owned.text != core)
-        }
-        return nil
+        guard let owned = wholeUtteranceOutput(of: core) ?? (dePaused != core ? wholeUtteranceOutput(of: dePaused) : nil)
+        else { return nil }
+        let segments = owned.segments.map { [.literal(leading)] + $0 + [.literal(trailing)] }
+        return (BareReplacement(text: leading + owned.text + trailing, submit: owned.submit), owned.rule, owned.text != core,
+                segments)
     }
 
-    private func wholeUtteranceOutput(of core: String) -> (text: String, submit: Mode.Submit?, rule: ReplacementRule)? {
+    private func wholeUtteranceOutput(
+        of core: String
+    ) -> (text: String, submit: Mode.Submit?, rule: ReplacementRule, segments: [BareSegment]?)? {
         let coreRange = NSRange(core.startIndex..., in: core)
         guard let winner = winningMatch(in: core, at: core.startIndex, includingWholeDictation: true),
               winner.result.range == coreRange else { return nil }
-        let generated = SentinelText.neutralizeOpen(
-            winner.rule.regex.replacementString(
-                for: winner.result, in: core, offset: 0, template: winner.rule.template))
-        return (generated, winner.rule.submit, winner.rule.source)
+        let raw = winner.rule.regex.replacementString(
+            for: winner.result, in: core, offset: 0, template: winner.rule.template)
+        let segments = Self.segments(of: winner.rule.template, filledFrom: winner.result, in: core)
+        let joined = segments?.map { segment -> String in
+            switch segment {
+            case .literal(let s), .captured(let s): s
+            }
+        }.joined()
+        // Splitting is only trusted when it reproduces the engine's own output; otherwise the output stays frozen.
+        return (SentinelText.neutralizeOpen(raw), winner.rule.submit, winner.rule.source, joined == raw ? segments : nil)
+    }
+
+    // Mirrors NSRegularExpression's template rules: a backslash makes the next character literal, and `$` takes
+    // digits for as long as they still name a group in the pattern.
+    static func segments(
+        of template: String, filledFrom result: NSTextCheckingResult, in text: String
+    ) -> [BareSegment]? {
+        let groups = result.numberOfRanges
+        var segments: [BareSegment] = []
+        var literal = ""
+        let chars = Array(template)
+        var i = 0
+        while i < chars.count {
+            let c = chars[i]
+            if c == "\\", i + 1 < chars.count {
+                literal.append(chars[i + 1])
+                i += 2
+                continue
+            }
+            if c == "$", i + 1 < chars.count, let first = chars[i + 1].wholeNumberValue, chars[i + 1].isASCII, first < groups {
+                var group = first
+                var j = i + 2
+                while j < chars.count, chars[j].isASCII, let digit = chars[j].wholeNumberValue, group * 10 + digit < groups {
+                    group = group * 10 + digit
+                    j += 1
+                }
+                if !literal.isEmpty { segments.append(.literal(literal)); literal = "" }
+                let range = result.range(at: group)
+                let captured = range.location == NSNotFound ? "" : (Range(range, in: text).map { String(text[$0]) } ?? "")
+                segments.append(.captured(captured))
+                i = j
+                continue
+            }
+            literal.append(c)
+            i += 1
+        }
+        if !literal.isEmpty { segments.append(.literal(literal)) }
+        return segments
     }
 
     // Sentence punctuation STT inserts at a boundary — one set for both trailing-trim and pause-bridging.

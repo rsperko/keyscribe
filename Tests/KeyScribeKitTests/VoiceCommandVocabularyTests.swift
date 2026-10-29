@@ -115,12 +115,81 @@ struct VoiceCommandVocabularyTests {
         #expect(plan(mode: mode).voiceCommandText(heard: "go to new line", mode: mode) == "go to new line")
     }
 
-    @Test func theDictionaryLeavesTheWordsPassedToAScriptAlone() {
+    @Test func theDictionaryCorrectsTheWordsPassedToASavedCommandButNotItsName() {
+        let mode = commands(words: ["Metafield", "Jaspar"])
+        let plan = plan(mode: mode)
+        let jasper = VoiceCommandScript(name: "Jasper", run: ["/bin/jasper", "{text}"])
+        let read = plan.voiceCommandText(heard: "Jasper, fix the meta field errors.", mode: mode, scripts: [jasper])
+        #expect(read == "Jasper, fix the Metafield errors.")
+        #expect(VoiceCommandResolver.resolve(read, catalog: VoiceCommandCatalog(scripts: [jasper]))
+                == .action(.script(jasper, arguments: ["fix the Metafield errors"])))
+    }
+
+    @Test func theDictionaryCorrectsTheWordsAfterRunAndASavedName() {
+        let mode = commands(words: ["Postgres"])
+        let deploy = VoiceCommandScript(name: "deploy", run: ["/bin/deploy", "{text}"])
+        #expect(plan(mode: mode).voiceCommandText(heard: "run deploy postgrass", mode: mode, scripts: [deploy])
+            == "run deploy Postgres")
+    }
+
+    @Test func theDictionaryCorrectsTheWordsAWholeTakeRuleHandsToASavedCommand() {
+        let rule = ReplacementsSet.Rule(
+            heard: #"(?s)^\s*(.*?)[\s,.!?]*\bend of transmission[\s,.!?]*$"#, replace: "jasper $1", regex: true)
+        let mode = commands(words: ["Metafield"], rules: [rule])
+        let jasper = VoiceCommandScript(name: "Jasper", run: ["/bin/jasper", "{text}"])
+        #expect(plan(mode: mode).voiceCommandText(
+            heard: "Find the meta field errors. End of transmission.", mode: mode, scripts: [jasper])
+            == "jasper Find the Metafield errors")
+    }
+
+    @Test func theDictionaryCorrectsAPlacesFindText() {
+        let mode = commands(words: ["Metafield"])
+        let docs = VoiceCommandPlace(name: "Docs", target: .app(bundleId: "com.example.docs"))
+        #expect(plan(mode: mode).voiceCommandText(heard: "docs meta field", mode: mode, places: [docs])
+            == "docs Metafield")
+    }
+
+    @Test func withoutASavedCommandTheWordsAreLeftAsHeard() {
+        let mode = commands(words: ["Postgres"])
+        #expect(plan(mode: mode).voiceCommandText(heard: "run deploy postgrass", mode: mode)
+            == "run deploy postgrass")
+        #expect(plan(mode: mode).voiceCommandText(heard: "switch to postgrass", mode: mode) == "switch to Postgres")
+    }
+
+    @Test func aCorrectionNeverChangesWhichSavedCommandRuns() {
         let mode = commands(words: ["Postgres"])
         let plan = plan(mode: mode)
-        #expect(plan.voiceCommandText(heard: "run deploy postgrass", mode: mode)
-            == "run deploy postgrass")
-        #expect(plan.voiceCommandText(heard: "switch to postgrass", mode: mode) == "switch to Postgres")
+        let deploy = VoiceCommandScript(name: "Deploy", say: ["ship"], run: ["/bin/deploy", "{text}"])
+        let deployPostgres = VoiceCommandScript(name: "Deploy Postgres", say: ["ship Postgres"], run: ["/bin/dp", "{text}"])
+        let scripts = [deploy, deployPostgres]
+        for heard in ["Deploy postgrass", "run deploy postgrass", "ship postgrass"] {
+            let read = plan.voiceCommandText(heard: heard, mode: mode, scripts: scripts)
+            #expect(read == heard)
+            #expect(VoiceCommandResolver.resolve(read, catalog: VoiceCommandCatalog(scripts: scripts))
+                    == .action(.script(deploy, arguments: ["postgrass"])))
+        }
+    }
+
+    @Test func aCaptureHoldingTheCommandNameNeverChangesWhichCommandRuns() {
+        let mode = commands(words: ["Postgres"], rules: [.init(heard: "^go (.*)$", replace: "$1", regex: true)])
+        let deploy = VoiceCommandScript(name: "Deploy", run: ["/bin/deploy", "{text}"])
+        let deployPostgres = VoiceCommandScript(name: "Deploy Postgres", run: ["/bin/dp", "{text}"])
+        #expect(plan(mode: mode).voiceCommandText(heard: "go deploy postgrass", mode: mode, scripts: [deploy, deployPostgres])
+            == "deploy postgrass")
+    }
+
+    @Test func aCaptureNeverHasItsCommandWordsCorrected() {
+        let mode = commands(words: ["Lunch", "herdr"], rules: [.init(heard: "^wrapped (.*)$", replace: "$1", regex: true)])
+        let plan = plan(mode: mode)
+        #expect(plan.voiceCommandText(heard: "wrapped launch Safari", mode: mode) == "launch Safari")
+        #expect(plan.voiceCommandText(heard: "wrapped switch to herder", mode: mode) == "switch to herdr")
+        #expect(plan.voiceCommandText(heard: "wrapped lunch herder", mode: mode) == "lunch herder")
+    }
+
+    @Test func aWholeTakeRulesOwnTextIsNeverCorrected() {
+        let mode = commands(words: ["Postgres"], rules: [.init(heard: "shortcut", replace: "Deploy postgrass", regex: false)])
+        let deploy = VoiceCommandScript(name: "Deploy", run: ["/bin/deploy", "{text}"])
+        #expect(plan(mode: mode).voiceCommandText(heard: "Shortcut.", mode: mode, scripts: [deploy]) == "Deploy postgrass")
     }
 
     @Test func theDictionaryNeverTurnsAPhraseIntoAScript() {

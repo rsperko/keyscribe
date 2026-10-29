@@ -33,9 +33,16 @@ public struct BareReplacement: Sendable, Equatable {
     }
 }
 
+// A whole-utterance replacement's output, split into the rule's own text and the words it captured.
+public enum BareSegment: Sendable, Equatable {
+    case literal(String)
+    case captured(String)
+}
+
 public struct PipelineContext: Sendable {
     public var text: String
     public var bareReplacement: BareReplacement?
+    public var bareSegments: [BareSegment]?
     public var firedReplacements: [ReplacementRule] = []
     public var replacementEffects: [ReplacementEffect] = []
     public init(text: String) { self.text = text }
@@ -63,16 +70,18 @@ public struct TokenizedPayload: Sendable {
     public let text: String
     public let issuedTokens: [String]
     public let bareReplacement: BareReplacement?
+    public let bareSegments: [BareSegment]?
     public let firedReplacements: [ReplacementRule]
     public let replacementEffects: [ReplacementEffect]
 
     init(
-        text: String, issuedTokens: [String], bareReplacement: BareReplacement? = nil,
+        text: String, issuedTokens: [String], bareReplacement: BareReplacement? = nil, bareSegments: [BareSegment]? = nil,
         firedReplacements: [ReplacementRule] = [], replacementEffects: [ReplacementEffect] = []
     ) {
         self.text = text
         self.issuedTokens = issuedTokens
         self.bareReplacement = bareReplacement
+        self.bareSegments = bareSegments
         self.firedReplacements = firedReplacements
         self.replacementEffects = replacementEffects
     }
@@ -89,13 +98,49 @@ public struct Pipeline: Sendable {
 
     public func forward(_ text: String) -> TokenizedPayload {
         var context = PipelineContext(text: text)
-        for stage in stages { stage.apply(&context) }
+        for stage in stages {
+            let ownedBefore = context.bareReplacement != nil
+            stage.apply(&context)
+            // The owning rule's text is frozen, but what it captured is dictation, so the text stages after it
+            // still reach those words. Tokenizers at other positions never do: the bare path skips the LLM.
+            if ownedBefore, stage.position == .postSTTText, let segments = context.bareSegments {
+                context.bareSegments = Self.applying(stage, toCapturesIn: segments)
+            }
+        }
         return TokenizedPayload(
             text: context.text,
             issuedTokens: stages.flatMap { $0.issuedTokens },
-            bareReplacement: context.bareReplacement,
+            bareReplacement: Self.rebuilt(context.bareReplacement, from: context.bareSegments),
+            bareSegments: context.bareSegments,
             firedReplacements: context.firedReplacements,
             replacementEffects: context.replacementEffects)
+    }
+
+    // A capture's edge whitespace is what joins it to the rule's text or the next capture, and the text stages
+    // normalize edges away, so only the words between them are handed over.
+    public static func applying(_ stage: any PipelineStage, toCapturesIn segments: [BareSegment]) -> [BareSegment] {
+        segments.map { segment in
+            guard case .captured(let words) = segment,
+                  let first = words.firstIndex(where: { !$0.isWhitespace }),
+                  let last = words.lastIndex(where: { !$0.isWhitespace })
+            else { return segment }
+            var captured = PipelineContext(text: String(words[first...last]))
+            stage.apply(&captured)
+            return .captured(String(words[..<first]) + captured.text + String(words[words.index(after: last)...]))
+        }
+    }
+
+    public static func joined(_ segments: [BareSegment]) -> String {
+        SentinelText.neutralizeOpen(segments.map { segment in
+            switch segment {
+            case .literal(let s), .captured(let s): s
+            }
+        }.joined())
+    }
+
+    private static func rebuilt(_ bare: BareReplacement?, from segments: [BareSegment]?) -> BareReplacement? {
+        guard let bare, let segments else { return bare }
+        return BareReplacement(text: joined(segments), submit: bare.submit)
     }
 
     public func restore(_ text: String) -> String {

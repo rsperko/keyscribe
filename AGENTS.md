@@ -76,7 +76,10 @@ This file is the entry point. Read the design docs before writing code — they 
   **One exception:** a replacement that consumes the **entire** utterance (a "whole-utterance
   replacement" like `slash resume`→`/resume`) is inserted verbatim and **bypasses the LLM, trailing,
   and trim** — detected at `ReplacementsStage` (reported via `PipelineContext.bareReplacement`) and
-  short-circuited in `DictationController.produceDictationText`. Regex/literal replacements both match
+  short-circuited in `DictationController.produceDictationText`. Only the rule's own text is frozen: the
+  words it **captured** (`$1`) still pass through the later text stages (numbers, the dictionary), which
+  `Pipeline.forward` runs on `PipelineContext.bareSegments`; a split that does not reproduce the regex
+  engine's output keeps the whole output frozen. Regex/literal replacements both match
   **case-insensitively** by default (STT output is engine-cased; `(?-i)` opts back in). See
   `docs/reference/config_schema.md` *Replacement matching & output*.
 - **Credential material is never persisted in config.** Saved API keys live in Keychain and TOML

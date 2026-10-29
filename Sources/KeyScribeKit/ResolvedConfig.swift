@@ -102,24 +102,87 @@ public final class ResolvedConfig: @unchecked Sendable {
         }
     }
 
-    public func voiceCommandText(heard: String) -> String {
+    public func voiceCommandText(
+        heard: String, places: [VoiceCommandPlace] = [], scripts: [VoiceCommandScript] = []
+    ) -> String {
         guard let mode = modes.first(where: { $0.id == Mode.voiceCommandsId }) else { return heard }
-        return voiceCommandText(heard: heard, mode: mode)
+        return voiceCommandText(heard: heard, mode: mode, places: places, scripts: scripts)
     }
 
-    public func voiceCommandText(heard: String, mode: Mode?) -> String {
-        voiceCommandReading(heard: heard, mode: mode).text
+    public func voiceCommandText(
+        heard: String, mode: Mode?, places: [VoiceCommandPlace] = [], scripts: [VoiceCommandScript] = []
+    ) -> String {
+        voiceCommandReading(heard: heard, mode: mode, places: places, scripts: scripts).text
     }
 
-    public func voiceCommandReading(heard: String, mode: Mode?) -> (text: String, firedReplacements: [ReplacementRule]) {
+    // The dictionary may correct an app or place being switched to, the words after a saved command's name, and
+    // the words a whole-utterance rule captured. Never the command words, a whole-utterance rule's own text, or a
+    // correction that would change which saved command the words name.
+    public func voiceCommandReading(
+        heard: String, mode: Mode?, places: [VoiceCommandPlace] = [], scripts: [VoiceCommandScript] = []
+    ) -> (text: String, firedReplacements: [ReplacementRule]) {
         let stages = postSTTTextStages(for: mode)
+        let fuzzy = stages.filter { $0 is FuzzyStage }
         let pipeline = Pipeline(stages.filter { !($0 is FuzzyStage) })
         let payload = pipeline.forward(heard)
-        let replaced = payload.bareReplacement?.text ?? pipeline.restore(payload.text)
-        guard let target = VoiceCommandGrammar.targetRange(in: replaced) else { return (replaced, payload.firedReplacements) }
-        var context = PipelineContext(text: String(replaced[target]))
-        for stage in stages where stage is FuzzyStage { stage.apply(&context) }
-        return (String(replaced[..<target.lowerBound]) + context.text, payload.firedReplacements)
+        let read: String
+        let corrected: String
+        if let bare = payload.bareReplacement {
+            read = bare.text
+            corrected = correctingCaptures(payload.bareSegments, of: read, with: fuzzy, places: places, scripts: scripts)
+                ?? read
+        } else {
+            read = pipeline.restore(payload.text)
+            if let target = Self.correctableRange(of: read, places: places, scripts: scripts) {
+                corrected = String(read[..<target.lowerBound]) + Self.correcting(String(read[target]), with: fuzzy)
+            } else {
+                corrected = read
+            }
+        }
+        let sameCommand = VoiceCommandResolver.savedCommandIdentity(corrected, places: places, scripts: scripts)
+            == VoiceCommandResolver.savedCommandIdentity(read, places: places, scripts: scripts)
+        return (sameCommand ? corrected : read, payload.firedReplacements)
+    }
+
+    // The words a command acts on: what a "switch to" targets, or what follows a saved command's name.
+    private static func correctableRange(
+        of read: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript]
+    ) -> Range<String.Index>? {
+        VoiceCommandResolver.savedTextRange(read, places: places, scripts: scripts) ?? VoiceCommandGrammar.targetRange(in: read)
+    }
+
+    private static func correcting(_ text: String, with stages: [any PipelineStage]) -> String {
+        Pipeline.joined(stages.reduce([.captured(text)]) { Pipeline.applying($1, toCapturesIn: $0) })
+    }
+
+    // A capture can hold command words ("launch", "switch to") as easily as a target, so only the part of each
+    // capture that lands in the words the command acts on is corrected.
+    private func correctingCaptures(
+        _ segments: [BareSegment]?, of read: String, with stages: [any PipelineStage],
+        places: [VoiceCommandPlace], scripts: [VoiceCommandScript]
+    ) -> String? {
+        guard let segments, Pipeline.joined(segments) == read,
+              let target = Self.correctableRange(of: read, places: places, scripts: scripts) else { return nil }
+        var corrected = ""
+        var cursor = read.startIndex
+        for segment in segments {
+            let isCaptured: Bool
+            let text: String
+            switch segment {
+            case .literal(let s): (isCaptured, text) = (false, s)
+            case .captured(let s): (isCaptured, text) = (true, s)
+            }
+            let end = read.index(cursor, offsetBy: text.count)
+            let low = max(cursor, target.lowerBound)
+            let high = min(end, target.upperBound)
+            if isCaptured, low < high {
+                corrected += read[cursor..<low] + Self.correcting(String(read[low..<high]), with: stages) + read[high..<end]
+            } else {
+                corrected += read[cursor..<end]
+            }
+            cursor = end
+        }
+        return corrected
     }
 
     private func buildTextStages(for mode: Mode?) -> [any PipelineStage] {

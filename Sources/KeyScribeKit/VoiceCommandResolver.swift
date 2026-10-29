@@ -288,9 +288,43 @@ public enum VoiceCommandResolver {
         savedMatch(transcript, from: 0, places: catalog.places, scripts: catalog.scripts)
     }
 
+    // Where the words after a saved command's name begin, found the same way `route` finds the command. Those
+    // words are the user's payload, so they may take dictionary corrections the name itself must never get.
+    public static func savedTextRange(
+        _ transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript]
+    ) -> Range<String.Index>? {
+        guard let found = savedCommand(transcript, places: places, scripts: scripts) else { return nil }
+        let start = transcript[found.nameEnd...].firstIndex { !$0.isWhitespace } ?? transcript.endIndex
+        return start..<transcript.endIndex
+    }
+
+    // Which saved command a transcript names, if any. A correction is only safe when it leaves this unchanged:
+    // a corrected word can complete a longer saved name and run a different program.
+    public static func savedCommandIdentity(
+        _ transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript]
+    ) -> [String]? {
+        savedCommand(transcript, places: places, scripts: scripts).map { found in
+            [found.match.target] + found.match.candidates.map(\.identity)
+        }
+    }
+
+    private static func savedCommand(
+        _ transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript]
+    ) -> (match: SavedMatch, nameEnd: String.Index)? {
+        if let found = savedMatchAndEnd(transcript, from: 0, places: places, scripts: scripts) { return found }
+        guard case .runScript = VoiceCommandGrammar.parse(transcript) else { return nil }
+        return savedMatchAndEnd(transcript, from: 1, places: [], scripts: scripts)
+    }
+
     private static func savedMatch(
         _ transcript: String, from start: Int, places: [VoiceCommandPlace], scripts: [VoiceCommandScript]
     ) -> SavedMatch? {
+        savedMatchAndEnd(transcript, from: start, places: places, scripts: scripts)?.match
+    }
+
+    private static func savedMatchAndEnd(
+        _ transcript: String, from start: Int, places: [VoiceCommandPlace], scripts: [VoiceCommandScript]
+    ) -> (match: SavedMatch, nameEnd: String.Index)? {
         let words = VoiceCommandGrammar.spokenWords(transcript)
         guard start < words.count else { return nil }
         var hits: [(candidate: VoiceCommandCandidate, length: Int)] = []
@@ -314,10 +348,11 @@ public enum VoiceCommandResolver {
         var seen = Set<String>()
         let winners = hits.filter { $0.length == longest && seen.insert($0.candidate.identity).inserted }.map(\.candidate)
         let end = start + longest
-        return SavedMatch(
+        let match = SavedMatch(
             candidates: winners,
             text: VoiceCommandGrammar.cleanedText(transcript[words[end - 1].end...]),
             target: words[start..<end].map(\.key).joined(separator: " "))
+        return (match, words[end - 1].end)
     }
 
     private static func resolve(_ match: SavedMatch, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {

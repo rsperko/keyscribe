@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import KeyScribeKit
 
@@ -237,5 +238,69 @@ struct BareReplacementTests {
             ReplacementRule(heard: "dog", replace: "canine", isRegex: false),
         ]
         #expect(detectBare(rules, on: "slash dog") == BareReplacement(text: "/dog", submit: .return))
+    }
+}
+
+// A whole-take rule's own text is frozen, but the words it captured are dictation like any other, so the
+// later text stages (numbers, the dictionary) still reach them.
+struct WholeTakeCaptureTests {
+    private func run(_ rules: [ReplacementRule], terms: [String] = ["Metafield"], numbers: Bool = false, on text: String) -> BareReplacement? {
+        var stages: [any PipelineStage] = [ReplacementsStage(rules: rules), FuzzyStage(terms: terms)]
+        if numbers { stages.append(NumbersStage()) }
+        return Pipeline(stages).forward(text).bareReplacement
+    }
+
+    private let transmission = ReplacementRule(
+        heard: #"(?s)^\s*(.*?)[\s,.!?]*\bend of transmission[\s,.!?]*$"#, replace: "jasper $1", isRegex: true)
+
+    @Test func theDictionaryCorrectsWhatTheRuleCaptured() {
+        #expect(run([transmission], on: "Find the meta field errors. End of transmission.")?.text
+            == "jasper Find the Metafield errors")
+    }
+
+    @Test func numbersReachWhatTheRuleCaptured() {
+        #expect(run([transmission], numbers: true, on: "open twenty three tickets end of transmission")?.text
+            == "jasper open 23 tickets")
+    }
+
+    @Test func theRulesOwnTextIsNeverCorrected() {
+        let rule = ReplacementRule(heard: #"^note (.*)$"#, replace: "meta feld: $1", isRegex: true)
+        #expect(run([rule], on: "note meta field")?.text == "meta feld: Metafield")
+    }
+
+    @Test func aRuleWithoutCapturesStaysExactlyAsWrittenAndKeepsItsReturn() {
+        let pi = ReplacementRule(heard: #"^p[ie]e?$"#, replace: "pi<CR>", isRegex: true)
+        let bare = run([pi], terms: ["pie"], on: "pee")
+        #expect(bare?.text == "pi")
+        #expect(bare?.submit == .return)
+        let literal = ReplacementRule(heard: "meta field", replace: "meta field", isRegex: false)
+        #expect(run([literal], on: "meta field")?.text == "meta field")
+    }
+
+    @Test func aCaptureUsedTwiceIsCorrectedInBothPlaces() {
+        let rule = ReplacementRule(heard: #"^twice (.*)$"#, replace: "$1 and $1", isRegex: true)
+        #expect(run([rule], on: "twice meta field")?.text == "Metafield and Metafield")
+    }
+
+    @Test func anEscapedReferenceStaysLiteral() {
+        let rule = ReplacementRule(heard: #"^cost (.*)$"#, replace: #"\$1 for $1"#, isRegex: true)
+        #expect(run([rule], on: "cost meta field")?.text == "$1 for Metafield")
+    }
+
+    @Test func aCaptureKeepsTheSpaceThatJoinsItToTheRulesText() {
+        let rule = ReplacementRule(heard: #"^(.+ )world$"#, replace: "$1everyone", isRegex: true)
+        #expect(run([rule], terms: ["Postgres"], on: "hello world")?.text == "hello everyone")
+    }
+
+    @Test func twoCapturesKeepTheSpaceBetweenThem() {
+        let rule = ReplacementRule(heard: #"^(.+ )and (.+)$"#, replace: "$1$2", isRegex: true)
+        #expect(run([rule], on: "meta field and more")?.text == "Metafield more")
+    }
+
+    @Test func aReferenceToAGroupThatDoesNotExistIsLeftToTheRegexEngine() {
+        let rule = ReplacementRule(heard: #"^solo (.*)$"#, replace: "$1$12", isRegex: true)
+        let expected = try! NSRegularExpression(pattern: #"^solo (.*)$"#)
+            .stringByReplacingMatches(in: "solo meta field", range: NSRange(location: 0, length: 15), withTemplate: "$1$12")
+        #expect(run([rule], terms: [], on: "solo meta field")?.text == expected)
     }
 }
