@@ -116,6 +116,9 @@ speech model: some models can also steer recognition toward your terms as they l
 Speech Models** says which — and on every model KeyScribe fixes near-misses right after
 transcription. The fix sticks for next time.
 
+A plural is fixed too: with `Metafield` in your dictionary, "meta fields" becomes Metafields. That only
+applies to names of five letters or more, so "marks" never turns into Marks because you added Mark.
+
 A near-miss fix only reaches spellings a letter or two away. A name your speech model hears as a
 different word (Kryten as "Croydon") needs a replacement. When you add a word and your History already
 holds likely mishearings of it, KeyScribe offers them straight away, unchecked, each with the sentence

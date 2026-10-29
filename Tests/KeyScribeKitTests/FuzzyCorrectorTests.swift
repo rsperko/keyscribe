@@ -302,3 +302,43 @@ struct FuzzyCorrectorTests {
         #expect(fix("rebake the branch", ["rebase"]) == "rebase the branch")
     }
 }
+
+struct FuzzyCorrectorPluralTests {
+    @Test func aPluralOfATermTakesTheTermsSpelling() {
+        #expect(fix("I love metafields", ["Metafield"]) == "I love Metafields")
+        #expect(fix("I love meta fields and more", ["Metafield"]) == "I love Metafields and more")
+        #expect(fix("Speak, meta fields, and meta objects", ["Metafield", "Metaobject"])
+            == "Speak, Metafields, and Metaobjects")
+    }
+
+    @Test func anEsPluralTakesTheTermsSpelling() {
+        #expect(fix("two code classes", ["CodeClass"]) == "two CodeClasses")
+    }
+
+    @Test func aPluralIsOnlyMatchedExactly() {
+        #expect(fix("the metafeilds broke", ["Metafield"]) == "the metafeilds broke")
+    }
+
+    @Test func aTermThatIsAlreadyPluralStillMatchesAsWritten() {
+        #expect(fix("deploy to kubernetes", ["Kubernetes"]) == "deploy to Kubernetes")
+        #expect(fix("the meta objects list", ["Metaobject", "Metaobjects"]) == "the Metaobjects list")
+    }
+
+    @Test func aPossessiveIsLeftAlone() {
+        #expect(fix("the metafield's owner", ["Metafield"]) == "the metafield's owner")
+    }
+
+    @Test func aShortTermsPluralIsLeftAlone() {
+        #expect(fix("hit the marks", ["Mark"]) == "hit the marks")
+    }
+
+    @Test func aDoubledSOnASibilantTermIsAMisspellingNotAPlural() {
+        #expect(fix("install postgress now", ["Postgres"]) == "install Postgres now")
+        #expect(fix("two redises", ["Redis"]) == "two Redises")
+    }
+
+    @Test func aPluralIsReportedAsACandidateWithItsSuffix() {
+        #expect(candidates("we shipped meta fields", ["Metafield"])
+            == [FuzzyCorrector.Candidate(heard: "meta fields", canonical: "Metafields")])
+    }
+}

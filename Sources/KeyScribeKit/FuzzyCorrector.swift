@@ -39,7 +39,7 @@ public enum FuzzyCorrector {
         guard !prepared.isEmpty else { return text }
         var out: [String] = []
         walk(text, prepared: prepared,
-             match: { out.append(leadingPunct($0.first!) + $1.canonical + trailingPunct($0.last!)) },
+             match: { out.append(leadingPunct($0.first!) + $1 + trailingPunct($0.last!)) },
              pass: { out.append($0) })
         return out.joined(separator: " ")
     }
@@ -52,10 +52,10 @@ public enum FuzzyCorrector {
         var result: [Candidate] = []
         var seen = Set<String>()
         walk(text, prepared: prepared,
-             match: { window, term in
+             match: { window, snapped in
                  let heard = window.map(stripPunct).joined(separator: " ")
-                 if seen.insert(heard.lowercased() + "\u{0}" + term.canonical).inserted {
-                     result.append(Candidate(heard: heard, canonical: term.canonical))
+                 if seen.insert(heard.lowercased() + "\u{0}" + snapped).inserted {
+                     result.append(Candidate(heard: heard, canonical: snapped))
                  }
              },
              pass: { _ in })
@@ -66,7 +66,7 @@ public enum FuzzyCorrector {
     // else pass the token through. The match rules are load-bearing (design.md §4.2) — do not fork them.
     private static func walk(
         _ text: String, prepared: Prepared,
-        match: (_ window: [String], _ term: Term) -> Void,
+        match: (_ window: [String], _ snapped: String) -> Void,
         pass: (_ token: String) -> Void
     ) {
         let tokens = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
@@ -88,15 +88,15 @@ public enum FuzzyCorrector {
                 guard norm.count >= 4 else { continue }
                 // Multi-token windows only snap on an exact normalized match (split/spacing fix); fuzzy
                 // distance is single-token only, so a short glue word ("to kubernetes") is never merged away.
-                guard let term = bestMatch(norm, in: prepared, allowFuzzy: span == 1) else { continue }
+                guard let snapped = bestMatch(norm, in: prepared, allowFuzzy: span == 1) else { continue }
                 // Skip only a genuine no-op: the reconstructed snap is byte-identical to the window. Keying on
                 // "join equals canonical" instead would wrongly skip a correctly-cased split ("Fluid Audio" →
                 // FluidAudio), whose join matches the canonical yet still needs the inter-token space removed.
-                if leadingPunct(window.first!) + term.canonical + trailingPunct(window.last!)
+                if leadingPunct(window.first!) + snapped + trailingPunct(window.last!)
                     == window.joined(separator: " ") {
                     continue
                 }
-                match(window, term)
+                match(window, snapped)
                 i += span
                 matched = true
                 break
@@ -123,9 +123,29 @@ public enum FuzzyCorrector {
         return result
     }
 
-    private static func bestMatch(_ norm: String, in prepared: Prepared, allowFuzzy: Bool) -> Term? {
-        if let exact = prepared.byNorm[norm] { return exact }                       // casing/spacing only
-        guard allowFuzzy, let latin = latinized(norm) else { return nil }
+    // The spelling a heard window snaps to. A plural is matched exactly only, and keeps the heard suffix, so it
+    // can change casing and spacing but never letters. A short stem is too often an ordinary word ("marks" for
+    // Mark), and "s" never follows a sibilant: "postgress" is a misspelling of Postgres, not its plural.
+    private static func bestMatch(_ norm: String, in prepared: Prepared, allowFuzzy: Bool) -> String? {
+        if let exact = prepared.byNorm[norm] { return exact.canonical }             // casing/spacing only
+        if let plural = pluralMatch(norm, in: prepared) { return plural }
+        return allowFuzzy ? nearMatch(norm, in: prepared)?.canonical : nil
+    }
+
+    private static func pluralMatch(_ norm: String, in prepared: Prepared) -> String? {
+        let sibilantEndings = ["s", "x", "z", "ch", "sh"]
+        for suffix in ["es", "s"] where norm.hasSuffix(suffix) {
+            let stem = String(norm.dropLast(suffix.count))
+            let sibilant = sibilantEndings.contains { stem.hasSuffix($0) }
+            guard stem.count >= shortestNearMatch, sibilant == (suffix == "es"),
+                  let term = prepared.byNorm[stem] else { continue }
+            return term.canonical + suffix
+        }
+        return nil
+    }
+
+    private static func nearMatch(_ norm: String, in prepared: Prepared) -> Term? {
+        guard let latin = latinized(norm) else { return nil }
         let latinKey = phoneticKey(latin)
         let latinDigits = digits(latin)
         let allowed = latin.count < shortestNearMatch ? 0 : latin.count >= 7 ? 2 : 1

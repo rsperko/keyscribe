@@ -652,8 +652,8 @@ link, or tab, and a *script* one that runs a program or shortcut.
   name never runs one, and **run** never opens an app or place. The spoken name is independent of the executable's filename: `name = "Foo"` can point at
   `~/bin/bar.sh`. A script whose arguments use `{text}` needs words after its name; saying only the name
   fails with a message and runs nothing. A script without `{text}` fails with a message when more words
-  follow its name. A script is never matched by a near-miss, and the dictionary never corrects its name or
-  arguments. These matching rules apply after mode replacements.
+  follow its name. A script is never matched by a near-miss, and the dictionary never corrects its name; it
+  does correct the words after the name, unless that would change which command matches. These matching rules apply after mode replacements.
 - **The text** is what follows the spoken name, in the cleaned transcript's own case and punctuation, with
   leading and trailing spaces and the `, ; : . ! ? …` that speech recognition adds at the edges removed.
   The voice-commands dictionary never corrects it.
