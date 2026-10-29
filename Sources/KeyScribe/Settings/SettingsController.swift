@@ -814,7 +814,7 @@ final class SettingsModel: ObservableObject {
     }
 
     static func featureStates(from features: Settings.Features) -> [String: Bool] {
-        Dictionary(uniqueKeysWithValues: Feature.allCases.map { ($0.id, features.isEnabled($0)) })
+        Dictionary(uniqueKeysWithValues: Feature.allCases.map { ($0.id, features.isSwitchedOn($0)) })
     }
 
     func binding(for feature: Feature) -> Binding<Bool> {

@@ -364,6 +364,11 @@ public struct Settings: Codable, Equatable, Sendable {
         }
 
         public func isEnabled(_ feature: Feature) -> Bool {
+            isSwitchedOn(feature) && (feature.requires.map(isEnabled) ?? true)
+        }
+
+        // The user's own toggle, kept while the feature it requires is off so turning that back on restores it.
+        public func isSwitchedOn(_ feature: Feature) -> Bool {
             overrides[feature.id] ?? false
         }
 

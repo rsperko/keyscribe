@@ -128,7 +128,16 @@ struct FeaturesTests {
         s.features.setEnabled(true, for: .findInApps)
         let toml = try SettingsStore.encode(s)
         #expect(toml.contains("voice_command_sidebars = true"))
-        #expect(try SettingsStore.decode(from: toml).features.isEnabled(.findInApps))
+        #expect(try SettingsStore.decode(from: toml).features.isSwitchedOn(.findInApps))
+    }
+
+    @Test func aNestedFeatureIsOffWhileTheFeatureItRequiresIsOff() {
+        var features = Settings.Features()
+        features.setEnabled(true, for: .findInApps)
+        #expect(!features.isEnabled(.findInApps))
+        #expect(features.isSwitchedOn(.findInApps))
+        features.setEnabled(true, for: .voiceCommands)
+        #expect(features.isEnabled(.findInApps))
     }
 
     @Test func findInAppsOffIsElided() throws {

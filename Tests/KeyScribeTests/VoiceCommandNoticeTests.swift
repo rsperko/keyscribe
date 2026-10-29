@@ -55,6 +55,21 @@ struct VoiceCommandNoticeTests {
         #expect(saved.last?.features.isEnabled(.voiceCommands) == true)
     }
 
+    @Test func findInAppsStaysChosenWhileVoiceCommandsIsOff() throws {
+        var settings = Settings.defaults
+        settings.features.setEnabled(true, for: .findInApps)
+        var saved: [Settings] = []
+        let model = SettingsModel(
+            settings: settings, onChange: { saved.append($0) }, onReload: {}, onResetHUDPosition: {})
+
+        #expect(model.binding(for: .findInApps).wrappedValue)
+        model.binding(for: .streamingTranscription).wrappedValue = true
+
+        let last = try #require(saved.last)
+        #expect(last.features.isSwitchedOn(.findInApps))
+        #expect(!last.features.isEnabled(.findInApps))
+    }
+
     @Test func resettingConfigurationRestoresBothNotices() throws {
         let suite = "keyscribe-notices-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
