@@ -359,11 +359,13 @@ What users informally call "the global hotkey" is just that Fn binding.
 
 **Phase A — known before STT (full pipeline available):**
 - **Trigger key(s):** press styles are **hold-or-tap** (push-to-talk while held *or* fires on a quick
-  tap), **hold-only**, and **tap-to-toggle**. A key **selects its mode** as the initial mode and runs
+  tap), **hold-only**, **tap-to-toggle**, and the TOML-only **start** and **stop** actions. A starting
+  key **selects its mode** as the initial mode and runs
   that mode's *entire* pipeline including pre-STT bias. A key only selects a mode that is **eligible in
   the current context** (its constraints match): pressing a key bound to a Slack-only mode while in
   Slack runs it; pressing it elsewhere does **not** — an app constraint scopes the mode for *every*
-  trigger, not just automatic selection. When **several modes share the key**, the eligible bound mode
+  start trigger, not just automatic selection. Stop-only entries do not participate in start-key
+  resolution or its candidate trace. When **several modes share the starting key**, the eligible bound mode
   whose constraints best fit wins (most specific, then declaration order), with an unconstrained bound
   mode as the fallback — so one key can drive a Slack-only mode in Slack and a plain mode everywhere
   else. **A press never silently borrows a different configured mode:** when no bound mode is eligible
@@ -410,7 +412,16 @@ through Carbon is **suppressed from the focused app**, and a bound mouse button 
 so a scoped mode used to break its key in every *other* app. Only the bundle fields can do this —
 `url_pattern` and `window_title` are unknowable without probing (an Automation prompt per navigation,
 an AX read per title), so a mode scoped only on those keeps its key claimed everywhere and the decision
-stays at press time.
+stays at press time for starts. Stop acts on the current recording without resolving a mode or probing
+its owning mode's URL/window constraints.
+
+**Separate start/stop actions.** A `start` press while busy is ignored, including during a rewrite.
+A `stop` press commits whichever dictation is recording, cancels a take still waiting for microphone
+startup, and does nothing after recording has ended. Releasing either key does nothing. App switches
+and configuration changes defer registration rebuilds until idle, preserving the stop bindings that
+were registered when the take started. Switching apps therefore does not strand the recording or
+retarget its mode; the existing insertion guard copies the result if another app is focused at delivery.
+Registered stop chords and mouse buttons remain reserved even while idle.
 
 The same predicate narrows **whether a press waits for a probe at all**. The deferral gate asks
 `requiresURLContext` / `requiresWindowTitleContext` over the modes the frontmost bundle cannot already
@@ -549,10 +560,12 @@ makes a key press a two-part promise: a constrained mode scopes only its *proces
 
 **Shared-key limitation.** When two modes own the same physical key (e.g. Plain Dictation and an
 app-scoped mode both on Fn — the intended "context disambiguates" workflow), the resolver still picks
-the right mode by context, but the *gesture* (press style: hold-or-tap / hold-only / tap-to-toggle) is
+the right starting mode by context, but the *gesture* (including the start-only or stop-only action) is
 shared: one physical key has one interpretation, taken from the higher-precedence mode (Plain Dictation
 leads, since system/declaration order). A shared key can't have two press styles at once — this is
-inherent, not a routing bug.
+inherent, not a routing bug. A key that starts one mode and stops another is reported as a conflict
+where their registration scopes overlap, even when context would otherwise separate their mode
+selection. The warning does not change registration precedence; use different keys for opposing actions.
 
 **Edit-in-place is a capability, not a magic mode.** There is no special "edit selection" mode — any
 mode can be configured this way. The flow:

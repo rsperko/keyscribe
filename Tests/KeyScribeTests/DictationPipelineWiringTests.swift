@@ -698,6 +698,29 @@ struct DictationPipelineWiringTests {
         #expect(await rig.inserts.text == "draft the memo")
     }
 
+    @Test func aStartOnlyPressNeverSkipsTheRewrite() async {
+        let rig = rewriteRig(escapeDelay: .zero)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await startRewrite(rig)
+        for _ in 0..<200 where !rig.hud.offersLocalTranscript { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(rig.hud.offersLocalTranscript)
+        rig.controller.handleStart(triggerKey: "option+command+j", pressStyle: .startOnly)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(!(await rig.llm.cancelled))
+        #expect(await rig.inserts.text == nil)
+        rig.controller.insertLocalTranscriptNow()
+        #expect(await awaitCancelled(rig.llm))
+    }
+
+    @Test func aStopPressWhileIdleDoesNothing() async {
+        let rig = rewriteRig()
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.controller.handleCommit()
+        #expect(!rig.controller.isBusy)
+        #expect(rig.controller.lastRecord == nil)
+        #expect(rig.hud.states.isEmpty)
+    }
+
     @Test func aSkippedRewriteIsRecordedAsSkippedWithHowLongItRan() async {
         let rig = rewriteRig(escapeDelay: .milliseconds(200))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }

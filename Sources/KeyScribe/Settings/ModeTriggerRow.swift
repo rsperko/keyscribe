@@ -33,13 +33,21 @@ struct PressStyleRow: View {
     let disabled: Bool
 
     var body: some View {
-        Picker("Press behavior", selection: selection) {
-            Text(PressStyle.holdOrTap.title).tag(PressStyle.holdOrTap.rawValue)
-            Text(PressStyle.holdOnly.title).tag(PressStyle.holdOnly.rawValue)
-            Text(PressStyle.tapToToggle.title).tag(PressStyle.tapToToggle.rawValue)
+        if let fileOnly = PressStyle(rawValue: selection.wrappedValue), [.startOnly, .stopOnly].contains(fileOnly) {
+            LabeledContent("Press behavior") {
+                Text("\(fileOnly.title) · configured in its TOML file")
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Editor.pressStyle)
+            }
+        } else {
+            Picker("Press behavior", selection: selection) {
+                Text(PressStyle.holdOrTap.title).tag(PressStyle.holdOrTap.rawValue)
+                Text(PressStyle.holdOnly.title).tag(PressStyle.holdOnly.rawValue)
+                Text(PressStyle.tapToToggle.title).tag(PressStyle.tapToToggle.rawValue)
+            }
+            .disabled(disabled)
+            .accessibilityIdentifier(AccessibilityID.Mode.Editor.pressStyle)
         }
-        .disabled(disabled)
-        .accessibilityIdentifier(AccessibilityID.Mode.Editor.pressStyle)
         Text(disabled
             ? "Add a shortcut to choose how it starts."
             : (PressStyle(rawValue: selection.wrappedValue) ?? .holdOrTap).instruction)
@@ -57,11 +65,14 @@ struct TriggerConflictLabel: View {
             case .collision:
                 IssueText(prefix(conflict) + "Also used by \(conflict.modeName) in an overlapping context. When both could apply, the more specific mode wins, then the one listed first.",
                           severity: .advisory)
+            case .actionCollision:
+                IssueText(prefix(conflict) + "Also used by \(conflict.modeName) for the opposite action. The first registered binding determines whether it starts or stops recording. Use different shortcuts for starting and stopping.",
+                          severity: .advisory)
             case .unreachable:
-                IssueText(prefix(conflict) + "This shortcut never fires: \(conflict.modeName) already claims the same press, written a different way. Give this mode a different shortcut, or write both the same way.",
+                IssueText(prefix(conflict) + "This shortcut never fires: \(conflict.modeName) already claims the same press, written a different way. Give this mode a different shortcut.",
                           severity: .failure)
             case .triggerUnreachable:
-                IssueText(prefix(conflict) + "This shortcut never fires: \(conflict.modeName) already claims the same press, written a different way. This mode's other shortcuts still start it.",
+                IssueText(prefix(conflict) + "This shortcut never fires: \(conflict.modeName) already claims the same press, written a different way. Give it a different shortcut; this mode's other start shortcuts still work.",
                           severity: .failure)
             case .masking:
                 IssueText(prefix(conflict) + "Pressed on the way into \(conflict.modeName)'s shortcut. Press that one as a single motion, or this mode starts first.",

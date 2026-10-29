@@ -977,7 +977,7 @@ The Modes list shows the user-visible summary of each mode:
 - one routing fact and one processing fact, such as `Right-⌥ · On this Mac`, `Safari · Cloud rewrite`,
   or `Say “as an email” · Cloud rewrite`. Wherever a mode's shortcuts are shown, several are joined
   with “or” (`Fn (Globe) or Mouse Button 4 · On this Mac`), and a shortcut that repeats an earlier
-  one on the same mode is not listed.
+  one on the same mode is not listed. Stop-only shortcuts are omitted from these start/routing summaries.
 
 When a mode's file has an error, its editor is **read-only** and a notice above it names the file and the
 parser message, with **Show in Finder**: the mode is running on its last working version, and saving from
@@ -1000,12 +1000,18 @@ sections:
    uses the same shortcut structure and adds one concise explanation of its special fallback role.
    The shortcut well edits the mode's **first** shortcut and preserves any others. Additional
    shortcuts written in the mode's file appear here as a read-only **Also starts with …, configured in
-   its TOML file.** note, naming an extra shortcut's press behavior when it differs from the first. The
-   same note says when a later shortcut is ignored because it is the same press as an earlier one, or
+   its TOML file.** note, naming an extra shortcut's press behavior when it differs from the first; a
+   stop-only shortcut is listed as **Stops with …** instead. The `start` and `stop` press styles are
+   TOML-only: an existing value appears as read-only **Start only · configured in its TOML file** or
+   **Stop only · configured in its TOML file**, replacing the press-behavior picker while leaving the
+   shortcut well editable. The same
+   note says when a later shortcut is ignored because it is the same press as an earlier one, or
    is listed twice. The conflict caption beside them names the shortcut it concerns whenever that is
    not the first, so a warning under the well is never misread as being about the well's key. A
    shortcut another mode already claims is reported as never firing, in red, even while the mode's
-   other shortcuts keep it reachable; only a mode with no working shortcut is flagged in the list.
+   other start shortcuts keep it reachable; an unshadowed stop shortcut does not make a mode reachable
+   from a start key. A shared shortcut with opposing start/stop actions gets its own advisory: the
+   first registered binding determines the action, and the user should choose different shortcuts.
 3. **Where it works** — states whether the mode is available everywhere or only in listed places.
    **Add app or website…** precedes saved places and offers running apps (with their icons), Choose from Applications…,
    Enter Bundle ID…, and **Website…**. Window-title regexes and raw URL patterns live under

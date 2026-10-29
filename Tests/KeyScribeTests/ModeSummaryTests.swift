@@ -81,6 +81,18 @@ struct ModeSummaryTests {
             == "Also starts with Mouse Button 4, configured in its TOML file.")
     }
 
+    @Test func aStopOnlyShortcutIsNotListedAsAWayToStart() {
+        let pedals = mode([("mouse4", "start"), ("mouse5", "stop")])
+        #expect(ModeSummary.triggerDescriptors(pedals) == [try! KeyDescriptor(parsing: "mouse4")])
+    }
+
+    @Test func extraTriggersNoteSaysWhichShortcutStopsTheMode() {
+        #expect(ModeSummary.extraTriggersNote(mode([("fn", "hold-or-tap"), ("mouse4", "start"), ("mouse5", "stop")]))
+            == "Also starts with Mouse Button 4 (Start only). Stops with Mouse Button 5. Both configured in its TOML file.")
+        #expect(ModeSummary.extraTriggersNote(mode([("fn", "hold-or-tap"), ("mouse5", "stop")]))
+            == "Stops with Mouse Button 5, configured in its TOML file.")
+    }
+
     @Test func extraTriggersNoteNamesAPressBehaviorThatDiffersFromTheFirst() {
         #expect(ModeSummary.extraTriggersNote(mode([("fn", "hold-or-tap"), ("mouse4", "hold-only")]))
             == "Also starts with Mouse Button 4 (Hold to talk), configured in its TOML file.")

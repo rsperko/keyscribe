@@ -20,6 +20,31 @@ struct TriggerKeyConflictTests {
         return m
     }
 
+    @Test func aShortcutThatStartsOneModeAndStopsAnotherIsAConflictWhereBothRegister() {
+        let general = mode("general", key: "option+command+k")
+        var textEdit = mode("textedit", key: nil, bundles: ["com.apple.TextEdit"])
+        textEdit.triggerKeys = [.init(key: "option+command+k", pressStyle: "stop")]
+        #expect(TriggerKeyConflicts.conflict(for: textEdit, in: [general, textEdit])?.kind == .actionCollision)
+        #expect(TriggerKeyConflicts.conflict(for: general, in: [general, textEdit])?.kind == .actionCollision)
+        let mail = mode("mail", key: "option+command+k", bundles: ["com.apple.mail"])
+        #expect(TriggerKeyConflicts.conflict(for: mail, in: [textEdit, mail]) == nil)
+    }
+
+    @Test func sharedStopShortcutsDoNotReportOpposingActions() {
+        var first = mode("first", key: "option+command+k")
+        var second = mode("second", key: "option+command+k")
+        first.triggerKeys[0].pressStyle = "stop"
+        second.triggerKeys[0].pressStyle = "stop"
+        #expect(TriggerKeyConflicts.conflict(for: second, in: [first, second])?.kind == .collision)
+    }
+
+    @Test func aModeWhoseOnlySurvivingShortcutStopsIsUnreachable() {
+        let first = mode("first", key: "right_command")
+        var second = mode("second", key: "command")
+        second.triggerKeys.append(.init(key: "option+command+k", pressStyle: "stop"))
+        #expect(TriggerKeyConflicts.conflict(for: second, in: [first, second])?.kind == .unreachable)
+    }
+
     @Test func reportsASubsetSetAsMasking() {
         let modes = [mode("a", key: "left_control+left_command"), mode("b", key: "left_command")]
         let conflict = TriggerKeyConflicts.conflict(for: modes[1], in: modes)

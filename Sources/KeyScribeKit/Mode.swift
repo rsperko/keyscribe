@@ -89,6 +89,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
             self.pressStyle = pressStyle
             self.tapThresholdMs = tapThresholdMs
         }
+        public var startsDictation: Bool { pressStyle != PressStyle.stopOnly.rawValue }
+
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             key = try c.decode(String.self, forKey: .key)

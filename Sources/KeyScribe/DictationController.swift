@@ -584,6 +584,7 @@ final class DictationController {
         // A wake key can reach the tap while the login window still owns the console.
         guard !isSessionLocked() else { return }
         guard machine.beginArming() else {
+            if pressStyle == .startOnly { return }
             if case .rewriting(_, _, _, _, true)? = lastPresented {
                 insertLocalTranscriptNow()
             } else {
@@ -1188,7 +1189,7 @@ final class DictationController {
     }
 
     private func choicePrompt(for pending: VoiceCommandPendingChoice) -> VoiceCommandChoicePrompt {
-        let shortcut = plan.modes.first { $0.runsVoiceCommands }?.triggerKeys.first
+        let shortcut = plan.modes.first { $0.runsVoiceCommands }?.triggerKeys.first(where: \.startsDictation)
             .flatMap { try? KeyDescriptor(parsing: $0.key) }?.displayString
         let use = shortcut.map { "Use \($0)" } ?? "Use your Voice Commands shortcut"
         let hint = (pending.choice.note.map { "\($0) " } ?? "")

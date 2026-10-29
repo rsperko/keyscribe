@@ -177,18 +177,29 @@ trim_trailing_punctuation = false  # strip a final . ! ? (and trailing whitespac
 exclude_from_history = false
 
 # ── When it runs ─────────────────────────────────────────────────────────────
-# Trigger keys. Each has a press style: "hold-or-tap" | "hold-only" | "tap-to-toggle".
+# Trigger keys. Each has a press style: "hold-or-tap" | "hold-only" | "tap-to-toggle" | "start" | "stop".
 # "hold-or-tap" = push-to-talk while held, OR fires on a quick tap.
+# "start" starts a dictation; another press while busy is ignored. "stop" finishes the current
+# recording, regardless of which mode started it. Releasing either key does nothing. TOML-only for now.
+# Use distinct keys for the two actions; their scope and idle behavior are described below.
 [[trigger_keys]]
 key = "right_option"        # canonical key descriptor; also e.g. "fn", "left_command+left_control",
                             # "control+`" (see "Key descriptor format" below)
 press_style = "hold-or-tap"
 tap_threshold_ms = 250      # release under this = a tap (latches on); over = push-to-talk hold
 
-# A further entry starts the same mode, each with its own press style. Settings edits only the first.
+# Each entry has its own press style. Settings edits only the first entry's shortcut.
 # [[trigger_keys]]
 # key = "mouse4"
 # press_style = "hold-only"
+#
+# Two pedals: one starts, the other stops.
+# [[trigger_keys]]
+# key = "mouse4"
+# press_style = "start"
+# [[trigger_keys]]
+# key = "mouse5"
+# press_style = "stop"
 
 # Context eligibility. Empty = eligible everywhere. A constraint ANDs its fields; any of
 # bundle_id (exact), bundle_prefix (case-insensitive bundle-id prefix), url_pattern (regex, when
@@ -200,7 +211,7 @@ bundle_id = "com.apple.mail"
 # url_pattern = 'mail\.google\.com/.*'    # optional; best-effort
 # Pair url_pattern with bundle_id in the SAME block to also release the trigger key outside that
 # browser: a url-only rule cannot be disproved without probing, so its key stays claimed everywhere
-# and an out-of-scope press starts and cancels. With the bundle present the press resolves before the
+# and an out-of-scope start press starts and cancels. With the bundle present the press resolves before the
 # mic opens and is a silent no-op (design.md §4.3).
 # window_title = '(?i)pull request'       # optional; regex against the focused window title
 # The editor's friendly "Website…" field stores a generated host-anchored url_pattern
@@ -258,7 +269,7 @@ context = { app = true, preceding_text = false }
 | `schema_version` | int | Required. Current: `2`. Older versions are normalized on read; v1→v2 migrates the retired `clipboard_modifier` key (`"control"` → `paste_key = "control+v"` + `copy_key = "control+c"`; `"command"` was the default and just drops). |
 | `name` | string | Display label. |
 | `enabled` | bool | Disabled modes are ignored by the resolver. |
-| `trigger_keys[]` | table[] | `key` (canonical descriptor) + `press_style` + `tap_threshold_ms` (default 250). Zero or more; every entry starts the mode. Settings edits the **first** entry and preserves the rest. Further entries are TOML-only and appear in the mode editor as a read-only "Also starts with" note; a later entry that is the same press as an earlier one (`command` after `right_command`, or the same key twice) is ignored at runtime, the note says so, and it is left out wherever the mode's shortcuts are listed. There is no separate global hotkey — whichever mode owns Fn (the Direct floor by default) is "the global hotkey". |
+| `trigger_keys[]` | table[] | `key` (canonical descriptor) + `press_style` + `tap_threshold_ms` (default 250). Zero or more; every entry starts the mode except a `stop` entry, which only stops the recording dictation. Settings edits the **first** entry and preserves the rest; the `start` and `stop` styles are TOML-only. Further entries are TOML-only and appear in the mode editor as a read-only "Also starts with" / "Stops with" note; a later entry that is the same press as an earlier one (`command` after `right_command`, or the same key twice) is ignored at runtime, the note says so, and it is left out wherever the mode's shortcuts are listed. There is no separate global hotkey — whichever mode owns Fn (the Direct floor by default) is "the global hotkey". |
 | `trigger_phrases` | string[] | Spoken phrases matched at the transcript end post-STT — case-insensitive, word-boundary-honored, trailing punctuation/space tolerated. Each is a regex, so power users can write one (`(?-i)` opts back into case-sensitivity). Zero or more. |
 | `constraints[]` | table[] | Any of `bundle_id`, `bundle_prefix`, `url_pattern`, `window_title` (ANDed). Empty ⇒ eligible everywhere. |
 | `source` | enum | `dictation` \| `selection`. |
@@ -288,6 +299,36 @@ next write.)
 The mode editor surfaces `source = "selection"` + `output = "replace_selection"` together as a
 single **"Rewrite selected text"** checkbox; the two-field model stays in TOML for flexibility.
 
+### Separate start and stop shortcuts
+
+Use `press_style = "start"` and `press_style = "stop"` on different keys or pedal buttons. These
+styles are configured in the mode's TOML file. Put the start entry first if you want Settings' single
+shortcut well to edit it; later entries are preserved and described below the well.
+
+| Action | Behavior |
+|---|---|
+| `start` | Starts a dictation using the normal mode-resolution rules. Further presses while busy are ignored, including during transcription or rewriting; they do not skip a rewrite. |
+| `stop` | Finishes the current recording and processes its result, whichever mode or shortcut started it. During microphone startup it cancels the pending take. Once recording has ended, it does nothing. It never selects a mode to start. |
+
+Both actions happen on key-down. Key-up does nothing, repeated key-down events while held are ignored,
+and `tap_threshold_ms` has no effect on these styles.
+
+**App constraints and switching apps.** Bundle constraints determine whether a mode's shortcuts are
+registered while idle. Once a dictation is in progress, registrations stay unchanged until it finishes,
+so a stop shortcut registered at the start remains usable after switching apps. Stop does not recheck
+the owning mode's app, URL, or window-title constraints; any registered stop shortcut can finish the
+recording. The mode and target remain based on the start-time context. If a different app is still
+focused at insertion time, the result is copied instead of pasted into it.
+
+**Reserved keys while idle.** A registered stop shortcut still reserves a keyboard chord or mouse
+button when no recording is active: the focused app does not receive that chord or button. Modifier-only
+shortcuts use the existing modifier handling instead. A URL- or window-title-only constraint cannot
+release a binding outside its context; add a bundle constraint to limit registration to an app.
+
+**Keep start and stop on distinct keys.** Do not give one key opposing actions in modes that can
+register in the same app. The first registered binding determines the action; mode specificity does
+not choose between starting and stopping. A conflict warning does not prevent use of that binding.
+
 ### Settings UI vs advanced TOML
 
 The Settings UI exposes mode behavior in user-facing terms. Some fields stay available in TOML
@@ -301,7 +342,7 @@ or make global behavior hard to reason about.
 | `dictionary.include_global` | No per-mode toggle in Settings; global dictionary terms stay included by default. | Turning this off makes a mode stop using vocabulary the user expects to apply everywhere. |
 | `replacements.include_global` | No per-mode toggle in Settings; global replacements stay included by default. | Turning this off creates surprising mode-specific replacement gaps. |
 | `source` + `output` | Shown as one “Rewrite selected text” control. | The app-supported selection workflow is the paired shape: capture the current selection and replace it with the rewritten result. |
-| `trigger_keys[]` beyond the first, `tap_threshold_ms` | The first entry's key and press style are editable in Settings (“Shortcut” and “Press behavior”). `tap_threshold_ms` and every entry after the first are TOML-only; further entries show as a read-only “Also starts with” note in the mode editor and are preserved when the first is edited. | One shortcut covers nearly everyone; a second is a routing detail, and the shortcut well stays one control showing one binding. |
+| `trigger_keys[]` beyond the first, `tap_threshold_ms`, `press_style = "start"` / `"stop"` | Settings edits the first entry's key. Regular press styles use a picker; an existing `start` or `stop` style instead appears as read-only “Start only · configured in its TOML file” or “Stop only · configured in its TOML file.” Changing those styles requires editing TOML. Further entries show as read-only “Also starts with” / “Stops with” notes and are preserved when the first is edited. | Separate start/stop controls and additional shortcuts are advanced configuration; the shortcut well stays one control showing one binding. |
 
 ---
 

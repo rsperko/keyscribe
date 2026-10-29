@@ -412,20 +412,34 @@ enum ModeSummary {
     }
 
     static func triggerDescriptors(_ mode: Mode) -> [KeyDescriptor] {
-        TriggerKeyConflicts.liveTriggers(in: mode).map(\.descriptor)
+        TriggerKeyConflicts.liveTriggers(in: mode)
+            .filter { mode.triggerKeys[$0.index].startsDictation }
+            .map(\.descriptor)
     }
 
     static func extraTriggersNote(_ mode: Mode) -> String? {
         let parsed = TriggerKeyConflicts.parsedTriggers(in: mode)
         let primaryStyle = mode.triggerKeys.first?.pressStyle
-        let extras = parsed.filter { $0.index > 0 && $0.sameAs == nil }.map { entry in
+        let live = parsed.filter { $0.index > 0 && $0.sameAs == nil }
+        let isStop = { (entry: TriggerKeyConflicts.ParsedTrigger) in
+            mode.triggerKeys[entry.index].pressStyle == PressStyle.stopOnly.rawValue
+        }
+        let extras = live.filter { !isStop($0) }.map { entry in
             let style = mode.triggerKeys[entry.index].pressStyle
             guard style != primaryStyle else { return entry.descriptor.displayString }
             return "\(entry.descriptor.displayString) (\((PressStyle(rawValue: style) ?? .holdOrTap).title))"
         }
+        let stops = live.filter(isStop).map(\.descriptor.displayString)
         var sentences: [String] = []
-        if !extras.isEmpty {
+        switch (extras.isEmpty, stops.isEmpty) {
+        case (false, true):
             sentences.append("Also starts with \(extras.joined(separator: " or ")), configured in its TOML file.")
+        case (true, false):
+            sentences.append("Stops with \(stops.joined(separator: " or ")), configured in its TOML file.")
+        case (false, false):
+            sentences.append("Also starts with \(extras.joined(separator: " or ")). Stops with \(stops.joined(separator: " or ")). Both configured in its TOML file.")
+        case (true, true):
+            break
         }
         for entry in parsed {
             guard let earlier = entry.sameAs else { continue }

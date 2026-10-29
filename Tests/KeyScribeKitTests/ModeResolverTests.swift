@@ -528,3 +528,12 @@ struct ModeClaimTests {
         #expect(ModeResolver.canClaimKey(constrained([.init(bundleId: "com.vmware.fusion")]), bundleId: nil))
     }
 }
+
+@Test func aStopOnlyShortcutNeverChoosesTheModeThatStarts() {
+    let general = mode("general", keys: ["option+command+k"])
+    var textEdit = mode("textedit", bundles: ["com.apple.TextEdit"])
+    textEdit.triggerKeys = [Mode.TriggerKey(key: "option+command+k", pressStyle: "stop")]
+    let ctx = RoutingContext(bundleId: "com.apple.TextEdit")
+    #expect(phaseA([general, textEdit], context: ctx, triggerKey: "option+command+k")?.id == "general")
+    #expect(ModeResolver.keyCandidates(modes: [general, textEdit], context: ctx, triggerKey: "option+command+k").isEmpty)
+}

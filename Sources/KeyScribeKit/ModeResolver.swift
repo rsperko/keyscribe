@@ -119,7 +119,7 @@ public enum ModeResolver {
         //    owns the pressed key (design.md §4.3).
         if let key = triggerKey {
             let wanted = normalizeKey(key)
-            let bound = enabled.filter { $0.triggerKeys.contains { normalizeKey($0.key) == wanted } }
+            let bound = enabled.filter { $0.triggerKeys.contains { $0.startsDictation && normalizeKey($0.key) == wanted } }
             if !bound.isEmpty {
                 if let m = mostSpecific(bound.filter { isEligible($0, context) }, context) {
                     // A bound mode that also carries a matching context rule is still "started by its shortcut"
@@ -131,7 +131,7 @@ public enum ModeResolver {
                 // elsewhere the user never gave this key to Direct, so borrowing it silently swaps a
                 // configured mode for another one — the very thing the rule above forbids. Compared
                 // canonically, like every other trigger-string comparison.
-                guard directFallback.triggerKeys.contains(where: { normalizeKey($0.key) == wanted })
+                guard directFallback.triggerKeys.contains(where: { $0.startsDictation && normalizeKey($0.key) == wanted })
                 else { return nil }
                 return PhaseAResult(mode: directFallback, reason: .fallback)
             }
@@ -150,7 +150,7 @@ public enum ModeResolver {
     public static func keyCandidates(modes: [Mode], context: RoutingContext, triggerKey: String?) -> [ModeCandidate] {
         guard let key = triggerKey else { return [] }
         let wanted = normalizeKey(key)
-        let bound = modes.filter { $0.enabled && $0.triggerKeys.contains { normalizeKey($0.key) == wanted } }
+        let bound = modes.filter { $0.enabled && $0.triggerKeys.contains { $0.startsDictation && normalizeKey($0.key) == wanted } }
         let winner = mostSpecific(bound.filter { isEligible($0, context) }, context)
         if bound.count == 1, bound.first?.id == winner?.id { return [] }
         let winnerScore = winner.map { specificity($0, context) }

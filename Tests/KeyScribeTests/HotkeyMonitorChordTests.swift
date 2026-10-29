@@ -118,16 +118,43 @@ struct HotkeyMonitorChordTests {
         #expect(commits == 0)
     }
 
-    @Test func heldGestureIsReportedWhilePhysicalKeyIsDown() async {
+    @Test func idleResyncResetsAToggleEvenWhileTheStopKeyIsStillHeld() async {
         let fake = FakeChordRegistrar()
+        var starts = 0, commits = 0
         let m = HotkeyMonitor(
-            bindings: [], onStart: { _, _, _ in }, onCommit: { _ in }, carbon: fake)
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
+        m.update(bindings: [
+            chordBinding("control+option+e", style: .tapToToggle), chordBinding("control+option+s", style: .stopOnly),
+        ])
+        let toggle = fake.lastRegistrations[0], stop = fake.lastRegistrations[1]
+
+        toggle.onPressed()
+        toggle.onReleased?()
+        stop.onPressed()
+        await drainMain()
+        m.resetIdleGestures()
+        stop.onReleased?()
+        toggle.onPressed()
+        await drainMain()
+
+        #expect(starts == 2)
+        #expect(commits == 1)
+    }
+
+    @Test func idleResyncLeavesAHeldGestureAlone() async {
+        let fake = FakeChordRegistrar()
+        var starts = 0, commits = 0
+        let m = HotkeyMonitor(
+            bindings: [], onStart: { _, _, _ in starts += 1 }, onCommit: { _ in commits += 1 }, carbon: fake)
         m.update(bindings: [chordBinding("control+option+e", style: .holdOnly)])
 
         fake.lastRegistrations[0].onPressed()
-        #expect(m.hasPhysicallyDownGesture)
+        m.resetIdleGestures()
         fake.lastRegistrations[0].onReleased?()
-        #expect(!m.hasPhysicallyDownGesture)
+        await drainMain()
+
+        #expect(starts == 1)
+        #expect(commits == 1)
     }
 
     @Test func updatePreservesInProgressGestureForIdenticalDescriptor() async {
@@ -948,7 +975,7 @@ struct HotkeyMonitorChordTests {
         #expect(starts == 1)
     }
 
-    @Test func aPressInsideTheGraceCountsAsHeld() async {
+    @Test func anIdleResyncInsideTheGraceKeepsThePress() async {
         var starts = 0
         let clock = ManualScheduler()
         let m = HotkeyMonitor(
@@ -957,12 +984,11 @@ struct HotkeyMonitorChordTests {
         m.update(bindings: [namedBinding("fn")])
 
         m.handle(type: .flagsChanged, keyCode: 63, flags: .maskSecondaryFn)
-        #expect(m.hasPhysicallyDownGesture)
+        m.resetIdleGestures()
 
         clock.fireAll()
         await drainMain()
         #expect(starts == 1)
-        #expect(m.hasPhysicallyDownGesture)
     }
 
     @Test func aForeignModifierInsideTheGraceStartsNothingAtAll() async {

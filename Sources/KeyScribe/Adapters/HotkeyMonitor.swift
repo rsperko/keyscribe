@@ -134,11 +134,15 @@ final class HotkeyMonitor {
         }
     }
 
-    // A pending arm counts: the key IS physically down, its gesture just has not been told yet. Without it the
-    // idle resync (AppDelegate.onBecameIdle) would see "nothing held" and cancelGestures() a press that is
-    // still inside its grace, silently dropping a dictation the user had already begun.
-    var hasPhysicallyDownGesture: Bool {
-        bindings.contains { $0.gesture.isPhysicallyDown || $0.pendingArm }
+    // Resyncs on a return to idle without touching a key still held: a held key's gesture may already have
+    // emitted a start whose dictation has not armed yet, and dropping it would lose that press's release. A
+    // pending arm counts as held, since its gesture has not been told yet. Resetting the rest regardless of
+    // what is held is what keeps a toggle in step after a separate stop key ended its take. Only the gesture
+    // resets: `engaged` and `suppressedUntilRelease` mirror the physical modifier flags, not the dictation.
+    func resetIdleGestures() {
+        for i in bindings.indices where !bindings[i].gesture.isPhysicallyDown && !bindings[i].pendingArm {
+            bindings[i].gesture.cancel()
+        }
     }
 
     // The tap watches modifier-only triggers (any set of sided/sideless modifiers) via `.flagsChanged`; once

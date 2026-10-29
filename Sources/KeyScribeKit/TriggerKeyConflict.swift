@@ -1,7 +1,7 @@
 public struct TriggerKeyConflict: Equatable, Sendable {
     // Collision shares a press; unreachable loses registration for every trigger, triggerUnreachable for
     // one while another still fires; masking is a strict modifier subset.
-    public enum Kind: Equatable, Sendable { case collision, unreachable, triggerUnreachable, masking }
+    public enum Kind: Equatable, Sendable { case collision, actionCollision, unreachable, triggerUnreachable, masking }
 
     public let modeId: String
     public let modeName: String
@@ -30,7 +30,8 @@ public enum TriggerKeyConflicts {
             (try? KeyDescriptor(parsing: trigger.key)).map { (trigger, $0) }
         }
         let claims = parsed.map { claimedEarlier($0.1, key: $0.0.key, for: mode, in: earlier) }
-        if !claims.isEmpty, claims.allSatisfy({ $0 != nil }), let first = claims.first ?? nil {
+        let startClaims = zip(parsed, claims).filter { $0.0.0.startsDictation }.map(\.1)
+        if !startClaims.isEmpty, startClaims.allSatisfy({ $0 != nil }), let first = startClaims.first ?? nil {
             return first
         }
         if let dead = claims.lazy.compactMap({ $0 }).first {
@@ -43,10 +44,15 @@ public enum TriggerKeyConflicts {
             for other in modes where other.id != mode.id && other.enabled {
                 for trigger in other.triggerKeys {
                     guard let otherDescriptor = try? KeyDescriptor(parsing: trigger.key) else { continue }
-                    guard canContend(mode, other) else { continue }
+                    // Registration, not routing, picks the press style, so starting and stopping on one key
+                    // cannot be separated by context wherever both modes register.
+                    let actionsDiffer = editedTrigger.startsDictation != trigger.startsDictation
+                    guard canContend(mode, other) || (actionsDiffer && bundleScopesIntersect(mode, other))
+                    else { continue }
                     if otherDescriptor.collides(with: descriptor) {
                         return TriggerKeyConflict(
-                            modeId: other.id, modeName: other.name, key: trigger.key, kind: .collision,
+                            modeId: other.id, modeName: other.name, key: trigger.key,
+                            kind: actionsDiffer ? .actionCollision : .collision,
                             triggerKey: editedTrigger.key)
                     }
                     // Prefer a collision warning over masking.

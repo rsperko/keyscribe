@@ -2,12 +2,16 @@ public enum PressStyle: String, Sendable {
     case holdOrTap = "hold-or-tap"
     case holdOnly = "hold-only"
     case tapToToggle = "tap-to-toggle"
+    case startOnly = "start"
+    case stopOnly = "stop"
 
     public var title: String {
         switch self {
         case .holdOnly: "Hold to talk"
         case .tapToToggle: "Tap to toggle"
         case .holdOrTap: "Hold to talk; tap to toggle"
+        case .startOnly: "Start only"
+        case .stopOnly: "Stop only"
         }
     }
 
@@ -16,6 +20,8 @@ public enum PressStyle: String, Sendable {
         case .holdOnly: "Hold the trigger while speaking, then release it to stop."
         case .tapToToggle: "Tap once to start, then tap again to stop."
         case .holdOrTap: "Hold and release, or tap to start and tap again to stop."
+        case .startOnly: "Press to start; does nothing while a dictation is in progress."
+        case .stopOnly: "Press to stop; does nothing when no dictation is recording."
         }
     }
 }
@@ -61,6 +67,12 @@ public struct PressGesture: Sendable {
             physicallyDown = false
         }
         switch style {
+        case .startOnly:
+            return edge == .down ? .start : .none
+
+        case .stopOnly:
+            return edge == .down ? .commit : .none
+
         case .holdOnly:
             switch edge {
             case .down: recording = true; return .start

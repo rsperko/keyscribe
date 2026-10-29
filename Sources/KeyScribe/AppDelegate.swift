@@ -265,13 +265,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.onBecameIdle = { [weak self] in
             guard let self else { return }
-            // Resync gesture state on every return to idle. A controller-side end (the recording limit, a mic error)
-            // drops the machine to idle while a PressGesture still thinks it is recording, so the next
-            // tap-to-toggle press would emit .commit into an idle machine (a no-op). Safe at idle: a real
-            // in-progress gesture keeps the machine recording, never idle.
-            if !self.hotkey.hasPhysicallyDownGesture {
-                self.hotkey.cancelGestures()
-            }
+            // Resync gesture state on every return to idle. A controller-side end (the recording limit, a mic error,
+            // a separate stop key) drops the machine to idle while a PressGesture still thinks it is recording, so
+            // the next tap-to-toggle press would emit .commit into an idle machine (a no-op).
+            self.hotkey.resetIdleGestures()
             guard self.pendingHotkeyRebuild else { return }
             self.pendingHotkeyRebuild = false
             self.buildHotkeyMonitor()
