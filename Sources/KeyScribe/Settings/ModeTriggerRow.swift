@@ -77,8 +77,15 @@ struct TriggerConflictLabel: View {
             case .masking:
                 IssueText(prefix(conflict) + "Pressed on the way into \(conflict.modeName)'s shortcut. Press that one as a single motion, or this mode starts first.",
                           severity: .advisory)
+            case .maskedBy:
+                IssueText(prefix(conflict) + "Starts with \(Self.display(conflict.key)), which is \(conflict.modeName)'s shortcut. Press this one as a single motion, or \(conflict.modeName) starts first and is then cancelled.",
+                          severity: .advisory)
             }
         }
+    }
+
+    private static func display(_ key: String) -> String {
+        (try? KeyDescriptor(parsing: key))?.displayString ?? key
     }
 
     private func prefix(_ conflict: TriggerKeyConflict) -> String {

@@ -623,7 +623,10 @@ Show the few choices a new user is most likely to need:
   offers a short list of the familiar sideless triggers, and anything else you record shows as
   **Custom**. A modifier set that is a strict subset of another
   contending mode's set is *pressed on the way into* it, and the well says so as an advisory; the
-  chord grace makes pressing the larger one as a single motion start only that mode.
+  chord grace makes pressing the larger one as a single motion start only that mode. The larger
+  shortcut's well says so too, and so does a key-plus-modifiers shortcut whose modifiers include a
+  contending mode's modifier-only trigger (⌥/ beside a Right-⌥ trigger): pressed slowly, the other mode
+  starts and is then cancelled.
 - Every shortcut well records the **character a key types**, not its position, so a saved chord may
   not exist on another keyboard layout. A chord the active layout cannot produce is never registered,
   and the well says so with a **Not on your current keyboard layout** caption rather than looking

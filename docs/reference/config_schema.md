@@ -1253,7 +1253,9 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
   - **A strict subset is warned about, not suppressed.** `left_command` under
     `left_command+left_control` is pressed on the way into it, and the Settings well says so. At
     runtime the 150 ms chord grace holds the smaller trigger's arm back, so pressing the pair as one
-    motion starts only the pair.
+    motion starts only the pair. The larger trigger is warned too, as is a key chord whose modifiers
+    include another mode's modifier-only trigger (`option+/` beside `right_option`): held longer than the
+    grace before the key, the modifier-only mode starts and is then cancelled by the key.
   - **The recorder writes the keys that were actually pressed**, sides and all: recording Left-⌘ + Left-⌃
     stores `left_command+left_control` and binds those keys. A trigger recorded on one side therefore does
     not fire on the other — recording ⌃⌥⇧⌘ on the left stores the all-left set, and reaching for the right

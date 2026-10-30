@@ -52,10 +52,37 @@ struct TriggerKeyConflictTests {
         #expect(conflict?.kind == .masking)
     }
 
-    @Test func maskingAcceptsASidelessSupersetButNotTheReverse() {
+    @Test func maskingAcceptsASidelessSupersetAndWarnsTheSupersetToo() {
         let modes = [mode("a", key: "control+command"), mode("b", key: "right_command")]
         #expect(TriggerKeyConflicts.conflict(for: modes[1], in: modes)?.kind == .masking)
+        let superset = TriggerKeyConflicts.conflict(for: modes[0], in: modes)
+        #expect(superset?.kind == .maskedBy)
+        #expect(superset?.modeId == "b")
+    }
+
+    @Test func aChordThatStartsWithAnotherModesModifierShortcutIsWarned() {
+        let modes = [mode("cleanup", key: "right_option"), mode("agent", key: "option+/")]
+        let chord = TriggerKeyConflicts.conflict(for: modes[1], in: modes)
+        #expect(chord?.kind == .maskedBy)
+        #expect(chord?.modeId == "cleanup")
+        #expect(chord?.key == "right_option")
         #expect(TriggerKeyConflicts.conflict(for: modes[0], in: modes) == nil)
+    }
+
+    @Test func aChordIsOnlyWarnedWhenTheModifierShortcutIsPartOfIt() {
+        let modes = [mode("cleanup", key: "right_option"), mode("agent", key: "command+/")]
+        #expect(TriggerKeyConflicts.conflict(for: modes[1], in: modes) == nil)
+        #expect(TriggerKeyConflicts.conflict(for: modes[0], in: modes) == nil)
+        let fn = [mode("fn", key: "fn"), mode("chord", key: "control+/")]
+        #expect(TriggerKeyConflicts.conflict(for: fn[1], in: fn) == nil)
+    }
+
+    @Test func aChordWarningRespectsContextSeparation() {
+        let modes = [
+            mode("cleanup", key: "right_option", bundles: ["com.apple.mail"]),
+            mode("agent", key: "option+/", bundles: ["com.mitchellh.ghostty"]),
+        ]
+        #expect(TriggerKeyConflicts.conflict(for: modes[1], in: modes) == nil)
     }
 
     @Test func maskingRequiresTheSharedModifiersToNameCompatibleKeys() {

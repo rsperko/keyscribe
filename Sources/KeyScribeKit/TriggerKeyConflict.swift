@@ -1,7 +1,8 @@
 public struct TriggerKeyConflict: Equatable, Sendable {
     // Collision shares a press; unreachable loses registration for every trigger, triggerUnreachable for
-    // one while another still fires; masking is a strict modifier subset.
-    public enum Kind: Equatable, Sendable { case collision, actionCollision, unreachable, triggerUnreachable, masking }
+    // one while another still fires; masking is a press made on the way into the other mode's shortcut, and
+    // maskedBy is the reverse: this shortcut begins with the other mode's.
+    public enum Kind: Equatable, Sendable { case collision, actionCollision, unreachable, triggerUnreachable, masking, maskedBy }
 
     public let modeId: String
     public let modeName: String
@@ -56,9 +57,9 @@ public enum TriggerKeyConflicts {
                             triggerKey: editedTrigger.key)
                     }
                     // Prefer a collision warning over masking.
-                    if masking == nil, masks(descriptor, otherDescriptor) {
+                    if masking == nil, let kind = maskingKind(descriptor, otherDescriptor) {
                         masking = TriggerKeyConflict(
-                            modeId: other.id, modeName: other.name, key: trigger.key, kind: .masking,
+                            modeId: other.id, modeName: other.name, key: trigger.key, kind: kind,
                             triggerKey: editedTrigger.key)
                     }
                 }
@@ -139,9 +140,22 @@ public enum TriggerKeyConflicts {
         }
     }
 
-    private static func masks(_ descriptor: KeyDescriptor, _ other: KeyDescriptor) -> Bool {
-        guard case .modifiers(let set) = descriptor, case .modifiers(let otherSet) = other else { return false }
-        return set.isMasked(by: otherSet)
+    private static func maskingKind(_ descriptor: KeyDescriptor, _ other: KeyDescriptor) -> TriggerKeyConflict.Kind? {
+        switch (descriptor, other) {
+        case (.modifiers(let set), .modifiers(let otherSet)):
+            if set.isMasked(by: otherSet) { return .masking }
+            if otherSet.isMasked(by: set) { return .maskedBy }
+        case (.chord(let modifiers, _), .modifiers(let otherSet)):
+            if begins(chord: modifiers, with: otherSet) { return .maskedBy }
+        default:
+            break
+        }
+        return nil
+    }
+
+    // A chord's modifiers are sideless, so either side of a held modifier counts toward it.
+    private static func begins(chord modifiers: Set<Modifier>, with set: ModifierKeySet) -> Bool {
+        set.modifiers.isSubset(of: Set(modifiers.compactMap { ModifierKey(rawValue: $0.rawValue) }))
     }
 
     /// Registration reachability differs from `canContend`: a global claimant can shadow a scoped mode.
