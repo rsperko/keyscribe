@@ -37,7 +37,7 @@ on macOS 26+.
 ## Project conventions
 
 - **Test-first for pure logic.** The OS-free core lives in `Sources/KeyScribeKit` and is unit-tested
-  (`swift test`). Write a failing test that defines the behavior before implementing it. OS edges
+  (`make test-kit` runs just those tests, without building the speech engines). Write a failing test that defines the behavior before implementing it. OS edges
   (audio capture, paste, CGEvent hotkeys, SwiftUI) are thin adapters in `Sources/KeyScribe`, covered
   by app-target integration tests through dependency-injection seams.
 - **Simplicity first.** Start with the simplest implementation; add abstraction only when a pattern

@@ -229,6 +229,12 @@ keyscribe/
   the OS-free core in `KeyScribeKit` (pipeline, mode resolution, tokenization, gate, regex via
   `RegexCache`, config models) test-first; OS edges (AUHAL capture, paste, CGEvent hotkeys, SwiftUI)
   are thin adapters in `Sources/KeyScribe`.
+- **Iterate on `KeyScribeKit` with `make test-kit`** (`FILTER=<regex>` narrows). It builds Kit and its tests
+  in a package without the engine stack, so a Kit edit never recompiles the app or links the speech
+  engines. It skips the app tests: run `make test` before calling a change done.
+- **Grep-able invariants are pinned by `SourceInvariantsTests`** (Kit tests), each with an allowlist of the
+  files allowed to break it. A failure names the rule; move the code behind the sanctioned seam rather
+  than widen the allowlist.
 - **File-based storage, no SQLite** — everything under `~/Library/Application Support/KeyScribe/`.
 - **Reuse the UI vocabulary** in `docs/development/ui_components.md`; never overstate privacy (no "secure/safe/
   private" for best-effort redaction — say what actually happens).
