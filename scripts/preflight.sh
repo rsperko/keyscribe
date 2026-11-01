@@ -614,7 +614,7 @@ else
     if ! ask "Changed STT engines / deps this release?"; then result skip "Qwen load / silence guard (STT unchanged)"; return; fi
     info "  Expected: using the same sandbox app/config, select Qwen3-ASR and dictate a short phrase."
     info "  This proves the MLX shader library loads from the hardened-runtime release app."
-    info "  Also re-run the --raw silence recipe (AGENTS.md 'Silence / no-speech') — no NEW lexical hallucination."
+    info "  Also re-run the --raw silence recipe (docs/development/areas/stt-engines.md 'Silence / no-speech') — no NEW lexical hallucination."
     if ask "  Qwen3-ASR selected loads + transcribes (proves the MLX shaders run under hardened runtime)"; then result pass "Qwen loads under hardened runtime"; else result fail "Qwen failed to load — check the MLX resource bundle signing"; fi
   }
   guard c-qwen-hardened "$AS" chk_c_qwen_hardened

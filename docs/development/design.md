@@ -752,7 +752,7 @@ Silence-based auto-stop is a non-goal (§1) and stays one: the limit is the only
 - **STT:** **FluidAudio** (Parakeet TDT v3 + pyannote diarization, CoreML/ANE); **WhisperKit** for
   Whisper; system `SpeechAnalyzer` (`SpeechTranscriber`, falling back to `DictationTranscriber`) for
   Apple; **speech-swift / Qwen3ASR** (MLX) for Qwen3-ASR.
-  (Fork/pin details in `AGENTS.md`.)
+  (Fork/pin details in `docs/development/areas/dependencies.md`.)
 - **Audio:** a device-pinned AUHAL input unit (`HALInputUnit`) for capture — it never changes the
   macOS default input; other audio is ducked while dictating (`other_audio` = quiet / mute /
   unchanged, quiet by default) via Core Audio.

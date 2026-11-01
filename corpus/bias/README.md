@@ -71,7 +71,7 @@ When a new STT model is added to the catalog, run it through this kit before shi
    is not actually applying bias — investigate before shipping.
 2. **Bias, streaming** — add `--streaming`. Confirm the streamed final is close to batch; a large gap
    means the streaming session is dropping context the batch path keeps.
-3. **No-speech sweep, both paths** — the AGENTS.md invariant: generate silence/hiss clips and run
+3. **No-speech sweep, both paths** — the invariant in `docs/development/areas/stt-engines.md`: generate silence/hiss clips and run
    `--raw` (batch) *and* `--streaming --raw`, checking for hallucinated markers. Bias content does not
    cover silence — keep that sweep separate.
 4. **Commands** — `--commands-check corpus/commands` for the no-LLM pipeline (unaffected by bias, but

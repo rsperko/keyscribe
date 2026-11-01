@@ -567,7 +567,7 @@ this file carries their numbers so they do not have to be found again.
 The gate, unchanged since July: `--benchmark corpus/distractors` and `--benchmark corpus/distractors
 --fuzzy` with the mechanism on, **substitution fires ≈ 0 over the engine's unbiased baseline**, with
 control-term recall still up. Orthographic snaps are tolerated. Then the same two sweeps over
-`corpus/stt`, and the no-speech sweep from `AGENTS.md` (bias content does not cover silence). A
+`corpus/stt`, and the no-speech sweep from `docs/development/areas/stt-engines.md` (bias content does not cover silence). A
 result from one engine or mechanism says nothing about another.
 
 What a new attempt should do, in the order that spends the least to learn the most:

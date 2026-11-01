@@ -11,7 +11,7 @@ import KeyScribeKit
 //
 // Streaming is deliberately not wired. StreamingUnifiedAsrManager exists, but each latency tier is a
 // distinct encoder bundle and a streaming session is its own no-speech path that needs its own silence
-// sweep (AGENTS.md "A streaming session is a DISTINCT no-speech path").
+// sweep (docs/development/areas/stt-engines.md "A streaming session is a DISTINCT no-speech path").
 actor ParakeetUnifiedEngine: SpeechEngine {
     nonisolated let id = "parakeet-unified-en"
     nonisolated let displayName = "Parakeet Unified 0.6B (English)"

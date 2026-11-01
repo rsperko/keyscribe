@@ -4,7 +4,7 @@ import Foundation
 // writer thread), so every field is lock-guarded.
 //
 // Timings are milliseconds from `AudioCapture.start()`, NOT from the trigger. GROUPING RULE: the transport
-// that delivered is `bound-transport` when present, else `transport`. Both are documented in AGENTS.md.
+// that delivered is `bound-transport` when present, else `transport`. Both are documented in docs/development/areas/audio-capture.md.
 final class CaptureStartRecord: @unchecked Sendable {
     private let lock = NSLock()
     private let origin = DispatchTime.now()

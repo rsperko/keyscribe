@@ -17,7 +17,7 @@ public struct SpeechPresenceGate: Sendable {
     public static let chunkSeconds = Double(chunkSamples) / Double(chunkSampleRate)
 
     // Admission is a minimum speech duration, not a take-level max, and an empty vector suppresses
-    // rather than failing open. Both are load-bearing — see AGENTS.md "Silence / no-speech behavior"
+    // rather than failing open. Both are load-bearing — see docs/development/areas/stt-engines.md "Silence / no-speech behavior"
     // and corpus/blips/README.md for the measured evidence pinning this at 2.
     public static let minSpeechChunks = 2
 

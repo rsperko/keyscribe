@@ -6,7 +6,7 @@ all welcome.
 ## Before you start
 
 KeyScribe has a written design spec, and it is the contract. Read [AGENTS.md](AGENTS.md) for
-orientation, then the relevant docs under [`docs/development/`](docs/development/) — especially
+orientation and the guide under [`docs/development/areas/`](docs/development/areas/) for the area you are changing, then the relevant docs under [`docs/development/`](docs/development/) — especially
 `principles.md`, `design.md`, and `roadmap.md`. A few invariants are non-negotiable and PRs that break them will be
 declined:
 

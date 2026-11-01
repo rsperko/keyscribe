@@ -5,10 +5,10 @@ let packageDependencies: [Package.Dependency] = [
     // Engine deps are pinned `exact:`/`revision:` for the same reason argmax-oss-swift is: they carry
     // recognition behavior, and a bump can change transcripts with no build error to warn you. Bumping
     // one is a deliberate act that must re-run the STT benchmark and the VAD gate (--vad-probe over
-    // corpus/blips AND corpus/commands) — see AGENTS.md "Silence / no-speech behavior".
+    // corpus/blips AND corpus/commands) — see docs/development/areas/stt-engines.md "Silence / no-speech behavior".
     // v0.17.7. The VAD artifact is pinned separately in SpeechPresenceDetector: 0.15.5 moved the SDK's
     // default Silero model to v6.2.1 (PR #734, a one-line artifact swap), which FAILS the blips gate —
-    // so KeyScribe names the v6.0.0 artifact itself. See AGENTS.md "FluidAudio".
+    // so KeyScribe names the v6.0.0 artifact itself. See docs/development/areas/dependencies.md "FluidAudio".
     .package(url: "https://github.com/FluidInference/FluidAudio.git", revision: "503b4bd1bbf7220882de39fe8ae6716aae4132da"),
     .package(url: "https://github.com/LebJe/TOMLKit.git", exact: "0.6.0"),
     .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", exact: "1.1.1"),

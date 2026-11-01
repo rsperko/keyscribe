@@ -2,7 +2,8 @@
 .build/
 *.app
 agent_notes/
-.claude/
+.claude/*
+!.claude/rules/
 .codex/
 .pi/
 .agents/

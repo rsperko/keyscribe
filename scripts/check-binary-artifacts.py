@@ -311,7 +311,7 @@ def main() -> int:
         print(
             f"\n{RED}{len(failures)} binary artifact(s) mutated upstream.{RESET} "
             "Re-pin to the dependency revision whose manifest declares the new "
-            "checksum, then clear the stale caches (see AGENTS.md)."
+            "checksum, then clear the stale caches (see docs/development/areas/dependencies.md)."
         )
         return 1
     if not args.quiet:
