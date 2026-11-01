@@ -31,8 +31,14 @@ while IFS= read -r line; do VERSION_SETTINGS+=("$line"); done <<< "$PREPARED"
 # ad-hoc when it is absent rather than fail. KEYSCRIBE_SIGN_ID / CODESIGN_IDENTITY are release identities
 # and deliberately never touch the dev build.
 SIGN_SETTINGS=()
+COMPILE_SETTINGS=()
 case "$VARIANT" in
   dev)
+    # Whole-module optimization recompiles an entire module on one core for any one-file edit; per-file
+    # compilation stays optimized but rebuilds only what changed, in parallel. Release keeps whole-module.
+    # Package targets request whole-module through SWIFT_OPTIMIZATION_LEVEL=-Owholemodule in Release, which
+    # overrides SWIFT_COMPILATION_MODE, so the level is pinned back to plain -O as well.
+    COMPILE_SETTINGS=("SWIFT_OPTIMIZATION_LEVEL=-O" "SWIFT_COMPILATION_MODE=singlefile")
     if security find-identity -v -p codesigning 2>/dev/null | grep -q "KeyScribe Local"; then
       echo "== signing with: KeyScribe Local =="
     else
@@ -58,7 +64,7 @@ xcodebuild build \
   -project App/KeyScribe.xcodeproj -scheme "$SCHEME" -configuration Release \
   -destination 'generic/platform=macOS' -derivedDataPath "$DERIVED" \
   -disableAutomaticPackageResolution -xcconfig App/Config/Packages.xcconfig \
-  "${VERSION_SETTINGS[@]}" "${SIGN_SETTINGS[@]}" \
+  "${VERSION_SETTINGS[@]}" "${SIGN_SETTINGS[@]}" "${COMPILE_SETTINGS[@]}" \
   -quiet
 
 # Qwen3-ASR runs on MLX, which terminates the app ("Failed to load the default metallib") without its
