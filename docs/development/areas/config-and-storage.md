@@ -4,6 +4,12 @@ Read before changing any on-disk config store, `schema_version` handling, or a m
 
 ## Storage
 
+- **A write never loses what it did not edit.** Every save re-reads the on-disk file at write time and
+  keeps unedited fields; a file holding keys the app does not read refuses the save
+  (`ConfigRepository.refuseUnreadKeys`) rather than dropping them. A migration never overwrites a
+  deliberate user choice (an exclusion, an override). A file that fails to read or decode is an error,
+  never treated as absent and replaced.
+
 Config lives under `~/Library/Application Support/<KeyScribe|KeyScribeDev>/` (per variant; the
 `models/` weights cache is shared), loaded once into `ConfigCache` and invalidated by an FSEvents
 watcher (no per-dictation I/O). File-based storage, **no SQLite**: config

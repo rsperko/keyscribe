@@ -119,6 +119,12 @@ are the ones that must never break; the guide explains why and what else applies
 - **Config storage and migrations** → `docs/development/areas/config-and-storage.md`.
   - Every config file carries `schema_version`; a migration is an idempotent transform run on every read.
   - Keep `MigrationRunner` and the `migrations:` hook even with no in-tree steps — downstream uses them.
+- **Voice commands** → `docs/development/areas/voice-commands.md` (resolution, execution, choices,
+  previews, their settings).
+  - Check `stillWanted` immediately before every side effect, not once at the start.
+  - Missing, unreadable, timed out, and uncertain stay distinct states; none of them means empty or success.
+  - An unresolved or tied target asks; it never falls through to the current or first target.
+  - Previews and uniqueness checks call the same matching function execution uses.
 - **Feature flags** → `docs/development/areas/feature-flags.md`.
   - Flags are `static let`s on `Feature`, opt-in only, read through `settings.features.isEnabled`.
   - Do not delete `consumptionDrivenRestore` until its rollout debt in the guide is paid.
@@ -232,6 +238,12 @@ keyscribe/
 - **Iterate on `KeyScribeKit` with `make test-kit`** (`FILTER=<regex>` narrows). It builds Kit and its tests
   in a package without the engine stack, so a Kit edit never recompiles the app or links the speech
   engines. It skips the app tests: run `make test` before calling a change done.
+- **A fix covers every site of the pattern.** Before reporting a review finding fixed, grep for the same
+  pattern elsewhere and fix the siblings too, and make its regression test reproduce the failing window
+  itself (no reload before the retry, no loosened timing, no fixture that sidesteps the bug).
+- **A behavior or name change updates every place that describes it.** Grep the user docs (README, FAQ,
+  PRIVACY), `docs/reference/`, `docs/development/ui_design.md`, and in-app strings for the old name and
+  for any promise about the behavior.
 - **Grep-able invariants are pinned by `SourceInvariantsTests`** (Kit tests), each with an allowlist of the
   files allowed to break it. A failure names the rule; move the code behind the sanctioned seam rather
   than widen the allowlist.
