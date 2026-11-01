@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major
+.PHONY: help build run release publish ship cask test test-kit check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -40,6 +40,9 @@ BUILD_SYSTEM = $(shell ./scripts/swiftpm-build-system.sh test)
 
 test: ## Run the full test suite
 	swift test $(BUILD_SYSTEM)
+
+test-kit: ## Run only the KeyScribeKit tests, without building the engine stack (FILTER=<regex> narrows)
+	swift test --package-path "$$(./scripts/kit-package.sh)" $(BUILD_SYSTEM) $(if $(FILTER),--filter '$(FILTER)')
 
 check-deps: ## Detect upstream dependency mutation (moved tags, re-uploaded binary assets)
 	./scripts/check-binary-artifacts.py
