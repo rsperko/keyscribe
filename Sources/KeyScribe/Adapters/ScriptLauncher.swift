@@ -48,7 +48,9 @@ enum ScriptLauncher {
         process.standardError = errors
 
         return await withCheckedContinuation { continuation in
-            let report = Report(continuation, onLateFinish: onLateFinish)
+            let report = Report(
+                continuation, onLateFinish: onLateFinish, errors: errors.fileHandleForReading, output: output.fileHandleForReading,
+                capture: capture)
             errors.fileHandleForReading.readabilityHandler = { handle in
                 let data = handle.availableData
                 if data.isEmpty {
@@ -133,10 +135,19 @@ enum ScriptLauncher {
         private var output = ScriptReport.Collector()
         private var status: Int32?
         private var openStreams = 2
+        private let errorHandle: FileHandle
+        private let outputHandle: FileHandle
+        private let capture: ScriptOutputCapture?
 
-        init(_ continuation: CheckedContinuation<ScriptRun, Never>, onLateFinish: @escaping @Sendable (ScriptRun) -> Void) {
+        init(
+            _ continuation: CheckedContinuation<ScriptRun, Never>, onLateFinish: @escaping @Sendable (ScriptRun) -> Void,
+            errors: FileHandle, output: FileHandle, capture: ScriptOutputCapture?
+        ) {
+            self.capture = capture
             self.continuation = continuation
             self.onLateFinish = onLateFinish
+            errorHandle = errors
+            outputHandle = output
         }
 
         func appendOutput(_ data: Data) {
@@ -172,8 +183,32 @@ enum ScriptLauncher {
         }
 
         private func graceEnded() {
+            let pendingErrors = Self.drain(errorHandle)
+            let pendingOutput = Self.drain(outputHandle)
+            if !pendingErrors.isEmpty {
+                capture?.appendError(pendingErrors)
+                appendError(pendingErrors)
+            }
+            if !pendingOutput.isEmpty {
+                capture?.appendOutput(pendingOutput)
+                appendOutput(pendingOutput)
+            }
             let result: ScriptRun? = lock.withLock { status.map(finished) }
             if let result { resume(result) }
+        }
+
+        private static func drain(_ handle: FileHandle) -> Data {
+            handle.readabilityHandler = nil
+            let descriptor = handle.fileDescriptor
+            _ = fcntl(descriptor, F_SETFL, fcntl(descriptor, F_GETFL) | O_NONBLOCK)
+            var data = Data()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while data.count < ScriptLauncher.errorCaptureLimit * 4 {
+                let count = read(descriptor, &buffer, buffer.count)
+                guard count > 0 else { break }
+                data.append(buffer, count: count)
+            }
+            return data
         }
 
         private func finishIfExited() {

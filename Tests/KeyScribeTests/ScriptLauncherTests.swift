@@ -124,6 +124,18 @@ struct ScriptLauncherTests {
         #expect(results == [.finished(status: 5, lastError: "gave up")])
     }
 
+    @Test func anErrorWrittenBeforeExitIsReportedEvenWhileABackgroundChildHoldsThePipesOpen() async throws {
+        let (dir, file) = try script("(sleep 3) &\necho 'to output'\necho 'gave up' >&2\nexit 5")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let capture = ScriptOutputCapture()
+        #expect(await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 20, capture: capture)
+            == .finished(status: 5, lastError: "gave up"))
+        let captured = capture.snapshot
+        #expect(captured.output.text == "to output\n")
+        #expect(captured.errors.text == "gave up\n")
+        #expect(captured.status == 5)
+    }
+
     @Test func aScriptThatFinishesInTimeHasNoLateResult() async throws {
         let (dir, file) = try script("exit 0")
         defer { try? FileManager.default.removeItem(at: dir) }
