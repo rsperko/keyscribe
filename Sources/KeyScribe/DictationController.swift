@@ -1355,6 +1355,7 @@ final class DictationController {
                     return
                 }
             }
+            modelLoadedForTesting?()
             loadingHUD.cancel()
             // A load that finished as the cancel landed still returns success; rendering now would re-show a
             // dismissed HUD.
@@ -1962,6 +1963,7 @@ final class DictationController {
     // outlast this delay, racing two timers — which flakes under CPU contention rather than failing for a
     // real reason. Overriding it lets the delay be ~0 so the state is reached deterministically.
     var loadingModelHUDDelayOverride: Duration?
+    var modelLoadedForTesting: (() -> Void)?
     // Test seam for the whole-rewrite deadline, so a test can watch it fire without waiting minutes.
     var rewriteDeadlineSecondsOverride: Double? {
         get { rewriter.deadlineSecondsOverride }

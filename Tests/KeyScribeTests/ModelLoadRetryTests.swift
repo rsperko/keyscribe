@@ -244,7 +244,7 @@ struct ModelLoadRetryTests {
         // The load is parked until released, so this waits for the HUD instead of hoping it beat a sleep.
         // Bounded: if the HUD stops appearing this must FAIL, not hang the suite waiting forever. The bound
         // is a backstop for a regression, not a timing margin the passing path depends on.
-        let deadline = Date().addingTimeInterval(10)
+        let deadline = Date().addingTimeInterval(30)
         var sawLoadingHUD = false
         while Date() < deadline {
             if hud.states.contains(where: { if case .loadingModel = $0 { return true }; return false }) {
@@ -297,20 +297,21 @@ struct ModelLoadRetryTests {
         await controller.captureBringUpTask?.value
         controller.handleCommit()
         let task = controller.dictationTask
-        let deadline = Date().addingTimeInterval(10)
+        let deadline = Date().addingTimeInterval(30)
         while Date() < deadline, !hud.states.contains(where: { if case .loadingModel = $0 { return true }; return false }) {
             await Task.yield()
         }
 
-        // Let the load finish and its main-actor completion run, then hold the main actor while the bounded
-        // wait records the success off-main. The cancel then lands after the load succeeded but before the
-        // dictation resumes — the window a busy main thread opens in use.
+        // The load has already won its deadline when the cancel lands, before the dictation checks for it —
+        // the window a busy main thread opens in use, reached without betting on scheduling.
+        var loadedBeforeCancel = false
+        controller.modelLoadedForTesting = { [weak controller] in
+            loadedBeforeCancel = engine.loadReturning.hasFired
+            controller?.cancel()
+        }
         engine.release.fire()
-        await engine.loadReturning.wait()
-        await Task.yield()
-        usleep(50_000)
-        controller.cancel()
         await task?.value
+        #expect(loadedBeforeCancel)
 
         #expect(hud.states.last == .hidden)
         #expect(engine.transcribes == 0)

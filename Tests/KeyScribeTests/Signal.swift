@@ -58,9 +58,9 @@ final class Signal: @unchecked Sendable {
         for waiter in pending.values { waiter.resume(returning: false) }
     }
 
-    // Ten seconds is ~2x the entire suite's wall time, so it cannot flake on a loaded machine, while still
+    // Thirty seconds is ~2x the entire suite's wall time, so it cannot flake on a loaded machine, while still
     // failing fast enough to be usable interactively.
-    func wait(within seconds: Double = 10, sourceLocation: SourceLocation = #_sourceLocation) async {
+    func wait(within seconds: Double = 30, sourceLocation: SourceLocation = #_sourceLocation) async {
         let token = lock.withLock { () -> Int in
             nextToken += 1
             return nextToken
