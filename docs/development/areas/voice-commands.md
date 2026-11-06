@@ -46,6 +46,17 @@ The coding-agent bridge (`AgentHub`, `AgentBridge`, `AgentHandles`, `AgentRecipi
 the terminal routes, the Claude connector) delivers dictated text to another program, so every rule
 above applies to it, with these sharpenings:
 
+- **Minimal agent impact is a release requirement** (`docs/development/principles.md` §10).
+  Observation hooks never await bridge work or perform I/O. They preserve downstream results,
+  errors, cancellation, and other extensions' UI; connector failures must not interrupt agent work.
+- **Bound background work across failures and reconnects.** A timed-out request still counts as
+  outstanding until it settles. Idle checks, retries, queues, timers, and stored receipts must not
+  grow with session age or failure count.
+- **Validate connection identity on both sides of the bridge.** Recheck session, connection,
+  expiry, and cancellation immediately before acting. Reconnection holds stale dictation for
+  review; it never grants old queued commands permission to run again.
+- **Removal preserves user data and unrelated agent configuration.** Retire loaded connectors
+  without waiting for them, verify uninstall state, and keep partial cleanup safe to retry.
 - **An unknown or ambiguous spoken recipient never falls through to the current recipient.** It holds
   and asks, like any unresolved target.
 - **Cancel withdraws the request itself, not just its HUD.** A message the user cancelled must not

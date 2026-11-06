@@ -36,6 +36,11 @@ struct AgentDeliveryPolicyTests {
         #expect(decide { $0.conversationChanged = true; $0.state = .working } == .notSent(.conversationChanged))
     }
 
+    @Test func aConnectionGapSinceQueueingNeedsReview() {
+        #expect(decide { $0.connectionGapSinceQueued = true } == .needsReview(.connectionGap))
+        #expect(decide { $0.connectionGapSinceQueued = true; $0.confirmed = true } == .handOff)
+    }
+
     @Test func somethingThatChangedSinceQueueingNeedsReview() {
         #expect(decide { $0.typedSinceQueued = true } == .needsReview(.typedSince))
         #expect(decide { $0.questionResolvedSinceQueued = true } == .needsReview(.questionResolved))

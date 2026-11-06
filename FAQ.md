@@ -438,6 +438,26 @@ tells you when this happens. A mode that normally presses Return after inserting
 an unfinished message is never sent. In an edit-in-place mode, a dictation stopped by the limit leaves your
 selected text unchanged.
 
+### How do I remove the Claude Code connector?
+
+In **Settings ▸ Modes ▸ Coding agent**, choose **Uninstall Connector…**. Open Claude Code sessions
+disconnect at once, and new ones do not connect; an instruction a session already received may still
+finish. Each open session unloads the connector the next time you run `/reload-plugins` in it or
+restart it. Uninstalling keeps your settings, history, conversation names, and models.
+
+If KeyScribe cannot find Claude Code, or you already deleted KeyScribe, run these in a terminal:
+
+```sh
+claude plugin uninstall keyscribe@keyscribe-local --scope user
+claude plugin marketplace remove keyscribe-local
+```
+
+Settings shows the exact commands for the copy of the app you are using, since a development or
+renamed build has its own connector name. Removing the marketplace also removes its plugin, so a
+"not found" answer from either command means that part is already gone. Check with
+`claude plugin list --json` and `claude plugin marketplace list --json`: neither should list the
+connector. Then run `/reload-plugins` in each open session or restart it.
+
 ### Where are my settings and history stored?
 
 Everything is a plain file under `~/Library/Application Support/KeyScribe/` — TOML config, JSONL

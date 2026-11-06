@@ -129,7 +129,7 @@ only_match() { [ -z "$ONLY" ] && return 0; case ",${ONLY//[[:space:]]/,}," in *,
 force_id()   { [ "$FORCE_ALL" = 1 ] && return 0; case ",${FORCE_LIST//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
 # The pre-notarize phase runs only these — swift test + Tier B. It must NOT run the Tier A packaging /
 # notarization checks (they need the notarized artifact, which does not exist yet) or Tier C (human).
-PRE_CHECKS=" a-deps a-swift-test a-catalog-contract a-min-xcode b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
+PRE_CHECKS=" a-deps a-swift-test a-connector-tests a-catalog-contract a-min-xcode b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
 pre_check() { case "$PRE_CHECKS" in *" $1 "*) return 0;; esac; return 1; }
 
 # guard <id> <input-sig> <fn>  — the whole cache / run / retry / override / record cycle for one check.
@@ -183,7 +183,7 @@ REQ_RELEASE="a-gatekeeper a-staple a-entitlements a-dmg a-sparkle c-plain-dictat
 
 if [ "$LIST_ONLY" = 1 ]; then
   bold "checks (tier A/B automated, tier C human):"
-  for id in $REQ_CORE $REQ_RELEASE b-coverage b-capture-probe c-trigger-matrix c-qwen-hardened c-edit-in-place c-quarantine; do
+  for id in $REQ_CORE $REQ_RELEASE a-connector-tests b-coverage b-capture-probe c-trigger-matrix c-qwen-hardened c-edit-in-place c-quarantine; do
     printf '  %s\n' "$id"
   done
   exit 0
@@ -214,6 +214,22 @@ chk_a_swift_test() {
   fi
 }
 guard a-swift-test "$(sig_source)" chk_a_swift_test
+
+chk_a_connector_tests() {
+  # The Claude Code connector runs inside the agent, so its behavior tests run on the CLI's own mod test
+  # runner. A machine without the CLI can still build and ship the app: that is a loud skip, never a pass.
+  timeout --foreground 600 ./scripts/test-claude-connector.sh >/tmp/preflight-connector.log 2>&1
+  local status=$?
+  if [ "$status" = 0 ]; then
+    result pass "connector tests — $(head -1 /tmp/preflight-connector.log | sed 's/^test-claude-connector: //')"
+  elif [ "$status" = 2 ] && grep -q "was not found" /tmp/preflight-connector.log; then
+    result skip "connector tests — the claude CLI is not installed here; run make test-connector on a machine that has it"
+  else
+    tail -20 /tmp/preflight-connector.log
+    result fail "connector tests — see /tmp/preflight-connector.log"
+  fi
+}
+guard a-connector-tests "$(sig_source)" chk_a_connector_tests
 
 chk_a_catalog_contract() {
   # A downstream build swaps the AI service catalog, and the public one permits everything, so a test or

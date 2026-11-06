@@ -50,7 +50,8 @@ let package = Package(
                 .product(name: "Qwen3ASR", package: "speech-swift"),
                 .product(name: "MLX", package: "mlx-swift"),
             ],
-            path: "Sources/KeyScribe"
+            path: "Sources/KeyScribe",
+            resources: [.copy("Resources/ClaudeConnector/register.js")]
         ),
         .target(
             name: "KeyScribeSparkle",

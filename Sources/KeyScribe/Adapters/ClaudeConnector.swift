@@ -33,10 +33,32 @@ struct ClaudeConnectorInstaller {
     let claude: String
     let socketPath: String
     let tokenPath: String
+    let readyPath: String
+    let script: String
     let run: ([String]) -> (Int32, String)
 
+    static let installationFile = "claude-installation.json"
+
+    static func currentInstallation(in agentsDir: URL) -> String? {
+        guard let data = FileManager.default.contents(atPath: agentsDir.appendingPathComponent(installationFile).path),
+              let record = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return record["installation"] as? String
+    }
+
     var marketplaceName: String { "\(pluginName)-local" }
-    var marketplaceDir: URL { agentsDir.appendingPathComponent("claude-connector", isDirectory: true) }
+    var marketplaceDir: URL { Self.marketplaceDir(in: agentsDir) }
+
+    static func marketplaceDir(in agentsDir: URL) -> URL {
+        agentsDir.appendingPathComponent("claude-connector", isDirectory: true)
+    }
+
+    static func manualUninstall(pluginName: String) -> [String] {
+        [
+            "claude plugin uninstall \(pluginName)@\(pluginName)-local --scope user",
+            "claude plugin marketplace remove \(pluginName)-local",
+        ]
+    }
     private var pluginId: String { "\(pluginName)@\(marketplaceName)" }
 
     static func pluginName(for variant: AppVariant) -> String {
@@ -50,21 +72,61 @@ struct ClaudeConnectorInstaller {
     }
 
     func install() throws {
-        try writeFiles()
+        try writeFiles(installation: UUID().uuidString)
         try claudeCommand(["plugin", "marketplace", "add", marketplaceDir.path])
         try claudeCommand(["plugin", "install", pluginId, "--scope", "user"])
     }
 
     func update() throws {
-        try writeFiles()
+        try writeFiles(installation: Self.currentInstallation(in: agentsDir) ?? UUID().uuidString)
         try claudeCommand(["plugin", "marketplace", "update", marketplaceName])
         try claudeCommand(["plugin", "update", pluginId])
     }
 
+    static func wasRemoved(in agentsDir: URL) -> Bool {
+        guard let data = FileManager.default.contents(atPath: agentsDir.appendingPathComponent(installationFile).path),
+              let record = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+        return record["installation"] is NSNull
+    }
+
+    static func disable(in agentsDir: URL) throws {
+        try record(installation: nil, in: agentsDir)
+    }
+
     func uninstall() throws {
-        try claudeCommand(["plugin", "uninstall", pluginId])
-        try claudeCommand(["plugin", "marketplace", "remove", marketplaceName])
+        try Self.disable(in: agentsDir)
+        let failures = [
+            attempt(["plugin", "uninstall", pluginId, "--scope", "user"]),
+            attempt(["plugin", "marketplace", "remove", marketplaceName]),
+        ].compactMap { $0 }
+        let plugins = try listed(["plugin", "list", "--json"]) { $0["scope"] as? String == "user" ? $0["id"] as? String : nil }
+        let marketplaces = try listed(["plugin", "marketplace", "list", "--json"]) { $0["name"] as? String }
+        let leftOver = [pluginId, marketplaceName].filter { plugins.contains($0) || marketplaces.contains($0) }
+        guard leftOver.isEmpty else {
+            throw failures.first ?? InstallError(
+                command: [claude, "plugin", "marketplace", "list", "--json"], status: 0,
+                output: "Claude Code still lists \(leftOver.joined(separator: " and ")).")
+        }
         try? FileManager.default.removeItem(at: marketplaceDir)
+    }
+
+    private func attempt(_ args: [String]) -> InstallError? {
+        do {
+            try claudeCommand(args)
+            return nil
+        } catch {
+            return error as? InstallError
+        }
+    }
+
+    private func listed(_ args: [String], _ name: ([String: Any]) -> String?) throws -> Set<String> {
+        let argv = [claude] + args
+        let (status, output) = run(argv)
+        guard status == 0,
+              let entries = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [[String: Any]]
+        else { throw InstallError(command: argv, status: status, output: output) }
+        return Set(entries.compactMap(name))
     }
 
     private func claudeCommand(_ args: [String]) throws {
@@ -73,14 +135,21 @@ struct ClaudeConnectorInstaller {
         guard status == 0 else { throw InstallError(command: argv, status: status, output: output) }
     }
 
-    private func writeFiles() throws {
+    private static func record(installation: String?, in agentsDir: URL) throws {
+        try FileManager.default.createDirectory(at: agentsDir, withIntermediateDirectories: true)
+        let body = try JSONSerialization.data(withJSONObject: ["installation": installation.map { $0 as Any } ?? NSNull()], options: [.sortedKeys])
+        try body.write(to: agentsDir.appendingPathComponent(Self.installationFile), options: .atomic)
+    }
+
+    private func writeFiles(installation: String) throws {
+        try Self.record(installation: installation, in: agentsDir)
         let plugin = marketplaceDir.appendingPathComponent(pluginName, isDirectory: true)
         let files: [(URL, String)] = [
             (marketplaceDir.appendingPathComponent(".claude-plugin/marketplace.json"), ClaudeConnectorFiles.marketplaceJSON(name: marketplaceName, plugin: pluginName)),
-            (plugin.appendingPathComponent(".claude-plugin/plugin.json"), ClaudeConnectorFiles.pluginJSON(name: pluginName)),
+            (plugin.appendingPathComponent(".claude-plugin/plugin.json"), ClaudeConnectorFiles.pluginJSON(name: pluginName, version: ClaudeConnectorFiles.version(for: script))),
             (plugin.appendingPathComponent("hooks/hooks.json"), ClaudeConnectorFiles.hooksJSON),
-            (plugin.appendingPathComponent("hooks/register.js"), ClaudeConnectorFiles.registerJS),
-            (plugin.appendingPathComponent("keyscribe.json"), ClaudeConnectorFiles.configJSON(socketPath: socketPath, tokenPath: tokenPath)),
+            (plugin.appendingPathComponent("hooks/register.js"), ClaudeConnectorFiles.installedScript(script, installation: installation)),
+            (plugin.appendingPathComponent("keyscribe.json"), ClaudeConnectorFiles.configJSON(socketPath: socketPath, tokenPath: tokenPath, readyPath: readyPath, installation: installation)),
         ]
         for (url, text) in files {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -90,7 +159,29 @@ struct ClaudeConnectorInstaller {
 }
 
 enum ClaudeConnectorFiles {
-    static let version = version(for: registerJS)
+    private final class BundleMarker {}
+
+    static let resourceBundleName = "KeyScribe_KeyScribeApp.bundle"
+    static let registerJS: String? = script(searching: resourceBundleLocations())
+    static let version: String? = registerJS.map(version(for:))
+
+    static func resourceBundleLocations() -> [URL] {
+        let code = Bundle(for: BundleMarker.self)
+        let places: [URL?] = [
+            Bundle.main.resourceURL, Bundle.main.bundleURL, code.resourceURL, code.bundleURL, code.bundleURL.deletingLastPathComponent(),
+        ]
+        return places.compactMap { $0?.appendingPathComponent(resourceBundleName, isDirectory: true) }
+    }
+
+    static func script(searching bundles: [URL]) -> String? {
+        for url in bundles {
+            guard let bundle = Bundle(url: url), let file = bundle.url(forResource: "register", withExtension: "js"),
+                  let text = try? String(contentsOf: file, encoding: .utf8)
+            else { continue }
+            return text
+        }
+        return nil
+    }
 
     static func version(for script: String) -> String {
         "0.1.0-" + SHA256.hash(data: Data(script.utf8)).prefix(4).map { String(format: "%02x", $0) }.joined()
@@ -110,7 +201,7 @@ enum ClaudeConnectorFiles {
         ])
     }
 
-    static func pluginJSON(name: String) -> String {
+    static func pluginJSON(name: String, version: String) -> String {
         json([
             "name": name,
             "version": version,
@@ -119,254 +210,16 @@ enum ClaudeConnectorFiles {
         ])
     }
 
+    static func installedScript(_ script: String, installation: String) -> String {
+        script.replacingOccurrences(of: "let loadedFrom = null", with: "let loadedFrom = \"\(installation)\"")
+    }
+
     static let hooksJSON = json(["description": "Voice connector", "modules": ["./register.js"]])
 
-    static func configJSON(socketPath: String, tokenPath: String) -> String {
-        json(["protocol": AgentBridgeCodec.protocolVersion, "socketPath": socketPath, "tokenPath": tokenPath])
+    static func configJSON(socketPath: String, tokenPath: String, readyPath: String, installation: String) -> String {
+        json([
+            "protocol": AgentBridgeCodec.protocolVersion, "socketPath": socketPath, "tokenPath": tokenPath, "readyPath": readyPath,
+            "installation": installation,
+        ])
     }
-
-    static let registerJS = #"""
-    const instance = Math.random().toString(36).slice(2, 10)
-    let config = null
-    let token = ''
-    let helloSession = null
-    let currentTurn = null
-    let pendingButton = null
-    let looping = false
-    let titleSession = null
-    let lastTitle = null
-
-    async function loadConfig($) {
-      config = JSON.parse(await $.fs.read($.plugin.root + '/keyscribe.json'))
-      token = (await $.fs.read(config.tokenPath)).trim()
-    }
-
-    async function post($, path, body) {
-      return $.http.fetch('http://keyscribe' + path, {
-        method: 'POST',
-        body: JSON.stringify(body),
-        socketPath: config.socketPath,
-        headers: { authorization: 'Bearer ' + token },
-      })
-    }
-
-    async function emit($, event) {
-      try {
-        const res = await post($, '/event', event)
-        return res.ok
-      } catch (err) {
-        $.ui.log('bridge unreachable: ' + String(err), { to: 'debug' })
-        return false
-      }
-    }
-
-    async function sayHello($, session) {
-      const ok = await emit($, {
-        op: 'hello', protocol: config.protocol, agent: 'claude', agentVersion: '', instance, session, pid: 0,
-        features: ['focus', 'label'], title: (titleSession === session && lastTitle) || undefined,
-      })
-      helloSession = ok ? session : null
-      return ok
-    }
-
-    function asText(text) {
-      return text.startsWith('/') ? '​' + text : text
-    }
-
-    async function submit($, id, text) {
-      let result
-      try {
-        result = await $.prompt.submit({ text: asText(text), asUser: true })
-      } catch (err) {
-        return emit($, { op: 'refused', request: id, reason: String(err && err.message || err) })
-      }
-      if (result && result.drop) return emit($, { op: 'refused', request: id, reason: result.drop })
-      return emit($, { op: 'submitted', request: id, turn: currentTurn || '' })
-    }
-
-    async function abort($, id, expectedTurn) {
-      if (!currentTurn || currentTurn !== expectedTurn) return emit($, { op: 'refused', request: id, reason: 'turnChanged' })
-      try {
-        await $.turn.abort({ turnId: currentTurn })
-        return emit($, { op: 'ack', request: id })
-      } catch (err) {
-        return emit($, { op: 'refused', request: id, reason: 'notRunning' })
-      }
-    }
-
-    async function fill($, id, text) {
-      const box = await $.prompt.read()
-      if (box.text.trim()) return emit($, { op: 'refused', request: id, reason: 'draft' })
-      const result = await $.prompt.fill({ text, mode: 'replace' })
-      return emit($, result.isFilled ? { op: 'ack', request: id } : { op: 'refused', request: id, reason: 'notFilled' })
-    }
-
-    async function noteTitle($, e) {
-      if (!('session_title' in e)) return
-      const session = await $.session.id()
-      const next = e.session_title || null
-      if (session !== titleSession) {
-        titleSession = session
-        lastTitle = null
-      }
-      if (next === lastTitle) return
-      lastTitle = next
-      if (config && helloSession === session) await emit($, { op: 'title', session, text: next || '' })
-    }
-
-    async function focus($, id, expiresAt) {
-      const surface = await $.env.get("CMUX_SURFACE_ID")
-      if (!surface) return emit($, { op: 'refused', request: id, reason: 'notInCmux' })
-      if (!(Date.now() < expiresAt)) return emit($, { op: 'refused', request: id, reason: 'expired' })
-      try {
-        const result = await $.process.run(['/usr/bin/env', 'cmux', 'focus-panel', '--panel', surface], { timeoutMs: 3000 })
-        return emit($, result.exitCode === 0 ? { op: 'focused', request: id } : { op: 'refused', request: id, reason: 'focusFailed' })
-      } catch (err) {
-        return emit($, { op: 'refused', request: id, reason: 'focusFailed' })
-      }
-    }
-
-    async function handle($, cmd) {
-      const live = await $.session.id()
-      if (cmd.expectedSession !== live) return emit($, { op: 'refused', request: cmd.id, reason: 'sessionChanged' })
-      if (cmd.op === 'submit') return submit($, cmd.id, cmd.text)
-      if (cmd.op === 'abort') return abort($, cmd.id, cmd.expectedTurn)
-      if (cmd.op === 'fill') return fill($, cmd.id, cmd.text)
-      if (cmd.op === 'focus') return focus($, cmd.id, cmd.expiresAt)
-      if (cmd.op === 'offerButton') {
-        pendingButton = { id: cmd.id, text: cmd.text, session: cmd.expectedSession }
-        $.ui.invalidate('ui.render')
-        return
-      }
-      if (cmd.op === 'status') {
-        $.ui.status(cmd.text)
-        return
-      }
-    }
-
-    async function pollLoop($) {
-      for (;;) {
-        if (!config) {
-          try {
-            await loadConfig($)
-          } catch (err) {
-            config = null
-            $.ui.log('voice connector waiting for its bridge: ' + String(err), { to: 'debug' })
-            await $.clock.sleep(5000)
-            continue
-          }
-        }
-        const session = await $.session.id()
-        if (session !== helloSession && !(await sayHello($, session))) {
-          $.ui.status('')
-          await $.clock.sleep(2000)
-          continue
-        }
-        let commands = []
-        try {
-          const res = await post($, '/poll', { session, instance })
-          if (res.status === 409) {
-            helloSession = null
-            continue
-          }
-          if (res.ok) {
-            commands = JSON.parse(res.text)
-          } else {
-            await $.clock.sleep(2000)
-          }
-        } catch (err) {
-          helloSession = null
-          $.ui.status('')
-          await $.clock.sleep(2000)
-          continue
-        }
-        for (const cmd of commands) {
-          const key = 'done-' + cmd.id
-          if (await $.store.get(key)) {
-            await emit($, { op: 'ack', request: cmd.id })
-            continue
-          }
-          await $.store.set(key, Date.now())
-          await emit($, { op: 'ack', request: cmd.id })
-          void handle($, cmd)
-        }
-      }
-    }
-
-    async function announceReplacement($, ended) {
-      for (let i = 0; i < 50; i++) {
-        await $.clock.sleep(100)
-        const session = await $.session.id()
-        if (session !== ended) return sayHello($, session)
-      }
-    }
-
-    async function pressButton($) {
-      const pending = pendingButton
-      pendingButton = null
-      $.ui.invalidate('ui.render')
-      if (!pending) return
-      if (pending.session !== await $.session.id()) return emit($, { op: 'refused', request: pending.id, reason: 'sessionChanged' })
-      await submit($, pending.id, pending.text)
-    }
-
-    export function register(on) {
-      on('session.start', async ($, e, next) => {
-        const started = await next(e)
-        if (!looping) {
-          looping = true
-          void pollLoop($)
-        }
-        return started
-      })
-
-      on('session.end', async ($, e, next) => {
-        const ended = await $.session.id()
-        const result = await next(e)
-        if (config) void announceReplacement($, ended)
-        return result
-      })
-
-      on('classic.SessionStart', async ($, e, next) => {
-        const result = await next(e)
-        void noteTitle($, e)
-        return result
-      })
-
-      on('classic.UserPromptSubmit', async ($, e, next) => {
-        const result = await next(e)
-        void noteTitle($, e)
-        return result
-      })
-
-      on('prompt.submit', async ($, e, next) => {
-        const typed = e.origin && (e.origin.kind === 'composer' || e.origin.kind === 'bridge')
-        if (config && typed) await emit($, { op: 'typed', session: await $.session.id() })
-        return next(e)
-      })
-
-      on('turn.start', async ($, e, next) => {
-        if (e.agentId === undefined) {
-          currentTurn = e.turnId
-          if (config) await emit($, { op: 'turnStarted', session: await $.session.id(), turn: e.turnId })
-        }
-        return next(e)
-      })
-
-      on('turn.complete', async ($, e, next) => {
-        const result = await next(e)
-        if (e.agentId === undefined && currentTurn === e.turnId) currentTurn = null
-        if (config && e.agentId === undefined) {
-          await emit($, { op: 'turnComplete', session: await $.session.id(), reason: e.reason, answer: String(e.answer || '').slice(0, 4000) })
-        }
-        return result
-      })
-
-      on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-        if (!pendingButton || pendingButton.session !== await $.session.id()) return next(e)
-        const { Box, Button } = $.ui.resolve(e)
-        return Box({ children: [Button({ key: 'keyscribe-send', label: 'Send dictated correction', variant: 'primary', onPress: async () => { await pressButton($) } })] })
-      })
-    }
-    """#
 }

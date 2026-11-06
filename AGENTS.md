@@ -27,6 +27,10 @@ before you edit code in its area.
   whole-utterance replacement, or a Phase-B route to a local mode); the preconnect stays content-free
   regardless, and a focused secure field neuters the mode so none fires there.
 - **No telemetry, no analytics.** Speech, transcripts, and usage are never collected.
+- **Agent integrations must have minimal impact, whether KeyScribe is running or not.** Normal
+  agent actions never wait on KeyScribe or connector I/O. Background work stays bounded; lost
+  connections never replay stale actions. Integrations must be easy to disable and uninstall
+  without deleting user data (`docs/development/principles.md` §10).
 - **Dictation is batch (commit-on-release) and inserts atomically** — one ⌘Z undoes the whole
   dictation.
 - **No app/mode identity in source.** No `if app == "Slack"`, no per-app presets. A Mode is a

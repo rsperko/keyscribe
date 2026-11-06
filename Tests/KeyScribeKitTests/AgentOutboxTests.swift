@@ -72,6 +72,21 @@ struct AgentOutboxTests {
         #expect(outbox.release { _ in .idle }.map(\.decision) == [.handOff])
     }
 
+    @Test func aConnectionGapWhileHeldNeedsReviewOnRelease() {
+        var outbox = AgentOutbox()
+        _ = outbox.send(message("m1"), state: .working)
+        _ = outbox.send(message("m2", to: "s2"), state: .working)
+        outbox.noteConnectionGap(conversation: "s1")
+        #expect(outbox.release { _ in .idle }.map(\.decision) == [.needsReview(.connectionGap), .handOff])
+    }
+
+    @Test func aConnectionGapBeforeAMessageIsQueuedDoesNotCount() {
+        var outbox = AgentOutbox()
+        outbox.noteConnectionGap(conversation: "s1")
+        _ = outbox.send(message("m1"), state: .working)
+        #expect(outbox.release { _ in .idle }.map(\.decision) == [.handOff])
+    }
+
     @Test func anInterruptedTurnHoldsForReconfirmation() {
         var outbox = AgentOutbox()
         _ = outbox.send(message("m1"), state: .working)

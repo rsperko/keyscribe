@@ -24,6 +24,7 @@ public struct AgentOutbox: Sendable {
         var message: Message
         var typedSince = false
         var interruptedSince = false
+        var connectionGapSince = false
     }
 
     private var queue: [Held] = []
@@ -57,6 +58,7 @@ public struct AgentOutbox: Sendable {
             context.delivery = .submit
             context.typedSinceQueued = held.typedSince
             context.interruptedSinceQueued = held.interruptedSince
+            context.connectionGapSinceQueued = held.connectionGapSince
             let decision = AgentDeliveryPolicy.decide(context)
             if case .queue = decision {
                 remaining.append(held)
@@ -74,6 +76,10 @@ public struct AgentOutbox: Sendable {
 
     public mutating func noteInterrupted(conversation: String) {
         for i in queue.indices where queue[i].message.conversation == conversation { queue[i].interruptedSince = true }
+    }
+
+    public mutating func noteConnectionGap(conversation: String) {
+        for i in queue.indices where queue[i].message.conversation == conversation { queue[i].connectionGapSince = true }
     }
 
     public mutating func withdraw(_ id: String) -> Message? {

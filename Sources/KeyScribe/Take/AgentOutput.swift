@@ -174,11 +174,13 @@ final class AgentOutput {
         case .kept(let handle, let reason):
             let why = switch reason {
             case .typedSince: "you sent it a message since"
+            case .composing: "it has a message you haven\u{2019}t sent"
             case .interrupted: "its last turn was stopped"
             case .questionResolved: "its question was answered on screen"
             case .historyMoved, .draft: "the conversation changed"
+            case .connectionGap: "it lost its connection to \(Branding.appName) while this waited"
             }
-            return .advisory(message: "Not sent to \(handle) yet: \(why)")
+            return .advisory(message: "Not sent to \(handle): \(why)")
         case .notSent(let handle, let reason):
             let name = handle ?? "that conversation"
             let message = switch reason {

@@ -11,7 +11,8 @@ struct CodingAgentsSettingsModelTests {
         private var heldWord: String?
         private var waiting = false
         var installed: String?
-        var failing: String?
+        var failing: Set<String> = []
+        var marketplace = false
         var calls: [[String]] { lock.withLock { _calls } }
 
         func holdNext(_ word: String) { lock.withLock { heldWord = word } }
@@ -31,13 +32,19 @@ struct CodingAgentsSettingsModelTests {
         }
 
         private func respond(_ argv: [String]) -> (Int32, String) {
-            if let failing, argv.contains(failing) { return (1, "boom: \(failing)") }
+            if let word = failing.first(where: argv.contains) { return (1, "boom: \(word)") }
             if argv.suffix(3) == ["plugin", "list", "--json"] {
                 guard let installed else { return (0, "[]") }
                 return (0, #"[{"id":"keyscribe-dev@keyscribe-dev-local","version":"\#(installed)","enabled":true,"scope":"user"}]"#)
             }
+            if argv.suffix(3) == ["marketplace", "list", "--json"] { return (0, marketplace ? #"[{"name":"keyscribe-dev-local"}]"# : "[]") }
+            if argv.contains("add") { marketplace = true }
             if argv.contains("install") || argv.contains("update") { installed = ClaudeConnectorFiles.version }
             if argv.contains("uninstall") { installed = nil }
+            if argv.contains("remove") {
+                marketplace = false
+                installed = nil
+            }
             return (0, "")
         }
     }
@@ -48,12 +55,24 @@ struct CodingAgentsSettingsModelTests {
     }
 
     private func makeModel(
-        claude: String? = "/bin/claude-test", cli: CLI = CLI(), terminals: Terminals = Terminals()
+        claude: String? = "/bin/claude-test", cli: CLI = CLI(), terminals: Terminals = Terminals(),
+        script: String? = ClaudeConnectorFiles.registerJS
     ) -> (CodingAgentsSettingsModel, CLI, URL) {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-agents-model-\(UUID().uuidString)")
         let model = CodingAgentsSettingsModel(
-            locateClaude: { claude }, run: cli.run, describeTerminal: terminals.describe, agentsDir: dir, pluginName: "keyscribe-dev")
+            locateClaude: { claude }, run: cli.run, describeTerminal: terminals.describe, agentsDir: dir, pluginName: "keyscribe-dev",
+            script: script)
         return (model, cli, dir)
+    }
+
+    @Test func aMissingConnectorIsUnavailableAndNeverRunsClaudeCode() async {
+        let (model, cli, dir) = makeModel(script: nil)
+        await model.refresh()
+        #expect(model.connector == .unavailable)
+        await model.install()
+        #expect(model.connector == .unavailable)
+        #expect(cli.calls.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("claude-connector").path))
     }
 
     @Test func refreshReadsTheInstalledConnector() async {
@@ -100,7 +119,7 @@ struct CodingAgentsSettingsModelTests {
 
     @Test func aFailedInstallShowsWhatClaudeSaid() async {
         let cli = CLI()
-        cli.failing = "install"
+        cli.failing = ["install"]
         let (model, _, _) = makeModel(cli: cli)
         await model.install()
         #expect(model.connector == .failed("boom: install"))
@@ -115,6 +134,98 @@ struct CodingAgentsSettingsModelTests {
         await model.remove()
         #expect(model.connector == .status(.notInstalled))
         #expect(!model.needsReload)
+    }
+
+    @Test func removeRetiresTheInstallationAndLoadedConnectorsBeforeAnyUninstallCommand() async {
+        let cli = CLI()
+        let (model, _, dir) = makeModel(cli: cli)
+        await model.install()
+        #expect(ClaudeConnectorInstaller.currentInstallation(in: dir) != nil)
+        var atRetire: (installation: String?, uninstalls: Int)?
+        model.onRetire = { atRetire = (ClaudeConnectorInstaller.currentInstallation(in: dir), cli.calls.filter { $0.contains("uninstall") }.count) }
+        await model.remove()
+        #expect(atRetire?.installation == nil)
+        #expect(atRetire?.uninstalls == 0)
+        #expect(cli.calls.contains { $0.contains("uninstall") })
+    }
+
+    @Test func aConnectorStillInClaudeCodeAfterAFailedRemovalIsShownAsUnfinishedUntilRemovedAgain() async {
+        let cli = CLI()
+        let (model, _, _) = makeModel(cli: cli)
+        await model.install()
+        cli.failing = ["uninstall", "remove"]
+        await model.remove()
+        #expect(model.connector == .removalUnfinished("boom: uninstall"))
+
+        cli.failing = []
+        await model.remove()
+        #expect(model.connector == .status(.notInstalled))
+    }
+
+    @Test func aConnectorInstalledBeforeInstallationsWereRecordedIsNotMistakenForAnUnfinishedRemoval() async {
+        let cli = CLI()
+        cli.installed = ClaudeConnectorFiles.version
+        let (model, _, dir) = makeModel(cli: cli)
+        await model.refresh()
+        #expect(model.connector == .status(.ready))
+        try? ClaudeConnectorInstaller.disable(in: dir)
+        await model.refresh()
+        #expect(model.connector == .removalUnfinished(nil))
+    }
+
+    @Test func anUninstallThatLeavesOnlyTheMarketplaceBehindStaysUnfinishedUntilRetried() async {
+        let cli = CLI()
+        let (model, _, _) = makeModel(cli: cli)
+        await model.install()
+        cli.failing = ["remove"]
+        await model.remove()
+        #expect(cli.installed == nil && cli.marketplace)
+        #expect(model.connector == .removalUnfinished("boom: remove"))
+        await model.refresh()
+        #expect(model.connector == .removalUnfinished(nil))
+
+        cli.failing = []
+        await model.remove()
+        #expect(model.connector == .status(.notInstalled))
+    }
+
+    @Test func withoutClaudeCodeAnInstalledConnectorCanStillBeUninstalledAndOffersTheCommandsToFinish() async {
+        let cli = CLI()
+        let (installed, _, dir) = makeModel(cli: cli)
+        let model = CodingAgentsSettingsModel(
+            locateClaude: { nil }, run: cli.run, describeTerminal: { _ in nil }, agentsDir: dir, pluginName: "keyscribe-dev")
+        await model.refresh()
+        #expect(model.manualUninstall.isEmpty)
+        #expect(!model.canUninstallWithoutClaude)
+        #expect(model.manualUninstallLead == nil)
+
+        await installed.install()
+        await model.refresh()
+        #expect(model.canUninstallWithoutClaude)
+        #expect(model.manualUninstallLead == "To remove the connector from Claude Code, run these in a terminal, then run /reload-plugins in each open session or restart it:")
+        #expect(model.manualUninstall == [
+            "claude plugin uninstall keyscribe-dev@keyscribe-dev-local --scope user",
+            "claude plugin marketplace remove keyscribe-dev-local",
+        ])
+
+        await model.remove()
+        #expect(!model.canUninstallWithoutClaude)
+        #expect(model.manualUninstall.count == 2)
+        #expect(model.manualUninstallLead == "Disconnected from \(Branding.appName). Run these in a terminal to finish uninstalling, then run /reload-plugins in each open session or restart it:")
+    }
+
+    @Test func removeStillRetiresTheConnectorWhenClaudeCannotBeFound() async {
+        let cli = CLI()
+        let (installed, _, dir) = makeModel(cli: cli)
+        await installed.install()
+        let model = CodingAgentsSettingsModel(
+            locateClaude: { nil }, run: cli.run, describeTerminal: { _ in nil }, agentsDir: dir, pluginName: "keyscribe-dev")
+        var retired = false
+        model.onRetire = { retired = true }
+        await model.remove()
+        #expect(retired)
+        #expect(ClaudeConnectorInstaller.currentInstallation(in: dir) == nil)
+        #expect(model.connector == .claudeNotFound)
     }
 
     @Test func aRefreshDuringAnInstallLeavesItInProgressAndASecondInstallDoesNothing() async {
@@ -430,8 +541,8 @@ struct ClaudeCLITests {
 
 @MainActor
 struct ClaudeCodeConnectorSectionTests {
-    @Test func afterRemovalOpenSessionsAreToldHowToStopListening() {
-        #expect(ClaudeCodeConnectorSection.stillConnected(1) == "1 open session is still connected and keeps receiving what you say until you run /reload-plugins in it or restart it.")
-        #expect(ClaudeCodeConnectorSection.stillConnected(3) == "3 open sessions are still connected and keep receiving what you say until you run /reload-plugins in each one or restart them.")
+    @Test func afterRemovalOutsideTheAppOpenSessionsAreToldHowToStopListening() {
+        #expect(ClaudeCodeConnectorSection.stillConnected(1) == "The connector was uninstalled outside \(Branding.appName), so 1 open session is still connected and keeps receiving what you say until you run /reload-plugins in it or restart it.")
+        #expect(ClaudeCodeConnectorSection.stillConnected(3) == "The connector was uninstalled outside \(Branding.appName), so 3 open sessions are still connected and keep receiving what you say until you run /reload-plugins in each one or restart them.")
     }
 }

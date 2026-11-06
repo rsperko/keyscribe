@@ -6,7 +6,9 @@ final class CodingAgentsSettingsModel: ObservableObject {
     enum Connector: Equatable {
         case checking
         case claudeNotFound
+        case unavailable
         case status(ClaudeConnectorStatus)
+        case removalUnfinished(String?)
         case failed(String)
     }
 
@@ -33,11 +35,31 @@ final class CodingAgentsSettingsModel: ObservableObject {
 
     var onRename: ((String, String) throws -> Void)?
     var onReloadNames: (() -> Void)?
+    var onRetire: (() -> Void)?
 
     var currentName: String? { rows.first(where: \.current)?.name }
     var connectedCount: Int { rows.filter(\.connected).count }
     var showsAgentType: Bool { Set(rows.map(\.agent)).count > 1 }
     var showsRemovalWarning: Bool { connector == .status(.notInstalled) && connectedCount > 0 }
+
+    private var hasConnectorFiles: Bool {
+        FileManager.default.fileExists(atPath: ClaudeConnectorInstaller.marketplaceDir(in: agentsDir).path)
+    }
+
+    var manualUninstall: [String] {
+        connector == .claudeNotFound && hasConnectorFiles ? ClaudeConnectorInstaller.manualUninstall(pluginName: pluginName) : []
+    }
+
+    var canUninstallWithoutClaude: Bool {
+        !manualUninstall.isEmpty && !ClaudeConnectorInstaller.wasRemoved(in: agentsDir)
+    }
+
+    var manualUninstallLead: String? {
+        guard !manualUninstall.isEmpty else { return nil }
+        return canUninstallWithoutClaude
+            ? "To remove the connector from Claude Code, run these in a terminal, then run /reload-plugins in each open session or restart it:"
+            : "Disconnected from \(Branding.appName). Run these in a terminal to finish uninstalling, then run /reload-plugins in each open session or restart it:"
+    }
 
     func recipientGuidance(shortcut: String? = nil) -> String {
         guard let example = rows.first(where: \.current) ?? rows.first(where: \.connected) ?? rows.first else {
@@ -62,14 +84,16 @@ final class CodingAgentsSettingsModel: ObservableObject {
     private var shown: (conversations: [AgentConversation], current: String?)?
     private let agentsDir: URL
     private let pluginName: String
+    private let script: String?
     private var refreshes = 0
 
     init(
         locateClaude: @escaping () -> String? = { ClaudeCLI.locate() },
         run: @escaping @Sendable ([String]) -> (Int32, String) = { ClaudeCLI.run($0) },
         describeTerminal: @escaping @Sendable (Int) -> String? = TerminalDescription.describe(pid:),
-        agentsDir: URL, pluginName: String
+        agentsDir: URL, pluginName: String, script: String? = ClaudeConnectorFiles.registerJS
     ) {
+        self.script = script
         self.locateClaude = locateClaude
         self.run = run
         self.describeTerminal = describeTerminal
@@ -80,23 +104,47 @@ final class CodingAgentsSettingsModel: ObservableObject {
     private var pluginId: String { "\(pluginName)@\(pluginName)-local" }
 
     func refresh() async {
+        guard let script else {
+            connector = .unavailable
+            return
+        }
         guard let claude = locateClaude() else {
             connector = .claudeNotFound
             return
         }
         refreshes += 1
         let ticket = refreshes
+        let found = await pluginState(claude: claude, script: script)
+        guard ticket == refreshes, operation == nil else { return }
+        connector = found
+    }
+
+    private func pluginState(claude: String, script: String) async -> Connector {
         let (run, pluginId) = (run, pluginId)
         let (status, output) = await Task.detached { run([claude, "plugin", "list", "--json"]) }.value
-        guard ticket == refreshes, operation == nil else { return }
-        connector = status == 0
-            ? .status(ClaudeConnectorStatus.parse(pluginList: Data(output.utf8), pluginId: pluginId, bundledVersion: ClaudeConnectorFiles.version))
-            : .failed(Self.trimmed(output))
+        guard status == 0 else { return .failed(Self.trimmed(output)) }
+        let found = ClaudeConnectorStatus.parse(pluginList: Data(output.utf8), pluginId: pluginId, bundledVersion: ClaudeConnectorFiles.version(for: script))
+        let registered = switch found {
+        case .ready, .outdated, .disabled: true
+        case .notInstalled, .unknown: false
+        }
+        let leftOver = registered || hasConnectorFiles
+        return leftOver && ClaudeConnectorInstaller.wasRemoved(in: agentsDir) ? .removalUnfinished(nil) : .status(found)
     }
 
     func install() async { await perform("Installing…", reloads: true) { try $0.install() } }
     func update() async { await perform("Updating…", reloads: true) { try $0.update() } }
-    func remove() async { await perform("Removing…", reloads: false) { try $0.uninstall() } }
+    func remove() async {
+        guard operation == nil else { return }
+        do {
+            try ClaudeConnectorInstaller.disable(in: agentsDir)
+        } catch {
+            connector = .failed(error.localizedDescription)
+            return
+        }
+        onRetire?()
+        await perform("Uninstalling…", reloads: false) { try $0.uninstall() }
+    }
 
     var namesFile: URL { agentsDir.appendingPathComponent(AgentNameStore.fileName) }
 
@@ -186,6 +234,10 @@ final class CodingAgentsSettingsModel: ObservableObject {
 
     private func perform(_ progress: String, reloads: Bool, _ action: @escaping @Sendable (ClaudeConnectorInstaller) throws -> Void) async {
         guard operation == nil else { return }
+        guard let script else {
+            connector = .unavailable
+            return
+        }
         guard let claude = locateClaude() else {
             connector = .claudeNotFound
             return
@@ -196,7 +248,8 @@ final class CodingAgentsSettingsModel: ObservableObject {
             agentsDir: agentsDir, pluginName: pluginName, claude: claude,
             socketPath: agentsDir.appendingPathComponent("bridge.sock").path,
             tokenPath: agentsDir.appendingPathComponent("token").path,
-            run: run)
+            readyPath: agentsDir.appendingPathComponent("ready.json").path,
+            script: script, run: run)
         let failure: String? = await Task.detached {
             do {
                 try action(installer)
@@ -207,12 +260,14 @@ final class CodingAgentsSettingsModel: ObservableObject {
                 return error.localizedDescription
             }
         }.value
-        operation = nil
         if let failure {
-            connector = .failed(failure)
+            let found = ClaudeConnectorInstaller.wasRemoved(in: agentsDir) ? await pluginState(claude: claude, script: script) : nil
+            operation = nil
+            connector = found == .removalUnfinished(nil) ? .removalUnfinished(failure) : .failed(failure)
             needsReload = false
             return
         }
+        operation = nil
         needsReload = reloads
         await refresh()
     }

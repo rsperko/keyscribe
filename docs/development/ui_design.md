@@ -296,7 +296,8 @@ Automatically generated titles never rename the destination. For Claude Code, cu
 separate from generated titles, and a fresh registry rename can supersede the last connector report.
 Each row's second line is the agent's title for the conversation, when it differs from the
 name (one the user gave it, else the one the agent generated), and the project folder; the agent is named only when the list mixes agents. A connector that can
-show it labels its own session with the same name (“KeyScribe: docs” on Claude Code's status line), so the
+show it labels its own session with the same name (the name in quotes on Claude Code's status line, after the
+connector's name that Claude Code adds), so the
 terminal on screen can be matched to its row; the label is display only and never renames the agent's
 conversation. The user can address a session by starting the take with its name or its number (“docs, run the tests”, “session two …”);
 a leading “tell” is optional, and “session” may come before a name as it does before a number (“session docs,
@@ -393,6 +394,14 @@ every other recording shows them: the panel keeps its usual width, and when the 
 screen the list opens above the header instead of below it. A recipient name long enough to wrap still grows
 the header, and a HUD at the middle of a screen edge grows both ways, so its header moves. Wherever the list
 sits, VoiceOver reaches the header first. Ordinary dictation never shows the list.
+
+**Coding agent delivery.** A take is sent only to a conversation that is ready for it. While a turn is
+running, the take waits and is sent when the turn finishes (“Queued for docs”, “Sends when it finishes”).
+A take that would no longer fit what is on screen is not sent, and never sends later on its own: for
+example, the user sent that conversation a message after the take was decided, its question was answered,
+or its prompt box holds a message the user has not sent. The HUD says so and why (“Not sent to docs: it has
+a message you haven’t sent”). An unsent message in the agent's prompt box is left exactly as it was, and
+what was said stays in History.
 
 **Voice command choice.** The list interrupts the user, so it is used sparingly (`principles.md` §4,
 “Asking is a last resort”): navigation settles ties it can order by itself, and the list appears only when
@@ -1410,9 +1419,23 @@ the current one is marked Current. The guidance names only what can be said. The
 while connector setup is unavailable, so a connected conversation never disappears behind installation
 status or a collapsed disclosure.
 
-Connector setup warns that open sessions still receive instructions only after removal is confirmed
-and at least one session remains connected. Checking installation does not imply that the connector
-was removed.
+**Uninstall Connector…** asks for confirmation first, which says that open sessions disconnect at
+once, new ones will not connect, work already sent may still finish, each open session unloads the
+connector with `/reload-plugins` or a restart, and the app's own settings and names are kept. The
+uninstall is done only once Claude Code no longer lists the plugin or its marketplace; a step that
+reports something already gone is not a failure. Connector setup warns that open sessions still
+receive instructions only when Claude Code reports the connector removed while at least one session is
+still connected, which happens when it was uninstalled outside the app; that warning says how to stop
+them. Checking installation does not imply that the connector was removed. An uninstall the app
+started that Claude Code did not finish shows **Uninstall not finished** as soon as it fails, with what
+Claude Code said, explains that its sessions no longer connect, and offers **Finish Uninstalling**; it
+stays until Claude Code lists neither the plugin nor its marketplace and the connector's files are gone,
+across refreshes and reopening the pane. When the claude command cannot be found but the connector's
+files are still in place, setup keeps **Uninstall Connector…** (it disconnects open sessions) and lists
+the terminal commands that finish the job, each copyable, named for this copy of the app. After that
+button is used, the lead line confirms the result: disconnected from the app, run these to finish
+uninstalling. A copy of the app that is missing its connector shows the connector as
+Unavailable, with guidance to reinstall the app; nothing else in the app is affected.
 
 **Rename…** opens a compact sheet, focused on the existing name, with a live spoken example. When fewer of
 the name's leading words already reach only this conversation, the example offers them as well (“Say “fix

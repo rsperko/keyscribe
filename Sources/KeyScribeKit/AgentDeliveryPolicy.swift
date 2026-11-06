@@ -14,6 +14,7 @@ public struct AgentDeliveryContext: Equatable, Sendable {
     public var questionResolvedSinceQueued = false
     public var interruptedSinceQueued = false
     public var historyMovedSinceQueued = false
+    public var connectionGapSinceQueued = false
     public var sideConversationOpen = false
     public var stopLocked = false
     public var composerHasDraft = false
@@ -25,7 +26,7 @@ public struct AgentDeliveryContext: Equatable, Sendable {
 
 public enum AgentDeliveryDecision: Equatable, Sendable {
     public enum QueueReason: Equatable, Sendable { case working, approval, question, userDialog, userTyping }
-    public enum ReviewReason: Equatable, Sendable { case typedSince, questionResolved, interrupted, historyMoved }
+    public enum ReviewReason: Equatable, Sendable { case typedSince, questionResolved, interrupted, historyMoved, connectionGap }
     public enum DraftReason: Equatable, Sendable { case modeReviews, sideConversation }
     public enum NotSentReason: Equatable, Sendable { case disconnected, conversationChanged }
     public enum Recovery: Equatable, Sendable { case fillComposer, button }
@@ -47,6 +48,7 @@ public enum AgentDeliveryPolicy {
             if c.questionResolvedSinceQueued { return .needsReview(.questionResolved) }
             if c.interruptedSinceQueued { return .needsReview(.interrupted) }
             if c.historyMovedSinceQueued { return .needsReview(.historyMoved) }
+            if c.connectionGapSinceQueued { return .needsReview(.connectionGap) }
             if c.sideConversationOpen { return .draft(.sideConversation) }
             if c.delivery == .draft { return .draft(.modeReviews) }
         }

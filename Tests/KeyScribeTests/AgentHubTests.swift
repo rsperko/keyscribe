@@ -65,6 +65,142 @@ struct AgentHubTests {
         #expect(await receipt == .sent("keyscribe"))
     }
 
+    @Test func aSubmitIsFencedOnThePromptCountTheHubLastHeard() async {
+        let (hub, transport, registry, _) = makeHub()
+        connected(hub, transport, registry)
+        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "s1", pid: 0, prompts: 2)))
+        hub.handle(.typed(session: "s1", prompts: 3))
+
+        async let receipt = hub.deliver("run the tests", to: "s1", delivery: .submit)
+        await Task.yield()
+        #expect(transport.sent.map(\.0) == [.submit(id: "r1", expectedSession: "s1", text: "run the tests", expectedPrompts: 3)])
+        hub.handle(.submitted(request: "r1", turn: ""))
+        _ = await receipt
+    }
+
+    @Test func aSubmitRefusedBecauseTheUserTypedIsKeptForReview() async {
+        let (hub, transport, registry, _) = makeHub()
+        connected(hub, transport, registry)
+
+        async let receipt = hub.deliver("run the tests", to: "s1", delivery: .submit)
+        await Task.yield()
+        hub.handle(.refused(request: "r1", reason: "typedSince"))
+        #expect(await receipt == .kept("keyscribe", reason: .typedSince))
+        #expect(hub.unsent.map(\.text) == ["run the tests"])
+    }
+
+    @Test func aSubmitRefusedOverAMessageTheUserIsWritingIsKeptForReview() async {
+        let (hub, transport, registry, _) = makeHub()
+        connected(hub, transport, registry)
+
+        async let receipt = hub.deliver("run the tests", to: "s1", delivery: .submit)
+        await Task.yield()
+        hub.handle(.refused(request: "r1", reason: "draft"))
+        #expect(await receipt == .kept("keyscribe", reason: .composing))
+        #expect(hub.unsent.map(\.text) == ["run the tests"])
+    }
+
+    private func ready(idle: Bool = true, gap: Bool) -> AgentEvent.Hello {
+        .init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "s1", pid: 0, features: ["readiness"], idle: idle, gap: gap)
+    }
+
+    private func greet(_ hub: AgentHub, _ hello: AgentEvent.Hello) {
+        hub.prepare(for: hello)
+        hub.handle(.hello(hello))
+    }
+
+    @Test func aTakeHeldAcrossAConnectionGapIsKeptForReviewNotSent() async {
+        let (hub, transport, registry, notices) = makeHub()
+        connected(hub, transport, registry, status: "busy")
+        #expect(await hub.deliver("run the tests", to: "s1", delivery: .submit) == .queued("keyscribe"))
+
+        registry.set("s1", status: "idle")
+        greet(hub, ready(gap: true))
+        hub.handle(.turnComplete(session: "s1", reason: "answer", answer: ""))
+        #expect(transport.sent.isEmpty)
+        #expect(notices.items == [.kept("keyscribe", reason: .connectionGap)])
+        #expect(hub.unsent.map(\.text) == ["run the tests"])
+    }
+
+    @Test func aReconnectDuringATurnKeepsTheOlderTakeForReviewAndSendsTheNewerOneWhenTheTurnEnds() async {
+        let (hub, transport, registry, notices) = makeHub()
+        connected(hub, transport, registry, status: "busy")
+        greet(hub, ready(idle: false, gap: false))
+        hub.handle(.turnStarted(session: "s1", turn: "t1"))
+        #expect(await hub.deliver("before the drop", to: "s1", delivery: .submit) == .queued("keyscribe"))
+
+        greet(hub, ready(idle: false, gap: true))
+        #expect(notices.items == [.kept("keyscribe", reason: .connectionGap)])
+        #expect(await hub.deliver("after the drop", to: "s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(transport.sent.isEmpty)
+
+        registry.set("s1", status: "idle")
+        hub.handle(.turnComplete(session: "s1", reason: "answer", answer: ""))
+        #expect(transport.sent.map(\.0) == [.submit(id: "r2", expectedSession: "s1", text: "after the drop")])
+        hub.handle(.submitted(request: "r2", turn: ""))
+        #expect(notices.items == [.kept("keyscribe", reason: .connectionGap), .sent("keyscribe")])
+        #expect(hub.unsent.map(\.text) == ["before the drop"])
+    }
+
+    @Test func aTakeTheBridgeWithdrewAtAGapIsKeptForReview() async {
+        let (hub, transport, registry, _) = makeHub()
+        connected(hub, transport, registry)
+        async let receipt = hub.deliver("run the tests", to: "s1", delivery: .submit)
+        await Task.yield()
+        hub.handle(.undelivered(request: "r1", reason: "connectionGap", handedOff: false))
+        #expect(await receipt == .kept("keyscribe", reason: .connectionGap))
+        #expect(hub.unsent.map(\.text) == ["run the tests"])
+    }
+
+    @Test func aTakeThatMayHaveBeenIssuedBeforeTheGapStaysUncertain() async {
+        let (hub, transport, registry, _) = makeHub()
+        connected(hub, transport, registry)
+        async let receipt = hub.deliver("run the tests", to: "s1", delivery: .submit)
+        await Task.yield()
+        hub.handle(.undelivered(request: "r1", reason: "connectionGap", handedOff: true))
+        #expect(await receipt == .uncertain("keyscribe"))
+    }
+
+    @Test func aConnectorThatReportsARunningTurnIsBusy() async {
+        let (hub, transport, registry, _) = makeHub()
+        connected(hub, transport, registry)
+        greet(hub, ready(idle: false, gap: false))
+        #expect(await hub.deliver("run the tests", to: "s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(transport.sent.isEmpty)
+    }
+
+    @Test func aConnectorThatReportsNoTurnAndNoGapIsReady() async {
+        let (hub, transport, registry, _) = makeHub()
+        connected(hub, transport, registry)
+        greet(hub, ready(gap: false))
+        async let receipt = hub.deliver("run the tests", to: "s1", delivery: .submit)
+        await Task.yield()
+        #expect(transport.sent.map(\.0.id) == ["r1"])
+        hub.handle(.submitted(request: "r1", turn: ""))
+        _ = await receipt
+    }
+
+    @Test func aConnectorThatCannotReportItsTurnIsNotAssumedIdle() async {
+        let (hub, transport, registry, _) = makeHub()
+        connected(hub, transport, registry)
+        let old = AgentEvent.Hello(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "s1", pid: 0, features: ["focus"])
+        greet(hub, old)
+        #expect(await hub.deliver("run the tests", to: "s1", delivery: .submit) == .queued("keyscribe"))
+    }
+
+    @Test func aSubmitRefusedBecauseATurnIsRunningWaitsForItToFinish() async {
+        let (hub, transport, registry, notices) = makeHub()
+        connected(hub, transport, registry)
+        async let receipt = hub.deliver("run the tests", to: "s1", delivery: .submit)
+        await Task.yield()
+        hub.handle(.refused(request: "r1", reason: "working"))
+        #expect(await receipt == .queued("keyscribe"))
+        hub.handle(.turnComplete(session: "s1", reason: "answer", answer: ""))
+        #expect(transport.sent.map(\.0.id) == ["r1", "r1"])
+        hub.handle(.submitted(request: "r1", turn: ""))
+        #expect(notices.items == [.sent("keyscribe")])
+    }
+
     @Test func aBusyConversationQueuesAndSendsWhenTheTurnCompletes() async {
         let (hub, transport, registry, notices) = makeHub()
         connected(hub, transport, registry, status: "busy")
@@ -435,14 +571,25 @@ struct AgentHubTests {
         #expect(transport.sent.count == 1)
     }
 
-    @Test func aReconnectClearsARunningTurnTheRegistryNoLongerShows() async {
+    @Test func aFreshIdleHelloClearsARunningTurnTheRegistryNoLongerShows() async {
         let (hub, transport, registry, _) = makeHub()
         connected(hub, transport, registry)
         hub.handle(.turnStarted(session: "s1", turn: "t1"))
         _ = await hub.deliver("one", to: "s1", delivery: .submit)
 
-        hub.handle(hello("s1"))
+        greet(hub, ready(idle: true, gap: false))
         #expect(transport.sent.count == 1)
+    }
+
+    @Test func aReconnectAfterAGapNeverReleasesWhatWasHeld() async {
+        let (hub, transport, registry, notices) = makeHub()
+        connected(hub, transport, registry)
+        hub.handle(.turnStarted(session: "s1", turn: "t1"))
+        _ = await hub.deliver("one", to: "s1", delivery: .submit)
+
+        greet(hub, ready(idle: true, gap: true))
+        #expect(transport.sent.isEmpty)
+        #expect(notices.items == [.kept("keyscribe", reason: .connectionGap)])
     }
 
     @Test func backgroundResultsAreKeptForLaterInspection() async {
@@ -598,9 +745,9 @@ struct AgentHubTests {
         connected(hub, transport, registry)
         hub.handle(labelHello())
         hub.refresh()
-        #expect(labels(transport) == ["\(Branding.appName): keyscribe"])
+        #expect(labels(transport) == ["\u{201C}keyscribe\u{201D}"])
         try hub.rename("s1", to: "backend")
-        #expect(labels(transport) == ["\(Branding.appName): keyscribe", "\(Branding.appName): backend"])
+        #expect(labels(transport) == ["\u{201C}keyscribe\u{201D}", "\u{201C}backend\u{201D}"])
         hub.handle(labelHello())
         #expect(labels(transport).count == 3)
     }
@@ -612,8 +759,7 @@ struct AgentHubTests {
         transport.live.formUnion(["s1", "s2"])
         hub.handle(labelHello("s1"))
         hub.handle(labelHello("s2"))
-        let app = Branding.appName
-        #expect(Set(labels(transport)) == ["\(app): keyscribe", "\(app): backend"])
+        #expect(Set(labels(transport)) == ["\u{201C}keyscribe\u{201D}", "\u{201C}backend\u{201D}"])
         hub.makeCurrent("s1")
         hub.makeCurrent("s2")
         #expect(labels(transport).count == 2)

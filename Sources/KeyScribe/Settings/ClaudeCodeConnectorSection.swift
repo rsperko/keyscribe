@@ -180,6 +180,9 @@ struct ClaudeCodeConnectorSection: View {
             if model.showsRemovalWarning {
                 IssueText(Self.stillConnected(model.connectedCount), severity: .advisory)
             }
+            if !model.manualUninstall.isEmpty {
+                manualUninstall
+            }
             if isInstalled {
                 Text(summary).font(.callout)
                     .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.summary)
@@ -187,30 +190,49 @@ struct ClaudeCodeConnectorSection: View {
                     Text("Already running Claude Code? Run /reload-plugins once in each open session. New sessions connect on their own once you trust their folder.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                HStack {
-                    Spacer()
-                    Button("Remove Connector\u{2026}", role: .destructive) { confirmingRemove = true }
-                        .buttonStyle(.borderless)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .disabled(model.operation != nil)
-                        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.remove)
-                }
+                uninstallButton
+            } else if model.canUninstallWithoutClaude {
+                uninstallButton
             }
         }
         .task { await model.refresh() }
-        .confirmationDialog("Remove the Claude Code connector?", isPresented: $confirmingRemove, titleVisibility: .visible) {
-            Button("Remove", role: .destructive) { Task { await model.remove() } }
+        .confirmationDialog("Uninstall the Claude Code connector?", isPresented: $confirmingRemove, titleVisibility: .visible) {
+            Button("Uninstall", role: .destructive) { Task { await model.remove() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("New Claude Code sessions will not connect. Sessions already open keep receiving what you say until you run /reload-plugins in each one or restart it.")
+            Text("Open Claude Code sessions disconnect now, and new ones will not connect. Work you already sent may still finish. Each open session unloads the connector when you run /reload-plugins in it or restart it. Your conversation names and other \(Branding.appName) settings are kept.")
         }
+    }
+
+    private var uninstallButton: some View {
+        HStack {
+            Spacer()
+            Button("Uninstall Connector\u{2026}", role: .destructive) { confirmingRemove = true }
+                .buttonStyle(.borderless)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .disabled(model.operation != nil)
+                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.remove)
+        }
+    }
+
+    private var manualUninstall: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let lead = model.manualUninstallLead {
+                Text(lead).font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(model.manualUninstall, id: \.self) { command in
+                CopyableValue(command, value: command, what: "command", of: "uninstalling the connector")
+                    .font(.caption.monospaced())
+            }
+        }
+        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.manualUninstall)
     }
 
     static func stillConnected(_ count: Int) -> String {
         count == 1
-            ? "1 open session is still connected and keeps receiving what you say until you run /reload-plugins in it or restart it."
-            : "\(count) open sessions are still connected and keep receiving what you say until you run /reload-plugins in each one or restart them."
+            ? "The connector was uninstalled outside \(Branding.appName), so 1 open session is still connected and keeps receiving what you say until you run /reload-plugins in it or restart it."
+            : "The connector was uninstalled outside \(Branding.appName), so \(count) open sessions are still connected and keep receiving what you say until you run /reload-plugins in each one or restart them."
     }
 
     private var isInstalled: Bool {
@@ -232,7 +254,9 @@ struct ClaudeCodeConnectorSection: View {
         return switch model.connector {
         case .checking: "Checking…"
         case .claudeNotFound: "Claude Code not found"
+        case .unavailable: "Unavailable"
         case .failed: "Something went wrong"
+        case .removalUnfinished: "Uninstall not finished"
         case .status(.ready): "Installed"
         case .status(.notInstalled): "Not installed"
         case .status(.outdated): "Update available"
@@ -257,6 +281,9 @@ struct ClaudeCodeConnectorSection: View {
         case .status(.outdated):
             Button("Update") { Task { await model.update() } }
                 .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.update)
+        case .removalUnfinished:
+            Button("Finish Uninstalling") { Task { await model.remove() } }
+                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.finishUninstalling)
         default:
             EmptyView()
         }
@@ -266,10 +293,15 @@ struct ClaudeCodeConnectorSection: View {
         switch model.connector {
         case .claudeNotFound:
             IssueText("Install Claude Code, then come back here. \(Branding.appName) looks for the claude command on your PATH and in the usual install folders.", severity: .advisory)
+        case .unavailable:
+            IssueText("This copy of \(Branding.appName) is missing its Claude Code connector. Reinstall \(Branding.appName) to connect Claude Code.")
         case .failed(let message):
             IssueText(message.isEmpty ? "Claude Code did not say why." : message)
         case .status(.disabled):
             IssueText("Turn the plugin back on with /plugin in Claude Code.", severity: .advisory)
+        case .removalUnfinished(let message):
+            IssueText("The connector was uninstalled in \(Branding.appName), but Claude Code has not finished removing it. Its sessions no longer connect. Finish uninstalling it, then install it again if you want it back.", severity: .advisory)
+            if let message { IssueText(message.isEmpty ? "Claude Code did not say why." : message) }
         case .status(.unknown):
             IssueText("Claude Code's plugin list could not be read.", severity: .advisory)
         default:

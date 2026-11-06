@@ -30,7 +30,9 @@
   agents/                  # coding agent bridge (experimental; see "Coding agent names")
     token                  #   the access token the Claude Code connector presents
     bridge.sock            #   the local socket the connector talks to
+    ready.json             #   present only while KeyScribe is listening on bridge.sock
     claude-connector/      #   the connector files installed into Claude Code
+    claude-installation.json  # which connector installation may connect; kept after removal
     names.json             #   names you chose for conversations
   lkg/                     # last-known-good mode copies + seed-ledger.toml (design.md §5.1)
   models/                  # downloaded STT weights, one dir per model (design.md §4.1)
@@ -160,21 +162,86 @@ never hand-edited, and a write to it does not reload configuration.
 The Claude Code connector talks to KeyScribe over HTTP on `agents/bridge.sock`, presenting `agents/token`
 as a bearer token. It sends events with `POST /event` and long-polls for commands with `POST /poll`; a
 `409` answer means KeyScribe no longer knows that connector, which says hello again. The message types are
-`AgentEvent` and `AgentCommand` in `AgentBridge.swift`, versioned by `AgentBridgeCodec.protocolVersion`.
+`AgentEvent` and `AgentCommand` in `AgentBridge.swift`, versioned by `AgentBridgeCodec.protocolVersion`;
+a hello on any other protocol is refused with `426` and is never registered or sent commands.
 
+- **Only the current installation connects.** Each install of the connector gets a new `installation` id,
+  written both into the connector's own settings and into `agents/claude-installation.json`; an update
+  keeps it. Every hello carries the id it was loaded with, and KeyScribe refuses any other with `403`,
+  including every hello once the connector is removed (the record then holds no id). Removal records that
+  first, then sends `retire` to connectors waiting for commands without waiting for an answer, and
+  withdraws every command still outstanding. A connector told to retire, one whose hello is refused with
+  `403`, or one whose settings now name a different installation, stops for good: it makes no further
+  requests in any session until Claude Code loads it fresh. An install records the new id before it writes
+  the connector's settings, and writes the id into the connector's code as well: Claude Code's
+  `/reload-plugins` loads only code that changed, so code identical to a retired copy would leave that copy
+  in place. Uninstalling runs each Claude Code removal step even when an earlier one fails, then deletes
+  `claude-connector/` only once `claude plugin list --json` and `claude plugin marketplace list --json`
+  no longer show the connector, and keeps the installation record; a record with no id while Claude Code
+  still lists the plugin or `claude-connector/` remains means an uninstall did not finish.
+
+- **The connector connects only when KeyScribe is listening.** KeyScribe writes `agents/ready.json`
+  (`launch`, a new random id each time the bridge starts, and `protocol`) after its socket is listening,
+  and removes it when it quits, the feature is turned off, or the bridge fails to start. While the file
+  is missing the connector only rereads it, about every 10 seconds per session, and makes no connection
+  attempt. A launch whose socket refuses the connection is not tried again until `launch` changes. A
+  bridge that stops answering is greeted once at once, then after growing waits (about 30, 60, 120,
+  then 300 seconds, with jitter) while it stays unresponsive; a new `launch` ends the wait. A rejected
+  hello, a `protocol` the connector does not speak, or missing connector settings make the connector go
+  quiet until the next session or a plugin reload. It clears only a status line or button it showed
+  itself.
 - **Hello** names the agent, the connector instance, the session id, and the features the connector offers.
   KeyScribe uses only what was announced: `label` for the status-line label naming the conversation, and
   `focus` for selecting the connector's own terminal surface during Open (cmux). A connector that lacks
   `focus` is reported as outdated, with the steps to update it. A hello may carry the conversation's title.
 - **Every command names the session it expects**, and the connector refuses one whose session has changed.
-- **Typed events** report a prompt the user submitted, in the agent's own input or through Remote Control.
-  One holds a queued take for review and makes that conversation the current recipient. Claude Code runs
+- **Each hello opens a new connection.** It carries a fresh `connection` id, and every later poll, event
+  and reply carries that id and the connector's `instance`. KeyScribe answers `409` to anything from a
+  connection that a newer hello replaced: it is not passed on, and it does not count as that connector
+  still being there. A command the old connection collected is reported as uncertain, never sent again
+  over the new one, even when its acknowledgment arrives late. KeyScribe sends an unacknowledged command
+  again only over the connection that collected it.
+- **The connector runs each command once per connection.** It remembers, in memory, the ids it has
+  accepted on the current connection, and only acknowledges a repeat. Nothing is written to Claude Code's
+  plugin storage. When that memory is full, the connector drops the connection before accepting more and
+  says hello again; the forgotten ids go with the connection they belonged to.
+- **The connector never makes Claude Code wait.** Its hooks only record what happened and hand the
+  event to one background sender, which delivers events and replies in order. Nothing a hook sees is
+  sent before that session's hello succeeds, and nothing missed while disconnected is replayed later. An
+  event that KeyScribe does not answer within its deadline, a poll that outlives its hold, a failed
+  delivery, or a full outgoing queue counts as a lost connection: the connector stops acting on what it
+  had, clears what it showed, and says hello again once its earlier request has finished. It never opens a
+  second request around one that has not finished.
+- **A hello says whether anything may have been missed.** It reports whether the session is known to be
+  idle and whether it resumes after a gap (a lost connection, a resumed session, or a reloaded connector).
+  When it resumes after a gap, KeyScribe reconciles before it accepts the hello: takes it was holding for
+  that conversation, and commands the connector had not collected, are kept for review; a command the
+  connector may already have carried out stays uncertain. A connector that does not announce
+  `readiness` is always treated as resuming after a gap, and as busy until the agent's own session
+  record says it is idle.
+- **A submit is refused as `working`** when a turn is already running in that session; KeyScribe holds
+  the take and sends it when the turn finishes.
+- **A submit is refused as `draft`** when the agent's prompt box holds text the user has not sent; the
+  connector leaves that text in place and KeyScribe keeps the take for review. The connector checks the
+  prompt count, a running turn, and the session again after reading the box, right before it submits.
+- **The session id comes from Claude Code's session lifecycle.** When a session ends or is replaced
+  (`/clear`, `/resume`, `/branch`), queued events for the old one are dropped and its commands refused, and
+  the connector says hello for the new id before sending anything else.
+- **Typed events** report a prompt the user submitted (in the agent's own input, through Remote Control, or from Slack)
+  and any prompt Claude Code cannot attribute to a program. Prompts from plugins (the connector's own
+  submissions included), background tasks, and scheduled triggers are not counted.
+  One holds a queued take for review and makes that conversation the current recipient. Hello and each typed event
+  carry the count of prompts the user has submitted in that session; each submit carries the count
+  KeyScribe last heard, and the connector refuses it as `typedSince` when the count has moved since, so a
+  prompt the user typed is never overtaken by dictation decided before KeyScribe heard about it. That
+  refusal holds the take for review like a typed event does. Claude Code runs
   slash commands and `!` shell commands without the hook the connector listens on, so they send no typed
   event.
 - **Title events** carry the custom title the user gave the conversation, as reported in Claude Code's hook
   payload. The connector sends one only when the payload includes the title field, and sends an empty
   title (name cleared) only after it has reported a non-empty one, so a Claude Code build that omits the
   field never erases a name found elsewhere.
+- **Turn events** report a turn starting and ending, never the agent's answer.
 - **The status-line label is cleared by the connector** when KeyScribe stops answering, so a label never
   outlives the app.
 

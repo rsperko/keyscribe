@@ -8,63 +8,139 @@ struct AgentCommandQueueTests {
     private func command(_ id: String) -> AgentCommand { .submit(id: id, expectedSession: "s1", text: "hello \(id)") }
     private let quiet = AgentCommandQueue.activeWindow + 1
 
+    @Test func aConnectionGapWithdrawsEverythingTheSessionHadOutstanding() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", connection: "i1", at: t0)
+        queue.enqueue(command("r1"), for: "s1", at: t0)
+        _ = queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(1))
+        queue.enqueue(command("r2"), for: "s1", at: at(1))
+        queue.enqueue(.submit(id: "r3", expectedSession: "s2", text: "other"), for: "s2", at: at(1))
+
+        let withdrawn = queue.connectionGap(session: "s1", instance: "i1")
+        #expect(withdrawn.map(\.command.id).sorted() == ["r1", "r2"])
+        #expect(withdrawn.allSatisfy { $0.reason == .connectionGap })
+        #expect(withdrawn.first { $0.command.id == "r1" }?.handedOff == true)
+        #expect(withdrawn.first { $0.command.id == "r2" }?.handedOff == false)
+
+        queue.hello(session: "s1", instance: "i2", connection: "i2", at: at(2))
+        #expect(queue.poll(session: "s1", instance: "i2", connection: "i2", at: at(2)) == [])
+        queue.tick(at: at(20))
+        #expect(queue.poll(session: "s1", instance: "i2", connection: "i2", at: at(20)) == [])
+    }
+
     @Test func aQueuedCommandIsDeliveredToThePollingInstance() {
         var queue = AgentCommandQueue()
-        queue.hello(session: "s1", instance: "i1", at: t0)
+        queue.hello(session: "s1", instance: "i1", connection: "i1", at: t0)
         queue.enqueue(command("r1"), for: "s1", at: t0)
-        let r1 = queue.poll(session: "s1", instance: "i1", at: at(1))
+        let r1 = queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(1))
         #expect(r1 == [command("r1")])
-        let r2 = queue.poll(session: "s1", instance: "i1", at: at(2))
+        let r2 = queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(2))
         #expect(r2 == [])
     }
 
     @Test func anAcknowledgedCommandIsNeverRedelivered() {
         var queue = AgentCommandQueue()
-        queue.hello(session: "s1", instance: "i1", at: t0)
+        queue.hello(session: "s1", instance: "i1", connection: "i1", at: t0)
         queue.enqueue(command("r1"), for: "s1", at: t0)
-        _ = queue.poll(session: "s1", instance: "i1", at: at(1))
-        queue.ack("r1")
+        _ = queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(1))
+        queue.ack("r1", instance: "i1", connection: "i1")
         queue.tick(at: at(2 + AgentCommandQueue.ackTimeout))
-        let r3 = queue.poll(session: "s1", instance: "i1", at: at(3 + AgentCommandQueue.ackTimeout))
+        let r3 = queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(3 + AgentCommandQueue.ackTimeout))
         #expect(r3 == [])
     }
 
     @Test func anUnacknowledgedCommandIsRedeliveredAfterTheTimeout() {
         var queue = AgentCommandQueue()
-        queue.hello(session: "s1", instance: "i1", at: t0)
+        queue.hello(session: "s1", instance: "i1", connection: "i1", at: t0)
         queue.enqueue(command("r1"), for: "s1", at: t0)
-        _ = queue.poll(session: "s1", instance: "i1", at: at(1))
+        _ = queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(1))
         queue.tick(at: at(1 + AgentCommandQueue.ackTimeout - 0.1))
-        let r4 = queue.poll(session: "s1", instance: "i1", at: at(1 + AgentCommandQueue.ackTimeout - 0.1))
+        let r4 = queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(1 + AgentCommandQueue.ackTimeout - 0.1))
         #expect(r4 == [])
         queue.tick(at: at(1 + AgentCommandQueue.ackTimeout + 0.1))
-        let r5 = queue.poll(session: "s1", instance: "i1", at: at(1 + AgentCommandQueue.ackTimeout + 0.2))
+        let r5 = queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(1 + AgentCommandQueue.ackTimeout + 0.2))
         #expect(r5 == [command("r1")])
     }
 
-    @Test func afterAReloadTheNewInstanceReceivesOnceTheOldOneGoesQuiet() {
+    @Test func aCommandAnotherInstanceCollectedIsNeverReplayedToTheNewOne() {
         var queue = AgentCommandQueue()
-        queue.hello(session: "s1", instance: "old", at: t0)
+        queue.hello(session: "s1", instance: "old", connection: "old", at: t0)
         queue.enqueue(command("r1"), for: "s1", at: t0)
-        _ = queue.poll(session: "s1", instance: "old", at: at(1))
-        queue.hello(session: "s1", instance: "new", at: at(2))
-        let early = queue.poll(session: "s1", instance: "new", at: at(2))
-        #expect(early == [])
-        let later = queue.poll(session: "s1", instance: "new", at: at(1 + quiet))
-        #expect(later == [command("r1")])
-        #expect(queue.undeliverable(at: at(1 + quiet)).isEmpty)
+        _ = queue.poll(session: "s1", instance: "old", connection: "old", at: at(1))
+        queue.hello(session: "s1", instance: "new", connection: "new", at: at(2))
+        queue.tick(at: at(2 + AgentCommandQueue.ackTimeout))
+        #expect(queue.poll(session: "s1", instance: "new", connection: "new", at: at(1 + quiet)) == [])
+        let later = queue.undeliverable(at: at(1 + quiet))
+        #expect(later.map(\.command) == [command("r1")])
+        #expect(later.map(\.handedOff) == [true])
+    }
+
+    @Test func aNewConnectionLeavesWhatTheOldOneCollectedUncertainAndKeepsTheRestForReview() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+        queue.enqueue(command("r1"), for: "s1", at: t0)
+        _ = queue.poll(session: "s1", instance: "i1", connection: "c1", at: at(1))
+        queue.enqueue(command("r2"), for: "s1", instance: "i1", at: at(1))
+
+        let withdrawn = queue.hello(session: "s1", instance: "i1", connection: "c2", at: at(2))
+        #expect(withdrawn.map(\.command.id) == ["r1"])
+        #expect(withdrawn.map(\.reason) == [.connectionGap])
+        #expect(withdrawn.map(\.handedOff) == [true])
+        queue.tick(at: at(3 + AgentCommandQueue.ackTimeout))
+        #expect(queue.poll(session: "s1", instance: "i1", connection: "c2", at: at(3 + AgentCommandQueue.ackTimeout)) == [command("r2")])
+    }
+
+    @Test func aSupersededConnectionIsToldToRegisterAndKeepsNothingAlive() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+        queue.hello(session: "s1", instance: "i1", connection: "c2", at: at(1))
+        #expect(queue.isCurrent(instance: "i1", connection: "c2"))
+        #expect(!queue.isCurrent(instance: "i1", connection: "c1"))
+        #expect(!queue.isCurrent(instance: "i9", connection: "c2"))
+        #expect(queue.poll(session: "s1", instance: "i1", connection: "c1", at: at(2)) == nil)
+        queue.touch(instance: "i1", connection: "c1", at: at(quiet))
+        #expect(!queue.isLive(session: "s1", at: at(1 + quiet)))
+    }
+
+    @Test func retiringWithdrawsEveryCommandAndEndsEveryConnection() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+        queue.hello(session: "s2", instance: "i2", connection: "c2", at: t0)
+        queue.enqueue(command("r1"), for: "s1", at: t0)
+        _ = queue.poll(session: "s1", instance: "i1", connection: "c1", at: at(1))
+        queue.enqueue(command("r2"), for: "s2", at: at(1))
+        #expect(queue.retire() == [
+            .init(command: command("r1"), reason: .retired, handedOff: true),
+            .init(command: command("r2"), reason: .retired, handedOff: false),
+        ])
+        #expect(!queue.isCurrent(instance: "i1", connection: "c1"))
+        #expect(!queue.isLive(session: "s2", at: at(1)))
+        #expect(queue.poll(session: "s1", instance: "i1", connection: "c1", at: at(2)) == nil)
+        queue.tick(at: at(2 + AgentCommandQueue.ackTimeout))
+        #expect(queue.undeliverable(at: at(3 + AgentCommandQueue.ackTimeout)).isEmpty)
+    }
+
+    @Test func anAcknowledgmentFromAnotherConnectionClearsNothing() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+        queue.enqueue(command("r1"), for: "s1", at: t0)
+        _ = queue.poll(session: "s1", instance: "i1", connection: "c1", at: at(1))
+        queue.ack("r1", instance: "i1", connection: "c0")
+        queue.ack("r1", instance: "i2", connection: "c1")
+        queue.tick(at: at(2 + AgentCommandQueue.ackTimeout))
+        #expect(queue.poll(session: "s1", instance: "i1", connection: "c1", at: at(2 + AgentCommandQueue.ackTimeout)) == [command("r1")])
     }
 
     @Test func untargetedCommandsAreRefusedWhileTwoTerminalsShareTheSession() {
         var queue = AgentCommandQueue()
-        queue.hello(session: "s1", instance: "left", at: t0)
-        queue.hello(session: "s1", instance: "right", at: t0)
+        queue.hello(session: "s1", instance: "left", connection: "left", at: t0)
+        queue.hello(session: "s1", instance: "right", connection: "right", at: t0)
         queue.enqueue(command("r1"), for: "s1", at: at(1))
-        let left = queue.poll(session: "s1", instance: "left", at: at(2))
+        let left = queue.poll(session: "s1", instance: "left", connection: "left", at: at(2))
         #expect(left == [])
         for second in stride(from: 2.0, through: 1 + AgentCommandQueue.ambiguityGrace, by: 1) {
-            queue.touch(instance: "left", at: at(second))
-            queue.touch(instance: "right", at: at(second))
+            queue.touch(instance: "left", connection: "left", at: at(second))
+            queue.touch(instance: "right", connection: "right", at: at(second))
         }
         let refused = queue.undeliverable(at: at(1.5 + AgentCommandQueue.ambiguityGrace))
         #expect(refused.map(\.command) == [command("r1")])
@@ -74,21 +150,21 @@ struct AgentCommandQueueTests {
 
     @Test func aCommandForOneInstanceReachesOnlyThatInstance() {
         var queue = AgentCommandQueue()
-        queue.hello(session: "s1", instance: "left", at: t0)
-        queue.hello(session: "s1", instance: "right", at: t0)
+        queue.hello(session: "s1", instance: "left", connection: "left", at: t0)
+        queue.hello(session: "s1", instance: "right", connection: "right", at: t0)
         queue.enqueue(command("r1"), for: "s1", instance: "left", at: t0)
-        let r13 = queue.poll(session: "s1", instance: "right", at: at(1))
+        let r13 = queue.poll(session: "s1", instance: "right", connection: "right", at: at(1))
         #expect(r13 == [])
-        let r14 = queue.poll(session: "s1", instance: "left", at: at(1))
+        let r14 = queue.poll(session: "s1", instance: "left", connection: "left", at: at(1))
         #expect(r14 == [command("r1")])
     }
 
     @Test func aCommandForAnInstanceThatWentAwayIsReportedNotStranded() {
         var queue = AgentCommandQueue()
-        queue.hello(session: "s1", instance: "old", at: t0)
+        queue.hello(session: "s1", instance: "old", connection: "old", at: t0)
         queue.enqueue(command("r1"), for: "s1", instance: "old", at: t0)
-        queue.hello(session: "s1", instance: "new", at: at(1))
-        let other = queue.poll(session: "s1", instance: "new", at: at(quiet))
+        queue.hello(session: "s1", instance: "new", connection: "new", at: at(1))
+        let other = queue.poll(session: "s1", instance: "new", connection: "new", at: at(quiet))
         #expect(other == [])
         let refused = queue.undeliverable(at: at(quiet))
         #expect(refused.map(\.command) == [command("r1")])
@@ -99,9 +175,9 @@ struct AgentCommandQueueTests {
 
     @Test func aHandedOffCommandWhoseInstanceWentAwayIsUncertainNotUnsent() {
         var queue = AgentCommandQueue()
-        queue.hello(session: "s1", instance: "old", at: t0)
+        queue.hello(session: "s1", instance: "old", connection: "old", at: t0)
         queue.enqueue(command("r1"), for: "s1", instance: "old", at: t0)
-        _ = queue.poll(session: "s1", instance: "old", at: at(1))
+        _ = queue.poll(session: "s1", instance: "old", connection: "old", at: at(1))
         queue.tick(at: at(2 + quiet))
         let refused = queue.undeliverable(at: at(2 + quiet))
         #expect(refused.map(\.reason) == [.instanceGone])
@@ -110,77 +186,77 @@ struct AgentCommandQueueTests {
 
     @Test func commandsForOneSessionNeverReachAnother() {
         var queue = AgentCommandQueue()
-        queue.hello(session: "s1", instance: "a", at: t0)
-        queue.hello(session: "s2", instance: "b", at: t0)
+        queue.hello(session: "s1", instance: "a", connection: "a", at: t0)
+        queue.hello(session: "s2", instance: "b", connection: "b", at: t0)
         queue.enqueue(command("r1"), for: "s1", at: t0)
-        let r9 = queue.poll(session: "s2", instance: "b", at: at(1))
+        let r9 = queue.poll(session: "s2", instance: "b", connection: "b", at: at(1))
         #expect(r9 == [])
     }
 
     @Test func anInstanceTheQueueDoesNotKnowIsToldToRegister() {
         var queue = AgentCommandQueue()
-        #expect(queue.poll(session: "s1", instance: "i1", at: t0) == nil)
-        queue.hello(session: "s1", instance: "i1", at: t0)
-        #expect(queue.poll(session: "s1", instance: "i1", at: at(1)) == [])
-        #expect(queue.poll(session: "s2", instance: "i1", at: at(2)) == nil)
+        #expect(queue.poll(session: "s1", instance: "i1", connection: "i1", at: t0) == nil)
+        queue.hello(session: "s1", instance: "i1", connection: "i1", at: t0)
+        #expect(queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(1)) == [])
+        #expect(queue.poll(session: "s2", instance: "i1", connection: "i1", at: at(2)) == nil)
     }
 
     @Test func aSessionIsLiveOnlyWhileAnInstanceKeepsPollingOrWaiting() {
         var queue = AgentCommandQueue()
         #expect(!queue.isLive(session: "s1", at: t0))
-        queue.hello(session: "s1", instance: "i1", at: t0)
+        queue.hello(session: "s1", instance: "i1", connection: "i1", at: t0)
         #expect(queue.isLive(session: "s1", at: at(1)))
-        queue.touch(instance: "i1", at: at(20))
+        queue.touch(instance: "i1", connection: "i1", at: at(20))
         #expect(queue.isLive(session: "s1", at: at(21)))
         #expect(!queue.isLive(session: "s1", at: at(20 + quiet)))
     }
 
     @Test func activeInstancesAreListedNewestFirst() {
         var queue = AgentCommandQueue()
-        queue.hello(session: "s1", instance: "left", at: t0)
-        queue.hello(session: "s1", instance: "right", at: at(1))
+        queue.hello(session: "s1", instance: "left", connection: "left", at: t0)
+        queue.hello(session: "s1", instance: "right", connection: "right", at: at(1))
         #expect(queue.activeInstances(session: "s1", at: at(2)) == ["right", "left"])
     }
 
     @Test func aCommandHandedOffOnceCannotBeWithdrawnEvenAfterRequeueing() {
         var queue = AgentCommandQueue()
-        queue.hello(session: "s1", instance: "i1", at: t0)
+        queue.hello(session: "s1", instance: "i1", connection: "i1", at: t0)
         queue.enqueue(command("r1"), for: "s1", at: t0)
-        _ = queue.poll(session: "s1", instance: "i1", at: at(1))
+        _ = queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(1))
         queue.tick(at: at(2 + AgentCommandQueue.ackTimeout))
         let withdrawn = queue.withdraw("r1")
         #expect(!withdrawn)
-        let redelivered = queue.poll(session: "s1", instance: "i1", at: at(3 + AgentCommandQueue.ackTimeout))
+        let redelivered = queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(3 + AgentCommandQueue.ackTimeout))
         #expect(redelivered == [command("r1")])
     }
 
     @Test func anExpiredFocusIsNeverDeliveredEvenAfterTheConnectorReconnects() {
         var queue = AgentCommandQueue()
         queue.enqueue(.focus(id: "f1", expectedSession: "s1", expiresAt: at(3)), for: "s1", at: t0)
-        queue.hello(session: "s1", instance: "i1", at: at(4))
-        #expect(queue.poll(session: "s1", instance: "i1", at: at(4)) == [])
+        queue.hello(session: "s1", instance: "i1", connection: "i1", at: at(4))
+        #expect(queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(4)) == [])
     }
 
     @Test func aFocusRequeuedAfterItExpiredIsDropped() {
         var queue = AgentCommandQueue()
-        queue.hello(session: "s1", instance: "i1", at: t0)
+        queue.hello(session: "s1", instance: "i1", connection: "i1", at: t0)
         let focus = AgentCommand.focus(id: "f1", expectedSession: "s1", expiresAt: at(3))
         queue.enqueue(focus, for: "s1", at: t0)
-        #expect(queue.poll(session: "s1", instance: "i1", at: at(1)) == [focus])
+        #expect(queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(1)) == [focus])
         queue.tick(at: at(2 + AgentCommandQueue.ackTimeout))
-        #expect(queue.poll(session: "s1", instance: "i1", at: at(3 + AgentCommandQueue.ackTimeout)) == [])
+        #expect(queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(3 + AgentCommandQueue.ackTimeout)) == [])
     }
 
     @Test func withdrawingAQueuedCommandWorksUntilItIsDelivered() {
         var queue = AgentCommandQueue()
-        queue.hello(session: "s1", instance: "i1", at: t0)
+        queue.hello(session: "s1", instance: "i1", connection: "i1", at: t0)
         queue.enqueue(command("r1"), for: "s1", at: t0)
         let r10 = queue.withdraw("r1")
         #expect(r10)
-        let r11 = queue.poll(session: "s1", instance: "i1", at: at(1))
+        let r11 = queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(1))
         #expect(r11 == [])
         queue.enqueue(command("r2"), for: "s1", at: at(1))
-        _ = queue.poll(session: "s1", instance: "i1", at: at(2))
+        _ = queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(2))
         let r12 = queue.withdraw("r2")
         #expect(!r12)
     }
@@ -218,6 +294,58 @@ struct AgentBridgeCodecTests {
             == .hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "s1", pid: 0, title: "Fix focus")))
         #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"title","session":"s1","text":"Renamed"}"#.utf8))
             == .title(session: "s1", text: "Renamed"))
+    }
+
+    @Test func aSubmitCarriesThePromptCountItWasDecidedAgainst() throws {
+        let fenced: [AgentCommand] = [.submit(id: "r1", expectedSession: "s1", text: "x", expectedPrompts: 3)]
+        let data = try AgentBridgeCodec.encode(fenced)
+        #expect(String(decoding: data, as: UTF8.self).contains(#""expectedPrompts":3"#))
+        #expect(try AgentBridgeCodec.decodeCommands(data) == fenced)
+        let unfenced = try AgentBridgeCodec.encode([.submit(id: "r1", expectedSession: "s1", text: "x")])
+        #expect(!String(decoding: unfenced, as: UTF8.self).contains("expectedPrompts"))
+    }
+
+    @Test func helloAndTypedReportTheUsersPromptCount() throws {
+        let hello = #"{"op":"hello","protocol":1,"agent":"claude","instance":"i1","session":"s1","pid":0,"prompts":4}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(hello.utf8))
+            == .hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "s1", pid: 0, prompts: 4)))
+        #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"typed","session":"s1","prompts":5}"#.utf8)) == .typed(session: "s1", prompts: 5))
+    }
+
+    @Test func helloReportsItsTurnAndWhetherItResumesAfterAGap() throws {
+        let fresh = #"{"op":"hello","protocol":1,"agent":"claude","instance":"i1","session":"s1","pid":0,"features":["readiness"],"idle":true,"gap":false}"#
+        guard case .hello(let hello) = try AgentBridgeCodec.decodeEvent(Data(fresh.utf8)) else { Issue.record("not a hello"); return }
+        #expect(hello.knownIdle)
+        #expect(hello.gap == false)
+        #expect(!hello.resumesAfterGap)
+
+        let gap = #"{"op":"hello","protocol":1,"agent":"claude","instance":"i1","session":"s1","pid":0,"features":["readiness"],"gap":true}"#
+        guard case .hello(let resumed) = try AgentBridgeCodec.decodeEvent(Data(gap.utf8)) else { Issue.record("not a hello"); return }
+        #expect(resumed.resumesAfterGap)
+        #expect(!resumed.knownIdle)
+    }
+
+    @Test func aConnectorWithoutReadinessAlwaysResumesAfterAGap() throws {
+        let old = #"{"op":"hello","protocol":1,"agent":"claude","instance":"i1","session":"s1","pid":0,"features":["focus"],"idle":true,"gap":false}"#
+        guard case .hello(let hello) = try AgentBridgeCodec.decodeEvent(Data(old.utf8)) else { Issue.record("not a hello"); return }
+        #expect(hello.resumesAfterGap)
+        #expect(!hello.knownIdle)
+    }
+
+    @Test func helloAndEveryEventNameTheConnectionTheyBelongTo() throws {
+        let hello = #"{"op":"hello","protocol":2,"agent":"claude","instance":"i1","session":"s1","pid":0,"connection":"c1"}"#
+        guard case .hello(let decoded) = try AgentBridgeCodec.decodeEvent(Data(hello.utf8)) else { Issue.record("not a hello"); return }
+        #expect(decoded.connection == "c1")
+        let typed = Data(#"{"op":"typed","session":"s1","instance":"i1","connection":"c1"}"#.utf8)
+        let frame = try AgentBridgeCodec.decodeFrame(typed)
+        #expect(frame.event == .typed(session: "s1"))
+        #expect(frame.envelope == .init(instance: "i1", connection: "c1"))
+        #expect(try AgentBridgeCodec.decodeFrame(Data(#"{"op":"ack","request":"r1"}"#.utf8)).envelope == .init(instance: nil, connection: nil))
+    }
+
+    @Test func aCompletionWithoutAnAnswerStillDecodes() throws {
+        #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"turnComplete","session":"s1","reason":"answer"}"#.utf8))
+            == .turnComplete(session: "s1", reason: "answer", answer: ""))
     }
 
     @Test func unknownOpsAndOversizeFramesAreRejected() {

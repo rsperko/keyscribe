@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test test-kit check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major
+.PHONY: help build run release publish ship cask test test-kit test-connector check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -43,6 +43,9 @@ test: ## Run the full test suite
 
 test-kit: ## Run only the KeyScribeKit tests, without building the engine stack (FILTER=<regex> narrows)
 	swift test --package-path "$$(./scripts/kit-package.sh)" $(BUILD_SYSTEM) $(if $(FILTER),--filter '$(FILTER)')
+
+test-connector: ## Run the Claude Code connector's behavior tests (needs the claude CLI; never needed to build)
+	./scripts/test-claude-connector.sh
 
 check-deps: ## Detect upstream dependency mutation (moved tags, re-uploaded binary assets)
 	./scripts/check-binary-artifacts.py

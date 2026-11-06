@@ -82,6 +82,21 @@ Write a failing test that defines the behavior, then make it pass.
 
 ---
 
+## 10. Minimal impact on agents
+An agent integration is a guest in the user's working session. KeyScribe must never become a
+dependency of normal agent work, whether it is healthy, closed, frozen, disabled, or removed.
+- Normal prompts, turns, tools, results, errors, and other extensions keep their behavior.
+  Observation hooks do no I/O and never wait for connector work; only small, bounded local
+  bookkeeping belongs on the agent's execution path.
+- Budget and verify background CPU, wakeups, requests, memory, and persistent storage while
+  connected and disconnected. Timeouts and reconnects must not accumulate unfinished work.
+- Connection loss stops pending actions and clears owned UI. Reconnection never silently replays
+  stale dictation or acts on a replacement session; uncertain delivery stays uncertain.
+- Disable and uninstall are explicit, easy, repeatable, and preserve user data. An absent app
+  never justifies silently changing the user's agent configuration.
+- A feature that cannot satisfy these constraints must reduce its integration or remain
+  unavailable. Agent responsiveness takes priority over connector availability.
+
 ## How these interact
 - **2 + 8** reinforce each other: a data-driven, branch-free engine is also the DRY one.
 - **4 + 6** are the UX spine: progressive disclosure delivered through a consistent,
@@ -89,3 +104,5 @@ Write a failing test that defines the behavior, then make it pass.
 - **1 + 3 + 7** keep the system small and fast: simple architecture and YAGNI are what make
   "insanely efficient" achievable and keep many optimization passes tractable.
 - **5 + 9** are the build loop: research the best version, then TDD it into existence.
+- **1 + 10** extend efficiency to the host agent: integration overhead is part of the product's
+  resource budget, including when KeyScribe is not running.

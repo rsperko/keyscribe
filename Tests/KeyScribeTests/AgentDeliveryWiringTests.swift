@@ -107,7 +107,7 @@ struct AgentDeliveryWiringTests {
 
         var sent: [(AgentCommand, String)] { transport.sent }
         var texts: [String] {
-            sent.compactMap { if case .submit(_, _, let text) = $0.0 { text } else { nil } }
+            sent.compactMap { if case .submit(_, _, let text, _) = $0.0 { text } else { nil } }
         }
     }
 
@@ -793,7 +793,7 @@ struct AgentDeliveryWiringTests {
         #expect(uncertain?.summary == "May not have reached keyscribe: check its terminal")
         #expect(uncertain?.outcome == .failed)
 
-        guard case .submit(let request, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
         rig.hub.handle(.submitted(request: request, turn: ""))
         for _ in 0..<200 where rig.history.entries().first?.summary != "Sent to keyscribe" {
             try? await Task.sleep(for: .milliseconds(5))
@@ -882,7 +882,7 @@ struct AgentDeliveryWiringTests {
         rig.transport.confirms = false
         await take(rig)
         let uncertain = await lastHistoryEntry(rig)
-        guard case .submit(let request, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
 
         rig.controller.agents = nil
         rig.controller.showAgentNotice(.sent("keyscribe"), request: request)
@@ -940,7 +940,7 @@ struct AgentDeliveryWiringTests {
 
         rig.registry.firstStatus = "idle"
         rig.hub.handle(.turnComplete(session: "s1", reason: "answer", answer: ""))
-        guard case .submit(let request, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
         rig.hub.handle(.refused(request: request, reason: "busy elsewhere"))
         for _ in 0..<200 where rig.history.entries().first?.outcome != .failed {
             try? await Task.sleep(for: .milliseconds(5))
@@ -950,5 +950,14 @@ struct AgentDeliveryWiringTests {
         #expect(refused?.outcome == .failed)
         #expect(refused?.failureReason == "Not sent: keyscribe refused the message")
         #expect(refused.flatMap(whyLocalWasKept) == reason)
+    }
+
+    @Test(arguments: [
+        (AgentReceipt.KeptReason.composing, "Not sent to docs: it has a message you haven\u{2019}t sent"),
+        (.typedSince, "Not sent to docs: you sent it a message since"),
+        (.connectionGap, "Not sent to docs: it lost its connection to \(Branding.appName) while this waited"),
+    ])
+    func aKeptTakeSaysWhyWithoutPromisingToSendLater(reason: AgentReceipt.KeptReason, message: String) {
+        #expect(AgentOutput.receiptState(.kept("docs", reason: reason), mode: "Agent", heard: "") == .advisory(message: message))
     }
 }

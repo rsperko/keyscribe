@@ -50,6 +50,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     public func applicationWillTerminate(_: Notification) {
         controller?.cancel()
+        agentRuntime?.stop()
     }
 
     private var launched = false
@@ -691,6 +692,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 settingsController.codingAgents.onRename = { [weak hub = runtime.hub] in try hub?.rename($0, to: $1) }
                 settingsController.codingAgents.onReloadNames = { [weak hub = runtime.hub] in hub?.reloadNames() }
+                settingsController.codingAgents.onRetire = { [weak runtime] in runtime?.retire() }
                 settingsController.codingAgents.show(
                     runtime.hub.directory.conversations, current: runtime.hub.current, namesProblem: runtime.hub.namesProblem)
                 agentRuntime = runtime
@@ -704,6 +706,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.agents = nil
             settingsController.codingAgents.onRename = nil
             settingsController.codingAgents.onReloadNames = nil
+            settingsController.codingAgents.onRetire = nil
             settingsController.codingAgents.show([], current: nil)
         }
     }

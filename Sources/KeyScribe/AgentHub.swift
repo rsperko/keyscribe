@@ -14,7 +14,7 @@ extension AgentBridgeServer: AgentTransport {
 }
 
 enum AgentReceipt: Equatable {
-    enum KeptReason: Equatable { case draft, typedSince, interrupted, questionResolved, historyMoved }
+    enum KeptReason: Equatable { case draft, composing, typedSince, interrupted, questionResolved, historyMoved, connectionGap }
     enum NotSentReason: Equatable { case conversationEnded, connectorNotRunning, conversationChanged, stopped, refused(String) }
 
     case sent(String)
@@ -57,6 +57,7 @@ final class AgentHub {
     private var waiters: [String: CheckedContinuation<AgentReceipt, Never>] = [:]
     private var focusWaiters: [String: CheckedContinuation<TerminalSelection, Never>] = [:]
     private var features: [String: Set<String>] = [:]
+    private var prompts: [String: Int] = [:]
     private var connectorNames: [String: String?] = [:]
     private var registryNames: [String: String?] = [:]
     private var labels: [String: String] = [:]
@@ -207,7 +208,7 @@ final class AgentHub {
     private func sendLabels() {
         for conversation in directory.conversations where conversation.connectorLive {
             guard features[conversation.id]?.contains("label") == true else { continue }
-            let label = "\(Branding.appName): \(conversation.handle)"
+            let label = "\u{201C}\(conversation.handle)\u{201D}"
             guard labels[conversation.id] != label else { continue }
             labels[conversation.id] = label
             transport.enqueue(.status(id: makeId(), expectedSession: conversation.id, text: label), for: conversation.id)
@@ -244,11 +245,16 @@ final class AgentHub {
         }
     }
 
+    func prepare(for hello: AgentEvent.Hello) {
+        if hello.resumesAfterGap { outbox.noteConnectionGap(conversation: hello.session) }
+        running[hello.session] = hello.knownIdle ? nil : now()
+    }
+
     func handle(_ event: AgentEvent) {
         switch event {
         case .hello(let hello):
-            running[hello.session] = nil
             features[hello.session] = Set(hello.features)
+            prompts[hello.session] = hello.prompts
             labels[hello.session] = nil
             if let title = hello.title {
                 connectorNames[hello.session] = .some(title.isEmpty ? nil : title)
@@ -269,6 +275,20 @@ final class AgentHub {
             focusWaiters.removeValue(forKey: request)?.resume(returning: .notFound)
         case .undelivered(let request, _, _) where focusWaiters[request] != nil:
             focusWaiters.removeValue(forKey: request)?.resume(returning: .notFound)
+        case .refused(let request, "working"):
+            clearHandOff(request)
+            guard let entry = requests.removeValue(forKey: request) else { break }
+            running[entry.message.conversation] = now()
+            _ = outbox.send(entry.message, state: .working)
+            report(.queued(entry.handle), for: request)
+        case .refused(let request, "typedSince"):
+            clearHandOff(request)
+            settle(request, .kept(requests[request]?.handle ?? "", reason: .typedSince), keep: true)
+            releaseHeld()
+        case .refused(let request, "draft"):
+            clearHandOff(request)
+            settle(request, .kept(requests[request]?.handle ?? "", reason: .composing), keep: true)
+            releaseHeld()
         case .refused(let request, let reason):
             clearHandOff(request)
             settle(request, .notSent(requests[request]?.handle, reason: Self.notSent(reason)), keep: true)
@@ -277,11 +297,16 @@ final class AgentHub {
             guard let entry = requests[request], !entry.timedOut else { break }
             requests[request]?.timedOut = true
             report(.uncertain(entry.handle), for: request)
+        case .undelivered(let request, "connectionGap", false):
+            clearHandOff(request)
+            settle(request, .kept(requests[request]?.handle ?? "", reason: .connectionGap), keep: true)
+            releaseHeld()
         case .undelivered(let request, _, false):
             clearHandOff(request)
             settle(request, .notSent(requests[request]?.handle, reason: .connectorNotRunning), keep: true)
             releaseHeld()
-        case .typed(let session):
+        case .typed(let session, let count):
+            if let count { prompts[session] = count }
             outbox.noteTyped(conversation: session)
             if handle(of: session) != nil { makeCurrent(session) }
         case .turnStarted(let session, _):
@@ -304,7 +329,9 @@ final class AgentHub {
     private func handOff(_ message: AgentOutbox.Message, handle: String) {
         requests[message.id] = Request(message: message, handle: handle)
         handingOff[message.conversation] = message.id
-        transport.enqueue(.submit(id: message.id, expectedSession: message.conversation, text: message.text), for: message.conversation)
+        transport.enqueue(
+            .submit(id: message.id, expectedSession: message.conversation, text: message.text, expectedPrompts: prompts[message.conversation]),
+            for: message.conversation)
         let timeout = receiptTimeout
         Task { [weak self] in
             try? await Task.sleep(for: timeout)
@@ -360,6 +387,7 @@ final class AgentHub {
         case .questionResolved: .questionResolved
         case .interrupted: .interrupted
         case .historyMoved: .historyMoved
+        case .connectionGap: .connectionGap
         }
     }
 
@@ -386,7 +414,16 @@ final class AgentRuntime {
         let directory = Self.bridgeDirectory(supportDir: supportDir)
         let token = try AgentBridgeToken.loadOrCreate(in: directory)
         let box = HubBox()
-        server = AgentBridgeServer(directory: directory, token: token) { event in
+        server = AgentBridgeServer(
+            directory: directory, token: token,
+            installation: { ClaudeConnectorInstaller.currentInstallation(in: directory) },
+            onHello: { hello, done in
+                Task { @MainActor in
+                    box.hub?.prepare(for: hello)
+                    done()
+                }
+            }
+        ) { event in
             Task { @MainActor in box.hub?.handle(event) }
         }
         hub = AgentHub(
@@ -400,6 +437,10 @@ final class AgentRuntime {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak hub] _ in
             MainActor.assumeIsolated { hub?.refresh(rereadingTitles: false) }
         }
+    }
+
+    func retire() {
+        server.retire()
     }
 
     func stop() {

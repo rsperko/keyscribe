@@ -302,6 +302,8 @@ enum AccessibilityID {
             static let install = "mode.codingAgents.install"
             static let update = "mode.codingAgents.update"
             static let remove = "mode.codingAgents.remove"
+            static let finishUninstalling = "mode.codingAgents.finishUninstalling"
+            static let manualUninstall = "mode.codingAgents.manualUninstall"
             static let conversation = "mode.codingAgents.conversation"
             static let copyDirectory = "mode.codingAgents.copyDirectory"
             static let rename = "mode.codingAgents.rename"
@@ -570,7 +572,7 @@ enum AccessibilityID {
         Settings.Advanced.revealConfig, Settings.Advanced.reloadConfig, Settings.Advanced.resetHUDPosition,
         Settings.Advanced.eraseAllData, Settings.Advanced.eraseConfirmConfirm, Settings.Advanced.eraseConfirmCancel,
         Mode.CodingAgents.connectorStatus, Mode.CodingAgents.currentRecipient, Mode.CodingAgents.summary,
-        Mode.CodingAgents.install, Mode.CodingAgents.update, Mode.CodingAgents.remove,
+        Mode.CodingAgents.install, Mode.CodingAgents.update, Mode.CodingAgents.remove, Mode.CodingAgents.finishUninstalling, Mode.CodingAgents.manualUninstall,
         Mode.CodingAgents.conversation, Mode.CodingAgents.rename, Mode.CodingAgents.copyDirectory,
         Mode.CodingAgents.renameProblem, Mode.CodingAgents.namesProblem, Mode.CodingAgents.reloadNames,
         Mode.CodingAgents.showNamesFile, Mode.CodingAgents.renameName, Mode.CodingAgents.renameSave,

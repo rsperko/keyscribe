@@ -13,10 +13,26 @@ struct AgentBridgeServerTests {
         var all: [AgentEvent] { lock.withLock { items } }
     }
 
-    private func makeServer(pollHold: TimeInterval = 2, activeWindow: TimeInterval = 0.5) throws -> (AgentBridgeServer, Events, URL) {
+    final class Installation: @unchecked Sendable {
+        private let lock = NSLock()
+        private var id: String? = "inst-1"
+        var current: String? {
+            get { lock.withLock { id } }
+            set { lock.withLock { id = newValue } }
+        }
+    }
+
+    private func makeServer(
+        pollHold: TimeInterval = 2, activeWindow: TimeInterval = 0.5, installation: Installation = Installation(),
+        onHello: @escaping @Sendable (AgentEvent.Hello, @escaping @Sendable () -> Void) -> Void = { $1() }
+    ) throws -> (AgentBridgeServer, Events, URL) {
         let dir = URL(fileURLWithPath: "/tmp/ks-bridge-\(UUID().uuidString.prefix(8))", isDirectory: true)
         let events = Events()
-        let server = AgentBridgeServer(directory: dir, token: "secret", pollHold: pollHold, activeWindow: activeWindow) { events.append($0) }
+        let server = AgentBridgeServer(
+            directory: dir, token: "secret", installation: { installation.current }, pollHold: pollHold, activeWindow: activeWindow, onHello: onHello
+        ) {
+            events.append($0)
+        }
         try server.start()
         return (server, events, dir)
     }
@@ -51,14 +67,25 @@ struct AgentBridgeServerTests {
         return (status, payload)
     }
 
-    private func hello(_ dir: URL, session: String = "s1", instance: String = "i1") throws {
-        _ = try request(dir, path: "/event", body: #"{"op":"hello","protocol":1,"agent":"claude","agentVersion":"2.1.314","instance":"\#(instance)","session":"\#(session)","pid":1}"#)
+    @discardableResult
+    private func hello(_ dir: URL, session: String = "s1", instance: String = "i1", connection: String? = nil, installation: String = "inst-1") throws -> Int {
+        let body = #"{"op":"hello","protocol":2,"agent":"claude","agentVersion":"2.1.314","instance":"\#(instance)","session":"\#(session)","pid":1,"connection":"\#(connection ?? instance)","installation":"\#(installation)"}"#
+        return try request(dir, path: "/event", body: body).0
+    }
+
+    private func readyHello(_ dir: URL, session: String = "s1", instance: String = "i1", connection: String? = nil, gap: Bool) throws -> Int {
+        let body = #"{"op":"hello","protocol":2,"agent":"claude","instance":"\#(instance)","session":"\#(session)","pid":1,"features":["readiness"],"gap":\#(gap),"connection":"\#(connection ?? instance)","installation":"inst-1"}"#
+        return try request(dir, path: "/event", body: body).0
+    }
+
+    private func poll(_ dir: URL, session: String = "s1", instance: String = "i1", connection: String? = nil) throws -> (Int, String) {
+        try request(dir, path: "/poll", body: #"{"session":"\#(session)","instance":"\#(instance)","connection":"\#(connection ?? instance)"}"#)
     }
 
     @Test func aWrongTokenIsRefused() throws {
         let (server, _, dir) = try makeServer()
         defer { server.stop() }
-        let (status, _) = try request(dir, path: "/poll", body: #"{"session":"s1","instance":"i1"}"#, token: "nope")
+        let (status, _) = try request(dir, path: "/poll", body: #"{"session":"s1","instance":"i1","connection":"i1"}"#, token: "nope")
         #expect(status == 401)
     }
 
@@ -69,6 +96,59 @@ struct AgentBridgeServerTests {
         let sockMode = try FileManager.default.attributesOfItem(atPath: dir.appendingPathComponent("bridge.sock").path)[.posixPermissions] as? Int
         #expect(dirMode == 0o700)
         #expect(sockMode == 0o600)
+    }
+
+    private func readiness(_ dir: URL) -> [String: Any]? {
+        guard let data = FileManager.default.contents(atPath: dir.appendingPathComponent("ready.json").path) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    @Test func aListeningBridgePublishesAnOwnerOnlyReadinessWithItsLaunch() throws {
+        let (server, _, dir) = try makeServer()
+        defer { server.stop() }
+        let ready = try #require(readiness(dir))
+        #expect(ready["protocol"] as? Int == AgentBridgeCodec.protocolVersion)
+        #expect((ready["launch"] as? String)?.count ?? 0 >= 16)
+        #expect(ready["launch"] as? String == server.launch)
+        let mode = try FileManager.default.attributesOfItem(atPath: dir.appendingPathComponent("ready.json").path)[.posixPermissions] as? Int
+        #expect(mode == 0o600)
+        #expect(try readyHello(dir, gap: false) == 200)
+    }
+
+    @Test func eachStartIsANewLaunch() throws {
+        let (server, _, dir) = try makeServer()
+        let first = try #require(readiness(dir)?["launch"] as? String)
+        server.stop()
+        try server.start()
+        defer { server.stop() }
+        let second = try #require(readiness(dir)?["launch"] as? String)
+        #expect(first != second)
+    }
+
+    @Test func stoppingRemovesTheReadinessAndTheSocket() throws {
+        let (server, _, dir) = try makeServer()
+        server.stop()
+        #expect(readiness(dir) == nil)
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("bridge.sock").path))
+    }
+
+    @Test func stoppingLeavesAReadinessItDoesNotOwn() throws {
+        let (server, _, dir) = try makeServer()
+        let other = Data(#"{"launch":"someone-else","protocol":1}"#.utf8)
+        try other.write(to: dir.appendingPathComponent("ready.json"))
+        server.stop()
+        #expect(readiness(dir)?["launch"] as? String == "someone-else")
+    }
+
+    @Test func aFailedStartClearsAStaleReadiness() throws {
+        let dir = URL(fileURLWithPath: "/tmp/ks-bridge-\(UUID().uuidString)-\(String(repeating: "x", count: 90))", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data(#"{"launch":"crashed","protocol":1}"#.utf8).write(to: dir.appendingPathComponent("ready.json"))
+        let server = AgentBridgeServer(directory: dir, token: "secret", installation: { "inst-1" }) { _ in }
+        #expect(throws: AgentBridgeServer.StartError.self) { try server.start() }
+        #expect(readiness(dir) == nil)
+        #expect(server.launch == nil)
     }
 
     @Test func eventsReachTheAppAndHelloRegistersTheInstance() throws {
@@ -84,7 +164,7 @@ struct AgentBridgeServerTests {
         defer { server.stop() }
         try hello(dir)
         server.enqueue(.submit(id: "r1", expectedSession: "s1", text: "run the tests"), for: "s1")
-        let (status, body) = try request(dir, path: "/poll", body: #"{"session":"s1","instance":"i1"}"#)
+        let (status, body) = try poll(dir)
         #expect(status == 200)
         #expect(try AgentBridgeCodec.decodeCommands(Data(body.utf8)) == [.submit(id: "r1", expectedSession: "s1", text: "run the tests")])
     }
@@ -93,7 +173,7 @@ struct AgentBridgeServerTests {
         let (server, _, dir) = try makeServer()
         defer { server.stop() }
         try hello(dir)
-        async let polled = Task.detached { try self.request(dir, path: "/poll", body: #"{"session":"s1","instance":"i1"}"#) }.value
+        async let polled = Task.detached { try self.poll(dir) }.value
         try await Task.sleep(for: .milliseconds(300))
         server.enqueue(.abort(id: "r2", expectedSession: "s1", expectedTurn: "t1"), for: "s1")
         let (status, body) = try await polled
@@ -106,21 +186,147 @@ struct AgentBridgeServerTests {
         defer { server.stop() }
         try hello(dir)
         let started = Date()
-        let (status, body) = try request(dir, path: "/poll", body: #"{"session":"s1","instance":"i1"}"#)
+        let (status, body) = try poll(dir)
         #expect(status == 200)
         #expect(body == "[]")
         #expect(Date().timeIntervalSince(started) >= 0.35)
     }
 
-    @Test func anUnacknowledgedCommandReachesTheReloadedInstance() throws {
-        let (server, _, dir) = try makeServer(pollHold: 2)
+    @Test func anUnacknowledgedCommandNeverReachesAnInstanceThatResumesAfterAGap() throws {
+        let (server, events, dir) = try makeServer(pollHold: 0.3)
         defer { server.stop() }
         try hello(dir)
         server.enqueue(.submit(id: "r3", expectedSession: "s1", text: "x"), for: "s1")
-        _ = try request(dir, path: "/poll", body: #"{"session":"s1","instance":"i1"}"#)
+        _ = try poll(dir)
         try hello(dir, instance: "i2")
-        let (_, body) = try request(dir, path: "/poll", body: #"{"session":"s1","instance":"i2"}"#)
-        #expect(try AgentBridgeCodec.decodeCommands(Data(body.utf8)).map(\.id) == ["r3"])
+        let (_, body) = try poll(dir, instance: "i2")
+        #expect(body == "[]")
+        #expect(events.all.contains(.undelivered(request: "r3", reason: "connectionGap", handedOff: true)))
+    }
+
+    @Test func aQueuedCommandIsWithdrawnForReviewWhenTheConnectorResumesAfterAGap() throws {
+        let (server, events, dir) = try makeServer(pollHold: 0.3)
+        defer { server.stop() }
+        _ = try readyHello(dir, gap: false)
+        server.enqueue(.submit(id: "r7", expectedSession: "s1", text: "x"), for: "s1")
+        _ = try readyHello(dir, connection: "c2", gap: true)
+        let (_, body) = try poll(dir, connection: "c2")
+        #expect(body == "[]")
+        let gap = AgentEvent.undelivered(request: "r7", reason: "connectionGap", handedOff: false)
+        let all = events.all
+        #expect(all.contains(gap))
+        let helloIndex = all.lastIndex { if case .hello = $0 { true } else { false } }
+        #expect(all.firstIndex(of: gap).map { $0 < (helloIndex ?? -1) } == true)
+    }
+
+    @Test func aFreshHelloKeepsWhatWasQueuedForTheSession() throws {
+        let (server, _, dir) = try makeServer(pollHold: 0.3)
+        defer { server.stop() }
+        server.enqueue(.submit(id: "r8", expectedSession: "s1", text: "x"), for: "s1")
+        _ = try readyHello(dir, gap: false)
+        let (_, body) = try poll(dir)
+        #expect(try AgentBridgeCodec.decodeCommands(Data(body.utf8)).map(\.id) == ["r8"])
+    }
+
+    @Test func theAppReconcilesBeforeAHelloIsRegisteredOrAnswered() async throws {
+        final class Gate: @unchecked Sendable {
+            let lock = NSLock()
+            var release: (@Sendable () -> Void)?
+        }
+        let gate = Gate()
+        let (server, _, dir) = try makeServer(onHello: { _, done in gate.lock.withLock { gate.release = done } })
+        defer { server.stop() }
+        async let answered = Task.detached { try self.readyHello(dir, gap: true) }.value
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline, gate.lock.withLock({ gate.release == nil }) { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(!server.isLive(session: "s1"))
+        gate.lock.withLock { gate.release }?()
+        #expect(try await answered == 200)
+        #expect(server.isLive(session: "s1"))
+    }
+
+    @Test func aHelloStillBeingPreparedWhenTheInstallationIsRemovedIsRefused() async throws {
+        final class Gate: @unchecked Sendable {
+            let lock = NSLock()
+            var release: (@Sendable () -> Void)?
+        }
+        let gate = Gate()
+        let installation = Installation()
+        let (server, events, dir) = try makeServer(installation: installation, onHello: { _, done in gate.lock.withLock { gate.release = done } })
+        defer { server.stop() }
+        async let answered = Task.detached { try self.readyHello(dir, gap: false) }.value
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline, gate.lock.withLock({ gate.release == nil }) { try await Task.sleep(for: .milliseconds(10)) }
+        installation.current = nil
+        server.retire()
+        gate.lock.withLock { gate.release }?()
+        #expect(try await answered == 403)
+        #expect(!server.isLive(session: "s1"))
+        #expect(!events.all.contains { if case .hello = $0 { true } else { false } })
+    }
+
+    @Test func aHelloReleasesThatInstancesOwnParkedPoll() async throws {
+        let (server, _, dir) = try makeServer(pollHold: 5)
+        defer { server.stop() }
+        _ = try readyHello(dir, gap: false)
+        let started = Date()
+        async let polled = Task.detached { try self.poll(dir) }.value
+        try await Task.sleep(for: .milliseconds(300))
+        _ = try readyHello(dir, connection: "c2", gap: true)
+        let (status, body) = try await polled
+        #expect(status == 200)
+        #expect(body == "[]")
+        #expect(Date().timeIntervalSince(started) < 3)
+    }
+
+    @MainActor
+    @Test func aGapHelloDuringAnActiveTurnNeverReleasesTheQueuedTake() async throws {
+        final class HubBox: @unchecked Sendable { weak var hub: AgentHub? }
+        final class Registry: @unchecked Sendable { var status = "busy" }
+        let box = HubBox()
+        let registry = Registry()
+        let dir = URL(fileURLWithPath: "/tmp/ks-bridge-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        let server = AgentBridgeServer(
+            directory: dir, token: "secret", installation: { "inst-1" }, pollHold: 0.3, activeWindow: 5,
+            onHello: { hello, done in Task { @MainActor in box.hub?.prepare(for: hello); done() } }
+        ) { event in Task { @MainActor in box.hub?.handle(event) } }
+        try server.start()
+        defer { server.stop() }
+        let hub = AgentHub(transport: server, scan: {
+            [ClaudeRegistryEntry(pid: 10, sessionId: "s1", cwd: "/src/keyscribe", name: nil, status: registry.status, waitingFor: nil)]
+        })
+        box.hub = hub
+        let send = { (body: String) in try await Task.detached { try self.request(dir, path: "/event", body: body) }.value }
+        let ready = #"{"op":"hello","protocol":2,"agent":"claude","instance":"i1","session":"s1","pid":1,"installation":"inst-1","features":["readiness"]"#
+
+        _ = try await send(ready + #","idle":true,"gap":false,"connection":"c1"}"#)
+        _ = try await Task.detached { try self.poll(dir, connection: "c1") }.value
+        hub.refresh()
+        #expect(await hub.deliver("run the tests", to: "s1", delivery: .submit) == .queued("keyscribe"))
+
+        _ = try await send(ready + #","idle":false,"gap":true,"connection":"c2"}"#)
+        registry.status = "idle"
+        _ = try await send(#"{"op":"turnComplete","session":"s1","reason":"answer","instance":"i1","connection":"c2"}"#)
+        for _ in 0..<20 { await Task.yield() }
+        hub.refresh()
+
+        let (_, body) = try await Task.detached { try self.poll(dir, connection: "c2") }.value
+        #expect(body == "[]")
+        #expect(hub.recent == [.kept("keyscribe", reason: .connectionGap)])
+        #expect(hub.unsent.map(\.text) == ["run the tests"])
+    }
+
+    @Test func aGapInOneTerminalKeepsWhatWasAddressedToTheOther() throws {
+        let (server, events, dir) = try makeServer(pollHold: 0.3)
+        defer { server.stop() }
+        _ = try readyHello(dir, instance: "left", gap: false)
+        _ = try readyHello(dir, instance: "right", gap: false)
+        server.enqueue(.submit(id: "r9", expectedSession: "s1", text: "x"), for: "s1", instance: "left")
+        _ = try readyHello(dir, instance: "right", connection: "right-2", gap: true)
+        let (_, left) = try poll(dir, instance: "left")
+        #expect(try AgentBridgeCodec.decodeCommands(Data(left.utf8)).map(\.id) == ["r9"])
+        #expect(!events.all.contains(.undelivered(request: "r9", reason: "connectionGap", handedOff: false)))
     }
 
     @Test func anAcknowledgedCommandIsNotRedelivered() throws {
@@ -128,20 +334,20 @@ struct AgentBridgeServerTests {
         defer { server.stop() }
         try hello(dir)
         server.enqueue(.submit(id: "r4", expectedSession: "s1", text: "x"), for: "s1")
-        _ = try request(dir, path: "/poll", body: #"{"session":"s1","instance":"i1"}"#)
-        _ = try request(dir, path: "/event", body: #"{"op":"ack","request":"r4"}"#)
+        _ = try poll(dir)
+        _ = try request(dir, path: "/event", body: #"{"op":"ack","request":"r4","instance":"i1","connection":"i1"}"#)
         try hello(dir, instance: "i2")
-        let (_, body) = try request(dir, path: "/poll", body: #"{"session":"s1","instance":"i2"}"#)
+        let (_, body) = try poll(dir, instance: "i2")
         #expect(body == "[]")
     }
 
     @Test func aPollFromAnInstanceTheBridgeDoesNotKnowIsToldToRegister() throws {
         let (server, _, dir) = try makeServer(pollHold: 0.3)
         defer { server.stop() }
-        let (status, _) = try request(dir, path: "/poll", body: #"{"session":"s1","instance":"i1"}"#)
+        let (status, _) = try poll(dir)
         #expect(status == 409)
         try hello(dir)
-        let (after, _) = try request(dir, path: "/poll", body: #"{"session":"s1","instance":"i1"}"#)
+        let (after, _) = try poll(dir)
         #expect(after == 200)
     }
 
@@ -162,10 +368,126 @@ struct AgentBridgeServerTests {
         try hello(dir, instance: "left")
         try hello(dir, instance: "right")
         server.enqueue(.submit(id: "r5", expectedSession: "s1", text: "x"), for: "s1", instance: "left")
-        let (_, right) = try request(dir, path: "/poll", body: #"{"session":"s1","instance":"right"}"#)
+        let (_, right) = try poll(dir, instance: "right")
         #expect(right == "[]")
-        let (_, left) = try request(dir, path: "/poll", body: #"{"session":"s1","instance":"left"}"#)
+        let (_, left) = try poll(dir, instance: "left")
         #expect(try AgentBridgeCodec.decodeCommands(Data(left.utf8)).map(\.id) == ["r5"])
+    }
+
+    @Test func aHelloOnAnotherProtocolIsRejectedWithoutRegistering() throws {
+        let (server, events, dir) = try makeServer()
+        defer { server.stop() }
+        let old = #"{"op":"hello","protocol":1,"agent":"claude","instance":"i1","session":"s1","pid":1,"connection":"c1"}"#
+        #expect(try request(dir, path: "/event", body: old).0 == 426)
+        let unbound = #"{"op":"hello","protocol":2,"agent":"claude","instance":"i1","session":"s1","pid":1,"installation":"inst-1"}"#
+        #expect(try request(dir, path: "/event", body: unbound).0 == 400)
+        #expect(events.all.isEmpty)
+        #expect(!server.isLive(session: "s1"))
+        #expect(try poll(dir).0 == 409)
+    }
+
+    @Test func messagesFromASupersededConnectionNeverReachTheApp() throws {
+        let (server, events, dir) = try makeServer(pollHold: 0.3)
+        defer { server.stop() }
+        try hello(dir, connection: "c1")
+        try hello(dir, connection: "c2")
+        let stale = #"{"op":"typed","session":"s1","prompts":1,"instance":"i1","connection":"c1"}"#
+        #expect(try request(dir, path: "/event", body: stale).0 == 409)
+        let anonymous = #"{"op":"typed","session":"s1","prompts":1}"#
+        #expect(try request(dir, path: "/event", body: anonymous).0 == 409)
+        #expect(try poll(dir, connection: "c1").0 == 409)
+        #expect(!events.all.contains(.typed(session: "s1", prompts: 1)))
+
+        let current = #"{"op":"typed","session":"s1","prompts":2,"instance":"i1","connection":"c2"}"#
+        #expect(try request(dir, path: "/event", body: current).0 == 200)
+        #expect(events.all.contains(.typed(session: "s1", prompts: 2)))
+    }
+
+    @Test func aCommandTheOldConnectionCollectedStaysUncertainEvenIfItsAckArrivesLate() throws {
+        let (server, events, dir) = try makeServer(pollHold: 0.3)
+        defer { server.stop() }
+        try hello(dir, connection: "c1")
+        server.enqueue(.submit(id: "r1", expectedSession: "s1", text: "x"), for: "s1")
+        _ = try poll(dir, connection: "c1")
+        _ = try readyHello(dir, connection: "c2", gap: false)
+        #expect(events.all.contains(.undelivered(request: "r1", reason: "connectionGap", handedOff: true)))
+        let late = #"{"op":"ack","request":"r1","instance":"i1","connection":"c1"}"#
+        #expect(try request(dir, path: "/event", body: late).0 == 409)
+        #expect(!events.all.contains(.ack(request: "r1")))
+        #expect(try poll(dir, connection: "c2").1 == "[]")
+    }
+
+    @Test func aHelloFromAnotherOrARemovedInstallationIsRefusedWithoutRegistering() throws {
+        let installation = Installation()
+        let (server, events, dir) = try makeServer(installation: installation)
+        defer { server.stop() }
+        #expect(try hello(dir, installation: "inst-0") == 403)
+        let unmarked = #"{"op":"hello","protocol":2,"agent":"claude","instance":"i1","session":"s1","pid":1,"connection":"c1"}"#
+        #expect(try request(dir, path: "/event", body: unmarked).0 == 403)
+        installation.current = nil
+        #expect(try hello(dir) == 403)
+        #expect(try poll(dir).0 == 409)
+        #expect(events.all.isEmpty)
+        installation.current = "inst-1"
+        #expect(try hello(dir) == 200)
+    }
+
+    @Test func retiringAnswersWaitingPollsWithRetireAndWithdrawsEveryCommand() async throws {
+        let (server, events, dir) = try makeServer(pollHold: 5)
+        defer { server.stop() }
+        try hello(dir)
+        try hello(dir, session: "s2", instance: "i2")
+        server.enqueue(.submit(id: "r2", expectedSession: "s2", text: "x"), for: "s2")
+        async let polled = Task.detached { try self.poll(dir) }.value
+        try await Task.sleep(for: .milliseconds(300))
+        server.retire()
+        let (status, body) = try await polled
+        #expect(status == 200)
+        let frame = try JSONSerialization.jsonObject(with: Data(body.utf8)) as? [[String: Any]]
+        #expect(frame?.map { $0["op"] as? String } == ["retire"])
+        #expect(events.all.contains(.undelivered(request: "r2", reason: "retired", handedOff: false)))
+        #expect(try poll(dir, session: "s2", instance: "i2").0 == 409)
+        #expect(!server.isLive(session: "s1"))
+    }
+
+    @Test func aClientThatHangsUpBeforeTheBridgeAcceptsItDoesNotTakeTheAppDown() throws {
+        let gate = DispatchSemaphore(value: 0)
+        let entered = DispatchSemaphore(value: 0)
+        let answered = DispatchSemaphore(value: 0)
+        let (server, _, dir) = try makeServer(onHello: { _, done in
+            entered.signal()
+            gate.wait()
+            done()
+        })
+        defer { server.stop() }
+        nonisolated(unsafe) var greeted = 0
+        DispatchQueue.global().async {
+            greeted = (try? self.hello(dir)) ?? -1
+            answered.signal()
+        }
+        #expect(entered.wait(timeout: .now() + 5) == .success)
+        try hangUpAfterSending(dir, path: "/event", body: #"{"op":"explode"}"#)
+        gate.signal()
+        #expect(answered.wait(timeout: .now() + 10) == .success)
+        #expect(greeted == 200)
+        #expect(try request(dir, path: "/event", body: #"{"op":"explode"}"#).0 == 400)
+    }
+
+    private func hangUpAfterSending(_ dir: URL, path: String, body: String) throws {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        defer { close(fd) }
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let socketPath = dir.appendingPathComponent("bridge.sock").path
+        withUnsafeMutableBytes(of: &addr.sun_path) { raw in
+            socketPath.utf8CString.withUnsafeBytes { raw.copyMemory(from: $0) }
+        }
+        let connected = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        guard connected == 0 else { throw POSIXError(.ECONNREFUSED) }
+        let raw = "POST \(path) HTTP/1.1\r\nHost: ks\r\nAuthorization: Bearer secret\r\nContent-Length: \(body.utf8.count)\r\n\r\n\(body)"
+        _ = raw.withCString { write(fd, $0, strlen($0)) }
     }
 
     @Test func malformedEventsAreRejectedWithoutReachingTheApp() throws {
