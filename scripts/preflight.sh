@@ -127,9 +127,10 @@ led_write()  { printf '%s\t%s\t%s\n' "$2" "$3" "$4" > "$LEDGER_DIR/$1"; }
 
 only_match() { [ -z "$ONLY" ] && return 0; case ",${ONLY//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
 force_id()   { [ "$FORCE_ALL" = 1 ] && return 0; case ",${FORCE_LIST//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
+CONNECTOR_CHECKS="a-connector-tests a-pi-connector-tests"
 # The pre-notarize phase runs only these — swift test + Tier B. It must NOT run the Tier A packaging /
 # notarization checks (they need the notarized artifact, which does not exist yet) or Tier C (human).
-PRE_CHECKS=" a-deps a-swift-test a-connector-tests a-catalog-contract a-min-xcode b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
+PRE_CHECKS=" a-deps a-swift-test $CONNECTOR_CHECKS a-catalog-contract a-min-xcode b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
 pre_check() { case "$PRE_CHECKS" in *" $1 "*) return 0;; esac; return 1; }
 
 # guard <id> <input-sig> <fn>  — the whole cache / run / retry / override / record cycle for one check.
@@ -178,12 +179,12 @@ will_run() {
 }
 
 # Required checks must each end pass / override / skip (never fail, never un-evaluated) for the stamp.
-REQ_CORE="a-deps a-swift-test a-catalog-contract a-min-xcode a-artifact a-codesign a-metallib a-plist a-licenses b-commands b-vad-gate b-benchmark"
+REQ_CORE="a-deps a-swift-test $CONNECTOR_CHECKS a-catalog-contract a-min-xcode a-artifact a-codesign a-metallib a-plist a-licenses b-commands b-vad-gate b-benchmark"
 REQ_RELEASE="a-gatekeeper a-staple a-entitlements a-dmg a-sparkle c-plain-dictation c-private-rewrite"
 
 if [ "$LIST_ONLY" = 1 ]; then
   bold "checks (tier A/B automated, tier C human):"
-  for id in $REQ_CORE $REQ_RELEASE a-connector-tests b-coverage b-capture-probe c-trigger-matrix c-qwen-hardened c-edit-in-place c-quarantine; do
+  for id in $REQ_CORE $REQ_RELEASE b-coverage b-capture-probe c-trigger-matrix c-qwen-hardened c-edit-in-place c-quarantine; do
     printf '  %s\n' "$id"
   done
   exit 0
@@ -677,7 +678,7 @@ printf '  %s passed (%s cached, %s overridden) · %s failed · %s skipped\n' \
 
 # Any required check that is currently failing, or was never evaluated for this commit, blocks the stamp.
 if [ "$PHASE" = "pre" ]; then
-  REQUIRED="a-swift-test a-catalog-contract b-commands b-benchmark"
+  REQUIRED="a-swift-test $CONNECTOR_CHECKS a-catalog-contract b-commands b-benchmark"
 elif [ "$MODE" = "release" ]; then
   REQUIRED="$REQ_CORE $REQ_RELEASE"
 else

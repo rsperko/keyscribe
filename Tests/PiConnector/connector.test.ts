@@ -20,7 +20,6 @@ function harness(options: Options = {}) {
   const requests: Request[] = []
   const sends: Array<{ text: string; options: any }> = []
   const statuses: Array<string | undefined> = []
-  const fills: string[] = []
   const execs: string[][] = []
   const env: Record<string, string | undefined> = {}
   const config = {
@@ -38,7 +37,6 @@ function harness(options: Options = {}) {
   let now = options.now ?? 1_000_000
   const live = { session: "s1", name: undefined as string | undefined, idle: true, editor: "", cwd: "/work", mode: options.mode ?? "tui" }
   let keyHandler: ((data: string) => unknown) | null = null
-  let aborts = 0
   let execCode = 0
   let sendFails = false
   let sendDispatchesInput = false
@@ -101,10 +99,8 @@ function harness(options: Options = {}) {
     get cwd() { return live.cwd },
     sessionManager: { getSessionId: () => live.session, getCwd: () => live.cwd },
     isIdle: () => live.idle,
-    abort: () => { aborts += 1 },
     ui: {
       setStatus: (_key: string, text: string | undefined) => { statuses.push(text) },
-      setEditorText: (text: string) => { fills.push(text); live.editor = text },
       getEditorText: () => live.editor,
       onTerminalInput: (handler: (data: string) => unknown) => {
         keyHandler = handler
@@ -208,13 +204,12 @@ function harness(options: Options = {}) {
     files["/tmp/ks-ready.json"] = launch === undefined ? undefined : JSON.stringify({ launch, protocol })
   }
   const readyChecks = () => fileReads.filter((p) => p === "/tmp/ks-ready.json").length
-  const submit = (id = "r1", text = "run the tests", extra: Record<string, unknown> = {}) => ({ op: "submit", id, expectedSession: live.session, text, ...extra })
+  const submit = (id = "r1", text = "run the tests", extra: Record<string, unknown> = {}) => ({ op: "submit", id, expectedSession: live.session, text, expiresAt: now + 8_000, ...extra })
 
   return {
-    requests, sends, statuses, fills, execs, env, files, live, timers, config,
+    requests, sends, statuses, execs, env, files, live, timers, config,
     get now() { return now },
     set now(value: number) { now = value },
-    get aborts() { return aborts },
     get keyHandler() { return keyHandler },
     set execCode(code: number) { execCode = code },
     set sendFails(value: boolean) { sendFails = value },
@@ -841,6 +836,24 @@ test("a key pressed just before dictation arrives holds it until the keyboard ha
   assert.equal(h.sends.length, 1)
 })
 
+test("a submission held past the deadline the app gave it is refused as expired and never sent", async () => {
+  const h = harness()
+  await h.connect()
+  await h.key()
+  await h.deliver([h.submit("r1", "run the tests", { expiresAt: h.now + 2_000 })])
+  await h.advance(3_000)
+  assert.equal(h.sends.length, 0)
+  assert.deepEqual(h.replies().filter((b) => b.request === "r1").map((b) => b.reason).filter(Boolean), ["expired"])
+})
+
+test("a submission that arrives after its deadline is refused as expired", async () => {
+  const h = harness()
+  await h.connect()
+  await h.deliver([h.submit("r1", "run the tests", { expiresAt: h.now })])
+  assert.equal(h.sends.length, 0)
+  assert.deepEqual(h.replies().filter((b) => b.request === "r1").map((b) => b.reason).filter(Boolean), ["expired"])
+})
+
 test("keys that keep coming extend the hold, but never past six seconds", async () => {
   const h = harness()
   await h.connect()
@@ -892,31 +905,6 @@ test("a session replaced during the hold never submits", async () => {
   assert.equal(h.sends.length, 0)
 })
 
-test("a stop is bound to the running turn", async () => {
-  const h = harness()
-  await h.connect()
-  h.live.idle = false
-  h.emit("agent_start")
-  await h.settle()
-  await h.deliver([{ op: "abort", id: "r1", expectedSession: "s1", expectedTurn: "9" }])
-  assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["turnChanged"])
-  assert.equal(h.aborts, 0)
-  await h.answerEvents()
-  await h.deliver([{ op: "abort", id: "r2", expectedSession: "s1", expectedTurn: "1" }])
-  assert.equal(h.aborts, 1)
-  assert.deepEqual(h.replies().filter((b) => b.request === "r2").map((b) => b.op), ["ack", "ack"])
-})
-
-test("a stop after the turn ended is refused", async () => {
-  const h = harness()
-  await h.connect()
-  h.emit("agent_start")
-  await h.finished()
-  await h.answerEvents()
-  await h.deliver([{ op: "abort", id: "r1", expectedSession: "s1", expectedTurn: "1" }])
-  assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["turnChanged"])
-})
-
 test("a turn that ends by being stopped is reported as aborted", async () => {
   const h = harness()
   await h.connect()
@@ -926,31 +914,6 @@ test("a turn that ends by being stopped is reported as aborted", async () => {
   assert.equal(complete.reason, "aborted")
   assert.equal(complete.session, "s1")
   assert.equal("answer" in complete, false)
-})
-
-test("a fill puts text in an empty prompt box and leaves a draft alone", async () => {
-  const h = harness()
-  await h.connect()
-  await h.deliver([{ op: "fill", id: "r1", expectedSession: "s1", text: "use approach B" }])
-  assert.deepEqual(h.fills, ["use approach B"])
-  assert.deepEqual(h.replies().filter((b) => b.request === "r1").map((b) => b.op), ["ack", "ack"])
-  await h.answerEvents()
-  await h.deliver([{ op: "fill", id: "r2", expectedSession: "s1", text: "another" }])
-  assert.deepEqual(h.fills, ["use approach B"])
-  assert.deepEqual(h.replies().filter((b) => b.request === "r2").map((b) => b.reason).filter(Boolean), ["draft"])
-})
-
-test("a fill is refused while the agent shows a dialog, like a submit", async () => {
-  const h = harness()
-  await h.connect()
-  h.emit("ui_prompt_start")
-  await h.deliver([{ op: "fill", id: "r1", expectedSession: "s1", text: "use approach B" }])
-  assert.deepEqual(h.fills, [])
-  assert.deepEqual(h.replies().filter((b) => b.request === "r1").map((b) => b.reason).filter(Boolean), ["dialog"])
-  h.emit("ui_prompt_end")
-  await h.answerEvents()
-  await h.deliver([{ op: "fill", id: "r2", expectedSession: "s1", text: "use approach B" }])
-  assert.deepEqual(h.fills, ["use approach B"])
 })
 
 test("a status from the app is shown after the connector's own name and an empty one clears it", async () => {
@@ -995,7 +958,7 @@ test("a focus outside cmux is refused, inside cmux it focuses the connector's ow
 test("a command the connector does not offer is refused", async () => {
   const h = harness()
   await h.connect()
-  await h.deliver([{ op: "offerButton", id: "r1", expectedSession: "s1", text: "x" }])
+  await h.deliver([{ op: "rewind", id: "r1", expectedSession: "s1", text: "x" }])
   assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["unsupported"])
 })
 

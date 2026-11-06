@@ -43,7 +43,6 @@ type Command = {
   op: string
   id: string
   expectedSession?: string
-  expectedTurn?: string
   expectedPrompts?: number
   text?: string
   expiresAt?: number
@@ -491,6 +490,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     const expected = cmd.expectedSession
     const hold = (): string | null => {
       if (!current(expected, gen)) return "sessionChanged"
+      if (!(host.now() < (cmd.expiresAt || 0))) return "expired"
       if (typeof cmd.expectedPrompts === "number" && cmd.expectedPrompts !== prompts) return "typedSince"
       if (!idle() || pending.some((item) => !item.late)) return "working"
       if (promptsOpen > 0) return "dialog"
@@ -559,26 +559,6 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     reply(item.generation, { op: "submitted", request: item.id, turn: currentTurn || "" })
   }
 
-  function abort(cmd: Command, gen: number): void {
-    if (!currentTurn || currentTurn !== cmd.expectedTurn) return refuse(gen, cmd.id, "turnChanged")
-    if (!current(cmd.expectedSession, gen) || !ctx) return refuse(gen, cmd.id, "sessionChanged")
-    try {
-      ctx.abort()
-      reply(gen, { op: "ack", request: cmd.id })
-    } catch (err) {
-      refuse(gen, cmd.id, "notRunning")
-    }
-  }
-
-  function fill(cmd: Command, gen: number): void {
-    if (!ctx) return refuse(gen, cmd.id, "sessionChanged")
-    if (promptsOpen > 0) return refuse(gen, cmd.id, "dialog")
-    if (ctx.ui.getEditorText().trim()) return refuse(gen, cmd.id, "draft")
-    if (!current(cmd.expectedSession, gen)) return refuse(gen, cmd.id, "sessionChanged")
-    ctx.ui.setEditorText(cmd.text || "")
-    reply(gen, { op: "ack", request: cmd.id })
-  }
-
   async function focus(cmd: Command, gen: number): Promise<void> {
     const surface = host.env("CMUX_SURFACE_ID")
     if (!surface) return refuse(gen, cmd.id, "notInCmux")
@@ -597,8 +577,6 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     const live = ctx ? ctx.sessionManager.getSessionId() : null
     if (!current(cmd.expectedSession, gen) || cmd.expectedSession !== live) return refuse(gen, cmd.id, "sessionChanged")
     if (cmd.op === "submit") return submit(cmd, gen)
-    if (cmd.op === "abort") return abort(cmd, gen)
-    if (cmd.op === "fill") return fill(cmd, gen)
     if (cmd.op === "focus") return focus(cmd, gen)
     if (cmd.op === "status") {
       ownedStatus = Boolean(cmd.text)

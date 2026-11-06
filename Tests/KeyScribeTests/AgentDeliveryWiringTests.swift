@@ -18,9 +18,13 @@ struct AgentDeliveryWiringTests {
 
     private final class FakeAudio: AudioCapturing, @unchecked Sendable {
         private let url: URL
+        private let lock = NSLock()
+        private var lost: (@Sendable () -> Void)?
         init(url: URL) { self.url = url }
         func start(sampleRate: Int) async throws -> URL { url }
         func stop() -> URL? { url }
+        func setCaptureLostHandler(_ handler: @escaping @Sendable () -> Void) { lock.withLock { lost = handler } }
+        func loseCapture() { lock.withLock { lost }?() }
     }
 
     private final class Transport: AgentTransport {
@@ -42,6 +46,7 @@ struct AgentDeliveryWiringTests {
             Task { @MainActor [weak hub] in hub?.handle(.submitted(request: command.id, turn: "")) }
         }
         func isLive(session: String) -> Bool { live }
+        func forget(session: String) {}
         func withdraw(_ id: String) -> Bool { false }
     }
 
@@ -160,16 +165,17 @@ struct AgentDeliveryWiringTests {
         let history: HistoryStore
         let supportDir: URL
         let registry: Registry
+        let audio: FakeAudio
 
         var sent: [(AgentCommand, String)] { transport.sent }
         var texts: [String] {
-            sent.compactMap { if case .submit(_, _, let text, _) = $0.0 { text } else { nil } }
+            sent.compactMap { if case .submit(_, _, let text, _, _) = $0.0 { text } else { nil } }
         }
     }
 
     private func agentMode(target: Mode.Agent.Target = .current) -> Mode {
         var mode = Mode.codingAgent
-        mode.agent = .init(target: target, delivery: .submit)
+        mode.agent = .init(target: target)
         return mode
     }
 
@@ -179,7 +185,8 @@ struct AgentDeliveryWiringTests {
         namesFile: String? = nil, focus: AgentTerminalFocusing? = nil, firstStatus: String = "idle",
         historyEnabled: Bool = true, receiptTimeout: Duration = .seconds(8),
         front: FrontWindow = FrontWindow(TargetSnapshot(bundleId: "test.bundle")), sessionInFront: Front = Front(),
-        glance: (any AgentFronting)? = nil, engine: (any SpeechEngine)? = nil, frontGrace: Duration = .seconds(1)
+        glance: (any AgentFronting)? = nil, engine: (any SpeechEngine)? = nil, frontGrace: Duration = .seconds(1),
+        maxRecordingSeconds: Double = RecordingLimit.backstopSeconds
     ) async -> Rig {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-agent-\(UUID().uuidString)", isDirectory: true)
@@ -220,24 +227,27 @@ struct AgentDeliveryWiringTests {
         let provider = try! SpeechEngineProvider(engines: [engine ?? FixedEngine(text: transcript)], activeId: "fixed")
         let config = ConfigCache(supportDir: supportDir)
         config.codingAgentsEnabled = true
+        let audio = FakeAudio(url: supportDir.appendingPathComponent("capture.wav"))
         let controller = DictationController(
             settings: settings, provider: provider, config: config,
             history: history, hud: hud, permits: { _ in true },
-            audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
+            audio: audio,
             insert: { _, _, _, text, _ in captured.insertedText = text; return true },
             submitKey: { _ in },
             snapshot: { front.snapshot },
             micStatus: { .granted },
             accessibilityGranted: { true },
             llmClient: llm ?? HTTPLLMClient(),
-            voiceCommands: voiceCommands)
+            voiceCommands: voiceCommands,
+            maxRecordingSeconds: maxRecordingSeconds)
         controller.agents = hub
         controller.frontReadingGrace = frontGrace
         hub.onNotice = { [weak controller] in controller?.showAgentNotice($0, request: $1) }
+        hub.onForget = { [weak controller] in controller?.forgetAgentReceipt(request: $0) }
         controller.agentNoticeDelayOverride = .milliseconds(10)
         return Rig(
             controller: controller, hub: hub, transport: transport, hud: hud, captured: captured, history: history,
-            supportDir: supportDir, registry: registry)
+            supportDir: supportDir, registry: registry, audio: audio)
     }
 
     private func take(_ rig: Rig, mode: String = Mode.codingAgentId, readingTheFront: Bool = false) async {
@@ -727,6 +737,48 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(!rig.hud.states.contains { if case .error = $0 { true } else { false } })
+    }
+
+    @Test func aTakeTheTimeLimitCutsOffIsNeverSentToTheAgent() async {
+        let rig = await rig("run the tests", current: "claude:s1", maxRecordingSeconds: 0.05)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.controller.setNextModeOverride(id: Mode.codingAgentId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        let stopped = { rig.hud.states.contains { if case .error(let message, _, _) = $0 { message.hasPrefix("Stopped at the ") } else { false } } }
+        for _ in 0..<400 where !stopped() {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        await rig.controller.dictationTask?.value
+        #expect(stopped())
+        #expect(rig.sent.isEmpty)
+        #expect(rig.controller.lastResult == "run the tests")
+    }
+
+    @Test func aNameHeardAfterTheMicrophoneStoppedSelectsNothing() async {
+        let rig = await rig("Tell keyscribe blue.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.controller.setNextModeOverride(id: Mode.codingAgentId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        rig.audio.loseCapture()
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        #expect(rig.hub.current == "claude:s1")
+        #expect(rig.hud.states.contains(.error(message: "The microphone stopped, so the command did not run.", action: nil)))
+    }
+
+    @Test func aMessageToANamedConversationAfterTheMicrophoneStoppedNeitherSendsNorSwitches() async {
+        let rig = await rig("Tell keyscribe blue to run the tests.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.controller.setNextModeOverride(id: Mode.codingAgentId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        rig.audio.loseCapture()
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.current == "claude:s1")
     }
 
     @Test func aNameAloneSelectsWithoutSending() async {
@@ -1275,7 +1327,7 @@ struct AgentDeliveryWiringTests {
         #expect(uncertain?.summary == "May not have reached keyscribe: check its terminal")
         #expect(uncertain?.outcome == .failed)
 
-        guard case .submit(let request, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
         rig.hub.handle(.submitted(request: request, turn: ""))
         for _ in 0..<200 where rig.history.entries().first?.summary != "Sent to keyscribe" {
             try? await Task.sleep(for: .milliseconds(5))
@@ -1286,6 +1338,21 @@ struct AgentDeliveryWiringTests {
         #expect(settled?.outcome == .inserted)
         #expect(settled?.failureReason == nil)
         #expect(settled?.steps?.map(\.text) == ["May not have reached keyscribe: check its terminal", "Sent to keyscribe"])
+    }
+
+    @Test func aReceiptForADeliveryTheHubForgotNoLongerChangesItsEntry() async {
+        let rig = await rig("Run the tests.", current: "claude:s1", receiptTimeout: .milliseconds(20))
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.transport.confirms = false
+        await take(rig)
+        guard case .submit(let request, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        rig.controller.forgetAgentReceipt(request: request)
+        rig.controller.showAgentNotice(.sent("keyscribe"), request: request)
+        try? await Task.sleep(for: .milliseconds(50))
+        rig.controller.waitForHistoryWrites()
+        let entry = rig.history.entries().first
+        #expect(entry?.summary == "May not have reached keyscribe: check its terminal")
+        #expect(entry?.steps == nil)
     }
 
     @Test func withHistoryOffALateReceiptStillShowsAndWritesNothing() async {
@@ -1364,7 +1431,7 @@ struct AgentDeliveryWiringTests {
         rig.transport.confirms = false
         await take(rig)
         let uncertain = await lastHistoryEntry(rig)
-        guard case .submit(let request, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
 
         rig.controller.agents = nil
         rig.controller.showAgentNotice(.sent("keyscribe"), request: request)
@@ -1423,7 +1490,7 @@ struct AgentDeliveryWiringTests {
         rig.registry.firstStatus = "idle"
         rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
         await rig.hub.rescan()
-        guard case .submit(let request, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
         rig.hub.handle(.refused(request: request, reason: "busy elsewhere"))
         for _ in 0..<200 where rig.history.entries().first?.outcome != .failed {
             try? await Task.sleep(for: .milliseconds(5))

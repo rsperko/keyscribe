@@ -1,23 +1,22 @@
 import Foundation
 
 public enum AgentCommand: Equatable, Sendable {
-    case submit(id: String, expectedSession: String, text: String, expectedPrompts: Int? = nil)
-    case abort(id: String, expectedSession: String, expectedTurn: String)
-    case fill(id: String, expectedSession: String, text: String)
-    case offerButton(id: String, expectedSession: String, text: String)
+    case submit(id: String, expectedSession: String, text: String, expectedPrompts: Int? = nil, expiresAt: Date)
     case status(id: String, expectedSession: String, text: String)
     case focus(id: String, expectedSession: String, expiresAt: Date)
 
     public var id: String {
         switch self {
-        case .submit(let id, _, _, _), .abort(let id, _, _), .fill(let id, _, _), .offerButton(let id, _, _), .status(let id, _, _): id
+        case .submit(let id, _, _, _, _), .status(let id, _, _): id
         case .focus(let id, _, _): id
         }
     }
 
     public var expiresAt: Date? {
-        if case .focus(_, _, let expiresAt) = self { return expiresAt }
-        return nil
+        switch self {
+        case .focus(_, _, let expiresAt), .submit(_, _, _, _, let expiresAt): expiresAt
+        case .status: nil
+        }
     }
 }
 
@@ -120,10 +119,8 @@ extension AgentEvent {
 extension AgentCommand {
     public func renamingSession(_ rename: (String) -> String) -> AgentCommand {
         switch self {
-        case .submit(let id, let s, let text, let prompts): .submit(id: id, expectedSession: rename(s), text: text, expectedPrompts: prompts)
-        case .abort(let id, let s, let turn): .abort(id: id, expectedSession: rename(s), expectedTurn: turn)
-        case .fill(let id, let s, let text): .fill(id: id, expectedSession: rename(s), text: text)
-        case .offerButton(let id, let s, let text): .offerButton(id: id, expectedSession: rename(s), text: text)
+        case .submit(let id, let s, let text, let prompts, let expiresAt):
+            .submit(id: id, expectedSession: rename(s), text: text, expectedPrompts: prompts, expiresAt: expiresAt)
         case .status(let id, let s, let text): .status(id: id, expectedSession: rename(s), text: text)
         case .focus(let id, let s, let expiresAt): .focus(id: id, expectedSession: rename(s), expiresAt: expiresAt)
         }
@@ -154,7 +151,6 @@ public enum AgentBridgeCodec {
         var op: String
         var id: String?
         var expectedSession: String?
-        var expectedTurn: String?
         var text: String?
         var request: String?
         var turn: String?
@@ -237,27 +233,31 @@ public enum AgentBridgeCodec {
 
     private static func wire(_ c: AgentCommand) -> Wire {
         switch c {
-        case .submit(let id, let s, let t, let prompts): Wire(op: "submit", id: id, expectedSession: s, text: t, expectedPrompts: prompts)
-        case .abort(let id, let s, let t): Wire(op: "abort", id: id, expectedSession: s, expectedTurn: t)
-        case .fill(let id, let s, let t): Wire(op: "fill", id: id, expectedSession: s, text: t)
-        case .offerButton(let id, let s, let t): Wire(op: "offerButton", id: id, expectedSession: s, text: t)
+        case .submit(let id, let s, let t, let prompts, let expiresAt):
+            Wire(op: "submit", id: id, expectedSession: s, text: t, expiresAt: milliseconds(expiresAt), expectedPrompts: prompts)
         case .status(let id, let s, let t): Wire(op: "status", id: id, expectedSession: s, text: t)
         case .focus(let id, let s, let expiresAt):
-            Wire(op: "focus", id: id, expectedSession: s, expiresAt: (expiresAt.timeIntervalSince1970 * 1000).rounded())
+            Wire(op: "focus", id: id, expectedSession: s, expiresAt: milliseconds(expiresAt))
         }
+    }
+
+    private static func milliseconds(_ date: Date) -> Double {
+        (date.timeIntervalSince1970 * 1000).rounded()
+    }
+
+    private static func date(_ milliseconds: Double?) throws -> Date {
+        guard let milliseconds else { throw CodecError.malformed }
+        return Date(timeIntervalSince1970: milliseconds / 1000)
     }
 
     private static func command(_ w: Wire) throws -> AgentCommand {
         guard let id = w.id, let s = w.expectedSession else { throw CodecError.malformed }
         switch w.op {
-        case "submit": return .submit(id: id, expectedSession: s, text: try required(w.text), expectedPrompts: w.expectedPrompts)
-        case "abort": return .abort(id: id, expectedSession: s, expectedTurn: try required(w.expectedTurn))
-        case "fill": return .fill(id: id, expectedSession: s, text: try required(w.text))
-        case "offerButton": return .offerButton(id: id, expectedSession: s, text: try required(w.text))
+        case "submit":
+            return .submit(
+                id: id, expectedSession: s, text: try required(w.text), expectedPrompts: w.expectedPrompts, expiresAt: try date(w.expiresAt))
         case "status": return .status(id: id, expectedSession: s, text: try required(w.text))
-        case "focus":
-            guard let expiresAt = w.expiresAt else { throw CodecError.malformed }
-            return .focus(id: id, expectedSession: s, expiresAt: Date(timeIntervalSince1970: expiresAt / 1000))
+        case "focus": return .focus(id: id, expectedSession: s, expiresAt: try date(w.expiresAt))
         default: throw CodecError.unknownOp(w.op)
         }
     }
@@ -268,7 +268,7 @@ public struct AgentCommandQueue: Sendable {
     public static let activeWindow: TimeInterval = 5
     public static var ambiguityGrace: TimeInterval { activeWindow * 2 }
 
-    public enum Undeliverable: String, Sendable { case instanceGone, ambiguous, connectionGap, retired }
+    public enum Undeliverable: String, Sendable { case instanceGone, ambiguous, connectionGap, retired, expired }
 
     public struct Refusal: Equatable, Sendable {
         public var command: AgentCommand
@@ -335,6 +335,10 @@ public struct AgentCommandQueue: Sendable {
         return refusals
     }
 
+    public mutating func forget(session: String) {
+        registrations = registrations.filter { $0.value.session != session }
+    }
+
     public func isCurrent(instance: String, connection: String) -> Bool {
         registrations[instance]?.connection == connection
     }
@@ -362,9 +366,8 @@ public struct AgentCommandQueue: Sendable {
         touch(instance: instance, connection: connection, at: now)
         let active = activeInstances(session: session, at: now)
         let sole = active == [instance]
-        pending.removeAll { $0.command.expiresAt.map { $0 <= now } == true }
         let mine: (Entry) -> Bool = { entry in
-            guard entry.session == session else { return false }
+            guard entry.session == session, !Self.expired(entry, at: now) else { return false }
             if let pinned = entry.connection { return entry.holder == instance && pinned == connection }
             return entry.instance == instance || (entry.instance == nil && sole)
         }
@@ -396,7 +399,12 @@ public struct AgentCommandQueue: Sendable {
         return found.map(\.1)
     }
 
+    private static func expired(_ entry: Entry, at now: Date) -> Bool {
+        entry.command.expiresAt.map { $0 <= now } == true
+    }
+
     private func refusalReason(for entry: Entry, at now: Date) -> Undeliverable? {
+        if Self.expired(entry, at: now) { return .expired }
         let active = activeInstances(session: entry.session, at: now)
         if let holder = entry.holder, let pinned = entry.connection {
             if !isCurrent(instance: holder, connection: pinned) { return .connectionGap }

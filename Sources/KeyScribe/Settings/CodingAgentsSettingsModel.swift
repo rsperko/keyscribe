@@ -52,7 +52,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
             return "Open a conversation in a connected coding agent. It will appear here."
         }
         if namesProblem != nil {
-            return "Conversation names are unavailable. Start with the session number shown while recording, such as \u{201C}session \(example.number), run the unit tests\u{201D} for \(example.name)."
+            return "Conversation names are unavailable. Start with \u{201C}session\u{201D} and the number shown while recording, then your instruction."
         }
         if example.current {
             guard example.connected else { return "\(example.name) is current but not connected. Connect it before speaking, or start with another conversation\u{2019}s name." }

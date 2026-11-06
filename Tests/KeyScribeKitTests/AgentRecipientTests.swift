@@ -5,20 +5,12 @@ import Testing
 struct AgentRecipientTests {
     let names = ["keyscribe": "a", "keyscribe blue": "b", "backend": "c"]
 
-    private func initial(_ target: Mode.Agent.Target, focused: String? = nil, current: String? = nil) -> AgentRecipient.Frozen? {
-        AgentRecipient.initial(target: target, focused: focused, current: current, names: names)
+    private func initial(_ target: Mode.Agent.Target, current: String? = nil) -> AgentRecipient.Frozen? {
+        AgentRecipient.initial(target: target, current: current, names: names)
     }
 
-    @Test func theFocusedAgentWinsOverTheCurrentRecipient() {
-        #expect(initial(.focused, focused: "b", current: "c") == .init(id: "b", source: .focused))
-    }
-
-    @Test func withoutAFocusedAgentTheCurrentRecipientApplies() {
-        #expect(initial(.focused, current: "c") == .init(id: "c", source: .current))
-    }
-
-    @Test func aCurrentTargetIgnoresFocus() {
-        #expect(initial(.current, focused: "b", current: "c") == .init(id: "c", source: .current))
+    @Test func aCurrentTargetUsesTheCurrentRecipient() {
+        #expect(initial(.current, current: "c") == .init(id: "c", source: .current))
     }
 
     @Test(arguments: ["Run the unit tests.", "Keyscrib run the tests", "Open keyscrib"])
@@ -38,26 +30,26 @@ struct AgentRecipientTests {
     }
 
     @Test func aMessageToTheCurrentOrFixedConversationLeavesCurrentAlone() {
-        #expect(resolve("Run the unit tests.", frozen: .init(id: "c", source: .current)).makesCurrent == nil)
+        #expect(resolve("Run the unit tests.").makesCurrent == nil)
         #expect(resolve("Run the unit tests.", frozen: .init(id: "c", source: .fixed)).makesCurrent == nil)
     }
 
-    @Test func aFixedTargetUsesItsNameWhateverIsFocused() {
-        #expect(initial(.handle("Backend"), focused: "b", current: "a") == .init(id: "c", source: .fixed))
-        #expect(initial(.handle("frontend"), focused: "b") == nil)
+    @Test func aFixedTargetUsesItsName() {
+        #expect(initial(.handle("Backend"), current: "a") == .init(id: "c", source: .fixed))
+        #expect(initial(.handle("frontend")) == nil)
     }
 
     @Test func askAndNothingKnownLeaveNoRecipient() {
-        #expect(initial(.ask, focused: "b", current: "c") == nil)
-        #expect(initial(.focused) == nil)
+        #expect(initial(.ask, current: "c") == nil)
+        #expect(initial(.current) == nil)
     }
 
-    private func resolve(_ text: String, frozen: AgentRecipient.Frozen? = .init(id: "a", source: .focused), rows: [String] = ["a", "b", "c"]) -> AgentRecipient.Resolution {
+    private func resolve(_ text: String, frozen: AgentRecipient.Frozen? = .init(id: "a", source: .current), rows: [String] = ["a", "b", "c"]) -> AgentRecipient.Resolution {
         AgentRecipient.resolve(AgentAddress.parse(text, names: Array(names.keys)), frozen: frozen, rows: rows, names: names)
     }
 
     @Test func anUnaddressedMessageGoesToTheFrozenRecipient() {
-        #expect(resolve("Run the unit tests.") == .deliver(id: "a", body: "Run the unit tests.", source: .focused))
+        #expect(resolve("Run the unit tests.") == .deliver(id: "a", body: "Run the unit tests.", source: .current))
     }
 
     @Test func anUnaddressedMessageWithNoRecipientAsks() {
@@ -165,8 +157,8 @@ struct AgentRecipientTests {
 
     @Test func anOpenVerbFollowedByALongerInstructionOrAPronounIsAMessageForTheRecipient() {
         let long = "Open the settings page and fix the toggle"
-        #expect(resolve(long) == .deliver(id: "a", body: long, source: .focused))
-        #expect(resolve("Open it.") == .deliver(id: "a", body: "Open it.", source: .focused))
+        #expect(resolve(long) == .deliver(id: "a", body: long, source: .current))
+        #expect(resolve("Open it.") == .deliver(id: "a", body: "Open it.", source: .current))
     }
 
     @Test func aHeldOpenIsClassifiedTheSameWhateverConversationsExist() {

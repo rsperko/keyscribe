@@ -1287,7 +1287,7 @@ final class DictationController {
     }
 
     // A focused secure (password) field forces whatever mode resolves fully local: no cloud rewrite, no
-    // context, never recorded (design.md §4.4). Applied at every site that sets activeMode so a Phase-B
+    // context, never recorded (design.md §4.7). Applied at every site that sets activeMode so a Phase-B
     // voice re-route to a cloud mode is neutered too. Best-effort — depends on the field exposing the
     // AXSecureTextField subrole (captured in TargetSnapshot.isSecureField). An unconfirmed target (the
     // secure-aware snapshot could not prove the field is safe because focus moved during the probe) is
@@ -1558,7 +1558,7 @@ final class DictationController {
         session?.agentSnapshot = snapshot
         guard let mode = activeMode, mode.output == .agent else { return }
         session?.agentRecipient = AgentRecipient.initial(
-            target: mode.agent.target, focused: nil, current: snapshot.current, names: snapshot.names)
+            target: mode.agent.target, current: snapshot.current, names: snapshot.names)
         followAgentInFront(target: mode.agent.target, snapshot: snapshot, through: agents)
     }
 
@@ -1609,8 +1609,7 @@ final class DictationController {
             names: agents.names, conversations: agents.recordingOrder, current: agents.current,
             namesAvailable: agents.namesProblem == nil)
         func frozenRecipient() -> AgentRecipient.Frozen? {
-            session?.agentRecipient ?? AgentRecipient.initial(
-                target: mode.agent.target, focused: nil, current: snapshot.current, names: snapshot.names)
+            session?.agentRecipient ?? AgentRecipient.initial(target: mode.agent.target, current: snapshot.current, names: snapshot.names)
         }
         switch VoiceCommandGrammar.parse(routed.transcript) {
         case .goBack:
@@ -1639,8 +1638,11 @@ final class DictationController {
         let frozen = frozenRecipient()
         let resolution = AgentRecipient.resolve(address, frozen: frozen, rows: snapshot.rows, names: snapshot.names)
         let facts = AgentHistoryFacts.facts(
-            address: address, resolution: resolution, frozen: frozen, conversations: snapshot.conversations,
-            delivery: mode.agent.delivery)
+            address: address, resolution: resolution, frozen: frozen, conversations: snapshot.conversations)
+        if captureWasLost {
+            if case .deliver(_, let body, _) = resolution { finishTruncatedCapture(transcript: body) } else { finishCommandCaptureLost() }
+            return
+        }
         if let id = resolution.makesCurrent { agents.makeCurrent(id) }
 
         switch resolution {
@@ -1724,10 +1726,18 @@ final class DictationController {
                         outcome: .failed, heard: heard, body: text, transformed: transformed, rewrite: rewrite, facts: facts)
             return
         }
+        if session?.stoppedAtLimit == true {
+            finishAgent(
+                state: .error(
+                    message: "Stopped at the \(limitPhrase) limit, so it was not sent. Use \u{201C}Paste last dictation\u{201D} to see what was captured.",
+                    action: nil, heard: HeardExcerpt(heard: text)),
+                outcome: .failed, heard: heard, body: text, transformed: transformed, rewrite: rewrite, facts: facts)
+            return
+        }
         guard lease(for: .codingAgents).keepActing() else { return }
         lastResult = text
         hud.present(.transcribing(mode: mode.name, status: "Sending to \(agents.handle(of: id) ?? "it")"))
-        let (request, receipt) = await agentOutput.deliver(text, to: id, delivery: mode.agent.delivery, via: agents)
+        let (request, receipt) = await agentOutput.deliver(text, to: id, via: agents)
         finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text), outcome: AgentOutput.dictationOutcome(receipt),
                     heard: heard, body: text, transformed: transformed, rewrite: rewrite, transitioned: true,
                     facts: facts, awaitingReceipt: (request, receipt))
@@ -1759,6 +1769,10 @@ final class DictationController {
 
     func showAgentNotice(_ receipt: AgentReceipt, request: String? = nil) {
         agentOutput.showNotice(receipt, request: request)
+    }
+
+    func forgetAgentReceipt(request: String) {
+        agentOutput.forgetReceipt(request: request)
     }
 
     var agentNoticeDelayOverride: Duration? {
@@ -1895,7 +1909,7 @@ final class DictationController {
         summary: String? = nil, facts: [HistoryEntry.Fact]? = nil, onRecorded: ((HistoryEntry) -> Void)? = nil
     ) -> Bool {
         // A secure-field dictation is never persisted, regardless of the history setting or the mode —
-        // the spoken text is a password (design.md §4.4). An unconfirmed target (focus moved before the
+        // the spoken text is a password (design.md §4.7). An unconfirmed target (focus moved before the
         // secure-aware snapshot could vet the field) is treated the same way (KS-01). The diagnostics record
         // holds only fingerprints (hashes), never the transcript, so it is safe to keep; this guards the
         // verbatim history store.

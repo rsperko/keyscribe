@@ -133,7 +133,10 @@ are the ones that must never break; the guide explains why and what else applies
   execution, choices, previews, their settings, and the coding-agent bridge).
   - Check `stillWanted` immediately before every side effect, not once at the start.
   - Missing, unreadable, timed out, and uncertain stay distinct states; none of them means empty or success.
-  - An unresolved or tied target or recipient asks; it never falls through to the current or first one.
+  - An unresolved target or recipient asks; it never falls through to the current or first one. A tie
+    takes a predictable order (a recipient tie, the first name alphabetically) and asks only when no such
+    order exists or a wrong guess would run the wrong action (different apps, places, or windows, or tabs
+    in different browsers, tied for a switch are offered as a choice).
   - Previews and uniqueness checks call the same matching function execution uses.
 - **Feature flags** → `docs/development/areas/feature-flags.md`.
   - Flags are `static let`s on `Feature`, opt-in only, read through `settings.features.isEnabled`.

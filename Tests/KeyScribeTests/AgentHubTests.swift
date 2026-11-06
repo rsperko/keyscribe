@@ -19,6 +19,8 @@ struct AgentHubTests {
             return true
         }
         func isLive(session: String) -> Bool { live.contains(session) }
+        var forgotten: [String] = []
+        func forget(session: String) { forgotten.append(session) }
     }
 
     final class Registry: @unchecked Sendable {
@@ -34,6 +36,7 @@ struct AgentHubTests {
     }
 
     final class Clock: @unchecked Sendable { var now = Date(timeIntervalSince1970: 1000) }
+    private static let deadline = Date(timeIntervalSince1970: 1005)
 
     private func makeHub(
         receiptTimeout: Duration = .seconds(5), handOffLimit: Duration = .seconds(30), disconnectGrace: Duration = .seconds(30),
@@ -73,9 +76,9 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
 
         let sentBefore = transport.sent.count
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
-        #expect(transport.sent.map(\.0) == [.submit(id: "r1", expectedSession: "claude:s1", text: "run the tests")])
+        #expect(transport.sent.map(\.0) == [.submit(id: "r1", expectedSession: "claude:s1", text: "run the tests", expiresAt: Self.deadline)])
         hub.handle(.submitted(request: "r1", turn: ""))
         #expect(await receipt == .sent("keyscribe"))
     }
@@ -87,9 +90,9 @@ struct AgentHubTests {
         hub.handle(.typed(session: "claude:s1", prompts: 3))
 
         let sentBefore = transport.sent.count
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
-        #expect(transport.sent.map(\.0) == [.submit(id: "r1", expectedSession: "claude:s1", text: "run the tests", expectedPrompts: 3)])
+        #expect(transport.sent.map(\.0) == [.submit(id: "r1", expectedSession: "claude:s1", text: "run the tests", expectedPrompts: 3, expiresAt: Self.deadline)])
         hub.handle(.submitted(request: "r1", turn: ""))
         _ = await receipt
     }
@@ -99,11 +102,10 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
 
         let sentBefore = transport.sent.count
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
         hub.handle(.refused(request: "r1", reason: "typedSince"))
         #expect(await receipt == .kept("keyscribe", reason: .typedSince))
-        #expect(hub.unsent.map(\.text) == ["run the tests"])
     }
 
     @Test func aSubmitRefusedOverAMessageTheUserIsWritingIsKeptForReview() async {
@@ -111,11 +113,10 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
 
         let sentBefore = transport.sent.count
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
         hub.handle(.refused(request: "r1", reason: "draft"))
         #expect(await receipt == .kept("keyscribe", reason: .composing))
-        #expect(hub.unsent.map(\.text) == ["run the tests"])
     }
 
     private func ready(idle: Bool = true, gap: Bool) -> AgentEvent.Hello {
@@ -130,14 +131,13 @@ struct AgentHubTests {
     @Test func aTakeHeldAcrossAConnectionGapIsKeptForReviewNotSent() async {
         let (hub, transport, registry, notices) = makeHub()
         await connected(hub, transport, registry, status: "busy")
-        #expect(await hub.deliver("run the tests", to: "claude:s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(await hub.deliver("run the tests", to: "claude:s1") == .queued("keyscribe"))
 
         registry.set("s1", status: "idle")
         greet(hub, ready(gap: true))
         hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
         #expect(transport.sent.isEmpty)
         #expect(notices.items == [.kept("keyscribe", reason: .connectionGap)])
-        #expect(hub.unsent.map(\.text) == ["run the tests"])
     }
 
     @Test func aReconnectDuringATurnKeepsTheOlderTakeForReviewAndSendsTheNewerOneWhenTheTurnEnds() async {
@@ -145,38 +145,36 @@ struct AgentHubTests {
         await connected(hub, transport, registry, status: "busy")
         greet(hub, ready(idle: false, gap: false))
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
-        #expect(await hub.deliver("before the drop", to: "claude:s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(await hub.deliver("before the drop", to: "claude:s1") == .queued("keyscribe"))
 
         greet(hub, ready(idle: false, gap: true))
         #expect(notices.items == [.kept("keyscribe", reason: .connectionGap)])
-        #expect(await hub.deliver("after the drop", to: "claude:s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(await hub.deliver("after the drop", to: "claude:s1") == .queued("keyscribe"))
         #expect(transport.sent.isEmpty)
 
         registry.set("s1", status: "idle")
         hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
         await hub.rescan()
-        #expect(transport.sent.map(\.0) == [.submit(id: "r2", expectedSession: "claude:s1", text: "after the drop")])
+        #expect(transport.sent.map(\.0) == [.submit(id: "r2", expectedSession: "claude:s1", text: "after the drop", expiresAt: Self.deadline)])
         hub.handle(.submitted(request: "r2", turn: ""))
         #expect(notices.items == [.kept("keyscribe", reason: .connectionGap), .sent("keyscribe")])
-        #expect(hub.unsent.map(\.text) == ["before the drop"])
     }
 
     @Test func aTakeTheBridgeWithdrewAtAGapIsKeptForReview() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         let sentBefore = transport.sent.count
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
         hub.handle(.undelivered(request: "r1", reason: "connectionGap", handedOff: false))
         #expect(await receipt == .kept("keyscribe", reason: .connectionGap))
-        #expect(hub.unsent.map(\.text) == ["run the tests"])
     }
 
     @Test func aTakeThatMayHaveBeenIssuedBeforeTheGapStaysUncertain() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         let sentBefore = transport.sent.count
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
         hub.handle(.undelivered(request: "r1", reason: "connectionGap", handedOff: true))
         #expect(await receipt == .uncertain("keyscribe"))
@@ -186,7 +184,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         greet(hub, ready(idle: false, gap: false))
-        #expect(await hub.deliver("run the tests", to: "claude:s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(await hub.deliver("run the tests", to: "claude:s1") == .queued("keyscribe"))
         #expect(transport.sent.isEmpty)
     }
 
@@ -195,7 +193,7 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         greet(hub, ready(gap: false))
         let sentBefore = transport.sent.count
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
         #expect(transport.sent.map(\.0.id) == ["r1"])
         hub.handle(.submitted(request: "r1", turn: ""))
@@ -207,14 +205,14 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         let old = AgentEvent.Hello(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["focus"])
         greet(hub, old)
-        #expect(await hub.deliver("run the tests", to: "claude:s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(await hub.deliver("run the tests", to: "claude:s1") == .queued("keyscribe"))
     }
 
     @Test func aSubmitRefusedBecauseATurnIsRunningWaitsForItToFinish() async {
         let (hub, transport, registry, notices) = makeHub()
         await connected(hub, transport, registry)
         let sentBefore = transport.sent.count
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
         hub.handle(.refused(request: "r1", reason: "working"))
         #expect(await receipt == .queued("keyscribe"))
@@ -228,13 +226,13 @@ struct AgentHubTests {
         let (hub, transport, registry, notices) = makeHub()
         await connected(hub, transport, registry, status: "busy")
 
-        #expect(await hub.deliver("run the tests", to: "claude:s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(await hub.deliver("run the tests", to: "claude:s1") == .queued("keyscribe"))
         #expect(transport.sent.isEmpty)
 
         registry.set("s1", status: "idle")
         hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
         await hub.rescan()
-        #expect(transport.sent.map(\.0) == [.submit(id: "r1", expectedSession: "claude:s1", text: "run the tests")])
+        #expect(transport.sent.map(\.0) == [.submit(id: "r1", expectedSession: "claude:s1", text: "run the tests", expiresAt: Self.deadline)])
         hub.handle(.submitted(request: "r1", turn: ""))
         #expect(notices.items == [.sent("keyscribe")])
     }
@@ -243,11 +241,11 @@ struct AgentHubTests {
         let (hub, transport, registry, notices) = makeHub()
         await connected(hub, transport, registry, status: "busy")
 
-        #expect(await hub.deliver("run the tests", to: "claude:s1", delivery: .submit, request: "entry-1") == .queued("keyscribe"))
+        #expect(await hub.deliver("run the tests", to: "claude:s1", request: "entry-1") == .queued("keyscribe"))
         registry.set("s1", status: "idle")
         hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
         await hub.rescan()
-        #expect(transport.sent.map(\.0) == [.submit(id: "entry-1", expectedSession: "claude:s1", text: "run the tests")])
+        #expect(transport.sent.map(\.0) == [.submit(id: "entry-1", expectedSession: "claude:s1", text: "run the tests", expiresAt: Self.deadline)])
         hub.handle(.submitted(request: "entry-1", turn: ""))
         #expect(notices.items == [.sent("keyscribe")])
         #expect(notices.requests == ["entry-1"])
@@ -258,11 +256,11 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
 
         let sentBefore = transport.sent.count
-        async let first = hub.deliver("one", to: "claude:s1", delivery: .submit)
+        async let first = hub.deliver("one", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
         hub.handle(.submitted(request: "r1", turn: ""))
         _ = await first
-        #expect(await hub.deliver("two", to: "claude:s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(await hub.deliver("two", to: "claude:s1") == .queued("keyscribe"))
 
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
         await hub.rescan()
@@ -276,14 +274,13 @@ struct AgentHubTests {
         registry.set("s1")
         await hub.rescan()
 
-        let receipt = await hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        let receipt = await hub.deliver("run the tests", to: "claude:s1")
         #expect(receipt == .notSent("keyscribe", reason: .connectorNotRunning))
-        #expect(hub.unsent.map(\.text) == ["run the tests"])
     }
 
     @Test func anEndedConversationIsNotSent() async {
         let (hub, _, _, _) = makeHub()
-        #expect(await hub.deliver("run the tests", to: "claude:gone", delivery: .submit) == .notSent(nil, reason: .conversationEnded))
+        #expect(await hub.deliver("run the tests", to: "claude:gone") == .notSent(nil, reason: .conversationEnded))
     }
 
     @Test func aRefusalIsReportedAndTheMessageKept() async {
@@ -291,11 +288,10 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
 
         let sentBefore = transport.sent.count
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
         hub.handle(.refused(request: "r1", reason: "sessionChanged"))
         #expect(await receipt == .notSent("keyscribe", reason: .conversationChanged))
-        #expect(hub.unsent.map(\.text) == ["run the tests"])
     }
 
     @Test func aHandoffThatMayHaveLandedIsUncertainNotRetried() async {
@@ -303,11 +299,10 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
 
         let sentBefore = transport.sent.count
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
         hub.handle(.undelivered(request: "r1", reason: "instanceGone", handedOff: true))
         #expect(await receipt == .uncertain("keyscribe"))
-        #expect(hub.unsent.isEmpty)
     }
 
     @Test func aHandoffThatMayHaveLandedStillBlocksTheNextMessageAndReportsItsLateResult() async {
@@ -315,11 +310,11 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
 
         let sentBefore = transport.sent.count
-        async let first = hub.deliver("one", to: "claude:s1", delivery: .submit)
+        async let first = hub.deliver("one", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
         hub.handle(.undelivered(request: "r1", reason: "instanceGone", handedOff: true))
         #expect(await first == .uncertain("keyscribe"))
-        #expect(await hub.deliver("two", to: "claude:s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(await hub.deliver("two", to: "claude:s1") == .queued("keyscribe"))
         #expect(transport.sent.count == 1)
 
         hub.handle(.submitted(request: "r1", turn: ""))
@@ -334,13 +329,12 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
 
         let sentBefore = transport.sent.count
-        async let first = hub.deliver("one", to: "claude:s1", delivery: .submit)
+        async let first = hub.deliver("one", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
         hub.handle(.undelivered(request: "r1", reason: "instanceGone", handedOff: true))
         #expect(await first == .uncertain("keyscribe"))
         try? await Task.sleep(for: .milliseconds(80))
         #expect(notices.items.isEmpty)
-        #expect(hub.recent == [.uncertain("keyscribe")])
     }
 
     @Test func aLateRefusalAfterAPossibleHandoffKeepsTheTextAndReleasesTheQueue() async {
@@ -348,29 +342,28 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
 
         let sentBefore = transport.sent.count
-        async let first = hub.deliver("one", to: "claude:s1", delivery: .submit)
+        async let first = hub.deliver("one", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
         hub.handle(.undelivered(request: "r1", reason: "instanceGone", handedOff: true))
         _ = await first
-        _ = await hub.deliver("two", to: "claude:s1", delivery: .submit)
+        _ = await hub.deliver("two", to: "claude:s1")
 
         hub.handle(.refused(request: "r1", reason: "sessionChanged"))
         #expect(notices.items == [.notSent("keyscribe", reason: .conversationChanged)])
-        #expect(hub.unsent.map(\.text) == ["one"])
         #expect(transport.sent.map(\.0.id) == ["r1", "r2"])
     }
 
     @Test func noAnswerFromTheConnectorIsUncertain() async {
         let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20))
         await connected(hub, transport, registry)
-        #expect(await hub.deliver("run the tests", to: "claude:s1", delivery: .submit) == .uncertain("keyscribe"))
+        #expect(await hub.deliver("run the tests", to: "claude:s1") == .uncertain("keyscribe"))
     }
 
     @Test func aHandOffNoOneAnswersHoldsTheQueueOnlyUntilItsLimitAndIsForgottenAfterIt() async {
         let (hub, transport, registry, notices) = makeHub(receiptTimeout: .milliseconds(20), handOffLimit: .milliseconds(60))
         await connected(hub, transport, registry)
-        #expect(await hub.deliver("one", to: "claude:s1", delivery: .submit) == .uncertain("keyscribe"))
-        #expect(await hub.deliver("two", to: "claude:s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(await hub.deliver("one", to: "claude:s1") == .uncertain("keyscribe"))
+        #expect(await hub.deliver("two", to: "claude:s1") == .queued("keyscribe"))
         #expect(transport.sent.map(\.0.id) == ["r1"])
         for _ in 0..<300 where transport.sent.count < 2 { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(transport.sent.map(\.0.id) == ["r1", "r2"])
@@ -379,13 +372,54 @@ struct AgentHubTests {
         let outcomes = Array(zip(notices.requests, notices.items))
         #expect(outcomes.filter { $0.0 == "r1" }.isEmpty)
         #expect(outcomes.last { $0.0 == "r2" }?.1 == .sent("keyscribe"))
-        #expect(hub.unsent.isEmpty)
+    }
+
+    @Test func aHandOffTheHubStopsTrackingIsForgottenByItsListenerOnce() async {
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20), handOffLimit: .milliseconds(60))
+        await connected(hub, transport, registry)
+        var forgotten: [String] = []
+        hub.onForget = { forgotten.append($0) }
+        #expect(await hub.deliver("one", to: "claude:s1") == .uncertain("keyscribe"))
+        #expect(forgotten.isEmpty)
+        for _ in 0..<300 where forgotten.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        hub.handle(.submitted(request: "r1", turn: "1"))
+        try? await Task.sleep(for: .milliseconds(80))
+        #expect(forgotten == ["r1"])
+    }
+
+    @Test func aSubmitExpiresWhenTheHubStopsWaitingForItsReceipt() async {
+        let clock = Clock()
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .seconds(8), clock: clock)
+        await connected(hub, transport, registry)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        #expect(transport.sent.first?.0.expiresAt == clock.now.addingTimeInterval(8))
+        hub.handle(.refused(request: "r1", reason: "expired"))
+        #expect(await receipt == .notSent("keyscribe", reason: .expired))
+    }
+
+    @Test func aSubmitTheBridgeDroppedAsExpiredIsReportedAsNotTakenInTime() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        hub.handle(.undelivered(request: "r1", reason: "expired", handedOff: false))
+        #expect(await receipt == .notSent("keyscribe", reason: .expired))
+    }
+
+    @Test func anExpiredSubmitTheConnectorHadCollectedStaysUncertain() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        hub.handle(.undelivered(request: "r1", reason: "expired", handedOff: true))
+        #expect(await receipt == .uncertain("keyscribe"))
     }
 
     @Test func aReceiptWithinTheHandOffLimitStillSettlesAnUncertainTake() async {
         let (hub, transport, registry, notices) = makeHub(receiptTimeout: .milliseconds(20), handOffLimit: .seconds(5))
         await connected(hub, transport, registry)
-        #expect(await hub.deliver("one", to: "claude:s1", delivery: .submit) == .uncertain("keyscribe"))
+        #expect(await hub.deliver("one", to: "claude:s1") == .uncertain("keyscribe"))
         hub.handle(.submitted(request: "r1", turn: "1"))
         #expect(notices.items == [.sent("keyscribe")])
         #expect(notices.requests == ["r1"])
@@ -394,12 +428,11 @@ struct AgentHubTests {
     @Test func aWorkingRefusalForATimedOutTakeKeepsItsTextAndReleasesTheQueueInsteadOfRequeueingIt() async {
         let (hub, transport, registry, notices) = makeHub(receiptTimeout: .milliseconds(20), handOffLimit: .seconds(5))
         await connected(hub, transport, registry)
-        #expect(await hub.deliver("one", to: "claude:s1", delivery: .submit) == .uncertain("keyscribe"))
-        #expect(await hub.deliver("two", to: "claude:s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(await hub.deliver("one", to: "claude:s1") == .uncertain("keyscribe"))
+        #expect(await hub.deliver("two", to: "claude:s1") == .queued("keyscribe"))
         #expect(transport.sent.map(\.0.id) == ["r1"])
         hub.handle(.refused(request: "r1", reason: "working"))
         #expect(notices.items == [.notSent("keyscribe", reason: .refused("working"))])
-        #expect(hub.unsent.map(\.text) == ["one"])
         #expect(transport.sent.map(\.0.id) == ["r1", "r2"])
         hub.handle(.submitted(request: "r2", turn: "2"))
         #expect(notices.items.last == .sent("keyscribe"))
@@ -407,9 +440,9 @@ struct AgentHubTests {
 
     private func dictated(_ hub: AgentHub, _ transport: FakeTransport, turn: String = "t1") async {
         let sentBefore = transport.sent.count
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
-        if case .submit(let id, _, _, _) = transport.sent.last?.0 { hub.handle(.submitted(request: id, turn: turn)) }
+        if case .submit(let id, _, _, _, _) = transport.sent.last?.0 { hub.handle(.submitted(request: id, turn: turn)) }
         _ = await receipt
         hub.handle(.turnStarted(session: "claude:s1", turn: turn))
     }
@@ -570,6 +603,29 @@ struct AgentHubTests {
         #expect(seen.isEmpty)
     }
 
+    @Test func aRefusalTheConnectorMarksStoppedIsReportedAsStopped() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        if case .submit(let id, _, _, _, _) = transport.sent.last?.0 { hub.handle(.refused(request: id, reason: "stopped")) }
+        #expect(await receipt == .notSent("keyscribe", reason: .stopped))
+    }
+
+    @Test func aStoppedHubReportsNoResultOrNoticeForLaterEvents() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var reported: [String] = []
+        hub.onResult = { _, _, _ in reported.append("result") }
+        hub.onAttention = { _, _, _ in reported.append("attention") }
+        await dictated(hub, transport)
+        hub.stop()
+        registry.set("s1", status: "waiting", waitingFor: "permission prompt")
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done."))
+        await hub.rescan()
+        #expect(reported.isEmpty)
+    }
+
     @Test func aConnectorBackWithinTheGraceReportsNothing() async {
         let clock = Clock()
         let (hub, transport, registry, _) = makeHub(disconnectGrace: .seconds(5), clock: clock)
@@ -593,7 +649,7 @@ struct AgentHubTests {
         var results: [String] = []
         hub.onResult = { results.append("\($0)|\($1)|\($2)") }
         hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "a typed turn"))
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: "t1"))
         #expect(await receipt == .sent("keyscribe"))
@@ -608,7 +664,7 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         var results: [String] = []
         hub.onResult = { results.append($2) }
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: "t1"))
         _ = await receipt
@@ -624,7 +680,7 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         var results: [String] = []
         hub.onResult = { results.append($2) }
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: "t1"))
         _ = await receipt
@@ -638,7 +694,7 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         var results: [String] = []
         hub.onResult = { results.append($2) }
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: "1"))
         _ = await receipt
@@ -653,7 +709,7 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         var results: [String] = []
         hub.onResult = { results.append($2) }
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
         hub.handle(.submitted(request: "r1", turn: ""))
@@ -669,7 +725,7 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         var results: [String] = []
         hub.onResult = { results.append($2) }
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: ""))
         _ = await receipt
@@ -684,7 +740,7 @@ struct AgentHubTests {
         var results: [String] = []
         hub.onResult = { results.append($2) }
         for reason in ["aborted", "error"] {
-            async let receipt = hub.deliver("one", to: "claude:s1", delivery: .submit)
+            async let receipt = hub.deliver("one", to: "claude:s1")
             let before = transport.sent.count
             await untilSent(transport, before + 1)
             hub.handle(.submitted(request: transport.sent.last!.0.id, turn: "t"))
@@ -717,7 +773,7 @@ struct AgentHubTests {
         hub.makeCurrent("claude:s2")
         #expect(hub.recordingOrder.map(\.id) == ["claude:s2", "claude:s3", "claude:s1"])
         clock.now += 1
-        _ = await hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        _ = await hub.deliver("run the tests", to: "claude:s1")
         #expect(hub.recordingOrder.map(\.id) == ["claude:s2", "claude:s1", "claude:s3"])
     }
 
@@ -728,7 +784,7 @@ struct AgentHubTests {
         registry.set("s2", cwd: "/src/bravo", pid: 20, startedAt: 200_000)
         transport.live.formUnion(["claude:s1", "claude:s2"])
         await hub.rescan()
-        _ = await hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        _ = await hub.deliver("run the tests", to: "claude:s1")
         #expect(hub.current == nil)
         #expect(hub.recordingOrder.map(\.id) == ["claude:s1", "claude:s2"])
         registry.set("s3", cwd: "/src/charlie", pid: 30, startedAt: Int(clock.now.timeIntervalSince1970 * 1000) + 500)
@@ -736,29 +792,20 @@ struct AgentHubTests {
         await hub.rescan()
         #expect(hub.recordingOrder.map(\.id) == ["claude:s3", "claude:s1", "claude:s2"])
         clock.now += 1
-        _ = await hub.deliver("run the tests", to: "claude:s2", delivery: .submit)
+        _ = await hub.deliver("run the tests", to: "claude:s2")
         #expect(hub.recordingOrder.map(\.id) == ["claude:s2", "claude:s3", "claude:s1"])
     }
 
     @Test func typingIntoTheConversationWhileQueuedHoldsItForReview() async {
         let (hub, transport, registry, notices) = makeHub()
         await connected(hub, transport, registry, status: "busy")
-        _ = await hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        _ = await hub.deliver("run the tests", to: "claude:s1")
 
         hub.handle(.typed(session: "claude:s1"))
         registry.set("s1", status: "idle")
         hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
         #expect(transport.sent.isEmpty)
         #expect(notices.items == [.kept("keyscribe", reason: .typedSince)])
-        #expect(hub.unsent.map(\.text) == ["run the tests"])
-    }
-
-    @Test func aReviewModeTakeIsKeptAsADraft() async {
-        let (hub, transport, registry, _) = makeHub()
-        await connected(hub, transport, registry)
-        #expect(await hub.deliver("run the tests", to: "claude:s1", delivery: .draft) == .kept("keyscribe", reason: .draft))
-        #expect(transport.sent.isEmpty)
-        #expect(hub.unsent.map(\.text) == ["run the tests"])
     }
 
     @Test func namesAndRowsFollowTheDirectory() async {
@@ -985,8 +1032,8 @@ struct AgentHubTests {
         let (hub, transport, registry, notices) = makeHub(receiptTimeout: .milliseconds(20))
         await connected(hub, transport, registry)
 
-        #expect(await hub.deliver("one", to: "claude:s1", delivery: .submit) == .uncertain("keyscribe"))
-        #expect(await hub.deliver("two", to: "claude:s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(await hub.deliver("one", to: "claude:s1") == .uncertain("keyscribe"))
+        #expect(await hub.deliver("two", to: "claude:s1") == .queued("keyscribe"))
         #expect(transport.sent.count == 1)
 
         hub.handle(.submitted(request: "r1", turn: ""))
@@ -999,20 +1046,19 @@ struct AgentHubTests {
     @Test func aLateRefusalAfterATimeoutKeepsTheTextAndReleasesTheQueue() async {
         let (hub, transport, registry, notices) = makeHub(receiptTimeout: .milliseconds(20))
         await connected(hub, transport, registry)
-        _ = await hub.deliver("one", to: "claude:s1", delivery: .submit)
-        _ = await hub.deliver("two", to: "claude:s1", delivery: .submit)
+        _ = await hub.deliver("one", to: "claude:s1")
+        _ = await hub.deliver("two", to: "claude:s1")
 
         hub.handle(.refused(request: "r1", reason: "sessionChanged"))
         #expect(notices.items == [.notSent("keyscribe", reason: .conversationChanged)])
-        #expect(hub.unsent.map(\.text) == ["one"])
         #expect(transport.sent.map(\.0.id) == ["r1", "r2"])
     }
 
     @Test func aReconnectDoesNotGiveUpOnATimedOutMessageThatCanStillArrive() async {
         let (hub, transport, registry, notices) = makeHub(receiptTimeout: .milliseconds(20))
         await connected(hub, transport, registry)
-        _ = await hub.deliver("one", to: "claude:s1", delivery: .submit)
-        _ = await hub.deliver("two", to: "claude:s1", delivery: .submit)
+        _ = await hub.deliver("one", to: "claude:s1")
+        _ = await hub.deliver("two", to: "claude:s1")
 
         hub.handle(hello("claude:s1"))
         #expect(transport.sent.map(\.0.id) == ["r1"])
@@ -1027,13 +1073,12 @@ struct AgentHubTests {
     @Test func aRefusalAfterTimeoutAndReconnectIsStillReportedAndKept() async {
         let (hub, transport, registry, notices) = makeHub(receiptTimeout: .milliseconds(20))
         await connected(hub, transport, registry)
-        _ = await hub.deliver("one", to: "claude:s1", delivery: .submit)
-        _ = await hub.deliver("two", to: "claude:s1", delivery: .submit)
+        _ = await hub.deliver("one", to: "claude:s1")
+        _ = await hub.deliver("two", to: "claude:s1")
 
         hub.handle(hello("claude:s1"))
         hub.handle(.refused(request: "r1", reason: "sessionChanged"))
         #expect(notices.items == [.notSent("keyscribe", reason: .conversationChanged)])
-        #expect(hub.unsent.map(\.text) == ["one"])
         #expect(transport.sent.map(\.0.id) == ["r1", "r2"])
     }
 
@@ -1042,7 +1087,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub(clock: clock)
         await connected(hub, transport, registry)
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
-        #expect(await hub.deliver("one", to: "claude:s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(await hub.deliver("one", to: "claude:s1") == .queued("keyscribe"))
 
         await hub.rescan()
         #expect(transport.sent.isEmpty)
@@ -1056,7 +1101,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
-        _ = await hub.deliver("one", to: "claude:s1", delivery: .submit)
+        _ = await hub.deliver("one", to: "claude:s1")
 
         greet(hub, ready(idle: true, gap: false))
         #expect(transport.sent.count == 1)
@@ -1066,21 +1111,21 @@ struct AgentHubTests {
         let (hub, transport, registry, notices) = makeHub()
         await connected(hub, transport, registry)
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
-        _ = await hub.deliver("one", to: "claude:s1", delivery: .submit)
+        _ = await hub.deliver("one", to: "claude:s1")
 
         greet(hub, ready(idle: true, gap: true))
         #expect(transport.sent.isEmpty)
         #expect(notices.items == [.kept("keyscribe", reason: .connectionGap)])
     }
 
-    @Test func backgroundResultsAreKeptForLaterInspection() async {
-        let (hub, transport, registry, _) = makeHub()
+    @Test func aRefusalOfAQueuedMessageIsReportedAsANotice() async {
+        let (hub, transport, registry, notices) = makeHub()
         await connected(hub, transport, registry, status: "busy")
-        _ = await hub.deliver("one", to: "claude:s1", delivery: .submit)
+        _ = await hub.deliver("one", to: "claude:s1")
         registry.set("s1", status: "idle")
         await hub.rescan()
         hub.handle(.refused(request: "r1", reason: "nope"))
-        #expect(hub.recent == [.notSent("keyscribe", reason: .refused("nope"))])
+        #expect(notices.items == [.notSent("keyscribe", reason: .refused("nope"))])
     }
 
     final class FakeFocus: AgentTerminalFocusing, @unchecked Sendable {
@@ -1178,11 +1223,10 @@ struct AgentHubTests {
     @Test func aSubmitRefusedBecauseADialogIsOpenIsKeptForReview() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
-        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.refused(request: transport.sent[0].0.id, reason: "dialog"))
         #expect(await receipt == .kept("keyscribe", reason: .dialog))
-        #expect(hub.unsent.map(\.text) == ["run the tests"])
     }
 
     private static func fakeSession(_ id: String) -> AgentSession {
@@ -1344,7 +1388,7 @@ struct AgentHubTests {
         #expect(hub.names["backend"] == "two:s1")
         #expect(hub.names["api"] == "one:s1")
         hub.handle(.hello(.init(protocolVersion: 1, agent: "two", agentVersion: "", instance: "i2", session: "two:s1", pid: 11)))
-        async let receipt = hub.deliver("run the tests", to: "two:s1", delivery: .submit)
+        async let receipt = hub.deliver("run the tests", to: "two:s1")
         await untilSent(transport, 1)
         #expect(transport.sent.map(\.1) == ["two:s1"])
         hub.handle(.submitted(request: transport.sent[0].0.id, turn: ""))
@@ -1452,7 +1496,6 @@ struct AgentHubTests {
         #expect(transport.sent.map(\.0) == [.focus(id: "r1", expectedSession: "claude:s1", expiresAt: clock.now.addingTimeInterval(3))])
         hub.handle(.focused(request: "r1"))
         #expect(await answer == .selected)
-        #expect(hub.recent.isEmpty)
     }
 
     @Test func aLiveConnectorThatCannotFocusIsNeverAskedAndSaysItNeedsAnUpdate() async {
@@ -1480,7 +1523,7 @@ struct AgentHubTests {
         await untilSent(transport, sentBefore + 1)
         hub.handle(.refused(request: "r1", reason: "notInCmux"))
         #expect(await refused == .notFound)
-        #expect(notices.items.isEmpty && hub.recent.isEmpty && hub.unsent.isEmpty)
+        #expect(notices.items.isEmpty)
     }
 
     @Test func anUnansweredFocusIsWithdrawnAndALateAnswerChangesNothing() async {
@@ -1490,7 +1533,7 @@ struct AgentHubTests {
         #expect(await hub.focusInPlace("claude:s1", within: .milliseconds(20)) == .notFound)
         #expect(transport.withdrawn == ["r1"])
         hub.handle(.focused(request: "r1"))
-        #expect(notices.items.isEmpty && hub.recent.isEmpty)
+        #expect(notices.items.isEmpty)
     }
 
     @Test func aCancelledFocusIsWithdrawnAtOnce() async {
@@ -1506,6 +1549,27 @@ struct AgentHubTests {
 
     private func labelHello(_ session: String = "claude:s1", title: String? = nil) -> AgentEvent {
         .hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: session, pid: 0, features: ["label"], title: title))
+    }
+
+    @Test func whatAConnectorReportedForASessionIsForgottenOnceTheSessionEndsAndDisconnects() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        await connected(hub, transport, registry, "s2")
+        hub.handle(labelHello(title: "Fix authentication retries"))
+        hub.handle(labelHello("claude:s2", title: "Write the docs"))
+        hub.handle(.typed(session: "claude:s2", prompts: 4))
+        await hub.rescan()
+        #expect(hub.connectorStateSessions == ["claude:s1", "claude:s2"])
+        registry.entries.removeAll { $0.sessionId == "s2" }
+        await hub.rescan()
+        #expect(hub.connectorStateSessions == ["claude:s1", "claude:s2"])
+        #expect(transport.forgotten.isEmpty)
+        transport.live.remove("claude:s2")
+        await hub.rescan()
+        #expect(hub.connectorStateSessions == ["claude:s1"])
+        #expect(transport.forgotten == ["claude:s2"])
+        await hub.rescan()
+        #expect(transport.forgotten == ["claude:s2"])
     }
 
     @Test func explicitConnectorNamesAreAddressesAndOverridesStillWin() async throws {

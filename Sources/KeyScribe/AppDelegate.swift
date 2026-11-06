@@ -714,6 +714,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     discovery: [ClaudeDiscovery(configDirs: [ClaudeRegistryScanner.defaultConfigDir()]), PiDiscovery()],
                     legacyAgent: AgentKind.claude.id)
                 runtime.hub.onNotice = { [weak self] in self?.controller.showAgentNotice($0, request: $1) }
+                runtime.hub.onForget = { [weak self] in self?.controller.forgetAgentReceipt(request: $0) }
                 runtime.hub.onChange = { [weak self, weak hub = runtime.hub] in
                     guard let hub else { return }
                     self?.settingsController.codingAgents.show(

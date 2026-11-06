@@ -1,7 +1,7 @@
 import Foundation
 
 public enum AgentRecipient {
-    public enum Source: Equatable, Sendable { case fixed, focused, current, front, spoken }
+    public enum Source: Equatable, Sendable { case fixed, current, front, spoken }
 
     public struct Frozen: Equatable, Sendable {
         public var id: String
@@ -34,13 +34,10 @@ public enum AgentRecipient {
         }
     }
 
-    public static func initial(target: Mode.Agent.Target, focused: String?, current: String?, names: [String: String]) -> Frozen? {
+    public static func initial(target: Mode.Agent.Target, current: String?, names: [String: String]) -> Frozen? {
         switch target {
         case .handle(let name):
             return id(named: name, in: names).map { Frozen(id: $0, source: .fixed) }
-        case .focused:
-            if let focused { return Frozen(id: focused, source: .focused) }
-            return current.map { Frozen(id: $0, source: .current) }
         case .current:
             return current.map { Frozen(id: $0, source: .current) }
         case .ask:

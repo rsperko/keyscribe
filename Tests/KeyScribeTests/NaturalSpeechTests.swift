@@ -26,24 +26,38 @@ struct NaturalSpeechTests {
     final class Synth: @unchecked Sendable {
         private let lock = NSLock()
         private var _calls: [(text: String, voice: String)] = []
-        private var held: CheckedContinuation<Void, Never>?
-        var holds = false
+        private var held: [CheckedContinuation<Void, Never>] = []
+        private var holding = false
+        var holds: Bool {
+            get { lock.withLock { holding } }
+            set { lock.withLock { holding = newValue } }
+        }
         var fails = false
         var calls: [(text: String, voice: String)] { lock.withLock { _calls } }
         func run(_ text: String, _ voice: String) async throws -> Data {
             lock.withLock { _calls.append((text, voice)) }
-            if holds { await withCheckedContinuation { continuation in lock.withLock { held = continuation } } }
+            await withCheckedContinuation { continuation in
+                let waits = lock.withLock { () -> Bool in
+                    if holding { held.append(continuation) }
+                    return holding
+                }
+                if !waits { continuation.resume() }
+            }
             if fails { throw CocoaError(.fileReadCorruptFile) }
             return Data(text.utf8)
         }
         func release() {
-            let continuation = lock.withLock { () -> CheckedContinuation<Void, Never>? in
-                let pending = held
-                held = nil
-                return pending
+            let pending = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+                holding = false
+                defer { held = [] }
+                return held
             }
-            continuation?.resume()
+            for continuation in pending { continuation.resume() }
         }
+    }
+
+    private func until(_ condition: () -> Bool) async {
+        for _ in 0..<400 where !condition() { try? await Task.sleep(for: .milliseconds(5)) }
     }
 
     private func settled() async {
@@ -52,13 +66,14 @@ struct NaturalSpeechTests {
 
     private func make(
         ready: Bool = true, synth: Synth = Synth(), outcome: @escaping (Bool) -> Void = { _ in },
-        fallbackLimit: @escaping (String) -> Duration = NaturalSpeech.fallbackLimit
+        fallbackLimit: @escaping (String) -> Duration = NaturalSpeech.fallbackLimit,
+        synthesisLimit: @escaping (String) -> Duration = NaturalSpeech.fallbackLimit
     ) -> (NaturalSpeech, FakePlayer, SpokenResultOutputTests.FakeSpeech, Synth) {
         let player = FakePlayer()
         let fallback = SpokenResultOutputTests.FakeSpeech()
         let speech = NaturalSpeech(
             ready: { ready }, synthesize: { try await synth.run($0, $1) }, player: player, fallback: fallback, outcome: outcome,
-            fallbackLimit: fallbackLimit)
+            fallbackLimit: fallbackLimit, synthesisLimit: synthesisLimit)
         return (speech, player, fallback, synth)
     }
 
@@ -69,12 +84,12 @@ struct NaturalSpeechTests {
         var finished = 0
         speech.onFinished = { finished += 1 }
         speech.speak("One.", voice: nil)
-        await settled()
+        await until { fallback.isSpeaking }
         #expect(fallback.isSpeaking)
         synth.fails = false
         speech.speak("Two.", voice: nil)
         #expect(!fallback.isSpeaking)
-        await settled()
+        await until { player.isPlaying }
         #expect(player.isPlaying)
         fallback.finish()
         #expect(finished == 0)
@@ -87,7 +102,7 @@ struct NaturalSpeechTests {
         var finished = 0
         speech.onFinished = { finished += 1 }
         speech.speak("One.", voice: nil)
-        await settled()
+        await until { player.isPlaying }
         #expect(player.isPlaying)
         synth.holds = true
         speech.speak("Two.", voice: nil)
@@ -97,7 +112,7 @@ struct NaturalSpeechTests {
         #expect(speech.isSpeaking)
         await settled()
         synth.release()
-        await settled()
+        await until { player.played.last == Data("Two.".utf8) }
         #expect(player.played.last == Data("Two.".utf8))
         player.finish()
         #expect(finished == 1)
@@ -125,7 +140,7 @@ struct NaturalSpeechTests {
         fallback.finish()
         speech.speak("Three.", voice: nil)
         try? await Task.sleep(for: .milliseconds(300))
-        await settled()
+        await until { finished == 1 }
         #expect(finished == 1)
         #expect(speech.isSpeaking)
     }
@@ -142,11 +157,11 @@ struct NaturalSpeechTests {
         var started = 0
         speech.onStarted = { started += 1 }
         speech.speak("Done.", voice: nil)
-        await settled()
+        await until { speech.isSpeaking }
         #expect(speech.isSpeaking)
         #expect(started == 0)
         synth.release()
-        await settled()
+        for _ in 0..<400 where started == 0 { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(started == 1)
     }
 
@@ -164,10 +179,10 @@ struct NaturalSpeechTests {
         var outcomes: [Bool] = []
         let (speech, _, _, _) = make(synth: synth, outcome: { outcomes.append($0) })
         speech.speak("One.", voice: nil)
-        await settled()
+        await until { outcomes == [true] }
         synth.fails = true
         speech.speak("Two.", voice: nil)
-        await settled()
+        await until { outcomes == [true, false] }
         #expect(outcomes == [true, false])
     }
 
@@ -182,7 +197,7 @@ struct NaturalSpeechTests {
     @Test func aReadyVoiceSpeaksTheTextInTheChosenVoice() async {
         let (speech, player, fallback, synth) = make()
         speech.speak("Build passed.", voice: "bf_emma")
-        await settled()
+        await until { player.played == [Data("Build passed.".utf8)] }
         #expect(synth.calls.map { "\($0.text)|\($0.voice)" } == ["Build passed.|bf_emma"])
         #expect(player.played == [Data("Build passed.".utf8)])
         #expect(fallback.spoken.isEmpty)
@@ -191,14 +206,14 @@ struct NaturalSpeechTests {
     @Test func aVoiceNotInTheListSpeaksInTheRecommendedOne() async {
         let (speech, _, _, synth) = make()
         speech.speak("Done.", voice: "com.apple.voice.compact.en-US.Samantha")
-        await settled()
+        await until { synth.calls.map(\.voice) == ["af_heart"] }
         #expect(synth.calls.map(\.voice) == ["af_heart"])
     }
 
     @Test func beforeTheVoiceIsReadyTheSystemVoiceSpeaks() async {
         let (speech, player, fallback, synth) = make(ready: false)
         speech.speak("Done.", voice: "bf_emma")
-        await settled()
+        await until { fallback.spoken.map(\.text) == ["Done."] }
         #expect(fallback.spoken.map(\.text) == ["Done."])
         #expect(fallback.spoken.first?.voice == nil)
         #expect(synth.calls.isEmpty)
@@ -210,7 +225,7 @@ struct NaturalSpeechTests {
         synth.fails = true
         let (speech, player, fallback, _) = make(synth: synth)
         speech.speak("Done.", voice: nil)
-        await settled()
+        await until { fallback.spoken.map(\.text) == ["Done."] }
         #expect(fallback.spoken.map(\.text) == ["Done."])
         #expect(player.played.isEmpty)
     }
@@ -222,10 +237,10 @@ struct NaturalSpeechTests {
         var finished = 0
         speech.onFinished = { finished += 1 }
         speech.speak("Done.", voice: nil)
-        await settled()
+        await until { speech.isSpeaking }
         #expect(speech.isSpeaking)
         synth.release()
-        await settled()
+        for _ in 0..<400 where !player.isPlaying { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(speech.isSpeaking)
         player.finish()
         #expect(!speech.isSpeaking)
@@ -248,6 +263,42 @@ struct NaturalSpeechTests {
         #expect(finished == 1)
     }
 
+    @Test func aVoiceThatIsNeverMadeFallsBackToTheSystemVoiceAfterItsLimit() async {
+        let synth = Synth()
+        synth.holds = true
+        var outcomes: [Bool] = []
+        let (speech, player, fallback, _) = make(
+            synth: synth, outcome: { outcomes.append($0) }, synthesisLimit: { _ in .milliseconds(30) })
+        speech.speak("Done.", voice: nil)
+        for _ in 0..<200 where fallback.spoken.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(fallback.spoken.map(\.text) == ["Done."])
+        #expect(outcomes == [false])
+        fallback.finish()
+        #expect(!speech.isSpeaking)
+        synth.release()
+        await settled()
+        #expect(player.played.isEmpty)
+    }
+
+    @Test func voicesStillBeingMadePastTheirLimitAreNotJoinedByMore() async {
+        let synth = Synth()
+        synth.holds = true
+        let (speech, _, fallback, _) = make(synth: synth, synthesisLimit: { _ in .milliseconds(20) })
+        for text in ["One.", "Two."] {
+            speech.speak(text, voice: nil)
+            for _ in 0..<200 where fallback.spoken.last?.text != text { try? await Task.sleep(for: .milliseconds(5)) }
+        }
+        speech.speak("Three.", voice: nil)
+        await until { synth.calls.map(\.text) == ["One.", "Two."] }
+        #expect(synth.calls.map(\.text) == ["One.", "Two."])
+        #expect(fallback.spoken.last?.text == "Three.")
+        synth.release()
+        await until { speech.unfinishedSyntheses == 0 }
+        speech.speak("Four.", voice: nil)
+        await until { synth.calls.map(\.text) == ["One.", "Two.", "Four."] }
+        #expect(synth.calls.map(\.text) == ["One.", "Two.", "Four."])
+    }
+
     @Test func aNewRequestReplacesOneStillBeingMade() async {
         let synth = Synth()
         synth.holds = true
@@ -259,7 +310,7 @@ struct NaturalSpeechTests {
         speech.speak("Second.", voice: nil)
         await settled()
         synth.release()
-        await settled()
+        await until { player.played == [Data("Second.".utf8)] }
         #expect(player.played == [Data("Second.".utf8)])
     }
 
@@ -286,14 +337,14 @@ struct NaturalSpeechTests {
         let (speech, player, _, _) = make()
         speech.speak("one", voice: nil)
         speech.speak("two", voice: nil)
-        await settled()
+        await until { player.played == [Data("two".utf8)] }
         #expect(player.played == [Data("two".utf8)])
     }
 
     @Test func stoppingWhilePlayingReportsFinishedOnce() async {
         let (speech, player, _, _) = make()
         speech.speak("one", voice: nil)
-        await settled()
+        await until { player.isPlaying }
         #expect(player.isPlaying)
         var finished = 0
         speech.onFinished = { finished += 1 }

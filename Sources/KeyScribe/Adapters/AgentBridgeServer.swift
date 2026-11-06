@@ -177,6 +177,10 @@ final class AgentBridgeServer: @unchecked Sendable {
         queue.sync { commands.withdraw(id) }
     }
 
+    func forget(session: String) {
+        queue.async { self.commands.forget(session: session) }
+    }
+
     func isLive(session: String) -> Bool {
         queue.sync { commands.isLive(session: session, at: Date()) }
     }

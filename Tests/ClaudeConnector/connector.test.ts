@@ -11,7 +11,6 @@ function harness(on: any) {
   const live = { session: 's1' }
   const env: Record<string, string | undefined> = {}
   const downstream: Record<string, any> = {}
-  const fills: string[] = []
   const reads: Array<() => void> = []
   const box = { text: '', held: false }
   const files: Record<string, string | undefined> = {
@@ -81,10 +80,6 @@ function harness(on: any) {
     if (!box.held) return answer()
     return new Promise((resolve) => { reads.push(() => resolve(answer())) })
   })
-  on('prompt.fill', ($: any, e: any) => {
-    fills.push(e.text)
-    return { isFilled: true }
-  })
 
   const settle = async () => {
     for (let i = 0; i < 20; i++) {
@@ -124,7 +119,7 @@ function harness(on: any) {
   const ready = (launch?: string, protocol = 2) => { files['/tmp/ks-ready.json'] = launch === undefined ? undefined : JSON.stringify({ launch, protocol }) }
 
   const releaseSubmits = () => { for (const release of heldSubmits.splice(0)) release() }
-  return { env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, fills, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
+  return { env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
 }
 
 test('agent hooks return while the bridge never answers, through one sender', async ($, on) => {
@@ -459,7 +454,7 @@ test('a command for a replaced session is refused without acting', async ($, on)
   await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
   await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
   h.live.session = 's2'
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'old dictation', expectedPrompts: 0 }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'old dictation', expectedPrompts: 0 }])
   await h.answerEvents()
 
   expect(h.submits).toEqual([])
@@ -473,7 +468,7 @@ test('a typed prompt overtaking queued dictation holds it while the sender is bl
   await h.typed($)
   await h.settle()
   expect(h.open('/event').length).toBe(1)
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'run the tests', expectedPrompts: 0 }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
   expect(h.submits).toEqual([])
 
   await h.answerEvents()
@@ -483,13 +478,22 @@ test('a typed prompt overtaking queued dictation holds it while the sender is bl
   ])
 })
 
+test('a submission Claude Code turns away because the session was stopped is reported as stopped', async ($, on) => {
+  const h = harness(on)
+  h.downstream['prompt.submit'] = { drop: 'Cannot submit: the session was stopped by the user.' }
+  await h.connect($)
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
+  await h.answerEvents()
+  expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).toEqual(['ack', 'stopped'])
+})
+
 test('dictation decided on the current prompt count is submitted, acknowledged first', async ($, on) => {
   const h = harness(on)
   await h.connect($)
   await h.typed($)
   await h.answerEvents()
 
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'run the tests', expectedPrompts: 1 }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 1 }])
   await h.answerEvents()
   expect(h.submits).toEqual(['run the tests'])
   expect(h.events().filter((b) => b.request === 'r1').map((b) => b.op)).toEqual(['ack', 'submitted'])
@@ -499,7 +503,7 @@ test('a submit names the turn its own prompt started', async ($, on) => {
   const h = harness(on)
   await h.connect($)
   h.submitHold.on = true
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'run the tests' }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests' }])
   await $.turn.start({ text: 'run the tests', turnId: 't2' })
   h.releaseSubmits()
   await h.answerEvents()
@@ -510,7 +514,7 @@ test('a turn someone else started while the submit was in flight is never named 
   const h = harness(on)
   await h.connect($)
   h.submitHold.on = true
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'run the tests' }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests' }])
   await $.turn.start({ text: 'typed by me', turnId: 't1' })
   h.releaseSubmits()
   await h.answerEvents()
@@ -520,9 +524,9 @@ test('a turn someone else started while the submit was in flight is never named 
 test('the connector own submission does not count as the user typing', async ($, on) => {
   const h = harness(on)
   await h.connect($)
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'one', expectedPrompts: 0 }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'one', expectedPrompts: 0 }])
   await h.answerEvents()
-  await h.deliver([{ op: 'submit', id: 'r2', expectedSession: 's1', text: 'two', expectedPrompts: 0 }])
+  await h.deliver([{ op: 'submit', id: 'r2', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'two', expectedPrompts: 0 }])
   await h.answerEvents()
   expect(h.submits).toEqual(['one', 'two'])
 })
@@ -531,10 +535,9 @@ test('dictation never submits over a message the user is still writing, and leav
   const h = harness(on)
   await h.connect($)
   h.box.text = 'half a thought'
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'run the tests', expectedPrompts: 0 }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
   await h.answerEvents()
   expect(h.submits).toEqual([])
-  expect(h.fills).toEqual([])
   expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).toEqual(['ack', 'draft'])
 })
 
@@ -542,7 +545,7 @@ test('a prompt sent while the draft is being read holds the dictation', async ($
   const h = harness(on)
   await h.connect($)
   h.box.held = true
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'run the tests', expectedPrompts: 0 }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
   expect(h.reads.length).toBe(1)
   await h.typed($)
   await h.settle()
@@ -556,7 +559,7 @@ test('a turn starting while the draft is being read holds the dictation until it
   const h = harness(on)
   await h.connect($)
   h.box.held = true
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'run the tests', expectedPrompts: 0 }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
   expect(h.reads.length).toBe(1)
   await $.turn.start({ text: '', turnId: 't1' })
   await h.settle()
@@ -566,12 +569,26 @@ test('a turn starting while the draft is being read holds the dictation until it
   expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).toEqual(['ack', 'working'])
 })
 
+test('a submission whose deadline passes while the draft is being read is refused as expired and never submits', async ($, on) => {
+  const h = harness(on)
+  await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
+  await h.connect($)
+  h.box.held = true
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: (await h.clock.now()) + 500, text: 'run the tests', expectedPrompts: 0 }])
+  expect(h.reads.length).toBe(1)
+  await h.clock.advance(1000)
+  h.reads[0]()
+  await h.answerEvents()
+  expect(h.submits).toEqual([])
+  expect(h.events().filter((e: any) => e.request === 'r1' && e.reason).map((e: any) => e.reason)).toEqual(['expired'])
+})
+
 test('a session replaced while the draft is being read never submits', async ($, on) => {
   const h = harness(on)
   await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await h.connect($)
   h.box.held = true
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'run the tests', expectedPrompts: 0 }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
   expect(h.reads.length).toBe(1)
   h.live.session = 's2'
   await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
@@ -607,7 +624,7 @@ test('a full queue disconnects, acts on nothing it had, and says hello again onl
   await h.settle()
   expect(h.ops()).toEqual(['hello', 'typed'])
 
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'late', expectedPrompts: 80 }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'late', expectedPrompts: 80 }])
   expect(h.submits).toEqual([])
   h.open('/event')[0].answer(200)
   await h.settle()
@@ -649,7 +666,7 @@ test('a poll past its deadline disconnects, and polling resumes only after it se
   await h.settle()
   expect(h.open('/poll')).toEqual([stuck])
 
-  stuck.answer(200, JSON.stringify([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'late', expectedPrompts: 0 }]))
+  stuck.answer(200, JSON.stringify([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'late', expectedPrompts: 0 }]))
   await h.settle()
   expect(h.submits).toEqual([])
   expect(h.open('/poll').length).toBe(1)
@@ -660,7 +677,7 @@ test('a command being prepared when the connection is lost never acts', async ($
   const h = harness(on)
   await h.connect($)
   h.box.held = true
-  await h.deliver([{ op: 'fill', id: 'r1', expectedSession: 's1', text: 'use approach B' }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'use approach B' }])
   expect(h.reads.length).toBe(1)
 
   await h.typed($)
@@ -669,7 +686,7 @@ test('a command being prepared when the connection is lost never acts', async ($
   await h.settle()
   h.reads[0]()
   await h.settle()
-  expect(h.fills).toEqual([])
+  expect(h.submits).toEqual([])
 })
 
 async function staleReply($: any, on: any, released: 'beforeHello' | 'afterHello') {
@@ -677,7 +694,7 @@ async function staleReply($: any, on: any, released: 'beforeHello' | 'afterHello
   await h.connect($)
   const first = h.events()[0].connection
   h.box.held = true
-  await h.deliver([{ op: 'fill', id: 'r1', expectedSession: 's1', text: 'use approach B' }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'use approach B' }])
   await h.answerEvents()
   expect(h.reads.length).toBe(1)
 
@@ -700,7 +717,7 @@ async function staleReply($: any, on: any, released: 'beforeHello' | 'afterHello
   expect(h.events().filter((b) => b.request === 'r1').map((b) => [b.op, b.connection])).toEqual([['ack', first]])
   expect(h.ops().filter((op) => op === 'hello').length).toBe(2)
   expect(h.open('/poll').map((r) => r.body.connection)).toEqual([replacement.body.connection])
-  expect(h.fills).toEqual([])
+  expect(h.submits).toEqual([])
 }
 
 test('a reply finishing after a disconnect is dropped while the replacement says hello', ($, on) => staleReply($, on, 'beforeHello'))
@@ -734,9 +751,9 @@ test('every hello opens a new connection that its events, replies and polls carr
 test('a command repeated on the same connection runs once and keeps nothing in plugin storage', async ($, on) => {
   const h = harness(on)
   await h.connect($)
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'run the tests', expectedPrompts: 0 }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
   await h.answerEvents()
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'run the tests', expectedPrompts: 0 }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
   await h.answerEvents()
   expect(h.submits).toEqual(['run the tests'])
   expect(h.events().filter((b) => b.request === 'r1').map((b) => b.op)).toEqual(['ack', 'submitted', 'ack'])
@@ -890,7 +907,7 @@ test('a turn running when dictation arrives is reported, not interrupted', async
   await h.connect($)
   await $.turn.start({ text: '', turnId: 't1' })
   await h.answerEvents()
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'run the tests', expectedPrompts: 0 }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
   await h.answerEvents()
   expect(h.submits).toEqual([])
   expect(h.events().filter((b) => b.request === 'r1')).toMatchObject([
@@ -914,7 +931,7 @@ test('a connection lost during a turn reconnects busy, refuses dictation as work
   hello.answer(200)
   await h.settle()
 
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'run the tests', expectedPrompts: 0 }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
   await h.answerEvents()
   await $.turn.complete({ turnId: 't1', answer: '', durationMs: 5, isAborted: false, usage: null, reason: 'answer' })
   await h.answerEvents()
@@ -928,7 +945,7 @@ test('a connection lost during a turn reconnects busy, refuses dictation as work
   ])
   expect(h.open('/poll').map((r) => r.body.connection)).toEqual([hello.body.connection])
 
-  await h.deliver([{ op: 'submit', id: 'r2', expectedSession: 's1', text: 'run the tests', expectedPrompts: 0 }])
+  await h.deliver([{ op: 'submit', id: 'r2', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
   await h.answerEvents()
   expect(h.submits).toEqual(['run the tests'])
   expect(h.events().filter((b) => b.request === 'r2').map((b) => [b.op, b.connection])).toEqual([
@@ -946,7 +963,7 @@ test('an older completion never clears a newer turn', async ($, on) => {
   await h.answerEvents()
   expect(h.ops()).toEqual(['hello', 'turnStarted', 'turnStarted'])
 
-  await h.deliver([{ op: 'abort', id: 'r1', expectedSession: 's1', expectedTurn: 't2' }])
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'three' }])
   await h.answerEvents()
-  expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).not.toContain('turnChanged')
+  expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).toEqual(['ack', 'working'])
 })

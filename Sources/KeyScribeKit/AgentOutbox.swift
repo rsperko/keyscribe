@@ -5,13 +5,11 @@ public struct AgentOutbox: Sendable {
         public let id: String
         public let conversation: String
         public let text: String
-        public var delivery: Mode.Agent.Delivery
 
-        public init(id: String, conversation: String, text: String, delivery: Mode.Agent.Delivery) {
+        public init(id: String, conversation: String, text: String) {
             self.id = id
             self.conversation = conversation
             self.text = text
-            self.delivery = delivery
         }
     }
 
@@ -35,7 +33,6 @@ public struct AgentOutbox: Sendable {
 
     public mutating func send(_ message: Message, state: AgentLiveState?) -> AgentDeliveryDecision {
         var context = AgentDeliveryContext(state: state ?? .disconnected)
-        context.delivery = message.delivery
         if state != nil, queue.contains(where: { $0.message.conversation == message.conversation }) {
             context.state = .working
         }
@@ -55,7 +52,6 @@ public struct AgentOutbox: Sendable {
                 continue
             }
             var context = AgentDeliveryContext(state: state(conversation) ?? .disconnected)
-            context.delivery = .submit
             context.typedSinceQueued = held.typedSince
             context.interruptedSinceQueued = held.interruptedSince
             context.connectionGapSinceQueued = held.connectionGapSince

@@ -5,6 +5,7 @@ protocol AgentTransport: AnyObject {
     func enqueue(_ command: AgentCommand, for session: String)
     func isLive(session: String) -> Bool
     func withdraw(_ id: String) -> Bool
+    func forget(session: String)
 }
 
 extension AgentBridgeServer: AgentTransport {
@@ -14,8 +15,8 @@ extension AgentBridgeServer: AgentTransport {
 }
 
 enum AgentReceipt: Equatable {
-    enum KeptReason: Equatable { case draft, composing, typedSince, interrupted, questionResolved, historyMoved, connectionGap, dialog }
-    enum NotSentReason: Equatable { case conversationEnded, connectorNotRunning, conversationChanged, stopped, refused(String) }
+    enum KeptReason: Equatable { case composing, typedSince, interrupted, connectionGap, dialog }
+    enum NotSentReason: Equatable { case conversationEnded, connectorNotRunning, conversationChanged, stopped, expired, refused(String) }
 
     case sent(String)
     case queued(String)
@@ -33,9 +34,9 @@ final class AgentHub {
     }
 
     static let runningGrace: TimeInterval = 5
-    static let recentLimit = 20
 
     var onNotice: ((AgentReceipt, _ request: String) -> Void)?
+    var onForget: ((_ request: String) -> Void)?
     var onChange: (() -> Void)?
     var onResult: ((_ conversation: String, _ handle: String, _ answer: String) -> Void)?
     var onAttention: ((_ conversation: String, _ handle: String, _ attention: AgentAttention?) -> Void)?
@@ -58,8 +59,6 @@ final class AgentHub {
     private var stopped = false
     private var savedRemembered: [String: RememberedName] = [:]
     private(set) var current: String?
-    private(set) var unsent: [AgentOutbox.Message] = []
-    private(set) var recent: [AgentReceipt] = []
 
     private let transport: AgentTransport
     private let nameStore: AgentNameStore?
@@ -173,7 +172,7 @@ final class AgentHub {
         guard transport.isLive(session: session), let features = features[session] else { return .notFound }
         guard features.contains("focus") else { return kind(of: session)?.connectorFeatures.contains("focus") == true ? .outdated : .unsupported }
         let id = makeId()
-        let expiresAt = now().addingTimeInterval(TimeInterval(timeout.components.seconds) + Double(timeout.components.attoseconds) / 1e18)
+        let expiresAt = deadline(after: timeout)
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 guard !Task.isCancelled else { return continuation.resume(returning: .notFound) }
@@ -326,6 +325,9 @@ final class AgentHub {
         scanTask = nil
         onChange = nil
         onNotice = nil
+        onForget = nil
+        onResult = nil
+        onAttention = nil
     }
 
     private func bounded(agent: String) async -> AgentScan? {
@@ -391,6 +393,10 @@ final class AgentHub {
         rememberNames()
         if let current, handle(of: current) == nil { self.current = nil }
         lastUsed = lastUsed.filter { handle(of: $0.key) != nil }
+        let listed = Set(directory.conversations.map(\.id))
+        let ended = connectorStateSessions.filter { !listed.contains($0) && !transport.isLive(session: $0) }
+        forgetConnectorState { !ended.contains($0) }
+        for session in ended { transport.forget(session: session) }
         sendLabels()
         let idle = Set(directory.conversations.filter { $0.state == .idle }.map(\.id))
         let stale = now().addingTimeInterval(-Self.runningGrace)
@@ -449,6 +455,20 @@ final class AgentHub {
         waitingPrompts = waitingPrompts.filter { live.contains($0.key) }
     }
 
+    private func forgetConnectorState(keeping kept: (String) -> Bool) {
+        features = features.filter { kept($0.key) }
+        environments = environments.filter { kept($0.key) }
+        prompts = prompts.filter { kept($0.key) }
+        connectorNames = connectorNames.filter { kept($0.key) }
+        connectorNamesAt = connectorNamesAt.filter { kept($0.key) }
+        labels = labels.filter { kept($0.key) }
+    }
+
+    var connectorStateSessions: Set<String> {
+        Set(features.keys).union(environments.keys).union(prompts.keys).union(connectorNames.keys)
+            .union(connectorNamesAt.keys).union(labels.keys)
+    }
+
     private func startGrace(for session: String) -> Date {
         let started = now()
         goneSince[session] = started
@@ -476,12 +496,12 @@ final class AgentHub {
         }
     }
 
-    func deliver(_ text: String, to id: String, delivery: Mode.Agent.Delivery, request: String? = nil) async -> AgentReceipt {
+    func deliver(_ text: String, to id: String, request: String? = nil) async -> AgentReceipt {
         guard let conversation = directory.conversations.first(where: { $0.id == id }) else {
             return .notSent(nil, reason: .conversationEnded)
         }
         lastUsed[id] = now()
-        let message = AgentOutbox.Message(id: request ?? makeId(), conversation: id, text: text, delivery: delivery)
+        let message = AgentOutbox.Message(id: request ?? makeId(), conversation: id, text: text)
         let handle = conversation.handle
         switch outbox.send(message, state: state(of: id)) {
         case .handOff:
@@ -491,18 +511,10 @@ final class AgentHub {
             }
         case .queue:
             return .queued(handle)
-        case .draft:
-            unsent.append(message)
-            return .kept(handle, reason: .draft)
         case .needsReview(let reason):
-            unsent.append(message)
             return .kept(handle, reason: Self.kept(reason))
-        case .notSent(let reason):
-            unsent.append(message)
-            return .notSent(handle, reason: reason == .disconnected ? .connectorNotRunning : .conversationChanged)
-        case .escRecovery:
-            unsent.append(message)
-            return .notSent(handle, reason: .stopped)
+        case .disconnected:
+            return .notSent(handle, reason: .connectorNotRunning)
         }
     }
 
@@ -512,13 +524,16 @@ final class AgentHub {
     }
 
     func retire(agent: String) {
-        awaitingResult = awaitingResult.filter { AgentSessionID.agent(of: $0.key) != agent }
-        waitingPrompts = waitingPrompts.filter { AgentSessionID.agent(of: $0.key) != agent }
+        let kept = { (session: String) in AgentSessionID.agent(of: session) != agent }
+        awaitingResult = awaitingResult.filter { kept($0.key) }
+        waitingPrompts = waitingPrompts.filter { kept($0.key) }
+        forgetConnectorState(keeping: kept)
         discoveries.first { $0.kind.id == agent }?.retire()
         Task { [weak self] in await self?.rescan(rereadingTitles: false) }
     }
 
     func handle(_ event: AgentEvent) {
+        guard !stopped else { return }
         if let session = event.session, let agent = AgentSessionID.agent(of: session) {
             discoveries.first { $0.kind.id == agent }?.observe(event.renamingSession(AgentSessionID.native))
         }
@@ -552,14 +567,14 @@ final class AgentHub {
             break
         case .submitted(let request, let turn):
             if let conversation = requests[request]?.message.conversation, !turn.isEmpty { awaitingResult[conversation] = turn }
-            settle(request, .sent(requests[request]?.handle ?? ""), keep: false)
+            settle(request, .sent(requests[request]?.handle ?? ""))
         case .refused(let request, _) where focusWaiters[request] != nil:
             focusWaiters.removeValue(forKey: request)?.resume(returning: .notFound)
         case .undelivered(let request, _, _) where focusWaiters[request] != nil:
             focusWaiters.removeValue(forKey: request)?.resume(returning: .notFound)
         case .refused(let request, "working") where requests[request]?.timedOut == true:
             clearHandOff(request)
-            settle(request, .notSent(requests[request]?.handle, reason: Self.notSent("working")), keep: true)
+            settle(request, .notSent(requests[request]?.handle, reason: Self.notSent("working")))
             releaseHeld()
         case .refused(let request, "working"):
             clearHandOff(request)
@@ -569,29 +584,33 @@ final class AgentHub {
             report(.queued(entry.handle), for: request)
         case .refused(let request, "typedSince"):
             clearHandOff(request)
-            settle(request, .kept(requests[request]?.handle ?? "", reason: .typedSince), keep: true)
+            settle(request, .kept(requests[request]?.handle ?? "", reason: .typedSince))
             releaseHeld()
         case .refused(let request, "draft"):
             clearHandOff(request)
-            settle(request, .kept(requests[request]?.handle ?? "", reason: .composing), keep: true)
+            settle(request, .kept(requests[request]?.handle ?? "", reason: .composing))
             releaseHeld()
         case .refused(let request, "dialog"):
             clearHandOff(request)
-            settle(request, .kept(requests[request]?.handle ?? "", reason: .dialog), keep: true)
+            settle(request, .kept(requests[request]?.handle ?? "", reason: .dialog))
             releaseHeld()
         case .refused(let request, let reason):
             clearHandOff(request)
-            settle(request, .notSent(requests[request]?.handle, reason: Self.notSent(reason)), keep: true)
+            settle(request, .notSent(requests[request]?.handle, reason: Self.notSent(reason)))
             releaseHeld()
         case .undelivered(let request, _, true):
             leaveUncertain(request)
+        case .undelivered(let request, "expired", false):
+            clearHandOff(request)
+            settle(request, .notSent(requests[request]?.handle, reason: .expired))
+            releaseHeld()
         case .undelivered(let request, "connectionGap", false):
             clearHandOff(request)
-            settle(request, .kept(requests[request]?.handle ?? "", reason: .connectionGap), keep: true)
+            settle(request, .kept(requests[request]?.handle ?? "", reason: .connectionGap))
             releaseHeld()
         case .undelivered(let request, _, false):
             clearHandOff(request)
-            settle(request, .notSent(requests[request]?.handle, reason: .connectorNotRunning), keep: true)
+            settle(request, .notSent(requests[request]?.handle, reason: .connectorNotRunning))
             releaseHeld()
         case .typed(let session, let count):
             if let count { prompts[session] = count }
@@ -624,7 +643,9 @@ final class AgentHub {
         requests[message.id] = Request(message: message, handle: handle)
         handingOff[message.conversation] = message.id
         transport.enqueue(
-            .submit(id: message.id, expectedSession: message.conversation, text: message.text, expectedPrompts: prompts[message.conversation]),
+            .submit(
+                id: message.id, expectedSession: message.conversation, text: message.text,
+                expectedPrompts: prompts[message.conversation], expiresAt: deadline(after: receiptTimeout)),
             for: message.conversation)
         let timeout = receiptTimeout
         Task { [weak self] in
@@ -647,7 +668,12 @@ final class AgentHub {
     private func releaseHandOff(_ request: String) {
         guard let entry = requests.removeValue(forKey: request) else { return }
         if handingOff[entry.message.conversation] == request { handingOff[entry.message.conversation] = nil }
+        onForget?(request)
         releaseHeld()
+    }
+
+    private func deadline(after duration: Duration) -> Date {
+        now().addingTimeInterval(TimeInterval(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18)
     }
 
     private func clearHandOff(_ request: String) {
@@ -655,15 +681,12 @@ final class AgentHub {
         handingOff[conversation] = nil
     }
 
-    private func settle(_ request: String, _ receipt: AgentReceipt, keep: Bool) {
+    private func settle(_ request: String, _ receipt: AgentReceipt) {
         guard let entry = requests.removeValue(forKey: request) else { return }
-        if keep { unsent.append(entry.message) }
         report(receipt, for: request)
     }
 
     private func report(_ receipt: AgentReceipt, for request: String) {
-        recent.append(receipt)
-        if recent.count > Self.recentLimit { recent.removeFirst(recent.count - Self.recentLimit) }
         if let waiter = waiters.removeValue(forKey: request) {
             waiter.resume(returning: receipt)
         } else {
@@ -678,14 +701,11 @@ final class AgentHub {
             case .handOff:
                 handOff(release.message, handle: handle ?? "")
             case .needsReview(let reason):
-                unsent.append(release.message)
                 report(.kept(handle ?? "", reason: Self.kept(reason)), for: release.message.id)
-            case .notSent(let reason):
-                unsent.append(release.message)
-                report(.notSent(handle, reason: reason == .disconnected ? .connectorNotRunning : .conversationChanged), for: release.message.id)
-            case .queue, .draft, .escRecovery:
-                unsent.append(release.message)
-                report(.notSent(handle, reason: .stopped), for: release.message.id)
+            case .disconnected:
+                report(.notSent(handle, reason: .connectorNotRunning), for: release.message.id)
+            case .queue:
+                break
             }
         }
     }
@@ -693,16 +713,15 @@ final class AgentHub {
     private static func kept(_ reason: AgentDeliveryDecision.ReviewReason) -> AgentReceipt.KeptReason {
         switch reason {
         case .typedSince: .typedSince
-        case .questionResolved: .questionResolved
         case .interrupted: .interrupted
-        case .historyMoved: .historyMoved
         case .connectionGap: .connectionGap
         }
     }
 
     private static func notSent(_ reason: String) -> AgentReceipt.NotSentReason {
         if reason == "sessionChanged" { return .conversationChanged }
-        if reason.contains("the session was stopped") { return .stopped }
+        if reason == "stopped" { return .stopped }
+        if reason == "expired" { return .expired }
         return .refused(reason)
     }
 }

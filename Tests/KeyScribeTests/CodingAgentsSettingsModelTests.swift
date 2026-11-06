@@ -418,9 +418,9 @@ struct CodingAgentsSettingsModelTests {
         model.show([
             .init(id: "a", agent: "claude", pid: 1, cwd: "/src/api", handle: "backend", state: .idle, connectorLive: true),
         ], current: "a", namesProblem: "unavailable")
-        #expect(model.recipientGuidance().contains("session 1, run the unit tests"))
         #expect(model.recipientGuidance().contains("number shown while recording"))
-        #expect(!model.recipientGuidance().contains("backend, run"))
+        #expect(!model.recipientGuidance().contains("session 1"))
+        #expect(!model.recipientGuidance().contains("backend"))
     }
 
     @Test func theRenamePreviewAsksTheSameCheckTheRenameUses() {

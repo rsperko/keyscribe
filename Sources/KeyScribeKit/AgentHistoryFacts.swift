@@ -3,7 +3,7 @@ import Foundation
 public enum AgentHistoryFacts {
     public static func facts(
         address: AgentAddress, resolution: AgentRecipient.Resolution, frozen: AgentRecipient.Frozen?,
-        conversations: [AgentConversation], delivery: Mode.Agent.Delivery
+        conversations: [AgentConversation]
     ) -> [HistoryEntry.Fact] {
         let spoken = spokenAddress(address)
         var facts = [fact(command: command(address, resolution))]
@@ -19,9 +19,6 @@ public enum AgentHistoryFacts {
             facts.append(.init(label: "Conversation", value: "None resolved"))
         }
         facts += defaultRecipient(frozen, in: conversations)
-        if case .deliver = resolution {
-            facts.append(.init(label: "Delivery", value: delivery == .draft ? "Keep as a draft" : "Send"))
-        }
         return facts
     }
 
@@ -72,7 +69,6 @@ public enum AgentHistoryFacts {
         if case .deliver(_, _, let source) = resolution, source != .spoken {
             return switch source {
             case .fixed: "The mode\u{2019}s fixed conversation"
-            case .focused: "The focused conversation"
             case .front: "The conversation in front"
             case .current, .spoken: "The current conversation"
             }

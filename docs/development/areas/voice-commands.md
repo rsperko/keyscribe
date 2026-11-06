@@ -29,8 +29,12 @@ review keeps finding the same few of them.
 - **Address a target by a stable identity captured when the decision is made, and recheck it right
   before acting.** Never act on a positional index, a PID, or a display name alone — windows, tabs,
   and apps reorder between resolution and execution.
-- **An unresolved or tied target holds and asks; it never falls through to the current, first, or
-  default target.** Equally close fuzzy matches are a choice for the user, not a tie-break by order.
+- **An unresolved target holds and asks; it never falls through to the current, first, or default
+  target.** A tie is different: asking interrupts, so a tie takes a predictable order (a Coding agent
+  recipient tie goes to the first name alphabetically, a sidebar tie to the first in sidebar order) and
+  asks only when no such order exists or a wrong guess would run the wrong action: different apps,
+  places, or windows, or tabs in different browsers, tied for a switch are offered as a choice (`ui_design.md`, *Voice command
+  choice*; `config_schema.md` has the full order).
 
 ## One rule, one function
 
@@ -67,10 +71,15 @@ every rule above applies to it, with these sharpenings:
 - **Reply text is in memory only.** A turn's final reply crosses the bridge bounded, for the spoken result of a
   turn the user's dictation started; it is never written to History or logs, and the only place it may go is
   the AI service the user chose for summaries, after redaction.
+- **A Coding agent take is delivered whatever field has focus, a password field included.** The text goes
+  to the agent the user addressed, not into the field, so the secure-field policy that keeps a dictation
+  local does not stop it. The take is still left out of History (`design.md` §4.7), and the turn's reply
+  can still go to the summary service like any dictated turn's.
 - **Removal preserves user data and unrelated agent configuration.** Retire loaded connectors
   without waiting for them, verify uninstall state, and keep partial cleanup safe to retry.
-- **An unknown or ambiguous spoken recipient never falls through to the current recipient.** It holds
-  and asks, like any unresolved target.
+- **A spoken recipient never falls through to the current recipient.** An unknown one holds and asks,
+  like any unresolved target; one that fits several names goes to the first of them alphabetically
+  (`AgentRecipient.resolve`).
 - **A spoken recipient is matched as heard first, then as the mode's replacements and dictionary read
   it.** The reading only picks the name (`AgentAddress.parse`'s `read`, built by
   `ResolvedConfig.agentAddressReader`); the message after it, near misses, and ties come from the words
@@ -83,7 +92,13 @@ every rule above applies to it, with these sharpenings:
 - **A receipt timeout is "unknown", not "failed" or "gone".** A request that may still be delivered
   stays tracked until the connector settles it or it expires. It holds later dictation for that
   conversation, so nothing overtakes it, but only for a bounded time (`AgentHub`'s hand-off limit); after
-  that the queue moves on and the request is forgotten, so tracking never grows with session age. A receipt
+  that the queue moves on and the request is forgotten everywhere that tracks it (`AgentHub.onForget`), so
+  tracking never grows with session age. What a connector reported for a session (its features,
+  environment, title, prompt count, and label) is dropped once the session is neither listed nor
+  connected, and its bridge registration goes with it, so the connector's next poll is refused and its
+  hello reports everything again; metadata never outlives the registration that would let a connector
+  skip that hello. The submit's own deadline ends at the receipt timeout, so a
+  connector never starts a submission the hub has already reported as uncertain. A receipt
   within the hold settles the earlier take alone; a refusal after the hold keeps its text for review rather
   than queueing it behind newer takes.
 - **Act on the turn or session captured at decision time.** Stop, open, and deliver recheck that

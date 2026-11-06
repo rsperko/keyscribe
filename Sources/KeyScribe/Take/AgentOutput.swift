@@ -32,11 +32,11 @@ final class AgentOutput {
     }
 
     func deliver(
-        _ text: String, to id: String, delivery: Mode.Agent.Delivery, via agents: AgentHub
+        _ text: String, to id: String, via agents: AgentHub
     ) async -> (request: String, receipt: AgentReceipt) {
         let request = UUID().uuidString
         awaited[request] = AwaitedReceipt()
-        return (request, await agents.deliver(text, to: id, delivery: delivery, request: request))
+        return (request, await agents.deliver(text, to: id, request: request))
     }
 
     func noteRecorded(_ entry: HistoryEntry, request: String) {
@@ -55,6 +55,10 @@ final class AgentOutput {
         if let request { recordLateReceipt(receipt, request: request) }
         pendingNotices.append(receipt)
         flushNotices(afterWaiting: false)
+    }
+
+    func forgetReceipt(request: String) {
+        stopAwaiting(request)
     }
 
     private func stopAwaiting(_ request: String) {
@@ -169,16 +173,12 @@ final class AgentOutput {
             return .commandDone(summary: "Sent to \(handle)", detail: mode)
         case .queued(let handle):
             return .commandDone(summary: "Queued for \(handle)", detail: "Sends when it finishes")
-        case .kept(let handle, .draft):
-            return .advisory(message: "Kept as a draft for \(handle)")
         case .kept(let handle, let reason):
             let why = switch reason {
             case .typedSince: "you sent it a message since"
             case .composing: "it has a message you haven\u{2019}t sent"
             case .interrupted: "its last turn was stopped"
-            case .questionResolved: "its question was answered on screen"
             case .dialog: "it has a dialog open"
-            case .historyMoved, .draft: "the conversation changed"
             case .connectionGap: "it lost its connection to \(Branding.appName) while this waited"
             }
             return .advisory(message: "Not sent to \(handle): \(why)")
@@ -189,6 +189,7 @@ final class AgentOutput {
             case .connectorNotRunning: "Not sent: \(name) isn\u{2019}t connected to \(Branding.appName)"
             case .conversationChanged: "Not sent: \(name) switched to another conversation"
             case .stopped: "Not sent: \(name) is stopped until you type in it"
+            case .expired: "Not sent: \(name) didn\u{2019}t take it in time"
             case .refused: "Not sent: \(name) refused the message"
             }
             return .error(message: message, action: nil, heard: HeardExcerpt(heard: heard))

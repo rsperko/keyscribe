@@ -23,7 +23,6 @@ let currentTurn = null
 let ownSubmit = null
 let turnKnown = false
 let prompts = 0
-let pendingButton = null
 let looping = false
 let titleSession = null
 let lastTitle = null
@@ -312,10 +311,6 @@ function sayHello($, target, attemptLaunch) {
 }
 
 function clearOwnedUI($) {
-  if (pendingButton) {
-    pendingButton = null
-    $.ui.invalidate('ui.render')
-  }
   if (ownedStatus) {
     ownedStatus = false
     quietly($.ui.status(undefined))
@@ -403,44 +398,31 @@ function asText(text) {
   return text.startsWith('/') ? '​' + text : text
 }
 
+function refusal(reason) {
+  const text = String(reason)
+  return /the session was stopped/i.test(text) ? 'stopped' : text.slice(0, 500)
+}
+
 function ownPrompt(started, sent) {
   const plain = (value) => String(value || '').replace(/^\u200b/, '').trim()
   return plain(started) === plain(sent)
 }
 
-async function submit($, id, text, gen, expected) {
+async function submit($, id, text, expiresAt, gen, expected) {
   if (!current(expected, gen)) return reply($, gen, { op: 'refused', request: id, reason: 'sessionChanged' })
+  if (!((await $.clock.now()) < expiresAt)) return reply($, gen, { op: 'refused', request: id, reason: 'expired' })
   const own = { text: asText(text), turn: null }
   ownSubmit = own
   let result
   try {
     result = await $.prompt.submit({ text: own.text, asUser: true })
   } catch (err) {
-    return reply($, gen, { op: 'refused', request: id, reason: String(err && err.message || err).slice(0, 500) })
+    return reply($, gen, { op: 'refused', request: id, reason: refusal(err && err.message || err) })
   } finally {
     if (ownSubmit === own) ownSubmit = null
   }
-  if (result && result.drop) return reply($, gen, { op: 'refused', request: id, reason: String(result.drop).slice(0, 500) })
+  if (result && result.drop) return reply($, gen, { op: 'refused', request: id, reason: refusal(result.drop) })
   return reply($, gen, { op: 'submitted', request: id, turn: own.turn || '' })
-}
-
-async function abort($, id, expectedTurn, gen, expected) {
-  if (!currentTurn || currentTurn !== expectedTurn) return reply($, gen, { op: 'refused', request: id, reason: 'turnChanged' })
-  if (!current(expected, gen)) return reply($, gen, { op: 'refused', request: id, reason: 'sessionChanged' })
-  try {
-    await $.turn.abort({ turnId: currentTurn })
-    return reply($, gen, { op: 'ack', request: id })
-  } catch (err) {
-    return reply($, gen, { op: 'refused', request: id, reason: 'notRunning' })
-  }
-}
-
-async function fill($, id, text, gen, expected) {
-  const box = await $.prompt.read()
-  if (box.text.trim()) return reply($, gen, { op: 'refused', request: id, reason: 'draft' })
-  if (!current(expected, gen)) return reply($, gen, { op: 'refused', request: id, reason: 'sessionChanged' })
-  const result = await $.prompt.fill({ text, mode: 'replace' })
-  return reply($, gen, result.isFilled ? { op: 'ack', request: id } : { op: 'refused', request: id, reason: 'notFilled' })
 }
 
 function noteTitle($, e) {
@@ -459,7 +441,7 @@ function noteTitle($, e) {
 async function focus($, id, expiresAt, gen, expected) {
   const surface = await $.env.get("CMUX_SURFACE_ID")
   if (!surface) return reply($, gen, { op: 'refused', request: id, reason: 'notInCmux' })
-  if (!(Date.now() < expiresAt)) return reply($, gen, { op: 'refused', request: id, reason: 'expired' })
+  if (!((await $.clock.now()) < expiresAt)) return reply($, gen, { op: 'refused', request: id, reason: 'expired' })
   if (!current(expected, gen)) return reply($, gen, { op: 'refused', request: id, reason: 'sessionChanged' })
   try {
     const result = await $.process.run(['/usr/bin/env', 'cmux', 'focus-panel', '--panel', surface], { timeoutMs: 3000 })
@@ -484,16 +466,9 @@ async function handle($, cmd, gen) {
     const box = await $.prompt.read()
     if (hold()) return reply($, gen, { op: 'refused', request: cmd.id, reason: hold() })
     if (box.text.trim()) return reply($, gen, { op: 'refused', request: cmd.id, reason: 'draft' })
-    return submit($, cmd.id, cmd.text, gen, cmd.expectedSession)
+    return submit($, cmd.id, cmd.text, cmd.expiresAt, gen, cmd.expectedSession)
   }
-  if (cmd.op === 'abort') return abort($, cmd.id, cmd.expectedTurn, gen, cmd.expectedSession)
-  if (cmd.op === 'fill') return fill($, cmd.id, cmd.text, gen, cmd.expectedSession)
   if (cmd.op === 'focus') return focus($, cmd.id, cmd.expiresAt, gen, cmd.expectedSession)
-  if (cmd.op === 'offerButton') {
-    pendingButton = { id: cmd.id, text: cmd.text, session: cmd.expectedSession, generation: gen }
-    $.ui.invalidate('ui.render')
-    return
-  }
   if (cmd.op === 'status') {
     ownedStatus = Boolean(cmd.text)
     quietly($.ui.status(cmd.text || undefined))
@@ -583,17 +558,6 @@ async function pollLoop($) {
   }
 }
 
-async function pressButton($) {
-  const pending = pendingButton
-  pendingButton = null
-  $.ui.invalidate('ui.render')
-  if (!pending) return
-  if (!current(pending.session, pending.generation) || pending.session !== await $.session.id()) {
-    return reply($, pending.generation, { op: 'refused', request: pending.id, reason: 'sessionChanged' })
-  }
-  await submit($, pending.id, pending.text, pending.generation, pending.session)
-}
-
 const userOrigins = ['composer', 'bridge', 'slack-ping', 'unclassified']
 
 function typedByUser(e) {
@@ -655,11 +619,5 @@ export function register(on) {
       observe($, { op: 'turnComplete', session, reason: e.reason, answer: boundedAnswer(e.answer) })
     }
     return result
-  })
-
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (!pendingButton || !current(pendingButton.session, pendingButton.generation)) return next(e)
-    const { Box, Button } = $.ui.resolve(e)
-    return Box({ children: [Button({ key: 'keyscribe-send', label: 'Send dictated correction', variant: 'primary', onPress: async () => { await pressButton($) } })] })
   })
 }

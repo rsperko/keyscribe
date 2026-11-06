@@ -218,7 +218,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
 
     public struct Agent: Codable, Equatable, Sendable {
         public enum Target: Equatable, Sendable, Codable {
-            case focused
             case current
             case ask
             case handle(String)
@@ -226,8 +225,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
             public init(from decoder: Decoder) throws {
                 let raw = try decoder.singleValueContainer().decode(String.self)
                 switch raw {
-                case "focused": self = .focused
-                case "current": self = .current
+                case "current", "focused": self = .current
                 case "ask": self = .ask
                 default:
                     let handle = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -239,7 +237,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
             public func encode(to encoder: Encoder) throws {
                 var c = encoder.singleValueContainer()
                 switch self {
-                case .focused: try c.encode("focused")
                 case .current: try c.encode("current")
                 case .ask: try c.encode("ask")
                 case .handle(let handle): try c.encode(handle)
@@ -247,21 +244,16 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
             }
         }
 
-        public enum Delivery: String, Codable, Sendable { case submit, draft }
-
         public var target: Target
-        public var delivery: Delivery
-        enum CodingKeys: String, CodingKey { case target, delivery }
+        enum CodingKeys: String, CodingKey { case target }
 
-        public init(target: Target = .current, delivery: Delivery = .submit) {
+        public init(target: Target = .current) {
             self.target = target
-            self.delivery = delivery
         }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             target = try c.decodeIfPresent(Target.self, forKey: .target) ?? .current
-            delivery = try c.decodeIfPresent(Delivery.self, forKey: .delivery) ?? .submit
         }
     }
 
@@ -564,7 +556,7 @@ public enum ModeStore {
         mode.trimTrailingPunctuation = true
         mode.excludeFromHistory = true
         mode.output = .agent
-        mode.agent = .init(target: .handle("a"), delivery: .draft)
+        mode.agent = .init(target: .handle("a"))
         return mode
     }
 

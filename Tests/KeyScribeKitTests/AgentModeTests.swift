@@ -6,20 +6,20 @@ struct AgentModeTests {
     @Test func agentOutputRoundTripsWithItsTable() throws {
         var mode = Mode(id: "coding-agent", name: "Coding agent")
         mode.output = .agent
-        mode.agent = .init(target: .handle("backend"), delivery: .draft)
+        mode.agent = .init(target: .handle("backend"))
         let decoded = try ModeStore.decode(from: ModeStore.encode(mode), id: Mode.codingAgentId)
         #expect(decoded.output == .agent)
-        #expect(decoded.agent == .init(target: .handle("backend"), delivery: .draft))
+        #expect(decoded.agent == .init(target: .handle("backend")))
     }
 
-    @Test func agentTableDefaultsToCurrentAndSendAfterSpeaking() throws {
+    @Test func agentTableDefaultsToCurrent() throws {
         let toml = """
         schema_version = \(ModeStore.currentSchemaVersion)
         name = "Coding agent"
         output = "agent"
         """
         let mode = try ModeStore.decode(from: toml, id: Mode.codingAgentId)
-        #expect(mode.agent == .init(target: .current, delivery: .submit))
+        #expect(mode.agent == .init(target: .current))
     }
 
     @Test func anAgentTableWithoutATargetDefaultsToCurrent() throws {
@@ -28,12 +28,11 @@ struct AgentModeTests {
         name = "Coding agent"
         output = "agent"
         [agent]
-        delivery = "draft"
         """
-        #expect(try ModeStore.decode(from: toml, id: Mode.codingAgentId).agent == .init(target: .current, delivery: .draft))
+        #expect(try ModeStore.decode(from: toml, id: Mode.codingAgentId).agent == .init(target: .current))
     }
 
-    @Test func anExplicitFocusedTargetIsKeptAcrossNormalizationAndAWrite() throws {
+    @Test func anOlderFocusedTargetIsReadAsCurrentAndWrittenAsCurrent() throws {
         let toml = """
         schema_version = \(ModeStore.currentSchemaVersion)
         name = "Coding agent"
@@ -42,16 +41,17 @@ struct AgentModeTests {
         target = "focused"
         """
         let mode = try ModeStore.decode(from: toml, id: Mode.codingAgentId).systemNormalized()
-        #expect(mode.agent.target == .focused)
+        #expect(mode.agent.target == .current)
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-agent-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         try ModeStore.write(mode, to: dir)
-        #expect(ModeStore.loadAll(in: dir).first { $0.id == Mode.codingAgentId }?.agent.target == .focused)
+        #expect(ModeStore.loadAll(in: dir).first { $0.id == Mode.codingAgentId }?.agent.target == .current)
+        #expect(!(try ModeStore.encode(mode)).contains("focused"))
     }
 
     @Test(arguments: [
-        ("focused", Mode.Agent.Target.focused),
+        ("focused", Mode.Agent.Target.current),
         ("current", .current),
         ("ask", .ask),
         ("keyscribe blue", .handle("keyscribe blue")),
@@ -86,7 +86,7 @@ struct AgentModeTests {
     @Test func theAgentTableIsAKnownKey() throws {
         var mode = Mode(id: "coding-agent", name: "Coding agent")
         mode.output = .agent
-        mode.agent = .init(target: .current, delivery: .draft)
+        mode.agent = .init(target: .handle("backend"))
         #expect(ModeStore.unknownKeys(in: try ModeStore.encode(mode)).isEmpty)
     }
 
@@ -124,7 +124,7 @@ struct AgentModeTests {
         #expect(mode.isSystem)
         #expect(mode.name == "Coding agent")
         #expect(mode.triggerKeys.isEmpty)
-        #expect(mode.agent == .init(target: .current, delivery: .submit))
+        #expect(mode.agent == .init(target: .current))
         #expect(mode.commands == .init(liveEdits: true, privacy: false, numbers: true))
 
         let all = ModeStore.loadAll(in: dir)
@@ -142,7 +142,7 @@ struct AgentModeTests {
         edited.constraints = [.init(bundleId: "com.example")]
         edited.triggerKeys = [.init(key: "control+/")]
         edited.enabled = false
-        edited.agent = .init(target: .current, delivery: .draft)
+        edited.agent = .init(target: .handle("backend"))
         edited.dictionary = .init(includeGlobal: false, words: ["herdr"])
         edited.replacements = .init(includeGlobal: false, rules: [.init(heard: "a", replace: "b", regex: false)])
         edited.aiRewrite = .init(

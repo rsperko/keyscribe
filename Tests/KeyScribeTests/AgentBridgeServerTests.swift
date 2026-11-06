@@ -86,13 +86,31 @@ struct AgentBridgeServerTests {
         try request(dir, path: "/poll", body: #"{"session":"\#(session)","instance":"\#(instance)","connection":"\#(connection ?? instance)"}"#)
     }
 
+    @Test func aForgottenSessionMustSayHelloBeforeItsNextPollWhileOthersKeepPolling() async throws {
+        let (server, _, dir) = try makeServer(pollHold: 5)
+        defer { server.stop() }
+        try hello(dir)
+        try hello(dir, session: "s2", instance: "i2")
+        server.forget(session: "claude:s1")
+        server.enqueue(.submit(id: "r1", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture), for: "claude:s1")
+        server.enqueue(.submit(id: "r2", expectedSession: "claude:s2", text: "y", expiresAt: .distantFuture), for: "claude:s2")
+        #expect(try poll(dir).0 == 409)
+        #expect(try poll(dir, session: "s2", instance: "i2").1.contains("r2"))
+        #expect(try hello(dir) == 200)
+        server.enqueue(.submit(id: "r3", expectedSession: "claude:s1", text: "z", expiresAt: .distantFuture), for: "claude:s1")
+        let (status, body) = try poll(dir)
+        #expect(status == 200)
+        #expect(body.contains("r3"))
+        #expect(!body.contains("r1"))
+    }
+
     @Test func retiringOneAgentLeavesTheOthersConnected() async throws {
         let (server, events, dir) = try makeServer(pollHold: 5)
         defer { server.stop() }
         try hello(dir)
         try hello(dir, session: "s2", instance: "i2", agent: "pi")
-        server.enqueue(.submit(id: "r1", expectedSession: "claude:s1", text: "x"), for: "claude:s1")
-        server.enqueue(.submit(id: "r2", expectedSession: "pi:s2", text: "y"), for: "pi:s2")
+        server.enqueue(.submit(id: "r1", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture), for: "claude:s1")
+        server.enqueue(.submit(id: "r2", expectedSession: "pi:s2", text: "y", expiresAt: .distantFuture), for: "pi:s2")
         #expect(try poll(dir, session: "s2", instance: "i2").1.contains("r2"))
         async let polled = Task.detached { try self.poll(dir, session: "s2", instance: "i2") }.value
         try await Task.sleep(for: .milliseconds(300))
@@ -118,7 +136,7 @@ struct AgentBridgeServerTests {
         #expect(server.isLive(session: "claude:s1"))
         #expect(server.isLive(session: "pi:s1"))
         #expect(events.all.compactMap { if case .hello(let hello) = $0 { hello.session } else { nil } } == ["claude:s1", "pi:s1"])
-        server.enqueue(.submit(id: "r1", expectedSession: "pi:s1", text: "x"), for: "pi:s1")
+        server.enqueue(.submit(id: "r1", expectedSession: "pi:s1", text: "x", expiresAt: .distantFuture), for: "pi:s1")
         #expect(try poll(dir, session: "s1", instance: "i2").1.contains("r1"))
         #expect(try request(dir, path: "/event", body: #"{"op":"typed","session":"s1","instance":"i2","connection":"i2","prompts":1}"#).0 == 200)
         #expect(events.all.contains(.typed(session: "pi:s1", prompts: 1)))
@@ -222,10 +240,10 @@ struct AgentBridgeServerTests {
         let (server, _, dir) = try makeServer()
         defer { server.stop() }
         try hello(dir)
-        server.enqueue(.submit(id: "r1", expectedSession: "claude:s1", text: "run the tests"), for: "claude:s1")
+        server.enqueue(.submit(id: "r1", expectedSession: "claude:s1", text: "run the tests", expiresAt: .distantFuture), for: "claude:s1")
         let (status, body) = try poll(dir)
         #expect(status == 200)
-        #expect(try AgentBridgeCodec.decodeCommands(Data(body.utf8)) == [.submit(id: "r1", expectedSession: "s1", text: "run the tests")])
+        #expect(try AgentBridgeCodec.decodeCommands(Data(body.utf8)) == [.submit(id: "r1", expectedSession: "s1", text: "run the tests", expiresAt: .distantFuture)])
     }
 
     @Test func aParkedPollIsAnsweredWhenACommandArrives() async throws {
@@ -234,10 +252,10 @@ struct AgentBridgeServerTests {
         try hello(dir)
         async let polled = Task.detached { try self.poll(dir) }.value
         try await Task.sleep(for: .milliseconds(300))
-        server.enqueue(.abort(id: "r2", expectedSession: "claude:s1", expectedTurn: "t1"), for: "claude:s1")
+        server.enqueue(.status(id: "r2", expectedSession: "claude:s1", text: "Dictating"), for: "claude:s1")
         let (status, body) = try await polled
         #expect(status == 200)
-        #expect(try AgentBridgeCodec.decodeCommands(Data(body.utf8)) == [.abort(id: "r2", expectedSession: "s1", expectedTurn: "t1")])
+        #expect(try AgentBridgeCodec.decodeCommands(Data(body.utf8)) == [.status(id: "r2", expectedSession: "s1", text: "Dictating")])
     }
 
     @Test func aParkedPollWithNothingToDoReturnsEmptyAfterTheHold() throws {
@@ -255,7 +273,7 @@ struct AgentBridgeServerTests {
         let (server, events, dir) = try makeServer(pollHold: 0.3)
         defer { server.stop() }
         try hello(dir)
-        server.enqueue(.submit(id: "r3", expectedSession: "claude:s1", text: "x"), for: "claude:s1")
+        server.enqueue(.submit(id: "r3", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture), for: "claude:s1")
         _ = try poll(dir)
         try hello(dir, instance: "i2")
         let (_, body) = try poll(dir, instance: "i2")
@@ -267,7 +285,7 @@ struct AgentBridgeServerTests {
         let (server, events, dir) = try makeServer(pollHold: 0.3)
         defer { server.stop() }
         _ = try readyHello(dir, gap: false)
-        server.enqueue(.submit(id: "r7", expectedSession: "claude:s1", text: "x"), for: "claude:s1")
+        server.enqueue(.submit(id: "r7", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture), for: "claude:s1")
         _ = try readyHello(dir, connection: "c2", gap: true)
         let (_, body) = try poll(dir, connection: "c2")
         #expect(body == "[]")
@@ -281,7 +299,7 @@ struct AgentBridgeServerTests {
     @Test func aFreshHelloKeepsWhatWasQueuedForTheSession() throws {
         let (server, _, dir) = try makeServer(pollHold: 0.3)
         defer { server.stop() }
-        server.enqueue(.submit(id: "r8", expectedSession: "claude:s1", text: "x"), for: "claude:s1")
+        server.enqueue(.submit(id: "r8", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture), for: "claude:s1")
         _ = try readyHello(dir, gap: false)
         let (_, body) = try poll(dir)
         #expect(try AgentBridgeCodec.decodeCommands(Data(body.utf8)).map(\.id) == ["r8"])
@@ -356,13 +374,15 @@ struct AgentBridgeServerTests {
             [ClaudeRegistryEntry(pid: 10, sessionId: "s1", cwd: "/src/keyscribe", name: nil, status: registry.status, waitingFor: nil)]
         }, scanDeadline: .seconds(30))
         box.hub = hub
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _ in notices.append(receipt) }
         let send = { (body: String) in try await Task.detached { try self.request(dir, path: "/event", body: body) }.value }
         let ready = #"{"op":"hello","protocol":2,"agent":"claude","instance":"i1","session":"s1","pid":1,"installation":"inst-1","features":["readiness"]"#
 
         _ = try await send(ready + #","idle":true,"gap":false,"connection":"c1"}"#)
         _ = try await Task.detached { try self.poll(dir, connection: "c1") }.value
         await hub.rescan()
-        #expect(await hub.deliver("run the tests", to: "claude:s1", delivery: .submit) == .queued("keyscribe"))
+        #expect(await hub.deliver("run the tests", to: "claude:s1") == .queued("keyscribe"))
 
         _ = try await send(ready + #","idle":false,"gap":true,"connection":"c2"}"#)
         registry.status = "idle"
@@ -372,8 +392,7 @@ struct AgentBridgeServerTests {
 
         let (_, body) = try await Task.detached { try self.poll(dir, connection: "c2") }.value
         #expect(body == "[]")
-        #expect(hub.recent == [.kept("keyscribe", reason: .connectionGap)])
-        #expect(hub.unsent.map(\.text) == ["run the tests"])
+        #expect(notices == [.kept("keyscribe", reason: .connectionGap)])
     }
 
     @Test func aGapInOneTerminalKeepsWhatWasAddressedToTheOther() throws {
@@ -381,7 +400,7 @@ struct AgentBridgeServerTests {
         defer { server.stop() }
         _ = try readyHello(dir, instance: "left", gap: false)
         _ = try readyHello(dir, instance: "right", gap: false)
-        server.enqueue(.submit(id: "r9", expectedSession: "claude:s1", text: "x"), for: "claude:s1", instance: "left")
+        server.enqueue(.submit(id: "r9", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture), for: "claude:s1", instance: "left")
         _ = try readyHello(dir, instance: "right", connection: "right-2", gap: true)
         let (_, left) = try poll(dir, instance: "left")
         #expect(try AgentBridgeCodec.decodeCommands(Data(left.utf8)).map(\.id) == ["r9"])
@@ -392,7 +411,7 @@ struct AgentBridgeServerTests {
         let (server, _, dir) = try makeServer(pollHold: 0.3)
         defer { server.stop() }
         try hello(dir)
-        server.enqueue(.submit(id: "r4", expectedSession: "claude:s1", text: "x"), for: "claude:s1")
+        server.enqueue(.submit(id: "r4", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture), for: "claude:s1")
         _ = try poll(dir)
         _ = try request(dir, path: "/event", body: #"{"op":"ack","request":"r4","instance":"i1","connection":"i1"}"#)
         try hello(dir, instance: "i2")
@@ -414,7 +433,7 @@ struct AgentBridgeServerTests {
         let (server, events, dir) = try makeServer(pollHold: 0.3)
         defer { server.stop() }
         try hello(dir, instance: "old")
-        server.enqueue(.submit(id: "r6", expectedSession: "claude:s1", text: "x"), for: "claude:s1", instance: "old")
+        server.enqueue(.submit(id: "r6", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture), for: "claude:s1", instance: "old")
         let deadline = Date().addingTimeInterval(3)
         let notSent = AgentEvent.undelivered(request: "r6", reason: "instanceGone", handedOff: false)
         while Date() < deadline, !events.all.contains(notSent) { usleep(50_000) }
@@ -426,7 +445,7 @@ struct AgentBridgeServerTests {
         defer { server.stop() }
         try hello(dir, instance: "left")
         try hello(dir, instance: "right")
-        server.enqueue(.submit(id: "r5", expectedSession: "claude:s1", text: "x"), for: "claude:s1", instance: "left")
+        server.enqueue(.submit(id: "r5", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture), for: "claude:s1", instance: "left")
         let (_, right) = try poll(dir, instance: "right")
         #expect(right == "[]")
         let (_, left) = try poll(dir, instance: "left")
@@ -466,7 +485,7 @@ struct AgentBridgeServerTests {
         let (server, events, dir) = try makeServer(pollHold: 0.3)
         defer { server.stop() }
         try hello(dir, connection: "c1")
-        server.enqueue(.submit(id: "r1", expectedSession: "claude:s1", text: "x"), for: "claude:s1")
+        server.enqueue(.submit(id: "r1", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture), for: "claude:s1")
         _ = try poll(dir, connection: "c1")
         _ = try readyHello(dir, connection: "c2", gap: false)
         #expect(events.all.contains(.undelivered(request: "r1", reason: "connectionGap", handedOff: true)))
@@ -496,7 +515,7 @@ struct AgentBridgeServerTests {
         defer { server.stop() }
         try hello(dir)
         try hello(dir, session: "s2", instance: "i2")
-        server.enqueue(.submit(id: "r2", expectedSession: "claude:s2", text: "x"), for: "claude:s2")
+        server.enqueue(.submit(id: "r2", expectedSession: "claude:s2", text: "x", expiresAt: .distantFuture), for: "claude:s2")
         async let polled = Task.detached { try self.poll(dir) }.value
         try await Task.sleep(for: .milliseconds(300))
         server.retire()

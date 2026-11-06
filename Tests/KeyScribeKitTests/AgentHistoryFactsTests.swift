@@ -10,11 +10,9 @@ private let roster = [conversation("s-backend", "backend"), conversation("s-docs
 
 private func facts(
     _ address: AgentAddress, _ resolution: AgentRecipient.Resolution,
-    frozen: AgentRecipient.Frozen? = AgentRecipient.Frozen(id: "s-docs", source: .current),
-    delivery: Mode.Agent.Delivery = .submit
+    frozen: AgentRecipient.Frozen? = AgentRecipient.Frozen(id: "s-docs", source: .current)
 ) -> [String: String] {
-    let list = AgentHistoryFacts.facts(
-        address: address, resolution: resolution, frozen: frozen, conversations: roster, delivery: delivery)
+    let list = AgentHistoryFacts.facts(address: address, resolution: resolution, frozen: frozen, conversations: roster)
     return Dictionary(list.map { ($0.label, $0.value) }, uniquingKeysWith: { first, _ in first })
 }
 
@@ -37,7 +35,6 @@ struct AgentHistoryFactsTests {
         #expect(recorded["Spoken address"] == "backend")
         #expect(recorded["Conversation"] == "backend \u{00B7} claude \u{00B7} s-backend")
         #expect(recorded["Chosen by"] == "Its name")
-        #expect(recorded["Delivery"] == nil)
     }
 
     @Test func aMessageToTheCurrentConversationNamesTheDefaultAndHowItWasChosen() {
@@ -47,12 +44,10 @@ struct AgentHistoryFactsTests {
         #expect(recorded["Conversation"] == "docs \u{00B7} claude \u{00B7} s-docs")
         #expect(recorded["Chosen by"] == "The current conversation")
         #expect(recorded["Default recipient"] == "docs")
-        #expect(recorded["Delivery"] == "Send")
     }
 
-    @Test func aDraftModeRecordsThatItKeepsADraft() {
-        let recorded = facts(.none(body: "x"), .deliver(id: "s-docs", body: "x", source: .fixed), delivery: .draft)
-        #expect(recorded["Delivery"] == "Keep as a draft")
+    @Test func aFixedConversationRecordsThatTheModeChoseIt() {
+        let recorded = facts(.none(body: "x"), .deliver(id: "s-docs", body: "x", source: .fixed))
         #expect(recorded["Chosen by"] == "The mode\u{2019}s fixed conversation")
     }
 
@@ -94,7 +89,7 @@ struct AgentHistoryFactsTests {
     @Test func noDefaultRecipientIsRecordedWhenNoneWasFrozen() {
         let list = AgentHistoryFacts.facts(
             address: .name("backend", body: "x"), resolution: .deliver(id: "s-backend", body: "x", source: .spoken),
-            frozen: nil, conversations: roster, delivery: .submit)
+            frozen: nil, conversations: roster)
         #expect(list.contains(.init(label: "Conversation", value: "backend \u{00B7} claude \u{00B7} s-backend")))
         #expect(!list.contains { $0.label == "Default recipient" })
     }

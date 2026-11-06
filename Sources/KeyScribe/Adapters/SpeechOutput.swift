@@ -196,6 +196,8 @@ final class NaturalSpeech: SpeechSynthesizing {
     private let fallback: any SpeechSynthesizing
     private let outcome: (Bool) -> Void
     private let fallbackLimit: (String) -> Duration
+    private let synthesisLimit: (String) -> Duration
+    private let unfinished = UnfinishedSyntheses()
     private var making: Task<Void, Never>?
     private var watchdog: Task<Void, Never>?
     private var active: Source?
@@ -206,7 +208,8 @@ final class NaturalSpeech: SpeechSynthesizing {
         ready: @escaping () -> Bool, synthesize: @escaping @Sendable (String, String) async throws -> Data,
         player: any AudioPlaying = WAVPlayer(), fallback: any SpeechSynthesizing = SystemSpeech(),
         outcome: @escaping (Bool) -> Void = { _ in },
-        fallbackLimit: @escaping (String) -> Duration = NaturalSpeech.fallbackLimit
+        fallbackLimit: @escaping (String) -> Duration = NaturalSpeech.fallbackLimit,
+        synthesisLimit: @escaping (String) -> Duration = NaturalSpeech.fallbackLimit
     ) {
         self.ready = ready
         self.synthesize = synthesize
@@ -214,6 +217,7 @@ final class NaturalSpeech: SpeechSynthesizing {
         self.fallback = fallback
         self.outcome = outcome
         self.fallbackLimit = fallbackLimit
+        self.synthesisLimit = synthesisLimit
         player.onFinished = { [weak self] in self?.ended(.player) }
         fallback.onStarted = { [weak self] in
             guard let self, self.active == .fallback else { return }
@@ -223,6 +227,9 @@ final class NaturalSpeech: SpeechSynthesizing {
     }
 
     var isSpeaking: Bool { active != nil }
+    var unfinishedSyntheses: Int { unfinished.count }
+
+    private static let unfinishedLimit = 2
 
     nonisolated static func fallbackLimit(_ text: String) -> Duration {
         .seconds(10) + .milliseconds(600 * text.split(whereSeparator: { $0.isWhitespace }).count)
@@ -230,13 +237,18 @@ final class NaturalSpeech: SpeechSynthesizing {
 
     func speak(_ text: String, voice: String?) {
         silence()
-        guard ready() else { return speakWithFallback(text) }
+        guard ready(), unfinished.count < Self.unfinishedLimit else { return speakWithFallback(text) }
         let voice = SpokenVoices.resolved(voice)
         let synthesize = synthesize
+        let unfinished = unfinished
+        let limit = synthesisLimit(text)
+        let seconds = Double(limit.components.seconds) + Double(limit.components.attoseconds) / 1e18
         active = .making
+        unfinished.begin()
         var task: Task<Void, Never>?
         task = Task { [weak self] in
-            let audio = try? await synthesize(text, voice)
+            let audio = try? await runWithDeadline(
+                seconds: seconds, operation: { try await synthesize(text, voice) }, onSettled: { unfinished.end() })
             guard !Task.isCancelled, let self, self.making == task else { return }
             self.making = nil
             if let audio {
@@ -291,4 +303,12 @@ final class NaturalSpeech: SpeechSynthesizing {
         watchdog = nil
         onFinished?()
     }
+}
+
+private final class UnfinishedSyntheses: @unchecked Sendable {
+    private let lock = NSLock()
+    private var running = 0
+    var count: Int { lock.withLock { running } }
+    func begin() { lock.withLock { running += 1 } }
+    func end() { lock.withLock { running -= 1 } }
 }

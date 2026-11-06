@@ -25,7 +25,6 @@ struct AgentHUDTests {
     }
 
     @Test func eachSourceIsDescribedWithoutClaimingTheScreenIdentifiedIt() {
-        #expect(recording(.init(id: "a", source: .focused)).agentRosterHint?.hasPrefix("The conversation on screen.") == true)
         #expect(recording(.init(id: "a", source: .fixed)).agentRosterHint?.hasPrefix("Set by this mode.") == true)
         #expect(recording(nil).primaryText == "No recipient yet")
         #expect(recording(nil).agentRosterHint == "Start with \u{201C}keyscribe \u{2026}\u{201D} or \u{201C}session 1 \u{2026}\u{201D}, then your message.")

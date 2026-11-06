@@ -103,7 +103,7 @@
   A **Coding agent** take fills them: `summary` says what happened (`Sent to backend`, `Queued for backend`,
   `Opened backend`, or why nothing was sent), and `facts` record the command (Open, choosing a recipient, or a
   message), the spoken address, the conversation chosen with its session id, how it was chosen, the default
-  recipient frozen at the start of the take, and the delivery setting. `result` is the text actually sent,
+  recipient frozen at the start of the take. `result` is the text actually sent,
   empty for an Open. A queued or uncertain message's entry is updated in place, by `id`, when its receipt
   arrives while the app is still running; a receipt after a restart, or after Coding agents is turned off,
   leaves the entry as it was. The update re-reads the entry, so a rewrite that fell back or was skipped
@@ -236,6 +236,13 @@ a hello on any other protocol is refused with `426` and is never registered or s
   connector may already have carried out stays uncertain. A connector that does not announce
   `readiness` is always treated as resuming after a gap, and as busy until the agent's own session
   record says it is idle.
+- **A submit carries a deadline** (`expiresAt`, in epoch milliseconds, like a focus): the end of KeyScribe's
+  receipt timeout. The connector checks it immediately before it submits, after any wait of its own, and
+  refuses a late submit as `expired`, so a take KeyScribe has reported as uncertain never starts afterwards.
+  The deadline is required: a submit without one is refused as `expired` too, so a connector never
+  submits text whose lifetime KeyScribe did not bound. A queued submit whose deadline passes before the
+  connector collects it is never handed over and is reported as not sent (`expired`); one the connector
+  had already collected stays uncertain.
 - **A submit is refused as `working`** when a turn is already running in that session; KeyScribe holds
   the take and sends it when the turn finishes.
 - **A submit is refused as `draft`** when the agent's prompt box holds text the user has not sent; the
@@ -474,7 +481,8 @@ context = { app = true, preceding_text = false }
 | `trigger_phrases` | string[] | Spoken phrases matched at the transcript end post-STT — case-insensitive, word-boundary-honored, trailing punctuation/space tolerated. Each is a regex, so power users can write one (`(?-i)` opts back into case-sensitivity). Zero or more. |
 | `constraints[]` | table[] | Any of `bundle_id`, `bundle_prefix`, `url_pattern`, `window_title` (ANDed). Empty ⇒ eligible everywhere. |
 | `source` | enum | `dictation` \| `selection`. |
-| `output` | enum | `cursor` \| `replace_selection` \| `voice_command`. `voice_command` is the Voice Commands system mode's output: the take is run as a command (`voice_commands.toml`) and nothing is inserted. Any other mode file that sets it fails to load. |
+| `output` | enum | `cursor` \| `replace_selection` \| `voice_command` \| `agent`. `voice_command` is the Voice Commands system mode's output: the take is run as a command (`voice_commands.toml`) and nothing is inserted. `agent` is the Coding agent system mode's output: the take goes to a coding agent conversation ("Coding agent bridge" above). Any other mode file that sets either fails to load. |
+| `[agent]` | table | Read only with `output = "agent"`. `target` picks the conversation a take goes to when it does not start with one's name: `current` (default) is the conversation the front terminal shows when the take starts, if that can be confirmed in the window that had focus, without asking for access, shortly after release at the latest, and otherwise the current recipient; `ask` holds the take until one is named, and any other text is the name of a fixed conversation (the take is held if no live conversation has that name). An older `focused` is read as `current`. |
 | `commands.live_edits` | bool | Opt-in to the spoken-command list (insert new line, insert new paragraph, insert tab character, scratch that, **insert clipboard contents**, **begin/end verbatim**). |
 | `commands.privacy` | bool | Opt-in to best-effort redaction. When true, **context is forced off** — `ai_rewrite.context` is locked to all-false so only the redacted transcript leaves. |
 | `commands.numbers` | bool | Opt-in to inverse text normalization ("twenty five" → "25"); bails on ambiguous/year-like runs. |

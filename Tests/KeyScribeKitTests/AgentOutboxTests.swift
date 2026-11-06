@@ -3,8 +3,8 @@ import Testing
 @testable import KeyScribeKit
 
 struct AgentOutboxTests {
-    private func message(_ id: String, to conversation: String = "s1", delivery: Mode.Agent.Delivery = .submit) -> AgentOutbox.Message {
-        AgentOutbox.Message(id: id, conversation: conversation, text: "run the tests", delivery: delivery)
+    private func message(_ id: String, to conversation: String = "s1") -> AgentOutbox.Message {
+        AgentOutbox.Message(id: id, conversation: conversation, text: "run the tests")
     }
 
     @Test func anIdleConversationGetsTheMessageAndNothingIsHeld() {
@@ -26,14 +26,14 @@ struct AgentOutboxTests {
 
     @Test func aMissingConversationIsNotSentAndNotHeld() {
         var outbox = AgentOutbox()
-        #expect(outbox.send(message("m1"), state: nil) == .notSent(.disconnected))
+        #expect(outbox.send(message("m1"), state: nil) == .disconnected)
         #expect(outbox.held.isEmpty)
     }
 
     @Test func aHeldMessageWhoseConversationWentAwayComesBackNotSent() {
         var outbox = AgentOutbox()
         _ = outbox.send(message("m1"), state: .working)
-        #expect(outbox.release { _ in nil } == [.init(message: message("m1"), decision: .notSent(.disconnected))])
+        #expect(outbox.release { _ in nil } == [.init(message: message("m1"), decision: .disconnected)])
         #expect(outbox.held.isEmpty)
     }
 
@@ -92,12 +92,6 @@ struct AgentOutboxTests {
         _ = outbox.send(message("m1"), state: .working)
         outbox.noteInterrupted(conversation: "s1")
         #expect(outbox.release { _ in .idle }.map(\.decision) == [.needsReview(.interrupted)])
-    }
-
-    @Test func aReviewModeMessageBecomesADraftInsteadOfSending() {
-        var outbox = AgentOutbox()
-        #expect(outbox.send(message("m1", delivery: .draft), state: .idle) == .draft(.modeReviews))
-        #expect(outbox.held.isEmpty)
     }
 
     @Test func aWithdrawnMessageIsNeverReleased() {

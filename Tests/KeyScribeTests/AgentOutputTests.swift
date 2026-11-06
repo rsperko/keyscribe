@@ -36,7 +36,7 @@ struct AgentOutputTests {
         let output = AgentOutput(hud: HUDChannel(hud: nil), reporter: reporter)
         output.keepsHistory = { true }
         let hub = AgentHub(transport: NoTransport(), scan: { [] }, names: AgentNameStore(directory: dir))
-        let (request, _) = await output.deliver("hi", to: "s1", delivery: .submit, via: hub)
+        let (request, _) = await output.deliver("hi", to: "s1", via: hub)
         output.showNotice(.sent("backend"), request: request)
         var entry = HistoryEntry(
             id: UUID().uuidString, timestamp: Date(), modeName: "Coding agent", heard: "hi", result: "hi", outcome: .inserted,
@@ -53,6 +53,7 @@ struct AgentOutputTests {
     private final class NoTransport: AgentTransport {
         func enqueue(_ command: AgentCommand, for session: String) {}
         func isLive(session: String) -> Bool { false }
+        func forget(session: String) {}
         func withdraw(_ id: String) -> Bool { false }
     }
 }

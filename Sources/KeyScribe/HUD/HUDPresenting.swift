@@ -367,7 +367,6 @@ extension HUDState {
         switch agents.source {
         case nil where agents.namesAvailable: return "Start with \(example(first)), then your message."
         case nil: return "\(namesOff). Start with \(example(first)), then your message."
-        case .focused: source = "The conversation on screen."
         case .fixed: source = "Set by this mode."
         case .front: source = "The conversation in front of you."
         case .current, .spoken: source = "The last conversation you used."

@@ -284,7 +284,10 @@ says so as an Error. It adds that what was said is in History only once that ent
 confirmed saved — this one write waits for the disk rather than being queued like every other
 History write, so a failed save never sends the user looking for an entry that does not exist. A take
 stopped by the limit never presses the mode's Return, including a take that is only a spoken Return
-command; the latter reports “Stopped at the [limit] limit — Return not pressed”.
+command; the latter reports “Stopped at the [limit] limit — Return not pressed”. A Coding agent take stopped
+by the limit is never sent, since sending submits it: an Error says so and points to Paste last dictation for
+what was captured. A Coding agent take whose microphone stopped never selects or opens a conversation either;
+it reports that the command did not run.
 
 **Coding agent session list.** A recording in the Coding agent mode lists the open sessions so the user
 can address one. Its displayed and spoken name is the user's KeyScribe override, else the agent's explicit
@@ -446,7 +449,7 @@ order, and names never change for that take, new sessions do not join it, and a 
 its row marked Ended rather than handing its number to a neighbour. Live states update in place. A state
 that means the session cannot receive (Not connected, Disconnected, Ended) is orange, and the
 word itself says so, so colour is never the only signal. The recipient line says where it came from and never claims the screen identified a
-conversation it did not: “The conversation in front of you”, “The conversation on screen”, “The last conversation you used”, or “Set by
+conversation it did not: “The conversation in front of you”, “The last conversation you used”, or “Set by
 this mode” — followed by a real example of both address forms taken from the list (“docs …” or
 “session 4 …”; a bare “four” starts the message, and “tell four” reaches only a conversation named four). With no recipient, nothing is highlighted. A list
 taller than the screen allows scrolls to the recipient each time recording starts, and keeps its numbers.
@@ -1588,7 +1591,9 @@ result fails to speak), or whose delete removed only some files reads "Needs att
 and **Reinstall voice** in the row. When an installed voice fails to read a summary and the macOS voice reads
 it instead, an advisory under the row says so until the natural voice plays again. A macOS voice that is cancelled, or
 never finishes, ends playback; one that never reports finishing is ended after `NaturalSpeech.fallbackLimit`,
-which grows with the text, so the speaking panel and its Escape are never held. Progress, failures and that
+which grows with the text, so the speaking panel and its Escape are never held. An installed voice still
+preparing its audio after that same limit hands the text to the macOS voice, and new speech skips the natural voice
+while stalled preparations are still running. Progress, failures and that
 advisory always sit at the Voice row, never inside the disclosure.
 
 **Advanced** is one collapsed `DisclosureSection`, with no disclosure nested inside it. It holds the **Summary
@@ -1686,7 +1691,7 @@ described as forgetting the chosen names. Rename is unavailable, and a take star
 is not a row number (“tell session 2 …”) is held instead of sent, including prose such as “tell me …”.
 A take starting with a name but no “tell” cannot be recognized and goes to the current conversation.
 The HUD offers row numbers while names are unavailable, and the Settings example points to the number
-shown while recording. Choosing or renaming a
+shown while recording without naming one, since the Settings list and the recording list are ordered differently. Choosing or renaming a
 conversation never retargets a take already recording: its list and recipient stay frozen.
 
 When privacy is enabled, context controls remain visible but disabled with the exact reason:
@@ -1839,7 +1844,7 @@ comparison. Its Result view leads with the outcome in large type, red when it fa
 second copy of it. Below it come what was heard, on its own and selectable for corrections, then the
 **Message** that was sent or kept when it differs from what was heard. **What happened** follows:
 labelled lines recorded when the take happened (the command, the spoken address, the conversation, or
-*None resolved*, and how it was chosen, the default recipient, the delivery setting), then, once a queued
+*None resolved*, and how it was chosen, and the default recipient), then, once a queued
 or uncertain message settles, a timed line for each result in order. Those lines are as they were at the
 time, so a later rename or reorder does not change them. When an AI rewrite ran, **Compare with the AI
 rewrite** offers the usual comparison, collapsed, with the final text called **Result**. A message whose

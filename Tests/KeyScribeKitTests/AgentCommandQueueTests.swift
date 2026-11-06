@@ -5,7 +5,7 @@ import Testing
 struct AgentCommandQueueTests {
     private let t0 = Date(timeIntervalSince1970: 1_000)
     private func at(_ seconds: TimeInterval) -> Date { t0.addingTimeInterval(seconds) }
-    private func command(_ id: String) -> AgentCommand { .submit(id: id, expectedSession: "s1", text: "hello \(id)") }
+    private func command(_ id: String) -> AgentCommand { .submit(id: id, expectedSession: "s1", text: "hello \(id)", expiresAt: .distantFuture) }
     private let quiet = AgentCommandQueue.activeWindow + 1
 
     @Test func aConnectionGapWithdrawsEverythingTheSessionHadOutstanding() {
@@ -14,7 +14,7 @@ struct AgentCommandQueueTests {
         queue.enqueue(command("r1"), for: "s1", at: t0)
         _ = queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(1))
         queue.enqueue(command("r2"), for: "s1", at: at(1))
-        queue.enqueue(.submit(id: "r3", expectedSession: "s2", text: "other"), for: "s2", at: at(1))
+        queue.enqueue(.submit(id: "r3", expectedSession: "s2", text: "other", expiresAt: .distantFuture), for: "s2", at: at(1))
 
         let withdrawn = queue.connectionGap(session: "s1", instance: "i1")
         #expect(withdrawn.map(\.command.id).sorted() == ["r1", "r2"])
@@ -237,6 +237,38 @@ struct AgentCommandQueueTests {
         #expect(queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(4)) == [])
     }
 
+    @Test func aForgottenSessionIsNotPolledOrLiveUntilItSaysHelloAgain() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+        queue.hello(session: "s2", instance: "i2", connection: "c2", at: t0)
+        queue.forget(session: "s1")
+        #expect(queue.poll(session: "s1", instance: "i1", connection: "c1", at: at(1)) == nil)
+        #expect(!queue.isLive(session: "s1", at: at(1)))
+        #expect(queue.poll(session: "s2", instance: "i2", connection: "c2", at: at(1)) == [])
+        queue.hello(session: "s1", instance: "i1", connection: "c3", at: at(2))
+        #expect(queue.poll(session: "s1", instance: "i1", connection: "c3", at: at(2)) == [])
+    }
+
+    @Test func anExpiredSubmitIsNeverDeliveredAndIsReportedAsExpiredNotHandedOff() {
+        var queue = AgentCommandQueue()
+        let submit = AgentCommand.submit(id: "r1", expectedSession: "s1", text: "x", expiresAt: at(3))
+        queue.enqueue(submit, for: "s1", at: t0)
+        queue.hello(session: "s1", instance: "i1", connection: "i1", at: at(4))
+        #expect(queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(4)) == [])
+        #expect(queue.undeliverable(at: at(4)) == [.init(command: submit, reason: .expired, handedOff: false)])
+        #expect(queue.undeliverable(at: at(5)).isEmpty)
+    }
+
+    @Test func aSubmitThatExpiresAfterTheConnectorCollectedItStaysHandedOff() {
+        var queue = AgentCommandQueue()
+        let submit = AgentCommand.submit(id: "r1", expectedSession: "s1", text: "x", expiresAt: at(3))
+        queue.hello(session: "s1", instance: "i1", connection: "i1", at: t0)
+        queue.enqueue(submit, for: "s1", at: t0)
+        #expect(queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(1)) == [submit])
+        queue.tick(at: at(2 + AgentCommandQueue.ackTimeout))
+        #expect(queue.undeliverable(at: at(3 + AgentCommandQueue.ackTimeout)).map(\.handedOff) == [true])
+    }
+
     @Test func aFocusRequeuedAfterItExpiredIsDropped() {
         var queue = AgentCommandQueue()
         queue.hello(session: "s1", instance: "i1", connection: "i1", at: t0)
@@ -265,10 +297,7 @@ struct AgentCommandQueueTests {
 struct AgentBridgeCodecTests {
     @Test func commandsRoundTripAsJSON() throws {
         let commands: [AgentCommand] = [
-            .submit(id: "r1", expectedSession: "s1", text: "/usr/local/bin is missing"),
-            .abort(id: "r2", expectedSession: "s1", expectedTurn: "t7"),
-            .fill(id: "r3", expectedSession: "s1", text: "use approach B"),
-            .offerButton(id: "r4", expectedSession: "s1", text: "use approach B"),
+            .submit(id: "r1", expectedSession: "s1", text: "/usr/local/bin is missing", expiresAt: Date(timeIntervalSince1970: 1_793_400_008.5)),
             .status(id: "r5", expectedSession: "s1", text: "🎙 keyscribe"),
             .focus(id: "r6", expectedSession: "s1", expiresAt: Date(timeIntervalSince1970: 1_793_400_000.25)),
         ]
@@ -339,12 +368,17 @@ struct AgentBridgeCodecTests {
     }
 
     @Test func aSubmitCarriesThePromptCountItWasDecidedAgainst() throws {
-        let fenced: [AgentCommand] = [.submit(id: "r1", expectedSession: "s1", text: "x", expectedPrompts: 3)]
+        let fenced: [AgentCommand] = [.submit(id: "r1", expectedSession: "s1", text: "x", expectedPrompts: 3, expiresAt: .distantFuture)]
         let data = try AgentBridgeCodec.encode(fenced)
         #expect(String(decoding: data, as: UTF8.self).contains(#""expectedPrompts":3"#))
         #expect(try AgentBridgeCodec.decodeCommands(data) == fenced)
-        let unfenced = try AgentBridgeCodec.encode([.submit(id: "r1", expectedSession: "s1", text: "x")])
+        let unfenced = try AgentBridgeCodec.encode([.submit(id: "r1", expectedSession: "s1", text: "x", expiresAt: .distantFuture)])
         #expect(!String(decoding: unfenced, as: UTF8.self).contains("expectedPrompts"))
+    }
+
+    @Test func aSubmitWithoutADeadlineIsMalformed() {
+        let undated = #"[{"op":"submit","id":"r1","expectedSession":"s1","text":"x"}]"#
+        #expect(throws: (any Error).self) { try AgentBridgeCodec.decodeCommands(Data(undated.utf8)) }
     }
 
     @Test func helloAndTypedReportTheUsersPromptCount() throws {
