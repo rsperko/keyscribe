@@ -5,6 +5,8 @@ import KeyScribeKit
 final class PiDiscovery: AgentDiscovery {
     let kind = AgentKind.pi
     private var sessions: [String: AgentSession] = [:]
+    private var inTurn: Set<String> = []
+    private var waiting: Set<String> = []
     private let processStart: (Int) -> ProcessStart.Reading
     private let isRunning: @Sendable (Int) -> Bool
 
@@ -22,12 +24,20 @@ final class PiDiscovery: AgentDiscovery {
             sessions = sessions.filter { $0.key == hello.session || $0.value.pid != hello.pid }
             sessions[hello.session] = AgentSession(
                 agent: kind.id, id: hello.session, pid: hello.pid, cwd: hello.cwd ?? "", explicitName: Self.name(hello.title),
-                state: hello.knownIdle ? .idle : .working,
+                state: .idle,
                 startedAt: sessions[hello.session].flatMap { $0.pid == hello.pid ? $0.startedAt : nil } ?? startedAt(of: hello.pid))
+            mark(&inTurn, hello.session, !hello.knownIdle)
+            mark(&waiting, hello.session, hello.waiting != nil)
+            resolve(hello.session)
         case .turnStarted(let session, _):
-            sessions[session]?.state = .working
+            mark(&inTurn, session, true)
+            resolve(session)
         case .turnComplete(let session, _, _):
-            sessions[session]?.state = .idle
+            mark(&inTurn, session, false)
+            resolve(session)
+        case .waiting(let session, let prompt):
+            mark(&waiting, session, prompt != nil)
+            resolve(session)
         case .title(let session, let text):
             sessions[session]?.explicitName = Self.name(text)
         case .typed, .ack, .submitted, .refused, .undelivered, .focused:
@@ -39,6 +49,8 @@ final class PiDiscovery: AgentDiscovery {
         let (pids, isRunning) = (Set(sessions.values.map(\.pid)), isRunning)
         let alive = await Task.detached { pids.filter(isRunning) }.value
         sessions = sessions.filter { !pids.contains($0.value.pid) || alive.contains($0.value.pid) }
+        inTurn.formIntersection(sessions.keys)
+        waiting.formIntersection(sessions.keys)
         return .found(sessions.values.sorted { $0.id < $1.id })
     }
 
@@ -48,6 +60,16 @@ final class PiDiscovery: AgentDiscovery {
 
     func retire() {
         sessions = [:]
+        inTurn = []
+        waiting = []
+    }
+
+    private func mark(_ set: inout Set<String>, _ session: String, _ member: Bool) {
+        if member { set.insert(session) } else { set.remove(session) }
+    }
+
+    private func resolve(_ session: String) {
+        sessions[session]?.state = waiting.contains(session) ? .userDialog : inTurn.contains(session) ? .working : .idle
     }
 
     private func startedAt(of pid: Int) -> Int? {

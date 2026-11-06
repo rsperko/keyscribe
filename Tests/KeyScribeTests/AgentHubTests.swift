@@ -23,20 +23,30 @@ struct AgentHubTests {
 
     final class Registry: @unchecked Sendable {
         var entries: [ClaudeRegistryEntry] = []
-        func set(_ session: String, status: String = "idle", cwd: String = "/src/keyscribe", pid: Int = 10, startedAt: Int? = nil) {
+        func set(
+            _ session: String, status: String = "idle", waitingFor: String? = nil, cwd: String = "/src/keyscribe", pid: Int = 10,
+            startedAt: Int? = nil
+        ) {
             entries.removeAll { $0.sessionId == session }
-            entries.append(ClaudeRegistryEntry(pid: pid, sessionId: session, cwd: cwd, name: nil, status: status, waitingFor: nil, startedAt: startedAt))
+            entries.append(ClaudeRegistryEntry(
+                pid: pid, sessionId: session, cwd: cwd, name: nil, status: status, waitingFor: waitingFor, startedAt: startedAt))
         }
     }
 
     final class Clock: @unchecked Sendable { var now = Date(timeIntervalSince1970: 1000) }
 
-    private func makeHub(receiptTimeout: Duration = .seconds(5), handOffLimit: Duration = .seconds(30), clock: Clock = Clock()) -> (AgentHub, FakeTransport, Registry, Notices) {
+    private func makeHub(
+        receiptTimeout: Duration = .seconds(5), handOffLimit: Duration = .seconds(30), disconnectGrace: Duration = .seconds(30),
+        clock: Clock = Clock()
+    ) -> (AgentHub, FakeTransport, Registry, Notices) {
         let transport = FakeTransport()
         let registry = Registry()
         let notices = Notices()
         var counter = 0
-        let hub = AgentHub(transport: transport, scan: { registry.entries }, receiptTimeout: receiptTimeout, handOffLimit: handOffLimit, scanDeadline: .seconds(30), now: { clock.now }) {
+        let hub = AgentHub(
+            transport: transport, scan: { registry.entries }, receiptTimeout: receiptTimeout, handOffLimit: handOffLimit,
+            disconnectGrace: disconnectGrace, scanDeadline: .seconds(30), now: { clock.now }
+        ) {
             counter += 1
             return "r\(counter)"
         }
@@ -393,6 +403,295 @@ struct AgentHubTests {
         #expect(transport.sent.map(\.0.id) == ["r1", "r2"])
         hub.handle(.submitted(request: "r2", turn: "2"))
         #expect(notices.items.last == .sent("keyscribe"))
+    }
+
+    private func dictated(_ hub: AgentHub, _ transport: FakeTransport, turn: String = "t1") async {
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        await untilSent(transport, sentBefore + 1)
+        if case .submit(let id, _, _, _) = transport.sent.last?.0 { hub.handle(.submitted(request: id, turn: turn)) }
+        _ = await receipt
+        hub.handle(.turnStarted(session: "claude:s1", turn: turn))
+    }
+
+    @Test func aDictatedTurnReportsEachApprovalAndQuestionOnceAndWhenItClears() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var seen: [String] = []
+        hub.onAttention = { seen.append("\($0)|\($1)|\($2.map { "\($0)" } ?? "cleared")") }
+        await dictated(hub, transport)
+        registry.set("s1", status: "waiting", waitingFor: "permission prompt")
+        await hub.rescan()
+        await hub.rescan()
+        registry.set("s1", status: "busy")
+        await hub.rescan()
+        registry.set("s1", status: "waiting", waitingFor: "input needed")
+        await hub.rescan()
+        registry.set("s1", status: "waiting", waitingFor: "dialog open")
+        await hub.rescan()
+        #expect(seen == [
+            "claude:s1|keyscribe|approval", "claude:s1|keyscribe|cleared", "claude:s1|keyscribe|question", "claude:s1|keyscribe|cleared",
+        ])
+    }
+
+    @Test func aTypedTurnWaitingForApprovalReportsNothing() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var seen: [AgentAttention?] = []
+        hub.onAttention = { seen.append($2) }
+        registry.set("s1", status: "waiting", waitingFor: "permission prompt")
+        await hub.rescan()
+        #expect(seen.isEmpty)
+    }
+
+    @Test func aFinishedTurnClearsItsNoticeAndAQuestionAfterItIsNotTheirs() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var seen: [AgentAttention?] = []
+        hub.onAttention = { seen.append($2) }
+        await dictated(hub, transport)
+        registry.set("s1", status: "waiting", waitingFor: "permission prompt")
+        await hub.rescan()
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done."))
+        registry.set("s1", status: "waiting", waitingFor: "input needed")
+        await hub.rescan()
+        #expect(seen == [.approval, nil])
+    }
+
+    @Test func aConnectorGoneMidTurnPastTheGraceIsReportedOnceAndAReconnectClearsIt() async {
+        let clock = Clock()
+        let (hub, transport, registry, _) = makeHub(disconnectGrace: .seconds(5), clock: clock)
+        await connected(hub, transport, registry)
+        var seen: [AgentAttention?] = []
+        hub.onAttention = { seen.append($2) }
+        await dictated(hub, transport)
+        transport.live = []
+        await hub.rescan()
+        clock.now += 4
+        await hub.rescan()
+        #expect(seen.isEmpty)
+        clock.now += 2
+        await hub.rescan()
+        await hub.rescan()
+        #expect(seen == [.disconnected])
+        transport.live = [AgentSessionID.make(agent: "claude", native: "s1")]
+        hub.handle(hello("claude:s1"))
+        #expect(seen == [.disconnected, nil])
+    }
+
+    @Test func aConversationThatVanishesMidTurnWithdrawsItsNoticeThenReportsDisconnectedByName() async {
+        let clock = Clock()
+        let (hub, transport, registry, _) = makeHub(disconnectGrace: .seconds(5), clock: clock)
+        await connected(hub, transport, registry)
+        var seen: [String] = []
+        hub.onAttention = { seen.append("\($1)|\($2.map { "\($0)" } ?? "cleared")") }
+        await dictated(hub, transport)
+        registry.set("s1", status: "waiting", waitingFor: "permission prompt")
+        await hub.rescan()
+        registry.entries = []
+        transport.live = []
+        await hub.rescan()
+        #expect(seen == ["keyscribe|approval", "keyscribe|cleared"])
+        clock.now += 6
+        await hub.rescan()
+        await hub.rescan()
+        #expect(seen == ["keyscribe|approval", "keyscribe|cleared", "keyscribe|disconnected"])
+        clock.now += 60
+        await hub.rescan()
+        #expect(seen.count == 3)
+    }
+
+    @Test func aVanishedConversationThatComesBackWithdrawsItsDisconnectedNotice() async {
+        let clock = Clock()
+        let (hub, transport, registry, _) = makeHub(disconnectGrace: .seconds(5), clock: clock)
+        await connected(hub, transport, registry)
+        var seen: [String] = []
+        hub.onAttention = { seen.append("\($1)|\($2.map { "\($0)" } ?? "cleared")") }
+        await dictated(hub, transport)
+        registry.entries = []
+        transport.live = []
+        await hub.rescan()
+        clock.now += 6
+        await hub.rescan()
+        #expect(seen == ["keyscribe|disconnected"])
+        await connected(hub, transport, registry)
+        #expect(seen == ["keyscribe|disconnected", "keyscribe|cleared"])
+        registry.entries = []
+        transport.live = []
+        await hub.rescan()
+        clock.now += 60
+        await hub.rescan()
+        await connected(hub, transport, registry)
+        #expect(seen.filter { $0.hasSuffix("disconnected") }.count == 1)
+        #expect(seen.last == "keyscribe|cleared")
+    }
+
+    @Test func aDialogTheConnectorDescribesIsReportedWithWhatItWaitsForAndClearsWhenItCloses() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var seen: [AgentAttention?] = []
+        hub.onAttention = { seen.append($2) }
+        await dictated(hub, transport)
+        let prompt = AgentPrompt(title: "Allow?", tool: "bash")
+        registry.set("s1", status: "waiting", waitingFor: "a dialog")
+        hub.handle(.waiting(session: "claude:s1", prompt: prompt))
+        await hub.rescan()
+        #expect(seen == [.waiting(prompt)])
+        registry.set("s1", status: "busy")
+        hub.handle(.waiting(session: "claude:s1", prompt: nil))
+        await hub.rescan()
+        #expect(seen == [.waiting(prompt), nil])
+    }
+
+    @Test func aPromptDescriptionIsForgottenWhenItsSessionDisappears() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var seen: [AgentAttention?] = []
+        hub.onAttention = { seen.append($2) }
+        hub.handle(.waiting(session: "claude:s1", prompt: AgentPrompt(title: "Allow?", detail: "rm -rf build")))
+        registry.entries = []
+        transport.live = []
+        await hub.rescan()
+        await connected(hub, transport, registry)
+        await dictated(hub, transport)
+        registry.set("s1", status: "waiting", waitingFor: "a dialog")
+        await hub.rescan()
+        #expect(!seen.contains { if case .waiting = $0 { true } else { false } })
+    }
+
+    @Test func aDialogWithoutADescriptionStillAnnouncesNothing() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var seen: [AgentAttention?] = []
+        hub.onAttention = { seen.append($2) }
+        await dictated(hub, transport)
+        registry.set("s1", status: "waiting", waitingFor: "a dialog")
+        await hub.rescan()
+        #expect(seen.isEmpty)
+    }
+
+    @Test func aConnectorBackWithinTheGraceReportsNothing() async {
+        let clock = Clock()
+        let (hub, transport, registry, _) = makeHub(disconnectGrace: .seconds(5), clock: clock)
+        await connected(hub, transport, registry)
+        var seen: [AgentAttention?] = []
+        hub.onAttention = { seen.append($2) }
+        await dictated(hub, transport)
+        transport.live = []
+        await hub.rescan()
+        transport.live = [AgentSessionID.make(agent: "claude", native: "s1")]
+        await hub.rescan()
+        clock.now += 60
+        transport.live = []
+        await hub.rescan()
+        #expect(seen.isEmpty)
+    }
+
+    @Test func aTurnThatDictationStartedReportsItsAnswerOnceWhenItCompletes() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var results: [String] = []
+        hub.onResult = { results.append("\($0)|\($1)|\($2)") }
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "a typed turn"))
+        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        await untilSent(transport, 1)
+        hub.handle(.submitted(request: "r1", turn: "t1"))
+        #expect(await receipt == .sent("keyscribe"))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "a later typed turn"))
+        #expect(results == ["claude:s1|keyscribe|All green."])
+    }
+
+    @Test func aDictatedTurnWhoseCompletionWasLostNeverLendsItsResultToALaterTypedTurn() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var results: [String] = []
+        hub.onResult = { results.append($2) }
+        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        await untilSent(transport, 1)
+        hub.handle(.submitted(request: "r1", turn: "t1"))
+        _ = await receipt
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        hub.handle(hello("claude:s1"))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t2"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "a typed reply"))
+        #expect(results.isEmpty)
+    }
+
+    @Test func aNewTurnStartingBeforeTheDictatedOneCompletesTakesItsEligibilityAway() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var results: [String] = []
+        hub.onResult = { results.append($2) }
+        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        await untilSent(transport, 1)
+        hub.handle(.submitted(request: "r1", turn: "t1"))
+        _ = await receipt
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t2"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "a typed reply"))
+        #expect(results.isEmpty)
+    }
+
+    @Test func aRepeatedStartOfTheSameTurnKeepsItsResult() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var results: [String] = []
+        hub.onResult = { results.append($2) }
+        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        await untilSent(transport, 1)
+        hub.handle(.submitted(request: "r1", turn: "1"))
+        _ = await receipt
+        hub.handle(.turnStarted(session: "claude:s1", turn: "1"))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "1"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "complete", answer: "All green."))
+        #expect(results == ["All green."])
+    }
+
+    @Test func aSubmitThatCannotNameItsTurnIsConfirmedButNoLaterTurnIsSpoken() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var results: [String] = []
+        hub.onResult = { results.append($2) }
+        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        await untilSent(transport, 1)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        hub.handle(.submitted(request: "r1", turn: ""))
+        #expect(await receipt == .sent("keyscribe"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "the rewritten dictation's reply"))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t2"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "a typed reply"))
+        #expect(results.isEmpty)
+    }
+
+    @Test func aSubmitWithNoTurnBeforeAnyTurnStartsLendsNothingToTheNextTurn() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var results: [String] = []
+        hub.onResult = { results.append($2) }
+        async let receipt = hub.deliver("run the tests", to: "claude:s1", delivery: .submit)
+        await untilSent(transport, 1)
+        hub.handle(.submitted(request: "r1", turn: ""))
+        _ = await receipt
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "a typed reply"))
+        #expect(results.isEmpty)
+    }
+
+    @Test func aTurnThatWasStoppedOrFailedReportsNoAnswer() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var results: [String] = []
+        hub.onResult = { results.append($2) }
+        for reason in ["aborted", "error"] {
+            async let receipt = hub.deliver("one", to: "claude:s1", delivery: .submit)
+            let before = transport.sent.count
+            await untilSent(transport, before + 1)
+            hub.handle(.submitted(request: transport.sent.last!.0.id, turn: "t"))
+            _ = await receipt
+            hub.handle(.turnComplete(session: "claude:s1", reason: reason, answer: "partial"))
+        }
+        #expect(results.isEmpty)
     }
 
     @Test func typingIntoAConversationMakesItTheCurrentRecipient() async {
@@ -1333,7 +1632,7 @@ struct AgentHubTests {
         let registry = Registry()
         let hub = AgentHub(
             transport: FakeTransport(), scan: { registry.entries },
-            transcriptTitles: ClaudeTranscriptTitles(configDirs: [dir], now: { clock.now }))
+            transcriptTitles: ClaudeTranscriptTitles(configDirs: [dir], now: { clock.now }), scanDeadline: .seconds(30))
         registry.set("s1")
         await hub.rescan(rereadingTitles: false)
         #expect(hub.directory.conversations.first?.title == "First")

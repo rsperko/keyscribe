@@ -17,6 +17,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var configProblemAnnouncement = ConfigProblemAnnouncement()
     private var speechModels: SpeechModelsModel!
     private let hud = HUDController()
+    private let speakingHUD = SpeakingHUDController()
+    private var speakingPreview: SpeakingHUDController?
     private let menu = MenuBarController()
     private var hotkey: HotkeyMonitor!
     private var controller: DictationController!
@@ -27,6 +29,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var replacementUsage: ReplacementUsageStore!
     private var correctionPanel: CorrectionPanelController!
     private var agentRuntime: AgentRuntime?
+    private var spokenResult: SpokenResultOutput?
+    private let spokenVoice = SpokenVoiceModel(installer: KokoroVoice.shared)
+    private let llmClient = HTTPLLMClient()
     private var configRepository: ConfigRepository!
     // Legacy crash recovery for audio state markers written by earlier builds.
     private var audioRestorer: SystemAudioStateRestorer!
@@ -112,9 +117,25 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     public func applicationDidFinishLaunching(_: Notification) {
+        DependencyLogging.configure()
         if let hudPreview {
             hud.appearance = HUDPreview.appearance(from: CommandLine.arguments) ?? .system
             hud.render(hudPreview)
+            return
+        }
+        if let preview = HUDPreview.speaking(from: CommandLine.arguments) {
+            let hud = SpeakingHUDController(
+                defaults: UserDefaults(suiteName: "speaking-preview-\(UUID().uuidString)") ?? .standard,
+                visibleFrame: { panel in
+                    guard var frame = (panel.screen ?? NSScreen.main)?.visibleFrame else { return nil }
+                    if let height = preview.screenHeight { frame.size.height = height }
+                    return frame
+                })
+            hud.appearance = HUDPreview.appearance(from: CommandLine.arguments) ?? .system
+            hud.show(name: preview.name, summary: preview.summary)
+            if preview.expanded { hud.toggleSummary() }
+            hud.onStop = { NSApp.terminate(nil) }
+            speakingPreview = hud
             return
         }
         audioRestorer = SystemAudioStateRestorer(markerURL: KeyScribePaths.pendingSystemRestoreFile)
@@ -199,7 +220,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             activeEngineUsable: { [weak self] engine in
                 InstalledEngineFilter.shouldRun(engineId: engine.id)
                     && (self?.speechModels?.isEngineUsable(engine.id) ?? true)
-            })
+            },
+            llmClient: llmClient)
         controller.preloadActiveEngineIfNeeded()
         hud.appearance = settings.hud.appearance
         hud.onInsertLocalTranscript = { [weak self] in self?.controller.insertLocalTranscriptNow() }
@@ -211,6 +233,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         hud.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
         hud.onOpenAIService = { [weak self] id in self?.settingsController.presentAIService(id: id) }
         hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
+        hud.onVisibilityChange = { SpeechSilencer.shared.dictationHUD(visible: $0) }
         hud.onEscapeCancel = { [weak self] in
             self?.hotkey.cancelGestures()
             self?.controller.cancel()
@@ -243,6 +266,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.showsUpdateCheck = updater != nil
         menu.install()
         menu.onPasteLast = { [weak self] in self?.controller.pasteLast() }
+        menu.onToggleSpokenUpdates = { [weak self] in self?.toggleSpokenUpdates() }
         menu.onOpenHistory = { [weak self] in self?.settingsController.present(.history) }
         menu.onOpenSettings = { [weak self] in self?.settingsController.present() }
         menu.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
@@ -319,6 +343,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             onEraseAllData: { [weak self] in self?.eraseAllDataAndRelaunch() },
             clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
         settingsController.onErrorsChanged = { [weak self] in self?.menu.setErrorBadge($0) }
+        settingsController.codingAgents.voice = spokenVoice
         applyCodingAgents()
         correctionPanel.mishearingsFinder = { [weak self] word, destination, onSaved in
             self?.settingsController.mishearingsFinder(word, destination.scope, onSaved)
@@ -702,6 +727,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 settingsController.codingAgents.show(
                     runtime.hub.directory.conversations, current: runtime.hub.current, namesProblem: runtime.hub.namesProblem,
                     namesNotSaved: runtime.hub.namesNotSaved, discoveryProblems: runtime.hub.discoveryProblems)
+                let spoken = SpokenResultOutput(
+                    client: llmClient, permits: AIServiceCatalog.permits, speech: spokenVoice.makeSpeech(),
+                    settings: { [weak self] in self?.settings.codingAgents.spokenResult ?? SpokenResultSettings() },
+                    connection: { [weak self] id in self?.config.connections.connection(id: id) },
+                    warm: { Task { await KokoroVoice.shared.warm() } },
+                    inFront: { [weak hub = runtime.hub] id in
+                        guard let candidates = hub?.frontCandidates else { return false }
+                        return await AgentFront.withoutAsking.shown(among: candidates) { _ in }?.id == id
+                    })
+                runtime.hub.onResult = { [weak spoken] in spoken?.finished(conversation: $0, handle: $1, answer: $2) }
+                runtime.hub.onAttention = { [weak spoken] in spoken?.attention(conversation: $0, handle: $1, $2) }
+                spoken.onSpeaking = { [weak self] name in self?.showSpeaking(name) }
+                speakingHUD.onStop = { [weak spoken] in spoken?.stop() }
+                spokenResult = spoken
+                controller.spokenUpdates = spoken
                 agentRuntime = runtime
                 controller.agents = runtime.hub
             } catch {
@@ -710,6 +750,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             agentRuntime?.stop()
             agentRuntime = nil
+            spokenResult?.stop()
+            spokenResult = nil
             controller.agents = nil
             settingsController.codingAgents.onRename = nil
             settingsController.codingAgents.onReloadNames = nil
@@ -717,6 +759,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsController.codingAgents.onRetire = nil
             settingsController.codingAgents.show([], current: nil)
         }
+    }
+
+    private func showSpeaking(_ speaking: SpokenResultOutput.Speaking?) {
+        guard let speaking else { return speakingHUD.hide() }
+        speakingHUD.appearance = settings.hud.appearance
+        speakingHUD.show(name: speaking.name, summary: speaking.text)
+    }
+
+    private func toggleSpokenUpdates() {
+        var updated = settings
+        updated.codingAgents.spokenResult.enabled.toggle()
+        applySettings(updated)
     }
 
     private func ensureSystemModes() {
@@ -744,6 +798,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         settings = updated
+        spokenResult?.settingsChanged()
         if updated.history != previousHistory {
             history?.applyRetention(retentionDays: updated.history.retentionDays)
             excludeHistoryFromBackups(updated.history)
@@ -943,6 +998,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             modes, automaticName: automatic?.name, overrideName: controller.nextModeOverrideID,
             inertReasons: inertReasons)
         menu.setSpeechModels(speechModels.rows)
+        let spoken = settings.codingAgents.spokenResult
+        menu.setSpokenUpdates(available: agentRuntime != nil, on: spoken.enabled)
     }
 
     // settings.toml decode failures (owned by AppDelegate) plus any malformed vocabulary/connection/mode

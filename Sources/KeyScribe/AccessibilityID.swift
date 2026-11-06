@@ -315,6 +315,21 @@ enum AccessibilityID {
             static let renameName = "mode.codingAgents.renameName"
             static let renameSave = "mode.codingAgents.renameSave"
             static let renameCancel = "mode.codingAgents.renameCancel"
+            static let spokenResultEnabled = "mode.codingAgents.spokenResultEnabled"
+            static let spokenResultService = "mode.codingAgents.spokenResultService"
+            static let spokenResultOpenAIServices = "mode.codingAgents.spokenResultOpenAIServices"
+            static let spokenResultAdvanced = "mode.codingAgents.spokenResultAdvanced"
+            static let spokenResultPrompt = "mode.codingAgents.spokenResultPrompt"
+            static let spokenResultPromptExpand = "mode.codingAgents.spokenResultPromptExpand"
+            static let spokenResultPromptExpandDone = "mode.codingAgents.spokenResultPromptExpandDone"
+            static let spokenResultReset = "mode.codingAgents.spokenResultReset"
+            static let spokenResultVoice = "mode.codingAgents.spokenResultVoice"
+            static let spokenResultPreview = "mode.codingAgents.spokenResultPreview"
+            static let spokenVoiceDownload = "mode.codingAgents.spokenVoiceDownload"
+            static let spokenVoiceReinstall = "mode.codingAgents.spokenVoiceReinstall"
+            static let spokenVoiceDelete = "mode.codingAgents.spokenVoiceDelete"
+            static let spokenVoiceDeleteConfirm = "mode.codingAgents.spokenVoiceDeleteConfirm"
+            static let spokenVoiceDeleteCancel = "mode.codingAgents.spokenVoiceDeleteCancel"
         }
 
         enum Editor {
@@ -433,6 +448,10 @@ enum AccessibilityID {
 
     enum HUD {
         static let panel = "hud.panel"
+        static let speaking = "hud.speaking"
+        static let speakingSummary = "hud.speakingSummary"
+        static let speakingSummaryToggle = "hud.action.speakingSummaryToggle"
+        static let stopSpeaking = "hud.action.stopSpeaking"
         static let insertWithoutRewriting = "hud.action.insertWithoutRewriting"
         static let pasteLast = "hud.action.pasteLast"
         static let repairAction = "hud.action.repair"

@@ -59,6 +59,11 @@ const keystrokeQuiet = 3000
 const keystrokeHoldLimit = 6000
 const receiptDeadline = 3000
 const lateLimit = 8
+const staleCheck = 2000
+const answerLimit = 8 * 1024
+const waitingTitleLimit = 300
+const waitingDetailLimit = 1000
+const waitingSaidLimit = 500
 const markAlphabet = ["\u200b", "\u200c", "\u200d", "\u2060"]
 const nonceBytes = 5
 const backoff = [30000, 60000, 120000, 300000]
@@ -79,9 +84,16 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   let turns = 0
   let prompts = 0
   let promptsOpen = 0
+  let waiting: Waiting | null = null
+  let said = ""
+  const tools: { id: string; name: string; args: unknown }[] = []
   let lastKeyAt: number | null = null
   let lastInputSource: string | null = null
   const pending: Pending[] = []
+  let lastAnswer = ""
+  let lastFailed = false
+  let staleWatch: (() => void) | null = null
+  let idleChecks = 0
   const nonce = instanceNonce()
   let serial = 0
   let looping = false
@@ -354,7 +366,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     const render = () => JSON.stringify({
       op: "hello", protocol: (config as Config).protocol, installation: (config as Config).installation, agent: "pi", agentVersion: "",
       instance, connection: attempt.connection, session: target, pid: host.pid, cwd,
-      features, title: pi.getSessionName() || undefined, prompts,
+      features, title: pi.getSessionName() || undefined, prompts, waiting: waiting || undefined,
       idle: idle(), gap: freshSession !== target,
       environment: terminalPlace(),
     })
@@ -409,6 +421,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
 
   function retire(): void {
     retired = true
+    stopStaleWatch()
     goDormant()
     generation += 1
     freshSession = null
@@ -425,6 +438,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     freshSession = null
     helloSession = null
     forget()
+    stopStaleWatch()
     currentTurn = null
     drain(() => false)
     clearOwnedUI()
@@ -442,6 +456,9 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     currentTurn = null
     prompts = 0
     promptsOpen = 0
+    waiting = null
+    said = ""
+    tools.length = 0
     lastKeyAt = null
     if (freshReasons.includes(reason)) freshSession = id
     stopKeys = context.ui.onTerminalInput(() => { lastKeyAt = host.now(); return undefined })
@@ -500,6 +517,36 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
       return refuse(gen, cmd.id, String((err && (err as Error).message) || err).slice(0, 500))
     }
     item.cancel = host.after(receiptDeadline, () => { item.late = true })
+  }
+
+  function watchForStaleTurn(): void {
+    stopStaleWatch()
+    if (retired) return
+    idleChecks = 0
+    scheduleStaleCheck()
+  }
+
+  function scheduleStaleCheck(): void {
+    staleWatch = host.after(staleCheck, () => {
+      staleWatch = null
+      if (currentTurn === null || !session) return
+      idleChecks = ctx && ctx.isIdle() ? idleChecks + 1 : 0
+      if (idleChecks >= 2) closeStaleTurn()
+      else scheduleStaleCheck()
+    })
+  }
+
+  function stopStaleWatch(): void {
+    if (staleWatch) staleWatch()
+    staleWatch = null
+  }
+
+  function closeStaleTurn(): void {
+    stopStaleWatch()
+    currentTurn = null
+    lastAnswer = ""
+    lastFailed = false
+    if (session) observe({ op: "turnComplete", session, reason: "unknown" })
   }
 
   function received(message: unknown): void {
@@ -646,22 +693,40 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     if (!session) return
     lastInputSource = event.source
     if (event.source === "interactive") {
+      if (currentTurn !== null && ctx && ctx.isIdle()) closeStaleTurn()
       prompts += 1
       observe({ op: "typed", session, prompts })
     }
   })
 
   pi.on("agent_start", () => {
-    if (!session) return
+    if (!session || currentTurn !== null) return
+    lastAnswer = ""
+    said = ""
+    lastFailed = false
     turns += 1
+    watchForStaleTurn()
     currentTurn = String(turns)
     observe({ op: "turnStarted", session, turn: currentTurn })
   })
 
   pi.on("agent_settled", (event) => {
     if (!session) return
+    stopStaleWatch()
     currentTurn = null
-    observe({ op: "turnComplete", session, reason: event.aborted ? "aborted" : "complete" })
+    if (event.aborted) observe({ op: "turnComplete", session, reason: "aborted" })
+    else if (lastFailed) observe({ op: "turnComplete", session, reason: "error" })
+    else observe({ op: "turnComplete", session, reason: "complete", answer: boundedAnswer(lastAnswer) })
+    lastAnswer = ""
+    lastFailed = false
+  })
+
+  pi.on("message_end", (event) => {
+    if (!session || !event.message || (event.message as { role?: string }).role !== "assistant") return
+    const stop = (event.message as { stopReason?: string }).stopReason
+    lastFailed = stop === "error" || stop === "aborted"
+    lastAnswer = lastFailed ? "" : messageText(event.message)
+    if (lastAnswer.trim()) said = lastAnswer.trim().slice(-waitingSaidLimit)
   })
 
   pi.on("message_start", (event) => {
@@ -674,14 +739,55 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     observe({ op: "title", session, text: event.name || "" })
   })
 
-  pi.on("ui_prompt_start", () => {
+  pi.on("tool_execution_start", (event) => {
+    tools.push({ id: event.toolCallId, name: event.toolName, args: event.args })
+  })
+
+  pi.on("tool_execution_end", (event) => {
+    const index = tools.findIndex((tool) => tool.id === event.toolCallId)
+    if (index >= 0) tools.splice(index, 1)
+  })
+
+  pi.on("ui_prompt_start", (event) => {
     promptsOpen += 1
+    if (promptsOpen > 1 || !session) return
+    waiting = waitingFor(event.kind, event.title, tools[tools.length - 1], said)
+    observe({ op: "waiting", session, waiting })
   })
 
   pi.on("ui_prompt_end", () => {
-    promptsOpen = Math.max(0, promptsOpen - 1)
+    if (promptsOpen === 0) return
+    promptsOpen -= 1
+    if (promptsOpen > 0 || !session) return
+    waiting = null
+    observe({ op: "waiting", session })
   })
 
+}
+
+type Waiting = { kind?: string; title?: string; tool?: string; detail?: string; said?: string }
+
+function waitingFor(kind: string | undefined, title: string | undefined, tool: { name: string; args: unknown } | undefined, said: string): Waiting {
+  const found: Waiting = {}
+  if (kind) found.kind = kind
+  if (title && title.trim()) found.title = title.trim().slice(0, waitingTitleLimit)
+  if (tool) {
+    found.tool = tool.name
+    const detail = argumentText(tool.args)
+    if (detail) found.detail = detail.slice(0, waitingDetailLimit)
+  }
+  if (said) found.said = said
+  return found
+}
+
+function argumentText(args: unknown): string {
+  if (args === undefined || args === null) return ""
+  try {
+    const text = typeof args === "string" ? args : JSON.stringify(args)
+    return text === "{}" ? "" : text || ""
+  } catch {
+    return ""
+  }
 }
 
 function instanceNonce(): string {
@@ -700,6 +806,18 @@ function mark(serial: number): string {
     digits = markAlphabet[value % markAlphabet.length] + digits
   }
   return digits
+}
+
+function boundedAnswer(text: string): string {
+  const gap = "\n[…]\n"
+  let budget = answerLimit
+  let cut = text
+  while (JSON.stringify(cut).length > answerLimit) {
+    budget = Math.floor(budget * 0.75)
+    const head = Math.floor(budget / 3)
+    cut = text.slice(0, head) + gap + text.slice(text.length - Math.max(0, budget - head - gap.length))
+  }
+  return cut
 }
 
 function messageText(message: unknown): string {

@@ -39,6 +39,33 @@ enum HUDPreview {
         return state(named: arguments[index + 1])
     }
 
+    struct Speaking {
+        let name: String
+        let summary: String
+        let expanded: Bool
+        var screenHeight: Double?
+    }
+
+    static func speaking(from arguments: [String], isDevelopmentBuild: Bool = KeyScribePaths.variant.isDev) -> Speaking? {
+        guard isDevelopmentBuild,
+              let index = arguments.firstIndex(of: "--speaking-preview"), index + 1 < arguments.count else {
+            return nil
+        }
+        let expanded = arguments.contains("--speaking-expanded")
+        let longest = "The suite failed in two places: the parser rejects empty tables and one migration test timed out. It is waiting on you to choose whether to skip that test or raise its limit before the next release goes out today."
+        switch arguments[index + 1] {
+        case "short": return Speaking(name: "keyscribe blue", summary: "Done. The tests pass.", expanded: expanded)
+        case "long": return Speaking(name: "keyscribe blue", summary: longest, expanded: expanded)
+        case "overflow":
+            return Speaking(
+                name: "keyscribe blue", summary: String(repeating: "A long sentence that keeps going. ", count: 12),
+                expanded: expanded, screenHeight: 120)
+        case "long-name":
+            return Speaking(name: "platform infrastructure migration review green", summary: longest, expanded: expanded)
+        default: return nil
+        }
+    }
+
     static func appearance(
         from arguments: [String], isDevelopmentBuild: Bool = KeyScribePaths.variant.isDev
     ) -> HUDAppearance? {

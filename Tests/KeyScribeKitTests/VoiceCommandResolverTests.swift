@@ -27,6 +27,9 @@ struct VoiceCommandResolverTests {
 
     @Test func goBackResolvesWithoutACatalog() {
         #expect(resolve("go back") == .action(.goBack))
+        #expect(resolve("repeat that") == .action(.repeatSummary))
+        #expect(VoiceCommandAction.repeatSummary.summary(appName: { _ in nil }) == "Repeat")
+        #expect(VoiceCommandAction.repeatSummary.detail(appName: { _ in nil }) == "Replays the last spoken update.")
     }
 
     @Test func runningAppByExactName() {

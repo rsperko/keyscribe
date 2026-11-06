@@ -64,6 +64,9 @@ every rule above applies to it, with these sharpenings:
 - **Validate connection identity on both sides of the bridge.** Recheck session, connection,
   expiry, and cancellation immediately before acting. Reconnection holds stale dictation for
   review; it never grants old queued commands permission to run again.
+- **Reply text is in memory only.** A turn's final reply crosses the bridge bounded, for the spoken result of a
+  turn the user's dictation started; it is never written to History or logs, and the only place it may go is
+  the AI service the user chose for summaries, after redaction.
 - **Removal preserves user data and unrelated agent configuration.** Retire loaded connectors
   without waiting for them, verify uninstall state, and keep partial cleanup safe to retry.
 - **An unknown or ambiguous spoken recipient never falls through to the current recipient.** It holds

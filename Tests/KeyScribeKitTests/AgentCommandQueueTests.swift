@@ -296,6 +296,19 @@ struct AgentBridgeCodecTests {
             == .title(session: "s1", text: "Renamed"))
     }
 
+    @Test func aConnectorReportsWhatItWaitsForAndWhenItStops() throws {
+        let opened = #"{"op":"waiting","session":"s1","waiting":{"kind":"select","title":"Allow?","tool":"bash","detail":"rm -rf build","said":"Cleaning up."}}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(opened.utf8))
+            == .waiting(session: "s1", prompt: AgentPrompt(kind: "select", title: "Allow?", tool: "bash", detail: "rm -rf build", said: "Cleaning up.")))
+        #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"waiting","session":"s1","waiting":{}}"#.utf8))
+            == .waiting(session: "s1", prompt: AgentPrompt()))
+        #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"waiting","session":"s1"}"#.utf8)) == .waiting(session: "s1", prompt: nil))
+        let hello = #"{"op":"hello","protocol":1,"agent":"pi","instance":"i1","session":"s1","pid":0,"waiting":{"title":"Which?"}}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(hello.utf8))
+            == .hello(.init(protocolVersion: 1, agent: "pi", agentVersion: "", instance: "i1", session: "s1", pid: 0, waiting: AgentPrompt(title: "Which?"))))
+        #expect(AgentEvent.waiting(session: "s1", prompt: nil).renamingSession { "pi:" + $0 } == .waiting(session: "pi:s1", prompt: nil))
+    }
+
     @Test func aConnectorReportsTheTerminalEnvironmentOnlyItsOwnProcessCanRead() throws {
         let hello = #"{"op":"hello","protocol":1,"agent":"claude","instance":"i1","session":"s1","pid":0,"environment":{"ZELLIJ_PANE_ID":"3"}}"#
         #expect(try AgentBridgeCodec.decodeEvent(Data(hello.utf8)) == .hello(.init(

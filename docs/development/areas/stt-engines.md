@@ -53,6 +53,10 @@ Read before adding or changing a speech model, an engine adapter, the no-speech 
   the literal `com.apple.security`, so it cannot see a missing or malformed `com.apple.developer.*`
   key; and **no preflight gate measures latency/RTF** — `b-benchmark` gates WER only, and an ANE→CPU
   fallback moves latency, not accuracy, so it would ship unnoticed.
+- **FluidAudio logs below error level are dropped app-wide** (`DependencyLogging.configure()` at launch),
+  for Parakeet, Silero VAD and the model downloader as much as the spoken result voice, because some of
+  them carry transcript text. Diagnosing a FluidAudio engine from its own warnings means lowering
+  `AppLogger.minimumLevel` in a local build; KeyScribe's own `Log` categories are unaffected.
 
 ## STT engines
 

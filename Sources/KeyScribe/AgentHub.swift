@@ -37,6 +37,14 @@ final class AgentHub {
 
     var onNotice: ((AgentReceipt, _ request: String) -> Void)?
     var onChange: (() -> Void)?
+    var onResult: ((_ conversation: String, _ handle: String, _ answer: String) -> Void)?
+    var onAttention: ((_ conversation: String, _ handle: String, _ attention: AgentAttention?) -> Void)?
+    private var awaitingResult: [String: String] = [:]
+    private var attention: [String: AgentAttention] = [:]
+    private var goneSince: [String: Date] = [:]
+    private var awaitedHandles: [String: String] = [:]
+    private var liveSessions: Set<String> = []
+    private var waitingPrompts: [String: AgentPrompt] = [:]
     private(set) var directory = AgentDirectory()
     private(set) var namesProblem: String?
     private(set) var namesNotSaved: String?
@@ -80,11 +88,12 @@ final class AgentHub {
     init(
         transport: AgentTransport, discovery: [any AgentDiscovery], names: AgentNameStore? = nil,
         focus: AgentTerminalFocusing? = nil, front: AgentFronting? = nil, glance: AgentFronting? = nil,
-        receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30),
+        receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30), disconnectGrace: Duration = AgentHub.defaultDisconnectGrace,
         scanDeadline: Duration = AgentHub.defaultScanDeadline,
         now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString }
     ) {
         self.transport = transport
+        self.disconnectGrace = disconnectGrace
         self.scanDeadline = scanDeadline
         nameStore = names
         self.focus = focus
@@ -240,6 +249,8 @@ final class AgentHub {
     }
 
     static let defaultScanDeadline: Duration = .seconds(3)
+    static let defaultDisconnectGrace: Duration = .seconds(5)
+    private let disconnectGrace: Duration
     private let scanDeadline: Duration
 
     func rescan(rereadingTitles: Bool = true) async {
@@ -385,8 +396,74 @@ final class AgentHub {
         let stale = now().addingTimeInterval(-Self.runningGrace)
         running = running.filter { !idle.contains($0.key) || $0.value > stale }
         releaseHeld()
+        reconcileAttention()
         shownProblems = discoveryProblems
         if directory.revision != before || namesNotSaved != reported || discoveryProblems != problemsBefore { onChange?() }
+    }
+
+    private func reconcileAttention() {
+        let tracked = Set(attention.keys).union(awaitingResult.keys)
+        for session in Set(attention.keys).union(goneSince.keys).union(awaitedHandles.keys) where awaitingResult[session] == nil {
+            goneSince[session] = nil
+            report(attention: nil, for: session)
+            awaitedHandles[session] = nil
+        }
+        for session in Array(awaitingResult.keys) {
+            let conversation = directory.conversations.first { $0.id == session }
+            if let conversation { awaitedHandles[session] = conversation.handle }
+            let wanted: AgentAttention?
+            if let conversation, conversation.connectorLive {
+                goneSince[session] = nil
+                wanted = switch conversation.state {
+                case .waitingApproval: .approval
+                case .waitingQuestion: .question
+                case .userDialog: waitingPrompts[session].map { .waiting($0) }
+                default: nil
+                }
+            } else {
+                let since = goneSince[session] ?? startGrace(for: session)
+                let grace = Double(disconnectGrace.components.seconds) + Double(disconnectGrace.components.attoseconds) / 1e18
+                if now().timeIntervalSince(since) >= grace {
+                    wanted = .disconnected
+                } else {
+                    wanted = conversation == nil ? nil : attention[session]
+                }
+            }
+            report(attention: wanted, for: session)
+            if conversation == nil, wanted == .disconnected {
+                awaitingResult[session] = nil
+                attention[session] = nil
+                goneSince[session] = nil
+                awaitedHandles[session] = nil
+            }
+        }
+        clearReturned(except: tracked)
+    }
+
+    private func clearReturned(except tracked: Set<String>) {
+        let live = Set(directory.conversations.filter(\.connectorLive).map(\.id))
+        for session in live.subtracting(liveSessions).subtracting(tracked) {
+            onAttention?(session, handle(of: session) ?? "", nil)
+        }
+        liveSessions = live
+        waitingPrompts = waitingPrompts.filter { live.contains($0.key) }
+    }
+
+    private func startGrace(for session: String) -> Date {
+        let started = now()
+        goneSince[session] = started
+        let grace = disconnectGrace
+        Task { [weak self] in
+            try? await Task.sleep(for: grace)
+            self?.refresh()
+        }
+        return started
+    }
+
+    private func report(attention wanted: AgentAttention?, for session: String) {
+        guard attention[session] != wanted else { return }
+        attention[session] = wanted
+        onAttention?(session, handle(of: session) ?? awaitedHandles[session] ?? "", wanted)
     }
 
     private func sendLabels() {
@@ -435,6 +512,8 @@ final class AgentHub {
     }
 
     func retire(agent: String) {
+        awaitingResult = awaitingResult.filter { AgentSessionID.agent(of: $0.key) != agent }
+        waitingPrompts = waitingPrompts.filter { AgentSessionID.agent(of: $0.key) != agent }
         discoveries.first { $0.kind.id == agent }?.retire()
         Task { [weak self] in await self?.rescan(rereadingTitles: false) }
     }
@@ -445,9 +524,11 @@ final class AgentHub {
         }
         switch event {
         case .hello(let hello):
+            awaitingResult[hello.session] = nil
             features[hello.session] = Set(hello.features)
             environments[hello.session] = hello.environment
             prompts[hello.session] = hello.prompts
+            waitingPrompts[hello.session] = hello.waiting
             labels[hello.session] = nil
             if let title = hello.title {
                 connectorNames[hello.session] = .some(title.isEmpty ? nil : title)
@@ -462,11 +543,15 @@ final class AgentHub {
             connectorNamesAt[session] = now()
             refresh(nameReportedFor: session)
             Task { [weak self] in await self?.rescan(rereadingTitles: true) }
+        case .waiting(let session, let prompt):
+            waitingPrompts[session] = prompt
+            Task { [weak self] in await self?.rescan(rereadingTitles: false) }
         case .focused(let request):
             focusWaiters.removeValue(forKey: request)?.resume(returning: .selected)
         case .ack:
             break
-        case .submitted(let request, _):
+        case .submitted(let request, let turn):
+            if let conversation = requests[request]?.message.conversation, !turn.isEmpty { awaitingResult[conversation] = turn }
             settle(request, .sent(requests[request]?.handle ?? ""), keep: false)
         case .refused(let request, _) where focusWaiters[request] != nil:
             focusWaiters.removeValue(forKey: request)?.resume(returning: .notFound)
@@ -512,16 +597,21 @@ final class AgentHub {
             if let count { prompts[session] = count }
             outbox.noteTyped(conversation: session)
             if handle(of: session) != nil { makeCurrent(session) }
-        case .turnStarted(let session, _):
+        case .turnStarted(let session, let turn):
+            if let awaited = awaitingResult[session], awaited != turn { awaitingResult[session] = nil }
             handingOff[session] = nil
             running[session] = now()
-        case .turnComplete(let session, let reason, _):
+        case .turnComplete(let session, let reason, let answer):
             handingOff[session] = nil
             running[session] = nil
+            if awaitingResult.removeValue(forKey: session) != nil, reason == "answer" || reason == "complete" {
+                onResult?(session, handle(of: session) ?? "", answer)
+            }
             if reason == "aborted" { outbox.noteInterrupted(conversation: session) }
             refresh()
             Task { [weak self] in await self?.rescan(rereadingTitles: false) }
         }
+        reconcileAttention()
     }
 
     private func state(of id: String) -> AgentLiveState? {

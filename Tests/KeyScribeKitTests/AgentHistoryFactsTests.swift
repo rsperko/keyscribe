@@ -26,6 +26,11 @@ struct AgentHistoryFactsTests {
         #expect(AgentHistoryFacts.goBack(frozen: nil, conversations: roster).map(\.label) == ["Command"])
     }
 
+    @Test func repeatingASummaryRecordsTheCommandAndTheRecipientItLeavesInPlace() {
+        let list = AgentHistoryFacts.repeatSummary(frozen: AgentRecipient.Frozen(id: "s-docs", source: .current), conversations: roster)
+        #expect(list.map(\.value) == ["Repeat that", "docs"])
+    }
+
     @Test func anOpenByNameRecordsTheCommandAddressAndConversation() {
         let recorded = facts(.open(.name("backend", body: "")), .open(id: "s-backend"))
         #expect(recorded["Command"] == "Open")

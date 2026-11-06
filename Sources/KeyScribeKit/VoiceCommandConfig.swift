@@ -567,6 +567,9 @@ extension VoiceCommandConfig {
         if covers(VoiceCommandGrammar.goBack) {
             return "Saying \u{201C}\(VoiceCommandGrammar.goBack)\u{201D} will run this command instead of returning to the previous window."
         }
+        if let phrase = VoiceCommandGrammar.repeatSummary.first(where: covers) {
+            return "Saying \u{201C}\(phrase)\u{201D} will run this command instead of repeating the last spoken update."
+        }
         if covers(VoiceCommandGrammar.run) {
             return "Saying \u{201C}\(VoiceCommandGrammar.run) \u{2026}\u{201D} will reach this command instead of your other actions."
         }

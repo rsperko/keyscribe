@@ -64,8 +64,13 @@ function harness(on: any) {
   on('session.start', () => ({ cwd: '/work' }))
   on('session.end', ($: any, e: any) => ({ sessionId: e.sessionId }))
   on('classic.SessionStart', () => ({}))
-  on('prompt.submit', ($: any, e: any) => {
-    if (e.origin && e.origin.kind === 'plugin') submits.push(e.text)
+  const heldSubmits: Array<() => void> = []
+  const submitHold = { on: false }
+  on('prompt.submit', async ($: any, e: any) => {
+    if (e.origin && e.origin.kind === 'plugin') {
+      submits.push(e.text)
+      if (submitHold.on) await new Promise<void>((resolve) => { heldSubmits.push(resolve) })
+    }
     return downstream['prompt.submit'] ?? { text: e.text }
   })
   on('turn.start', ($: any, e: any) => ({ turnId: e.turnId }))
@@ -118,7 +123,8 @@ function harness(on: any) {
   const readyChecks = () => fileReads.filter((p) => p === '/tmp/ks-ready.json').length
   const ready = (launch?: string, protocol = 2) => { files['/tmp/ks-ready.json'] = launch === undefined ? undefined : JSON.stringify({ launch, protocol }) }
 
-  return { env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, fills, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed }
+  const releaseSubmits = () => { for (const release of heldSubmits.splice(0)) release() }
+  return { env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, fills, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
 }
 
 test('agent hooks return while the bridge never answers, through one sender', async ($, on) => {
@@ -143,7 +149,7 @@ test('downstream answers pass through unchanged', async ($, on) => {
   expect(await h.typed($)).toEqual({ drop: 'another plugin dropped it' })
 })
 
-test('events keep their order and a completion carries no answer', async ($, on) => {
+test('events keep their order and a completion carries the final answer', async ($, on) => {
   const h = harness(on)
   await h.connect($)
 
@@ -154,8 +160,36 @@ test('events keep their order and a completion carries no answer', async ($, on)
 
   expect(h.ops()).toEqual(['hello', 'typed', 'turnStarted', 'turnComplete'])
   expect(h.events()[1]).toMatchObject({ op: 'typed', session: 's1', prompts: 1 })
-  expect(h.events()[3]).toMatchObject({ op: 'turnComplete', session: 's1', reason: 'answer' })
-  expect(Object.keys(h.events()[3]).sort()).toEqual(['connection', 'instance', 'op', 'reason', 'session'])
+  expect(h.events()[3]).toMatchObject({ op: 'turnComplete', session: 's1', reason: 'answer', answer: 'secret answer' })
+  expect(Object.keys(h.events()[3]).sort()).toEqual(['answer', 'connection', 'instance', 'op', 'reason', 'session'])
+})
+
+test('an answer full of characters JSON must escape still fits the event queue and arrives', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await h.typed($)
+  await $.turn.start({ text: 'typed by me', turnId: 't1' })
+  await $.turn.complete({ turnId: 't1', answer: '"'.repeat(20000), durationMs: 5, isAborted: false, usage: null, reason: 'answer' })
+  await h.answerEvents()
+  const done = h.events().filter((b: any) => b.op === 'turnComplete')
+  expect(done.length).toBe(1)
+  expect(JSON.stringify(done[0].answer).length).toBeLessThanOrEqual(8 * 1024)
+  expect(h.events().filter((b: any) => b.op === 'hello').length).toBe(1)
+})
+
+test('a long answer crosses the bridge bounded to its opening and its ending', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await h.typed($)
+  await $.turn.start({ text: 'typed by me', turnId: 't1' })
+  const answer = 'a'.repeat(5000) + 'b'.repeat(5000) + 'c'.repeat(5000)
+  await $.turn.complete({ turnId: 't1', answer, durationMs: 5, isAborted: false, usage: null, reason: 'answer' })
+  await h.answerEvents()
+  const done = h.events().find((b: any) => b.op === 'turnComplete')
+  expect(done.answer.length).toBeLessThanOrEqual(8 * 1024)
+  expect(done.answer.startsWith('a'.repeat(100))).toBe(true)
+  expect(done.answer.endsWith('c'.repeat(100))).toBe(true)
+  expect(done.answer.includes('[…]')).toBe(true)
 })
 
 test('what happens before hello is dropped, never replayed, and hello reports the prompt count', async ($, on) => {
@@ -459,6 +493,28 @@ test('dictation decided on the current prompt count is submitted, acknowledged f
   await h.answerEvents()
   expect(h.submits).toEqual(['run the tests'])
   expect(h.events().filter((b) => b.request === 'r1').map((b) => b.op)).toEqual(['ack', 'submitted'])
+})
+
+test('a submit names the turn its own prompt started', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  h.submitHold.on = true
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'run the tests' }])
+  await $.turn.start({ text: 'run the tests', turnId: 't2' })
+  h.releaseSubmits()
+  await h.answerEvents()
+  expect(h.events().filter((b: any) => b.op === 'submitted').map((b: any) => b.turn)).toEqual(['t2'])
+})
+
+test('a turn someone else started while the submit was in flight is never named as the submit\'s own', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  h.submitHold.on = true
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', text: 'run the tests' }])
+  await $.turn.start({ text: 'typed by me', turnId: 't1' })
+  h.releaseSubmits()
+  await h.answerEvents()
+  expect(h.events().filter((b: any) => b.op === 'submitted').map((b: any) => b.turn)).toEqual([''])
 })
 
 test('the connector own submission does not count as the user typing', async ($, on) => {

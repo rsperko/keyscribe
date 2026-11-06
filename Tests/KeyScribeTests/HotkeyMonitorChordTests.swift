@@ -8,9 +8,14 @@ import Testing
 @MainActor
 final class FakeChordRegistrar: ChordRegistering {
     var lastRegistrations: [CarbonHotKeys.Registration] = []
+    var refuses = false
+    var onUpdate: (([CarbonHotKeys.Registration]) -> Void)?
 
-    func update(_ registrations: [CarbonHotKeys.Registration]) {
+    @discardableResult
+    func update(_ registrations: [CarbonHotKeys.Registration]) -> Bool {
         lastRegistrations = registrations
+        onUpdate?(registrations)
+        return !refuses
     }
 
     func stop() { lastRegistrations = [] }

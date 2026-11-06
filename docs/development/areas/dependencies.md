@@ -57,6 +57,32 @@ that migration is done (`ProgressHandler` is now top-level; `ModelHub.loadModels
 supports — per `corpus/blips/README.md` the fast-release twins must be recorded FIRST. The artifact
 pin exists precisely so that a future SDK bump does not force that question.
 
+### The spoken result voice (Kokoro) — re-check on every FluidAudio bump
+
+FluidAudio also supplies the Kokoro voice behind the Coding agent spoken result (`KokoroVoice`). It
+cannot tell us these at runtime, so a bump re-checks them by hand:
+
+- **Which speakers to offer.** `SpokenVoices.all` is a hand-kept list: only English speakers that
+  Kokoro's author grades **C+ or better** in
+  [VOICES.md](https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md). The download carries no
+  names or grades, so nothing derives the list. On a bump, compare FluidAudio's
+  `KokoroAneConstants.englishVoices` and its Kokoro model version against the last bump; if either moved,
+  re-read the grades, update `SpokenVoices.all`, and re-measure the installed size behind
+  `SpokenVoiceModel.approxDownloadBytes`. A dropped speaker needs no migration: `SpokenVoices.resolved`
+  sends it to the recommended one.
+- **That dependency logs stay content-free.** FluidAudio's phonemizer logs the words it fails on at
+  warning level, so `DependencyLogging.configure()` drops every FluidAudio message below error, from the
+  console and the system log alike, for every FluidAudio engine, not only the voice. `KokoroVoiceTests` sets
+  that process-wide state too, to the same values the app uses. On a bump, grep its error- and fault-level log calls for
+  interpolated text (the input, a word, a transcript); one that appears breaks the no-content-logging
+  rule and needs a stricter floor.
+- **That loading an installed voice still downloads nothing.** `KokoroVoice.isIntact` keeps a missing file
+  from being fetched, but loading also runs FluidAudio's cache migration, which re-downloads any model bundle
+  its compatibility check rejects. A bump that changes that check turns into a silent download at launch,
+  breaking PRIVACY's "only when you choose Download". On a bump, install the voice on the old pin, move to
+  the new one, and confirm `KokoroAneModelCompatibility.existingBundlesRequiringMigration` returns nothing
+  for it; if it does not, mark the voice Needs attention before loading.
+
 ## speech-swift (Qwen3-ASR) fork
 
 **speech-swift (Qwen3-ASR)** → `rsperko/speech-swift` (upstream `soniqo/speech-swift`, package

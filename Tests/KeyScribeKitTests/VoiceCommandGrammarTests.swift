@@ -40,6 +40,11 @@ struct VoiceCommandGrammarTests {
         #expect(VoiceCommandGrammar.parse(transcript) == .goBack)
     }
 
+    @Test(arguments: ["repeat that", "Repeat that.", "say that again", "Say that again!"])
+    func parsesRepeatThat(transcript: String) {
+        #expect(VoiceCommandGrammar.parse(transcript) == .repeatSummary)
+    }
+
     @Test(arguments: [("run Foo", "foo"), ("Run deploy Staging-2!", "deploy staging 2")])
     func parsesAScriptCommand(transcript: String, target: String) {
         #expect(VoiceCommandGrammar.parse(transcript) == .runScript(target: target))
@@ -70,6 +75,10 @@ struct VoiceCommandGrammarTests {
         "Ron deploy",
         "rune deploy",
         "go bag",
+        "repeat that test",
+        "please repeat that",
+        "repeat",
+        "say that",
     ])
     func rejectsAnythingElse(transcript: String) {
         #expect(VoiceCommandGrammar.parse(transcript) == nil)

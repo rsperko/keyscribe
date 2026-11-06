@@ -33,12 +33,18 @@ protocol AgentFronting: Sendable {
 struct AgentFront: AgentFronting, Sendable {
     typealias Read = @Sendable (_ app: String, _ pid: Int, _ body: String, _ asking: @escaping @Sendable () async -> Void) async -> TerminalRead
 
+    static let withoutAsking = AgentFront(
+        frontmost: { AgentFront.frontmost(withWindow: false) },
+        read: { app, pid, body, _ in await TerminalScripting.read(app, pid: pid, body: body, asking: {}, mayAsk: false) },
+        confirming: false)
+
     static let confirmingWithoutAsking = AgentFront(
         read: { app, pid, body, _ in await TerminalScripting.read(app, pid: pid, body: body, asking: {}, mayAsk: false) })
 
-    var frontmost: @MainActor @Sendable () -> FrontApp? = AgentFront.frontmost
+    var frontmost: @MainActor @Sendable () -> FrontApp? = { AgentFront.frontmost() }
     var read: Read = { await TerminalScripting.read($0, pid: $1, body: $2, asking: $3) }
     var facts: @Sendable () -> TerminalFacts = { SystemTerminalFacts() }
+    var confirming = true
 
     func reading(asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }) async -> FrontReading {
         switch await confirmed(asking: asking, { _ in () }) {
@@ -87,6 +93,7 @@ struct AgentFront: AgentFronting, Sendable {
         let first = await surface(app, route, script, asking: { await asking(app.name) })
         guard case .pane(let pane) = first else { return .failure(Self.reason(first)) }
         let value = await evaluate(first)
+        guard confirming else { return .success(Confirmed(app: app, pane: pane, value: value)) }
         let second = await surface(app, route, script, asking: {})
         guard case .pane = second else { return .failure(Self.reason(second)) }
         guard second == first, await frontmost() == app else { return .failure(.changed) }
@@ -112,9 +119,9 @@ struct AgentFront: AgentFronting, Sendable {
     }
 
     @MainActor
-    static func frontmost() -> FrontApp? {
+    static func frontmost(withWindow: Bool = true) -> FrontApp? {
         guard let app = NSWorkspace.shared.frontmostApplication, let bundle = app.bundleIdentifier else { return nil }
-        let window = ContextProbe.focusedState(pid: app.processIdentifier).windowId
+        let window = withWindow ? ContextProbe.focusedState(pid: app.processIdentifier).windowId : nil
         return FrontApp(bundle: bundle, pid: Int(app.processIdentifier), name: app.localizedName ?? bundle, window: window)
     }
 }

@@ -54,6 +54,7 @@ final class HUDController: HUDPresenting {
     var onChooseVoiceCommand: ((Int, String) -> Void)?
     var onCancelVoiceCommandChoice: ((Int) -> Void)?
     var canCancel: (() -> Bool)?
+    var onVisibilityChange: ((Bool) -> Void)?
     private var localKeyMonitor: Any?
     private var anchor: HUDAnchor = HUDAnchorStore.load() {
         didSet { model.listAbove = anchor.keepsBottomEdge }
@@ -93,6 +94,8 @@ final class HUDController: HUDPresenting {
         }
         model.state = state
         announce(state, after: previous)
+        let isHidden: Bool = { if case .hidden = state { return true } else { return false } }()
+        if isHidden != wasHidden { onVisibilityChange?(!isHidden) }
         if case .hidden = state {
             if panel?.isKeyWindow == true { relinquishKeyFocus() }
             fadeOutPanel()
@@ -414,8 +417,6 @@ private struct HUDView: View {
     let onErrorAction: (HUDErrorAction) -> Void
     let onChoose: (Int, String) -> Void
     let onCancelChoice: (Int) -> Void
-    @Environment(\.colorSchemeContrast) private var contrast
-    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         if case .choice(let prompt, _, _) = model.shown {
@@ -431,11 +432,7 @@ private struct HUDView: View {
             .padding(.vertical, 10)
             .frame(width: model.shown.panelWidth, alignment: .leading)
             .frame(minHeight: model.shown.contentHeight, alignment: .leading)
-            // A light card usually floats over dark content, which bleeds through the standard material as grey.
-            .background(colorScheme == .light ? .thickMaterial : .regularMaterial, in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(
-                Color.primary.opacity(contrast == .increased ? 0.5 : 0.2),
-                lineWidth: contrast == .increased ? 1.5 : 1))
+            .modifier(HUDCardBackground())
             .accessibilityElement(children: .contain)
             .accessibilityLabel(accessibilityLabel)
             .accessibilityIdentifier(AccessibilityID.HUD.panel)

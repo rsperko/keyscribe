@@ -202,6 +202,8 @@ struct VoiceCommandRunnerTests {
         var result: AgentFocusResult = .exact
         var handles: [String: String] = ["a": "docs", "b": "backend"]
         var whileOpening: @MainActor () -> Void = {}
+        var replay: SpokenResultOutput.Replay = .repeating("docs")
+        private(set) var replays = 0
         private(set) var opened: [String] = []
         private(set) var reads = 0
         private(set) var wantedAfterOpening: [Bool] = []
@@ -214,8 +216,25 @@ struct VoiceCommandRunnerTests {
                     self.wantedAfterOpening.append(stillWanted())
                     return self.result
                 },
-                handle: { self.handles[$0] })
+                handle: { self.handles[$0] },
+                replay: { self.replays += 1; return self.replay })
         }
+    }
+
+    @Test func repeatThatReplaysTheLastSummaryAndSaysWhenThereIsNone() async {
+        let (runner, system) = make()
+        #expect(await runner.run(transcript: "repeat that", places: [], origin: nil, stillWanted: { true })
+                == .failed(message: "Nothing to repeat yet.", command: "Replays the last spoken update."))
+        let sessions = Sessions()
+        runner.returnToSessions(sessions.returns)
+        #expect(await runner.run(transcript: "Say that again.", places: [], origin: nil, stillWanted: { true })
+                == .done(summary: "docs", command: "Replays the last spoken update."))
+        sessions.replay = .off
+        #expect(await runner.run(transcript: "repeat that", places: [], origin: nil, stillWanted: { true })
+                == .failed(message: "Spoken updates are off.", command: "Replays the last spoken update."))
+        #expect(await runner.run(transcript: "repeat that", places: [], origin: nil, stillWanted: { false }) == .abandoned)
+        #expect(sessions.replays == 2)
+        #expect(system.activatedPids.isEmpty)
     }
 
     @Test func goBackToASessionStopsWhenTheStopCheckFailsDuringTheOpen() async {

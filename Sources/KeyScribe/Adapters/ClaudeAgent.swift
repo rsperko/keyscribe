@@ -48,14 +48,14 @@ extension AgentHub {
         transport: AgentTransport, scan: @escaping @Sendable () -> [ClaudeRegistryEntry]?, names: AgentNameStore? = nil,
         focus: AgentTerminalFocusing? = nil, front: AgentFronting? = nil, glance: AgentFronting? = nil, transcriptTitles: ClaudeTranscriptTitles? = nil,
         receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30),
-        scanDeadline: Duration = AgentHub.defaultScanDeadline,
+        disconnectGrace: Duration = AgentHub.defaultDisconnectGrace, scanDeadline: Duration = AgentHub.defaultScanDeadline,
         now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString },
         stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning
     ) {
         self.init(
             transport: transport, discovery: [ClaudeDiscovery(scan: scan, titles: transcriptTitles, stillRunning: stillRunning)],
             names: names, focus: focus, front: front, glance: glance, receiptTimeout: receiptTimeout, handOffLimit: handOffLimit,
-            scanDeadline: scanDeadline, now: now, makeId: makeId)
+            disconnectGrace: disconnectGrace, scanDeadline: scanDeadline, now: now, makeId: makeId)
     }
 }
 

@@ -259,6 +259,16 @@ a hello on any other protocol is refused with `426` and is never registered or s
   leaves the take uncertain. A submission stops holding further dictation after
   three seconds, and only the most recent such submissions are still matched; one dropped from that list
   stays uncertain. Text starting with `/` or `!` reaches Pi as plain text.
+- **A submit names its own turn.** The Claude connector reports the turn whose prompt is the text it
+  submitted, and no turn when it cannot tell (another mod may rewrite the prompt), so a turn the user started
+  meanwhile is never taken for the dictation's. A submit that names no turn is still confirmed as sent, but
+  no turn's reply is spoken for it. The Pi connector treats Pi's automatic retries and continuations as one turn, and closes a run
+  Pi never reported settled once Pi has been idle across two checks a couple of seconds apart, reporting it
+  with reason `unknown` and no answer.
+- **A completed turn carries the agent's final reply** in `answer`: the last assistant text of the turn, without
+  thinking or tool calls, bounded by each connector to its opening and its ending. KeyScribe keeps it in
+  memory only, for the spoken result of a turn its own dictation started, and never writes it to History or
+  logs. A turn that was stopped or failed carries no spoken result.
 - **The session id comes from Claude Code's session lifecycle.** When a session ends or is replaced
   (`/clear`, `/resume`, `/branch`), queued events for the old one are dropped and its commands refused, and
   the connector says hello for the new id before sending anything else.
@@ -762,7 +772,8 @@ regex = false
 ### `voice_commands.toml` — saved commands for Voice Commands (experimental)
 
 Read only while the `voice_commands` flag is on. The Voice Commands mode understands
-a saved command's spoken name (below, checked first), an app-switching verb followed by a target (`VoiceCommandGrammar.focusVerbs`), `run <action> [words]`, and `go back`, matched against the whole
+a saved command's spoken name (below, checked first), an app-switching verb followed by a target (`VoiceCommandGrammar.focusVerbs`), `run <action> [words]`, `go back`, and `repeat that` or `say that again` (`VoiceCommandGrammar.repeatSummary`, which
+replays the last spoken update of the Coding agent feature), matched against the whole
 utterance (case and punctuation ignored; a leading "the" is dropped from an app-switching target, so
 `switch to the browser` looks for `browser`, but not from a `run` action name). The app-switching prefixes also accept
 `which to` and `witch to` for `switch to`, and `two` or `too` in place of `to` after `switch`, `which`,
@@ -1339,7 +1350,37 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 # input_device_name = "MacBook Pro Microphone"   # possibly-stale label, so a disconnected device still reads as itself
 # keep_captures = false                          # debug: retain a copy of each committed capture WAV
 # keep_captures_max_mb = 500                     # soft budget for the archive; oldest pruned first
+
+[coding_agents.spoken_result]               # Settings ▸ Modes ▸ Coding agent ▸ Spoken updates
+# enabled = true                                 # Read updates aloud; absent = on exactly when a
+                                                 #   connection is set
+# connection = "omlx"                            # id of the AI service that summarizes a finished reply
+                                                 #   and describes a Pi prompt; absent or "" = None:
+                                                 #   a longer reply is announced as finished, and
+                                                 #   notices still play as fixed sentences
+# prompt = "…"                                   # the summary instruction; absent = the built-in default
+                                                 #   (SpokenResultSettings.defaultPrompt)
+# voice = "bf_emma"                              # speaker of the on-device voice, one of SpokenVoices.all;
+                                                 #   absent or unknown = SpokenVoices.recommended
 ```
+
+> **`[coding_agents.spoken_result]`** is read only while the Coding agent feature is on. A reply of at most
+> `SpokenResult.verbatimWordLimit` words (counted on the reply as written, so a reply that is mostly code is
+> summarized rather than read as "code block") is spoken as it is, with markup removed, code blocks named and
+> recognized secrets hidden, without any service call; a reply with nothing left to read, such as one that is
+> only a table, is summarized instead; a longer one is sent to the chosen service, bounded to its opening and ending within
+> `SpokenResult.inputCharacterLimit` characters and after best-effort redaction. With no `connection`, a reply that
+> would be summarized is spoken as the conversation's name followed by "Finished." without any service call; a
+> `connection` that names no saved service speaks it as unavailable. A redacted span is never
+> restored into speech: the summary says "a hidden value" in its place. Every result starts with the name of
+> the conversation that produced it, and a summary that fails, times out or comes back empty is spoken as that
+> name followed by "The spoken summary is unavailable." Unavailable summaries waiting together are spoken as one
+> notice naming each conversation, followed by "The spoken summaries are unavailable." A summary longer than
+> `SpokenResult.summaryWordLimit` words is requested once more, shorter; a second overlong one is unavailable. Turning `enabled` off keeps `connection`, `prompt` and
+> `voice`. Only turns the user's own dictation started are spoken, and a conversation confirmed in front when
+> its turn finishes is skipped without a service call. With `enabled` on, a dictated turn that starts waiting for
+> approval or an answer, or whose connector stays gone mid-turn, is announced with a fixed notice whether or not
+> `connection` is set; notices never call a service. Nothing is stored.
 
 > **`[audio]`** — `input_device_uid` is a CoreAudio UID (stable across reconnect, unlike the ephemeral
 > device id), resolved live at each bring-up: the preferred device if present, else the system default.

@@ -960,6 +960,22 @@ struct AgentDeliveryWiringTests {
         #expect(fact(entry, "Default recipient") == "keyscribe")
     }
 
+    @Test(arguments: ["Repeat that.", "say that again"])
+    func repeatThatOnTheCodingAgentTriggerReplaysLocallyAndSendsNothing(text: String) async {
+        let runner = BackRunner()
+        runner.outcome = .done(summary: "docs", command: "Replays the last spoken update.")
+        let rig = await rig(text, current: "claude:s1", voiceCommands: runner)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        let entry = await lastHistoryEntry(rig)
+        #expect(runner.ran.map(\.transcript) == ["repeat that"])
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.current == "claude:s1")
+        #expect(entry?.outcome == .inserted)
+        #expect(fact(entry, "Command") == "Repeat that")
+        #expect(fact(entry, "Default recipient") == "keyscribe")
+    }
+
     @Test func goBackWithNothingToReturnToSaysSoAndSendsNothing() async {
         let runner = BackRunner()
         runner.outcome = .failed(message: "Nothing to go back to.")
@@ -973,7 +989,10 @@ struct AgentDeliveryWiringTests {
         #expect(entry?.failureReason == "Nothing to go back to.")
     }
 
-    @Test(arguments: [("Tell keyscribe go back", "go back"), ("Go back to the parser", "Go back to the parser")])
+    @Test(arguments: [
+        ("Tell keyscribe go back", "go back"), ("Go back to the parser", "Go back to the parser"),
+        ("Tell keyscribe repeat that", "repeat that"), ("Repeat that test run", "Repeat that test run"),
+    ])
     func goBackInsideAMessageIsStillAMessage(text: String, sent: String) async {
         let runner = BackRunner()
         let rig = await rig(text, current: "claude:s1", voiceCommands: runner)

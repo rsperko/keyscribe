@@ -301,6 +301,18 @@ the HUD is visible and cancellable (see the HUD-is-key footgun in `insertion-and
 ESC does not apply there; the trigger cancels instead). A local `NSEvent` monitor needs no
 permission, but it only sees keys routed to a key window of THIS process.
 
+**ESC-to-stop a spoken update** is the one exception, because the speaking panel never takes key focus:
+`SpeakingHUDController` registers a bare Escape (key code 53, layout-independent) as a Carbon hot key on its
+own `CarbonHotKeys` **only while the panel shows**, and unregisters it when the panel hides, so Escape is
+consumed then and reaches the foreground app at every other time. This does not loosen the bare-key rule
+above, which governs user triggers. Several `CarbonHotKeys` registrars coexist: ids are unique across all of
+them, and each one's handler returns `eventNotHandledErr` for an id it does not own so the event reaches the
+next handler. Keep both halves, or one registrar silently swallows the other's chords.
+`ChordRegistering.update` reports whether every registration succeeded, and the speaking panel drops "Esc to
+stop" from its status when the claim failed. Recording releases this claim before the recording HUD takes key
+focus for its own local Escape, because `recordingStarted` stops speech first; `CaptureCueOrderingTests` pins
+that order.
+
 ## TCC verdicts and Accessibility recovery
 
 - **TCC verdicts are read at launch and cached for the process lifetime** — a grant/revoke needs an

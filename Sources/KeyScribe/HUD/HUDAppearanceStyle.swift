@@ -33,3 +33,17 @@ extension Color {
         scheme == .light ? Color(red: 0.56, green: 0.11, blue: 0.18) : .red
     }
 }
+
+struct HUDCardBackground: ViewModifier {
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        content
+            // A light card usually floats over dark content, which bleeds through the standard material as grey.
+            .background(colorScheme == .light ? .thickMaterial : .regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(
+                Color.primary.opacity(contrast == .increased ? 0.5 : 0.2),
+                lineWidth: contrast == .increased ? 1.5 : 1))
+    }
+}

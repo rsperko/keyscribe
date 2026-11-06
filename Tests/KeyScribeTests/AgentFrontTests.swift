@@ -124,6 +124,21 @@ struct AgentFrontTests {
         #expect(await check.check(agent: 30) == .unknown(.changed))
     }
 
+    @Test func aSingleReadCheckReadsTheTerminalAndTheFrontAppOnce() async {
+        final class Count: @unchecked Sendable { var reads = 0; var fronts = 0 }
+        let count = Count()
+        var check = AgentFront(
+            frontmost: { count.fronts += 1; return Self.ghosttyApp },
+            read: { _, _, _, _ in count.reads += 1; return .value("/dev/ttys004") },
+            facts: { Self.facts })
+        check.confirming = false
+        let agents = [AgentFrontCandidate(id: "a", pid: 30), AgentFrontCandidate(id: "b", pid: 40)]
+        #expect(await check.shown(among: agents) == FrontSession(id: "a", app: Self.ghosttyApp))
+        #expect(count.reads == 1 && count.fronts == 1)
+        #expect(AgentFront.withoutAsking.confirming == false)
+        #expect(AgentFront.confirmingWithoutAsking.confirming)
+    }
+
     @Test func anAgentInTheFrontTerminalTabIsShown() async {
         let check = front(Front(Self.ghosttyApp))
         #expect(await check.check(agent: 30) == .shown)

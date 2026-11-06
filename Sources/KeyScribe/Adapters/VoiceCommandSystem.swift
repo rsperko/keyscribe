@@ -31,6 +31,7 @@ struct SessionReturns {
     var inFront: @MainActor () async -> FrontSession?
     var open: @MainActor (String, _ stillWanted: @escaping @MainActor @Sendable () -> Bool) async -> AgentFocusResult
     var handle: @MainActor (String) -> String?
+    var replay: @MainActor () -> SpokenResultOutput.Replay = { .nothingHeard }
 }
 
 enum VoiceCommandFailureKind: Equatable, Sendable {
@@ -603,10 +604,11 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         var command = action.command(appName: system.appName(forBundleId:), reach: reach)
         let succeeded: Bool
         if case .goBack = action { return await goBack(to: origin, stillWanted: stillWanted) }
+        if case .repeatSummary = action { return replay(stillWanted: stillWanted) }
         let origin = if case .script = action { origin } else { await departure(from: origin) }
         guard stillWanted() else { return .abandoned }
         switch action {
-        case .goBack:
+        case .goBack, .repeatSummary:
             return .abandoned
         case .window(let window):
             switch await system.focusWindow(window, stillWanted: stillWanted) {
@@ -766,6 +768,19 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         guard let origin, let sessions else { return origin }
         return origin.leaving(await sessions.inFront())
     }
+
+    private func replay(stillWanted: @MainActor () -> Bool) -> VoiceCommandOutcome {
+        let command = VoiceCommandAction.repeatSummary.detail(appName: { _ in nil })
+        guard let sessions else { return .failed(message: Self.nothingToRepeat, command: command) }
+        guard stillWanted() else { return .abandoned }
+        switch sessions.replay() {
+        case .repeating(let name): return .done(summary: name.isEmpty ? "Summary" : name, command: command)
+        case .nothingHeard: return .failed(message: Self.nothingToRepeat, command: command)
+        case .off: return .failed(message: "Spoken updates are off.", command: command)
+        }
+    }
+
+    static let nothingToRepeat = "Nothing to repeat yet."
 
     private func goBack(to origin: VoiceCommandOrigin?, stillWanted: @escaping @MainActor () -> Bool) async -> VoiceCommandOutcome {
         let nothing = VoiceCommandOutcome.failed(message: "Nothing to go back to.")

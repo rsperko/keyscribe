@@ -264,7 +264,7 @@ final class AgentBridgeServer: @unchecked Sendable {
             if let instance = envelope.instance, let connection = envelope.connection {
                 commands.ack(request, instance: instance, connection: connection)
             }
-        case .typed, .turnStarted, .turnComplete, .undelivered, .title:
+        case .typed, .turnStarted, .turnComplete, .undelivered, .title, .waiting:
             break
         }
         respond(fd, status: 200, body: Data(#"{"ok":true}"#.utf8))

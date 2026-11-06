@@ -92,6 +92,8 @@ struct VoiceCommandPreviewTests {
             == VoiceCommandPreview(headline: "Open Recipes", context: "In the Notes sidebar"))
         #expect(VoiceCommandAction.goBack.preview(spoken: "go back", appName: names)
             == VoiceCommandPreview(headline: "Go back", context: "To where you were before your last command"))
+        #expect(VoiceCommandAction.repeatSummary.preview(spoken: "repeat that", appName: names)
+            == VoiceCommandPreview(headline: "Repeat that", context: "The last spoken update"))
         let speak = VoiceCommandScript(name: "Speak", run: ["/usr/bin/say", "{text}"])
         #expect(VoiceCommandAction.script(speak, arguments: ["hello"]).preview(spoken: "speak hello", appName: names)
             == VoiceCommandPreview(headline: "Run Speak", context: "Runs /usr/bin/say hello in the background."))

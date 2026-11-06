@@ -34,6 +34,30 @@ struct PiDiscoveryTests {
             agent: "pi", id: "s1", pid: 10, cwd: "/src/api", explicitName: "frontend", state: .idle, startedAt: 1_700_000_000_000)]))
     }
 
+    @Test func anOpenDialogShowsAsADialogUntilItClosesWhateverTheTurnDoes() async {
+        let discovery = make()
+        func state() async -> AgentLiveState? {
+            if case .found(let sessions) = await discovery.scan(rereadingTitles: false) { return sessions.first?.state }
+            return nil
+        }
+        discovery.observe(hello("s1", idle: false))
+        discovery.observe(.waiting(session: "s1", prompt: AgentPrompt(title: "Allow?")))
+        #expect(await state() == .userDialog)
+        discovery.observe(.turnStarted(session: "s1", turn: "2"))
+        #expect(await state() == .userDialog)
+        discovery.observe(.waiting(session: "s1", prompt: nil))
+        #expect(await state() == .working)
+        discovery.observe(.waiting(session: "s1", prompt: AgentPrompt()))
+        discovery.observe(.turnComplete(session: "s1", reason: "complete", answer: ""))
+        #expect(await state() == .userDialog)
+        discovery.observe(.waiting(session: "s1", prompt: nil))
+        #expect(await state() == .idle)
+        discovery.observe(.hello(.init(
+            protocolVersion: 2, agent: "pi", agentVersion: "", instance: "i10", session: "s1", pid: 10, idle: true,
+            waiting: AgentPrompt(title: "Which?"))))
+        #expect(await state() == .userDialog)
+    }
+
     @Test func aBusyHelloAndTurnEventsSetTheState() async {
         let discovery = make()
         discovery.observe(hello("s1", idle: false))

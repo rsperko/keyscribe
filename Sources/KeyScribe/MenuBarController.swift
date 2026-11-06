@@ -72,6 +72,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusLine = NSMenuItem(title: "starting…", action: nil, keyEquivalent: "")
     private let pasteLastItem = NSMenuItem(title: "Paste Last Dictation", action: nil, keyEquivalent: "")
     private let addVocabularyItem = NSMenuItem(title: "Add to Vocabulary…", action: nil, keyEquivalent: "")
+    private let spokenUpdatesItem = NSMenuItem(title: "Spoken Updates", action: nil, keyEquivalent: "")
     private let speechModelsMenu = NSMenu()
     private let modesMenu = NSMenu()
 
@@ -118,6 +119,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var hasUpdateAvailable = false
 
     var onPasteLast: (() -> Void)?
+    var onToggleSpokenUpdates: (() -> Void)?
     var onOpenHistory: (() -> Void)?
     var onOpenSettings: (() -> Void)?
     var onOpenSpeechModels: (() -> Void)?
@@ -175,6 +177,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         pasteLastItem.isEnabled = false
         menu.addItem(pasteLastItem)
 
+        spokenUpdatesItem.target = self
+        spokenUpdatesItem.action = #selector(toggleSpokenUpdates)
+        spokenUpdatesItem.isHidden = true
+        menu.addItem(spokenUpdatesItem)
+
         menu.addItem(.separator())
         addVocabularyItem.target = self
         addVocabularyItem.action = #selector(addVocabulary)
@@ -215,6 +222,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     var mainMenu: NSMenu? { appMenu }
     var pasteLastMenuItem: NSMenuItem { pasteLastItem }
+    var spokenUpdatesMenuItem: NSMenuItem { spokenUpdatesItem }
     var modeMenuItems: [NSMenuItem] { modesMenu.items }
 
     func menuWillOpen(_ menu: NSMenu) { onMenuWillOpen?() }
@@ -227,6 +235,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         statusLine.isEnabled = destination != nil
     }
     func setHasResult(_ hasResult: Bool) { pasteLastItem.isEnabled = hasResult }
+
+    func setSpokenUpdates(available: Bool, on: Bool) {
+        spokenUpdatesItem.isHidden = !available
+        spokenUpdatesItem.state = on ? .on : .off
+    }
 
     func setSpeechModels(_ rows: [SpeechModelsModel.Row]) {
         speechModelsMenu.removeAllItems()
@@ -383,6 +396,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     }
 
     @objc private func pasteLast() { onPasteLast?() }
+    @objc private func toggleSpokenUpdates() { onToggleSpokenUpdates?() }
     @objc private func openHistory() { onOpenHistory?() }
     @objc private func openSettings() { onOpenSettings?() }
     @objc private func openSpeechModels() { onOpenSpeechModels?() }

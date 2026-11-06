@@ -22,6 +22,19 @@ final class CodingAgentsSettingsModel: ObservableObject {
     @Published private(set) var renameDetails: String?
     @Published private(set) var namesProblem: String?
     @Published private(set) var namesNotSaved: String?
+    @Published var spokenResult = SpokenResultSettings() {
+        didSet { if !loadingSpokenResult, spokenResult != oldValue { onSpokenResultChange?(spokenResult) } }
+    }
+    var onSpokenResultChange: ((SpokenResultSettings) -> Void)?
+    var onOpenAIServices: (() -> Void)?
+    var voice: SpokenVoiceModel?
+    private var loadingSpokenResult = false
+
+    func load(spokenResult: SpokenResultSettings) {
+        loadingSpokenResult = true
+        self.spokenResult = spokenResult
+        loadingSpokenResult = false
+    }
 
     var onRename: ((String, String) throws -> Void)?
     var onReloadNames: (() -> Void)?

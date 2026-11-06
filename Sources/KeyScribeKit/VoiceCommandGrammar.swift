@@ -9,6 +9,7 @@ public enum VoiceCommandIntent: Equatable, Sendable {
     case focus(target: String, reach: VoiceCommandReach)
     case runScript(target: String)
     case goBack
+    case repeatSummary
 }
 
 public enum VoiceCommandText {
@@ -64,6 +65,7 @@ public enum VoiceCommandGrammar {
     static let openingVerbs = ["open", "launch"]
     static let focusVerbs = runningVerbs + openingVerbs
     public static let goBack = "go back"
+    public static let repeatSummary = ["repeat that", "say that again"]
     static let run = "run"
 
     private static let focusVerbPrefix: NSRegularExpression = {
@@ -119,6 +121,7 @@ public enum VoiceCommandGrammar {
     public static func parse(_ transcript: String) -> VoiceCommandIntent? {
         let words = VoiceCommandText.key(transcript)
         if words == goBack { return .goBack }
+        if repeatSummary.contains(words) { return .repeatSummary }
         if words.hasPrefix(run + " ") {
             return .runScript(target: String(words.dropFirst(run.count + 1)))
         }

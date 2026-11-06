@@ -16,6 +16,7 @@ not a legal privacy policy.
 | Saved API keys | macOS Keychain. The config stores only a key reference. |
 | Command-generated bearer tokens | Memory only, with expiry honored when present. |
 | Speech model weights | Downloaded on demand, cached locally, and reused offline. |
+| Spoken updates voice | Downloaded only when you choose Download, then runs on your Mac. Nothing it reads is sent anywhere. |
 
 ## What never leaves your Mac
 
@@ -34,11 +35,28 @@ not a legal privacy policy.
   prints a bearer token. KeyScribe keeps generated tokens in memory only, honoring reported expiry
   when present.
 
-## The only thing KeyScribe itself sends
+## The only things KeyScribe itself sends
 
-The only path on which KeyScribe itself sends your words off your Mac is an **optional,
-bring-your-own-key (BYOK) LLM cleanup** that rewrites a transcript (removing filler, fixing grammar,
-reformatting). It is off unless you configure a provider and enable it for a mode. A script or
+KeyScribe itself sends content off your Mac on two paths only, both **optional, bring-your-own-key (BYOK)
+LLM calls** to a service you configured, and both off unless you turn them on:
+
+- **LLM cleanup**, which rewrites a transcript (removing filler, fixing grammar, reformatting). It runs only
+  for a mode you enabled it for.
+- **Spoken updates**, in the experimental Coding agent feature. Notices that a conversation is waiting for you or
+  lost its connector are fixed sentences and send nothing, with one exception: when a Pi conversation you
+  dictated to opens a prompt, the prompt's kind and title, the tool call it seems to be about (its name and up
+  to a thousand characters of arguments, such as the command it asks you to approve), and the agent's last
+  words before it asked are sent to the service you chose, after best-effort redaction, to say in a sentence
+  what it asks. Which tool call a prompt belongs to is a best guess, so another tool's arguments can be sent. When an agent finishes an instruction you
+  dictated, a longer final reply is sent to the service you chose under Spoken updates, only to be
+  summarized into a sentence or two to read aloud; a short reply is read without it, a longer one is only announced
+  as finished when no service is chosen, and nothing is sent for a
+  conversation KeyScribe can confirm is in front of you when it finishes. When it can't confirm that, such as
+  in a terminal it can't read, the reply is sent as usual. Agent replies often contain code and command output, and the
+  redaction described below is tuned to dictated speech, so it catches less there. Choose a local service
+  such as oMLX if replies must stay on your Mac.
+
+A script or
 shortcut you set up to run by voice can send what you said wherever it is built to; see
 [Programs and shortcuts you run by voice](#programs-and-shortcuts-you-run-by-voice).
 
@@ -48,8 +66,9 @@ When it runs:
   credential method you selected: a Keychain-backed API key, no auth for local/no-auth endpoints, or
   a command-generated bearer token. KeyScribe has no LLM service of its own.
 - Before the request is sent, recognizable sensitive spans may be **tokenized out** of the
-  transcript (the redaction wedge, below) and restored locally in the response.
-- Turn the cleanup off and KeyScribe itself makes no network calls after the initial one-time model
+  transcript or reply (the redaction wedge, below). A rewrite restores them locally in the response; a
+  spoken summary never reads them aloud and says "a hidden value" instead.
+- Turn both off and KeyScribe itself makes no network calls after the initial one-time model
   downloads, apart from the update check below.
 
 ## Network use, in full
@@ -60,9 +79,10 @@ KeyScribe only reaches the network for these things, and never to send your audi
    publishers (e.g. Hugging Face) the first time you select an engine, then cached locally and reused
    offline. A tiny (~1 MB) voice-activity-detection model is fetched the same way, alongside your first
    speech model; it runs entirely on-device to detect whether a recording contains any speech (so a
-   silent trigger inserts nothing) and never sends audio anywhere.
-2. **Your own AI service**, if you set one up — the optional LLM cleanup described above, plus the
-   connection test and model list when you add or edit a connection. All of it goes to the provider
+   silent trigger inserts nothing) and never sends audio anywhere. The spoken updates voice is fetched
+   the same way, from Hugging Face, only when you choose **Download** for it.
+2. **Your own AI service**, if you set one up — the optional LLM cleanup and the summaries
+   spoken updates read, described above, plus the connection test and model list when you add or edit a connection. All of it goes to the provider
    you configured and nowhere else. While you are recording a mode that uses it, KeyScribe may also
    open the connection ahead of time so the cleanup comes back faster; that request carries no
    content, and it is skipped entirely when you are typing in a password field.
@@ -164,7 +184,10 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
 - **Replacement use counts** under `usage/`: for each of your replacements, how many dictations it
   changed and the day it was last used. No dictation text is stored there, and it is kept whether or
   not History is on.
-- **Downloaded speech model weights** under `models/`.
+- **Downloaded speech model weights** under `models/`, including the spoken updates voice. Part of that
+  voice, its pronunciation files, is stored in `~/.cache/fluidaudio/Models/kokoro`, a folder other apps
+  built on the same speech library can share. **Delete Voice** removes the voice and leaves that folder
+  alone, because another app may be using it; delete it yourself if nothing else needs it.
 - **Coding agent connection** under `agents/`, only if you turn on the experimental Coding agent
   feature: an access token the agent connectors use to reach KeyScribe on your Mac, the Claude Code
   connector's files, a record of which connector installation may connect for each agent, and
@@ -181,6 +204,11 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
   do so, and the answer stays on your Mac and is not stored. To bring a
   conversation's terminal forward, KeyScribe reads a few terminal and multiplexer variables (such as a
   pane id) from the environment of the processes that hold it; the rest of their environment is ignored.
+  If you turn on **Read updates aloud** and choose an AI service for it, a longer final reply to an
+  instruction you dictated is sent to that service, after best-effort redaction, only to be summarized
+  into a sentence or two; a reply of a few words is read as it is without any service. KeyScribe keeps
+  the reply and the summary in memory only and never writes them to History or logs; what the service
+  you chose keeps is up to that service.
 
 You can inspect, back up, or delete any of it with the Finder or a text editor. Deleting the history
 files removes that history; removing the application support folder resets KeyScribe.
@@ -189,9 +217,10 @@ While you dictate, the recording is written to a temporary file and deleted once
 KeyScribe quits in the middle of a dictation, it deletes the leftover recording the next time it starts,
 or within a few minutes of starting for a recording left by an older version.
 **Erase All KeyScribe Data** in Settings removes everything described here except downloaded speech
-models, including retained and leftover recordings, and also deletes saved API keys from the Keychain.
+models and the spoken updates voice, including retained and leftover recordings, and also deletes saved API keys from the Keychain.
 One exception: a leftover recording made in the last few minutes by an older version of KeyScribe could
-still be in use by that version, so it is kept, and the next start deletes it.
+still be in use by that version, so it is kept, and the next start deletes it. The voice's pronunciation
+files in `~/.cache/fluidaudio/Models/kokoro` are never touched, since other apps may share that folder.
 
 ## What KeyScribe trusts
 

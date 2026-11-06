@@ -61,9 +61,10 @@ downloads include the required bundled artifact.
 
 ### Does any of my speech or text get sent anywhere?
 
-Speech recognition is always on-device — your audio is never sent anywhere. The only thing that can
-leave your Mac is an optional, you-keyed LLM cleanup over a redacted payload, and it is off unless
-you enable it. See [PRIVACY.md](PRIVACY.md) for the full picture.
+Speech recognition is always on-device — your audio is never sent anywhere. The only things that can
+leave your Mac are optional, you-keyed LLM calls over a redacted payload: a mode's cleanup of your
+transcript, and, in the experimental Coding agent feature, the summary of an agent's reply that Spoken
+summaries reads aloud. Both are off unless you enable them. See [PRIVACY.md](PRIVACY.md) for the full picture.
 
 ### Which speech model should I pick?
 
@@ -214,6 +215,8 @@ These also work without saving anything:
 - **“go back”** returns to the window you were using before your last switch by voice, even in the
   same app. Say it again to switch back. It never starts an app that has since quit. Running an action
   does not change that destination.
+- **“repeat that”** or **“say that again”** replays the last spoken update from a coding agent (see
+  [Can KeyScribe tell me when an agent finishes](#can-keyscribe-tell-me-when-an-agent-finishes-without-reading-the-whole-reply)).
 
 Commands never type your words. An unrecognized command shows an explanation and runs nothing, and a
 command that matches more than one saved command, app, or window asks which one (below). **Preview a command** previews
@@ -473,11 +476,48 @@ or you already deleted KeyScribe, delete the folder yourself: Settings shows the
 of the app you are using (`rm -r ~/.pi/agent/extensions/keyscribe` for the released app). Nothing else in
 Pi's folders is touched, and your settings, history and conversation names are kept.
 
+### Can KeyScribe tell me when an agent finishes, without reading the whole reply?
+
+Yes. In **Settings ▸ Modes ▸ Coding agent ▸ Spoken updates**, turn on **Read updates aloud**. When a
+conversation you spoke to is waiting for your approval or an answer, KeyScribe says its name and "Waiting for
+approval." or "Waiting for an answer."; if its connector goes away before it finishes, you hear
+"Disconnected before it finished." These notices need no AI service, and one that is
+no longer true by the time it would play is dropped. Claude Code reports approvals and questions. Pi reports
+only that a prompt is open, so with an AI service chosen, what is known about it is sent to that service,
+after best-effort redaction, to say what it asks: the prompt's kind and title, the tool call it seems to be
+about (such as the command to approve, or a question and its options), and the agent's last words before it
+asked. Which tool call a prompt is about is a best guess. Without a service you hear "Waiting for you." For summaries, also choose one of your saved AI services. When a conversation you spoke to finishes, KeyScribe says the conversation's
+name and a short summary of the agent's final reply: a longer reply goes to that service, after its
+best-effort redaction, to be summarized; a reply of a few words is read as it is without any service. With
+**AI service** set to **None**, a longer reply is announced as finished and nothing is sent. If the
+summary can't be made, you hear that it is unavailable rather than a guess; several waiting at once are
+read as one notice that names each conversation. For a natural voice, choose
+**Download** beside **Voice**: it is a one-time download that runs on your Mac, and you can pick the speaker.
+Its speakers are English only. Until it is downloaded the macOS voice reads summaries, and **Preview Voice**
+lets you hear it first. The instruction the service gets is under **Advanced**, with **Reset to
+Default** to get the original back.
+
+While a summary plays, a small panel shows which conversation it is from, and the chevron beside the name adds
+the text being read; it remembers that choice. Click its stop button or press Esc
+to stop it and drop any summaries still waiting; summaries stay on for the next result. While a summary is
+audible, Esc goes to KeyScribe instead of the app you're in, and reaches your app again the moment it stops. If
+another app already holds Esc, the panel says only "Speaking" and the stop button is the way to stop it.
+Starting a dictation also stops it, and waiting summaries play once the dictation's own panel has gone. The
+**Spoken Updates** item in the menu bar menu turns the feature off and on. Only instructions you dictated are
+spoken about. To hear the last one again, say **"repeat that"** or **"say that
+again"** as the whole dictation, with either the Coding agent or the Voice Commands shortcut; with the Coding
+agent shortcut, a longer dictation that starts that way is sent to the agent as usual. A conversation that is in front of you when it finishes is
+skipped, since you can already see its reply. If KeyScribe can't tell what is in front, for example because
+your terminal hasn't been given Automation access for voice commands yet, the summary still plays.
+KeyScribe does not save replies or summaries. A local service such as oMLX keeps the reply on your Mac.
+
 ### Where are my settings and history stored?
 
 Everything is a plain file under `~/Library/Application Support/KeyScribe/` — TOML config, JSONL
 history (one file per day), and downloaded model weights under `models/`. You can inspect, back up,
-or delete any of it. Removing that folder resets KeyScribe.
+or delete any of it. Removing that folder resets KeyScribe. The spoken updates voice also keeps pronunciation
+files in `~/.cache/fluidaudio/Models/kokoro`, a folder other apps may share, so removing KeyScribe's folder
+leaves them.
 
 ## Permissions
 

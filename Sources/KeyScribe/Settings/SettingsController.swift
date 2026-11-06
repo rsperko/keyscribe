@@ -174,6 +174,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
                 PiConnector(agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug),
             ])
         modes.codingAgents = codingAgents
+        codingAgents.load(spokenResult: settings.codingAgents.spokenResult)
+        codingAgents.onSpokenResultChange = { [model] in model.setSpokenResult($0) }
         aiServices = AIServiceSettingsModel(repository: repository, permits: AIServiceCatalog.permits)
         history = HistoryPaneModel(
             store: historyStore,
@@ -215,6 +217,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         }
         history.mishearingsFinder = { [weak self] word, scope, onSaved in self?.mishearingsFinder(word, scope, onSaved) }
         history.openSettings = { [weak self] destination in self?.navigation.destination = destination }
+        codingAgents.onOpenAIServices = { [weak self] in self?.navigation.destination = .aiServices }
         history.voiceCommandsEnabled = { repository.voiceCommandsEnabled }
         modes.voiceCommands.previousApp = { [weak self] in self?.historyPreviousApp }
         history.copyText = { TextInserter.copyToClipboard($0) }
@@ -246,6 +249,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     func update(settings: Settings) {
         model.apply(settings)
+        codingAgents.load(spokenResult: settings.codingAgents.spokenResult)
         modes.setVoiceCommandsEnabled(settings.features.isEnabled(.voiceCommands))
         modes.setCodingAgentsEnabled(settings.features.isEnabled(.codingAgents))
         speechModels.syncActive(settings.stt.engine)
@@ -900,6 +904,12 @@ final class SettingsModel: ObservableObject {
     }
 
     func previewSound() { onPreviewSound(soundVolumePercent) }
+
+    func setSpokenResult(_ value: SpokenResultSettings) {
+        guard settings.codingAgents.spokenResult != value else { return }
+        settings.codingAgents.spokenResult = value
+        onChange(settings)
+    }
 
     private var soundVolumePercent: Int { Int((soundVolume * 100).rounded()) }
 

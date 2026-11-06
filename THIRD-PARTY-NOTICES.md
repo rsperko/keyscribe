@@ -36,6 +36,9 @@ the property of its publisher and is used under its own license.
 | Silero VAD Core ML (speech-presence detection) | Silero Team; Core ML conversion by Fluid Inference | MIT |
 | Whisper Large v3 Turbo / Whisper Small (English) | OpenAI | MIT |
 | Qwen3-ASR 0.6B / 1.7B | Alibaba Cloud (Qwen) | Apache-2.0 |
+| Kokoro 82M (Spoken result voice) | hexgrad; Core ML conversion by Fluid Inference | Apache-2.0 |
+| English pronunciation model (Spoken result voice) | Fluid Inference | Apache-2.0 |
+| Misaki pronunciation lexicons (Spoken result voice) | hexgrad | Apache-2.0 |
 | Apple on-device speech (`DictationTranscriber`) | Apple | macOS system framework — no separate distribution |
 
 > Parakeet Unified is licensed separately from the other Parakeet models: the Core ML conversion's

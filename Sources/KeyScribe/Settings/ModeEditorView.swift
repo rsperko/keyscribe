@@ -48,6 +48,7 @@ struct ModeEditorView: View {
             }
             if let codingAgents {
                 CodingAgentRecipientSection(model: codingAgents, shortcut: ModeSummary.triggerDescriptors(mode).first?.displayString)
+                SpokenResultSection(model: codingAgents, connections: connections)
                 ForEach(codingAgents.connectors) { AgentConnectorSection(model: $0) }
             }
             Section("Words") {

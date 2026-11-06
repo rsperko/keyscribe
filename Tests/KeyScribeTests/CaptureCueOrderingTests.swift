@@ -102,7 +102,9 @@ struct CaptureCueOrderingTests {
         controller.cancel()
     }
 
-    private func makeController(audio: AudioCapturing, hud: HUDPresenting, cueSeconds: TimeInterval) -> DictationController {
+    private func makeController(
+        audio: AudioCapturing, hud: HUDPresenting, cueSeconds: TimeInterval, silencer: SpeechSilencer = .shared
+    ) -> DictationController {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-cue-order-\(UUID().uuidString)", isDirectory: true)
         let provider = try! SpeechEngineProvider(engines: [TinyEngine()], activeId: "tiny")
@@ -111,7 +113,8 @@ struct CaptureCueOrderingTests {
             startCueDurationOverride: cueSeconds)
         return DictationController(
             settings: Settings.defaults, provider: provider, config: ConfigCache(supportDir: dir),
-            history: nil, hud: hud, permits: { _ in true }, audio: audio, effects: effects, micStatus: { .granted })
+            history: nil, hud: hud, permits: { _ in true }, audio: audio, effects: effects, micStatus: { .granted },
+            silencer: silencer)
     }
 
     private func poll(until condition: @escaping () -> Bool) async {
@@ -238,5 +241,44 @@ struct CaptureCueOrderingTests {
         let visible = hud.states.enumerated().filter { $0.element != .hidden }.map(\.offset)
         try #require(visible.count == 2)
         #expect(hud.states[(visible[0] + 1)..<visible[1]].contains(.hidden))
+    }
+
+    private final class LoggingHUD: HUDPresenting {
+        let log: (String) -> Void
+        init(log: @escaping (String) -> Void) { self.log = log }
+        func render(_ state: HUDState) {
+            if case .recording = state { log("recording HUD") }
+        }
+    }
+
+    @Test func aRecordingReleasesTheSpeakingPanelsEscapeBeforeTheRecordingHUDAppears() async {
+        var events: [String] = []
+        let silencer = SpeechSilencer()
+        let speech = SpokenResultOutputTests.FakeSpeech()
+        let connection = Connection(id: "omlx", name: "Local", provider: .openaiCompatible, model: "qwen", keyRef: "k")
+        let output = SpokenResultOutput(
+            client: SpokenResultOutputTests.FakeLLM(), permits: { _ in true }, speech: speech, silencer: silencer,
+            settings: { SpokenResultSettings(connection: "omlx") }, connection: { $0 == "omlx" ? connection : nil })
+        let escape = FakeChordRegistrar()
+        escape.onUpdate = { events.append($0.isEmpty ? "escape released" : "escape claimed") }
+        let panel = SpeakingHUDController(escape: escape, defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        defer { panel.hide() }
+        output.onSpeaking = { speaking in
+            if let speaking { panel.show(name: speaking.name, summary: speaking.text) } else { panel.hide() }
+        }
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await poll { speech.isSpeaking }
+        speech.start()
+
+        let ready = SignalLatch()
+        let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
+        let hud = LoggingHUD { events.append($0) }
+        let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05, silencer: silencer)
+        controller.handleStart()
+        await poll { audio.startCalls == 1 }
+        ready.signal()
+        await poll { events.contains("recording HUD") }
+        #expect(events == ["escape claimed", "escape released", "recording HUD"])
+        controller.cancel()
     }
 }

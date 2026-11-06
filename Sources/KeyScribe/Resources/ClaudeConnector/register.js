@@ -1,6 +1,7 @@
 const instance = Math.random().toString(36).slice(2, 10)
 const queueLimit = 64
 const queueBytesLimit = 16 * 1024
+const answerLimit = 8 * 1024
 const eventDeadline = 2000
 const pollDeadline = 28000
 const identityTries = 50
@@ -19,6 +20,7 @@ let endedSession = null
 let helloSession = null
 let generation = 0
 let currentTurn = null
+let ownSubmit = null
 let turnKnown = false
 let prompts = 0
 let pendingButton = null
@@ -380,6 +382,19 @@ function adopt($, id, source) {
   wake(resolve)
 }
 
+function boundedAnswer(answer) {
+  const text = typeof answer === 'string' ? answer : ''
+  const gap = '\n[…]\n'
+  let budget = answerLimit
+  let cut = text
+  while (JSON.stringify(cut).length > answerLimit) {
+    budget = Math.floor(budget * 0.75)
+    const head = Math.floor(budget / 3)
+    cut = text.slice(0, head) + gap + text.slice(text.length - Math.max(0, budget - head - gap.length))
+  }
+  return cut
+}
+
 function current(expected, gen) {
   return gen === generation && expected === session
 }
@@ -388,16 +403,25 @@ function asText(text) {
   return text.startsWith('/') ? '​' + text : text
 }
 
+function ownPrompt(started, sent) {
+  const plain = (value) => String(value || '').replace(/^\u200b/, '').trim()
+  return plain(started) === plain(sent)
+}
+
 async function submit($, id, text, gen, expected) {
   if (!current(expected, gen)) return reply($, gen, { op: 'refused', request: id, reason: 'sessionChanged' })
+  const own = { text: asText(text), turn: null }
+  ownSubmit = own
   let result
   try {
-    result = await $.prompt.submit({ text: asText(text), asUser: true })
+    result = await $.prompt.submit({ text: own.text, asUser: true })
   } catch (err) {
     return reply($, gen, { op: 'refused', request: id, reason: String(err && err.message || err).slice(0, 500) })
+  } finally {
+    if (ownSubmit === own) ownSubmit = null
   }
   if (result && result.drop) return reply($, gen, { op: 'refused', request: id, reason: String(result.drop).slice(0, 500) })
-  return reply($, gen, { op: 'submitted', request: id, turn: currentTurn || '' })
+  return reply($, gen, { op: 'submitted', request: id, turn: own.turn || '' })
 }
 
 async function abort($, id, expectedTurn, gen, expected) {
@@ -617,6 +641,7 @@ export function register(on) {
     if (e.agentId === undefined) {
       currentTurn = e.turnId
       turnKnown = true
+      if (ownSubmit && ownSubmit.turn === null && ownPrompt(e.text, ownSubmit.text)) ownSubmit.turn = e.turnId
       observe($, { op: 'turnStarted', session, turn: e.turnId })
     }
     return next(e)
@@ -627,7 +652,7 @@ export function register(on) {
     if (e.agentId === undefined && (currentTurn === null || currentTurn === e.turnId)) {
       currentTurn = null
       turnKnown = true
-      observe($, { op: 'turnComplete', session, reason: e.reason })
+      observe($, { op: 'turnComplete', session, reason: e.reason, answer: boundedAnswer(e.answer) })
     }
     return result
   })

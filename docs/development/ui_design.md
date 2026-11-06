@@ -368,6 +368,13 @@ selecting the conversation reports that and keeps the destination for another tr
 back” in the Coding agent mode is that return, never a message: it moves focus and nothing else, keeps the
 current recipient, sends no pending dictation, and reports what Voice Commands would (“Nothing to go back
 to.” when there is no destination). “Go back” inside a longer take, or after “tell” and a name, is ordinary
+message text. A take that is only “repeat that” or “say that again” (`VoiceCommandGrammar.repeatSummary`) is
+the same kind of local command on either trigger: it replays the last spoken update that started playing,
+exactly as it was heard, ahead of any still waiting, and sends nothing. The replay waits in its own place
+rather than the queue, so a newer result for the same conversation does not replace it and an unavailable
+notice is never merged again with notices still waiting. It does not repeat the front check, since the user asked for it.
+The HUD names the conversation (“docs”), or says “Nothing to repeat yet.” or “Spoken updates are off.”;
+History records the command and never the summary. Inside a longer take or after “tell” and a name it is
 message text. With the Coding agent feature off, a remembered conversation is only its app and window. While
 it looks, the HUD says so (“Opening docs…”). It follows the agent's processes outward and
 selects each layer it passes through: the multiplexer pane showing the agent (herdr or tmux, for example — the
@@ -512,6 +519,52 @@ always treated as a cloud data boundary — it names the connection and shows th
 `Cloud rewrite` badge even for a local endpoint — so the boundary-badge behavior below always
 governs it (KeyScribe does not currently distinguish a "polishing on this Mac" sub-state).
 
+### The speaking panel
+
+A spoken update (§7 Coding agent) has its own small panel, separate from the dictation HUD and drawn with the
+same card, appearance and anchor, at the dictation HUD's normal width (`SpeakingHUDLayout.width`) whether or
+not the summary is shown. Its header shows a stop button, the exact name of the conversation being read with
+"Speaking · Esc to stop" beneath it, and a small trailing chevron; a long name wraps within that width. The
+stop button is a steady 16-point rounded square on a 26-point rounded-square halo, the same filled-halo
+language as the listening indicator; while audio plays the halo's opacity gently rises and falls on a timer,
+never its size, and under Reduce Motion it is static. The button's 30-point hit target never changes, and its
+accessible label is "Stop speaking". The chevron's tooltip and accessible label are "Show summary" or "Hide
+summary", and VoiceOver hears whether it is collapsed or expanded. The halo does not follow the audio level or
+the voice.
+
+Showing the summary adds the complete text the moment playback starts: exactly the words handed to speech,
+after redaction and cleanup, without the spoken conversation-name prefix the header already shows. The text
+wraps at the panel's width and is never truncated or highlighted word by word.
+A subtle inset divider separates the expanded caption from the controls, with space on either side; it stays
+at that boundary even when the caption scrolls and is absent when the caption is hidden. The divider and an
+8-point gap sit outside the scrolling viewport, so clipped text never meets the divider; both are included
+in the caption's height budget. The outer card padding also stays outside the viewport while text scrolls.
+
+Showing or hiding the text changes only the panel's height, and never moves the stop button: the header keeps
+its screen position and the text opens away from the anchored edge, the same way the Coding agent session list
+does in the dictation HUD: above the header for a bottom anchor, below it for a top anchor, and below it for a
+side anchor unless only above fits. The chevron points toward the text: down when it opens below, up when it
+opens above, right when collapsed. The panel always stays within the screen. On a screen too short for the
+whole text, the header keeps its place and the text area is capped to the space left and scrolls, so the
+complete summary and the stop button both stay reachable; nothing scrolls on its own.
+
+The choice is remembered across launches and carries to the next summary, whose text replaces the previous
+one. Showing or hiding the text never restarts, pauses or changes playback, never clears the queue and never
+takes focus. The text exists only while the panel shows it; it is never written to settings, History or logs.
+
+The panel appears when audio actually starts, never while it is being prepared, and disappears when playback
+finishes or stops. It never takes key focus. Clicking stop or pressing Escape, in either state, stops playback,
+cancels audio and summaries being prepared, drops waiting summaries and hides the panel, leaving the feature on
+for the next result. While the panel shows, Escape is consumed: it never reaches the app in front, so stopping the voice
+can have no side effect there, and it reaches that app again the moment the panel hides. If Escape cannot be
+claimed because another process holds it, the status line reads only "Speaking" and the stop button is the way
+to stop. Starting a dictation hides the panel, and releases Escape, before the dictation HUD appears; a
+waiting summary starts only once the dictation HUD has hidden again, so the two never share the anchor. The
+dictation HUD appearing for any other reason, such as the acknowledgement for a mode chosen under Next
+Dictation, likewise silences the summary being read and hides the panel; that summary is not resumed, and the
+rest wait. There is no countdown or
+waveform.
+
 ### Rules for cloud and privacy state
 
 - A cloud request always names the selected connection, not a generic “AI” label.
@@ -586,6 +639,7 @@ Next Dictation ▸
   Manage Modes…
 
 Paste Last Dictation
+Spoken Updates ✓
 
 ────────────────
 Add to Vocabulary…
@@ -638,6 +692,11 @@ so they sit together above Settings instead of competing with the primary loop.
 > and an **`Update Available…`** item plus the amber badge below are the passive "an update is waiting"
 > affordance, rendered only when the updater reports one. The public build uses Sparkle (EdDSA-verified);
 > a build with no injected updater shows neither.
+
+**Spoken Updates** is shown only while the Coding agent feature is on. Its checkmark is the **Read updates
+aloud** switch (§7 Coding agent), with the same effects: off stops playback and drops waiting and in-progress
+updates, on keeps the configuration and replays nothing. It needs no AI service, since notices are spoken
+without one.
 
 **About & Notices…** names the licenses for bundled libraries and runtime-downloaded models, including
 the Silero VAD support model and production-only Sparkle binary. The app bundle carries the GPLv3
@@ -1473,6 +1532,98 @@ conversation is done by voice (see the Coding agent session list in §5), and
 the current one is marked Current. The guidance names only what can be said. The list remains available
 while connector setup is unavailable, so a connected conversation never disappears behind installation
 status or a collapsed disclosure.
+
+**Spoken updates** sits between the conversations and connector setup, and its everyday view is three rows
+and one disclosure. **Read updates aloud** is its own switch, off by default, with "Skipped when the
+conversation is already in front of you." as the row's always-visible caption. It speaks two kinds of update
+for a turn the user's dictation started: a summary when the turn finishes, and a notice when it needs
+attention (below). Turning it off stops playback, cancels any summary being made, and drops updates still
+waiting, while the chosen service, speaker and instruction are kept; turning it back on applies to the next
+update and replays nothing. The **Spoken Updates** item in the menu bar menu (§6) is the same switch. The rest
+of the section shows only while it is on.
+
+A notice is a fixed sentence after the conversation's name, in the session list's own words: "Waiting for
+approval." and "Waiting for an answer." when the agent's own state says so (`AgentLiveState`), and
+"Disconnected before it finished." when the connector, or the conversation itself, stays gone for
+`AgentHub.defaultDisconnectGrace`, so a reload does not announce itself; a conversation that vanished is still
+named, and its earlier notice is withdrawn at once since nothing is left to answer it. A notice needs no AI
+service and sends nothing anywhere, except a Pi prompt's: Pi says only that an extension prompt is open, not
+whether it asks for approval or an answer, so the connector reports what it can see: the prompt's kind and title, the
+most recently started tool call still running (its name and capped arguments), and a capped tail of the agent's
+last words before it asked. Pi runs each tool's approval gate in start order before running any of them, so a
+gate's prompt belongs to that latest tool; a question tool's own arguments are the only place its question and
+options exist. Attribution is best effort: a dialog opened by a shortcut while a tool runs, or by a question tool
+running beside another tool, can be reported with the wrong tool, and the instruction tells the model the tool
+call may be unrelated and that the title wins. With a service chosen that context, redacted, becomes one spoken line saying what it asks
+(`SpokenResult.waitingPrompt`), under a budget shorter than a summary's so a slow service does not hold the
+notice; without a service, or when that fails or runs out of time, it is "Waiting for you." The hub forgets a
+prompt's context once its session is no longer live. A Pi prompt shows in the session list as a dialog. Each is spoken once when the state begins; a notice whose state ends (the
+approval was given, the connector or the conversation came back, the turn finished) before it is audible is withdrawn rather than
+played late, even while the voice is still preparing it, and a finished turn's summary replaces it. A new
+notice supersedes an earlier turn's summary still being made for that conversation. A
+Claude Code user dialog, or a turn the user typed rather than dictated, is never announced. Notices share the summaries'
+queue, in-front skip and speaking panel, and "repeat that" replays them too; a replay the user asked for plays
+even if its state has since ended.
+
+**AI service** picks **None** or one of the saved AI services, used for summaries and for describing a Pi prompt. No
+service is ever chosen for the user. With **None**, a short finished reply is still read as it is, a longer one is
+announced as "Finished.", and a Pi prompt is "Waiting for you."; the row's caption says so ("Longer replies are
+announced as finished. Nothing is sent."). A chosen service that no longer exists is an `IssueText`, and a longer reply
+is then spoken as unavailable. With no saved services, an advisory saying summaries need one and what plays without it,
+and **Open AI Services**, take its place. While a service is chosen, the row's caption
+states the data boundary in one line, naming the service ("Long replies and waiting prompts go to {name}
+after best-effort redaction."); its help adds that short replies are read without any service and that the app, named with
+`Branding.appName`, does not save replies or summaries, with no claim about what the provider keeps.
+
+**Voice** is one row, with **Preview Voice** beside its control, wrapping below it only when the pane is too
+narrow. Preview speaks a sample in whichever voice would read a summary now, never while recording, and
+interrupts a summary rather than overlapping one. Before the voice is installed, the row's caption reads
+"Using the macOS voice. Download the natural voice for better speech." and its prominent button names the
+language and download size; enabling the switch never downloads anything. While installing, the row's status
+reads "Downloading N%" and then "Testing…" with the phase beside a spinner. Once installed, the row's control
+is the speaker picker, listing `SpokenVoices.all` by name and accent with the recommended speaker first and
+marked "(Recommended)"; only English speakers the voice's authors grade C+ or better are offered, every one
+downloaded with the voice. A voice that makes no sound, whose files went missing (found at launch or when a
+result fails to speak), or whose delete removed only some files reads "Needs attention" with an `IssueText`
+and **Reinstall voice** in the row. When an installed voice fails to read a summary and the macOS voice reads
+it instead, an advisory under the row says so until the natural voice plays again. A macOS voice that is cancelled, or
+never finishes, ends playback; one that never reports finishing is ended after `NaturalSpeech.fallbackLimit`,
+which grows with the text, so the speaking panel and its Escape are never held. Progress, failures and that
+advisory always sit at the Voice row, never inside the disclosure.
+
+**Advanced** is one collapsed `DisclosureSection`, with no disclosure nested inside it. It holds the **Summary
+instruction** prompt editor, seeded with the default instruction, and **Reset to Default**, enabled only once
+it was changed; then, once the voice has files to delete, its language and size on this Mac, a note that
+deleting returns playback to the macOS voice until it is downloaded again and keeps the speaker and summary
+settings, and the red trailing **Delete Voice**, which confirms first and stops anything the voice is speaking.
+A missing voice file is never fetched in the background: only **Download** or **Reinstall voice** downloads.
+Speech is made on this Mac; only summarizing may use the chosen service. The voice's speakers are English, so
+a non-English summary is read by an English speaker or the macOS default voice.
+
+Every summary starts with the exact name of the conversation that produced it, even with only one open, and
+the default instruction asks for 15 to 25 words and never more than 40, leading with failures, open questions
+and decisions and keeping uncertainty and skipped tests. A summary that cannot be made (the service fails,
+times out or returns nothing) is spoken as "{name}: The spoken summary is unavailable.", never a guess.
+Unavailable summaries waiting together are read as one notice naming each conversation ("{name} and {name}:
+The spoken summaries are unavailable.") in the place of the first, ahead of summaries that finished between
+them, so an outage does not repeat the same sentence once per result. A conversation named twice is named once,
+and one whose name is gone is left out of the list. A
+summary over `SpokenResult.summaryWordLimit` words is asked for once more, shorter, within the same deadline;
+a second overlong one counts as unavailable rather than being cut off, since cutting could drop the failure or
+decision it ends with. One
+summary plays at a time and only the latest waiting one per conversation is kept. Nothing plays while a
+recording is open or the dictation HUD shows: summaries wait and play once it has hidden, and starting a dictation stops playback and any audio
+being prepared; the interrupted summary is not resumed. While a summary is audible, the speaking panel (§5)
+shows it. Only turns the user's own dictation started are spoken; a typed prompt's reply is not. A
+conversation that is in front when its turn finishes is neither summarized nor read: the user is already looking
+at the reply. The check uses the same front reading as voice commands, but reads once: voice commands read twice
+and act only on an unchanged view because they act on another app, while a wrong skip costs one summary, so the
+second read and the window lookup it compares are left out. When what is in front cannot
+be confirmed, the summary plays. This check never asks for Automation access: a terminal whose permission is undecided or
+unknown counts as unconfirmed, and the scripted read sends its events without prompting for consent. Its reads
+run on their own queue, so agents finishing never delay a voice command's terminal read. The row's help says the
+summary plays when the front cannot be confirmed. A value
+redaction hid from the service is spoken as "a hidden value", never read aloud.
 
 Connector setup is one section per agent, each drawn from that agent's own adapter: its status, Install,
 Update and Uninstall, its reload advice, and its wording. Installing, updating or uninstalling one agent's

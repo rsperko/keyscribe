@@ -41,6 +41,7 @@ final class DictationController {
     private let activeEngineUsable: @MainActor (any SpeechEngine) -> Bool
     private let isSessionLocked: @MainActor () -> Bool
     private let llmClient: any LLMClient
+    private let silencer: SpeechSilencer
     private let voiceCommands: VoiceCommandRunning
     private let permits: @Sendable (Connection) -> Bool
     private let recordModelLoadFailure: @MainActor (_ engineId: String, _ timedOut: Bool, _ error: String) -> Void
@@ -115,6 +116,7 @@ final class DictationController {
         var agentFacts: [HistoryEntry.Fact] = []
     }
     private var session: DictationSession?
+    weak var spokenUpdates: SpokenResultOutput?
     var agents: AgentHub? {
         didSet {
             if agents !== oldValue { agentOutput.forgetReceipts() }
@@ -135,6 +137,10 @@ final class DictationController {
             handle: { [weak self, weak hub] id in
                 guard let self, self.settings.features.isEnabled(.codingAgents) else { return nil }
                 return hub?.handle(of: id)
+            },
+            replay: { [weak self] in
+                guard let self, self.settings.features.isEnabled(.codingAgents), let spoken = self.spokenUpdates else { return .off }
+                return spoken.repeatLast()
             })
     }
 
@@ -298,8 +304,10 @@ final class DictationController {
         maxRecordingSeconds: Double = RecordingLimit.backstopSeconds,
         modelRecordingLimit: @escaping (String) -> Double? = RecordingLimit.modelLimit(engineId:),
         limitWarningSeconds: Double = 30,
-        warmupClip: URL? = EngineKeeper.bundledWarmupClip
+        warmupClip: URL? = EngineKeeper.bundledWarmupClip,
+        silencer: SpeechSilencer = .shared
     ) {
+        self.silencer = silencer
         self.settings = settings
         self.provider = provider
         self.config = config
@@ -519,6 +527,7 @@ final class DictationController {
             return
         }
         dictationStarts += 1
+        silencer.recordingStarted()
         activeStartTrigger = triggerKey
         latchedTriggerName = (pressStyle == .tapToToggle)
             ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
@@ -1603,10 +1612,20 @@ final class DictationController {
             session?.agentRecipient ?? AgentRecipient.initial(
                 target: mode.agent.target, focused: nil, current: snapshot.current, names: snapshot.names)
         }
-        if VoiceCommandGrammar.parse(routed.transcript) == .goBack {
+        switch VoiceCommandGrammar.parse(routed.transcript) {
+        case .goBack:
             session?.agentFrontTask?.cancel()
-            await goBackFromAgent(heard: heard, frozen: frozenRecipient(), conversations: snapshot.conversations)
+            await builtInFromAgent(
+                VoiceCommandGrammar.goBack, heard: heard, facts: AgentHistoryFacts.goBack(frozen: frozenRecipient(), conversations: snapshot.conversations))
             return
+        case .repeatSummary:
+            session?.agentFrontTask?.cancel()
+            await builtInFromAgent(
+                VoiceCommandGrammar.repeatSummary[0], heard: heard,
+                facts: AgentHistoryFacts.repeatSummary(frozen: frozenRecipient(), conversations: snapshot.conversations))
+            return
+        default:
+            break
         }
         let address = AgentAddress.parse(
             routed.transcript, names: Array(snapshot.names.keys), namesKnown: snapshot.namesAvailable,
@@ -1668,11 +1687,11 @@ final class DictationController {
         }
     }
 
-    private func goBackFromAgent(heard: String, frozen: AgentRecipient.Frozen?, conversations: [AgentConversation]) async {
+    private func builtInFromAgent(_ transcript: String, heard: String, facts: [HistoryEntry.Fact]) async {
         let lease = lease(for: .codingAgents, stopsAtPress: session?.voiceCommandStopsAtPress)
         guard lease.keepActing() else { return }
         let outcome = await voiceCommands.run(
-            transcript: VoiceCommandGrammar.goBack, places: [], scripts: [], origin: capturedSnapshot.flatMap(Self.origin),
+            transcript: transcript, places: [], scripts: [], origin: capturedSnapshot.flatMap(Self.origin),
             stillWanted: { lease.keepActing() }, onLateResult: { _ in })
         if Task.isCancelled { return }
         guard let shown = VoiceCommandOutput.presentation(of: outcome, resultPrefix: "") else {
@@ -1685,7 +1704,7 @@ final class DictationController {
         }
         finishAgent(state: shown.state, outcome: shown.failure == nil ? .inserted : .failed, heard: heard, body: "",
                     transformed: nil, rewrite: nil, transitioned: true, hideAfter: shown.hideAfter, summary: shown.result,
-                    facts: AgentHistoryFacts.goBack(frozen: frozen, conversations: conversations))
+                    facts: facts)
     }
 
     private func deliverToAgent(
@@ -2338,6 +2357,7 @@ final class DictationController {
         history: HistoryWrite? = nil,
         completion: DictationCompletion? = nil
     ) {
+        silencer.recordingEnded()
         switch terminal {
         case .cancel: machine.cancel()
         case .finish(let outcome): machine.finish(outcome)

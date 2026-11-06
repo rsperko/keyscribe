@@ -159,6 +159,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
     case tab(VoiceCommandCatalog.Tab)
     case sidebarItem(VoiceCommandCatalog.SidebarItem)
     case goBack
+    case repeatSummary
 
     public func summary(appName: (String) -> String?) -> String {
         switch self {
@@ -167,6 +168,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
         case .tab(let tab): return appName(tab.browserBundleId).map { "\(tab.title) \u{00B7} \($0)" } ?? tab.title
         case .sidebarItem(let item): return appName(item.bundleId).map { "\(item.name) \u{00B7} \($0)" } ?? item.name
         case .goBack: return "Back"
+        case .repeatSummary: return "Repeat"
         case .place(let place, .tab(let tab)):
             return appName(tab.browserBundleId).map { "\(place.name) · \($0)" } ?? place.name
         case .place(let place, _): return place.name
@@ -185,6 +187,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
         case .sidebarItem(let item):
             return "Opens \u{201C}\(item.name)\u{201D} in the sidebar of \(appName(item.bundleId) ?? item.bundleId)."
         case .goBack: return "Returns to the window or app you were in before your last command."
+        case .repeatSummary: return "Replays the last spoken update."
         case .place(_, .app(let bundleId)):
             return "Brings \(appName(bundleId) ?? bundleId) to the front\(opening)."
         case .place(_, .tab(let tab)):
@@ -247,6 +250,7 @@ public enum VoiceCommandResolver {
     public enum Route: Equatable, Sendable {
         case saved(SavedMatch)
         case goBack
+        case repeatSummary
         case focus(String, VoiceCommandReach)
         case scriptNotFound(String)
         case notACommand
@@ -257,6 +261,7 @@ public enum VoiceCommandResolver {
         switch VoiceCommandGrammar.parse(transcript) {
         case nil: return .notACommand
         case .goBack: return .goBack
+        case .repeatSummary: return .repeatSummary
         case .focus(let target, let reach): return .focus(target, reach)
         case .runScript(let target):
             return savedMatch(transcript, from: 1, places: [], scripts: catalog.scripts).map(Route.saved) ?? .scriptNotFound(target)
@@ -267,6 +272,7 @@ public enum VoiceCommandResolver {
         switch route(transcript, catalog: catalog) {
         case .saved(let match): return resolve(match, catalog: catalog)
         case .goBack: return .action(.goBack)
+        case .repeatSummary: return .action(.repeatSummary)
         case .focus(let target, let reach): return resolve(target: target, reach: reach, catalog: catalog)
         case .scriptNotFound(let target): return .scriptNotFound(target)
         case .notACommand: return .notACommand

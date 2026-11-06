@@ -284,6 +284,7 @@ test("what happens before hello is dropped, never replayed, and hello reports th
   h.ready(undefined)
   await h.start()
   await h.typed()
+  h.live.idle = false
   h.emit("agent_start")
   await h.settle()
   assert.equal(h.requests.length, 0)
@@ -508,6 +509,148 @@ test("only a bounded number of late submissions wait for a receipt, oldest forgo
   assert.deepEqual(h.replies().filter((b) => b.op === "submitted").map((b) => b.request), ["r2"])
 })
 
+test("a turn's final assistant text is reported when it completes, without thinking or tool calls", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.idle = false
+  h.emit("agent_start")
+  h.emit("message_end", { message: { role: "assistant", content: [{ type: "thinking", thinking: "plan" }, { type: "text", text: "Looking." }, { type: "toolCall", id: "t1", name: "bash", arguments: {} }] } })
+  h.emit("message_end", { message: { role: "toolResult", content: [{ type: "text", text: "tool output" }] } })
+  h.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [{ type: "thinking", thinking: "done" }, { type: "text", text: "All green." }] } })
+  await h.finished()
+  const done = h.events().filter((b) => b.op === "turnComplete")
+  assert.deepEqual(done.map((b) => [b.reason, b.answer]), [["complete", "All green."]])
+})
+
+test("a turn without assistant text reports an empty answer, and the next turn starts fresh", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.idle = false
+  h.emit("agent_start")
+  h.emit("message_end", { message: { role: "assistant", content: [{ type: "text", text: "first" }] } })
+  await h.finished()
+  h.live.idle = false
+  h.emit("agent_start")
+  await h.finished()
+  assert.deepEqual(h.events().filter((b) => b.op === "turnComplete").map((b) => b.answer), ["first", ""])
+})
+
+test("a turn whose final response failed reports an error, never the progress text before it", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.idle = false
+  h.emit("agent_start")
+  h.emit("message_end", { message: { role: "assistant", stopReason: "toolUse", content: [{ type: "text", text: "Looking into it." }, { type: "toolCall", id: "t1", name: "bash", arguments: {} }] } })
+  h.emit("message_end", { message: { role: "assistant", stopReason: "error", content: [] } })
+  await h.finished()
+  const done = h.events().filter((b) => b.op === "turnComplete")
+  assert.deepEqual(done.map((b) => [b.reason, "answer" in b]), [["error", false]])
+})
+
+test("an empty final response leaves no earlier text as the answer", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.idle = false
+  h.emit("agent_start")
+  h.emit("message_end", { message: { role: "assistant", stopReason: "toolUse", content: [{ type: "text", text: "Looking into it." }] } })
+  h.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [] } })
+  await h.finished()
+  assert.deepEqual(h.events().filter((b) => b.op === "turnComplete").map((b) => [b.reason, b.answer]), [["complete", ""]])
+})
+
+test("an answer full of characters JSON must escape still fits the event queue and arrives", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.idle = false
+  h.emit("agent_start")
+  h.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: '"'.repeat(20000) } })
+  await h.finished()
+  const done = h.events().filter((b) => b.op === "turnComplete")
+  assert.equal(done.length, 1)
+  assert.ok(JSON.stringify(done[0].answer).length <= 8 * 1024)
+  assert.equal(h.events().filter((b) => b.op === "hello").length, 1)
+})
+
+test("a run Pi retries before it settles stays one turn, and its recovered answer is reported once", async () => {
+  const h = harness()
+  await h.connect()
+  await h.deliver([h.submit("r1", "run the tests")])
+  await h.accepted()
+  h.emit("message_end", { message: { role: "assistant", stopReason: "error", content: [] } })
+  h.emit("agent_start")
+  h.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "All green." }] } })
+  await h.finished()
+  assert.deepEqual(h.ops().filter((op) => op === "turnStarted").length, 1)
+  assert.deepEqual(h.events().filter((b) => b.op === "turnComplete").map((b) => [b.reason, b.answer]), [["complete", "All green."]])
+  assert.deepEqual(h.replies().filter((b) => b.op === "submitted").map((b) => b.turn), ["1"])
+})
+
+test("a run whose settlement was missed is closed when the user types into an idle Pi, so the session is never stuck busy", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.idle = false
+  h.emit("agent_start")
+  h.live.idle = true
+  await h.typed()
+  h.live.idle = false
+  h.emit("agent_start")
+  h.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Hi." }] } })
+  await h.finished()
+  assert.deepEqual(h.events().filter((b) => ["turnStarted", "turnComplete"].includes(b.op)).map((b) => [b.op, b.turn ?? b.reason, b.answer]), [
+    ["turnStarted", "1", undefined], ["turnComplete", "unknown", undefined], ["turnStarted", "2", undefined], ["turnComplete", "complete", "Hi."],
+  ])
+})
+
+test("a run whose settlement never came is closed once Pi has been idle across two checks, so dictation is not held forever", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.idle = false
+  h.emit("agent_start")
+  h.live.idle = true
+  await h.advance(4_000)
+  assert.deepEqual(h.events().filter((b) => b.op === "turnComplete").map((b) => b.reason), ["unknown"])
+  await h.answerEvents()
+  await h.deliver([h.submit("r1", "run the tests")])
+  assert.equal(h.sends.length, 1)
+})
+
+test("a long run that is still busy is never closed by the idle check", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.idle = false
+  h.emit("agent_start")
+  await h.advance(20_000)
+  assert.equal(h.events().filter((b) => b.op === "turnComplete").length, 0)
+  await h.finished()
+  assert.deepEqual(h.events().filter((b) => b.op === "turnComplete").map((b) => b.reason), ["complete"])
+})
+
+test("a single idle moment during settlement does not close the run early", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.idle = false
+  h.emit("agent_start")
+  await h.advance(1_000)
+  h.live.idle = true
+  await h.advance(2_000)
+  await h.finished()
+  assert.deepEqual(h.events().filter((b) => b.op === "turnComplete").map((b) => b.reason), ["complete"])
+})
+
+test("a very long answer crosses the bridge bounded to its opening and its ending", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.idle = false
+  h.emit("agent_start")
+  h.emit("message_end", { message: { role: "assistant", content: "a".repeat(5000) + "b".repeat(5000) + "c".repeat(5000) } })
+  await h.finished()
+  const answer = h.events().find((b) => b.op === "turnComplete").answer
+  assert.ok(answer.length <= 8 * 1024)
+  assert.ok(answer.startsWith("a".repeat(100)))
+  assert.ok(answer.endsWith("c".repeat(100)))
+  assert.ok(answer.includes("[…]"))
+})
+
 test("a message the agent rejects outright is refused with its words", async () => {
   const h = harness()
   await h.connect()
@@ -599,6 +742,82 @@ test("dictation is refused while the agent shows a dialog and accepted once it c
   await h.answerEvents()
   await h.deliver([h.submit("r2")])
   assert.equal(h.sends.length, 1)
+})
+
+test("a dialog is reported with its kind, title, the tool it interrupts and what the agent said, once per span, and its close clears it", async () => {
+  const h = harness()
+  await h.connect()
+  h.emit("message_end", { message: { role: "assistant", stopReason: "toolUse", content: [{ type: "text", text: "Cleaning up first." }, { type: "toolCall", id: "t1", name: "bash", arguments: {} }] } })
+  h.emit("tool_execution_start", { toolCallId: "t1", toolName: "bash", args: { command: "rm -rf build" } })
+  h.emit("ui_prompt_start", { kind: "select", title: "Allow?" })
+  h.emit("ui_prompt_start", { kind: "confirm", title: "Really?" })
+  h.emit("ui_prompt_end", { kind: "confirm" })
+  h.emit("ui_prompt_end", { kind: "select" })
+  await h.advance(0)
+  const waiting = h.events().filter((b) => b.op === "waiting")
+  assert.deepEqual(waiting.map((b) => b.waiting), [
+    { kind: "select", title: "Allow?", tool: "bash", detail: '{"command":"rm -rf build"}', said: "Cleaning up first." }, undefined,
+  ])
+  assert.equal(waiting[0].session, "s1")
+})
+
+test("a dialog with no title outside any tool still reports that it waits", async () => {
+  const h = harness()
+  await h.connect()
+  h.emit("tool_execution_start", { toolCallId: "t1", toolName: "read", args: {} })
+  h.emit("tool_execution_end", { toolCallId: "t1", toolName: "read" })
+  h.emit("ui_prompt_start", { kind: "custom" })
+  await h.advance(0)
+  assert.deepEqual(h.events().filter((b) => b.op === "waiting").map((b) => b.waiting), [{ kind: "custom" }])
+})
+
+test("a gate in a batch of tools names the tool that started last, the one it is preparing", async () => {
+  const h = harness()
+  await h.connect()
+  h.emit("tool_execution_start", { toolCallId: "a", toolName: "read", args: { path: "notes.md" } })
+  h.emit("tool_execution_start", { toolCallId: "b", toolName: "bash", args: { command: "rm -rf build" } })
+  h.emit("ui_prompt_start", { kind: "select", title: "Allow?" })
+  await h.advance(0)
+  assert.deepEqual(h.events().filter((b) => b.op === "waiting").map((b) => b.waiting), [
+    { kind: "select", title: "Allow?", tool: "bash", detail: '{"command":"rm -rf build"}' },
+  ])
+})
+
+test("an unrelated dialog while one tool runs is still reported with that tool, as best effort", async () => {
+  const h = harness()
+  await h.connect()
+  h.emit("tool_execution_start", { toolCallId: "a", toolName: "bash", args: { command: "make test" } })
+  h.emit("ui_prompt_start", { kind: "input", title: "Bookmark name?" })
+  await h.advance(0)
+  assert.deepEqual(h.events().filter((b) => b.op === "waiting").map((b) => b.waiting), [
+    { kind: "input", title: "Bookmark name?", tool: "bash", detail: '{"command":"make test"}' },
+  ])
+})
+
+test("a long tool argument and a long reply are cut before they are reported", async () => {
+  const h = harness()
+  await h.connect()
+  h.emit("message_end", { message: { role: "assistant", content: [{ type: "text", text: "a".repeat(2_000) + "the end" }] } })
+  h.emit("tool_execution_start", { toolCallId: "t1", toolName: "question", args: { question: "x".repeat(5_000) } })
+  h.emit("ui_prompt_start", { kind: "custom" })
+  await h.advance(0)
+  const reported = h.events().find((b) => b.op === "waiting").waiting
+  assert.ok((reported.detail as string).length <= 1_000)
+  assert.ok((reported.detail as string).startsWith('{"question":"xxx'))
+  assert.ok((reported.said as string).length <= 500)
+  assert.ok((reported.said as string).endsWith("the end"))
+})
+
+test("a hello sent while a dialog is open carries what it waits for", async () => {
+  const h = harness()
+  await h.connect()
+  h.emit("ui_prompt_start", { kind: "input", title: "Which database?" })
+  await h.answerEvents()
+  await h.advance(28_000)
+  const hellos = h.events().filter((b) => b.op === "hello")
+  assert.equal(hellos.length, 2)
+  assert.equal(hellos[0].waiting, undefined)
+  assert.deepEqual(hellos[1].waiting, { kind: "input", title: "Which database?" })
 })
 
 test("a command for another session is refused without acting", async () => {
@@ -974,6 +1193,20 @@ test("a retire ends the connector for good without answering, even for a new ses
   await h.start("new")
   await h.advance(60_000)
   assert.deepEqual(h.ops(), ["hello"])
+})
+
+test("a retire during a run stops the stale-turn watch, and a later run never starts one", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.idle = false
+  h.emit("agent_start")
+  assert.ok(h.timers.length > 0)
+  await h.deliver([{ op: "retire", id: "retire" }])
+  await h.settle()
+  h.emit("agent_start")
+  await h.advance(60_000)
+  assert.equal(h.timers.length, 0)
+  assert.equal(h.events().filter((b) => b.op === "turnComplete").length, 0)
 })
 
 test("a connector whose installation was replaced never reconnects", async () => {

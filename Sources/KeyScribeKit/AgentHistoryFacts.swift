@@ -29,6 +29,10 @@ public enum AgentHistoryFacts {
         [fact(command: "Go back")] + defaultRecipient(frozen, in: conversations)
     }
 
+    public static func repeatSummary(frozen: AgentRecipient.Frozen?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
+        [fact(command: "Repeat that")] + defaultRecipient(frozen, in: conversations)
+    }
+
     private static func fact(command: String) -> HistoryEntry.Fact {
         HistoryEntry.Fact(label: "Command", value: command)
     }

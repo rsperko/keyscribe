@@ -17,8 +17,11 @@ before you edit code in its area.
 - **Exactly one STT engine is active globally** (user-selected). Multiple named *LLMs* are
   allowed; the STT engine is singular. Resolve it through one provider (seam for per-mode later,
   not built — YAGNI).
-- **The only outbound network call that carries content is an explicit BYOK LLM rewrite**, over a
-  redacted payload. One content-free exception: when the **Phase-A resolved mode is wired to a BYOK
+- **The only outbound network calls that carry content are explicit BYOK LLM calls**, each over a redacted
+  payload and each to a connection the user chose for that purpose: a mode's rewrite of the transcript, and,
+  when the user turns on the Coding agent spoken updates and chooses a service, the summary of an agent's final reply to the user's
+  own dictation and the description of a prompt that turn waits on, from the prompt's title, the tool call it seems to
+  be about, and the agent's last words (`SpokenResultOutput`). One content-free exception: when the **Phase-A resolved mode is wired to a BYOK
   connection** — and only after the secure-aware snapshot has confirmed the field is not a password
   field — a **bodyless, auth-less HEAD preconnect** to that connection's host may fire during recording
   to warm the TLS connection (`HTTPLLMClient.preconnect`, gated by `DictationController.maybePreconnect`
@@ -117,6 +120,9 @@ are the ones that must never break; the guide explains why and what else applies
   - Never bump WhisperKit below 1.1.0. Keep the Silero VAD artifact pinned. The speech-swift fork is
     still required.
   - A green warm build proves nothing about a fresh checkout: run `make check-deps`.
+  - A FluidAudio bump re-checks the spoken result voice: the speaker grades behind `SpokenVoices.all`,
+    that none of its error-level logs carry the text it speaks or transcribes, and that loading an installed
+    voice downloads nothing.
 - **Build, variants, release** → `docs/development/areas/build-and-release.md`.
   - Apps build through `App/project.yml`; a bare `swift build` has no MLX shader library.
   - `make preflight` must pass before anything is published. A release build is a background job.

@@ -21,6 +21,21 @@ public enum AgentCommand: Equatable, Sendable {
     }
 }
 
+public struct AgentPrompt: Equatable, Sendable, Codable {
+    public var kind: String?
+    public var title: String?
+    public var tool: String?
+    public var detail: String?
+    public var said: String?
+    public init(kind: String? = nil, title: String? = nil, tool: String? = nil, detail: String? = nil, said: String? = nil) {
+        self.kind = kind
+        self.title = title
+        self.tool = tool
+        self.detail = detail
+        self.said = said
+    }
+}
+
 public enum AgentEvent: Equatable, Sendable {
     public struct Hello: Equatable, Sendable {
         public var protocolVersion: Int
@@ -38,11 +53,14 @@ public enum AgentEvent: Equatable, Sendable {
         public var installation: String?
         public var environment: [String: String]
         public var cwd: String?
+        public var waiting: AgentPrompt?
         public init(
             protocolVersion: Int, agent: String, agentVersion: String, instance: String, session: String, pid: Int,
             features: [String] = [], title: String? = nil, prompts: Int? = nil, idle: Bool? = nil, gap: Bool? = nil,
-            connection: String? = nil, installation: String? = nil, environment: [String: String] = [:], cwd: String? = nil
+            connection: String? = nil, installation: String? = nil, environment: [String: String] = [:], cwd: String? = nil,
+            waiting: AgentPrompt? = nil
         ) {
+            self.waiting = waiting
             self.cwd = cwd
             self.environment = environment
             self.connection = connection
@@ -71,13 +89,15 @@ public enum AgentEvent: Equatable, Sendable {
     case undelivered(request: String, reason: String, handedOff: Bool)
     case focused(request: String)
     case title(session: String, text: String)
+    case waiting(session: String, prompt: AgentPrompt?)
 }
 
 extension AgentEvent {
     public var session: String? {
         switch self {
         case .hello(let hello): hello.session
-        case .typed(let session, _), .turnStarted(let session, _), .turnComplete(let session, _, _), .title(let session, _): session
+        case .typed(let session, _), .turnStarted(let session, _), .turnComplete(let session, _, _), .title(let session, _),
+             .waiting(let session, _): session
         case .ack, .submitted, .refused, .undelivered, .focused: nil
         }
     }
@@ -91,6 +111,7 @@ extension AgentEvent {
         case .turnStarted(let session, let turn): return .turnStarted(session: rename(session), turn: turn)
         case .turnComplete(let session, let reason, let answer): return .turnComplete(session: rename(session), reason: reason, answer: answer)
         case .title(let session, let text): return .title(session: rename(session), text: text)
+        case .waiting(let session, let prompt): return .waiting(session: rename(session), prompt: prompt)
         case .ack, .submitted, .refused, .undelivered, .focused: return self
         }
     }
@@ -156,6 +177,7 @@ public enum AgentBridgeCodec {
         var installation: String?
         var environment: [String: String]?
         var cwd: String?
+        var waiting: AgentPrompt?
     }
 
     public static func encode(_ commands: [AgentCommand]) throws -> Data {
@@ -184,7 +206,7 @@ public enum AgentBridgeCodec {
             return .hello(.init(
                 protocolVersion: p, agent: agent, agentVersion: w.agentVersion ?? "", instance: instance, session: session, pid: pid,
                 features: w.features ?? [], title: w.title, prompts: w.prompts, idle: w.idle, gap: w.gap, connection: w.connection,
-                installation: w.installation, environment: w.environment ?? [:], cwd: w.cwd))
+                installation: w.installation, environment: w.environment ?? [:], cwd: w.cwd, waiting: w.waiting))
         case "ack":
             return .ack(request: try required(w.request))
         case "submitted":
@@ -199,6 +221,8 @@ public enum AgentBridgeCodec {
             return .title(session: try required(w.session), text: try required(w.text))
         case "turnStarted":
             return .turnStarted(session: try required(w.session), turn: try required(w.turn))
+        case "waiting":
+            return .waiting(session: try required(w.session), prompt: w.waiting)
         case "turnComplete":
             return .turnComplete(session: try required(w.session), reason: w.reason ?? "", answer: w.answer ?? "")
         default:
