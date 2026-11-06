@@ -65,5 +65,11 @@ public struct Feature: CaseIterable, Hashable, Sendable {
         requires: voiceCommands
     )
 
-    public static let allCases: [Feature] = [streamingTranscription, consumptionDrivenRestore, voiceCommands, findInApps]
+    public static let codingAgents = Feature(
+        id: "coding_agents",
+        title: "Talk to coding agents",
+        summary: "Send what you say to a coding agent conversation running in a terminal, such as Claude Code, and hear when it finishes. Requires installing the agent connector."
+    )
+
+    public static let allCases: [Feature] = [streamingTranscription, consumptionDrivenRestore, voiceCommands, findInApps, codingAgents]
 }

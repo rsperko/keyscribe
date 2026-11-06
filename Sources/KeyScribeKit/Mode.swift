@@ -26,12 +26,14 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public var pasteSettleMs: Int
     public var trimTrailingPunctuation: Bool
     public var excludeFromHistory: Bool
+    public var agent: Agent
 
     public enum Source: String, Codable, Sendable { case dictation, selection }
     public enum Output: String, Codable, Sendable {
         case cursor
         case replaceSelection = "replace_selection"
         case voiceCommand = "voice_command"
+        case agent
     }
     public enum Insertion: String, Codable, Sendable { case paste, insert, type }
 
@@ -214,6 +216,55 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         }
     }
 
+    public struct Agent: Codable, Equatable, Sendable {
+        public enum Target: Equatable, Sendable, Codable {
+            case focused
+            case current
+            case ask
+            case handle(String)
+
+            public init(from decoder: Decoder) throws {
+                let raw = try decoder.singleValueContainer().decode(String.self)
+                switch raw {
+                case "focused": self = .focused
+                case "current": self = .current
+                case "ask": self = .ask
+                default:
+                    let handle = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !handle.isEmpty else { throw ConfigError.invalid("agent.target is empty") }
+                    self = .handle(handle)
+                }
+            }
+
+            public func encode(to encoder: Encoder) throws {
+                var c = encoder.singleValueContainer()
+                switch self {
+                case .focused: try c.encode("focused")
+                case .current: try c.encode("current")
+                case .ask: try c.encode("ask")
+                case .handle(let handle): try c.encode(handle)
+                }
+            }
+        }
+
+        public enum Delivery: String, Codable, Sendable { case submit, draft }
+
+        public var target: Target
+        public var delivery: Delivery
+        enum CodingKeys: String, CodingKey { case target, delivery }
+
+        public init(target: Target = .focused, delivery: Delivery = .submit) {
+            self.target = target
+            self.delivery = delivery
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            target = try c.decodeIfPresent(Target.self, forKey: .target) ?? .focused
+            delivery = try c.decodeIfPresent(Delivery.self, forKey: .delivery) ?? .submit
+        }
+    }
+
     public struct AIRewrite: Codable, Equatable, Sendable {
         public var connection: String
         public var prompt: String
@@ -254,6 +305,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         case pasteSettleMs = "paste_settle_ms"
         case trimTrailingPunctuation = "trim_trailing_punctuation"
         case excludeFromHistory = "exclude_from_history"
+        case agent
     }
 
     public init(id: String, name: String, schemaVersion: Int = ModeStore.currentSchemaVersion) {
@@ -281,6 +333,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         pasteSettleMs = 0
         trimTrailingPunctuation = false
         excludeFromHistory = false
+        agent = .init()
     }
 
     public init(from decoder: Decoder) throws {
@@ -309,6 +362,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         pasteSettleMs = try c.decodeIfPresent(Int.self, forKey: .pasteSettleMs) ?? 0
         trimTrailingPunctuation = try c.decodeIfPresent(Bool.self, forKey: .trimTrailingPunctuation) ?? false
         excludeFromHistory = try c.decodeIfPresent(Bool.self, forKey: .excludeFromHistory) ?? false
+        agent = try c.decodeIfPresent(Agent.self, forKey: .agent) ?? .init()
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -336,6 +390,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         if pasteSettleMs != 0 { try c.encode(pasteSettleMs, forKey: .pasteSettleMs) }
         if trimTrailingPunctuation { try c.encode(trimTrailingPunctuation, forKey: .trimTrailingPunctuation) }
         try c.encode(excludeFromHistory, forKey: .excludeFromHistory)
+        if output == .agent { try c.encode(agent, forKey: .agent) }
     }
 
     public static let directId = "_direct"
@@ -484,6 +539,8 @@ public enum ModeStore {
         mode.pasteSettleMs = 1
         mode.trimTrailingPunctuation = true
         mode.excludeFromHistory = true
+        mode.output = .agent
+        mode.agent = .init(target: .handle("a"), delivery: .draft)
         return mode
     }
 
