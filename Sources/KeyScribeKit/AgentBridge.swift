@@ -37,11 +37,13 @@ public enum AgentEvent: Equatable, Sendable {
         public var connection: String?
         public var installation: String?
         public var environment: [String: String]
+        public var cwd: String?
         public init(
             protocolVersion: Int, agent: String, agentVersion: String, instance: String, session: String, pid: Int,
             features: [String] = [], title: String? = nil, prompts: Int? = nil, idle: Bool? = nil, gap: Bool? = nil,
-            connection: String? = nil, installation: String? = nil, environment: [String: String] = [:]
+            connection: String? = nil, installation: String? = nil, environment: [String: String] = [:], cwd: String? = nil
         ) {
+            self.cwd = cwd
             self.environment = environment
             self.connection = connection
             self.installation = installation
@@ -69,6 +71,42 @@ public enum AgentEvent: Equatable, Sendable {
     case undelivered(request: String, reason: String, handedOff: Bool)
     case focused(request: String)
     case title(session: String, text: String)
+}
+
+extension AgentEvent {
+    public var session: String? {
+        switch self {
+        case .hello(let hello): hello.session
+        case .typed(let session, _), .turnStarted(let session, _), .turnComplete(let session, _, _), .title(let session, _): session
+        case .ack, .submitted, .refused, .undelivered, .focused: nil
+        }
+    }
+
+    public func renamingSession(_ rename: (String) -> String) -> AgentEvent {
+        switch self {
+        case .hello(var hello):
+            hello.session = rename(hello.session)
+            return .hello(hello)
+        case .typed(let session, let prompts): return .typed(session: rename(session), prompts: prompts)
+        case .turnStarted(let session, let turn): return .turnStarted(session: rename(session), turn: turn)
+        case .turnComplete(let session, let reason, let answer): return .turnComplete(session: rename(session), reason: reason, answer: answer)
+        case .title(let session, let text): return .title(session: rename(session), text: text)
+        case .ack, .submitted, .refused, .undelivered, .focused: return self
+        }
+    }
+}
+
+extension AgentCommand {
+    public func renamingSession(_ rename: (String) -> String) -> AgentCommand {
+        switch self {
+        case .submit(let id, let s, let text, let prompts): .submit(id: id, expectedSession: rename(s), text: text, expectedPrompts: prompts)
+        case .abort(let id, let s, let turn): .abort(id: id, expectedSession: rename(s), expectedTurn: turn)
+        case .fill(let id, let s, let text): .fill(id: id, expectedSession: rename(s), text: text)
+        case .offerButton(let id, let s, let text): .offerButton(id: id, expectedSession: rename(s), text: text)
+        case .status(let id, let s, let text): .status(id: id, expectedSession: rename(s), text: text)
+        case .focus(let id, let s, let expiresAt): .focus(id: id, expectedSession: rename(s), expiresAt: expiresAt)
+        }
+    }
 }
 
 extension AgentEvent.Hello {
@@ -117,6 +155,7 @@ public enum AgentBridgeCodec {
         var connection: String?
         var installation: String?
         var environment: [String: String]?
+        var cwd: String?
     }
 
     public static func encode(_ commands: [AgentCommand]) throws -> Data {
@@ -145,7 +184,7 @@ public enum AgentBridgeCodec {
             return .hello(.init(
                 protocolVersion: p, agent: agent, agentVersion: w.agentVersion ?? "", instance: instance, session: session, pid: pid,
                 features: w.features ?? [], title: w.title, prompts: w.prompts, idle: w.idle, gap: w.gap, connection: w.connection,
-                installation: w.installation, environment: w.environment ?? [:]))
+                installation: w.installation, environment: w.environment ?? [:], cwd: w.cwd))
         case "ack":
             return .ack(request: try required(w.request))
         case "submitted":
@@ -260,6 +299,15 @@ public struct AgentCommandQueue: Sendable {
         inFlight = []
         pending = []
         registrations = [:]
+        return refusals
+    }
+
+    public mutating func retire(where retiring: (String) -> Bool) -> [Refusal] {
+        let refusals = inFlight.filter { retiring($0.entry.session) }.map { Refusal(command: $0.entry.command, reason: .retired, handedOff: true) }
+            + pending.filter { retiring($0.session) }.map { Refusal(command: $0.command, reason: .retired, handedOff: $0.handedOff) }
+        inFlight.removeAll { retiring($0.entry.session) }
+        pending.removeAll { retiring($0.session) }
+        registrations = registrations.filter { !retiring($0.value.session) }
         return refusals
     }
 

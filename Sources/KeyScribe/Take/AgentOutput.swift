@@ -177,6 +177,7 @@ final class AgentOutput {
             case .composing: "it has a message you haven\u{2019}t sent"
             case .interrupted: "its last turn was stopped"
             case .questionResolved: "its question was answered on screen"
+            case .dialog: "it has a dialog open"
             case .historyMoved, .draft: "the conversation changed"
             case .connectionGap: "it lost its connection to \(Branding.appName) while this waited"
             }

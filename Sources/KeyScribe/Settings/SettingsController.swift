@@ -166,9 +166,13 @@ final class SettingsController: NSObject, NSWindowDelegate {
         modes = ModesSettingsModel(
             repository: repository, voiceCommandsEnabled: settings.features.isEnabled(.voiceCommands),
             codingAgentsEnabled: settings.features.isEnabled(.codingAgents))
+        let agentsDir = AgentRuntime.bridgeDirectory(supportDir: repository.supportDir)
         codingAgents = CodingAgentsSettingsModel(
-            agentsDir: AgentRuntime.bridgeDirectory(supportDir: repository.supportDir),
-            pluginName: ClaudeConnectorInstaller.pluginName(for: KeyScribePaths.variant))
+            agentsDir: agentsDir,
+            connectors: [
+                ClaudeConnector(agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug),
+                PiConnector(agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug),
+            ])
         modes.codingAgents = codingAgents
         aiServices = AIServiceSettingsModel(repository: repository, permits: AIServiceCatalog.permits)
         history = HistoryPaneModel(

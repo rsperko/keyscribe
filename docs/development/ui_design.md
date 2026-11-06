@@ -293,11 +293,12 @@ Rename. Duplicate names gain a distinguishing word; an arriving native name neve
 handle. Native names that cannot be addressed under the reserved row grammar fall back to the project.
 A native rename updates an unaliased conversation for the next take; a KeyScribe override keeps winning.
 Automatically generated titles never rename the destination. For Claude Code, custom names are kept
-separate from generated titles, and a fresh registry rename can supersede the last connector report.
+separate from generated titles, and a fresh registry rename can supersede the last connector report. For
+Pi, the name is the session name its user set (`/name`), as the connector reports it.
 Each row's second line is the agent's title for the conversation, when it differs from the
 name (one the user gave it, else the one the agent generated), and the project folder; the agent is named only when the list mixes agents. A connector that can
-show it labels its own session with the same name (the name in quotes on Claude Code's status line, after the
-connector's name that Claude Code adds), so the
+show it labels its own session with the same name (the name in quotes on the agent's status line, after the
+connector's name, which Claude Code adds and the Pi connector writes itself), so the
 terminal on screen can be matched to its row; the label is display only and never renames the agent's
 conversation. The user can address a session by starting the take with its name or its number (“docs, run the tests”, “session two …”);
 a leading “tell” is optional, and “session” may come before a name as it does before a number (“session docs,
@@ -1473,9 +1474,16 @@ the current one is marked Current. The guidance names only what can be said. The
 while connector setup is unavailable, so a connected conversation never disappears behind installation
 status or a collapsed disclosure.
 
+Connector setup is one section per agent, each drawn from that agent's own adapter: its status, Install,
+Update and Uninstall, its reload advice, and its wording. Installing, updating or uninstalling one agent's
+connector never disconnects another agent's sessions. When an agent's session list cannot be read, or does
+not answer in time, its section says so as an advisory and the sessions last seen stay listed rather than
+vanishing.
+
 **Uninstall Connector…** asks for confirmation first, which says that open sessions disconnect at
 once, new ones will not connect, work already sent may still finish, each open session unloads the
-connector with `/reload-plugins` or a restart, and the app's own settings and names are kept. The
+connector with its agent's reload command (`/reload-plugins` in Claude Code, `/reload` in Pi) or a
+restart, and the app's own settings and names are kept. For Claude Code, the
 uninstall is done only once Claude Code no longer lists the plugin or its marketplace; a step that
 reports something already gone is not a failure. Connector setup warns that open sessions still
 receive instructions only when Claude Code reports the connector removed while at least one session is
@@ -1490,6 +1498,18 @@ the terminal commands that finish the job, each copyable, named for this copy of
 button is used, the lead line confirms the result: disconnected from the app, run these to finish
 uninstalling. A copy of the app that is missing its connector shows the connector as
 Unavailable, with guidance to reinstall the app; nothing else in the app is affected.
+
+The Pi connector is files only: Install writes an extension folder into Pi's own extensions folder, which
+every Pi the user starts loads on its own, and Uninstall deletes that folder; Pi is never asked to run a
+command. Its status is read from those files: Installed when the folder holds the packaged extension for
+this installation, Update available when it holds another version, Not installed when it is gone, and
+Uninstall not finished when the app recorded an uninstall but the folder remains, with Finish Uninstalling.
+Because Pi is only consulted for its version, a Pi older than the first version the connector works with
+(`PiCLI.minimumVersion`) shows **Pi too old** with that version and advice to update, and offers no Install;
+when the folder is in place it still offers Uninstall Connector…, since removal needs nothing from Pi.
+When the pi command cannot be found but the folder is in place, setup keeps Uninstall Connector… and shows
+the one terminal command that deletes the folder. An open Pi session picks up an install, update or removal
+when the user runs `/reload` in it or restarts it; the reload advice in this section says so.
 
 **Rename…** opens a compact sheet, focused on the existing name, with a live spoken example. When fewer of
 the name's leading words already reach only this conversation, the example offers them as well (“Say “fix

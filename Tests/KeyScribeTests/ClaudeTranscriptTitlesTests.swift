@@ -4,7 +4,7 @@ import Testing
 @testable import KeyScribeApp
 
 struct ClaudeTranscriptTitlesTests {
-    final class Clock { var now = Date(timeIntervalSince1970: 1_000) }
+    final class Clock: @unchecked Sendable { var now = Date(timeIntervalSince1970: 1_000) }
 
     private let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-transcripts-\(UUID().uuidString)")
     private let entry = ClaudeRegistryEntry(pid: 1, sessionId: "s1", cwd: "/src/keyscribe", name: nil, status: "idle", waitingFor: nil)

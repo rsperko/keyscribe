@@ -43,8 +43,8 @@ review keeps finding the same few of them.
 ## Coding agents
 
 The coding-agent bridge (`AgentHub`, `AgentBridge`, `AgentHandles`, `AgentRecipient`, `AgentOutbox`,
-the terminal routes, the Claude connector) delivers dictated text to another program, so every rule
-above applies to it, with these sharpenings:
+the terminal routes, the agent adapters and their connectors) delivers dictated text to another program, so
+every rule above applies to it, with these sharpenings:
 
 - **Work with agents, terminals, and multiplexers as people normally start them.** Never require a
   launch flag, a wrapper, an environment variable, a named session, or an edit the user makes to
@@ -78,8 +78,42 @@ above applies to it, with these sharpenings:
 - **Cancel withdraws the request itself, not just its HUD.** A message the user cancelled must not
   still send, and a cancelled message must not stay visible as if it will.
 - **A receipt timeout is "unknown", not "failed" or "gone".** A request that may still be delivered
-  stays tracked until the connector settles it or it expires.
+  stays tracked until the connector settles it or it expires. It holds later dictation for that
+  conversation, so nothing overtakes it, but only for a bounded time (`AgentHub`'s hand-off limit); after
+  that the queue moves on and the request is forgotten, so tracking never grows with session age. A receipt
+  within the hold settles the earlier take alone; a refusal after the hold keeps its text for review rather
+  than queueing it behind newer takes.
 - **Act on the turn or session captured at decision time.** Stop, open, and deliver recheck that
   handle right before acting, so they never hit a newer turn or a renamed or reordered session.
 - **No speech means no message.** A silent or empty take never submits to an agent; every output
   branch keeps the gates the insert path applies.
+- **One agent, one adapter.** Everything particular to an agent (how its sessions are found, how its
+  connector is installed and checked, its names, its reload command, its copy) lives in files named for that
+  agent, behind `AgentDiscovery` and `AgentConnector`, with the facts shared code needs carried by
+  `AgentKind` and `AgentSession`. Shared code never branches on an agent's name; a new agent is a new
+  adapter and a line in the composition root. `SourceInvariantsTests` pins the boundary.
+- **Agents are isolated at the bridge.** Each agent has its own installation record, and retiring one
+  agent's connectors leaves the others' sessions connected. Inside the app a conversation id is
+  `agent:nativeId` (`AgentSessionID`); the bridge is the only place that translates, namespacing every
+  event by the hello's agent and handing connectors their native id back, so two agents may reuse an id
+  and never meet. Saved names carry the namespaced key; a legacy key gets the agent the composition root
+  names. A connector advertises what it can do
+  on its hello (`features`); a missing feature is unsupported unless that agent's shipped connector has it,
+  which is the only case that reads as an outdated connector.
+- **Discovery failure is not an empty roster.** A scan that cannot read its source says so, the hub keeps
+  the sessions last seen for that agent, and Settings shows the problem beside that agent's connector.
+- **An agent without a registry is discovered through its connector.** The hub hands every session event
+  to the adapter of that event's agent (`AgentDiscovery.observe`, with the native id), so an adapter may
+  build its roster from hellos, turn and title events; its scan then keeps only sessions whose process
+  still runs, and retiring the agent's connectors forgets them (`AgentDiscovery.retire`). Such a session is
+  never "not connected": without its connector it is simply not seen.
+- **Discovery never runs on the main actor.** An adapter's `scan` does its reading off the main actor; the
+  hub's `rescan` waits for it under a deadline (`AgentHub.defaultScanDeadline`) and treats a scan that does
+  not answer like an unreadable one. `refresh` is the synchronous half: it applies the sessions last scanned
+  and never touches a file, so a hello, a title or a turn ending is handled at once and only asks for a
+  rescan afterwards. Concurrent rescans coalesce into the one in flight plus one follow-up. A scan that
+  missed its deadline stays outstanding: no second scan starts for that agent until it settles, one observer
+  waits on it however many rescans time out meanwhile, and its answer is applied by the next rescan. A
+  stopped hub applies nothing and calls nothing back. A scan carries the time it began, and a title the
+  connector reported after that time is never cleared by the scan's older registry name, even when the scan
+  settles late.

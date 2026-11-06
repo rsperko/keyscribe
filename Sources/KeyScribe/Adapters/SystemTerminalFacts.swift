@@ -104,7 +104,7 @@ struct SystemTerminalFacts: TerminalFacts {
     }
 
     func run(_ argv: [String]) -> (status: Int32, output: String) {
-        let (status, output) = ClaudeCLI.run(argv, timeout: 3)
+        let (status, output) = ToolCLI.run(argv, timeout: 3)
         return (status, output)
     }
 

@@ -1,7 +1,7 @@
 import Foundation
 import KeyScribeKit
 
-final class ClaudeTranscriptTitles {
+final class ClaudeTranscriptTitles: @unchecked Sendable {
     static let tailBytes = 256 * 1024
     static let rereadInterval: TimeInterval = 10
 
@@ -13,11 +13,12 @@ final class ClaudeTranscriptTitles {
     }
 
     private let configDirs: [URL]
-    private let now: () -> Date
+    private let now: @Sendable () -> Date
+    private let lock = NSLock()
     private var cache: [String: Cached] = [:]
     private var misses: [String: Date] = [:]
 
-    init(configDirs: [URL], now: @escaping () -> Date = Date.init) {
+    init(configDirs: [URL], now: @escaping @Sendable () -> Date = Date.init) {
         self.configDirs = configDirs
         self.now = now
     }
@@ -27,6 +28,10 @@ final class ClaudeTranscriptTitles {
     }
 
     func titles(for entry: ClaudeRegistryEntry, rereading: Bool = true) -> ClaudeTranscriptTitle {
+        lock.withLock { read(entry, rereading: rereading) }
+    }
+
+    private func read(_ entry: ClaudeRegistryEntry, rereading: Bool) -> ClaudeTranscriptTitle {
         if !rereading {
             if let cached = cache[entry.sessionId] { return cached.titles }
             if misses[entry.sessionId] != nil { return .init() }
@@ -42,8 +47,10 @@ final class ClaudeTranscriptTitles {
     }
 
     func forget(keeping sessions: Set<String>) {
-        cache = cache.filter { sessions.contains($0.key) }
-        misses = misses.filter { sessions.contains($0.key) }
+        lock.withLock {
+            cache = cache.filter { sessions.contains($0.key) }
+            misses = misses.filter { sessions.contains($0.key) }
+        }
     }
 
     private func lookUp(_ entry: ClaudeRegistryEntry) -> URL? {

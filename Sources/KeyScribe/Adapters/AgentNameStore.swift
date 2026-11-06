@@ -22,6 +22,7 @@ struct AgentNameStore {
     }
 
     let directory: URL
+    var legacyAgent = ""
 
     var url: URL { directory.appendingPathComponent(Self.fileName) }
 
@@ -34,7 +35,16 @@ struct AgentNameStore {
         guard file.schemaVersion <= Self.schemaVersion else {
             return .unavailable("\(Self.fileName) was saved by a newer version of \(Branding.appName).")
         }
-        return .names(file.names, remembered: file.remembered ?? [:])
+        let migrated: (String) -> String = { key in
+            AgentSessionID.split(key) == nil && !self.legacyAgent.isEmpty ? AgentSessionID.make(agent: self.legacyAgent, native: key) : key
+        }
+        let names = Dictionary(file.names.map { (migrated($0.key), $0.value) }, uniquingKeysWith: { first, _ in first })
+        let remembered = Dictionary((file.remembered ?? [:]).map { key, saved in
+            var named = saved
+            if named.agent.isEmpty { named.agent = AgentSessionID.agent(of: key) ?? legacyAgent }
+            return (migrated(key), named)
+        }, uniquingKeysWith: { first, _ in first })
+        return .names(names, remembered: remembered)
     }
 
     func save(_ names: [String: String], remembered: [String: RememberedName]) throws {

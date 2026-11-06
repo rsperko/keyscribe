@@ -166,15 +166,20 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
   not History is on.
 - **Downloaded speech model weights** under `models/`.
 - **Coding agent connection** under `agents/`, only if you turn on the experimental Coding agent
-  feature: an access token the Claude Code connector uses to reach KeyScribe on your Mac, the connector's
-  files, and `names.json`, the names you chose for conversations along with their Claude Code session
-  ids. These are kept whether or not History is on, until you delete them. No message text is stored
-  there. To show each conversation's title, KeyScribe reads the end of that conversation's own Claude Code
-  transcript on your Mac; it keeps only the title, in memory, and never logs or stores the transcript. When
-  you start a Coding agent dictation, KeyScribe asks the terminal in front which tab or pane is selected and
-  reads the same process details, so what you say goes to the conversation you are looking at; it never asks
-  for permission to do so, and the answer stays on your Mac and is not stored. To bring a conversation's
-  terminal forward, it reads a few terminal and multiplexer variables (such as a
+  feature: an access token the agent connectors use to reach KeyScribe on your Mac, the Claude Code
+  connector's files, a record of which connector installation may connect for each agent, and
+  `names.json`, the names you chose for conversations along with their agent session ids. The Pi
+  connector's files live in Pi's own extensions folder instead, because that is where Pi loads them
+  from; they hold the same connection settings and nothing else. These are kept whether or not History
+  is on, until you delete them. No message text is stored there. To show each conversation's title,
+  KeyScribe reads the end of that conversation's own Claude Code transcript on your Mac; it keeps only
+  the title, in memory, and never logs or stores the transcript. Pi's titles come from the connector,
+  which reads nothing on disk but its own settings. To decide when to hand over what you said, the Pi
+  connector notes the time of the last key pressed in that session, never which key. When you start a
+  Coding agent dictation, KeyScribe asks the terminal in front which tab or pane is selected and reads the same
+  process details, so what you say goes to the conversation you are looking at; it never asks for permission to
+  do so, and the answer stays on your Mac and is not stored. To bring a
+  conversation's terminal forward, KeyScribe reads a few terminal and multiplexer variables (such as a
   pane id) from the environment of the processes that hold it; the rest of their environment is ignored.
 
 You can inspect, back up, or delete any of it with the Finder or a text editor. Deleting the history

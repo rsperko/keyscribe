@@ -141,18 +141,20 @@ enum HUDPreview {
         }
     }
 
+    private static let sampleAgent = AgentKind.claude.id
+
     static let agentConversations = [
-        AgentConversation(id: "a", agent: "claude", pid: 1, cwd: "/src/api", handle: "api", state: .working, connectorLive: true),
-        AgentConversation(id: "b", agent: "claude", pid: 2, cwd: "/src/api", handle: "api blue", state: .idle, connectorLive: true),
-        AgentConversation(id: "c", agent: "claude", pid: 3, cwd: "/src/web", handle: "frontend", state: .waitingApproval, connectorLive: true),
-        AgentConversation(id: "d", agent: "claude", pid: 4, cwd: "/src/docs", handle: "docs", state: .idle, connectorLive: false),
+        AgentConversation(id: "a", agent: sampleAgent, pid: 1, cwd: "/src/api", handle: "api", state: .working, connectorLive: true),
+        AgentConversation(id: "b", agent: sampleAgent, pid: 2, cwd: "/src/api", handle: "api blue", state: .idle, connectorLive: true),
+        AgentConversation(id: "c", agent: sampleAgent, pid: 3, cwd: "/src/web", handle: "frontend", state: .waitingApproval, connectorLive: true),
+        AgentConversation(id: "d", agent: sampleAgent, pid: 4, cwd: "/src/docs", handle: "docs", state: .idle, connectorLive: false),
     ]
 
     static let longAgentConversations = [
         "api", "api blue", "backend", "backend blue", "build", "docs", "frontend", "frontend blue", "tests", "web", "web blue", "worker",
     ].map { name in
         AgentConversation(
-            id: name, agent: "claude", pid: 1, cwd: "/src/project", handle: name,
+            id: name, agent: sampleAgent, pid: 1, cwd: "/src/project", handle: name,
             state: name == "web" ? .working : .idle, connectorLive: true,
             title: "Check the database migration and verify recovery after a failed deployment")
     }

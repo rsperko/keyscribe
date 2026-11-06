@@ -14,7 +14,7 @@ extension AgentBridgeServer: AgentTransport {
 }
 
 enum AgentReceipt: Equatable {
-    enum KeptReason: Equatable { case draft, composing, typedSince, interrupted, questionResolved, historyMoved, connectionGap }
+    enum KeptReason: Equatable { case draft, composing, typedSince, interrupted, questionResolved, historyMoved, connectionGap, dialog }
     enum NotSentReason: Equatable { case conversationEnded, connectorNotRunning, conversationChanged, stopped, refused(String) }
 
     case sent(String)
@@ -40,8 +40,15 @@ final class AgentHub {
     private(set) var directory = AgentDirectory()
     private(set) var namesProblem: String?
     private(set) var namesNotSaved: String?
+    private(set) var discoveryProblems: [String: String] = [:]
+    private var shownProblems: [String: String] = [:]
+    private var lastScan: [String: [AgentSession]] = [:]
+    private var scanTask: Task<Void, Never>?
+    private var rescanWanted = false
+    private var outstanding: [String: Outstanding] = [:]
+    private var connectorNamesAt: [String: Date] = [:]
+    private var stopped = false
     private var savedRemembered: [String: RememberedName] = [:]
-    private let stillRunning: (RememberedName) -> Bool
     private(set) var current: String?
     private(set) var unsent: [AgentOutbox.Message] = []
     private(set) var recent: [AgentReceipt] = []
@@ -51,10 +58,9 @@ final class AgentHub {
     private let focus: AgentTerminalFocusing?
     private let front: AgentFronting?
     private let glance: AgentFronting?
-    private let scan: () -> [ClaudeRegistryEntry]
-    private let transcriptTitle: ((ClaudeRegistryEntry, Bool) -> ClaudeTranscriptTitle)?
-    private let forgetTitles: ((Set<String>) -> Void)?
+    private let discoveries: [any AgentDiscovery]
     private let receiptTimeout: Duration
+    private let handOffLimit: Duration
     private let makeId: () -> String
     private let now: () -> Date
     private var outbox = AgentOutbox()
@@ -72,22 +78,21 @@ final class AgentHub {
     private var lastUsed: [String: Date] = [:]
 
     init(
-        transport: AgentTransport, scan: @escaping () -> [ClaudeRegistryEntry], names: AgentNameStore? = nil,
+        transport: AgentTransport, discovery: [any AgentDiscovery], names: AgentNameStore? = nil,
         focus: AgentTerminalFocusing? = nil, front: AgentFronting? = nil, glance: AgentFronting? = nil,
-        transcriptTitles: ClaudeTranscriptTitles? = nil, receiptTimeout: Duration = .seconds(8),
-        now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString },
-        stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning
+        receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30),
+        scanDeadline: Duration = AgentHub.defaultScanDeadline,
+        now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString }
     ) {
         self.transport = transport
-        self.stillRunning = stillRunning
+        self.scanDeadline = scanDeadline
         nameStore = names
         self.focus = focus
         self.front = front
         self.glance = glance
-        self.scan = scan
-        transcriptTitle = transcriptTitles.map { titles in { titles.titles(for: $0, rereading: $1) } }
-        forgetTitles = transcriptTitles.map { titles in { titles.forget(keeping: $0) } }
+        discoveries = discovery
         self.receiptTimeout = receiptTimeout
+        self.handOffLimit = handOffLimit
         self.now = now
         self.makeId = makeId
         adopt(names?.load() ?? .names([:]))
@@ -106,6 +111,15 @@ final class AgentHub {
 
     func handle(of id: String) -> String? {
         directory.conversations.first { $0.id == id }?.handle
+    }
+
+    func kind(of id: String) -> AgentKind? {
+        guard let conversation = directory.conversations.first(where: { $0.id == id }) else { return nil }
+        return discoveries.first { $0.kind.id == conversation.agent }?.kind
+    }
+
+    private func stillRunning(_ remembered: RememberedName) -> Bool {
+        discoveries.first { $0.kind.id == remembered.agent }?.stillRunning(remembered) ?? false
     }
 
     var recordingOrder: [AgentConversation] {
@@ -148,7 +162,7 @@ final class AgentHub {
 
     func focusInPlace(_ session: String, within timeout: Duration = focusTimeout) async -> TerminalSelection {
         guard transport.isLive(session: session), let features = features[session] else { return .notFound }
-        guard features.contains("focus") else { return .outdated }
+        guard features.contains("focus") else { return kind(of: session)?.connectorFeatures.contains("focus") == true ? .outdated : .unsupported }
         let id = makeId()
         let expiresAt = now().addingTimeInterval(TimeInterval(timeout.components.seconds) + Double(timeout.components.attoseconds) / 1e18)
         return await withTaskCancellationHandler {
@@ -225,30 +239,143 @@ final class AgentHub {
         }
     }
 
-    func refresh(nameReportedFor: String? = nil, rereadingTitles: Bool = true) {
-        let entries = scan()
-        let live = Set(entries.map(\.sessionId).filter(transport.isLive(session:)))
+    static let defaultScanDeadline: Duration = .seconds(3)
+    private let scanDeadline: Duration
+
+    func rescan(rereadingTitles: Bool = true) async {
+        if let scanTask {
+            rescanWanted = rescanWanted || rereadingTitles
+            await scanTask.value
+            return
+        }
+        let task = Task { @MainActor [weak self] in
+            var rereading = rereadingTitles
+            repeat {
+                self?.rescanWanted = false
+                await self?.scanOnce(rereadingTitles: rereading)
+                rereading = true
+            } while self?.rescanWanted == true
+            self?.scanTask = nil
+        }
+        scanTask = task
+        await task.value
+    }
+
+    private struct Outstanding {
+        let task: Task<AgentScan, Never>
+        let startedAt: Date
+        var result: AgentScan?
+        var waiter: FirstAnswer?
+    }
+
+    private func scanOnce(rereadingTitles: Bool) async {
+        var results: [(String, AgentScan)] = []
+        var scannedAt: [String: Date] = [:]
+        for discovery in discoveries {
+            let agent = discovery.kind.id
+            if outstanding[agent] == nil { begin(agent: agent) { await discovery.scan(rereadingTitles: rereadingTitles) } }
+            let startedAt = outstanding[agent]?.startedAt ?? now()
+            if let result = await bounded(agent: agent) {
+                outstanding[agent] = nil
+                results.append((agent, result))
+                scannedAt[agent] = startedAt
+            } else {
+                results.append((agent, .unreadable(
+                    "\(discovery.kind.displayName)\u{2019}s session list is not answering, so these are the sessions last seen.")))
+            }
+        }
+        guard !stopped else { return }
+        for (agent, result) in results {
+            switch result {
+            case .found(let scanned):
+                lastScan[agent] = scanned
+                discoveryProblems[agent] = nil
+            case .unreadable(let why):
+                discoveryProblems[agent] = why
+            }
+        }
+        refresh(scannedAt: scannedAt)
+    }
+
+    private func begin(agent: String, _ scan: @escaping @MainActor () async -> AgentScan) {
+        let task = Task { @MainActor in await scan() }
+        outstanding[agent] = Outstanding(task: task, startedAt: now())
+        Task { @MainActor [weak self] in
+            let result = await task.value
+            guard let self, self.outstanding[agent]?.task == task else { return }
+            self.outstanding[agent]?.result = result
+            self.outstanding[agent]?.waiter?.resume(result)
+            self.outstanding[agent]?.waiter = nil
+        }
+    }
+
+    func stop() {
+        stopped = true
+        scanTask?.cancel()
+        scanTask = nil
+        onChange = nil
+        onNotice = nil
+    }
+
+    private func bounded(agent: String) async -> AgentScan? {
+        if let result = outstanding[agent]?.result { return result }
+        let deadline = scanDeadline
+        return await withCheckedContinuation { (continuation: CheckedContinuation<AgentScan?, Never>) in
+            let answer = FirstAnswer(continuation)
+            outstanding[agent]?.waiter = answer
+            Task {
+                try? await Task.sleep(for: deadline)
+                answer.resume(nil)
+            }
+        }
+    }
+
+    private final class FirstAnswer: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<AgentScan?, Never>?
+
+        init(_ continuation: CheckedContinuation<AgentScan?, Never>) {
+            self.continuation = continuation
+        }
+
+        func resume(_ result: AgentScan?) {
+            let waiting = lock.withLock {
+                let pending = continuation
+                continuation = nil
+                return pending
+            }
+            waiting?.resume(returning: result)
+        }
+    }
+
+    func refresh(nameReportedFor: String? = nil, scannedAt: [String: Date] = [:]) {
         let before = directory.revision
+        let problemsBefore = shownProblems
+        var entries: [AgentSession] = []
         var shown: [String: String] = [:]
         var nativeNames: [String: String?] = [:]
-        for entry in entries {
-            let id = entry.sessionId
-            let recorded = transcriptTitle?(entry, rereadingTitles) ?? .init()
-            if nameReportedFor != id, let previous = registryNames[id], previous != entry.explicitName {
-                connectorNames[id] = nil
+        for discovery in discoveries {
+            let found = lastScan[discovery.kind.id] ?? []
+            for entry in found {
+                let id = AgentSessionID.make(agent: entry.agent, native: entry.id)
+                if nameReportedFor != id, let previous = registryNames[id], previous != entry.explicitName,
+                   (connectorNamesAt[id] ?? .distantPast) <= (scannedAt[entry.agent] ?? .distantFuture) {
+                    connectorNames[id] = nil
+                }
+                registryNames[id] = .some(entry.explicitName)
+                let native: String?
+                if let reported = connectorNames[id] {
+                    native = reported
+                } else {
+                    native = entry.explicitName ?? entry.title.explicitName
+                }
+                nativeNames[id] = .some(native)
+                shown[id] = native ?? entry.title.generatedTitle
             }
-            registryNames[id] = .some(entry.explicitName)
-            let native: String?
-            if let reported = connectorNames[id] {
-                native = reported
-            } else {
-                native = entry.explicitName ?? recorded.explicitName
-            }
-            nativeNames[id] = .some(native)
-            shown[id] = native ?? recorded.generatedTitle
+            entries += found
         }
-        forgetTitles?(Set(entries.map(\.sessionId)))
-        directory.update(claude: entries, live: live, titles: shown, nativeNames: nativeNames, running: stillRunning)
+        let live = Set(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }.filter(transport.isLive(session:)))
+        directory.update(entries: entries, live: live, titles: shown, nativeNames: nativeNames, running: stillRunning)
         let reported = namesNotSaved
         rememberNames()
         if let current, handle(of: current) == nil { self.current = nil }
@@ -258,7 +385,8 @@ final class AgentHub {
         let stale = now().addingTimeInterval(-Self.runningGrace)
         running = running.filter { !idle.contains($0.key) || $0.value > stale }
         releaseHeld()
-        if directory.revision != before || namesNotSaved != reported { onChange?() }
+        shownProblems = discoveryProblems
+        if directory.revision != before || namesNotSaved != reported || discoveryProblems != problemsBefore { onChange?() }
     }
 
     private func sendLabels() {
@@ -306,7 +434,15 @@ final class AgentHub {
         running[hello.session] = hello.knownIdle ? nil : now()
     }
 
+    func retire(agent: String) {
+        discoveries.first { $0.kind.id == agent }?.retire()
+        Task { [weak self] in await self?.rescan(rereadingTitles: false) }
+    }
+
     func handle(_ event: AgentEvent) {
+        if let session = event.session, let agent = AgentSessionID.agent(of: session) {
+            discoveries.first { $0.kind.id == agent }?.observe(event.renamingSession(AgentSessionID.native))
+        }
         switch event {
         case .hello(let hello):
             features[hello.session] = Set(hello.features)
@@ -318,10 +454,14 @@ final class AgentHub {
             } else {
                 connectorNames[hello.session] = nil
             }
+            connectorNamesAt[hello.session] = now()
             refresh(nameReportedFor: hello.session)
+            Task { [weak self] in await self?.rescan(rereadingTitles: true) }
         case .title(let session, let text):
             connectorNames[session] = .some(text.isEmpty ? nil : text)
+            connectorNamesAt[session] = now()
             refresh(nameReportedFor: session)
+            Task { [weak self] in await self?.rescan(rereadingTitles: true) }
         case .focused(let request):
             focusWaiters.removeValue(forKey: request)?.resume(returning: .selected)
         case .ack:
@@ -332,6 +472,10 @@ final class AgentHub {
             focusWaiters.removeValue(forKey: request)?.resume(returning: .notFound)
         case .undelivered(let request, _, _) where focusWaiters[request] != nil:
             focusWaiters.removeValue(forKey: request)?.resume(returning: .notFound)
+        case .refused(let request, "working") where requests[request]?.timedOut == true:
+            clearHandOff(request)
+            settle(request, .notSent(requests[request]?.handle, reason: Self.notSent("working")), keep: true)
+            releaseHeld()
         case .refused(let request, "working"):
             clearHandOff(request)
             guard let entry = requests.removeValue(forKey: request) else { break }
@@ -346,14 +490,16 @@ final class AgentHub {
             clearHandOff(request)
             settle(request, .kept(requests[request]?.handle ?? "", reason: .composing), keep: true)
             releaseHeld()
+        case .refused(let request, "dialog"):
+            clearHandOff(request)
+            settle(request, .kept(requests[request]?.handle ?? "", reason: .dialog), keep: true)
+            releaseHeld()
         case .refused(let request, let reason):
             clearHandOff(request)
             settle(request, .notSent(requests[request]?.handle, reason: Self.notSent(reason)), keep: true)
             releaseHeld()
         case .undelivered(let request, _, true):
-            guard let entry = requests[request], !entry.timedOut else { break }
-            requests[request]?.timedOut = true
-            report(.uncertain(entry.handle), for: request)
+            leaveUncertain(request)
         case .undelivered(let request, "connectionGap", false):
             clearHandOff(request)
             settle(request, .kept(requests[request]?.handle ?? "", reason: .connectionGap), keep: true)
@@ -374,6 +520,7 @@ final class AgentHub {
             running[session] = nil
             if reason == "aborted" { outbox.noteInterrupted(conversation: session) }
             refresh()
+            Task { [weak self] in await self?.rescan(rereadingTitles: false) }
         }
     }
 
@@ -392,10 +539,25 @@ final class AgentHub {
         let timeout = receiptTimeout
         Task { [weak self] in
             try? await Task.sleep(for: timeout)
-            guard let self, let entry = self.requests[message.id], !entry.timedOut else { return }
-            self.requests[message.id]?.timedOut = true
-            self.report(.uncertain(handle), for: message.id)
+            self?.leaveUncertain(message.id)
         }
+    }
+
+    private func leaveUncertain(_ request: String) {
+        guard let entry = requests[request], !entry.timedOut else { return }
+        requests[request]?.timedOut = true
+        report(.uncertain(entry.handle), for: request)
+        let limit = handOffLimit
+        Task { [weak self] in
+            try? await Task.sleep(for: limit)
+            self?.releaseHandOff(request)
+        }
+    }
+
+    private func releaseHandOff(_ request: String) {
+        guard let entry = requests.removeValue(forKey: request) else { return }
+        if handingOff[entry.message.conversation] == request { handingOff[entry.message.conversation] = nil }
+        releaseHeld()
     }
 
     private func clearHandOff(_ request: String) {
@@ -467,13 +629,13 @@ final class AgentRuntime {
         supportDir.appendingPathComponent("agents", isDirectory: true)
     }
 
-    init(supportDir: URL, claudeConfigDirs: [URL] = [ClaudeRegistryScanner.defaultConfigDir()]) throws {
+    init(supportDir: URL, discovery: [any AgentDiscovery], legacyAgent: String) throws {
         let directory = Self.bridgeDirectory(supportDir: supportDir)
         let token = try AgentBridgeToken.loadOrCreate(in: directory)
         let box = HubBox()
         server = AgentBridgeServer(
             directory: directory, token: token,
-            installation: { ClaudeConnectorInstaller.currentInstallation(in: directory) },
+            installation: { AgentInstallationRecord.current(agent: $0, in: directory) },
             onHello: { hello, done in
                 Task { @MainActor in
                     box.hub?.prepare(for: hello)
@@ -484,25 +646,27 @@ final class AgentRuntime {
             Task { @MainActor in box.hub?.handle(event) }
         }
         hub = AgentHub(
-            transport: server, scan: { ClaudeRegistryScanner.scan(configDirs: claudeConfigDirs) },
-            names: AgentNameStore(directory: directory),
+            transport: server, discovery: discovery,
+            names: AgentNameStore(directory: directory, legacyAgent: legacyAgent),
             focus: AgentTerminalFocus(connector: { session in await box.hub?.focusInPlace(session) ?? .notFound }),
-            front: AgentFront(), glance: AgentFront.confirmingWithoutAsking, transcriptTitles: ClaudeTranscriptTitles(configDirs: claudeConfigDirs))
+            front: AgentFront(), glance: AgentFront.confirmingWithoutAsking)
         box.hub = hub
         try server.start()
-        hub.refresh()
+        Task { @MainActor [weak hub] in await hub?.rescan() }
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak hub] _ in
-            MainActor.assumeIsolated { hub?.refresh(rereadingTitles: false) }
+            Task { @MainActor in await hub?.rescan(rereadingTitles: false) }
         }
     }
 
-    func retire() {
-        server.retire()
+    func retire(agent: String) {
+        server.retire(agent: agent)
+        hub.retire(agent: agent)
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
+        hub.stop()
         server.stop()
     }
 }

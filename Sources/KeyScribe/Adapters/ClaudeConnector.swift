@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import KeyScribeKit
 import Security
@@ -37,13 +36,10 @@ struct ClaudeConnectorInstaller {
     let script: String
     let run: ([String]) -> (Int32, String)
 
-    static let installationFile = "claude-installation.json"
+    static let installationFile = AgentInstallationRecord.file(for: AgentKind.claude.id)
 
     static func currentInstallation(in agentsDir: URL) -> String? {
-        guard let data = FileManager.default.contents(atPath: agentsDir.appendingPathComponent(installationFile).path),
-              let record = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return record["installation"] as? String
+        AgentInstallationRecord.current(agent: AgentKind.claude.id, in: agentsDir)
     }
 
     var marketplaceName: String { "\(pluginName)-local" }
@@ -61,15 +57,7 @@ struct ClaudeConnectorInstaller {
     }
     private var pluginId: String { "\(pluginName)@\(marketplaceName)" }
 
-    static func pluginName(for variant: AppVariant) -> String {
-        switch variant {
-        case .production: return "keyscribe"
-        case .dev: return "keyscribe-dev"
-        case .custom(let displayName, _):
-            let slug = displayName.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }
-            return String(slug).split(separator: "-").joined(separator: "-")
-        }
-    }
+    static func pluginName(for variant: AppVariant) -> String { variant.connectorSlug }
 
     func install() throws {
         try writeFiles(installation: UUID().uuidString)
@@ -84,14 +72,11 @@ struct ClaudeConnectorInstaller {
     }
 
     static func wasRemoved(in agentsDir: URL) -> Bool {
-        guard let data = FileManager.default.contents(atPath: agentsDir.appendingPathComponent(installationFile).path),
-              let record = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return false }
-        return record["installation"] is NSNull
+        AgentInstallationRecord.wasRemoved(agent: AgentKind.claude.id, in: agentsDir)
     }
 
     static func disable(in agentsDir: URL) throws {
-        try record(installation: nil, in: agentsDir)
+        try AgentInstallationRecord.disable(agent: AgentKind.claude.id, in: agentsDir)
     }
 
     func uninstall() throws {
@@ -135,14 +120,8 @@ struct ClaudeConnectorInstaller {
         guard status == 0 else { throw InstallError(command: argv, status: status, output: output) }
     }
 
-    private static func record(installation: String?, in agentsDir: URL) throws {
-        try FileManager.default.createDirectory(at: agentsDir, withIntermediateDirectories: true)
-        let body = try JSONSerialization.data(withJSONObject: ["installation": installation.map { $0 as Any } ?? NSNull()], options: [.sortedKeys])
-        try body.write(to: agentsDir.appendingPathComponent(Self.installationFile), options: .atomic)
-    }
-
     private func writeFiles(installation: String) throws {
-        try Self.record(installation: installation, in: agentsDir)
+        try AgentInstallationRecord.record(installation: installation, agent: AgentKind.claude.id, in: agentsDir)
         let plugin = marketplaceDir.appendingPathComponent(pluginName, isDirectory: true)
         let files: [(URL, String)] = [
             (marketplaceDir.appendingPathComponent(".claude-plugin/marketplace.json"), ClaudeConnectorFiles.marketplaceJSON(name: marketplaceName, plugin: pluginName)),
@@ -159,38 +138,16 @@ struct ClaudeConnectorInstaller {
 }
 
 enum ClaudeConnectorFiles {
-    private final class BundleMarker {}
-
-    static let resourceBundleName = "KeyScribe_KeyScribeApp.bundle"
-    static let registerJS: String? = script(searching: resourceBundleLocations())
+    static let registerJS: String? = ConnectorResources.text(named: "register", extension: "js")
     static let version: String? = registerJS.map(version(for:))
 
-    static func resourceBundleLocations() -> [URL] {
-        let code = Bundle(for: BundleMarker.self)
-        let places: [URL?] = [
-            Bundle.main.resourceURL, Bundle.main.bundleURL, code.resourceURL, code.bundleURL, code.bundleURL.deletingLastPathComponent(),
-        ]
-        return places.compactMap { $0?.appendingPathComponent(resourceBundleName, isDirectory: true) }
-    }
-
     static func script(searching bundles: [URL]) -> String? {
-        for url in bundles {
-            guard let bundle = Bundle(url: url), let file = bundle.url(forResource: "register", withExtension: "js"),
-                  let text = try? String(contentsOf: file, encoding: .utf8)
-            else { continue }
-            return text
-        }
-        return nil
+        ConnectorResources.text(named: "register", extension: "js", searching: bundles)
     }
 
-    static func version(for script: String) -> String {
-        "0.1.0-" + SHA256.hash(data: Data(script.utf8)).prefix(4).map { String(format: "%02x", $0) }.joined()
-    }
+    static func version(for script: String) -> String { ConnectorResources.version(for: script) }
 
-    static func json(_ object: [String: Any]) -> String {
-        let data = (try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])) ?? Data("{}".utf8)
-        return String(decoding: data, as: UTF8.self) + "\n"
-    }
+    static func json(_ object: [String: Any]) -> String { ConnectorResources.json(object) }
 
     static func marketplaceJSON(name: String, plugin: String) -> String {
         json([

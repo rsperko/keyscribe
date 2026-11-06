@@ -7,6 +7,17 @@ struct ClaudeRegistryTests {
         ClaudeRegistryEntry.decode(Data(json.utf8))
     }
 
+    @Test func aRecordIsInteractiveOtherOrInvalid() {
+        let interactive = #"{"pid":1,"sessionId":"s","cwd":"/p","kind":"interactive","status":"idle"}"#
+        #expect(ClaudeRegistryEntry.read(Data(interactive.utf8)) == .interactive(ClaudeRegistryEntry(pid: 1, sessionId: "s", cwd: "/p", name: nil, status: "idle", waitingFor: nil)))
+        #expect(ClaudeRegistryEntry.read(Data(#"{"pid":1,"sessionId":"s","cwd":"/p","kind":"sdk"}"#.utf8)) == .other)
+        #expect(ClaudeRegistryEntry.read(Data(#"{"pid":1,"kind":"interactive"}"#.utf8)) == .invalid)
+        #expect(ClaudeRegistryEntry.read(Data(#"{"pid":1,"sess"#.utf8)) == .invalid)
+        #expect(ClaudeRegistryEntry.read(Data("{}".utf8)) == .invalid)
+        #expect(ClaudeRegistryEntry.read(Data(#"{"pid":1,"sessionId":"s","cwd":"/p","kind":null}"#.utf8)) == .invalid)
+        #expect(ClaudeRegistryEntry.read(Data(#"{"pid":1,"sessionId":"s","cwd":"/p","kind":""}"#.utf8)) == .invalid)
+    }
+
     @Test func anInteractiveSessionDecodes() {
         let e = entry("""
         {"pid":6521,"sessionId":"f6569352","cwd":"/Users/me/src/keyscribe","kind":"interactive","name":"proj-claude-0e","nameSource":"derived","status":"busy","messagingSocketPath":"/tmp/cc-socks/6521.sock"}

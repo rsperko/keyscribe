@@ -12,7 +12,7 @@ enum AgentFocusResult: Equatable, Sendable {
     case notAllowed(String)
     case none
 
-    func hudState(handle: String, detail: String) -> HUDState {
+    func hudState(handle: String, detail: String, agent: AgentKind? = nil) -> HUDState {
         let recipient = "Your recipient is \(handle)"
         return switch self {
         case .exact: .commandDone(summary: "Opened \(handle)", detail: detail)
@@ -27,12 +27,12 @@ enum AgentFocusResult: Equatable, Sendable {
                 message: "Brought \(app) forward. Couldn\u{2019}t select \(handle)\u{2019}s tab without access to \(app). \(recipient)",
                 action: .openAutomationSettings)
         case .connectorOutdated(let app):
-            .advisory(message: "Brought \(app) forward. Update the Claude Code connector in Settings, then run /reload-plugins in \(handle) to open its tab. \(recipient)")
+            .advisory(message: "Brought \(app) forward. Update the \(agent?.connectorName ?? "connector") in Settings, then \(Self.reload(agent, in: handle)) to open its tab. \(recipient)")
         case .none: .advisory(message: "Nothing showing \(handle) could be brought forward. \(recipient)")
         }
     }
 
-    func historySummary(handle: String) -> String {
+    func historySummary(handle: String, agent: AgentKind? = nil) -> String {
         let forward = { (app: String, rest: String) in "Brought \(app) forward; \(rest)" }
         return switch self {
         case .exact: "Opened \(handle)"
@@ -42,9 +42,13 @@ enum AgentFocusResult: Equatable, Sendable {
             forward(app, "\(handle)\u{2019}s \(multiplexer) pane not \(uncertain ? "confirmed" : "selected")")
         case .unsupported(let app): forward(app, "\(handle)\u{2019}s terminal not selected")
         case .notAllowed(let app): forward(app, "no access to select \(handle)\u{2019}s tab")
-        case .connectorOutdated(let app): forward(app, "the Claude Code connector needs an update")
+        case .connectorOutdated(let app): forward(app, "the \(agent?.connectorName ?? "connector") needs an update")
         case .none: "Nothing showing \(handle) was brought forward"
         }
+    }
+
+    private static func reload(_ agent: AgentKind?, in handle: String) -> String {
+        agent?.reloadCommand.map { "run \($0) in \(handle)" } ?? "restart \(handle)"
     }
 }
 
@@ -76,7 +80,7 @@ struct AgentTerminalFocus: AgentTerminalFocusing {
     var plan: @Sendable (Int, [String: String]) -> [OpenAction] = {
         TerminalRoutes.plan(agent: $0, facts: SystemTerminalFacts().reporting($1, for: $0))
     }
-    var run: @Sendable ([String]) -> (Int32, String) = { ClaudeCLI.run($0, timeout: 3) }
+    var run: @Sendable ([String]) -> (Int32, String) = { ToolCLI.run($0, timeout: 3) }
     var script: Script = TerminalScripting.select
     var openURL: @MainActor @Sendable (String) -> Bool = { URL(string: $0).map(NSWorkspace.shared.open) ?? false }
     var connector: @MainActor @Sendable (_ session: String) async -> TerminalSelection = { _ in .unsupported }

@@ -1,13 +1,14 @@
 import Foundation
 
-struct SourceRule {
+struct SourceRule: Sendable {
     let pattern: String
     let allowed: [String: Int]
     let reason: String
+    var exempt: @Sendable (String) -> Bool = { _ in false }
 
     func violations(in files: [String: String]) -> [String] {
         let regex = try! NSRegularExpression(pattern: pattern)
-        return files.keys.sorted().flatMap { path -> [String] in
+        return files.keys.sorted().filter { !exempt($0) }.flatMap { path -> [String] in
             let hits = files[path]!.components(separatedBy: "\n").enumerated().compactMap { index, line -> String? in
                 if line.trimmingCharacters(in: .whitespaces).hasPrefix("//") { return nil }
                 let range = NSRange(line.startIndex..., in: line)
@@ -76,6 +77,33 @@ enum SourceInvariants {
             ],
             reason: "History shows summary, facts and steps without vetting them, so only reviewed writers fill them, with "
                 + "fixed local strings and names: never an agent reply, a secret, or an environment value."
+        ),
+        SourceRule(
+            pattern: #"(?i)claude"#,
+            allowed: [
+                "Sources/KeyScribe/AppDelegate.swift": 2,
+                "Sources/KeyScribe/HUD/HUDPreview.swift": 1,
+                "Sources/KeyScribe/Settings/SettingsController.swift": 1,
+                "Sources/KeyScribeKit/AIServiceCatalog.swift": 1,
+                "Sources/KeyScribeKit/Features.swift": 1,
+            ],
+            reason: "Everything one coding agent needs lives in that agent's adapter files (named for the agent); shared "
+                + "code speaks AgentKind, AgentSession, AgentDiscovery and AgentConnector, so another agent is another "
+                + "adapter, never a branch (docs/development/areas/voice-commands.md). The composition root wires the "
+                + "adapters and names the legacy agent for saved names, and the LLM catalog names a model provider.",
+            exempt: { ($0 as NSString).lastPathComponent.hasPrefix("Claude") }
+        ),
+        SourceRule(
+            pattern: #"(?<![.\w])Pi(?![a-z])"#,
+            allowed: [
+                "Sources/KeyScribe/AppDelegate.swift": 1,
+                "Sources/KeyScribe/Settings/SettingsController.swift": 1,
+                "Sources/KeyScribeKit/Features.swift": 1,
+            ],
+            reason: "Everything Pi needs lives in its adapter files (named for it); shared code never names an agent "
+                + "(docs/development/areas/voice-commands.md). The composition root wires the adapter, and the feature "
+                + "summary names the agents it works with.",
+            exempt: { ($0 as NSString).lastPathComponent.hasPrefix("Pi") }
         ),
     ]
 

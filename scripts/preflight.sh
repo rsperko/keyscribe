@@ -231,6 +231,22 @@ chk_a_connector_tests() {
 }
 guard a-connector-tests "$(sig_source)" chk_a_connector_tests
 
+chk_a_pi_connector_tests() {
+  # The Pi connector runs inside Pi as a TypeScript extension, so its behavior tests run under Node against
+  # a stubbed extension API. A machine without a recent Node can still build and ship the app: a loud skip.
+  timeout --foreground 600 ./scripts/test-pi-connector.sh >/tmp/preflight-pi-connector.log 2>&1
+  local status=$?
+  if [ "$status" = 0 ]; then
+    result pass "Pi connector tests — $(head -1 /tmp/preflight-pi-connector.log | sed 's/^test-pi-connector: //')"
+  elif [ "$status" = 2 ]; then
+    result skip "Pi connector tests — $(tail -1 /tmp/preflight-pi-connector.log | sed 's/^test-pi-connector: //'); run make test-pi-connector on a machine with a recent node"
+  else
+    tail -20 /tmp/preflight-pi-connector.log
+    result fail "Pi connector tests — see /tmp/preflight-pi-connector.log"
+  fi
+}
+guard a-pi-connector-tests "$(sig_source)" chk_a_pi_connector_tests
+
 chk_a_catalog_contract() {
   # A downstream build swaps the AI service catalog, and the public one permits everything, so a test or
   # seam leaning on the public lineup stays green above and breaks only downstream. Runs in a synced copy

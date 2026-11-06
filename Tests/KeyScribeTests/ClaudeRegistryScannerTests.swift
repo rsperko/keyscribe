@@ -19,20 +19,50 @@ struct ClaudeRegistryScannerTests {
         let dir = try configDir()
         try write(dir, pid: getpid(), session: "alive")
         let entries = ClaudeRegistryScanner.scan(configDirs: [dir])
-        #expect(entries.map(\.sessionId) == ["alive"])
+        #expect(entries?.map(\.sessionId) == ["alive"])
+    }
+
+    @Test func aTruncatedSessionFileMakesTheScanUnknownWhileOtherKindsAreStillIgnored() throws {
+        let dir = try configDir()
+        try write(dir, pid: getpid(), session: "alive")
+        try write(dir, pid: getppid(), session: "sdk", kind: "sdk")
+        #expect(ClaudeRegistryScanner.scan(configDirs: [dir])?.map(\.sessionId) == ["alive"])
+        try Data(#"{"pid":1,"sessionId":"cut","cwd":"/src/x","kind":"interactive","sta"#.utf8).write(to: dir.appendingPathComponent("sessions/1.json"))
+        #expect(ClaudeRegistryScanner.scan(configDirs: [dir]) == nil)
+        try Data(#"{"pid":1,"kind":"interactive"}"#.utf8).write(to: dir.appendingPathComponent("sessions/1.json"))
+        #expect(ClaudeRegistryScanner.scan(configDirs: [dir]) == nil)
+        try Data("{}".utf8).write(to: dir.appendingPathComponent("sessions/1.json"))
+        #expect(ClaudeRegistryScanner.scan(configDirs: [dir]) == nil)
+    }
+
+    @Test func aSessionFileThatCannotBeReadMakesTheScanUnknownRatherThanDroppingIt() throws {
+        let dir = try configDir()
+        try write(dir, pid: getpid(), session: "alive")
+        let file = dir.appendingPathComponent("sessions/\(getpid()).json")
+        try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: file.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: file.path) }
+        #expect(ClaudeRegistryScanner.scan(configDirs: [dir]) == nil)
+    }
+
+    @Test func aMissingSessionsFolderIsEmptyButAnUnreadableOneIsUnknown() throws {
+        let dir = try configDir()
+        try FileManager.default.removeItem(at: dir.appendingPathComponent("sessions"))
+        #expect(ClaudeRegistryScanner.scan(configDirs: [dir]) == [])
+        try Data("not a folder".utf8).write(to: dir.appendingPathComponent("sessions"))
+        #expect(ClaudeRegistryScanner.scan(configDirs: [dir]) == nil)
     }
 
     @Test func entriesForProcessesThatNoLongerExistAreDropped() throws {
         let dir = try configDir()
         try write(dir, pid: 999_999, session: "gone")
-        #expect(ClaudeRegistryScanner.scan(configDirs: [dir]).isEmpty)
+        #expect(ClaudeRegistryScanner.scan(configDirs: [dir]) == [])
     }
 
     @Test func keyFilesAndOtherKindsAreIgnored() throws {
         let dir = try configDir()
         try Data("secret".utf8).write(to: dir.appendingPathComponent("sessions/\(getpid()).abc.key"))
         try write(dir, pid: getpid(), session: "sdk", kind: "sdk")
-        #expect(ClaudeRegistryScanner.scan(configDirs: [dir]).isEmpty)
+        #expect(ClaudeRegistryScanner.scan(configDirs: [dir]) == [])
     }
 
     @Test func everyConfigDirIsScanned() throws {
@@ -40,7 +70,7 @@ struct ClaudeRegistryScannerTests {
         let b = try configDir()
         try write(a, pid: getpid(), session: "one")
         try write(b, pid: getppid(), session: "two")
-        #expect(Set(ClaudeRegistryScanner.scan(configDirs: [a, b]).map(\.sessionId)) == ["one", "two"])
+        #expect(Set(ClaudeRegistryScanner.scan(configDirs: [a, b])?.map(\.sessionId) ?? []) == ["one", "two"])
     }
 
     @Test func theDefaultConfigDirHonorsTheEnvironment() {

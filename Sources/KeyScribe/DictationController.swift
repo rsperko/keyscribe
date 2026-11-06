@@ -1542,7 +1542,7 @@ final class DictationController {
 
     private func freezeAgentRecipient() {
         guard let agents, settings.features.isEnabled(.codingAgents) else { return }
-        agents.refresh(rereadingTitles: false)
+        agents.refresh()
         let snapshot = AgentSnapshot(
             names: agents.names, conversations: agents.recordingOrder, current: agents.current,
             namesAvailable: agents.namesProblem == nil)
@@ -1649,11 +1649,11 @@ final class DictationController {
                 voiceCommands.recordReturn(to: origin)
             }
             if Task.isCancelled { return }
-            let state = result.hudState(handle: handle, detail: mode.name)
+            let state = result.hudState(handle: handle, detail: mode.name, agent: agents.kind(of: id))
             let outcome: DictationOutcome = if case .notAllowed = result { .failed } else { .inserted }
             finishAgent(state: state, outcome: outcome, heard: heard, body: "", transformed: nil, rewrite: nil,
                         hideAfter: state.errorAction != nil ? 8 : state.indicator == .advisory ? 5 : 2,
-                        summary: result.historySummary(handle: handle), facts: facts)
+                        summary: result.historySummary(handle: handle, agent: agents.kind(of: id)), facts: facts)
         case .ask(let body, let reason):
             let line = if case .open = address { AgentOutput.openAskLine(reason) } else { AgentOutput.askLine(reason) }
             finishAgent(state: .error(message: line, action: nil, heard: HeardExcerpt(heard: body)),

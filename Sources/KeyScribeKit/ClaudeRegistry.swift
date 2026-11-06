@@ -56,11 +56,44 @@ public struct ClaudeRegistryEntry: Equatable, Sendable {
         var startedAt: Int?
     }
 
+    public enum Record: Equatable, Sendable {
+        case interactive(ClaudeRegistryEntry)
+        case other
+        case invalid
+    }
+
+    public static func read(_ data: Data) -> Record {
+        guard let w = try? JSONDecoder().decode(Wire.self, from: data), let kind = w.kind, !kind.isEmpty else { return .invalid }
+        guard kind == "interactive" else { return .other }
+        guard let pid = w.pid, let sessionId = w.sessionId, let cwd = w.cwd else { return .invalid }
+        return .interactive(ClaudeRegistryEntry(
+            pid: pid, sessionId: sessionId, cwd: cwd, name: w.name, status: w.status ?? "busy", waitingFor: w.waitingFor, nameSource: w.nameSource,
+            startedAt: w.startedAt))
+    }
+
     public static func decode(_ data: Data) -> ClaudeRegistryEntry? {
-        guard let w = try? JSONDecoder().decode(Wire.self, from: data),
-              w.kind == "interactive", let pid = w.pid, let sessionId = w.sessionId, let cwd = w.cwd
-        else { return nil }
-        return ClaudeRegistryEntry(pid: pid, sessionId: sessionId, cwd: cwd, name: w.name, status: w.status ?? "busy", waitingFor: w.waitingFor, nameSource: w.nameSource,
-            startedAt: w.startedAt)
+        if case .interactive(let entry) = read(data) { return entry }
+        return nil
+    }
+}
+
+extension ClaudeRegistryEntry {
+    public var session: AgentSession {
+        AgentSession(agent: AgentKind.claude.id, id: sessionId, pid: pid, cwd: cwd, explicitName: explicitName, state: liveState, startedAt: startedAt)
+    }
+}
+
+extension AgentKind {
+    public static let claude = AgentKind(
+        id: "claude", displayName: "Claude Code", connectorName: "Claude Code connector", reloadCommand: "/reload-plugins",
+        connectorFeatures: ["focus", "label", "readiness"])
+}
+
+extension AgentDirectory {
+    public mutating func update(
+        claude entries: [ClaudeRegistryEntry], live: Set<String>, titles: [String: String] = [:], nativeNames: [String: String?] = [:],
+        running: (RememberedName) -> Bool = { _ in false }
+    ) {
+        update(entries: entries.map(\.session), live: live, titles: titles, nativeNames: nativeNames, running: running)
     }
 }

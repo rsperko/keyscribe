@@ -302,6 +302,29 @@ struct AgentBridgeCodecTests {
             protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "s1", pid: 0, environment: ["ZELLIJ_PANE_ID": "3"])))
     }
 
+    @Test func aConnectorWithoutARegistryReportsItsWorkingDirectoryOnHello() throws {
+        let hello = #"{"op":"hello","protocol":1,"agent":"pi","instance":"i1","session":"s1","pid":77,"cwd":"/src/api"}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(hello.utf8))
+            == .hello(.init(protocolVersion: 1, agent: "pi", agentVersion: "", instance: "i1", session: "s1", pid: 77, cwd: "/src/api")))
+        let bare = #"{"op":"hello","protocol":1,"agent":"claude","instance":"i1","session":"s1","pid":0}"#
+        guard case .hello(let plain) = try AgentBridgeCodec.decodeEvent(Data(bare.utf8)) else { Issue.record("not a hello"); return }
+        #expect(plain.cwd == nil)
+    }
+
+    @Test func everyEventNamesTheSessionItConcernsAndRequestEventsNameNone() throws {
+        let hello = AgentEvent.hello(.init(protocolVersion: 1, agent: "pi", agentVersion: "", instance: "i1", session: "pi:s1", pid: 0))
+        #expect(hello.session == "pi:s1")
+        #expect(AgentEvent.typed(session: "pi:s1").session == "pi:s1")
+        #expect(AgentEvent.turnStarted(session: "pi:s1", turn: "t1").session == "pi:s1")
+        #expect(AgentEvent.turnComplete(session: "pi:s1", reason: "complete", answer: "").session == "pi:s1")
+        #expect(AgentEvent.title(session: "pi:s1", text: "x").session == "pi:s1")
+        #expect(AgentEvent.ack(request: "r1").session == nil)
+        #expect(AgentEvent.submitted(request: "r1", turn: "t1").session == nil)
+        #expect(AgentEvent.refused(request: "r1", reason: "draft").session == nil)
+        #expect(AgentEvent.focused(request: "r1").session == nil)
+        #expect(AgentEvent.undelivered(request: "r1", reason: "retired", handedOff: false).session == nil)
+    }
+
     @Test func aSubmitCarriesThePromptCountItWasDecidedAgainst() throws {
         let fenced: [AgentCommand] = [.submit(id: "r1", expectedSession: "s1", text: "x", expectedPrompts: 3)]
         let data = try AgentBridgeCodec.encode(fenced)

@@ -32,7 +32,8 @@
     bridge.sock            #   the local socket the connector talks to
     ready.json             #   present only while KeyScribe is listening on bridge.sock
     claude-connector/      #   the connector files installed into Claude Code
-    claude-installation.json  # which connector installation may connect; kept after removal
+    claude-installation.json  # which Claude Code connector installation may connect; kept after removal
+    pi-installation.json   #   the same for the Pi connector, whose files live in Pi's own extensions folder
     names.json             #   names you chose, and the names open conversations were given
   lkg/                     # last-known-good mode copies + seed-ledger.toml (design.md §5.1)
   models/                  # downloaded STT weights, one dir per model (design.md §4.1)
@@ -159,14 +160,16 @@ never hand-edited, and a write to it does not reload configuration.
 
 ## Coding agent bridge
 
-The Claude Code connector talks to KeyScribe over HTTP on `agents/bridge.sock`, presenting `agents/token`
-as a bearer token. It sends events with `POST /event` and long-polls for commands with `POST /poll`; a
+Every agent connector talks to KeyScribe over HTTP on `agents/bridge.sock`, presenting `agents/token`
+as a bearer token; the Claude Code connector is a plugin, the Pi connector an extension, and both speak the
+same protocol. It sends events with `POST /event` and long-polls for commands with `POST /poll`; a
 `409` answer means KeyScribe no longer knows that connector, which says hello again. The message types are
 `AgentEvent` and `AgentCommand` in `AgentBridge.swift`, versioned by `AgentBridgeCodec.protocolVersion`;
 a hello on any other protocol is refused with `426` and is never registered or sent commands.
 
-- **Only the current installation connects.** Each install of the connector gets a new `installation` id,
-  written both into the connector's own settings and into `agents/claude-installation.json`; an update
+- **Only the current installation connects.** Each install of a connector gets a new `installation` id,
+  written both into the connector's own settings and into that agent's installation record
+  (`agents/claude-installation.json`, `agents/pi-installation.json`); an update
   keeps it. Every hello carries the id it was loaded with, and KeyScribe refuses any other with `403`,
   including every hello once the connector is removed (the record then holds no id). Removal records that
   first, then sends `retire` to connectors waiting for commands without waiting for an answer, and
@@ -178,7 +181,12 @@ a hello on any other protocol is refused with `426` and is never registered or s
   in place. Uninstalling runs each Claude Code removal step even when an earlier one fails, then deletes
   `claude-connector/` only once `claude plugin list --json` and `claude plugin marketplace list --json`
   no longer show the connector, and keeps the installation record; a record with no id while Claude Code
-  still lists the plugin or `claude-connector/` remains means an uninstall did not finish.
+  still lists the plugin or `claude-connector/` remains means an uninstall did not finish. The Pi
+  connector is installed by writing its folder into Pi's extensions folder (`~/.pi/agent/extensions/`, or
+  the `extensions` folder under `PI_CODING_AGENT_DIR`) and uninstalled by deleting it; Pi loads whatever is
+  there when it starts or on `/reload`, so no Pi command is run, and the record with no id while the folder
+  remains means an uninstall did not finish. The folder's `keyscribe.json` carries the connection settings,
+  the installation id, the connector version and the environment keys the terminal routes read.
 
 - **The connector connects only when KeyScribe is listening.** KeyScribe writes `agents/ready.json`
   (`launch`, a new random id each time the bridge starts, and `protocol`) after its socket is listening,
@@ -190,7 +198,13 @@ a hello on any other protocol is refused with `426` and is never registered or s
   hello, a `protocol` the connector does not speak, or missing connector settings make the connector go
   quiet until the next session or a plugin reload. It clears only a status line or button it showed
   itself.
-- **Hello** names the agent, the connector instance, the session id, and the features the connector offers.
+- **Hello** names the agent, the connector instance, the session id, the agent's process id, and the features
+  the connector offers. A connector whose agent keeps no session registry (Pi) also sends the session's
+  working directory (`cwd`), and its hello is how KeyScribe learns the session exists: the session is listed
+  while its process runs, and a hello from the same process for another session id replaces the earlier one
+  (`/new`, `/resume`, `/fork`). The start time recorded for such a session is its process's start time; a
+  session whose start cannot be read has none, so its name is not remembered across a restart, until a later
+  hello reads it. A hello for a known session from another process takes that process's start time.
   KeyScribe uses only what was announced: `label` for the status-line label naming the conversation, and
   `focus` for selecting the connector's own terminal surface during Open when the terminal cannot be
   told which surface from outside (cmux, when no process shows the agent's surface id). A connector that lacks
@@ -227,11 +241,30 @@ a hello on any other protocol is refused with `426` and is never registered or s
 - **A submit is refused as `draft`** when the agent's prompt box holds text the user has not sent; the
   connector leaves that text in place and KeyScribe keeps the take for review. The connector checks the
   prompt count, a running turn, and the session again after reading the box, right before it submits.
+- **A submit is refused as `dialog`** when the agent is showing a dialog of its own (Pi reports these around
+  every extension prompt); KeyScribe keeps the take for review.
+- **The Pi connector waits for the keyboard.** A key pressed in that terminal within the last three seconds
+  holds the submit until three seconds have passed since the last key, for at most six seconds, rechecking
+  the refusals above after every wait. It then hands the text to Pi as a follow-up message with an invisible
+  mark of its own appended: a short run of zero-width characters encoding a random value drawn when the
+  connector loaded and a count of its submissions, so no two submissions share a mark, within one connector
+  instance or across reloads, and the clock plays no part (Pi gives an extension no other identity for a
+  message it submits). The connector reports `submitted` only when Pi's own user message
+  carrying that exact marked text appears, so a message another extension consumed or changed, the same
+  words submitted again or by another extension, a prompt the user typed, or a message delayed across a
+  reload can never confirm it. Until a receipt arrives the outcome is unknown: the connector keeps waiting
+  (another extension's input hook may hold the message for a while), KeyScribe's own receipt timeout reports
+  the take as uncertain and, after a bounded wait, lets later dictation to that conversation go ahead and
+  forgets the request; a receipt that arrives within that wait still settles it as sent, and one after it
+  leaves the take uncertain. A submission stops holding further dictation after
+  three seconds, and only the most recent such submissions are still matched; one dropped from that list
+  stays uncertain. Text starting with `/` or `!` reaches Pi as plain text.
 - **The session id comes from Claude Code's session lifecycle.** When a session ends or is replaced
   (`/clear`, `/resume`, `/branch`), queued events for the old one are dropped and its commands refused, and
   the connector says hello for the new id before sending anything else.
 - **Typed events** report a prompt the user submitted (in the agent's own input, through Remote Control, or from Slack)
-  and any prompt Claude Code cannot attribute to a program. Prompts from plugins (the connector's own
+  and any prompt Claude Code cannot attribute to a program; the Pi connector counts prompts typed in Pi's own
+  editor. Prompts from plugins (the connector's own
   submissions included), background tasks, and scheduled triggers are not counted.
   One holds a queued take for review and makes that conversation the current recipient. Hello and each typed event
   carry the count of prompts the user has submitted in that session; each submit carries the count
@@ -241,10 +274,11 @@ a hello on any other protocol is refused with `426` and is never registered or s
   slash commands and `!` shell commands without the hook the connector listens on, so they send no typed
   event.
 - **Title events** carry the custom title the user gave the conversation, as reported in Claude Code's hook
-  payload. The connector sends one only when the payload includes the title field, and sends an empty
+  payload, or the session name set in Pi, which reports every change including a cleared name. The connector sends one only when the payload includes the title field, and sends an empty
   title (name cleared) only after it has reported a non-empty one, so a Claude Code build that omits the
   field never erases a name found elsewhere.
-- **Turn events** report a turn starting and ending, never the agent's answer.
+- **Turn events** report a turn starting and ending, never the agent's answer. Pi's turn ends only when
+  Pi settles, after retries and queued follow-ups, and a run ended with Escape is reported as aborted.
 - **The status-line label is cleared by the connector** when KeyScribe stops answering, so a label never
   outlives the app.
 
@@ -259,7 +293,8 @@ state, and a write to it does not reload configuration.
 - Chosen names are restored before any generated name is handed out, so a name keeps meaning the same
   conversation across restarts, and a chosen name stays reserved while its conversation is closed.
 - `remembered` holds the name each running conversation was given without a chosen name, with the
-  agent's pid and the start time Claude Code recorded for that process
+  agent's pid and the start time recorded for that process (the one Claude Code recorded, or for Pi the
+  process's own start time)
   (`"remembered": {"<session id>": {"name": "keyscribe blue", "pid": 4821, "started_at": 1793454517559, "native": null}}`).
   After a KeyScribe restart a conversation gets its remembered name back only when the same process is
   still running, so names do not move between open sessions. A session missing from a scan keeps its

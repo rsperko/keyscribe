@@ -368,7 +368,7 @@ struct AgentTerminalFocusTests {
         (.none, .advisory(message: "Nothing showing backend could be brought forward. Your recipient is backend")),
     ])
     func eachResultSaysWhatHappened(result: AgentFocusResult, state: HUDState) {
-        #expect(result.hudState(handle: "backend", detail: "Coding agent") == state)
+        #expect(result.hudState(handle: "backend", detail: "Coding agent", agent: .claude) == state)
     }
 
     @Test(arguments: [
@@ -383,7 +383,7 @@ struct AgentTerminalFocusTests {
         (.none, "Nothing showing backend was brought forward"),
     ])
     func eachResultHasAHistorySummaryThatNeverReadsAsSent(result: AgentFocusResult, summary: String) {
-        #expect(result.historySummary(handle: "backend") == summary)
+        #expect(result.historySummary(handle: "backend", agent: .claude) == summary)
         #expect(!summary.localizedCaseInsensitiveContains("sent"))
     }
 }

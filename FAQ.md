@@ -458,6 +458,21 @@ renamed build has its own connector name. Removing the marketplace also removes 
 `claude plugin list --json` and `claude plugin marketplace list --json`: neither should list the
 connector. Then run `/reload-plugins` in each open session or restart it.
 
+### How do I connect Pi, and how do I remove its connector?
+
+In **Settings ▸ Modes ▸ Coding agent**, the **Pi** section has its own **Install**. It writes a small
+extension into Pi's extensions folder (`~/.pi/agent/extensions/`, or the `extensions` folder under
+`PI_CODING_AGENT_DIR` when that is set), and every Pi you start from then on loads it on its own: no flag,
+no wrapper, nothing to add to your own configuration. A Pi that is already running picks it up when you
+run `/reload` in it or restart it. The connector needs Pi 1.4.0 or later; an older Pi is reported in that
+section, nothing is installed until Pi is updated, and a connector already installed can still be removed.
+
+**Uninstall Connector…** in the same section deletes that folder. Open Pi sessions disconnect at once; each
+one unloads the extension the next time you run `/reload` in it or restart it. If KeyScribe cannot find Pi,
+or you already deleted KeyScribe, delete the folder yourself: Settings shows the exact command for the copy
+of the app you are using (`rm -r ~/.pi/agent/extensions/keyscribe` for the released app). Nothing else in
+Pi's folders is touched, and your settings, history and conversation names are kept.
+
 ### Where are my settings and history stored?
 
 Everything is a plain file under `~/Library/Application Support/KeyScribe/` — TOML config, JSONL

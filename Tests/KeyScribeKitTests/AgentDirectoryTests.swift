@@ -33,11 +33,11 @@ struct AgentDirectoryTests {
     @Test func aRememberedNameIsNotGivenBackToAnotherProcess() {
         var before = AgentDirectory()
         before.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200)], live: [])
-        #expect(before.conversation(handle: "keyscribe blue")?.id == "b")
+        #expect(before.conversation(handle: "keyscribe blue")?.id == "claude:b")
         for reused in [started(20, "b", at: 900), started(30, "b", at: 200)] {
             var after = AgentDirectory(remembered: before.remembered)
             after.update(claude: [reused], live: [])
-            #expect(after.conversation(handle: "keyscribe")?.id == "b")
+            #expect(after.conversation(handle: "keyscribe")?.id == "claude:b")
         }
     }
 
@@ -46,16 +46,16 @@ struct AgentDirectoryTests {
         before.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200)], live: [])
         var after = AgentDirectory(remembered: before.remembered)
         after.update(claude: [started(20, "b", at: 200), started(30, "c", at: 300)], live: [])
-        #expect(after.conversation(handle: "keyscribe blue")?.id == "b")
-        #expect(after.conversation(handle: "keyscribe")?.id == "c")
-        #expect(Set(after.remembered.keys) == ["b", "c"])
+        #expect(after.conversation(handle: "keyscribe blue")?.id == "claude:b")
+        #expect(after.conversation(handle: "keyscribe")?.id == "claude:c")
+        #expect(Set(after.remembered.keys) == ["claude:b", "claude:c"])
     }
 
     @Test func onlyGeneratedNamesOfRunningSessionsWithAKnownStartAreRemembered() throws {
-        var directory = AgentDirectory(chosen: ["gone": "old"])
+        var directory = AgentDirectory(chosen: ["claude:gone": "old"])
         directory.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200), claude(30, "c")], live: [])
-        try directory.rename("a", to: "backend")
-        #expect(directory.remembered == ["b": RememberedName(name: "keyscribe blue", pid: 20, startedAt: 200, native: nil)])
+        try directory.rename("claude:a", to: "backend")
+        #expect(directory.remembered == ["claude:b": RememberedName(name: "keyscribe blue", pid: 20, startedAt: 200, native: nil, agent: "claude")])
     }
 
     @Test func aSessionMissingFromAStartupScanKeepsItsNameUntilItsProcessIsGone() {
@@ -63,11 +63,11 @@ struct AgentDirectoryTests {
         before.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200)], live: [])
         var after = AgentDirectory(remembered: before.remembered)
         after.update(claude: [started(20, "b", at: 200), started(30, "c", at: 300)], live: [], running: { $0.pid == 10 })
-        #expect(after.conversation(handle: "keyscribe blue")?.id == "b")
+        #expect(after.conversation(handle: "keyscribe blue")?.id == "claude:b")
         #expect(after.conversation(handle: "keyscribe")?.id == nil)
-        #expect(after.remembered["a"] == RememberedName(name: "keyscribe", pid: 10, startedAt: 100, native: nil))
+        #expect(after.remembered["claude:a"] == RememberedName(name: "keyscribe", pid: 10, startedAt: 100, native: nil, agent: "claude"))
         after.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200), started(30, "c", at: 300)], live: [], running: { $0.pid == 10 })
-        #expect(after.conversation(handle: "keyscribe")?.id == "a")
+        #expect(after.conversation(handle: "keyscribe")?.id == "claude:a")
         #expect(Set(after.handles) == ["keyscribe", "keyscribe blue", "keyscribe green"])
     }
 
@@ -76,9 +76,9 @@ struct AgentDirectoryTests {
         directory.update(claude: [started(10, "a", at: 100)], live: [])
         directory.update(claude: [started(30, "c", at: 300)], live: [], running: { $0.pid == 10 })
         #expect(directory.conversation(handle: "keyscribe")?.id == nil)
-        #expect(directory.remembered.keys.sorted() == ["a", "c"])
+        #expect(directory.remembered.keys.sorted() == ["claude:a", "claude:c"])
         directory.update(claude: [started(10, "a", at: 100), started(30, "c", at: 300)], live: [], running: { $0.pid == 10 })
-        #expect(directory.conversation(handle: "keyscribe")?.id == "a")
+        #expect(directory.conversation(handle: "keyscribe")?.id == "claude:a")
     }
 
     @Test func aMissingSessionWhoseProcessIsGoneFreesItsName() {
@@ -86,14 +86,14 @@ struct AgentDirectoryTests {
         before.update(claude: [started(10, "a", at: 100)], live: [])
         var after = AgentDirectory(remembered: before.remembered)
         after.update(claude: [started(30, "c", at: 300)], live: [], running: { _ in false })
-        #expect(after.conversation(handle: "keyscribe")?.id == "c")
-        #expect(after.remembered.keys.sorted() == ["c"])
+        #expect(after.conversation(handle: "keyscribe")?.id == "claude:c")
+        #expect(after.remembered.keys.sorted() == ["claude:c"])
     }
 
     @Test func aNativeNameThatChangedWhileTheAppWasClosedIsUsedInsteadOfTheRememberedOne() {
         var before = AgentDirectory()
         before.update(claude: [started(10, "a", at: 100, name: "Fix login"), started(20, "b", at: 200, name: "Fix login")], live: [])
-        #expect(before.conversation(handle: "fix login blue")?.id == "b")
+        #expect(before.conversation(handle: "fix login blue")?.id == "claude:b")
         var same = AgentDirectory(remembered: before.remembered)
         same.update(claude: [started(20, "b", at: 200, name: "Fix login")], live: [])
         #expect(same.handles == ["fix login blue"])
@@ -109,17 +109,17 @@ struct AgentDirectoryTests {
     @Test func anExplicitAgentNameIsUsedBeforeTheFolder() {
         var directory = AgentDirectory()
         directory.update(claude: [named("a", "Fix authentication retries")], live: [])
-        #expect(directory.conversation(handle: "fix authentication retries")?.id == "a")
+        #expect(directory.conversation(handle: "fix authentication retries")?.id == "claude:a")
         #expect(directory.conversation(handle: "api") == nil)
     }
 
     @Test func aKeyScribeOverrideWinsOverNativeNamesAndNativeRenames() throws {
-        var directory = AgentDirectory(chosen: ["a": "backend"])
+        var directory = AgentDirectory(chosen: ["claude:a": "backend"])
         directory.update(claude: [named("a", "Fix authentication retries")], live: [])
         directory.update(claude: [named("a", "Fix cache invalidation")], live: [])
-        #expect(directory.conversation(handle: "backend")?.id == "a")
+        #expect(directory.conversation(handle: "backend")?.id == "claude:a")
         #expect(directory.handles == ["backend"])
-        try directory.rename("a", to: "api")
+        try directory.rename("claude:a", to: "api")
         directory.update(claude: [named("a", "Another native name")], live: [])
         #expect(directory.handles == ["api"])
     }
@@ -137,15 +137,15 @@ struct AgentDirectoryTests {
 
     @Test func generatedTitlesAndDerivedRegistryNamesNeverBecomeAddresses() {
         var directory = AgentDirectory()
-        directory.update(claude: [named("a", "internal label", source: "derived")], live: [], titles: ["a": "Generated title"])
-        directory.update(claude: [named("a", "another internal label", source: "auto")], live: [], titles: ["a": "Changed generated title"])
+        directory.update(claude: [named("a", "internal label", source: "derived")], live: [], titles: ["claude:a": "Generated title"])
+        directory.update(claude: [named("a", "another internal label", source: "auto")], live: [], titles: ["claude:a": "Changed generated title"])
         #expect(directory.handles == ["api"])
     }
 
     @Test func nativeNamesAreAllocatedBeforeFolderFallbacksAndDuplicatesAreDistinct() {
         var directory = AgentDirectory()
         directory.update(claude: [claude(20, "folder", cwd: "/src/backend"), named("b", "Backend"), named("a", "Backend")], live: [])
-        #expect(directory.conversation(handle: "backend")?.id == "a")
+        #expect(directory.conversation(handle: "backend")?.id == "claude:a")
         #expect(Set(directory.handles).count == 3)
         #expect(directory.conversation(pid: 20)?.handle != "backend")
         let handles = directory.conversations.map { ($0.id, $0.handle) }
@@ -157,7 +157,7 @@ struct AgentDirectoryTests {
         var directory = AgentDirectory()
         directory.update(claude: [claude(20, "folder", cwd: "/src/backend"), named("a", "Authentication")], live: [])
         directory.update(claude: [claude(20, "folder", cwd: "/src/backend"), named("a", "Backend")], live: [])
-        #expect(directory.conversation(handle: "backend")?.id == "folder")
+        #expect(directory.conversation(handle: "backend")?.id == "claude:folder")
         #expect(directory.handles.contains("backend blue"))
     }
 
@@ -165,12 +165,12 @@ struct AgentDirectoryTests {
         var directory = AgentDirectory()
         directory.update(claude: [named("a", "Authentication")], live: [])
         directory.update(claude: [named("a", "Authentication"), named("fork", "Authentication")], live: [])
-        let fork = directory.conversations.first { $0.id == "fork" }?.handle
+        let fork = directory.conversations.first { $0.id == "claude:fork" }?.handle
         directory.update(claude: [], live: [])
         directory.update(claude: [named("fork", "Authentication")], live: [])
         #expect(directory.conversations.first?.handle == fork)
         directory.update(claude: [named("fork", "Authentication"), named("a", "Authentication")], live: [])
-        #expect(directory.conversation(handle: "authentication")?.id == "a")
+        #expect(directory.conversation(handle: "authentication")?.id == "claude:a")
     }
 
     @Test func nativeNamesCannotClaimReservedRowSyntaxOrAnAwayOverride() {
@@ -182,51 +182,51 @@ struct AgentDirectoryTests {
 
     @Test func aConversationCarriesTheTitleItsConnectorReported() {
         var directory = AgentDirectory()
-        directory.update(claude: [claude(10, "a"), claude(11, "b")], live: ["a", "b"], titles: ["a": "Fix terminal focus"])
+        directory.update(claude: [claude(10, "a"), claude(11, "b")], live: ["claude:a", "claude:b"], titles: ["claude:a": "Fix terminal focus"])
         let byId = Dictionary(uniqueKeysWithValues: directory.conversations.map { ($0.id, $0) })
-        #expect(byId["a"]?.title == "Fix terminal focus")
-        #expect(byId["b"]?.title == nil)
+        #expect(byId["claude:a"]?.title == "Fix terminal focus")
+        #expect(byId["claude:b"]?.title == nil)
     }
 
     @Test func registrySessionsBecomeConversationsWithHandles() {
         var directory = AgentDirectory()
-        directory.update(claude: [claude(10, "a"), claude(11, "b"), claude(12, "c", cwd: "/src/chatplay")], live: ["a", "b"])
+        directory.update(claude: [claude(10, "a"), claude(11, "b"), claude(12, "c", cwd: "/src/chatplay")], live: ["claude:a", "claude:b"])
         let byId = Dictionary(uniqueKeysWithValues: directory.conversations.map { ($0.id, $0) })
-        #expect(byId["a"]?.handle == "keyscribe")
-        #expect(byId["b"]?.handle == "keyscribe blue")
-        #expect(byId["c"]?.handle == "chatplay")
-        #expect(byId["a"]?.connectorLive == true)
-        #expect(byId["c"]?.connectorLive == false)
-        #expect(byId["c"]?.state == .idle)
+        #expect(byId["claude:a"]?.handle == "keyscribe")
+        #expect(byId["claude:b"]?.handle == "keyscribe blue")
+        #expect(byId["claude:c"]?.handle == "chatplay")
+        #expect(byId["claude:a"]?.connectorLive == true)
+        #expect(byId["claude:c"]?.connectorLive == false)
+        #expect(byId["claude:c"]?.state == .idle)
     }
 
     @Test func aNameStaysWithItsConversationWhenTheTerminalSwitchesToAnother() throws {
         var directory = AgentDirectory()
         directory.update(claude: [claude(10, "a")], live: [])
-        try directory.rename("a", to: "backend")
+        try directory.rename("claude:a", to: "backend")
         directory.update(claude: [claude(10, "a2")], live: [])
         #expect(directory.conversation(handle: "backend") == nil)
         #expect(directory.conversation(pid: 10)?.handle == "keyscribe")
         directory.update(claude: [claude(10, "a")], live: [])
-        #expect(directory.conversation(handle: "backend")?.id == "a")
+        #expect(directory.conversation(handle: "backend")?.id == "claude:a")
     }
 
     @Test func aChosenNameStaysReservedForItsConversationWhileItIsAway() throws {
         var directory = AgentDirectory()
         directory.update(claude: [claude(10, "a")], live: [])
-        try directory.rename("a", to: "backend")
+        try directory.rename("claude:a", to: "backend")
         directory.update(claude: [claude(20, "b", cwd: "/src/backend")], live: [])
         #expect(directory.conversation(pid: 20)?.handle == "backend blue")
         directory.update(claude: [claude(20, "b", cwd: "/src/backend"), claude(10, "a")], live: [])
-        #expect(directory.conversation(handle: "backend")?.id == "a")
+        #expect(directory.conversation(handle: "backend")?.id == "claude:a")
     }
 
     @Test func nobodyElseCanTakeAChosenNameWhileItsConversationIsAway() throws {
         var directory = AgentDirectory()
         directory.update(claude: [claude(10, "a")], live: [])
-        try directory.rename("a", to: "backend")
+        try directory.rename("claude:a", to: "backend")
         directory.update(claude: [claude(20, "b")], live: [])
-        #expect(throws: AgentHandles.RenameError.taken) { try directory.rename("b", to: "Back End") }
+        #expect(throws: AgentHandles.RenameError.taken) { try directory.rename("claude:b", to: "Back End") }
     }
 
     @Test func aReturningConversationNeverTakesBackANameSomeoneElseChose() throws {
@@ -234,46 +234,46 @@ struct AgentDirectoryTests {
         directory.update(claude: [claude(10, "a", cwd: "/src/api")], live: [])
         directory.update(claude: [], live: [])
         directory.update(claude: [claude(20, "b", cwd: "/src/api")], live: [])
-        try directory.rename("b", to: "api")
+        try directory.rename("claude:b", to: "api")
         directory.update(claude: [], live: [])
         directory.update(claude: [claude(10, "a", cwd: "/src/api")], live: [])
         #expect(directory.conversation(pid: 10)?.handle == "api blue")
         directory.update(claude: [claude(10, "a", cwd: "/src/api"), claude(20, "b", cwd: "/src/api")], live: [])
-        #expect(directory.conversation(handle: "api")?.id == "b")
+        #expect(directory.conversation(handle: "api")?.id == "claude:b")
     }
 
     @Test func chosenNamesComeBackAfterARestartEvenWhenTheyWereSwapped() throws {
         var before = AgentDirectory()
         let sessions = [claude(10, "a", cwd: "/src/api"), claude(20, "b", cwd: "/src/docs")]
         before.update(claude: sessions, live: [])
-        try before.rename("a", to: "backend")
-        try before.rename("b", to: "api")
+        try before.rename("claude:a", to: "backend")
+        try before.rename("claude:b", to: "api")
 
         var after = AgentDirectory(chosen: before.chosenNames)
         after.update(claude: sessions, live: [])
-        #expect(after.conversation(handle: "backend")?.id == "a")
-        #expect(after.conversation(handle: "api")?.id == "b")
+        #expect(after.conversation(handle: "backend")?.id == "claude:a")
+        #expect(after.conversation(handle: "api")?.id == "claude:b")
     }
 
     @Test func aRestoredChosenNameStaysReservedUntilItsConversationReturns() {
-        var directory = AgentDirectory(chosen: ["a": "api"])
+        var directory = AgentDirectory(chosen: ["claude:a": "api"])
         directory.update(claude: [claude(20, "b", cwd: "/src/api")], live: [])
         #expect(directory.conversation(pid: 20)?.handle == "api blue")
         directory.update(claude: [claude(20, "b", cwd: "/src/api"), claude(10, "a", cwd: "/src/other")], live: [])
-        #expect(directory.conversation(handle: "api")?.id == "a")
+        #expect(directory.conversation(handle: "api")?.id == "claude:a")
     }
 
     @Test func aGeneratedNameIsReusedWhileItsConversationIsAway() {
         var directory = AgentDirectory()
         directory.update(claude: [claude(10, "a")], live: [])
         directory.update(claude: [claude(10, "a2")], live: [])
-        #expect(directory.conversation(handle: "keyscribe")?.id == "a2")
+        #expect(directory.conversation(handle: "keyscribe")?.id == "claude:a2")
         var switching = AgentDirectory()
         switching.update(claude: [started(10, "a", at: 100)], live: [], running: { _ in true })
         for next in ["a2", "a3", "a4"] {
             switching.update(claude: [started(10, next, at: 100)], live: [], running: { _ in true })
-            #expect(switching.conversation(handle: "keyscribe")?.id == next)
-            #expect(switching.remembered.keys.sorted() == [next])
+            #expect(switching.conversation(handle: "keyscribe")?.id == "claude:" + next)
+            #expect(switching.remembered.keys.sorted() == ["claude:" + next])
         }
     }
 
@@ -281,12 +281,12 @@ struct AgentDirectoryTests {
         var directory = AgentDirectory()
         directory.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200)], live: [])
         directory.update(claude: [started(20, "b", at: 200)], live: [], running: { $0.pid == 10 })
-        #expect(throws: AgentHandles.RenameError.taken) { try directory.rename("b", to: "keyscribe") }
-        #expect(directory.renameProblem("b", to: "Keyscribe") == .taken)
-        #expect(directory.renameProblem("b", to: "backend") == nil)
-        #expect(directory.renameProblem("b", to: "session 2") == .reserved)
+        #expect(throws: AgentHandles.RenameError.taken) { try directory.rename("claude:b", to: "keyscribe") }
+        #expect(directory.renameProblem("claude:b", to: "Keyscribe") == .taken)
+        #expect(directory.renameProblem("claude:b", to: "backend") == nil)
+        #expect(directory.renameProblem("claude:b", to: "session 2") == .reserved)
         directory.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200)], live: [], running: { $0.pid == 10 })
-        #expect(directory.conversation(handle: "keyscribe")?.id == "a")
+        #expect(directory.conversation(handle: "keyscribe")?.id == "claude:a")
     }
 
     @Test func aHandleSurvivesTheProcessRestartingWithTheSameSession() {
@@ -300,7 +300,7 @@ struct AgentDirectoryTests {
     @Test func renamingAHandleSticksAcrossUpdates() throws {
         var directory = AgentDirectory()
         directory.update(claude: [claude(10, "a")], live: [])
-        try directory.rename("a", to: "Backend")
+        try directory.rename("claude:a", to: "Backend")
         directory.update(claude: [claude(10, "a", status: "busy")], live: [])
         #expect(directory.conversation(handle: "backend")?.state == .working)
         #expect(directory.conversation(handle: "keyscribe") == nil)
@@ -309,14 +309,14 @@ struct AgentDirectoryTests {
     @Test func handlesAreLookedUpBySpokenForm() {
         var directory = AgentDirectory()
         directory.update(claude: [claude(10, "a"), claude(11, "b")], live: [])
-        #expect(directory.conversation(handle: "KeyscribeBlue")?.id == "b")
+        #expect(directory.conversation(handle: "KeyscribeBlue")?.id == "claude:b")
         #expect(directory.handles.sorted() == ["keyscribe", "keyscribe blue"])
     }
 
     @Test func conversationsAreFoundByPid() {
         var directory = AgentDirectory()
         directory.update(claude: [claude(10, "a")], live: [])
-        #expect(directory.conversation(pid: 10)?.id == "a")
+        #expect(directory.conversation(pid: 10)?.id == "claude:a")
         #expect(directory.conversation(pid: 99) == nil)
     }
 

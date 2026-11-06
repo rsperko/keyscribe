@@ -684,20 +684,24 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         guard enabled != (agentRuntime != nil) else { return }
         if enabled {
             do {
-                let runtime = try AgentRuntime(supportDir: KeyScribePaths.supportDir)
+                let runtime = try AgentRuntime(
+                    supportDir: KeyScribePaths.supportDir,
+                    discovery: [ClaudeDiscovery(configDirs: [ClaudeRegistryScanner.defaultConfigDir()]), PiDiscovery()],
+                    legacyAgent: AgentKind.claude.id)
                 runtime.hub.onNotice = { [weak self] in self?.controller.showAgentNotice($0, request: $1) }
                 runtime.hub.onChange = { [weak self, weak hub = runtime.hub] in
                     guard let hub else { return }
                     self?.settingsController.codingAgents.show(
-                        hub.directory.conversations, current: hub.current, namesProblem: hub.namesProblem, namesNotSaved: hub.namesNotSaved)
+                        hub.directory.conversations, current: hub.current, namesProblem: hub.namesProblem, namesNotSaved: hub.namesNotSaved,
+                        discoveryProblems: hub.discoveryProblems)
                 }
                 settingsController.codingAgents.onRename = { [weak hub = runtime.hub] in try hub?.rename($0, to: $1) }
                 settingsController.codingAgents.onReloadNames = { [weak hub = runtime.hub] in hub?.reloadNames() }
                 settingsController.codingAgents.renameCheck = { [weak hub = runtime.hub] in hub?.renameProblem($0, to: $1) }
-                settingsController.codingAgents.onRetire = { [weak runtime] in runtime?.retire() }
+                settingsController.codingAgents.onRetire = { [weak runtime] in runtime?.retire(agent: $0.id) }
                 settingsController.codingAgents.show(
                     runtime.hub.directory.conversations, current: runtime.hub.current, namesProblem: runtime.hub.namesProblem,
-                    namesNotSaved: runtime.hub.namesNotSaved)
+                    namesNotSaved: runtime.hub.namesNotSaved, discoveryProblems: runtime.hub.discoveryProblems)
                 agentRuntime = runtime
                 controller.agents = runtime.hub
             } catch {

@@ -12,7 +12,7 @@ public enum AgentHistoryFacts {
         if let candidates = spoken.candidates { facts.append(.init(label: "Candidates", value: candidates.sorted().joined(separator: ", "))) }
         if let id = resolution.recipient {
             let conversation = conversations.first { $0.id == id }
-            let described = conversation.map { "\($0.handle) \u{00B7} \($0.agent) \u{00B7} \(id)" } ?? id
+            let described = conversation.map { "\($0.handle) \u{00B7} \($0.agent) \u{00B7} \(AgentSessionID.native(id))" } ?? AgentSessionID.native(id)
             facts.append(.init(label: "Conversation", value: described))
             facts.append(.init(label: "Chosen by", value: chosenBy(resolution, spoken: spoken.how)))
         } else {

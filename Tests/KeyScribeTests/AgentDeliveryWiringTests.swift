@@ -121,7 +121,7 @@ struct AgentDeliveryWiringTests {
             calls += 1
             guard calls == 1 else { return nil }
             await release.wait()
-            return FrontSession(id: "s2", app: FrontApp(bundle: "com.mitchellh.ghostty", pid: 9, name: "Ghostty", window: "cg:3"))
+            return FrontSession(id: "claude:s2", app: FrontApp(bundle: "com.mitchellh.ghostty", pid: 9, name: "Ghostty", window: "cg:3"))
         }
     }
 
@@ -180,7 +180,7 @@ struct AgentDeliveryWiringTests {
         historyEnabled: Bool = true, receiptTimeout: Duration = .seconds(8),
         front: FrontWindow = FrontWindow(TargetSnapshot(bundleId: "test.bundle")), sessionInFront: Front = Front(),
         glance: (any AgentFronting)? = nil, engine: (any SpeechEngine)? = nil, frontGrace: Duration = .seconds(1)
-    ) -> Rig {
+    ) async -> Rig {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-agent-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
@@ -197,7 +197,7 @@ struct AgentDeliveryWiringTests {
         let transport = Transport()
         let registry = Registry()
         registry.firstStatus = firstStatus
-        let entries = {
+        let entries: @Sendable () -> [ClaudeRegistryEntry] = {
             [
                 ClaudeRegistryEntry(pid: 10, sessionId: "s1", cwd: "/src/keyscribe", name: nil, status: registry.firstStatus, waitingFor: nil),
                 ClaudeRegistryEntry(pid: 11, sessionId: "s2", cwd: "/src/keyscribe", name: nil, status: "idle", waitingFor: nil),
@@ -209,9 +209,9 @@ struct AgentDeliveryWiringTests {
             try? Data(namesFile.utf8).write(to: agentsDir.appendingPathComponent(AgentNameStore.fileName))
         }
         let hub = AgentHub(transport: transport, scan: { entries() }, names: AgentNameStore(directory: agentsDir), focus: focus,
-                           front: sessionInFront, glance: glance, receiptTimeout: receiptTimeout)
+                           front: sessionInFront, glance: glance, receiptTimeout: receiptTimeout, scanDeadline: .seconds(30))
         transport.hub = hub
-        hub.refresh()
+        await hub.rescan()
         if let current { hub.makeCurrent(current) }
 
         let captured = Captured()
@@ -254,7 +254,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func whileRecordingTheHUDListsTheRecipientFirstThenTheOtherSessions() async {
-        let rig = rig("Run the tests.", current: "s2")
+        let rig = await rig("Run the tests.", current: "claude:s2")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         let roster = try? #require(rosters(rig).last ?? nil)
@@ -264,7 +264,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func anOrdinaryDictationShowsNoSessionList() async {
-        let rig = rig("hello", modes: [agentMode(), .direct], current: "s1")
+        let rig = await rig("hello", modes: [agentMode(), .direct], current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig, mode: Mode.directId)
         #expect(!rosters(rig).isEmpty)
@@ -272,133 +272,133 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func aSpokenNameSendsTheRestToThatConversationAndMakesItCurrent() async {
-        let rig = rig("Tell keyscribe blue to run the tests.")
+        let rig = await rig("Tell keyscribe blue to run the tests.")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s2"])
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
         #expect(rig.texts == ["to run the tests."])
         #expect(rig.captured.insertedText == nil)
-        #expect(rig.hub.current == "s2")
+        #expect(rig.hub.current == "claude:s2")
     }
 
     @Test func aLeadingNameWithoutTellSendsTheRestToThatConversation() async {
-        let rig = rig("keyscribe what is going on with this right now?", current: "s2")
+        let rig = await rig("keyscribe what is going on with this right now?", current: "claude:s2")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s1"])
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
         #expect(rig.texts == ["what is going on with this right now?"])
-        #expect(rig.hub.current == "s1")
+        #expect(rig.hub.current == "claude:s1")
     }
 
     @Test func equallyStrongAddressesSendToTheAlphabeticallyFirstMatch() async {
-        let rig = rig("Tell blue, run the tests.", current: "s1",
-                      namesFile: #"{"schema_version":1,"names":{"s1":"web blue","s2":"api blue"}}"#)
+        let rig = await rig("Tell blue, run the tests.", current: "claude:s1",
+                      namesFile: #"{"schema_version":1,"names":{"claude:s1":"web blue","claude:s2":"api blue"}}"#)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s2"])
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
         #expect(rig.texts == ["run the tests."])
-        #expect(rig.hub.current == "s2")
+        #expect(rig.hub.current == "claude:s2")
     }
 
     @Test(arguments: ["Session to run the build", "Keyscrib run the tests"])
     func aMisheardAddressWithoutTellSendsNothingToTheCurrentConversation(transcript: String) async {
-        let rig = rig(transcript, current: "s2")
+        let rig = await rig(transcript, current: "claude:s2")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.captured.insertedText == nil)
-        #expect(rig.hub.current == "s2")
+        #expect(rig.hub.current == "claude:s2")
     }
 
     @Test func aWordThatSoundsLikeTheCurrentConversationSendsTheWholeTakeThere() async {
-        let rig = rig("Keyscrib run the tests", current: "s1")
+        let rig = await rig("Keyscrib run the tests", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s1"])
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
         #expect(rig.texts == ["Keyscrib run the tests"])
     }
 
     @Test func aSpokenNameIsNotReplacedByTheCurrentConversationItSoundsLike() async {
-        let rig = rig("Tell keyscribe glue the adapters together", current: "s2")
+        let rig = await rig("Tell keyscribe glue the adapters together", current: "claude:s2")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s1"])
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
         #expect(rig.texts == ["glue the adapters together"])
     }
 
-    private static let twoFirst = #"{"schema_version":1,"names":{"s1":"two","s2":"zeta"}}"#
+    private static let twoFirst = #"{"schema_version":1,"names":{"claude:s1":"two","claude:s2":"zeta"}}"#
 
     @Test func aSentenceStartingWithANumberNameGoesWholeToTheCurrentConversation() async {
-        let rig = rig("Two tests failed.", current: "s2", namesFile: Self.twoFirst)
+        let rig = await rig("Two tests failed.", current: "claude:s2", namesFile: Self.twoFirst)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s2"])
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
         #expect(rig.texts == ["Two tests failed."])
     }
 
     @Test func tellReachesANumberNameAtADifferentRowAndSessionReachesTheRow() async {
-        let told = rig("Tell two, run tests.", current: "s2", namesFile: Self.twoFirst)
+        let told = await rig("Tell two, run tests.", current: "claude:s2", namesFile: Self.twoFirst)
         defer { try? FileManager.default.removeItem(at: told.supportDir) }
         await take(told)
-        #expect(told.sent.map(\.1) == ["s1"])
+        #expect(told.sent.map(\.1) == ["claude:s1"])
         #expect(told.texts == ["run tests."])
 
-        let row = rig("Session two, run tests.", current: "s1", namesFile: Self.twoFirst)
+        let row = await rig("Session two, run tests.", current: "claude:s1", namesFile: Self.twoFirst)
         defer { try? FileManager.default.removeItem(at: row.supportDir) }
         await take(row)
-        #expect(row.sent.map(\.1) == ["s2"])
+        #expect(row.sent.map(\.1) == ["claude:s2"])
         #expect(row.texts == ["run tests."])
     }
 
     @Test func openingANumberNoConversationHasHoldsAndSaysSo() async {
         let focus = Focus()
-        let rig = rig("Open two.", current: "s1", focus: focus)
+        let rig = await rig("Open two.", current: "claude:s1", focus: focus)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(focus.sessions.isEmpty)
-        #expect(rig.hub.current == "s1")
+        #expect(rig.hub.current == "claude:s1")
         #expect(rig.hud.states.contains { if case .error(let message, _, _) = $0 { message == "No conversation named \u{201C}two\u{201D}" } else { false } })
     }
 
     @Test func sessionBeforeANameAddressesThatConversation() async {
-        let rig = rig("Session keyscribe blue, run unit tests.", current: "s1")
+        let rig = await rig("Session keyscribe blue, run unit tests.", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s2"])
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
         #expect(rig.texts == ["run unit tests."])
     }
 
     @Test func openSessionAndANameOpensThatConversation() async {
         let focus = Focus()
-        let rig = rig("Open session keyscribe blue", current: "s1", focus: focus)
+        let rig = await rig("Open session keyscribe blue", current: "claude:s1", focus: focus)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
-        #expect(focus.sessions == ["s2"])
+        #expect(focus.sessions == ["claude:s2"])
     }
 
     @Test func anUnaddressedTakeGoesToTheCurrentRecipient() async {
-        let rig = rig("Run the tests.", current: "s1")
+        let rig = await rig("Run the tests.", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s1"])
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
         #expect(rig.captured.insertedText == nil)
     }
 
     private func inFront(
         _ transcript: String = "Run the tests.", modes: [Mode]? = nil, press: TargetSnapshot = terminal,
-        glance: any AgentFronting = Front("s2"), engine: (any SpeechEngine)? = nil, frontGrace: Duration = .seconds(1)
+        glance: any AgentFronting = Front("claude:s2"), engine: (any SpeechEngine)? = nil, frontGrace: Duration = .seconds(1)
     ) async -> Rig {
-        rig(transcript, modes: modes, current: "s1", front: FrontWindow(press), glance: glance, engine: engine, frontGrace: frontGrace)
+        await rig(transcript, modes: modes, current: "claude:s1", front: FrontWindow(press), glance: glance, engine: engine, frontGrace: frontGrace)
     }
 
     @Test func anUnaddressedTakeGoesToTheConversationInFrontAndMakesItCurrent() async {
         let rig = await inFront()
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig, readingTheFront: true)
-        #expect(rig.sent.map(\.1) == ["s2"])
-        #expect(rig.hub.current == "s2")
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
+        #expect(rig.hub.current == "claude:s2")
         let roster = try? #require(rosters(rig).last ?? nil)
         #expect(roster?.rows.map(\.name) == ["keyscribe", "keyscribe blue"])
         #expect(roster?.recipientName == "keyscribe blue")
@@ -410,8 +410,8 @@ struct AgentDeliveryWiringTests {
         let rig = await inFront("Tell keyscribe to run the tests.")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s1"])
-        #expect(rig.hub.current == "s1")
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
+        #expect(rig.hub.current == "claude:s1")
     }
 
     @Test func aSpokenNameDoesNotWaitForTheFrontReading() async {
@@ -420,21 +420,21 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         slow.release.fire()
-        #expect(rig.sent.map(\.1) == ["s1"])
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
     }
 
     @Test func aFixedConversationIgnoresTheConversationInFront() async {
         let rig = await inFront(modes: [agentMode(target: .handle("keyscribe"))])
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig, readingTheFront: true)
-        #expect(rig.sent.map(\.1) == ["s1"])
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
     }
 
     @Test func thePressNeverReadsTheFrontThroughTheReaderThatMayAskForAccess() async {
-        let rig = rig("Run the tests.", current: "s1", front: FrontWindow(Self.terminal), sessionInFront: Front("s2"))
+        let rig = await rig("Run the tests.", current: "claude:s1", front: FrontWindow(Self.terminal), sessionInFront: Front("claude:s2"))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig, readingTheFront: true)
-        #expect(rig.sent.map(\.1) == ["s1"])
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
     }
 
     @Test(arguments: [
@@ -445,15 +445,15 @@ struct AgentDeliveryWiringTests {
         let rig = await inFront(press: press)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig, readingTheFront: true)
-        #expect(rig.sent.map(\.1) == ["s1"])
-        #expect(rig.hub.current == "s1")
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
+        #expect(rig.hub.current == "claude:s1")
     }
 
     @Test func aConversationInFrontThatIsNotInTheListLeavesTheCurrentRecipient() async {
-        let rig = await inFront(glance: Front("s9"))
+        let rig = await inFront(glance: Front("claude:s9"))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig, readingTheFront: true)
-        #expect(rig.sent.map(\.1) == ["s1"])
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
     }
 
     @Test func aFrontReadingThatDoesNotSettleInTimeLeavesTheCurrentRecipient() async {
@@ -462,8 +462,8 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         slow.release.fire()
-        #expect(rig.sent.map(\.1) == ["s1"])
-        #expect(rig.hub.current == "s1")
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
+        #expect(rig.hub.current == "claude:s1")
     }
 
     @Test func aFrontReadingThatLandsAfterReleaseAndGraceWhileTranscribingIsIgnored() async {
@@ -480,8 +480,8 @@ struct AgentDeliveryWiringTests {
         await rig.controller.agentFrontTask?.value
         engine.release.fire()
         await rig.controller.dictationTask?.value
-        #expect(rig.sent.map(\.1) == ["s1"])
-        #expect(rig.hub.current == "s1")
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
+        #expect(rig.hub.current == "claude:s1")
     }
 
     @Test func aFrontReadingThatLandsAfterItsTakeWasCancelledNeverReachesTheNextTake() async {
@@ -501,31 +501,31 @@ struct AgentDeliveryWiringTests {
         await first?.value
         rig.controller.handleCommit()
         await rig.controller.dictationTask?.value
-        #expect(rig.sent.map(\.1) == ["s1"])
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
     }
 
     @Test func anUnknownNameSendsNothingAndInsertsNothing() async {
-        let rig = rig("Tell frontend to run the tests.", current: "s1")
+        let rig = await rig("Tell frontend to run the tests.", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.captured.insertedText == nil)
-        #expect(rig.hub.current == "s1")
+        #expect(rig.hub.current == "claude:s1")
     }
 
     @Test func whileNamesCannotBeLoadedASpokenNameSendsNothing() async {
-        let rig = rig("Tell keyscribe blue to run the tests.", current: "s1", namesFile: "not json")
+        let rig = await rig("Tell keyscribe blue to run the tests.", current: "claude:s1", namesFile: "not json")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.captured.insertedText == nil)
-        #expect(rig.hub.current == "s1")
+        #expect(rig.hub.current == "claude:s1")
         #expect(rosters(rig).compactMap { $0 }.last?.namesAvailable == false)
     }
 
     @Test(arguments: ["Tell my api to run the tests.", "Tell the api to run the tests."])
     func whileNamesCannotBeLoadedANameThatReadsLikeProseStillSendsNothing(transcript: String) async {
-        let rig = rig(transcript, current: "s1", namesFile: "not json")
+        let rig = await rig(transcript, current: "claude:s1", namesFile: "not json")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
@@ -533,14 +533,14 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func whileNamesCannotBeLoadedARowNumberStillWorks() async {
-        let rig = rig("Tell session 2 to run the tests.", current: "s1", namesFile: "not json")
+        let rig = await rig("Tell session 2 to run the tests.", current: "claude:s1", namesFile: "not json")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s2"])
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
     }
 
     @Test func withTheFeatureOffNothingIsSent() async {
-        let rig = rig("Tell keyscribe to run the tests.", enabled: false)
+        let rig = await rig("Tell keyscribe to run the tests.", enabled: false)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
@@ -553,10 +553,10 @@ struct AgentDeliveryWiringTests {
             .init(heard: "keyscribe blue", replace: "keyscribe", regex: false),
             .init(heard: "tests", replace: "specs", regex: false),
         ])
-        let rig = rig("Tell keyscribe blue to run the tests.", modes: [mode])
+        let rig = await rig("Tell keyscribe blue to run the tests.", modes: [mode])
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s2"])
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
         #expect(rig.texts == ["to run the specs."])
     }
 
@@ -564,21 +564,21 @@ struct AgentDeliveryWiringTests {
         var mode = agentMode()
         mode.replacements = .init(includeGlobal: false, rules: [.init(heard: "Keys Crab", replace: "keyscribe", regex: false)])
         let focus = Focus()
-        let rig = rig("Go to Keys Crab Blue.", modes: [mode], current: "s1", focus: focus)
+        let rig = await rig("Go to Keys Crab Blue.", modes: [mode], current: "claude:s1", focus: focus)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(focus.sessions == ["s2"])
+        #expect(focus.sessions == ["claude:s2"])
         #expect(rig.sent.isEmpty)
-        #expect(rig.hub.current == "s2")
+        #expect(rig.hub.current == "claude:s2")
     }
 
     @Test func aLiveEditRightAfterACorrectedNameReachesTheMessage() async {
         var mode = agentMode()
         mode.replacements = .init(includeGlobal: false, rules: [.init(heard: "Keys Crab", replace: "keyscribe", regex: false)])
-        let rig = rig("Tell Keys Crab Blue insert new line hello", modes: [mode], current: "s1")
+        let rig = await rig("Tell Keys Crab Blue insert new line hello", modes: [mode], current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s2"])
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
         #expect(rig.texts == ["\nhello"])
     }
 
@@ -589,35 +589,35 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func aWholeUtteranceRuleAfterANameIsSentToThatConversationAsWritten() async {
-        let rig = rig("tell keyscribe blue slash resume", modes: [slashResumeMode()], current: "s1")
+        let rig = await rig("tell keyscribe blue slash resume", modes: [slashResumeMode()], current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s2"])
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
         #expect(rig.texts == ["/resume"])
     }
 
     @Test func aTakeThatIsAWholeUtteranceRuleGoesToTheCurrentConversation() async {
-        let rig = rig("slash resume", modes: [slashResumeMode()], current: "s1")
+        let rig = await rig("slash resume", modes: [slashResumeMode()], current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s1"])
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
         #expect(rig.texts == ["/resume"])
     }
 
     @Test func verbatimTextThatStartsWithTellIsNeverAnAddress() async {
-        let rig = rig("begin verbatim tell keyscribe blue to stop end verbatim", current: "s1")
+        let rig = await rig("begin verbatim tell keyscribe blue to stop end verbatim", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["s1"])
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
         #expect(rig.texts.first?.contains("tell keyscribe blue to stop") == true)
-        #expect(rig.hub.current == "s1")
+        #expect(rig.hub.current == "claude:s1")
     }
 
     @Test func skippingASlowRewriteSendsTheLocalTextToTheAgentAndNeverPastes() async {
         var mode = agentMode()
         mode.aiRewrite = .init(connection: "c", prompt: "Tidy it.")
         let llm = HangingLLM()
-        let rig = rig(
+        let rig = await rig(
             "Tell keyscribe blue to run the tests.", modes: [mode],
             connection: Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k"), llm: llm)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
@@ -631,7 +631,7 @@ struct AgentDeliveryWiringTests {
         for _ in 0..<200 where rig.controller.isBusy { try? await Task.sleep(for: .milliseconds(5)) }
 
         #expect(rig.captured.insertedText == nil)
-        #expect(rig.sent.map(\.1) == ["s2"])
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
         #expect(rig.texts == ["to run the tests."])
     }
 
@@ -639,7 +639,7 @@ struct AgentDeliveryWiringTests {
         var mode = agentMode()
         mode.aiRewrite = .init(connection: "c", prompt: "Tidy it.")
         let llm = HangingLLM()
-        let rig = rig(
+        let rig = await rig(
             "Tell keyscribe blue to run the tests.", modes: [mode],
             connection: Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k"), llm: llm)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
@@ -665,7 +665,7 @@ struct AgentDeliveryWiringTests {
         var mode = agentMode()
         mode.aiRewrite = .init(connection: "c", prompt: "Tidy it.")
         let llm = SlowReasoningLLM()
-        let rig = rig(
+        let rig = await rig(
             "Tell keyscribe blue to run the tests.", modes: [mode],
             connection: Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k"), llm: llm)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
@@ -690,7 +690,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func cancellingWhileTheMessageIsBeingSentKeepsTheTruthfulReceipt() async {
-        let rig = rig("Run the tests.", current: "s1")
+        let rig = await rig("Run the tests.", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.transport.confirms = false
         rig.controller.setNextModeOverride(id: Mode.codingAgentId)
@@ -714,7 +714,7 @@ struct AgentDeliveryWiringTests {
         plain.output = .cursor
         var agent = agentMode()
         agent.triggerPhrases = ["over to agents"]
-        let rig = rig("Tell keyscribe blue to run the tests over to agents", modes: [plain, agent])
+        let rig = await rig("Tell keyscribe blue to run the tests over to agents", modes: [plain, agent])
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig, mode: "plain")
         #expect(rig.sent.isEmpty)
@@ -722,7 +722,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func silenceSendsNothingAndAsksNothing() async {
-        let rig = rig("", current: "s1")
+        let rig = await rig("", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
@@ -730,11 +730,11 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func aNameAloneSelectsWithoutSending() async {
-        let rig = rig("Tell keyscribe blue.", current: "s1")
+        let rig = await rig("Tell keyscribe blue.", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
-        #expect(rig.hub.current == "s2")
+        #expect(rig.hub.current == "claude:s2")
     }
 
     final class Focus: AgentTerminalFocusing, @unchecked Sendable {
@@ -759,8 +759,8 @@ struct AgentDeliveryWiringTests {
 
     @Test func anOpenThatCameForwardWithoutSelectingTheTabInTheSameWindowRecordsNothing() async {
         let runner = BackRunner()
-        let rig = rig("Switch to keyscribe blue.", current: "s1", voiceCommands: runner, focus: Focus(.app("Ghostty")),
-                      front: FrontWindow(Self.terminal), sessionInFront: Front("s1"))
+        let rig = await rig("Switch to keyscribe blue.", current: "claude:s1", voiceCommands: runner, focus: Focus(.app("Ghostty")),
+                      front: FrontWindow(Self.terminal), sessionInFront: Front("claude:s1"))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(runner.recorded.isEmpty)
@@ -770,7 +770,7 @@ struct AgentDeliveryWiringTests {
         let runner = BackRunner()
         let front = FrontWindow(Self.textEdit)
         let focus = Focus()
-        let rig = rig("Switch to keyscribe blue.", current: "s1", voiceCommands: runner, focus: focus, front: front)
+        let rig = await rig("Switch to keyscribe blue.", current: "claude:s1", voiceCommands: runner, focus: focus, front: front)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         let controller = rig.controller
         focus.whileFocusing = {
@@ -778,14 +778,14 @@ struct AgentDeliveryWiringTests {
             controller.cancel()
         }
         await take(rig)
-        #expect(focus.sessions == ["s2"])
+        #expect(focus.sessions == ["claude:s2"])
         #expect(runner.recorded.isEmpty)
     }
 
     @Test func aSessionReadInAnotherAppThanThePressIsNotAttachedToThatWindow() async {
         let runner = BackRunner()
         let front = FrontWindow(Self.textEdit)
-        let rig = rig("Switch to keyscribe blue.", current: "s1", voiceCommands: runner, focus: Focus(), front: front, sessionInFront: Front("s1"))
+        let rig = await rig("Switch to keyscribe blue.", current: "claude:s1", voiceCommands: runner, focus: Focus(), front: front, sessionInFront: Front("claude:s1"))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.controller.setNextModeOverride(id: Mode.codingAgentId)
         rig.controller.handleStart()
@@ -798,7 +798,7 @@ struct AgentDeliveryWiringTests {
 
     @Test func turningCodingAgentsOffWhileGoingBackLeavesTheControllerFreeForTheNextTake() async {
         let runner = BackRunner()
-        let rig = rig("go back", current: "s1", voiceCommands: runner, focus: Focus())
+        let rig = await rig("go back", current: "claude:s1", voiceCommands: runner, focus: Focus())
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         let controller = rig.controller
         runner.whileRunning = {
@@ -820,7 +820,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func systemSleepAndTurningCodingAgentsOffCloseARunningTerminalScriptGateAtOnce() async {
-        let rig = rig("", current: "s1")
+        let rig = await rig("", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         let sleeping = StopGate.watching({ true }, every: .seconds(10))
         rig.controller.handleSystemSleep()
@@ -836,8 +836,8 @@ struct AgentDeliveryWiringTests {
 
     @Test func aSessionWhoseWindowCannotBeReadIsNotAttachedToACapturedWindow() async {
         let runner = BackRunner()
-        let rig = rig("Switch to keyscribe blue.", current: "s1", voiceCommands: runner, focus: Focus(),
-                      front: FrontWindow(Self.terminal), sessionInFront: Front("s1", window: nil))
+        let rig = await rig("Switch to keyscribe blue.", current: "claude:s1", voiceCommands: runner, focus: Focus(),
+                      front: FrontWindow(Self.terminal), sessionInFront: Front("claude:s1", window: nil))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(runner.recorded.isEmpty)
@@ -845,7 +845,7 @@ struct AgentDeliveryWiringTests {
 
     @Test func systemSleepWhileGoingBackOnTheCodingAgentTriggerStopsTheReturn() async {
         let runner = BackRunner()
-        let rig = rig("go back", current: "s1", voiceCommands: runner, focus: Focus())
+        let rig = await rig("go back", current: "claude:s1", voiceCommands: runner, focus: Focus())
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         let controller = rig.controller
         runner.whileRunning = { controller.handleSystemSleep() }
@@ -864,27 +864,27 @@ struct AgentDeliveryWiringTests {
         let front = FrontWindow(Self.textEdit)
         let focus = Focus(result)
         focus.whileFocusing = { front.snapshot = Self.terminal }
-        let rig = rig("Switch to keyscribe blue.", current: "s1", voiceCommands: runner, focus: focus, front: front)
+        let rig = await rig("Switch to keyscribe blue.", current: "claude:s1", voiceCommands: runner, focus: focus, front: front)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(focus.sessions == ["s2"])
+        #expect(focus.sessions == ["claude:s2"])
         #expect(runner.recorded == [VoiceCommandOrigin(bundleId: "com.apple.TextEdit", pid: 42, windowId: "cg:7")])
         #expect(runner.ran.isEmpty)
     }
 
     @Test func openingFromAnotherSessionInTheSameWindowRecordsThatSessionAsTheReturn() async {
         let runner = BackRunner()
-        let rig = rig("Switch to keyscribe blue.", current: "s1", voiceCommands: runner, focus: Focus(),
-                      front: FrontWindow(Self.terminal), sessionInFront: Front("s1"))
+        let rig = await rig("Switch to keyscribe blue.", current: "claude:s1", voiceCommands: runner, focus: Focus(),
+                      front: FrontWindow(Self.terminal), sessionInFront: Front("claude:s1"))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(runner.recorded == [VoiceCommandOrigin(bundleId: "com.mitchellh.ghostty", pid: 9, windowId: "cg:3", session: "s1")])
+        #expect(runner.recorded == [VoiceCommandOrigin(bundleId: "com.mitchellh.ghostty", pid: 9, windowId: "cg:3", session: "claude:s1")])
     }
 
     @Test func aSessionShownInAnotherWindowOfThePressedTerminalIsNotAttachedToThatWindow() async {
         let runner = BackRunner()
-        let rig = rig("Switch to keyscribe blue.", current: "s1", voiceCommands: runner, focus: Focus(),
-                      front: FrontWindow(Self.terminal), sessionInFront: Front("s1", window: "cg:5"))
+        let rig = await rig("Switch to keyscribe blue.", current: "claude:s1", voiceCommands: runner, focus: Focus(),
+                      front: FrontWindow(Self.terminal), sessionInFront: Front("claude:s1", window: "cg:5"))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(runner.recorded.isEmpty)
@@ -892,8 +892,8 @@ struct AgentDeliveryWiringTests {
 
     @Test func openingTheConversationAlreadyShownRecordsNoReturnDestination() async {
         let runner = BackRunner()
-        let rig = rig("Switch to keyscribe blue.", current: "s1", voiceCommands: runner, focus: Focus(),
-                      front: FrontWindow(Self.terminal), sessionInFront: Front("s2"))
+        let rig = await rig("Switch to keyscribe blue.", current: "claude:s1", voiceCommands: runner, focus: Focus(),
+                      front: FrontWindow(Self.terminal), sessionInFront: Front("claude:s2"))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(runner.recorded.isEmpty)
@@ -902,31 +902,31 @@ struct AgentDeliveryWiringTests {
     @Test func theRunnerCanReturnToSessionsThroughTheHubWithoutChangingTheRecipient() async {
         let runner = BackRunner()
         let focus = Focus()
-        let rig = rig("", current: "s1", voiceCommands: runner, focus: focus, sessionInFront: Front("s2"))
+        let rig = await rig("", current: "claude:s1", voiceCommands: runner, focus: focus, sessionInFront: Front("claude:s2"))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         let sessions = try? #require(runner.sessions)
-        #expect(await sessions?.inFront() == FrontSession(id: "s2", app: FrontApp(bundle: "com.mitchellh.ghostty", pid: 9, name: "Ghostty", window: "cg:3")))
-        #expect(sessions?.handle("s2") == "keyscribe blue")
-        #expect(await sessions?.open("s2", { true }) == .exact)
-        #expect(focus.sessions == ["s2"])
-        #expect(rig.hub.current == "s1")
+        #expect(await sessions?.inFront() == FrontSession(id: "claude:s2", app: FrontApp(bundle: "com.mitchellh.ghostty", pid: 9, name: "Ghostty", window: "cg:3")))
+        #expect(sessions?.handle("claude:s2") == "keyscribe blue")
+        #expect(await sessions?.open("claude:s2", { true }) == .exact)
+        #expect(focus.sessions == ["claude:s2"])
+        #expect(rig.hub.current == "claude:s1")
     }
 
     @Test func withCodingAgentsOffTheRunnerHasNoSessionsToReturnTo() async {
         let runner = BackRunner()
-        let rig = rig("", current: "s1", enabled: false, voiceCommands: runner, focus: Focus(), sessionInFront: Front("s2"))
+        let rig = await rig("", current: "claude:s1", enabled: false, voiceCommands: runner, focus: Focus(), sessionInFront: Front("claude:s2"))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         #expect(await runner.sessions?.inFront() == nil)
-        #expect(await runner.sessions?.open("s2", { true }) == AgentFocusResult.none)
-        #expect(runner.sessions?.handle("s2") == nil)
+        #expect(await runner.sessions?.open("claude:s2", { true }) == AgentFocusResult.none)
+        #expect(runner.sessions?.handle("claude:s2") == nil)
     }
 
     @Test func openingAConversationAlreadyInFrontKeepsTheEarlierReturnDestination() async {
         let runner = BackRunner()
-        let rig = rig("Switch to keyscribe blue.", current: "s1", voiceCommands: runner, focus: Focus(), front: FrontWindow(Self.terminal))
+        let rig = await rig("Switch to keyscribe blue.", current: "claude:s1", voiceCommands: runner, focus: Focus(), front: FrontWindow(Self.terminal))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.hub.current == "s2")
+        #expect(rig.hub.current == "claude:s2")
         #expect(runner.recorded.isEmpty)
     }
 
@@ -935,7 +935,7 @@ struct AgentDeliveryWiringTests {
         let front = FrontWindow(Self.textEdit)
         let focus = Focus(.none)
         focus.whileFocusing = { front.snapshot = Self.terminal }
-        let rig = rig("Switch to keyscribe blue.", current: "s1", voiceCommands: runner, focus: focus, front: front)
+        let rig = await rig("Switch to keyscribe blue.", current: "claude:s1", voiceCommands: runner, focus: focus, front: front)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(runner.recorded.isEmpty)
@@ -944,7 +944,7 @@ struct AgentDeliveryWiringTests {
     @Test func goBackOnTheCodingAgentTriggerReturnsLocallyAndSendsNothing() async {
         let runner = BackRunner()
         let focus = Focus()
-        let rig = rig("Go back.", current: "s1", voiceCommands: runner, focus: focus, front: FrontWindow(Self.terminal))
+        let rig = await rig("Go back.", current: "claude:s1", voiceCommands: runner, focus: focus, front: FrontWindow(Self.terminal))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         let entry = await lastHistoryEntry(rig)
@@ -952,7 +952,7 @@ struct AgentDeliveryWiringTests {
         #expect(runner.ran.first?.origin == VoiceCommandOrigin(bundleId: "com.mitchellh.ghostty", pid: 9, windowId: "cg:3"))
         #expect(rig.sent.isEmpty)
         #expect(focus.sessions.isEmpty)
-        #expect(rig.hub.current == "s1")
+        #expect(rig.hub.current == "claude:s1")
         #expect(rig.hud.states.contains(.commandDone(summary: "TextEdit")))
         #expect(entry?.summary == "Returns to TextEdit.")
         #expect(entry?.outcome == .inserted)
@@ -963,7 +963,7 @@ struct AgentDeliveryWiringTests {
     @Test func goBackWithNothingToReturnToSaysSoAndSendsNothing() async {
         let runner = BackRunner()
         runner.outcome = .failed(message: "Nothing to go back to.")
-        let rig = rig("go back", current: "s1", voiceCommands: runner)
+        let rig = await rig("go back", current: "claude:s1", voiceCommands: runner)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         let entry = await lastHistoryEntry(rig)
@@ -976,7 +976,7 @@ struct AgentDeliveryWiringTests {
     @Test(arguments: [("Tell keyscribe go back", "go back"), ("Go back to the parser", "Go back to the parser")])
     func goBackInsideAMessageIsStillAMessage(text: String, sent: String) async {
         let runner = BackRunner()
-        let rig = rig(text, current: "s1", voiceCommands: runner)
+        let rig = await rig(text, current: "claude:s1", voiceCommands: runner)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.texts == [sent])
@@ -985,23 +985,23 @@ struct AgentDeliveryWiringTests {
 
     @Test func openingAConversationBringsItForwardAndSendsNothing() async {
         let focus = Focus()
-        let rig = rig("Switch to keyscribe blue.", current: "s1", focus: focus)
+        let rig = await rig("Switch to keyscribe blue.", current: "claude:s1", focus: focus)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(focus.sessions == ["s2"])
+        #expect(focus.sessions == ["claude:s2"])
         #expect(rig.sent.isEmpty)
         #expect(rig.captured.insertedText == nil)
-        #expect(rig.hub.current == "s2")
+        #expect(rig.hub.current == "claude:s2")
         #expect(rig.hud.states.contains(.commandDone(summary: "Opened keyscribe blue", detail: "Coding agent")))
     }
 
     @Test(arguments: [AgentFocusResult.app("Ghostty"), .unsupported("kitty"), .notAllowed("Ghostty"), .none])
     func aConversationWhoseTerminalWasNotSelectedIsStillCurrentAndTheHUDSaysSo(result: AgentFocusResult) async {
-        let rig = rig("Open keyscribe blue.", current: "s1", focus: Focus(result))
+        let rig = await rig("Open keyscribe blue.", current: "claude:s1", focus: Focus(result))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
-        #expect(rig.hub.current == "s2")
+        #expect(rig.hub.current == "claude:s2")
         #expect(rig.hud.states.contains(result.hudState(handle: "keyscribe blue", detail: "Coding agent")))
         #expect(!rig.hud.states.contains { if case .commandDone = $0 { true } else { false } })
     }
@@ -1024,7 +1024,7 @@ struct AgentDeliveryWiringTests {
 
     @Test func aCancelledOpenNeverShowsThePermissionHintAfterwards() async {
         let focus = HeldFocus()
-        let rig = rig("Open keyscribe blue.", current: "s1", focus: focus)
+        let rig = await rig("Open keyscribe blue.", current: "claude:s1", focus: focus)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.controller.setNextModeOverride(id: Mode.codingAgentId)
         rig.controller.handleStart()
@@ -1041,7 +1041,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func whileATerminalIsBeingFoundTheHUDSaysWhichConversationIsOpening() async {
-        let rig = rig("Open keyscribe blue.", current: "s1", focus: Focus())
+        let rig = await rig("Open keyscribe blue.", current: "claude:s1", focus: Focus())
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.hud.states.contains(.transcribing(mode: "Coding agent", status: "Opening keyscribe blue\u{2026}")))
@@ -1049,7 +1049,7 @@ struct AgentDeliveryWiringTests {
 
     @Test func whileATerminalAsksForPermissionTheHUDSaysWhatItIsFor() async {
         let focus = Focus(.exact, asking: "Ghostty")
-        let rig = rig("Open keyscribe blue.", current: "s1", focus: focus)
+        let rig = await rig("Open keyscribe blue.", current: "claude:s1", focus: focus)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.hud.states.contains(.transcribing(mode: "Coding agent", status: "Allow access to Ghostty to open the tab for keyscribe blue")))
@@ -1057,11 +1057,11 @@ struct AgentDeliveryWiringTests {
 
     @Test func anOpenVerbFollowedByAnInstructionIsSentAsSaid() async {
         let focus = Focus()
-        let rig = rig("Open the readme and fix the typo.", current: "s1", focus: focus)
+        let rig = await rig("Open the readme and fix the typo.", current: "claude:s1", focus: focus)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(focus.sessions.isEmpty)
-        #expect(rig.sent.map(\.1) == ["s1"])
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
         #expect(rig.texts == ["Open the readme and fix the typo."])
     }
 
@@ -1069,7 +1069,7 @@ struct AgentDeliveryWiringTests {
         var mode = agentMode()
         mode.aiRewrite = .init(connection: "c", prompt: "Tidy it.")
         let llm = HangingLLM()
-        let rig = rig(
+        let rig = await rig(
             "Tell keyscribe blue to run the tests.", modes: [mode],
             connection: Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k"), llm: llm)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
@@ -1099,7 +1099,7 @@ struct AgentDeliveryWiringTests {
         runner.pendingChoice = VoiceCommandPendingChoice(
             id: 1, choice: VoiceCommandChoice(family: .navigation, target: "x", matches: []), request: "", origin: nil,
             rows: [], places: [], scripts: [])
-        let rig = rig("", voiceCommands: runner)
+        let rig = await rig("", voiceCommands: runner)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         let notice = HUDState.error(message: "Not sent: keyscribe isn\u{2019}t connected to \(Branding.appName)", action: nil, heard: nil)
 
@@ -1117,7 +1117,7 @@ struct AgentDeliveryWiringTests {
         runner.pendingChoice = VoiceCommandPendingChoice(
             id: 1, choice: VoiceCommandChoice(family: .navigation, target: "x", matches: []), request: "", origin: nil,
             rows: [], places: [], scripts: [])
-        let rig = rig("", voiceCommands: runner)
+        let rig = await rig("", voiceCommands: runner)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         let uncertainA = HUDState.advisory(message: "May not have reached keyscribe: check its terminal")
         let notSentB = AgentDeliveryWiringTests.notSentNotice("keyscribe blue")
@@ -1147,7 +1147,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func historyRecordsWhyATakeWasNotSent() async {
-        let rig = rig("Tell frontend to run the tests.", current: "s1")
+        let rig = await rig("Tell frontend to run the tests.", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         let entry = await lastHistoryEntry(rig)
@@ -1155,7 +1155,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func aConversationWithoutItsConnectorSaysSoRatherThanSuggestingAReload() async {
-        let rig = rig("Run the tests.", current: "s1")
+        let rig = await rig("Run the tests.", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.transport.live = false
         rig.hub.refresh()
@@ -1170,7 +1170,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func historyRecordsAMessageWithWhereItWentAndHowThatWasChosen() async {
-        let rig = rig("Run the tests.", current: "s1")
+        let rig = await rig("Run the tests.", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         let entry = await lastHistoryEntry(rig)
@@ -1183,7 +1183,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func historyRecordsAnOpenAsAnOpenWithNothingSent() async {
-        let rig = rig("Open keyscribe blue.", current: "s1", focus: Focus(.pane(app: "Ghostty", multiplexer: "herdr", uncertain: false)))
+        let rig = await rig("Open keyscribe blue.", current: "claude:s1", focus: Focus(.pane(app: "Ghostty", multiplexer: "herdr", uncertain: false)))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         let entry = await lastHistoryEntry(rig)
@@ -1196,7 +1196,7 @@ struct AgentDeliveryWiringTests {
 
     @Test func anOpenThatFindsNoConversationIsRecordedAsAnOpen() async {
         let focus = Focus()
-        let rig = rig("Open two.", current: "s1", focus: focus)
+        let rig = await rig("Open two.", current: "claude:s1", focus: focus)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         let entry = await lastHistoryEntry(rig)
@@ -1214,19 +1214,19 @@ struct AgentDeliveryWiringTests {
     ])
     func anOpenVerbWithAFewWordsNamingNothingIsHeldAndNeverSent(text: String, line: String) async {
         let focus = Focus()
-        let rig = rig(text, current: "s1", focus: focus)
+        let rig = await rig(text, current: "claude:s1", focus: focus)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         let entry = await lastHistoryEntry(rig)
         #expect(rig.sent.isEmpty)
         #expect(focus.sessions.isEmpty)
-        #expect(rig.hub.current == "s1")
+        #expect(rig.hub.current == "claude:s1")
         #expect(rig.hud.states.contains { if case .error(let message, _, _) = $0 { message == line } else { false } })
         #expect(entry?.summary == line)
     }
 
     @Test func aQueuedMessageUpdatesItsOwnEntryWhenItIsSentLater() async {
-        let rig = rig("Run the tests.", current: "s1", firstStatus: "busy")
+        let rig = await rig("Run the tests.", current: "claude:s1", firstStatus: "busy")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         let queued = await lastHistoryEntry(rig)
@@ -1234,7 +1234,7 @@ struct AgentDeliveryWiringTests {
         #expect(rig.sent.isEmpty)
 
         rig.registry.firstStatus = "idle"
-        rig.hub.handle(.turnComplete(session: "s1", reason: "answer", answer: ""))
+        rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
         for _ in 0..<200 where rig.history.entries().first?.summary != "Sent to keyscribe" {
             try? await Task.sleep(for: .milliseconds(5))
             rig.controller.waitForHistoryWrites()
@@ -1248,7 +1248,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func anUncertainDeliveryThatLaterSettlesKeepsTheEarlierUncertainty() async {
-        let rig = rig("Run the tests.", current: "s1", receiptTimeout: .milliseconds(20))
+        let rig = await rig("Run the tests.", current: "claude:s1", receiptTimeout: .milliseconds(20))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.transport.confirms = false
         await take(rig)
@@ -1270,11 +1270,11 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func withHistoryOffALateReceiptStillShowsAndWritesNothing() async {
-        let rig = rig("Run the tests.", current: "s1", firstStatus: "busy", historyEnabled: false)
+        let rig = await rig("Run the tests.", current: "claude:s1", firstStatus: "busy", historyEnabled: false)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         rig.registry.firstStatus = "idle"
-        rig.hub.handle(.turnComplete(session: "s1", reason: "answer", answer: ""))
+        rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
         let sent = HUDState.commandDone(summary: "Sent to keyscribe", detail: "Coding agent")
         for _ in 0..<200 where !rig.hud.states.contains(sent) { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(rig.hud.states.contains(sent))
@@ -1283,7 +1283,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func aConfirmationRightBehindAnUncertainReceiptStillReachesHistory() async {
-        let rig = rig("Run the tests.", current: "s1")
+        let rig = await rig("Run the tests.", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.transport.uncertainThenConfirmed = true
         await take(rig)
@@ -1297,8 +1297,8 @@ struct AgentDeliveryWiringTests {
     @Test func aQueuedMessageWhoseRewriteFellBackKeepsTheFallbackOnceSent() async {
         var mode = agentMode()
         mode.aiRewrite = .init(connection: "c", prompt: "Tidy it.")
-        let rig = rig(
-            "Run the tests.", modes: [mode], current: "s1",
+        let rig = await rig(
+            "Run the tests.", modes: [mode], current: "claude:s1",
             connection: Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k"), llm: FailingLLM(),
             firstStatus: "busy")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
@@ -1309,7 +1309,7 @@ struct AgentDeliveryWiringTests {
         let reason = try? #require(queued?.fallbackReason)
 
         rig.registry.firstStatus = "idle"
-        rig.hub.handle(.turnComplete(session: "s1", reason: "answer", answer: ""))
+        rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
         for _ in 0..<200 where rig.history.entries().first?.summary != "Sent to keyscribe" {
             try? await Task.sleep(for: .milliseconds(5))
             rig.controller.waitForHistoryWrites()
@@ -1321,13 +1321,13 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func everyPendingMessageUpdatesItsEntryWhenItIsSent() async {
-        let rig = rig("Run the tests.", current: "s1", firstStatus: "busy")
+        let rig = await rig("Run the tests.", current: "claude:s1", firstStatus: "busy")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         let count = 25
         for _ in 0..<count { await take(rig) }
         rig.registry.firstStatus = "idle"
         for _ in 0..<count {
-            rig.hub.handle(.turnComplete(session: "s1", reason: "answer", answer: ""))
+            rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
             for _ in 0..<20 { await Task.yield() }
         }
         let sentCount = { rig.history.entries().filter { $0.summary == "Sent to keyscribe" }.count }
@@ -1340,7 +1340,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func turningTheBridgeOffStopsUpdatingPendingEntries() async {
-        let rig = rig("Run the tests.", current: "s1", receiptTimeout: .milliseconds(20))
+        let rig = await rig("Run the tests.", current: "claude:s1", receiptTimeout: .milliseconds(20))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.transport.confirms = false
         await take(rig)
@@ -1358,8 +1358,8 @@ struct AgentDeliveryWiringTests {
         var mode = agentMode()
         mode.aiRewrite = .init(connection: "c", prompt: "Tidy it.")
         let llm = HangingLLM()
-        let rig = rig(
-            "Run the tests.", modes: [mode], current: "s1",
+        let rig = await rig(
+            "Run the tests.", modes: [mode], current: "claude:s1",
             connection: Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k"), llm: llm,
             firstStatus: "busy")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
@@ -1377,7 +1377,7 @@ struct AgentDeliveryWiringTests {
         #expect(queued?.rewriteSkippedMs != nil)
 
         rig.registry.firstStatus = "idle"
-        rig.hub.handle(.turnComplete(session: "s1", reason: "answer", answer: ""))
+        rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
         for _ in 0..<200 where rig.history.entries().first?.summary != "Sent to keyscribe" {
             try? await Task.sleep(for: .milliseconds(5))
             rig.controller.waitForHistoryWrites()
@@ -1391,8 +1391,8 @@ struct AgentDeliveryWiringTests {
     @Test func aRefusalAfterAFallenBackRewriteKeepsBothExplanations() async {
         var mode = agentMode()
         mode.aiRewrite = .init(connection: "c", prompt: "Tidy it.")
-        let rig = rig(
-            "Run the tests.", modes: [mode], current: "s1",
+        let rig = await rig(
+            "Run the tests.", modes: [mode], current: "claude:s1",
             connection: Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k"), llm: FailingLLM(),
             firstStatus: "busy")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
@@ -1402,7 +1402,8 @@ struct AgentDeliveryWiringTests {
         let reason = try? #require(queued?.fallbackReason)
 
         rig.registry.firstStatus = "idle"
-        rig.hub.handle(.turnComplete(session: "s1", reason: "answer", answer: ""))
+        rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
+        await rig.hub.rescan()
         guard case .submit(let request, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
         rig.hub.handle(.refused(request: request, reason: "busy elsewhere"))
         for _ in 0..<200 where rig.history.entries().first?.outcome != .failed {

@@ -39,6 +39,16 @@ public enum AppVariant: Sendable, Equatable {
 
     public var isDev: Bool { self == .dev }
 
+    public var connectorSlug: String {
+        switch self {
+        case .production: return "keyscribe"
+        case .dev: return "keyscribe-dev"
+        case .custom(let displayName, _):
+            let slug = displayName.lowercased().map { $0.isLetter || $0.isNumber ? $0 : "-" }
+            return String(slug).split(separator: "-").joined(separator: "-")
+        }
+    }
+
     // The public production build is the only variant that bundles Sparkle and injects it as the
     // auto-updater; dev and every downstream white-label (custom) build supply their own update path
     // (or none), so the bundled updater is constructed only here. Paired with a manifest-level Sparkle
