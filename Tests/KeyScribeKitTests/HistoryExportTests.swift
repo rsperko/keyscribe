@@ -116,6 +116,47 @@ struct HistoryStatsTests {
         #expect(md.contains("  - Reported: Switched to Inbox\n"))
     }
 
+    private static func open() -> HistoryEntry {
+        var open = entry("", heard: "open back end", mode: "Coding agent")
+        open.summary = "Opened backend"
+        open.facts = [.init(label: "Command", value: "Open"), .init(label: "Conversation", value: "backend \u{00B7} claude \u{00B7} s1")]
+        return open
+    }
+
+    private static func queuedThenSent() -> HistoryEntry {
+        var sent = entry("run the tests", heard: "run the tests", mode: "Coding agent")
+        sent.summary = "Sent to backend"
+        sent.facts = [.init(label: "Command", value: "Send message")]
+        sent.steps = [.init(at: Date(timeIntervalSince1970: 1_700_000_000), text: "Queued for backend"),
+                      .init(at: Date(timeIntervalSince1970: 1_700_000_060), text: "Sent to backend")]
+        return sent
+    }
+
+    @Test(arguments: [HistoryExport.Format.text, .markdown])
+    func readableExportsSayWhyLocalTextWasKeptBesideTheDeliverySummary(format: HistoryExport.Format) {
+        var fellBack = Self.queuedThenSent()
+        fellBack.outcome = .localFallback
+        fellBack.fallbackReason = "HTTP 500"
+        var skipped = Self.queuedThenSent()
+        skipped.outcome = .localFallback
+        skipped.rewriteSkippedMs = 1200
+        let out = HistoryExport.export([fellBack, skipped], format: format, formatting: utc(), appName: "KeyScribe")
+        #expect(out.contains("Why local was kept: HTTP 500"))
+        #expect(out.contains("Why local was kept: the rewrite was skipped"))
+        #expect(out.components(separatedBy: "Sent to backend").count > 2)
+    }
+
+    @Test(arguments: [HistoryExport.Format.text, .markdown])
+    func readableExportsUseTheSummaryAndKeepWhatHappened(format: HistoryExport.Format) {
+        let out = HistoryExport.export([Self.open(), Self.queuedThenSent()], format: format, formatting: utc(), appName: "KeyScribe")
+        #expect(out.contains("Coding agent \u{00B7} Opened backend"))
+        #expect(!out.contains("Inserted"))
+        #expect(out.contains("Command: Open"))
+        #expect(out.contains("Conversation: backend \u{00B7} claude \u{00B7} s1"))
+        #expect(out.contains("22:13 Queued for backend"))
+        #expect(out.contains("22:14 Sent to backend"))
+    }
+
     @Test func exportsLabelACommandAsOne() {
         let entries = [entry("~/bin/deploy staging", outcome: .command), entry("~/bin/deploy prod", outcome: .commandFailed)]
         let txt = HistoryExport.export(entries, format: .text, formatting: utc(), appName: "KeyScribe")

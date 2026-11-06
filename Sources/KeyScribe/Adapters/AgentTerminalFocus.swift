@@ -1,0 +1,162 @@
+import AppKit
+import Foundation
+import KeyScribeKit
+
+enum AgentFocusResult: Equatable, Sendable {
+    case exact
+    case requested(String)
+    case app(String)
+    case pane(app: String, multiplexer: String, uncertain: Bool)
+    case unsupported(String)
+    case connectorOutdated(String)
+    case notAllowed(String)
+    case none
+
+    func hudState(handle: String, detail: String) -> HUDState {
+        let recipient = "Your recipient is \(handle)"
+        return switch self {
+        case .exact: .commandDone(summary: "Opened \(handle)", detail: detail)
+        case .requested(let app): .commandDone(summary: "Asked \(app) to show \(handle)", detail: detail)
+        case .app(let app): .advisory(message: "Brought \(app) forward. Couldn\u{2019}t find \(handle)\u{2019}s tab. \(recipient)")
+        case .pane(let app, let multiplexer, let uncertain):
+            .advisory(message: "Brought \(app) forward. Couldn\u{2019}t \(uncertain ? "confirm" : "select") \(handle)\u{2019}s \(multiplexer) pane. \(recipient)")
+        case .unsupported(let app):
+            .advisory(message: "Brought \(app) forward. Select \(handle)\u{2019}s terminal yourself. \(recipient)")
+        case .notAllowed(let app):
+            .error(
+                message: "Brought \(app) forward. Couldn\u{2019}t select \(handle)\u{2019}s tab without access to \(app). \(recipient)",
+                action: .openAutomationSettings)
+        case .connectorOutdated(let app):
+            .advisory(message: "Brought \(app) forward. Update the Claude Code connector in Settings, then run /reload-plugins in \(handle) to open its tab. \(recipient)")
+        case .none: .advisory(message: "Nothing showing \(handle) could be brought forward. \(recipient)")
+        }
+    }
+
+    func historySummary(handle: String) -> String {
+        let forward = { (app: String, rest: String) in "Brought \(app) forward; \(rest)" }
+        return switch self {
+        case .exact: "Opened \(handle)"
+        case .requested(let app): "Asked \(app) to show \(handle)"
+        case .app(let app): forward(app, "\(handle)\u{2019}s tab not found")
+        case .pane(let app, let multiplexer, let uncertain):
+            forward(app, "\(handle)\u{2019}s \(multiplexer) pane not \(uncertain ? "confirmed" : "selected")")
+        case .unsupported(let app): forward(app, "\(handle)\u{2019}s terminal not selected")
+        case .notAllowed(let app): forward(app, "no access to select \(handle)\u{2019}s tab")
+        case .connectorOutdated(let app): forward(app, "the Claude Code connector needs an update")
+        case .none: "Nothing showing \(handle) was brought forward"
+        }
+    }
+}
+
+enum TerminalSelection: Equatable, Sendable {
+    case selected, notFound, notAllowed, unsupported, outdated
+}
+
+protocol AgentTerminalFocusing: Sendable {
+    func focus(session: String, pid: Int, asking: @escaping @MainActor @Sendable (String) -> Void) async -> AgentFocusResult
+}
+
+struct AgentTerminalFocus: AgentTerminalFocusing {
+    typealias Script = @Sendable (_ app: String, _ pid: Int, _ body: String, _ asking: @escaping @Sendable () async -> Void) async -> TerminalSelection
+
+    var plan: @Sendable (Int) -> [OpenAction] = { TerminalRoutes.plan(agent: $0, facts: SystemTerminalFacts()) }
+    var run: @Sendable ([String]) -> (Int32, String) = { ClaudeCLI.run($0, timeout: 3) }
+    var script: Script = TerminalScripting.select
+    var openURL: @MainActor @Sendable (String) -> Bool = { URL(string: $0).map(NSWorkspace.shared.open) ?? false }
+    var connector: @MainActor @Sendable (_ session: String) async -> TerminalSelection = { _ in .unsupported }
+    var running: @MainActor @Sendable (_ app: String, _ near: Int) -> (pid: Int, name: String)? = AgentTerminalFocus.running
+    var activate: @MainActor @Sendable (Int) -> String? = AppActivation.bringForwardApp(pid:)
+
+    private enum Terminal {
+        case selected, requested, notFound, notAllowed, unsupported, outdated
+    }
+
+    func focus(session: String, pid: Int, asking: @escaping @MainActor @Sendable (String) -> Void) async -> AgentFocusResult {
+        let (plan, run) = (plan, run)
+        let actions = await Task.detached { plan(pid) }.value
+        var unselectedLayer: (multiplexer: String, uncertain: Bool)?
+        var terminal = Terminal.unsupported
+        var shown: String?
+        for action in actions {
+            guard !Task.isCancelled else { return .none }
+            switch action {
+            case .layer(let layer):
+                var failed = false
+                for command in layer.commands {
+                    guard !Task.isCancelled else { return .none }
+                    let (status, output) = await Task.detached { run(command.arguments) }.value
+                    guard command.succeeded(status: status, output: output) else {
+                        failed = true
+                        break
+                    }
+                }
+                if unselectedLayer == nil, failed || !layer.confirmed {
+                    unselectedLayer = (layer.multiplexer, uncertain: !failed && !layer.commands.isEmpty)
+                }
+            case .select(.script(let app, let near, let body)):
+                guard let (appPid, name) = await running(app, near) else { return .none }
+                switch await script(app, appPid, body, { await asking(name) }) {
+                case .selected: terminal = .selected
+                case .notFound: terminal = .notFound
+                case .notAllowed: terminal = .notAllowed
+                case .unsupported, .outdated: terminal = .unsupported
+                }
+            case .select(.connector):
+                switch await connector(session) {
+                case .selected: terminal = .selected
+                case .notFound, .notAllowed: terminal = .notFound
+                case .unsupported: terminal = .unsupported
+                case .outdated: terminal = .outdated
+                }
+            case .select(.url(let url)):
+                terminal = await openURL(url) ? .requested : .notFound
+            case .activate(let app, let near), .unsupported(let app, let near):
+                guard let (appPid, _) = await running(app, near), let name = await activate(appPid) else { return .none }
+                shown = name
+            }
+        }
+        guard let shown else { return .none }
+        if let layer = unselectedLayer, terminal == .selected || terminal == .requested {
+            return .pane(app: shown, multiplexer: layer.multiplexer, uncertain: layer.uncertain)
+        }
+        switch terminal {
+        case .selected: return .exact
+        case .requested: return .requested(shown)
+        case .notFound: return .app(shown)
+        case .notAllowed: return .notAllowed(shown)
+        case .unsupported: return .unsupported(shown)
+        case .outdated: return .connectorOutdated(shown)
+        }
+    }
+
+    @MainActor
+    static func running(_ app: String, near pid: Int) -> (pid: Int, name: String)? {
+        let near = NSRunningApplication(processIdentifier: pid_t(pid))
+        let process = near.flatMap { $0.bundleIdentifier == app && !$0.isTerminated ? $0 : nil }
+            ?? NSRunningApplication.runningApplications(withBundleIdentifier: app).first { !$0.isTerminated }
+        guard let process else { return nil }
+        return (Int(process.processIdentifier), process.localizedName ?? app)
+    }
+}
+
+enum TerminalScripting {
+    static let replyTimeout = 3
+    private static let queue = DeadlineQueue(label: "com.keyscribe.agents.terminal-scripts", backlog: TimeInterval(replyTimeout))
+
+    static func select(
+        _ app: String, pid: Int, body: String, asking: @escaping @Sendable () async -> Void
+    ) async -> TerminalSelection {
+        let consent = await AutomationConsent.settle([app], willAsk: { _ in await asking() })
+        guard consent.readable == [app] else { return consent.refused.isEmpty ? .notFound : .notAllowed }
+        let source = PinnedAppleScript.pinned(to: app, timeout: replyTimeout, body)
+        let answer = await queue.run(within: TimeInterval(replyTimeout)) { isCurrent -> TerminalSelection in
+            switch PinnedAppleScript.run(source, pid: pid_t(pid), isCurrent: isCurrent) {
+            case .value(let result): result.booleanValue ? .selected : .notFound
+            case .refused: .notAllowed
+            case .gone, .failed: .notFound
+            }
+        }
+        guard case .finished(let selection) = answer else { return .notFound }
+        return selection
+    }
+}

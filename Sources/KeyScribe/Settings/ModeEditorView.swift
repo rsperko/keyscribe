@@ -19,6 +19,7 @@ struct ModeEditorView: View {
     var onDuplicate: () -> Void = {}
     var onEditVocabulary: () -> Void = {}
     let onDelete: () -> Void
+    var codingAgents: CodingAgentsSettingsModel?
 
     private var bind: ModeBinding { ModeBinding(mode: mode, onUpdate: onUpdate) }
     private var trigger: ModeTrigger {
@@ -26,7 +27,68 @@ struct ModeEditorView: View {
     }
 
     var body: some View {
-        if mode.isSystem { systemBody } else { normalBody }
+        if mode.id == Mode.codingAgentId { codingAgentBody } else if mode.isSystem { systemBody } else { normalBody }
+    }
+
+    private var codingAgentBody: some View {
+        Form {
+            Section {
+                PaneDetailHeader(
+                    systemImage: "terminal",
+                    title: mode.name,
+                    subtitle: ModeSummary.whenRuns(mode),
+                    badges: { PaneBadge("Built in") })
+            }
+
+            Section("How to start \(mode.name)") {
+                ModeTriggerRow(mode: mode, onUpdate: onUpdate, label: "Shortcut")
+                PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
+                TriggerConflictLabel(conflict: trigger.conflict, mode: mode)
+                ExtraTriggersNote(mode: mode)
+            }
+            if let codingAgents {
+                CodingAgentRecipientSection(model: codingAgents, shortcut: ModeSummary.triggerDescriptors(mode).first?.displayString)
+                ClaudeCodeConnectorSection(model: codingAgents)
+            }
+            Section("Words") {
+                modeVocabularyRow
+            }
+            ModeAISection(
+                mode: mode, connections: connections,
+                fragmentIds: fragmentIds, fragmentNames: fragmentNames,
+                onUpdate: onUpdate,
+                onAddFragmentFile: onAddFragmentFile,
+                onLoadFragmentBody: onLoadFragmentBody,
+                onSaveFragmentBody: onSaveFragmentBody,
+                onCloseFragment: onCloseFragment,
+                onRevealFragment: onRevealFragment)
+            if mode.aiRewrite != nil {
+                Section("Data sent with AI") {
+                    SettingRow(
+                        title: "Hide recognizable sensitive text",
+                        help: "Best-effort redaction replaces recognizable sensitive spans with tokens before the AI rewrite, then restores them on this Mac. It protects only the rewrite request: the coding agent still receives your words in full.")
+                    {
+                        Toggle("", isOn: privacyMode).labelsHidden()
+                            .accessibilityIdentifier(AccessibilityID.Mode.Editor.privacy)
+                    }
+                }
+            }
+            Section("Where it goes") {
+                Label(
+                    "The coding agent receives what you say and sends it to its own AI provider under its own settings. Best-effort redaction does not apply to it.",
+                    systemImage: "arrow.up.forward.app")
+                    .font(.caption).foregroundStyle(.secondary)
+                SettingRow(
+                    title: "Do not save this mode in history",
+                    help: "When on, what you send to coding agents is never written to local history. Other modes still record per your History setting.")
+                {
+                    Toggle("", isOn: bind.binding(\.excludeFromHistory)).labelsHidden()
+                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.excludeFromHistory)
+                }
+            }
+        }
+        .formStyle(.grouped)
+        .padding(16)
     }
 
     private var systemBody: some View {

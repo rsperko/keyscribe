@@ -134,15 +134,112 @@ struct AgentAddressTests {
     }
 
     @Test(arguments: [
-        "Keyscribe, run the unit tests.",
-        "Backend is failing after the migration.",
+        ("keyscribe what is going on with this right now?", "keyscribe", "what is going on with this right now?"),
+        ("Keyscribe, run the unit tests.", "keyscribe", "run the unit tests."),
+        ("Keyscribe blue: run the unit tests.", "keyscribe blue", "run the unit tests."),
+        ("Backend is failing after the migration.", "backend", "is failing after the migration."),
+        ("My api, add a retry.", "my api", "add a retry."),
+    ])
+    func aLeadingNameAddressesWithoutTell(text: String, name: String, body: String) {
+        #expect(AgentAddress.parse(text, names: names) == .name(name, body: body))
+    }
+
+    @Test(arguments: [
+        ("Tell jk boots to run the tests.", "foo jk boots manager 1234", "to run the tests."),
+        ("tell boots jk, run the tests", "foo jk boots manager 1234", "run the tests"),
+        ("jk boots run the tests", "foo jk boots manager 1234", "run the tests"),
+        ("Tell jk boots manager fix it", "foo jk boots manager 1234", "fix it"),
+        ("tell boots, manager is down", "foo jk boots manager 1234", "manager is down"),
+        ("Tell keyscribe, run the tests", "keyscribe", "run the tests"),
+    ])
+    func partOfANameInAnyOrderAddressesIt(text: String, name: String, body: String) {
+        #expect(AgentAddress.parse(text, names: names + ["foo jk boots manager 1234"]) == .name(name, body: body))
+    }
+
+    @Test func aNameWordRepeatedInTheMessageStaysInTheMessage() {
+        let names = ["release manager", "build"]
+        #expect(AgentAddress.parse("Tell release manager release the package", names: names) == .name("release manager", body: "release the package"))
+        #expect(AgentAddress.parse("Tell build build the project", names: names) == .name("build", body: "build the project"))
+    }
+
+    @Test func aCommaEndsTheAddressForNearMatchesToo() {
+        #expect(AgentAddress.parse("Tell keyscribe, blue is the failing theme", names: names) == .name("keyscribe", body: "blue is the failing theme"))
+        #expect(AgentAddress.parse("keyscribe, blue is the failing theme", names: names) == .name("keyscribe", body: "blue is the failing theme"))
+    }
+
+    @Test func aMisheardAddressWithoutTellIsHeldNotSentToTheCurrentConversation() {
+        #expect(AgentAddress.parse("Session to run the build", names: names) == .unresolved(spoken: "session to", body: "run the build"))
+        #expect(AgentAddress.parse("Keyscrib run the tests", names: names)
+            == .nearMiss(spoken: "keyscrib", name: "keyscribe", body: "run the tests", unaddressed: "Keyscrib run the tests"))
+    }
+
+    @Test(arguments: [
+        ("Tell back and to run the tests", "back and", "backend", "to run the tests"),
+    ])
+    func anAddressThatSoundsLikeANameNamesIt(text: String, spoken: String, name: String, body: String) {
+        #expect(AgentAddress.parse(text, names: names) == .nearMiss(spoken: spoken, name: name, body: body, unaddressed: nil))
+    }
+
+    @Test(arguments: [
+        ("Review these changes", "review", "preview", "these changes"),
+        ("Update the dependencies", "update", "updates", "the dependencies"),
+    ])
+    func anInstructionWhoseFirstWordSoundsLikeANameIsANearMissThatCanStillBeTheMessage(
+        text: String, spoken: String, name: String, body: String
+    ) {
+        #expect(AgentAddress.parse(text, names: ["preview", "updates"]) == .nearMiss(spoken: spoken, name: name, body: body, unaddressed: text))
+    }
+
+    @Test func aShortWordCloseToANameIsStillTheMessageWithoutTell() {
+        #expect(AgentAddress.parse("Build the project", names: ["builds"]) == .none(body: "Build the project"))
+        #expect(AgentAddress.parse("Test the login flow", names: ["tests"]) == .none(body: "Test the login flow"))
+        #expect(AgentAddress.parse("Tell build the project", names: ["builds"]) == .nearMiss(spoken: "build", name: "builds", body: "the project", unaddressed: nil))
+    }
+
+    @Test func theLongestMatchingPartOfANameWins() {
+        let names = ["jk boots", "foo jk boots manager 1234"]
+        #expect(AgentAddress.parse("tell jk boots fix it", names: names) == .name("jk boots", body: "fix it"))
+        #expect(AgentAddress.parse("tell jk boots manager fix it", names: names) == .name("foo jk boots manager 1234", body: "fix it"))
+    }
+
+    @Test func partOfSeveralNamesIsAmbiguous() {
+        let names = ["jk boots manager", "mk boots", "frontend"]
+        #expect(AgentAddress.parse("tell boots, fix it", names: names) == .ambiguous(spoken: "boots", names: ["jk boots manager", "mk boots"], body: "fix it"))
+    }
+
+    @Test func withoutTellOneWordOfALongerNameIsTheMessage() {
+        let names = ["foo jk boots manager 1234"]
+        #expect(AgentAddress.parse("Boots are on sale.", names: names) == .none(body: "Boots are on sale."))
+        #expect(AgentAddress.parse("tell boots they are on sale", names: names) == .name("foo jk boots manager 1234", body: "they are on sale"))
+    }
+
+    @Test func aSessionNumberIsTheRowEvenWhenTheWordsAfterItAreAName() {
+        let names = names + ["one foobar"]
+        #expect(AgentAddress.parse("tell session one foobar is broke", names: names) == .row(1, body: "foobar is broke"))
+        #expect(AgentAddress.parse("session one foobar is broke", names: names) == .row(1, body: "foobar is broke"))
+        #expect(AgentAddress.parse("tell one foobar it is broke", names: names) == .name("one foobar", body: "it is broke"))
+    }
+
+    @Test func aLeadingSessionNumberAddressesWithoutTell() {
+        #expect(AgentAddress.parse("Session two, check the migration.", names: names) == .row(2, body: "check the migration."))
+        #expect(AgentAddress.parse("session 4 run the build", names: names) == .row(4, body: "run the build"))
+    }
+
+    @Test func anAcceptedNameKeepsItsBoundaryWhenTheNextWordSoundsLikeALongerName() {
+        #expect(AgentAddress.parse("Tell keyscribe glue the adapters together", names: names) == .name("keyscribe", body: "glue the adapters together"))
+        #expect(AgentAddress.parse("Keyscribe glue to run the tests", names: names) == .name("keyscribe", body: "glue to run the tests"))
+    }
+
+    @Test(arguments: [
+        "Frontend, run the tests.",
+        "Run the tests in keyscribe.",
         "Tell me why keyscribe fails.",
         "Tell them to wait for the build.",
         "Tell the backend team the API changed.",
         "Tell everyone about the outage.",
         "Explain why \u{201C}tell keyscribe to run tests\u{201D} is ambiguous.",
     ])
-    func textWithoutALeadingTellAddressIsTheMessage(text: String) {
+    func textWithoutALeadingAddressIsTheMessage(text: String) {
         #expect(AgentAddress.parse(text, names: names) == .none(body: text))
     }
 
@@ -156,8 +253,6 @@ struct AgentAddressTests {
         ("Tell frontend to run, then report", "frontend", "to run, then report"),
         ("Tell Claude to check the logs", "claude", "to check the logs"),
         ("Tell back end blue: run the tests.", "back end blue", "run the tests."),
-        ("Tell back and to run the tests", "back and", "to run the tests"),
-        ("Tell keyscribe glue to run the tests", "keyscribe glue", "to run the tests"),
         ("Tell keyscribe green to run the tests", "keyscribe green", "to run the tests"),
         ("Tell session to run the tests", "session to", "run the tests"),
         ("Tell session for, run the build", "session for", "run the build"),
@@ -166,17 +261,165 @@ struct AgentAddressTests {
         #expect(AgentAddress.parse(text, names: names) == .unresolved(spoken: spoken, body: body))
     }
 
-    @Test(arguments: [
-        ("Reply, use approach B.", "use approach B."),
-        ("reply use approach B", "use approach B"),
-    ])
-    func replyIsItsOwnAddress(text: String, body: String) {
-        #expect(AgentAddress.parse(text, names: names) == .reply(body: body))
-    }
-
     @Test func anAddressWithNothingAfterItSelectsWithoutAMessage() {
         #expect(AgentAddress.parse("Tell keyscribe.", names: names) == .name("keyscribe", body: ""))
         #expect(AgentAddress.parse("Tell session three", names: names) == .row(3, body: ""))
-        #expect(AgentAddress.parse("Reply.", names: names) == .none(body: "Reply."))
+    }
+
+    @Test(arguments: [
+        ("tell my api run the tests", "my"),
+        ("Tell the api to run the tests.", "the"),
+        ("please tell keyscribe blue to run the tests", "keyscribe"),
+        ("tell me what failed", "me"),
+    ])
+    func withoutKnownNamesEveryTellThatIsNotARowIsUnresolved(text: String, spoken: String) {
+        guard case .unresolved(let said, _) = AgentAddress.parse(text, names: [], namesKnown: false) else {
+            Issue.record("\(text) was not held back")
+            return
+        }
+        #expect(said.hasPrefix(spoken))
+    }
+
+    @Test func withoutKnownNamesRowsAndUnaddressedTextStillWork() {
+        #expect(AgentAddress.parse("tell session 2 run the tests", names: [], namesKnown: false) == .row(2, body: "run the tests"))
+        #expect(AgentAddress.parse("run the tests", names: [], namesKnown: false) == .none(body: "run the tests"))
+        #expect(AgentAddress.parse("my api run the tests", names: [], namesKnown: false) == .none(body: "my api run the tests"))
+        #expect(AgentAddress.parse("session 2 run the tests", names: [], namesKnown: false) == .row(2, body: "run the tests"))
+    }
+
+    @Test(arguments: [
+        ("Open keyscribe.", AgentAddress.name("keyscribe", body: "")),
+        ("switch to backend", .name("backend", body: "")),
+        ("Which to keyscribe blue", .name("keyscribe blue", body: "")),
+        ("Go to session two.", .row(2, body: "")),
+        ("focus on my api", .name("my api", body: "")),
+        ("Focus backend", .name("backend", body: "")),
+        ("Launch the backend.", .name("backend", body: "")),
+        ("Open, keyscribe", .name("keyscribe", body: "")),
+    ])
+    func aBringForwardVerbBeforeAnAddressOpensIt(text: String, inner: AgentAddress) {
+        #expect(AgentAddress.parse(text, names: names) == .open(inner))
+    }
+
+    @Test(arguments: [
+        "Open the readme.",
+        "Open keyscribe and run the tests.",
+        "Switch to the main branch.",
+        "Go to the definition of backend.",
+        "Focus on the failing tests.",
+        "Open",
+    ])
+    func aBringForwardVerbThatIsNotFollowedByOnlyAnAddressIsTheMessage(text: String) {
+        #expect(AgentAddress.parse(text, names: names) == .none(body: text))
+    }
+
+    @Test func openingNeedsTheSameEvidenceAsAnAddressWithoutTell() {
+        let names = ["jk boots manager", "jk boots helper", "frontend"]
+        #expect(AgentAddress.parse("open boots", names: names) == .none(body: "open boots"))
+        #expect(AgentAddress.parse("open jk boots", names: names)
+            == .open(.ambiguous(spoken: "jk boots", names: ["jk boots helper", "jk boots manager"], body: "")))
+        #expect(AgentAddress.parse("switch to boots manager", names: names) == .open(.name("jk boots manager", body: "")))
+    }
+
+    @Test func anOpenThatSoundsLikeAnAddressButMissesIsHeld() {
+        #expect(AgentAddress.parse("Open session to", names: names) == .open(.unresolved(spoken: "session to", body: "")))
+        #expect(AgentAddress.parse("open keyscrib", names: names)
+            == .open(.nearMiss(spoken: "keyscrib", name: "keyscribe", body: "", unaddressed: "keyscrib")))
+    }
+
+    @Test(arguments: [
+        ("session backend run unit tests", AgentAddress.name("backend", body: "run unit tests")),
+        ("Tell session backend, run unit tests.", .name("backend", body: "run unit tests.")),
+        ("Session keyscribe blue to run the tests", .name("keyscribe blue", body: "to run the tests")),
+        ("Open session backend", .open(.name("backend", body: ""))),
+        ("Session manager, check the logs.", .name("session manager", body: "check the logs.")),
+        ("tell session frobnicate, run it", .unresolved(spoken: "frobnicate", body: "run it")),
+        ("Tell session, run the build.", .name("session manager", body: "run the build.")),
+    ])
+    func sessionMayComeBeforeAName(text: String, expected: AgentAddress) {
+        #expect(AgentAddress.parse(text, names: names) == expected)
+    }
+
+    @Test(arguments: ["Session timeout is too short.", "Session cookies are not cleared on logout."])
+    func aSentenceAboutSessionsIsTheMessage(text: String) {
+        #expect(AgentAddress.parse(text, names: names) == .none(body: text))
+    }
+
+    private let numbered = ["backend", "frontend", "two bugs", "two", "one", "for"]
+
+    @Test(arguments: [
+        "One more thing: check the migration.",
+        "For the record, the build is green.",
+        "Two tests failed.",
+        "Two, run tests.",
+        "4 files changed.",
+    ])
+    func aSentenceThatStartsWithANumberIsTheMessageEvenWhenANameIsThatNumber(text: String) {
+        #expect(AgentAddress.parse(text, names: numbered) == .none(body: text))
+    }
+
+    @Test func theLongestNameWinsOverANumberNameItStartsWith() {
+        #expect(AgentAddress.parse("Two bugs, run tests.", names: numbered) == .name("two bugs", body: "run tests."))
+        #expect(AgentAddress.parse("Two bugs are left in the parser", names: numbered) == .name("two bugs", body: "are left in the parser"))
+    }
+
+    @Test func aNumberNameIsReachedByTellOrOpen() {
+        #expect(AgentAddress.parse("Tell two, run tests.", names: numbered) == .name("two", body: "run tests."))
+        #expect(AgentAddress.parse("tell for, run it", names: numbered) == .name("for", body: "run it"))
+        #expect(AgentAddress.parse("Open two.", names: numbered) == .open(.name("two", body: "")))
+        #expect(AgentAddress.parse("open for", names: numbered) == .open(.name("for", body: "")))
+    }
+
+    @Test func sessionAndANumberIsAlwaysTheRowEvenWhenANameIsThatNumber() {
+        #expect(AgentAddress.parse("Session two, run tests.", names: numbered) == .row(2, body: "run tests."))
+        #expect(AgentAddress.parse("Open session two.", names: numbered) == .open(.row(2, body: "")))
+    }
+
+    @Test func aMissingNumberNameIsHeldAfterTellOrOpenAndNeverBecomesARow() {
+        let names = ["backend", "frontend"]
+        #expect(AgentAddress.parse("Tell two, run tests.", names: names) == .unresolved(spoken: "two", body: "run tests."))
+        #expect(AgentAddress.parse("Open two.", names: names) == .open(.unresolved(spoken: "two", body: "")))
+        #expect(AgentAddress.parse("open for", names: names) == .open(.unresolved(spoken: "for", body: "")))
+        #expect(AgentAddress.parse("Two, run tests.", names: names) == .none(body: "Two, run tests."))
+    }
+
+    @Test(arguments: ["Open two files.", "open the readme", "Open 2 files and compare them."])
+    func openingFilesIsAMessage(text: String) {
+        #expect(AgentAddress.parse(text, names: numbered) == .none(body: text))
+        #expect(AgentAddress.parse(text, names: ["backend"]) == .none(body: text))
+    }
+}
+
+struct AgentShorterNameTests {
+    private func reaches(_ spoken: String, _ name: String, among names: [String]) -> Bool {
+        if case .name(name, let body) = AgentAddress.parse("\(spoken), run the unit tests.", names: names) { return !body.isEmpty }
+        return false
+    }
+
+    @Test func aLongNameOffersTheShortestLeadingWordsTheMatcherAcceptsForIt() throws {
+        let names = ["fix authentication retries", "backend"]
+        let short = try #require(AgentAddress.shorterSpokenName(for: "fix authentication retries", among: names))
+        #expect("fix authentication retries".hasPrefix(short + " "))
+        #expect(reaches(short, "fix authentication retries", among: names))
+        let words = short.split(separator: " ")
+        for count in 1..<words.count {
+            #expect(!reaches(words.prefix(count).joined(separator: " "), "fix authentication retries", among: names))
+        }
+    }
+
+    @Test func leadingWordsSharedWithAnotherConversationAreNeverOffered() {
+        let names = ["fix authentication retries", "fix authentication tests"]
+        let short = AgentAddress.shorterSpokenName(for: "fix authentication retries", among: names)
+        #expect(short == nil)
+    }
+
+    @Test func aShorterNameNeverEndsOnAConnectingWord() {
+        let names = ["deploy the staging cluster", "chief of staff project tracking"]
+        #expect(AgentAddress.shorterSpokenName(for: "deploy the staging cluster", among: names) == "deploy the staging")
+        #expect(AgentAddress.shorterSpokenName(for: "chief of staff project tracking", among: names) == "chief of staff")
+    }
+
+    @Test func aOneWordNameHasNothingShorter() {
+        #expect(AgentAddress.shorterSpokenName(for: "backend", among: ["backend"]) == nil)
     }
 }

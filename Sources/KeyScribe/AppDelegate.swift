@@ -26,6 +26,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var history: HistoryStore!
     private var replacementUsage: ReplacementUsageStore!
     private var correctionPanel: CorrectionPanelController!
+    private var agentRuntime: AgentRuntime?
     private var configRepository: ConfigRepository!
     // Legacy crash recovery for audio state markers written by earlier builds.
     private var audioRestorer: SystemAudioStateRestorer!
@@ -153,6 +154,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 Log.config.error("replacement usage file was unreadable; moved to \(aside.lastPathComponent, privacy: .public) and started fresh")
             })
         config.voiceCommandsEnabled = settings.features.isEnabled(.voiceCommands)
+        config.codingAgentsEnabled = settings.features.isEnabled(.codingAgents)
         config.findsInAppsEnabled = settings.features.isEnabled(.findInApps)
         configRepository = ConfigRepository(
             supportDir: KeyScribePaths.supportDir, config: config, selfWriteGate: selfWriteGate,
@@ -316,6 +318,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             onEraseAllData: { [weak self] in self?.eraseAllDataAndRelaunch() },
             clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
         settingsController.onErrorsChanged = { [weak self] in self?.menu.setErrorBadge($0) }
+        applyCodingAgents()
         correctionPanel.mishearingsFinder = { [weak self] word, destination, onSaved in
             self?.settingsController.mishearingsFinder(word, destination.scope, onSaved)
         }
@@ -675,9 +678,40 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             supportDir: KeyScribePaths.supportDir)
     }
 
+    private func applyCodingAgents() {
+        let enabled = settings.features.isEnabled(.codingAgents)
+        guard enabled != (agentRuntime != nil) else { return }
+        if enabled {
+            do {
+                let runtime = try AgentRuntime(supportDir: KeyScribePaths.supportDir)
+                runtime.hub.onNotice = { [weak self] in self?.controller.showAgentNotice($0, request: $1) }
+                runtime.hub.onChange = { [weak self, weak hub = runtime.hub] in
+                    guard let hub else { return }
+                    self?.settingsController.codingAgents.show(hub.directory.conversations, current: hub.current, namesProblem: hub.namesProblem)
+                }
+                settingsController.codingAgents.onRename = { [weak hub = runtime.hub] in try hub?.rename($0, to: $1) }
+                settingsController.codingAgents.onReloadNames = { [weak hub = runtime.hub] in hub?.reloadNames() }
+                settingsController.codingAgents.show(
+                    runtime.hub.directory.conversations, current: runtime.hub.current, namesProblem: runtime.hub.namesProblem)
+                agentRuntime = runtime
+                controller.agents = runtime.hub
+            } catch {
+                Log.agents.error("agent bridge did not start: \(String(describing: error), privacy: .public)")
+            }
+        } else {
+            agentRuntime?.stop()
+            agentRuntime = nil
+            controller.agents = nil
+            settingsController.codingAgents.onRename = nil
+            settingsController.codingAgents.onReloadNames = nil
+            settingsController.codingAgents.show([], current: nil)
+        }
+    }
+
     private func ensureSystemModes() {
         ModeStore.ensureSystemModes(
-            in: KeyScribePaths.modesDir, voiceCommands: settings.features.isEnabled(.voiceCommands))
+            in: KeyScribePaths.modesDir, voiceCommands: settings.features.isEnabled(.voiceCommands),
+            codingAgents: settings.features.isEnabled(.codingAgents))
     }
 
     // Apply the runtime consequences of a settings change WITHOUT writing to disk. `applySettings` calls
@@ -686,6 +720,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applySettingsEffects(_ updated: Settings) {
         let previousHistory = settings.history
         let voiceCommandsChanged = updated.features.isEnabled(.voiceCommands) != settings.features.isEnabled(.voiceCommands)
+        let codingAgentsChanged = updated.features.isEnabled(.codingAgents) != settings.features.isEnabled(.codingAgents)
         let previousAudio = settings.audio
         // Compared against the provider, not the old setting: launch already activated a replacement for a
         // retired saved id, and persisting it must not evict the engine that preload is warming.
@@ -707,13 +742,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             CaptureArchive.publish(updated.audio)
             CaptureArchive.applyRetention()
         }
-        if voiceCommandsChanged {
+        if voiceCommandsChanged || codingAgentsChanged {
             ensureSystemModes()
             selfWriteGate.adopt(ConfigTreeSnapshot.capture(supportDir: KeyScribePaths.supportDir))
             config.voiceCommandsEnabled = updated.features.isEnabled(.voiceCommands)
+            config.codingAgentsEnabled = updated.features.isEnabled(.codingAgents)
         }
         config.findsInAppsEnabled = updated.features.isEnabled(.findInApps)
         controller.updateSettings(updated)
+        applyCodingAgents()
         hud.appearance = updated.hud.appearance
         rebuildHotkeyMonitor()
         applyLoginItem(updated.loadOnLogin)

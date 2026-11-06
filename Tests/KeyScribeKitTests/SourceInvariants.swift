@@ -67,6 +67,16 @@ enum SourceInvariants {
             reason: "User-facing copy interpolates Branding.appName; the literal product name lives only in "
                 + "AppVariant.production.displayName, or a downstream rebrand shows the wrong name (AGENTS.md)."
         ),
+        SourceRule(
+            pattern: #"(?<!self)\.(summary|facts|steps)\s*=[^=]|HistoryEntry\.(Fact|Step)\("#,
+            allowed: [
+                "Sources/KeyScribe/DictationController.swift": 2,
+                "Sources/KeyScribe/Take/AgentOutput.swift": 2,
+                "Sources/KeyScribeKit/AgentHistoryFacts.swift": 1,
+            ],
+            reason: "History shows summary, facts and steps without vetting them, so only reviewed writers fill them, with "
+                + "fixed local strings and names: never an agent reply, a secret, or an environment value."
+        ),
     ]
 
     static func swiftFiles(under root: URL, in directory: String) throws -> [String: String] {

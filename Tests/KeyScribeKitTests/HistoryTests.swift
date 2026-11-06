@@ -77,6 +77,37 @@ struct HistoryEntryCodecTests {
         #expect(try HistoryEntry(jsonLine: line) == entry)
     }
 
+    @Test func summaryFactsAndStepsRoundTripUnderTheirOnDiskKeys() throws {
+        var entry = sampleEntry(heard: "open the back end", result: "")
+        entry.summary = "Opened backend"
+        entry.facts = [.init(label: "Command", value: "Open"), .init(label: "Recipient", value: "backend")]
+        entry.steps = [.init(at: Date(timeIntervalSince1970: 1_700_000_001), text: "Queued for backend")]
+        let line = try entry.jsonLine()
+        #expect(line.contains("\"summary\":\"Opened backend\""))
+        #expect(line.contains("\"facts\":[{\"label\":\"Command\",\"value\":\"Open\"}"))
+        #expect(line.contains("\"steps\":[{\"at\":\"2023-11-14T22:13:21Z\",\"text\":\"Queued for backend\"}]"))
+        #expect(try HistoryEntry(jsonLine: line) == entry)
+    }
+
+    @Test func keptLocalTextIsTheOutcomeAReasonOrASkip() {
+        var skipped = sampleEntry(outcome: .failed)
+        #expect(!skipped.keptLocalText)
+        skipped.rewriteSkippedMs = 1200
+        #expect(skipped.keptLocalText)
+        var fellBack = sampleEntry(outcome: .failed)
+        fellBack.fallbackReason = "HTTP 500"
+        #expect(fellBack.keptLocalText)
+        #expect(sampleEntry(outcome: .localFallback).keptLocalText)
+    }
+
+    @Test func olderLinesWithoutSummaryFactsOrStepsDecodeToNilAndWriteNone() throws {
+        let entry = sampleEntry()
+        let line = try entry.jsonLine()
+        for key in ["summary", "facts", "steps"] { #expect(!line.contains("\"\(key)\"")) }
+        let decoded = try HistoryEntry(jsonLine: line)
+        #expect(decoded.summary == nil && decoded.facts == nil && decoded.steps == nil)
+    }
+
     @Test func aVoiceCommandRoundTripsWithWhatItReported() throws {
         let entry = HistoryEntry(
             timestamp: Date(timeIntervalSince1970: 1_700_000_000),
@@ -319,6 +350,16 @@ struct HistorySearchTests {
     }
 }
 
+extension HistorySearchTests {
+    @Test func matchesTheSummaryButNotTheFacts() {
+        var entry = sampleEntry(heard: "open back end", result: "")
+        entry.summary = "Opened backend"
+        entry.facts = [.init(label: "Session", value: "3f9c-session")]
+        #expect(HistorySearch.matches(entry, query: "opened"))
+        #expect(!HistorySearch.matches(entry, query: "3f9c"))
+    }
+}
+
 struct CorrectionSurfaceTests {
     @Test func addingWordIgnoresBlanksAndRecasesCaseInsensitiveDups() {
         var set = DictionarySet().adding(word: "KeyScribe")
@@ -400,6 +441,40 @@ struct HistoryStoreTests {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-history-test-\(UUID().uuidString)", isDirectory: true)
         return HistoryStore(supportDir: dir)
+    }
+
+    @Test func updateByIdChangesWhatIsOnDiskNowAndKeepsItsPlace() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        var first = sampleEntry(heard: "one", at: 0)
+        first.id = "a"
+        var second = sampleEntry(heard: "two", at: 10)
+        second.id = "b"
+        try store.append(first, today: HistoryStore.todayString(date: first.timestamp))
+        try store.append(second, today: HistoryStore.todayString(date: second.timestamp))
+        var edited = first
+        edited.summary = "edited elsewhere"
+        #expect(store.replace(first, with: edited))
+
+        let changed = store.update(id: "a", near: first.timestamp) { entry in
+            var entry = entry
+            entry.steps = [.init(at: entry.timestamp, text: entry.summary ?? "")]
+            return entry
+        }
+        #expect(changed)
+        let entries = store.entries()
+        #expect(entries.map(\.heard) == ["two", "one"])
+        #expect(entries.last?.steps?.map(\.text) == ["edited elsewhere"])
+    }
+
+    @Test func updateOfADeletedEntryReportsNothingChanged() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        var entry = sampleEntry(heard: "one", at: 0)
+        entry.id = "a"
+        try store.append(entry, today: HistoryStore.todayString(date: entry.timestamp))
+        #expect(store.delete(entry) == .deleted)
+        #expect(!store.update(id: "a", near: entry.timestamp) { $0 })
     }
 
     @Test func appendThenReadRoundTrips() throws {

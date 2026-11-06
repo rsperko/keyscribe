@@ -24,6 +24,6 @@
   <key>NSMicrophoneUsageDescription</key>
   <string>$(PRODUCT_NAME) uses the microphone to transcribe your speech on this Mac.</string>
   <key>NSAppleEventsUsageDescription</key>
-  <string>$(PRODUCT_NAME) uses Automation to read browser tabs and let scripts you run by voice control other apps.</string>
+  <string>$(PRODUCT_NAME) uses Automation to read browser tabs, bring a coding agent's terminal tab forward, and let scripts you run by voice control other apps.</string>
 </dict>
 </plist>

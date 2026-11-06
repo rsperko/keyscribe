@@ -40,10 +40,14 @@ final class ModesSettingsModel: ObservableObject {
 
     private(set) var voiceCommandsEnabled: Bool
     let voiceCommands: VoiceCommandsSettingsModel
+    var codingAgents: CodingAgentsSettingsModel?
 
-    init(repository: ConfigRepository, voiceCommandsEnabled: Bool = false) {
+    private(set) var codingAgentsEnabled: Bool
+
+    init(repository: ConfigRepository, voiceCommandsEnabled: Bool = false, codingAgentsEnabled: Bool = false) {
         self.repository = repository
         self.voiceCommandsEnabled = voiceCommandsEnabled
+        self.codingAgentsEnabled = codingAgentsEnabled
         voiceCommands = VoiceCommandsSettingsModel(repository: repository)
         reload()
         // Refresh from disk on any external config write (e.g. a mode-scoped term from the correction
@@ -60,6 +64,12 @@ final class ModesSettingsModel: ObservableObject {
         reload(force: true)
     }
 
+    func setCodingAgentsEnabled(_ enabled: Bool) {
+        guard enabled != codingAgentsEnabled else { return }
+        codingAgentsEnabled = enabled
+        reload(force: true)
+    }
+
     private func applyingLocalMutation<T>(_ body: () throws -> T) rethrows -> T {
         let previous = isApplyingLocalMutation
         isApplyingLocalMutation = true
@@ -72,9 +82,9 @@ final class ModesSettingsModel: ObservableObject {
     func reload(force: Bool = false) {
         guard force || configSignature() != loadedSignature else { return }
         let lkgModesDir = supportDir.appendingPathComponent("lkg", isDirectory: true).appendingPathComponent("modes", isDirectory: true)
-        ModeStore.ensureSystemModes(in: modesDir, voiceCommands: voiceCommandsEnabled)
+        ModeStore.ensureSystemModes(in: modesDir, voiceCommands: voiceCommandsEnabled, codingAgents: codingAgentsEnabled)
         let result = ModeStore.load(in: modesDir, previous: modes, lkgDir: lkgModesDir)
-        modes = Mode.visible(result.modes, voiceCommands: voiceCommandsEnabled)
+        modes = Mode.visible(result.modes, voiceCommands: voiceCommandsEnabled, codingAgents: codingAgentsEnabled)
         loadFailures = result.failures
         unknownKeys = loadUnknownKeys()
         connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections

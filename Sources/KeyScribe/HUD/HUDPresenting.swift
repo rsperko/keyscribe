@@ -65,7 +65,7 @@ enum VoiceCommandChoiceStatus: Equatable {
 enum HUDState: Equatable {
     case hidden
     case ready(mode: String)
-    case recording(mode: String?, level: Float, latchedTrigger: String?, countdown: RecordingCountdown? = nil)
+    case recording(mode: String?, level: Float, latchedTrigger: String?, countdown: RecordingCountdown? = nil, agents: AgentRoster? = nil)
     case loadingModel(mode: String)
     case transcribing(mode: String, status: String? = nil)
     case rewriting(connection: String, mode: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
@@ -136,7 +136,9 @@ extension HUDState {
             return nil
         case .ready(let mode):
             return mode
-        case .recording(let mode, _, _, _):
+        case .recording(_, _, _, _, let agents?):
+            return agents.recipientName.map { "To \($0)" } ?? "No recipient yet"
+        case .recording(let mode, _, _, _, nil):
             return mode
         case .loadingModel(let mode):
             return mode
@@ -174,9 +176,9 @@ extension HUDState {
         switch self {
         case .ready:
             return "Next dictation"
-        case .recording(_, _, _, let countdown?):
+        case .recording(_, _, _, let countdown?, _):
             return "Stops in \(countdown.clockText)"
-        case .recording(_, _, let latchedTrigger, nil):
+        case .recording(_, _, let latchedTrigger, nil, _):
             return latchedTrigger.map { "Listening — tap \($0) again to stop" } ?? "Listening"
         case .loadingModel:
             return "Loading speech model…"
@@ -264,7 +266,7 @@ extension HUDState {
     }
 
     var recordingCountdown: RecordingCountdown? {
-        if case .recording(_, _, _, let countdown) = self { return countdown }
+        if case .recording(_, _, _, let countdown, _) = self { return countdown }
         return nil
     }
 
@@ -309,8 +311,12 @@ extension HUDState {
         switch self {
         case .hidden, .ready:
             return nil
-        case .recording(_, _, _, let countdown?):
+        case .recording(_, _, _, let countdown?, _):
             return "Recording stops in \(countdown.secondsLeft) seconds"
+        case .recording(_, _, _, nil, let agents?):
+            let sessions = agents.rows.count == 1 ? "1 session" : "\(agents.rows.count) sessions"
+            let to = agents.recipientName.map { "Recording to \($0)" } ?? "Recording. No recipient yet"
+            return "\(to). \(sessions)"
         case .recording:
             return "Recording"
         case .loadingModel:
@@ -328,6 +334,9 @@ extension HUDState {
 
     // A retained list is announced once; later edges announce only what changed about it.
     func voiceOverAnnouncement(after previous: HUDState) -> String? {
+        if case .recording(_, _, _, let countdown, _) = self, case .recording(_, _, _, let shown, _) = previous {
+            return shown == nil && countdown != nil ? voiceOverAnnouncement : nil
+        }
         guard case .choice(let prompt, let status, _) = self,
               case .choice(let shown, _, _) = previous, shown.id == prompt.id else { return voiceOverAnnouncement }
         switch status {
@@ -340,6 +349,57 @@ extension HUDState {
     var isWaitingForChoice: Bool {
         if case .choice(_, .waiting, _) = self { return true }
         return false
+    }
+
+    var agentRoster: AgentRoster? {
+        if case .recording(_, _, _, _, let agents) = self { return agents }
+        return nil
+    }
+
+    var agentRosterHint: String? {
+        guard let agents = agentRoster else { return nil }
+        guard let first = agents.rows.first else { return "No coding agent sessions are running." }
+        let namesOff = "Names are off until they can be loaded"
+        let example = agents.namesAvailable ? Self.addressExample : Self.rowExample
+        let source: String
+        switch agents.source {
+        case nil where agents.namesAvailable: return "Start with \(example(first)), then your message."
+        case nil: return "\(namesOff). Start with \(example(first)), then your message."
+        case .focused: source = "The conversation on screen."
+        case .fixed: source = "Set by this mode."
+        case .current, .spoken: source = "The last conversation you used."
+        }
+        guard let other = agents.rows.first(where: { !$0.current }) else {
+            return agents.namesAvailable ? source : "\(source) \(namesOff)."
+        }
+        guard agents.namesAvailable else { return "\(source) \(namesOff); to talk to another, say \(example(other))." }
+        return "\(source) To talk to another, say \(example(other))."
+    }
+
+    private static func rowExample(_ row: AgentRoster.Row) -> String {
+        "\u{201C}session \(row.number) \u{2026}\u{201D}"
+    }
+
+    private static func addressExample(_ row: AgentRoster.Row) -> String {
+        "\u{201C}\(row.name) \u{2026}\u{201D} or \u{201C}session \(row.number) \u{2026}\u{201D}"
+    }
+
+    static let agentRowHeight: CGFloat = 40
+    static let agentHeaderHeight: CGFloat = 44
+    static let agentRowStep: CGFloat = agentRowHeight + 2
+    static let agentListChrome: CGFloat = 160
+    static let agentListVisibleRows = 8
+
+    static func agentListHeight(rows: Int, screenHeight: CGFloat) -> CGFloat? {
+        let fitting = max(1, Int((screenHeight - agentListChrome) / agentRowStep))
+        let visible = min(agentListVisibleRows, fitting)
+        guard rows > visible else { return nil }
+        return CGFloat(visible) * agentRowStep
+    }
+
+    static func spoken(_ row: AgentRoster.Row) -> String {
+        [String(row.number), row.name, row.detail, row.state, row.current ? "current recipient" : nil]
+            .compactMap { $0 }.joined(separator: ", ")
     }
 
     var panelWidth: CGFloat {

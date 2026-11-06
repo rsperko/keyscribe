@@ -6,6 +6,13 @@ public enum HUDAnchor: String, CaseIterable, Sendable {
     case bottomLeft, bottomCenter, bottomRight
 
     public static let `default`: HUDAnchor = .bottomCenter
+
+    public var keepsBottomEdge: Bool {
+        switch self {
+        case .bottomLeft, .bottomCenter, .bottomRight: true
+        default: false
+        }
+    }
     public static let defaultMargin: CGFloat = 24
 
     public func origin(in visibleFrame: CGRect, size: CGSize, margin: CGFloat = HUDAnchor.defaultMargin) -> CGPoint {

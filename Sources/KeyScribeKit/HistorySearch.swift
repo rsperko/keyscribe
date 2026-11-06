@@ -1,7 +1,7 @@
 import Foundation
 
 // Pure search over locally stored text (ui_design.md §8): case-insensitive substring over the
-// heard transcription, the final result, the mode name, and why a command failed. An empty query
+// heard transcription, the final result, the mode name, why a command failed, and the recorded summary. An empty query
 // returns everything.
 public enum HistorySearch {
     public static func matches(_ entry: HistoryEntry, query: String) -> Bool {
@@ -16,5 +16,6 @@ public enum HistorySearch {
             || entry.modeName.localizedCaseInsensitiveContains(q)
             || entry.failureReason?.localizedCaseInsensitiveContains(q) == true
             || entry.reported?.localizedCaseInsensitiveContains(q) == true
+            || entry.summary?.localizedCaseInsensitiveContains(q) == true
     }
 }

@@ -14,7 +14,7 @@ struct HUDStateTests {
             "reasoning-notice",
             "microphone-error", "command-not-recognized", "command-not-recognized-long", "accessibility-error",
             "recording-countdown", "stopped-at-limit", "stopped-at-limit-local", "choice", "choice-five",
-            "choice-listening", "choice-retry", "choice-heard", "choice-heard-long",
+            "choice-listening", "choice-retry", "choice-heard", "choice-heard-long", "recording-agents", "recording-agents-long",
         ])
         for name in HUDPreview.names {
             #expect(HUDPreview.state(named: name) != nil)

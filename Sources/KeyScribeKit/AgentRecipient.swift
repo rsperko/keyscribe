@@ -1,7 +1,7 @@
 import Foundation
 
 public enum AgentRecipient {
-    public enum Source: Equatable, Sendable { case fixed, focused, current, spoken, reply }
+    public enum Source: Equatable, Sendable { case fixed, focused, current, spoken }
 
     public struct Frozen: Equatable, Sendable {
         public var id: String
@@ -14,19 +14,21 @@ public enum AgentRecipient {
 
     public enum AskReason: Equatable, Sendable {
         case noRecipient
-        case noReply
         case noSuchRow(Int)
         case unknownName(String)
+        case ambiguousName(String, matches: [String])
+        case soundsLike(String, name: String)
     }
 
     public enum Resolution: Equatable, Sendable {
         case deliver(id: String, body: String, source: Source)
         case select(id: String)
+        case open(id: String)
         case ask(body: String, reason: AskReason)
 
         public var makesCurrent: String? {
             switch self {
-            case .deliver(let id, _, .spoken), .deliver(let id, _, .reply), .select(let id): return id
+            case .deliver(let id, _, .spoken), .select(let id), .open(let id): return id
             case .deliver, .ask: return nil
             }
         }
@@ -46,16 +48,29 @@ public enum AgentRecipient {
         }
     }
 
-    public static func resolve(_ address: AgentAddress, frozen: Frozen?, rows: [String], names: [String: String], replyTo: String?) -> Resolution {
+    public static func resolve(_ address: AgentAddress, frozen: Frozen?, rows: [String], names: [String: String]) -> Resolution {
         switch address {
+        case .open(let target):
+            switch resolve(target, frozen: frozen, rows: rows, names: names) {
+            case .select(let id), .open(let id), .deliver(let id, _, _): return .open(id: id)
+            case .ask(_, let reason): return .ask(body: "", reason: reason)
+            }
         case .none(let body):
             guard let frozen else { return .ask(body: body, reason: .noRecipient) }
             return .deliver(id: frozen.id, body: body, source: frozen.source)
-        case .reply(let body):
-            guard let replyTo else { return .ask(body: body, reason: .noReply) }
-            return .deliver(id: replyTo, body: body, source: .reply)
         case .unresolved(let spoken, let body):
             return .ask(body: body, reason: .unknownName(spoken))
+        case .ambiguous(let spoken, let matches, let body):
+            guard let first = matches.sorted().first, let id = id(named: first, in: names) else {
+                return .ask(body: body, reason: .ambiguousName(spoken, matches: matches))
+            }
+            return addressed(id, body: body)
+        case .nearMiss(let spoken, let name, let body, let unaddressed):
+            if let frozen, id(named: name, in: names) == frozen.id {
+                guard let unaddressed else { return addressed(frozen.id, body: body) }
+                return .deliver(id: frozen.id, body: unaddressed, source: frozen.source)
+            }
+            return .ask(body: body, reason: .soundsLike(spoken, name: name))
         case .row(let row, let body):
             guard rows.indices.contains(row - 1) else { return .ask(body: body, reason: .noSuchRow(row)) }
             return addressed(rows[row - 1], body: body)

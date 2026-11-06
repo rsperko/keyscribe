@@ -11,8 +11,15 @@ struct ClaudeRegistryTests {
         let e = entry("""
         {"pid":6521,"sessionId":"f6569352","cwd":"/Users/me/src/keyscribe","kind":"interactive","name":"proj-claude-0e","nameSource":"derived","status":"busy","messagingSocketPath":"/tmp/cc-socks/6521.sock"}
         """)
-        #expect(e == ClaudeRegistryEntry(pid: 6521, sessionId: "f6569352", cwd: "/Users/me/src/keyscribe", name: "proj-claude-0e", status: "busy", waitingFor: nil))
+        #expect(e == ClaudeRegistryEntry(pid: 6521, sessionId: "f6569352", cwd: "/Users/me/src/keyscribe", name: "proj-claude-0e", status: "busy", waitingFor: nil, nameSource: "derived"))
         #expect(e?.folder == "keyscribe")
+    }
+
+    @Test(arguments: ["user", "derived", "auto", "unknown"])
+    func onlyUserNamesAreExplicit(source: String) {
+        let e = entry(#"{"pid":1,"sessionId":"a","cwd":"/src/api","kind":"interactive","name":"Fix authentication retries","nameSource":"\#(source)"}"#)
+        #expect(e?.explicitName == (source == "user" ? "Fix authentication retries" : nil))
+        #expect(entry(#"{"pid":1,"sessionId":"a","cwd":"/src/api","kind":"interactive","name":"Unclassified"}"#)?.explicitName == nil)
     }
 
     @Test func nonInteractiveOrIncompleteEntriesAreIgnored() {

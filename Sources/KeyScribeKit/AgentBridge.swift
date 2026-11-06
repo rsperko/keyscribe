@@ -6,11 +6,18 @@ public enum AgentCommand: Equatable, Sendable {
     case fill(id: String, expectedSession: String, text: String)
     case offerButton(id: String, expectedSession: String, text: String)
     case status(id: String, expectedSession: String, text: String)
+    case focus(id: String, expectedSession: String, expiresAt: Date)
 
     public var id: String {
         switch self {
         case .submit(let id, _, _), .abort(let id, _, _), .fill(let id, _, _), .offerButton(let id, _, _), .status(let id, _, _): id
+        case .focus(let id, _, _): id
         }
+    }
+
+    public var expiresAt: Date? {
+        if case .focus(_, _, let expiresAt) = self { return expiresAt }
+        return nil
     }
 }
 
@@ -22,7 +29,14 @@ public enum AgentEvent: Equatable, Sendable {
         public var instance: String
         public var session: String
         public var pid: Int
-        public init(protocolVersion: Int, agent: String, agentVersion: String, instance: String, session: String, pid: Int) {
+        public var features: [String]
+        public var title: String?
+        public init(
+            protocolVersion: Int, agent: String, agentVersion: String, instance: String, session: String, pid: Int,
+            features: [String] = [], title: String? = nil
+        ) {
+            self.features = features
+            self.title = title
             self.protocolVersion = protocolVersion
             self.agent = agent
             self.agentVersion = agentVersion
@@ -40,6 +54,8 @@ public enum AgentEvent: Equatable, Sendable {
     case turnStarted(session: String, turn: String)
     case turnComplete(session: String, reason: String, answer: String)
     case undelivered(request: String, reason: String, handedOff: Bool)
+    case focused(request: String)
+    case title(session: String, text: String)
 }
 
 public enum AgentBridgeCodec {
@@ -64,6 +80,9 @@ public enum AgentBridgeCodec {
         var agentVersion: String?
         var instance: String?
         var pid: Int?
+        var features: [String]?
+        var expiresAt: Double?
+        var title: String?
     }
 
     public static func encode(_ commands: [AgentCommand]) throws -> Data {
@@ -81,7 +100,9 @@ public enum AgentBridgeCodec {
         case "hello":
             guard let p = w.protocol, let agent = w.agent, let instance = w.instance, let session = w.session, let pid = w.pid
             else { throw CodecError.malformed }
-            return .hello(.init(protocolVersion: p, agent: agent, agentVersion: w.agentVersion ?? "", instance: instance, session: session, pid: pid))
+            return .hello(.init(
+                protocolVersion: p, agent: agent, agentVersion: w.agentVersion ?? "", instance: instance, session: session, pid: pid,
+                features: w.features ?? [], title: w.title))
         case "ack":
             return .ack(request: try required(w.request))
         case "submitted":
@@ -90,6 +111,10 @@ public enum AgentBridgeCodec {
             return .refused(request: try required(w.request), reason: w.reason ?? "")
         case "typed":
             return .typed(session: try required(w.session))
+        case "focused":
+            return .focused(request: try required(w.request))
+        case "title":
+            return .title(session: try required(w.session), text: try required(w.text))
         case "turnStarted":
             return .turnStarted(session: try required(w.session), turn: try required(w.turn))
         case "turnComplete":
@@ -111,6 +136,8 @@ public enum AgentBridgeCodec {
         case .fill(let id, let s, let t): Wire(op: "fill", id: id, expectedSession: s, text: t)
         case .offerButton(let id, let s, let t): Wire(op: "offerButton", id: id, expectedSession: s, text: t)
         case .status(let id, let s, let t): Wire(op: "status", id: id, expectedSession: s, text: t)
+        case .focus(let id, let s, let expiresAt):
+            Wire(op: "focus", id: id, expectedSession: s, expiresAt: (expiresAt.timeIntervalSince1970 * 1000).rounded())
         }
     }
 
@@ -122,6 +149,9 @@ public enum AgentBridgeCodec {
         case "fill": return .fill(id: id, expectedSession: s, text: try required(w.text))
         case "offerButton": return .offerButton(id: id, expectedSession: s, text: try required(w.text))
         case "status": return .status(id: id, expectedSession: s, text: try required(w.text))
+        case "focus":
+            guard let expiresAt = w.expiresAt else { throw CodecError.malformed }
+            return .focus(id: id, expectedSession: s, expiresAt: Date(timeIntervalSince1970: expiresAt / 1000))
         default: throw CodecError.unknownOp(w.op)
         }
     }
@@ -187,6 +217,7 @@ public struct AgentCommandQueue: Sendable {
         touch(instance: instance, at: now)
         let active = activeInstances(session: session, at: now)
         let sole = active == [instance]
+        pending.removeAll { $0.command.expiresAt.map { $0 <= now } == true }
         let mine: (Entry) -> Bool = { $0.session == session && ($0.instance == instance || ($0.instance == nil && sole)) }
         let ready = pending.filter(mine)
         pending.removeAll(where: mine)

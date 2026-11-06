@@ -39,3 +39,20 @@ review keeps finding the same few of them.
   promises something execution does not do.
 - **Strip parsed parts out of the original text; never rebuild the remainder.** Re-casing, re-joining,
   or re-normalizing the leftover corrupts content the user dictated (`npm test` must stay `npm test`).
+
+## Coding agents
+
+The coding-agent bridge (`AgentHub`, `AgentBridge`, `AgentHandles`, `AgentRecipient`, `AgentOutbox`,
+the terminal routes, the Claude connector) delivers dictated text to another program, so every rule
+above applies to it, with these sharpenings:
+
+- **An unknown or ambiguous spoken recipient never falls through to the current recipient.** It holds
+  and asks, like any unresolved target.
+- **Cancel withdraws the request itself, not just its HUD.** A message the user cancelled must not
+  still send, and a cancelled message must not stay visible as if it will.
+- **A receipt timeout is "unknown", not "failed" or "gone".** A request that may still be delivered
+  stays tracked until the connector settles it or it expires.
+- **Act on the turn or session captured at decision time.** Stop, open, and deliver recheck that
+  handle right before acting, so they never hit a newer turn or a renamed or reordered session.
+- **No speech means no message.** A silent or empty take never submits to an agent; every output
+  branch keeps the gates the insert path applies.

@@ -50,6 +50,15 @@ struct AutomationConsentTests {
         #expect(verdicts.log == ["a", "a?", "b", "b?"])
     }
 
+    @Test func onlyAnAppAboutToBeAskedIsAnnouncedBeforeTheQuestion() async {
+        let verdicts = Verdicts(checked: ["a": .allowed, "b": .needsAsking], answered: ["b": .allowed])
+        let announced = Verdicts(checked: [:])
+        _ = await AutomationConsent.settle(
+            ["a", "b"], queue: DeadlineQueue(label: "test.consent"), checkWithin: 1, answerWithin: 1,
+            verdict: verdicts.verdict, willAsk: { _ = announced.verdict($0, false) })
+        #expect(announced.log == ["b"])
+    }
+
     @Test func aPromptLeftUnansweredIsNotRead() async {
         let verdicts = Verdicts(checked: ["a": .needsAsking], answered: ["a": .allowed], holding: ["a"])
         let settled = await settle(["a"], verdicts, answerWithin: 0.05)

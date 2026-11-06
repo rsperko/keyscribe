@@ -119,11 +119,11 @@ are the ones that must never break; the guide explains why and what else applies
 - **Config storage and migrations** → `docs/development/areas/config-and-storage.md`.
   - Every config file carries `schema_version`; a migration is an idempotent transform run on every read.
   - Keep `MigrationRunner` and the `migrations:` hook even with no in-tree steps — downstream uses them.
-- **Voice commands** → `docs/development/areas/voice-commands.md` (resolution, execution, choices,
-  previews, their settings).
+- **Voice commands and coding agents** → `docs/development/areas/voice-commands.md` (resolution,
+  execution, choices, previews, their settings, and the coding-agent bridge).
   - Check `stillWanted` immediately before every side effect, not once at the start.
   - Missing, unreadable, timed out, and uncertain stay distinct states; none of them means empty or success.
-  - An unresolved or tied target asks; it never falls through to the current or first target.
+  - An unresolved or tied target or recipient asks; it never falls through to the current or first one.
   - Previews and uniqueness checks call the same matching function execution uses.
 - **Feature flags** → `docs/development/areas/feature-flags.md`.
   - Flags are `static let`s on `Feature`, opt-in only, read through `settings.features.isEnabled`.
@@ -138,7 +138,7 @@ controller owns the state machine, the take's lease, and the diagnostics record;
 - `presenceReading`, `finalizeStreamingIfActive`, `Transcriber`, `EngineKeeper` → speech-to-text engines.
 - `finishInsertion`, `InsertOutput`, `HUDChannel`, `rewriteSelection`, `pasteLast` → insertion, pasteboard,
   HUD focus.
-- `VoiceCommandOutput` → voice commands.
+- `VoiceCommandOutput`, `AgentOutput` → voice commands and coding agents.
 - `probeCandidates`, `PressResolver`, and in `AppDelegate` `rebuildHotkeyMonitor`, `claimableModes`,
   `shadowedHotkeyIds`, `launchAttention` → hotkeys, triggers, permissions.
 - `maybePreconnect`, `produceDictationText`, `TakeText`, `TakeRewrite`, `SelectionText` → the hard

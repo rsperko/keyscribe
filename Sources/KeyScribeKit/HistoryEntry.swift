@@ -24,6 +24,24 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         }
     }
 
+    public struct Fact: Codable, Equatable, Sendable {
+        public var label: String
+        public var value: String
+        public init(label: String, value: String) {
+            self.label = label
+            self.value = value
+        }
+    }
+
+    public struct Step: Codable, Equatable, Sendable {
+        public var at: Date
+        public var text: String
+        public init(at: Date, text: String) {
+            self.at = at
+            self.text = text
+        }
+    }
+
     // Stable across in-place updates (a late command result, a clicked choice), so a row and a delete
     // keep pointing at the same record. nil on older entries.
     public var id: String?
@@ -79,6 +97,12 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     public var audioSeconds: Double?
     public var error: String?
     public var shortcutCandidates: [ModeCandidate]?
+    // Written finished by whatever recorded the take, so History shows them without knowing what produced
+    // them: the strongest outcome in words, labelled context frozen at the time, and later transitions.
+    // Fixed local strings and names only, never a reply, a secret, or an environment value.
+    public var summary: String?
+    public var facts: [Fact]?
+    public var steps: [Step]?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -114,6 +138,9 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case audioSeconds = "audio_seconds"
         case error
         case shortcutCandidates = "shortcut_candidates"
+        case summary
+        case facts
+        case steps
     }
 
     public init(
@@ -183,6 +210,8 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     }
 
     public var contextLabels: [String] { contextCategories.compactMap(Self.contextLabel) }
+
+    public var keptLocalText: Bool { outcome == .localFallback || fallbackReason != nil || rewriteSkippedMs != nil }
 
     public var listTextIsHeard: Bool { result.isEmpty && !heard.isEmpty }
 

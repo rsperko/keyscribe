@@ -148,7 +148,7 @@ struct RecordingLimitTests {
 
     private func countdowns(_ hud: HUDSpy) -> [RecordingCountdown?] {
         hud.states.compactMap { state -> RecordingCountdown?? in
-            if case .recording(_, _, _, let countdown) = state { return countdown } else { return nil }
+            if case .recording(_, _, _, let countdown, _) = state { return countdown } else { return nil }
         }
     }
 

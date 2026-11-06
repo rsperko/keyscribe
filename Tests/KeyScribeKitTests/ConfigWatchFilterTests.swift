@@ -16,6 +16,11 @@ final class ConfigWatchFilterTests: XCTestCase {
             changedPath: base + "/lkg/modes/_direct.toml", supportDir: base))
     }
 
+    func testCodingAgentBridgeStateIsIgnored() {
+        XCTAssertFalse(ConfigWatchFilter.isConfigRelevant(
+            changedPath: base + "/agents/names.json", supportDir: base))
+    }
+
     func testModelDownloadsAreIgnored() {
         XCTAssertFalse(ConfigWatchFilter.isConfigRelevant(
             changedPath: base + "/models/whisper-small/Model.mlmodelc/coremldata.bin", supportDir: base))

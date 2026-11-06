@@ -100,6 +100,23 @@ struct ClaudeConnectorInstallerTests {
         #expect(!source.contains("KeyScribeDev"))
         #expect(source.contains("keyscribe.json"))
     }
+
+    @Test func theModReadsOnlyTheSurfaceItFocusesNeverAnAccessToken() throws {
+        let source = ClaudeConnectorFiles.registerJS
+        let reads = try Regex(#"\$\.env\.get\("([A-Z_]+)"\)"#)
+        #expect(source.matches(of: reads).compactMap { $0.output[1].substring.map(String.init) } == ["CMUX_SURFACE_ID"])
+        #expect(source.contains("features: ['focus', 'label']"))
+    }
+
+    @Test func thePluginVersionNamesTheConnectorCodeItCarries() throws {
+        let (installer, _, dir) = try (setup())
+        try installer.install()
+        let manifest = try json(dir.appendingPathComponent("claude-connector/keyscribe-dev/.claude-plugin/plugin.json"))
+        #expect(manifest["version"] as? String == ClaudeConnectorFiles.version)
+        #expect(ClaudeConnectorFiles.version == ClaudeConnectorFiles.version(for: ClaudeConnectorFiles.registerJS))
+        #expect(ClaudeConnectorFiles.version(for: ClaudeConnectorFiles.registerJS + " ") != ClaudeConnectorFiles.version)
+        #expect(ClaudeConnectorFiles.version.hasPrefix("0.1.0-"))
+    }
 }
 
 struct AgentBridgeTokenTests {

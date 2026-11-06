@@ -31,7 +31,7 @@ final class HUDChannel {
         let choices = choices()
         if let prompt = choices.answering {
             switch state {
-            case .recording(_, let level, let latched, _):
+            case .recording(_, let level, let latched, _, _):
                 return .choice(prompt, status: .listening(latchedTrigger: latched), level: level)
             case .transcribing, .loadingModel:
                 return .choice(prompt, status: .working)

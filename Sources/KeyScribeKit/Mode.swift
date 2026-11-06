@@ -253,14 +253,14 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         public var delivery: Delivery
         enum CodingKeys: String, CodingKey { case target, delivery }
 
-        public init(target: Target = .focused, delivery: Delivery = .submit) {
+        public init(target: Target = .current, delivery: Delivery = .submit) {
             self.target = target
             self.delivery = delivery
         }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
-            target = try c.decodeIfPresent(Target.self, forKey: .target) ?? .focused
+            target = try c.decodeIfPresent(Target.self, forKey: .target) ?? .current
             delivery = try c.decodeIfPresent(Delivery.self, forKey: .delivery) ?? .submit
         }
     }
@@ -395,7 +395,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
 
     public static let directId = "_direct"
     public static let voiceCommandsId = "_voice_commands"
-    public var isSystem: Bool { id == Mode.directId || id == Mode.voiceCommandsId }
+    public static let codingAgentId = "_coding_agent"
+    public var isSystem: Bool { id == Mode.directId || id == Mode.voiceCommandsId || id == Mode.codingAgentId }
     public var isDirect: Bool { id == Mode.directId }
     public var runsVoiceCommands: Bool { output == .voiceCommand }
     public var hasOwnVocabulary: Bool { !isDirect }
@@ -407,8 +408,16 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         return mode
     }
 
-    public static func visible(_ modes: [Mode], voiceCommands: Bool) -> [Mode] {
-        voiceCommands ? modes : modes.filter { $0.id != voiceCommandsId }
+    public static var codingAgent: Mode {
+        var mode = Mode(id: codingAgentId, name: "Coding agent")
+        mode.output = .agent
+        mode.trailing = .none
+        mode.commands = Commands(liveEdits: true, numbers: true)
+        return mode
+    }
+
+    public static func visible(_ modes: [Mode], voiceCommands: Bool, codingAgents: Bool = false) -> [Mode] {
+        modes.filter { (voiceCommands || $0.id != voiceCommandsId) && (codingAgents || $0.id != codingAgentId) }
     }
 
     public static var direct: Mode {
@@ -421,6 +430,18 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     }
 
     public func systemNormalized() -> Mode {
+        if id == Mode.codingAgentId {
+            var mode = Mode.codingAgent
+            mode.triggerKeys = triggerKeys
+            mode.enabled = enabled
+            mode.agent = agent
+            mode.commands.privacy = commands.privacy
+            mode.dictionary = dictionary
+            mode.replacements = replacements
+            mode.aiRewrite = aiRewrite.map { AIRewrite(connection: $0.connection, prompt: $0.prompt, fragments: $0.fragments) }
+            mode.excludeFromHistory = excludeFromHistory
+            return mode
+        }
         if id == Mode.voiceCommandsId {
             var mode = Mode.voiceCommands
             mode.triggerKeys = triggerKeys
@@ -511,6 +532,9 @@ public enum ModeStore {
         }
         if mode.output == .voiceCommand && id != Mode.voiceCommandsId {
             throw ConfigError.invalid("output = \"voice_command\" belongs to the built-in Voice Commands mode")
+        }
+        if mode.output == .agent && id != Mode.codingAgentId {
+            throw ConfigError.invalid("output = \"agent\" belongs to the built-in Coding agent mode")
         }
         mode.id = id
         return mode
@@ -782,10 +806,13 @@ public enum ModeStore {
     }
 
     // The Direct file also marks the completed Plain Dictation migration.
-    public static func ensureSystemModes(in dir: URL, voiceCommands: Bool = false) {
+    public static func ensureSystemModes(in dir: URL, voiceCommands: Bool = false, codingAgents: Bool = false) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         if voiceCommands {
             ensureSystemMode(.voiceCommands, in: dir) { .voiceCommands }
+        }
+        if codingAgents {
+            ensureSystemMode(.codingAgent, in: dir) { .codingAgent }
         }
         ensureSystemMode(.direct, in: dir) { migratedDirect(in: dir) }
     }

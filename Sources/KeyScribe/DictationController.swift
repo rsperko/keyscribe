@@ -21,6 +21,7 @@ final class DictationController {
     private let config: ConfigCache
     private let reporter: TakeReporter
     private let inserter: InsertOutput
+    private let agentOutput: AgentOutput
     private let commandOutput: VoiceCommandOutput
     private let rewriter: TakeRewrite
     private let engines: EngineKeeper
@@ -106,8 +107,23 @@ final class DictationController {
         // An unconfirmed target is treated as secure: no cloud rewrite, context, or history.
         var targetUnconfirmed = false
         var precedingTextTask: Task<String?, Never>?
+        var agentRecipient: AgentRecipient.Frozen?
+        var agentSnapshot: AgentSnapshot?
+        var agentDestination: String?
+        var agentFacts: [HistoryEntry.Fact] = []
     }
     private var session: DictationSession?
+    var agents: AgentHub? {
+        didSet { if agents !== oldValue { agentOutput.forgetReceipts() } }
+    }
+
+    private struct AgentSnapshot {
+        let names: [String: String]
+        let conversations: [AgentConversation]
+        let current: String?
+        var namesAvailable = true
+        var rows: [String] { conversations.map(\.id) }
+    }
     private var activeStartTrigger: String?
 
     private var building: DictationRecord {
@@ -192,7 +208,7 @@ final class DictationController {
                 remaining: Self.seconds(ContinuousClock.now.duration(to: deadline)),
                 warningSeconds: limitWarningSeconds)
         }
-        return .recording(mode: activeMode?.name, level: level, latchedTrigger: latchedTriggerName, countdown: countdown)
+        return .recording(mode: activeMode?.name, level: level, latchedTrigger: latchedTriggerName, countdown: countdown, agents: agentRoster)
     }
 
     private nonisolated static func seconds(_ duration: Duration) -> Double {
@@ -270,6 +286,7 @@ final class DictationController {
             snapshotAsync: snapshotAsync ?? { snapshot() }, accessibilityGranted: accessibilityGranted,
             insert: insert, submitKey: submitKey)
         self.hud = HUDChannel(hud: hud)
+        self.agentOutput = AgentOutput(hud: self.hud, reporter: self.reporter)
         self.audio = audio ?? AudioCapture()
         self.presenceDetector = presenceDetector ?? SpeechPresenceDetector(modelsDir: KeyScribePaths.modelsDir)
         self.effects = effects ?? DuringDictationEffects()
@@ -303,6 +320,9 @@ final class DictationController {
             HUDChannel.Choices(answering: self?.answeringChoicePrompt, pending: self?.pendingVoiceCommandChoice)
         }
         reporter.onHistoryUpdated = { [weak self] in self?.onHistoryUpdated?() }
+        agentOutput.keepsHistory = { [weak self] in self?.settings.history.enabled ?? false }
+        agentOutput.noticesBlocked = { [weak self] in self.map { $0.machine.isBusy || $0.voiceCommands.pendingChoice != nil } ?? false }
+        agentOutput.hide = { [weak self] in self?.scheduleHide(after: $0) }
         commandOutput.host = self
         engines.host = self
     }
@@ -1190,6 +1210,7 @@ final class DictationController {
         session?.shortcutCandidates = choice.shortcutCandidates
         session?.triggerDisplay = choice.triggerDisplay
         activeMode = securePolicyApplied(chosen)
+        freezeAgentRecipient()
         session?.modeReady = true
         claimOrDismissVoiceCommandChoice()
         onModeAndSnapshotReady()
@@ -1457,21 +1478,169 @@ final class DictationController {
         let finalMode = securePolicyApplied(route.mode)
         activeMode = finalMode
         session?.pendingHeardTranscript = raw
+        if let finalMode, finalMode.output == .agent {
+            await finishAgentTake(routed: routed, heard: raw, mode: finalMode)
+            return
+        }
         let (final, rewrite, transformed) = await produceFinalText(routed: routed, mode: finalMode)
 
         // Cancelled during the rewrite: bail before any insert or history write.
         if Task.isCancelled { return }
 
-        switch final {
-        case .abort(let message, let action):
+        await dispatch(final, to: .cursor, heard: raw, transformed: transformed, rewrite: rewrite)
+    }
+
+    private enum Destination {
+        case cursor
+        case agent(id: String, facts: [HistoryEntry.Fact])
+    }
+
+    // The one place a take's final text goes to its output, for the normal path and the escape hatch alike.
+    private func dispatch(
+        _ final: FinalText, to destination: Destination, heard: String, transformed: String?, rewrite: RewriteDetails?
+    ) async {
+        switch (final, destination) {
+        case (.abort(let message, let action), _):
             // A selection rewrite that failed (or had nothing to do) leaves the target untouched —
             // a destructive op must never overwrite the user's text on failure.
             log.info("aborted: \(message, privacy: .public)")
             clearRewriteEscapeHatch()
             finishError(message, action: action)
-        case .insert(let transcript, let bare, let submit):
-            await finishInsertion(transcript: transcript, heard: raw, transformed: transformed, rewrite: rewrite, bare: bare, submitOverride: submit)
+        case (.insert(let text, _, _), .agent(let id, let facts)):
+            await deliverToAgent(id, text: text, heard: heard, transformed: transformed, rewrite: rewrite, facts: facts)
+        case (.insert(let text, let bare, let submit), .cursor):
+            await finishInsertion(transcript: text, heard: heard, transformed: transformed, rewrite: rewrite, bare: bare, submitOverride: submit)
         }
+    }
+
+    private func freezeAgentRecipient() {
+        guard let agents, settings.features.isEnabled(.codingAgents) else { return }
+        agents.refresh(rereadingTitles: false)
+        let snapshot = AgentSnapshot(
+            names: agents.names, conversations: agents.recordingOrder, current: agents.current,
+            namesAvailable: agents.namesProblem == nil)
+        session?.agentSnapshot = snapshot
+        guard let mode = activeMode, mode.output == .agent else { return }
+        session?.agentRecipient = AgentRecipient.initial(
+            target: mode.agent.target, focused: nil, current: snapshot.current, names: snapshot.names)
+    }
+
+    private var agentRoster: AgentRoster? {
+        guard activeMode?.output == .agent, let agents, let snapshot = session?.agentSnapshot else { return nil }
+        return AgentRoster(
+            frozen: snapshot.conversations, live: agents.directory.conversations, recipient: session?.agentRecipient,
+            namesAvailable: snapshot.namesAvailable)
+    }
+
+    private func finishAgentTake(routed: PhaseBResult, heard: String, mode: Mode) async {
+        guard let agents, settings.features.isEnabled(.codingAgents) else {
+            finishError("Talking to coding agents is turned off")
+            return
+        }
+        guard !routed.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            finishNoSpeech()
+            return
+        }
+        let snapshot = session?.agentSnapshot ?? AgentSnapshot(
+            names: agents.names, conversations: agents.recordingOrder, current: agents.current,
+            namesAvailable: agents.namesProblem == nil)
+        let frozen = session?.agentRecipient ?? AgentRecipient.initial(
+            target: mode.agent.target, focused: nil, current: snapshot.current, names: snapshot.names)
+        let address = AgentAddress.parse(routed.transcript, names: Array(snapshot.names.keys), namesKnown: snapshot.namesAvailable)
+        let resolution = AgentRecipient.resolve(address, frozen: frozen, rows: snapshot.rows, names: snapshot.names)
+        let facts = AgentHistoryFacts.facts(
+            address: address, resolution: resolution, frozen: frozen, conversations: snapshot.conversations,
+            delivery: mode.agent.delivery)
+        if let id = resolution.makesCurrent { agents.makeCurrent(id) }
+
+        switch resolution {
+        case .select(let id):
+            finishAgent(state: .commandDone(summary: "Talking to \(agents.handle(of: id) ?? "it")", detail: mode.name),
+                        outcome: .inserted, heard: heard, body: "", transformed: nil, rewrite: nil, facts: facts)
+        case .open(let id):
+            let handle = agents.handle(of: id) ?? "it"
+            hud.present(.transcribing(mode: mode.name, status: "Opening \(handle)\u{2026}"))
+            let result = await agents.open(id) { [weak self] app in
+                guard !Task.isCancelled else { return }
+                self?.hud.present(.transcribing(mode: mode.name, status: "Allow access to \(app) to open the tab for \(handle)"))
+            }
+            if Task.isCancelled { return }
+            let state = result.hudState(handle: handle, detail: mode.name)
+            let outcome: DictationOutcome = if case .notAllowed = result { .failed } else { .inserted }
+            finishAgent(state: state, outcome: outcome, heard: heard, body: "", transformed: nil, rewrite: nil,
+                        hideAfter: state.errorAction != nil ? 8 : state.indicator == .advisory ? 5 : 2,
+                        summary: result.historySummary(handle: handle), facts: facts)
+        case .ask(let body, let reason):
+            let line = if case .open = address { AgentOutput.openAskLine(reason) } else { AgentOutput.askLine(reason) }
+            finishAgent(state: .error(message: line, action: nil, heard: HeardExcerpt(heard: body)),
+                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, facts: facts)
+        case .deliver(let id, let body, _):
+            session?.agentDestination = id
+            session?.agentFacts = facts
+            let (final, rewrite, transformed) = await produceFinalText(
+                routed: PhaseBResult(routedModeId: routed.routedModeId, transcript: body), mode: mode)
+            if Task.isCancelled { return }
+            await dispatch(final, to: .agent(id: id, facts: facts), heard: heard, transformed: transformed, rewrite: rewrite)
+        }
+    }
+
+    private func deliverToAgent(
+        _ id: String, text: String, heard: String, transformed: String?, rewrite: RewriteDetails?, facts: [HistoryEntry.Fact]
+    ) async {
+        clearRewriteEscapeHatch()
+        if captureWasLost {
+            finishTruncatedCapture(transcript: text)
+            return
+        }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            finishNoSpeech()
+            return
+        }
+        guard let agents, let mode = activeMode, settings.features.isEnabled(.codingAgents) else {
+            finishAgent(state: .error(message: "Not sent: talking to coding agents was turned off", action: nil, heard: HeardExcerpt(heard: text)),
+                        outcome: .failed, heard: heard, body: text, transformed: transformed, rewrite: rewrite, facts: facts)
+            return
+        }
+        guard lease(for: .codingAgents).keepActing() else { return }
+        lastResult = text
+        hud.present(.transcribing(mode: mode.name, status: "Sending to \(agents.handle(of: id) ?? "it")"))
+        let (request, receipt) = await agentOutput.deliver(text, to: id, delivery: mode.agent.delivery, via: agents)
+        finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text), outcome: AgentOutput.dictationOutcome(receipt),
+                    heard: heard, body: text, transformed: transformed, rewrite: rewrite, transitioned: true,
+                    facts: facts, awaitingReceipt: (request, receipt))
+    }
+
+    private func finishAgent(
+        state: HUDState, outcome: DictationOutcome, heard: String, body: String, transformed: String?,
+        rewrite: RewriteDetails?, transitioned: Bool = false, hideAfter: Double? = nil, summary: String? = nil,
+        facts: [HistoryEntry.Fact], awaitingReceipt awaited: (request: String, receipt: AgentReceipt)? = nil
+    ) {
+        if !transitioned {
+            if !body.isEmpty { lastResult = body }
+            guard lease().beginActing() else { return }
+        }
+        machine.finish(outcome)
+        building.fingerprints[.final] = .of(body)
+        let reason = outcome == .inserted ? nil : state.primaryText
+        finish(machine: .alreadyTransitioned, cue: outcome == .inserted ? .success : .error, state: state,
+               hideAfter: hideAfter ?? (outcome == .inserted ? 2 : 6),
+               record: (outcome == .inserted ? .inserted : .failed, reason),
+               history: HistoryWrite(
+                   heard: heard, transformed: transformed, result: body, insertion: outcome, rewrite: rewrite,
+                   failureReason: reason, summary: summary ?? state.primaryText, facts: facts,
+                   onRecorded: awaited.map { awaited in { [weak self] entry in
+                       self?.agentOutput.noteRecorded(entry, request: awaited.request)
+                   } }))
+        if let awaited { agentOutput.replayEarlyReceipts(request: awaited.request, receipt: awaited.receipt) }
+    }
+
+    func showAgentNotice(_ receipt: AgentReceipt, request: String? = nil) {
+        agentOutput.showNotice(receipt, request: request)
+    }
+
+    var agentNoticeDelayOverride: Duration? {
+        get { agentOutput.noticeDelayOverride }
+        set { agentOutput.noticeDelayOverride = newValue }
     }
 
     // The one definition of a take that may still act: not cancelled, its capture intact, still the current
@@ -1600,7 +1769,7 @@ final class DictationController {
         heard: String, transformed: String?, result: String, insertion: DictationOutcome,
         rewrite: RewriteDetails?, failureReason: String? = nil, reported: String? = nil, confirmWrite: Bool = false,
         commandStillRunning: Bool = false, outcome override: HistoryEntry.Outcome? = nil,
-        onRecorded: ((HistoryEntry) -> Void)? = nil
+        summary: String? = nil, facts: [HistoryEntry.Fact]? = nil, onRecorded: ((HistoryEntry) -> Void)? = nil
     ) -> Bool {
         // A secure-field dictation is never persisted, regardless of the history setting or the mode —
         // the spoken text is a password (design.md §4.4). An unconfirmed target (focus moved before the
@@ -1634,11 +1803,13 @@ final class DictationController {
             received: rewrite?.received,
             modeChoice: session?.modeChoice, routedPhrase: session?.routedPhrase,
             triggerKey: session?.triggerDisplay,
-            fallbackReason: outcome == .localFallback
+            fallbackReason: keptLocal
                 ? (rewriteSkipped ? Self.rewriteSkippedAtLimitReason : rewrite?.fallbackReason) : nil,
             stoppedAtLimit: session?.stoppedAtLimit == true ? true : nil,
             failureReason: failureReason, reported: reported)
         entry.reasoning = rewrite?.reasoning?.summary
+        entry.summary = summary
+        entry.facts = facts
         entry.rewriteSkippedMs = rewrite?.skippedAfterMs.map { Int($0.rounded()) }
         entry.appVersion = DiagnosticsCollector.appVersion()
         entry.osVersion = DiagnosticsCollector.osVersion()
@@ -1950,11 +2121,19 @@ final class DictationController {
         }
         dictationTask?.cancel()
         clearRewriteEscapeHatch()
-        switch guardedInsert(transcript, issuedTokens: issuedTokens) {
-        case .abort(let message, let action):
-            finishError(message, action: action)
-        case .insert(let final, let bare, let submit):
-            Task { await self.finishInsertion(transcript: final, heard: heard, transformed: transcript, rewrite: rewrite, bare: bare, submitOverride: submit) }
+        let final = guardedInsert(transcript, issuedTokens: issuedTokens)
+        if case .abort(let message, let action) = final { return finishError(message, action: action) }
+        let destination: Destination
+        if activeMode?.output == .agent {
+            guard let id = session?.agentDestination else { return finishError("Not sent: the recipient was lost") }
+            destination = .agent(id: id, facts: session?.agentFacts ?? [])
+        } else {
+            destination = .cursor
+        }
+        let identity = session?.identity
+        Task {
+            guard let identity, self.session?.identity === identity else { return }
+            await self.dispatch(final, to: destination, heard: heard, transformed: transcript, rewrite: rewrite)
         }
     }
 
@@ -2033,6 +2212,8 @@ final class DictationController {
         var reported: String?
         var commandStillRunning = false
         var outcome: HistoryEntry.Outcome?
+        var summary: String?
+        var facts: [HistoryEntry.Fact]?
         var onRecorded: ((HistoryEntry) -> Void)?
     }
 
@@ -2086,7 +2267,8 @@ final class DictationController {
                           insertion: history.insertion, rewrite: history.rewrite,
                           failureReason: history.failureReason, reported: history.reported,
                           commandStillRunning: history.commandStillRunning,
-                          outcome: history.outcome, onRecorded: history.onRecorded)
+                          outcome: history.outcome, summary: history.summary, facts: history.facts,
+                          onRecorded: history.onRecorded)
         }
         let engineUsed = activeEngine
         releaseCapturedPlan()

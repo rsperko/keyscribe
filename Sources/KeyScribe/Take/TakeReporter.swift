@@ -59,5 +59,19 @@ final class TakeReporter {
         }
     }
 
+    func update(
+        id: String, near date: Date, _ change: @escaping @Sendable (HistoryEntry) -> HistoryEntry,
+        then: @escaping @MainActor (Bool) -> Void
+    ) {
+        guard let history else { return }
+        queue.async { [weak self] in
+            let changed = history.update(id: id, near: date, change)
+            Task { @MainActor in
+                if changed { self?.onHistoryUpdated?() }
+                then(changed)
+            }
+        }
+    }
+
     func waitForWrites() { queue.sync {} }
 }

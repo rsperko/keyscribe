@@ -1336,12 +1336,7 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
     }
 
     func activate(pid: Int32) -> Bool {
-        guard let app = NSRunningApplication(processIdentifier: pid), !app.isTerminated else { return false }
-        if app.isHidden { app.unhide() }
-        let element = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(element, AppWindows.messagingTimeout)
-        if AXUIElementSetAttributeValue(element, kAXFrontmostAttribute as CFString, kCFBooleanTrue) == .success { return true }
-        return app.activate()
+        AppActivation.bringForward(pid: pid)
     }
 
     func frontTab(ofBrowser bundleId: String) async -> (url: String, title: String)? {
@@ -1409,12 +1404,12 @@ enum BrowserScripting {
     static func tabs(of bundleId: String, pid: Int32, isCurrent: () -> Bool) -> BrowserTabsReply {
         for shape in Shape.allCases {
             guard isCurrent() else { return .unavailable }
-            switch run(tabsSource(of: bundleId, shape: shape), pid: pid, isCurrent: isCurrent) {
+            switch PinnedAppleScript.run(tabsSource(of: bundleId, shape: shape), pid: pid, isCurrent: isCurrent) {
             case .refused:
                 return .refused
             case .gone:
                 return .tabs([])
-            case .failed(let code) where code == timedOut:
+            case .failed(let code) where code == PinnedAppleScript.timedOut:
                 return .unavailable
             case .failed:
                 continue
@@ -1427,29 +1422,14 @@ enum BrowserScripting {
     }
 
     static func tabsSource(of bundleId: String, shape: Shape) -> String {
-        pinned(to: bundleId, """
+        PinnedAppleScript.pinned(to: bundleId, timeout: replyTimeout, """
         return {URL of every tab of every window, \(shape.titleProperty) of every tab of every window}
         """)
     }
 
     static func frontTabSource(of bundleId: String, shape: Shape) -> String {
         let tabRef = shape == .chromium ? "active tab of front window" : "current tab of front window"
-        return pinned(to: bundleId, "return {URL of \(tabRef), \(shape.titleProperty) of \(tabRef)}")
-    }
-
-    // AppleScript starts any app a script tells that is not running, so the script tells only itself and
-    // `run(_:pid:)` sends each event to the browser's process; a quit browser fails instead of restarting.
-    // Tab browsers have a static dictionary, so reading their terms does not start one either.
-    private static func pinned(to bundleId: String, _ statements: String) -> String {
-        """
-        with timeout of \(replyTimeout) seconds
-        using terms from application id \(literal(bundleId))
-        tell current application
-        \(statements)
-        end tell
-        end using terms from
-        end timeout
-        """
+        return PinnedAppleScript.pinned(to: bundleId, timeout: replyTimeout, "return {URL of \(tabRef), \(shape.titleProperty) of \(tabRef)}")
     }
 
     static func focus(_ tab: VoiceCommandCatalog.Tab, pid: Int32, isCurrent: () -> Bool) -> Bool {
@@ -1458,7 +1438,7 @@ enum BrowserScripting {
             "set current tab of window w to tab t of window w",
         ]
         return firstAnswer(bodies.map { focusSource(tab, selecting: $0) }, isCurrent: isCurrent) { source in
-            switch run(source, pid: pid, isCurrent: isCurrent) {
+            switch PinnedAppleScript.run(source, pid: pid, isCurrent: isCurrent) {
             case .value(let result): return result.booleanValue
             case .gone: return false
             case .refused, .failed: return nil
@@ -1475,8 +1455,8 @@ enum BrowserScripting {
     }
 
     static func focusSource(_ tab: VoiceCommandCatalog.Tab, selecting body: String) -> String {
-        sameURLHandler + pinned(to: tab.browserBundleId, """
-            set wanted to \(literal(tab.url))
+        sameURLHandler + PinnedAppleScript.pinned(to: tab.browserBundleId, timeout: replyTimeout, """
+            set wanted to \(PinnedAppleScript.literal(tab.url))
             set found to missing value
             if (count of windows) \u{2265} \(tab.window) then
                 if (count of tabs of window \(tab.window)) \u{2265} \(tab.tab) then
@@ -1512,13 +1492,9 @@ enum BrowserScripting {
 
         """
 
-    static func literal(_ value: String) -> String {
-        "\"" + value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
-    }
-
     static func frontTab(of bundleId: String, pid: Int32, isCurrent: () -> Bool) -> (url: String, title: String)? {
         firstAnswer(Shape.allCases.map { frontTabSource(of: bundleId, shape: $0) }, isCurrent: isCurrent) { source in
-            guard case .value(let result) = run(source, pid: pid, isCurrent: isCurrent), result.numberOfItems == 2,
+            guard case .value(let result) = PinnedAppleScript.run(source, pid: pid, isCurrent: isCurrent), result.numberOfItems == 2,
                   let url = result.atIndex(1)?.stringValue, !url.isEmpty else { return nil }
             return (url, result.atIndex(2)?.stringValue ?? "")
         }
@@ -1541,63 +1517,4 @@ enum BrowserScripting {
         return tabs
     }
 
-    private enum Reply {
-        case value(NSAppleEventDescriptor)
-        case refused
-        case gone
-        case failed(Int)
-    }
-
-    private static let notPermitted = -1743
-    private static let timedOut = -1712
-
-    private final class PinnedProcess {
-        let pid: pid_t
-        let isCurrent: () -> Bool
-        var gone = false
-        init(pid: pid_t, isCurrent: @escaping () -> Bool) {
-            self.pid = pid
-            self.isCurrent = isCurrent
-        }
-    }
-
-    // A command abandoned mid-script sends nothing more, so a slow browser cannot be acted on after the user moved on.
-    private static let sendToProcess: OSASendUPP = { event, reply, mode, _, timeout, _, _, refCon in
-        guard let event, let reply, let refCon else { return OSErr(paramErr) }
-        let process = Unmanaged<PinnedProcess>.fromOpaque(refCon).takeUnretainedValue()
-        guard process.isCurrent() else { return OSErr(userCanceledErr) }
-        var addressed = AppleEvent()
-        var status = AEDuplicateDesc(event, &addressed)
-        guard status == noErr else { return status }
-        defer { AEDisposeDesc(&addressed) }
-        var pid = process.pid
-        var address = AEAddressDesc()
-        status = AECreateDesc(DescType(typeKernelProcessID), &pid, MemoryLayout<pid_t>.size, &address)
-        guard status == noErr else { return status }
-        defer { AEDisposeDesc(&address) }
-        status = AEPutAttributeDesc(&addressed, AEKeyword(keyAddressAttr), &address)
-        guard status == noErr else { return status }
-        let sent = AESendMessage(&addressed, reply, mode, Int(timeout))
-        if sent == procNotFound || sent == connectionInvalid { process.gone = true }
-        return OSErr(truncatingIfNeeded: sent)
-    }
-
-    private static func run(_ source: String, pid: Int32, isCurrent: () -> Bool) -> Reply {
-        guard let language = OSALanguage(forName: "AppleScript") else { return .failed(0) }
-        let instance = OSALanguageInstance(language: language)
-        return withoutActuallyEscaping(isCurrent) { isCurrent in
-            let process = PinnedProcess(pid: pid, isCurrent: isCurrent)
-            return withExtendedLifetime(process) {
-                guard OSASetSendProc(instance.componentInstance, sendToProcess, Unmanaged.passUnretained(process).toOpaque()) == noErr
-                else { return .failed(0) }
-                let script = OSAScript(source: source, from: nil, languageInstance: instance, using: [])
-                var error: NSDictionary?
-                let result = script.executeAndReturnError(&error)
-                if process.gone { return .gone }
-                if let result, error == nil { return .value(result) }
-                let code = (error?[OSAScriptErrorNumber] as? Int) ?? 0
-                return code == notPermitted ? .refused : .failed(code)
-            }
-        }
-    }
 }

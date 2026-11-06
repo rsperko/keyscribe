@@ -9,7 +9,7 @@ enum HUDPreview {
         "reasoning-notice",
         "microphone-error", "command-not-recognized", "command-not-recognized-long", "accessibility-error",
         "recording-countdown", "stopped-at-limit", "stopped-at-limit-local", "choice", "choice-five",
-        "choice-listening", "choice-retry", "choice-heard", "choice-heard-long",
+        "choice-listening", "choice-retry", "choice-heard", "choice-heard-long", "recording-agents", "recording-agents-long",
     ]
 
     static let reasoningLimitReason = ProviderTransportError.limitBeforeAnswer(reasoningEvidence: true).rewriteFailureReason
@@ -130,9 +130,31 @@ enum HUDPreview {
             .choice(choicePrompt, status: .waiting(note: nil, heard: HeardExcerpt(heard: "tube")))
         case "choice-heard-long":
             .choice(choicePrompt, status: .waiting(note: nil, heard: HeardExcerpt(heard: longHeard)))
+        case "recording-agents":
+            .recording(mode: "Coding agent", level: 0.7, latchedTrigger: nil, agents: AgentRoster(
+                frozen: agentConversations, live: agentConversations, recipient: .init(id: "b", source: .current)))
+        case "recording-agents-long":
+            .recording(mode: "Coding agent", level: 0.7, latchedTrigger: nil, agents: AgentRoster(
+                frozen: longAgentConversations, live: longAgentConversations, recipient: .init(id: "web", source: .current)))
         default:
             nil
         }
+    }
+
+    static let agentConversations = [
+        AgentConversation(id: "a", agent: "claude", pid: 1, cwd: "/src/api", handle: "api", state: .working, connectorLive: true),
+        AgentConversation(id: "b", agent: "claude", pid: 2, cwd: "/src/api", handle: "api blue", state: .idle, connectorLive: true),
+        AgentConversation(id: "c", agent: "claude", pid: 3, cwd: "/src/web", handle: "frontend", state: .waitingApproval, connectorLive: true),
+        AgentConversation(id: "d", agent: "claude", pid: 4, cwd: "/src/docs", handle: "docs", state: .idle, connectorLive: false),
+    ]
+
+    static let longAgentConversations = [
+        "api", "api blue", "backend", "backend blue", "build", "docs", "frontend", "frontend blue", "tests", "web", "web blue", "worker",
+    ].map { name in
+        AgentConversation(
+            id: name, agent: "claude", pid: 1, cwd: "/src/project", handle: name,
+            state: name == "web" ? .working : .idle, connectorLive: true,
+            title: "Check the database migration and verify recovery after a failed deployment")
     }
 
     static let longHeard = "switch over to the window where I was writing the quarterly budget review notes for the "

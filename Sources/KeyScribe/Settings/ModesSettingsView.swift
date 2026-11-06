@@ -88,7 +88,8 @@ struct ModesSettingsView: View {
                                     onConsumeFocus: model.consumeCreated,
                                     onDuplicate: { model.duplicate(mode) },
                                     onEditVocabulary: { onEditVocabulary(mode.id) },
-                                    onDelete: { modePendingDelete = mode })
+                                    onDelete: { modePendingDelete = mode },
+                                    codingAgents: model.codingAgents)
                             }
                         }
                         .disabled(model.loadFailure(for: mode.id) != nil)
@@ -463,7 +464,7 @@ enum ModeSummary {
     static func whenRuns(_ mode: Mode) -> String {
         let constrained = !mode.constraints.isEmpty
         // The Direct floor: shortcut first (it owns Fn), plus its fallback role.
-        if mode.runsVoiceCommands { return triggerDisplay(mode) ?? "Off — no shortcut" }
+        if mode.runsVoiceCommands || mode.id == Mode.codingAgentId { return triggerDisplay(mode) ?? "Off — no shortcut" }
         if mode.isDirect { return triggerDisplay(mode) ?? "Fallback" }
         // A constrained mode with no shortcut/phrase never auto-runs (Fn goes to Plain Dictation) — it's
         // menu-reachable, so don't imply it's automatic.

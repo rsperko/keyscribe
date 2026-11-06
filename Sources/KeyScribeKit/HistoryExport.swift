@@ -55,13 +55,14 @@ public enum HistoryExport {
             out += "\n## \(group.day)\n\n"
             for e in group.entries {
                 let labels = e.dataBoundaryLabels.joined(separator: ", ")
-                out += "- **\(f.time(e.timestamp))** · \(e.modeName) · \(label(e.outcome))"
+                out += "- **\(f.time(e.timestamp))** · \(e.modeName) · \(e.summary ?? label(e.outcome))"
                 if !labels.isEmpty { out += " · \(labels)" }
                 out += "\n"
                 if !e.heard.isEmpty, e.heard != e.result { out += "  - Heard: \(e.heard)\n" }
                 out += "  - Result: \(e.result.isEmpty ? "(no text)" : e.result)\n"
                 if let reason = e.failureReason { out += "  - Why it failed: \(reason)\n" }
                 if let reported = e.reported { out += "  - Reported: \(reported)\n" }
+                for line in whatHappened(e, f) { out += "  - \(line)\n" }
             }
         }
         return out
@@ -73,16 +74,22 @@ public enum HistoryExport {
             out += "\n\(group.day)\n"
             for e in group.entries {
                 let labels = e.dataBoundaryLabels.joined(separator: ", ")
-                out += "  \(f.time(e.timestamp))  \(e.modeName) · \(label(e.outcome))"
+                out += "  \(f.time(e.timestamp))  \(e.modeName) · \(e.summary ?? label(e.outcome))"
                 if !labels.isEmpty { out += "  [\(labels)]" }
                 out += "\n"
                 if !e.heard.isEmpty, e.heard != e.result { out += "    Heard:  \(e.heard)\n" }
                 out += "    Result: \(e.result.isEmpty ? "(no text)" : e.result)\n"
                 if let reason = e.failureReason { out += "    Why it failed: \(reason)\n" }
                 if let reported = e.reported { out += "    Reported: \(reported)\n" }
+                for line in whatHappened(e, f) { out += "    \(line)\n" }
             }
         }
         return out
+    }
+
+    private static func whatHappened(_ e: HistoryEntry, _ f: Formatting) -> [String] {
+        let kept = e.keptLocalText ? ["Why local was kept: \(e.fallbackReason ?? "the rewrite was skipped")"] : []
+        return kept + (e.facts ?? []).map { "\($0.label): \($0.value)" } + (e.steps ?? []).map { "\(f.time($0.at)) \($0.text)" }
     }
 
     // Group by day key, preserving the input order (newest-first from the store) both across days and

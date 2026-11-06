@@ -176,7 +176,7 @@ public enum ModeResolver {
         // (strict `>` in declaration order keeps the earliest-declared on a tie).
         var best: (mode: Mode, stripped: String, phrase: String)?
         var bestScore = Int.min
-        for mode in eligibleModes {
+        for mode in eligibleModes where mode.output != .agent {
             for phrase in mode.triggerPhrases {
                 guard let stripped = matchSuffix(phrase, in: transcript) else { continue }
                 let score = specificity(mode, context)

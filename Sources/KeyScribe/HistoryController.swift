@@ -665,7 +665,7 @@ private struct HistoryRowView: View {
             HStack(spacing: 6) {
                 Text(entry.timestamp, style: .time)
                 Text("·"); Text(entry.modeName)
-                Text("·"); Text(outcomeLabel(entry))
+                Text("·"); Text(statusLabel(entry))
             }
             .font(.caption).foregroundStyle(.secondary)
             HStack(spacing: 4) {
@@ -696,6 +696,7 @@ private struct HistoryDetailView: View {
     @State private var showReplacementSheet = false
     @State private var showDictionarySheet = false
     @State private var promptExpanded = false
+    @State private var rewriteComparisonExpanded = false
     @State private var receivedExpanded = false
     @State private var confirmingDelete = false
 
@@ -766,19 +767,66 @@ private struct HistoryDetailView: View {
 
     private var whatHappened: some View {
         VStack(alignment: .leading, spacing: 12) {
-            if comparisonStages.count > 1 {
-                Picker("", selection: $comparisonStage) {
-                    ForEach(comparisonStages) { Text(comparisonStageLabel($0)).tag($0) }
+            if let summary = entry.summary {
+                actionOutcome(summary)
+                plainPane("Heard", role: .heard, text: entry.heard)
+                if !entry.result.isEmpty, entry.result != entry.heard {
+                    plainPane("Message", role: .result, text: entry.result)
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .accessibilityIdentifier(AccessibilityID.History.comparisonPicker)
+            } else {
+                comparison
             }
-            ComparisonSectionView(section: selectedComparisonSection) { role, text in
-                selectedRole = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : role
-                selectedText = text
+            if entry.facts != nil || entry.steps != nil {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("What happened").font(.headline)
+                    ForEach(Array((entry.facts ?? []).enumerated()), id: \.offset) { _, fact in
+                        detailRow(fact.label, fact.value)
+                    }
+                    ForEach(Array((entry.steps ?? []).enumerated()), id: \.offset) { _, step in
+                        detailRow(step.at.formatted(date: .omitted, time: .standard), step.text)
+                    }
+                }
+                .accessibilityIdentifier(AccessibilityID.History.whatHappened)
+            }
+            if entry.summary != nil, entry.cloudInvolved {
+                DisclosureSection("Compare with the AI rewrite", isExpanded: $rewriteComparisonExpanded) {
+                    comparison
+                }
+                .accessibilityIdentifier(AccessibilityID.History.rewriteComparison)
             }
         }
+    }
+
+    @ViewBuilder private var comparison: some View {
+        if comparisonStages.count > 1 {
+            Picker("", selection: $comparisonStage) {
+                ForEach(comparisonStages) { Text(comparisonStageLabel($0)).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .accessibilityIdentifier(AccessibilityID.History.comparisonPicker)
+        }
+        ComparisonSectionView(section: selectedComparisonSection, onSelect: selectComparisonText)
+    }
+
+    private func plainPane(_ title: String, role: ComparisonTextRole, text: String) -> some View {
+        ComparisonPane(title: title, role: role, spans: [.init(id: 0, text: text, kind: .unchanged)], onSelect: selectComparisonText)
+    }
+
+    @ViewBuilder private func actionOutcome(_ summary: String) -> some View {
+        Group {
+            if entry.outcome == .failed {
+                IssueText(summary, font: .title3)
+            } else {
+                Text(summary).font(.title3)
+            }
+        }
+        .accessibilityIdentifier(AccessibilityID.History.actionOutcome)
+    }
+
+    private func selectComparisonText(_ role: ComparisonTextRole, _ text: String) {
+        selectedRole = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : role
+        selectedText = text
     }
 
     private var comparisonStages: [ComparisonStage] {
@@ -794,7 +842,7 @@ private struct HistoryDetailView: View {
             for: selected, heard: entry.heard, transformed: entry.transformed, result: entry.result)
         switch selected {
         case .heardInserted:
-            let to = entry.outcome.isCommand ? "Command" : "Inserted"
+            let to = resultTitle
             return ComparisonSection(
                 id: "heard-inserted",
                 title: "Heard -> \(to)",
@@ -814,8 +862,12 @@ private struct HistoryDetailView: View {
                 title: "AI rewrite",
                 context: rewriteContext,
                 from: .init(title: "Before rewrite", role: .local, text: texts.from),
-                to: .init(title: "Inserted", role: .result, text: texts.to))
+                to: .init(title: resultTitle, role: .result, text: texts.to))
         }
+    }
+
+    private var resultTitle: String {
+        entry.outcome.isCommand ? "Command" : entry.summary == nil ? "Inserted" : "Result"
     }
 
     private var rewriteContext: String {
@@ -827,7 +879,7 @@ private struct HistoryDetailView: View {
 
     private func comparisonStageLabel(_ stage: ComparisonStage) -> String {
         switch stage {
-        case .heardInserted: "Heard -> Inserted"
+        case .heardInserted: "Heard -> \(resultTitle)"
         case .onThisMac: "On this Mac"
         case .rewrite: "AI rewrite"
         }
@@ -850,7 +902,7 @@ private struct HistoryDetailView: View {
             symbolStyle: AnyShapeStyle(.secondary),
             title: entry.modeName,
             badges: {
-                PaneBadge(outcomeLabel(entry))
+                if entry.summary == nil { PaneBadge(outcomeLabel(entry)) }
                 ForEach(entry.dataBoundaryLabels, id: \.self) { DataBoundaryBadge(label: $0) }
             },
             trailing: {
@@ -943,10 +995,8 @@ private struct HistoryDetailView: View {
                 if entry.stoppedAtLimit == true {
                     detailRow("Recording", "Stopped at the time limit")
                 }
-                if let skipped = entry.rewriteSkippedMs {
-                    detailRow("Why local was kept", HUDState.skippedLine(Double(skipped) / 1000))
-                } else if entry.outcome == .localFallback, let reason = entry.fallbackReason {
-                    detailRow("Why local was kept", reason)
+                if let why = whyLocalWasKept(entry) {
+                    detailRow("Why local was kept", why)
                 }
                 if let reason = entry.failureReason {
                     detailRow("Why it failed", reason)
@@ -970,7 +1020,7 @@ private struct HistoryDetailView: View {
             if let received = entry.received {
                 DisclosureSection("Show exactly what was received", isExpanded: $receivedExpanded) {
                     VStack(alignment: .leading, spacing: 6) {
-                        if entry.outcome == .localFallback {
+                        if showsUnusedReplyNote(entry) {
                             Text("This reply was not used — your local text was kept.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
@@ -1005,6 +1055,19 @@ private struct HistoryDetailView: View {
             Text(value).font(.caption)
         }
     }
+}
+
+func whyLocalWasKept(_ entry: HistoryEntry) -> String? {
+    if let skipped = entry.rewriteSkippedMs { return HUDState.skippedLine(Double(skipped) / 1000) }
+    return entry.keptLocalText ? entry.fallbackReason : nil
+}
+
+func showsUnusedReplyNote(_ entry: HistoryEntry) -> Bool {
+    entry.keptLocalText && entry.received != nil
+}
+
+func statusLabel(_ entry: HistoryEntry) -> String {
+    entry.summary ?? outcomeLabel(entry)
 }
 
 func outcomeLabel(_ entry: HistoryEntry) -> String {

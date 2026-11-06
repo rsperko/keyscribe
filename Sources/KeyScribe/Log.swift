@@ -7,4 +7,5 @@ enum Log {
     static let audio = Logger(subsystem: "com.keyscribe.app", category: "audio")
     static let insertion = Logger(subsystem: "com.keyscribe.app", category: "insertion")
     static let config = Logger(subsystem: "com.keyscribe.app", category: "config")
+    static let agents = Logger(subsystem: "com.keyscribe.app", category: "agents")
 }

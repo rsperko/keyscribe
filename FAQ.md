@@ -458,7 +458,9 @@ Two for everyday dictation, granted in **System Settings ▸ Privacy & Security*
 A third, **Automation**, lets KeyScribe control another app. KeyScribe itself uses it to ask your browser for
 the current tab's address for a mode that routes by website, or, with the experimental voice commands, for the
 open tabs' addresses and titles (in every window, which can include private ones) so it can switch to a saved web
-page. Those reads stay on your Mac. A script or shortcut you run by voice can also cause an Automation
+page. With the experimental Coding agent feature, it also asks your terminal (such as Ghostty, Terminal, or
+iTerm2) to select a conversation's tab when you say "open" and its name; that request is made the first time
+you open a conversation in that terminal. Those reads stay on your Mac. A script or shortcut you run by voice can also cause an Automation
 request, which may name KeyScribe, and may reuse a permission you already gave KeyScribe without asking
 again ([details](PRIVACY.md#programs-and-shortcuts-you-run-by-voice)).
 

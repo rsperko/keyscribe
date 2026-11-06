@@ -199,6 +199,44 @@ struct SettingRow<Control: View>: View {
     }
 }
 
+struct CopyableValue: View {
+    let display: String
+    let value: String
+    let what: String
+    let owner: String
+    @State private var copied = false
+
+    init(_ display: String, value: String, what: String, of owner: String) {
+        self.display = display
+        self.value = value
+        self.what = what
+        self.owner = owner
+    }
+
+    var body: some View {
+        Button {
+            copied = TextInserter.copyToClipboard(value)
+        } label: {
+            HStack(spacing: 5) {
+                Text(display).lineLimit(1).truncationMode(.middle)
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .frame(width: 12, height: 14)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(copied ? "Copied \(value)" : "Copy \(what): \(value)")
+        .accessibilityLabel("Copy \(what) for \(owner)")
+        .accessibilityValue(copied ? "Copied" : value)
+        .task(id: copied) {
+            guard copied else { return }
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            copied = false
+        }
+    }
+}
+
 // Label strings come from KeyScribeKit (HistoryEntry); this one view is shared by HUD, Mode summaries,
 // and History so data-boundary categories always render identically.
 struct DataBoundaryBadge: View {

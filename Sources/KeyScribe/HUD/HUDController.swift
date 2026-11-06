@@ -6,11 +6,21 @@ import KeyScribeKit
 @MainActor
 final class HUDModel: ObservableObject {
     var state: HUDState = .hidden {
-        didSet { if state != .hidden { shown = state } }
+        didSet {
+            switch (oldValue, state) {
+            case (.recording, .recording): break
+            case (_, .recording): recordingAdmission += 1
+            default: break
+            }
+            if state != .hidden { shown = state }
+        }
     }
+    @Published private(set) var recordingAdmission = 0
     // What the card draws. Hiding keeps the last card so the panel fades out whole; redrawing it as hidden
     // mid-fade dropped the card's background while the buttons' bezels lingered.
     @Published private(set) var shown: HUDState = .hidden
+    @Published var screenHeight: CGFloat = 800
+    @Published var listAbove = HUDAnchor.default.keepsBottomEdge
 }
 
 // Kept separate from HUDModel so only `LevelIndicator` rebuilds on each per-buffer level tick, not
@@ -45,7 +55,9 @@ final class HUDController: HUDPresenting {
     var onCancelVoiceCommandChoice: ((Int) -> Void)?
     var canCancel: (() -> Bool)?
     private var localKeyMonitor: Any?
-    private var anchor: HUDAnchor = HUDAnchorStore.load()
+    private var anchor: HUDAnchor = HUDAnchorStore.load() {
+        didSet { model.listAbove = anchor.keepsBottomEdge }
+    }
     private var moveObserver: NSObjectProtocol?
     private var snapWorkItem: DispatchWorkItem?
     private var isRepositioning = false
@@ -53,9 +65,9 @@ final class HUDController: HUDPresenting {
     func render(_ state: HUDState) {
         // Same mode/latch, only the level changed: push just the level so the card chrome isn't rebuilt
         // on every audio tick.
-        if case .recording(let mode, let level, let latched, let countdown) = state,
-           case .recording(let currentMode, _, let currentLatched, let currentCountdown) = model.state,
-           mode == currentMode, latched == currentLatched {
+        if case .recording(let mode, let level, let latched, let countdown, let agents) = state,
+           case .recording(let currentMode, _, let currentLatched, let currentCountdown, let currentAgents) = model.state,
+           mode == currentMode, latched == currentLatched, agents == currentAgents {
             levelModel.level = level
             if countdown != currentCountdown {
                 model.state = state
@@ -73,7 +85,7 @@ final class HUDController: HUDPresenting {
         guard model.state != state else { return }
         let previous = model.state
         let wasHidden: Bool = { if case .hidden = previous { return true } else { return false } }()
-        if case .recording(_, let level, _, _) = state {
+        if case .recording(_, let level, _, _, _) = state {
             levelModel.level = level
         }
         if case .choice(_, .listening, let level) = state {
@@ -120,6 +132,7 @@ final class HUDController: HUDPresenting {
 
     private func showPanelIfNeeded() {
         guard panel == nil else { return }
+        model.listAbove = anchor.keepsBottomEdge
         let hosting = NSHostingView(rootView: HUDView(
             model: model,
             level: levelModel,
@@ -170,6 +183,9 @@ final class HUDController: HUDPresenting {
         // layout pass first — `model.state` was just mutated and SwiftUI may not have reconciled the
         // hosting view yet, so a cold `fittingSize` read can return the previous (smaller) state's height
         // and clip a wrap-grown state on a state→state transition.
+        if let screen = panel.screen ?? NSScreen.main, model.screenHeight != screen.visibleFrame.height {
+            model.screenHeight = screen.visibleFrame.height
+        }
         panel.contentView?.layoutSubtreeIfNeeded()
         let fittingHeight = panel.contentView?.fittingSize.height ?? 0
         let height = max(state.contentHeight, fittingHeight)
@@ -244,6 +260,7 @@ final class HUDController: HUDPresenting {
     // correctly on any display; only the screen changes when the HUD follows the focused window.
     private func reposition(_ panel: NSPanel, to screen: NSScreen? = nil) {
         guard let screen = screen ?? panel.screen ?? NSScreen.main else { return }
+        if model.screenHeight != screen.visibleFrame.height { model.screenHeight = screen.visibleFrame.height }
         let origin = anchor.origin(in: screen.visibleFrame, size: panel.frame.size)
         // Our own setFrameOrigin posts didMove; guard so it isn't mistaken for a user drag. Cleared a
         // runloop tick later since the notification is delivered asynchronously.
@@ -330,6 +347,26 @@ private final class KeyablePanel: NSPanel {
 
 // A minimal flow layout: wraps to a new row when the next subview would exceed the proposed width. Used
 // for the HUD's data-boundary badges so they wrap instead of clipping the fixed-width panel.
+private struct VerticalStack: Layout {
+    var spacing: CGFloat
+    var reversed: Bool
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(ProposedViewSize(width: proposal.width, height: nil)) }
+        let height = sizes.map(\.height).reduce(0, +) + spacing * CGFloat(max(sizes.count - 1, 0))
+        return CGSize(width: proposal.width ?? sizes.map(\.width).max() ?? 0, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for subview in reversed ? Array(subviews.reversed()) : Array(subviews) {
+            let size = subview.sizeThatFits(ProposedViewSize(width: bounds.width, height: nil))
+            subview.place(at: CGPoint(x: bounds.minX, y: y), proposal: ProposedViewSize(width: bounds.width, height: size.height))
+            y += size.height + spacing
+        }
+    }
+}
+
 private struct WrapLayout: Layout {
     var spacing: CGFloat = 4
 
@@ -467,29 +504,98 @@ private struct HUDView: View {
 
     private var standardBody: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 10) {
-                icon
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(primary).font(.system(size: 13, weight: .semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let secondary { secondaryText(secondary) }
-                    if !model.shown.dataBoundaryBadges.isEmpty {
-                        // Wrap to as many rows as needed so badges never clip; each is `.fixedSize()` so a
-                        // label never ellipsizes.
-                        WrapLayout(spacing: 4) {
-                            ForEach(model.shown.dataBoundaryBadges, id: \.self) {
-                                DataBoundaryBadge(label: $0).fixedSize()
-                            }
-                        }
-                    }
+            if let agents = model.shown.agentRoster {
+                VerticalStack(spacing: 8, reversed: model.listAbove) {
+                    standardHeader.frame(minHeight: HUDState.agentHeaderHeight)
+                    agentList(agents)
                 }
-                Spacer(minLength: 0)
+            } else {
+                standardHeader
             }
             if hasAction {
                 HStack(spacing: 8) { actionButtons }
                     .buttonStyle(HUDActionButtonStyle())
             }
         }
+    }
+
+    private var standardHeader: some View {
+        HStack(spacing: 10) {
+            icon
+            VStack(alignment: .leading, spacing: 2) {
+                Text(primary).font(.system(size: 13, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                if let secondary { secondaryText(secondary) }
+                if !model.shown.dataBoundaryBadges.isEmpty {
+                    // Wrap to as many rows as needed so badges never clip; each is `.fixedSize()` so a
+                    // label never ellipsizes.
+                    WrapLayout(spacing: 4) {
+                        ForEach(model.shown.dataBoundaryBadges, id: \.self) {
+                            DataBoundaryBadge(label: $0).fixedSize()
+                        }
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func agentList(_ agents: AgentRoster) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let height = HUDState.agentListHeight(rows: agents.rows.count, screenHeight: model.screenHeight) {
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical) { agentRows(agents) }
+                        .frame(height: height)
+                        .onChange(of: model.recordingAdmission, initial: true) { _, _ in
+                            if let current = agents.rows.first(where: \.current) { proxy.scrollTo(current.id, anchor: .center) }
+                        }
+                }
+            } else if !agents.rows.isEmpty {
+                agentRows(agents)
+            }
+            if let hint = model.shown.agentRosterHint {
+                Text(hint).font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func agentRows(_ agents: AgentRoster) -> some View {
+        VStack(alignment: .leading, spacing: HUDState.agentRowStep - HUDState.agentRowHeight) {
+            ForEach(agents.rows, id: \.id) { agentRow($0).id($0.id) }
+        }
+    }
+
+    private func agentRow(_ row: AgentRoster.Row) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(row.number)")
+                .font(.system(size: 13, weight: .semibold).monospacedDigit())
+                .frame(minWidth: 14, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(row.name).font(.system(size: 13, weight: row.current ? .semibold : .regular))
+                    .lineLimit(1).truncationMode(.middle)
+                HStack(spacing: 6) {
+                    Text(row.detail)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1).truncationMode(.middle)
+                    if row.current {
+                        Text("Current").fontWeight(.medium).fixedSize()
+                    }
+                }
+                .font(.system(size: 11))
+            }
+            Spacer(minLength: 8)
+            Text(row.state).font(.system(size: 11))
+                .foregroundStyle(row.available ? AnyShapeStyle(.secondary) : AnyShapeStyle(.orange))
+                .fixedSize()
+        }
+        .padding(.horizontal, 6)
+        .frame(maxWidth: .infinity, minHeight: HUDState.agentRowHeight, maxHeight: HUDState.agentRowHeight, alignment: .leading)
+        .background(row.current ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(HUDState.spoken(row))
+        .accessibilityIdentifier(AccessibilityID.HUD.agentRow)
     }
 
     private var hasAction: Bool {

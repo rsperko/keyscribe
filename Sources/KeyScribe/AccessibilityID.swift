@@ -295,6 +295,25 @@ enum AccessibilityID {
             static func scriptEdit(_ scriptKey: String) -> String { "mode.voiceCommands.script.edit.\(scriptKey)" }
         }
 
+        enum CodingAgents {
+            static let connectorStatus = "mode.codingAgents.connectorStatus"
+            static let currentRecipient = "mode.codingAgents.currentRecipient"
+            static let summary = "mode.codingAgents.summary"
+            static let install = "mode.codingAgents.install"
+            static let update = "mode.codingAgents.update"
+            static let remove = "mode.codingAgents.remove"
+            static let conversation = "mode.codingAgents.conversation"
+            static let copyDirectory = "mode.codingAgents.copyDirectory"
+            static let rename = "mode.codingAgents.rename"
+            static let renameProblem = "mode.codingAgents.renameProblem"
+            static let namesProblem = "mode.codingAgents.namesProblem"
+            static let reloadNames = "mode.codingAgents.reloadNames"
+            static let showNamesFile = "mode.codingAgents.showNamesFile"
+            static let renameName = "mode.codingAgents.renameName"
+            static let renameSave = "mode.codingAgents.renameSave"
+            static let renameCancel = "mode.codingAgents.renameCancel"
+        }
+
         enum Editor {
             static let fileNotice = "mode.editor.fileNotice"
             static let revealFile = "mode.editor.revealFile"
@@ -416,6 +435,7 @@ enum AccessibilityID {
         static let repairAction = "hud.action.repair"
         static let choiceRow = "hud.choice.row"
         static let choiceCancel = "hud.choice.cancel"
+        static let agentRow = "hud.agent.row"
     }
 
     enum History {
@@ -424,6 +444,9 @@ enum AccessibilityID {
         static let search = "history.search"
         static let export = "history.action.export"
         static let stagePicker = "history.detail.stagePicker"
+        static let whatHappened = "history.detail.whatHappened"
+        static let actionOutcome = "history.detail.actionOutcome"
+        static let rewriteComparison = "history.detail.rewriteComparison"
         static let comparisonPicker = "history.detail.comparisonPicker"
         static func comparisonPane(_ role: String) -> String { "history.detail.comparison.\(role)" }
         static let promptDisclosure = "history.detail.promptDisclosure"
@@ -546,6 +569,12 @@ enum AccessibilityID {
         Settings.AI.Editor.delete,
         Settings.Advanced.revealConfig, Settings.Advanced.reloadConfig, Settings.Advanced.resetHUDPosition,
         Settings.Advanced.eraseAllData, Settings.Advanced.eraseConfirmConfirm, Settings.Advanced.eraseConfirmCancel,
+        Mode.CodingAgents.connectorStatus, Mode.CodingAgents.currentRecipient, Mode.CodingAgents.summary,
+        Mode.CodingAgents.install, Mode.CodingAgents.update, Mode.CodingAgents.remove,
+        Mode.CodingAgents.conversation, Mode.CodingAgents.rename, Mode.CodingAgents.copyDirectory,
+        Mode.CodingAgents.renameProblem, Mode.CodingAgents.namesProblem, Mode.CodingAgents.reloadNames,
+        Mode.CodingAgents.showNamesFile, Mode.CodingAgents.renameName, Mode.CodingAgents.renameSave,
+        Mode.CodingAgents.renameCancel,
         Mode.List.list, Mode.List.add, Mode.List.addBlank, Mode.List.chooserCancel,
         Mode.List.deleteConfirmConfirm, Mode.List.deleteConfirmCancel,
         Mode.List.moveShortcutConfirm, Mode.List.moveShortcutCancel, Mode.List.moveShortcutUndo,
@@ -579,7 +608,7 @@ enum AccessibilityID {
         FirstRun.AI.connectionEditor, FirstRun.AI.connect, FirstRun.AI.skip, FirstRun.AI.offerConnect,
         FirstRun.Playground.field, FirstRun.Playground.next, FirstRun.Playground.done,
         HUD.panel, HUD.insertWithoutRewriting, HUD.pasteLast, HUD.repairAction,
-        History.list, History.search, History.export, History.stagePicker, History.comparisonPicker,
+        History.list, History.search, History.export, History.stagePicker, History.comparisonPicker, History.whatHappened, History.actionOutcome, History.rewriteComparison,
         History.promptDisclosure, History.receivedDisclosure, History.copyResult, History.pasteResult, History.copyHeard, History.delete,
         History.manageVocabulary, History.createReplacement, History.addToDictionary,
         History.retentionConfirm, History.retentionCancel,

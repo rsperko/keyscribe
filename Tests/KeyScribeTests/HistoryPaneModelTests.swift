@@ -186,6 +186,30 @@ struct HistoryPaneModelTests {
         #expect(outcomeLabel(skipped) == "Rewrite skipped")
     }
 
+    @Test func aFailedDeliveryStillExplainsWhyTheRewriteReplyWasNotUsed() {
+        var refused = entry("run the tests")
+        refused.outcome = .failed
+        refused.failureReason = "Not sent: keyscribe refused the message"
+        refused.fallbackReason = "The reply dropped a protected token"
+        refused.received = "garbled"
+        #expect(whyLocalWasKept(refused) == "The reply dropped a protected token")
+        #expect(showsUnusedReplyNote(refused))
+    }
+
+    @Test func aDeliveredRewriteShowsNoLocalTextExplanation() {
+        var rewritten = entry("Run the tests.")
+        rewritten.received = "Run the tests."
+        #expect(whyLocalWasKept(rewritten) == nil)
+        #expect(!showsUnusedReplyNote(rewritten))
+    }
+
+    @Test func aSkippedRewriteExplainsTheSkipEvenAfterAFailedDelivery() {
+        var skipped = entry("run the tests")
+        skipped.outcome = .failed
+        skipped.rewriteSkippedMs = 2_000
+        #expect(whyLocalWasKept(skipped) == HUDState.skippedLine(2))
+    }
+
     private func entry(_ result: String) -> HistoryEntry {
         HistoryEntry(
             timestamp: Date(timeIntervalSince1970: 1_000_000), modeName: "Plain Dictation",

@@ -244,6 +244,7 @@ not to its label.
 |---|---|---|---|
 | Ready (one-shot mode picked from the menu) | Mode name | “Next dictation” | None; replaced when recording starts |
 | Recording | Mode name + a red level circle (halo + dot; Reduce Motion: intensity-only dot) | “Listening”, or “Listening — tap [trigger] again to stop” for a latched tap-to-toggle recording | Stop if tap-to-toggle |
+| Recording (Coding agent mode, experimental) | “To [name]” for the frozen recipient, or “No recipient yet”, + the level circle | “Listening” as above, then the open sessions as numbered rows (name over agent and project, live state at the trailing edge, the recipient highlighted and marked Current), then one line saying where the recipient came from and how to name another | As Recording; rows are not clickable while recording |
 | Recording, near the limit | Same, plus an orange ring around the level circle that drains to empty | “Stops in 0:SS”, counting down | As Recording |
 | Transcribing | “Transcribing” | Mode name | Cancel when safe |
 | Voice command opening an app | Mode name | “Opening [app]…” only while “open” starts an app, then “Looking in [app]…” while its tabs or sidebar fill; “switch to” never starts one, so never shows it | None; shown only once the command is acting, so it is not cancellable and does not take key focus away from the app being opened |
@@ -284,6 +285,114 @@ confirmed saved — this one write waits for the disk rather than being queued l
 History write, so a failed save never sends the user looking for an entry that does not exist. A take
 stopped by the limit never presses the mode's Return, including a take that is only a spoken Return
 command; the latter reports “Stopped at the [limit] limit — Return not pressed”.
+
+**Coding agent session list.** A recording in the Coding agent mode lists the open sessions so the user
+can address one. Its displayed and spoken name is the user's KeyScribe override, else the agent's explicit
+conversation name, else a name generated from the project folder. Names use the same normalization as
+Rename. Duplicate names gain a distinguishing word; an arriving native name never steals an existing
+handle. Native names that cannot be addressed under the reserved row grammar fall back to the project.
+A native rename updates an unaliased conversation for the next take; a KeyScribe override keeps winning.
+Automatically generated titles never rename the destination. For Claude Code, custom names are kept
+separate from generated titles, and a fresh registry rename can supersede the last connector report.
+Each row's second line is the agent's title for the conversation, when it differs from the
+name (one the user gave it, else the one the agent generated), and the project folder; the agent is named only when the list mixes agents. A connector that can
+show it labels its own session with the same name (“KeyScribe: docs” on Claude Code's status line), so the
+terminal on screen can be matched to its row; the label is display only and never renames the agent's
+conversation. The user can address a session by starting the take with its name or its number (“docs, run the tests”, “session two …”);
+a leading “tell” is optional, and “session” may come before a name as it does before a number (“session docs,
+run the tests”, “open session docs”) — a sentence about sessions, such as “Session timeout is too short”, is
+still a message, and a conversation whose own name starts with “session” matches whole first. A row number always needs “session”, and “session two” is always row two,
+even beside a conversation named two. A name made only of number words — the words a row number accepts,
+including “to”, “too” and “for” — is reached only with “tell” or “open”, because a take that starts with a
+number is ordinary prose: “One more thing: …”, “For the record, …” and “Two tests failed” go whole to the
+highlighted recipient. A number never falls back to a row: “tell two …” or “open two” with no conversation
+named two is held with “No conversation named “two””. A name with other words is matched without “tell”,
+longest first, so with conversations named two and two bugs, “two bugs, run tests” addresses two bugs. That
+has a deliberate cost: “Two bugs are left in the parser” is also an address to two bugs, with “are left in
+the parser” as its message, just as “Backend is failing” addresses backend. No guess is made about whether
+the name was meant; the session list shows the names, and renaming one avoids the clash. Names match the way Voice Commands targets do (`SpokenNameMatch`): the
+whole name, a run of its words, or its words in any order, so “tell jk boots …” and “tell boots jk …” both
+reach `foo-jk-boots-manager-1234`. The longest leading run of words that fits a name is the address, and a
+comma or colon ends it. Each of the name's words counts once, so “tell build build the project” sends “build the
+project”. Without “tell”, part of a name needs at least two of its words, because a single
+word at the start of a sentence is usually just prose. A take that starts with what sounds like an address
+but does not match is held rather than sent to the highlighted recipient: “session to …” (a misheard
+row) and a long word one sound away from a name (“keyscrib …”). One exception keeps the take: when that
+misheard word sounds like the highlighted recipient itself, it is sent there, since both readings agree.
+Without “tell” the whole take is sent, misheard word included; after “tell” the misheard address is removed
+like any other. Otherwise the HUD says which name it sounded like.
+
+An address that matched is always removed from the message, and a name that was said whole is never traded
+for a longer one it sounds like: “tell keyscribe glue the adapters together” sends “glue the adapters
+together” to keyscribe even when keyscribe blue is current. Short words are left alone without
+“tell”, so “build the project” beside a conversation named `builds` is still a message. Words that fit several conversations at the winning address length and match tier go to the
+first conversation alphabetically by its displayed name, whatever order the session list shows. The
+current recipient does not override that order. A whole-name match wins over a looser match at the same
+address length. The receipt names the selected conversation, which becomes current; no choice is required
+for an accepted tie. A first match that is no longer available is held, never replaced by the next one. The list is not a question: a take that does not start with a name or
+number from the list sends to the highlighted recipient.
+A take that is only a bring-forward word and an address opens that conversation: the words Voice Commands
+uses to bring something forward (`VoiceCommandGrammar.focusVerbs`, such as “open”, “switch to”, “go to”), an
+optional “the”, then a name or number that meets the same evidence as an address without “tell” (“open
+docs”, “switch to session two”). It makes the conversation current, sends nothing, and brings its terminal
+forward. While it looks, the HUD says so (“Opening docs…”). It follows the agent's processes outward and
+selects each layer it passes through: the multiplexer pane showing the agent (herdr or tmux, for example — the
+`PaneRoute`s in `TerminalRoutes`), then the terminal tab and split holding that pane (or holding the agent directly),
+then the terminal app. Each multiplexer is one `PaneRoute` and each terminal app one `TerminalRoute`; both
+return ordered actions, so a terminal that must come forward before it can select a tab says so itself. A
+terminal that admits only its own processes (cmux) is selected by the agent's connector instead: KeyScribe
+asks it to focus its own surface, and only a connector that announced it can is asked. An older connector
+says how to get there: “Brought cmux forward. Update the Claude Code connector in Settings, then run
+/reload-plugins in docs to open its tab”. Every layer is found by something stable — a pane id, a tty, or the terminal's own
+session link — never by matching a title, so Open never guesses a pane (`TerminalRoutes`). A terminal with
+no route for its tabs, or one Open had nothing to look for (no session link, no tty), only comes forward and
+says so (“Select docs’s terminal yourself”). The first Open into a scripted terminal asks for Automation
+permission for that terminal, so a user who never says Open never sees the prompt; while macOS asks, the HUD
+says what the access is for (“Allow access to Ghostty to open the tab for docs”).
+The receipt stays short when it worked: “Opened docs” only when every layer confirmed its selection, and
+“Asked Warp to show docs” when the terminal accepted a session link but cannot report which tab it chose.
+Anything less says what came forward, what is still missing, and who the recipient now is — “Brought
+Ghostty forward. Couldn’t find docs’s tab. Your recipient is docs”. The missing part names the layer that
+fell short: the terminal’s tab, a multiplexer’s pane (“Couldn’t select docs’s herdr pane”, or “Couldn’t
+confirm docs’s Zellij pane” when a session open in several windows cannot say which one moved), or a
+terminal with no tab route, where the next step is the user’s (“Select docs’s terminal yourself”). These
+stay up long enough to read. A multiplexer command counts only when it succeeded, or when its own answer
+says the pane was already selected — never on an exit status another failure shares. When Automation for that terminal was refused, the HUD is an error with **Open
+Automation Settings**, held long enough to use. Cancelling the take stops every pane, tab, or window change
+KeyScribe has not started. A request already handed to a connector is best effort: it is withdrawn if the
+connector has not collected it, and it carries an expiry, so a connector that collects it late (or after a
+reconnect) refuses it instead of moving the terminal seconds later.
+Anything after the address makes the take a message, so “open the readme and fix the typo” is sent as said,
+and “open two files” or “open the readme” stays a message whenever it does not name a conversation.
+A misheard name with nothing after it follows the address rule: held, unless it sounds like the highlighted
+recipient, which is then opened. Words that fit several conversations choose one as an address does.
+Settings has no Open or Talk to button: Settings configures the integration, and choosing or opening a
+conversation belongs where the user is already working.
+
+The list opens with the current recipient first, then the sessions waiting for input (approval, an answer,
+or an open dialog), then the other sessions; within each group the most recently used comes first, and
+sessions never used since launch follow alphabetically (`AgentRoster.recordingOrder`). A session is used
+when a take is sent to it, when it is chosen or opened by voice, or when the user submits a prompt in it,
+which also makes it the current recipient; a prompt sent from another device through Claude Code's Remote
+Control counts the same way. Slash commands and `!` shell commands never reach the connector, so they are not
+use: they neither move the recipient nor reorder the list, and they do not hold a queued take for review. Settings keeps its list alphabetical: it is an inventory, not
+an addressing surface. The recipient row is highlighted across the whole row with a subtle accent background and a semibold name. A separate
+**Current** label stays visible even when the conversation title truncates; Ready, Working and other
+live states remain at the trailing edge. The list is frozen when recording starts — numbers,
+order, and names never change for that take, new sessions do not join it, and a session that ended keeps
+its row marked Ended rather than handing its number to a neighbour. Live states update in place. A state
+that means the session cannot receive (Not connected, Disconnected, Ended) is orange, and the
+word itself says so, so colour is never the only signal. The recipient line says where it came from and never claims the screen identified a
+conversation it did not: “The conversation on screen”, “The last conversation you used”, or “Set by
+this mode” — followed by a real example of both address forms taken from the list (“docs …” or
+“session 4 …”; a bare “four” starts the message, and “tell four” reaches only a conversation named four). With no recipient, nothing is highlighted. A list
+taller than the screen allows scrolls to the recipient each time recording starts, and keeps its numbers.
+Live status changes do not scroll the list again. A session changing state
+during the take is not announced again to VoiceOver. In the usual layout the level circle and title stay where
+every other recording shows them: the panel keeps its usual width, and when the HUD sits at the bottom of the
+screen the list opens above the header instead of below it. A recipient name long enough to wrap still grows
+the header, and a HUD at the middle of a screen edge grows both ways, so its header moves. Wherever the list
+sits, VoiceOver reaches the header first. Ordinary dictation never shows the list.
 
 **Voice command choice.** The list interrupts the user, so it is used sparingly (`principles.md` §4,
 “Asking is a last resort”): navigation settles ties it can order by itself, and the list appears only when
@@ -1275,6 +1384,60 @@ Its sections are, in order:
    default. Its help says saved commands include what was said, what ran (including input), and any
    error message, which may include text from a script or shortcut.
 
+**Coding agent** (experimental, shown only while its flag is on) puts an always-visible
+**Conversations** section before connector setup. One block shows **Current recipient: {name}** or
+**No current recipient**, with brief guidance underneath. With no recipient and a connected conversation,
+the example uses a real name and the mode's first recording shortcut (“Use Fn (Globe) and say …”, which reads
+right whether the shortcut is held or tapped); when none is assigned it says to
+start recording without inventing a shortcut. With a current recipient it explains that subsequent
+instructions go there and another name switches the recipient. Compact rows follow, each its own native row of the grouped form (native insets and separators). Rows carry no numbers: Settings is an inventory, not
+an addressing surface, so row numbers appear only on the recording HUD, where “session two” is said and the
+numbering is frozen for the take. Each row is identified to assistive technology by its conversation name.
+The first line holds the name, Current, the text-only live state and a small, native bordered **Rename…**
+button, visibly distinct from the status labels. The agent type
+appears beside the state only when the list contains different agent types. The second line shows the
+directory on the left and the terminal/multiplexer on the right. The directory abbreviates the home folder
+with `~`, truncates in the middle when needed, and exposes its full path in a tooltip. Clicking it copies
+the full, unabridged path; it is a `CopyableValue`, whose copy icon briefly becomes a checkmark without moving the row. The directory
+is a keyboard-accessible button named for its conversation. There is no action menu, details popover,
+session id or process id in these rows. Conversation titles remain available to the recording HUD:
+the title is the one the user gave the conversation, reported by the connector, else the title
+Claude Code generated, read best effort from the end of the session's own transcript (only the title is kept,
+and it is never logged); a brand-new conversation has neither yet. An empty
+list explains how to open a conversation instead of inventing a name to say. Choosing or opening a
+conversation is done by voice (see the Coding agent session list in §5), and
+the current one is marked Current. The guidance names only what can be said. The list remains available
+while connector setup is unavailable, so a connected conversation never disappears behind installation
+status or a collapsed disclosure.
+
+Connector setup warns that open sessions still receive instructions only after removal is confirmed
+and at least one session remains connected. Checking installation does not imply that the connector
+was removed.
+
+**Rename…** opens a compact sheet, focused on the existing name, with a live spoken example. When fewer of
+the name's leading words already reach only this conversation, the example offers them as well (“Say “fix
+authentication retries, run the unit tests.” “fix authentication, …” also works.”): the shorter form is
+checked against the same matcher a take uses, is never offered when another conversation shares it, and never
+ends on a connecting word such as “the”. The available
+conversation title and abbreviated directory provide recognition context above the field, with their full
+text available on hover and selectable for copying. Empty,
+reserved and already-used names are explained beside the field before submission. A save failure
+keeps the sheet and draft open for correction or retry, with the diagnostic reason under Technical
+details; Cancel makes no change. Renaming changes the
+name used in KeyScribe and leaves Claude Code's own title alone. A chosen name stays with its session
+across restarts of either app and is held for it while it is closed. The name is saved before it takes
+effect. It overrides subsequent native renames; without a KeyScribe override the native conversation
+name is used automatically.
+
+If saved names cannot be loaded, Conversations explains what still works and offers **Try Again**.
+The diagnostic reason and **Show in Finder** live under **Details**; removing the file is explicitly
+described as forgetting the chosen names. Rename is unavailable, and a take starting with “tell” that
+is not a row number (“tell session 2 …”) is held instead of sent, including prose such as “tell me …”.
+A take starting with a name but no “tell” cannot be recognized and goes to the current conversation.
+The HUD offers row numbers while names are unavailable, and the Settings example points to the number
+shown while recording. Choosing or renaming a
+conversation never retargets a take already recording: its list and recipient stay frozen.
+
 When privacy is enabled, context controls remain visible but disabled with the exact reason:
 `Privacy mode sends only the redacted dictation. Context is off.` The user should not have to
 wonder why a selection/context option disappeared.
@@ -1375,6 +1538,8 @@ The list is grouped by day and supports search over locally stored text. Each ro
 - time and mode;
 - outcome (`Inserted`, `Copied`, `Local fallback`, `Rewrite skipped`, or `Failed`; a voice command reads `Command`,
   `Command failed`, `Command started`, `Needs a choice`, or `Choice cancelled`);
+  an entry that recorded its own summary shows that instead, so a Coding agent take reads `Sent to backend`,
+  `Queued for backend`, `Opened backend`, or why nothing was sent, never a generic `Inserted`;
 - data-boundary badges relevant to that dictation;
 - no audio indicator because audio is never stored.
 
@@ -1393,7 +1558,7 @@ section. Details reveal the exact connection/model when used, where its reasonin
 enabled, which context categories were sent, and the raw cloud exchange as sibling disclosures:
 **Show exactly what was sent** (the stored prompt) and **Show exactly what was received** (the
 provider's reply, verbatim — before any output enforcement, so model misbehavior stays visible
-rather than silently corrected). On a local-fallback entry the received view notes the reply was
+rather than silently corrected). Whenever local text was kept, even if delivery later failed, the received view notes the reply was
 not used. Redaction maps are never shown or persisted.
 
 A **voice command** entry reuses the same detail: the comparison reads **Heard → Command**, where
@@ -1415,6 +1580,20 @@ command. Say …” guidance there while the HUD shows only “Command not recog
 Voice Commands vocabulary, not the global one, since that is what reads commands. While voice commands
 are turned off, a command entry shows no corrections, since that vocabulary cannot be seen or edited. The Voice Commands
 editor carries its own **Do not save this mode in history** toggle.
+
+A **Coding agent** entry is an attempted action, not a text transformation, so every one of them (Open,
+choosing a recipient, a sent, queued, kept or refused message) uses one presentation instead of the
+comparison. Its Result view leads with the outcome in large type, red when it failed (*Sent to backend*,
+*Opened backend*, *Not sent: start with a conversation’s name*). The header carries no outcome badge or
+second copy of it. Below it come what was heard, on its own and selectable for corrections, then the
+**Message** that was sent or kept when it differs from what was heard. **What happened** follows:
+labelled lines recorded when the take happened (the command, the spoken address, the conversation, or
+*None resolved*, and how it was chosen, the default recipient, the delivery setting), then, once a queued
+or uncertain message settles, a timed line for each result in order. Those lines are as they were at the
+time, so a later rename or reorder does not change them. When an AI rewrite ran, **Compare with the AI
+rewrite** offers the usual comparison, collapsed, with the final text called **Result**. A message whose
+rewrite fell back or was skipped stays **Local fallback** or **Rewrite skipped** after it is sent. The
+text and Markdown exports carry the same summary and lines, and say why local text was kept.
 
 Correction actions are directly beside the relevant text:
 

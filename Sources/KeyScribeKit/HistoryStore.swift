@@ -128,6 +128,23 @@ public struct HistoryStore: Sendable {
         return ([derived] + dayFiles().filter { $0 != derived }).contains { rewrite(entry, with: replacement, inFile: $0) }
     }
 
+    @discardableResult
+    public func update(id: String, near date: Date, _ change: (HistoryEntry) -> HistoryEntry) -> Bool {
+        let derived = "\(HistoryStore.todayString(date: date)).jsonl"
+        return ([derived] + dayFiles().filter { $0 != derived }).contains { file in
+            Self.mutationQueue.sync {
+                let url = dir.appendingPathComponent(file)
+                guard let content = try? String(contentsOf: url, encoding: .utf8) else { return false }
+                var lines = content.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+                guard let index = lines.firstIndex(where: { (try? HistoryEntry(jsonLine: $0))?.id == id }),
+                      let current = try? HistoryEntry(jsonLine: lines[index]),
+                      let line = try? change(current).jsonLine() else { return false }
+                lines[index] = line
+                return (try? Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)) != nil
+            }
+        }
+    }
+
     private func rewrite(_ entry: HistoryEntry, with replacement: HistoryEntry, inFile file: String) -> Bool {
         Self.mutationQueue.sync {
             let url = dir.appendingPathComponent(file)

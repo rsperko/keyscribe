@@ -31,8 +31,8 @@ struct AgentRecipientTests {
         #expect(initial(.focused) == nil)
     }
 
-    private func resolve(_ text: String, frozen: AgentRecipient.Frozen? = .init(id: "a", source: .focused), rows: [String] = ["a", "b", "c"], reply: String? = nil) -> AgentRecipient.Resolution {
-        AgentRecipient.resolve(AgentAddress.parse(text, names: Array(names.keys)), frozen: frozen, rows: rows, names: names, replyTo: reply)
+    private func resolve(_ text: String, frozen: AgentRecipient.Frozen? = .init(id: "a", source: .focused), rows: [String] = ["a", "b", "c"]) -> AgentRecipient.Resolution {
+        AgentRecipient.resolve(AgentAddress.parse(text, names: Array(names.keys)), frozen: frozen, rows: rows, names: names)
     }
 
     @Test func anUnaddressedMessageGoesToTheFrozenRecipient() {
@@ -62,19 +62,88 @@ struct AgentRecipientTests {
         #expect(resolve("Tell session to run the tests") == .ask(body: "run the tests", reason: .unknownName("session to")))
     }
 
+    @Test(arguments: ["a", "b", "c", nil] as [String?])
+    func equallyStrongMatchesChooseTheAlphabeticallyFirstNameRegardlessOfTheCurrentRecipient(current: String?) {
+        let names = ["web blue": "a", "api blue": "b", "backend": "c"]
+        let address = AgentAddress.parse("Tell blue, fix it", names: ["web blue", "api blue", "backend"])
+        let resolution = AgentRecipient.resolve(
+            address, frozen: current.map { .init(id: $0, source: .current) },
+            rows: ["a", "b", "c"], names: names)
+        #expect(resolution == .deliver(id: "b", body: "fix it", source: .spoken))
+        #expect(resolution.makesCurrent == "b")
+    }
+
+    @Test func alphabeticalTieBreakingDoesNotSkipAnUnavailableFirstMatch() {
+        let address = AgentAddress.ambiguous(spoken: "blue", names: ["web blue", "api blue"], body: "fix it")
+        #expect(AgentRecipient.resolve(address, frozen: nil, rows: ["a"], names: ["web blue": "a"])
+            == .ask(body: "fix it", reason: .ambiguousName("blue", matches: ["web blue", "api blue"])))
+    }
+
+    @Test func anExactNameBeatsAnAlphabeticallyEarlierLooseMatch() {
+        let names = ["alpha blue": "a", "blue": "b"]
+        let address = AgentAddress.parse("Tell blue, fix it", names: Array(names.keys))
+        #expect(AgentRecipient.resolve(address, frozen: nil, rows: ["a", "b"], names: names)
+            == .deliver(id: "b", body: "fix it", source: .spoken))
+    }
+
+    @Test func anUntoldNearMissOfTheFrozenRecipientSendsTheWholeTake() {
+        let address = AgentAddress.parse("Update the dependencies", names: ["updates"])
+        let resolution = AgentRecipient.resolve(address, frozen: .init(id: "u", source: .current), rows: ["u"], names: ["updates": "u"])
+        #expect(resolution == .deliver(id: "u", body: "Update the dependencies", source: .current))
+    }
+
+    @Test func aToldNearMissOfTheFrozenRecipientSendsTheMessage() {
+        let address = AgentAddress.parse("Tell update to bump the dependencies", names: ["updates"])
+        let resolution = AgentRecipient.resolve(address, frozen: .init(id: "u", source: .current), rows: ["u"], names: ["updates": "u"])
+        #expect(resolution == .deliver(id: "u", body: "to bump the dependencies", source: .spoken))
+    }
+
+    @Test func aNameThatWasSaidIsNotReplacedByTheCurrentRecipientItSoundsLike() {
+        #expect(resolve("Tell keyscribe glue the adapters together", frozen: .init(id: "b", source: .current))
+            == .deliver(id: "a", body: "glue the adapters together", source: .spoken))
+    }
+
+    @Test func aNearMissOfAnotherConversationAsksAndSaysWhichItSoundedLike() {
+        let address = AgentAddress.parse("Update the dependencies", names: ["updates", "backend"])
+        let resolution = AgentRecipient.resolve(
+            address, frozen: .init(id: "c", source: .current), rows: ["u", "c"], names: ["updates": "u", "backend": "c"])
+        #expect(resolution == .ask(body: "the dependencies", reason: .soundsLike("update", name: "updates")))
+    }
+
     @Test func anAddressWithoutAMessageSelectsWithoutSending() {
         let resolution = resolve("Tell backend.")
         #expect(resolution == .select(id: "c"))
         #expect(resolution.makesCurrent == "c")
     }
 
-    @Test func replyGoesToTheNoticesConversationOnlyWhileThereIsOne() {
-        #expect(resolve("Reply, use approach B.", reply: "b") == .deliver(id: "b", body: "use approach B.", source: .reply))
-        #expect(resolve("Reply, use approach B.") == .ask(body: "use approach B.", reason: .noReply))
+    @Test func openingAConversationMakesItCurrentWithoutSending() {
+        let resolution = resolve("Open backend.")
+        #expect(resolution == .open(id: "c"))
+        #expect(resolution.makesCurrent == "c")
+        #expect(resolve("Switch to session two", rows: ["c", "b", "a"]) == .open(id: "b"))
+    }
+
+    @Test func anOpenThatCannotResolveAsksAndSendsNothing() {
+        #expect(resolve("Open session five") == .ask(body: "", reason: .noSuchRow(5)))
+        #expect(resolve("Open session to") == .ask(body: "", reason: .unknownName("session to")))
+        #expect(resolve("Open backand") == .ask(body: "", reason: .soundsLike("backand", name: "backend")))
+    }
+
+    @Test func anOpenThatSoundsLikeTheFrozenRecipientOpensIt() {
+        #expect(resolve("Open backand", frozen: .init(id: "c", source: .current)) == .open(id: "c"))
+    }
+
+    @Test func anOpenVerbFollowedByAnInstructionIsAMessageForTheRecipient() {
+        #expect(resolve("Open the readme.") == .deliver(id: "a", body: "Open the readme.", source: .focused))
+    }
+
+    @Test func openingANumberNoConversationHasAsksAndNeverPicksThatRow() {
+        #expect(resolve("Open two.") == .ask(body: "", reason: .unknownName("two")))
+        #expect(resolve("Tell two, run tests.") == .ask(body: "run tests.", reason: .unknownName("two")))
     }
 
     @Test func onlyAnExplicitAddressMovesTheCurrentRecipient() {
         #expect(resolve("Run the unit tests.").makesCurrent == nil)
-        #expect(resolve("Reply, use approach B.", reply: "b").makesCurrent == "b")
+        #expect(resolve("Tell backend, run the tests.").makesCurrent == "c")
     }
 }

@@ -38,6 +38,10 @@ final class ConfigCache {
         didSet { if voiceCommandsEnabled != oldValue { invalidate() } }
     }
 
+    var codingAgentsEnabled = false {
+        didSet { if codingAgentsEnabled != oldValue { invalidate() } }
+    }
+
     var findsInAppsEnabled = false
 
     init(supportDir: URL) {
@@ -179,7 +183,7 @@ final class ConfigCache {
                 error: failure.error, recovery: failure.usedLastKnownGood ? .previousVersion : .ignored)
             if !loadFailures.contains(issue) { loadFailures.append(issue) }
         }
-        let unguarded = Mode.visible(result.modes, voiceCommands: voiceCommandsEnabled)
+        let unguarded = Mode.visible(result.modes, voiceCommands: voiceCommandsEnabled, codingAgents: codingAgentsEnabled)
         let visible = VoiceCommandTriggers.guarded(unguarded)
         voiceCommandsShutOutCache = VoiceCommandTriggers.isShutOut(unguarded)
         modesCache = visible

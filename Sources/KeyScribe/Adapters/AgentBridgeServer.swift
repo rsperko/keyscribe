@@ -168,9 +168,9 @@ final class AgentBridgeServer: @unchecked Sendable {
             commands.hello(session: hello.session, instance: hello.instance, at: Date())
             releaseOthers(session: hello.session, current: hello.instance)
             flush(session: hello.session)
-        case .ack(let request), .submitted(let request, _), .refused(let request, _):
+        case .ack(let request), .submitted(let request, _), .refused(let request, _), .focused(let request):
             commands.ack(request)
-        case .typed, .turnStarted, .turnComplete, .undelivered:
+        case .typed, .turnStarted, .turnComplete, .undelivered, .title:
             break
         }
         respond(fd, status: 200, body: Data(#"{"ok":true}"#.utf8))

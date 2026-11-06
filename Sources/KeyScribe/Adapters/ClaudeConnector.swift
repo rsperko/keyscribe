@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import KeyScribeKit
 import Security
@@ -89,7 +90,11 @@ struct ClaudeConnectorInstaller {
 }
 
 enum ClaudeConnectorFiles {
-    static let version = "0.1.0"
+    static let version = version(for: registerJS)
+
+    static func version(for script: String) -> String {
+        "0.1.0-" + SHA256.hash(data: Data(script.utf8)).prefix(4).map { String(format: "%02x", $0) }.joined()
+    }
 
     static func json(_ object: [String: Any]) -> String {
         let data = (try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])) ?? Data("{}".utf8)
@@ -128,6 +133,8 @@ enum ClaudeConnectorFiles {
     let currentTurn = null
     let pendingButton = null
     let looping = false
+    let titleSession = null
+    let lastTitle = null
 
     async function loadConfig($) {
       config = JSON.parse(await $.fs.read($.plugin.root + '/keyscribe.json'))
@@ -154,7 +161,10 @@ enum ClaudeConnectorFiles {
     }
 
     async function sayHello($, session) {
-      const ok = await emit($, { op: 'hello', protocol: config.protocol, agent: 'claude', agentVersion: '', instance, session, pid: 0 })
+      const ok = await emit($, {
+        op: 'hello', protocol: config.protocol, agent: 'claude', agentVersion: '', instance, session, pid: 0,
+        features: ['focus', 'label'], title: (titleSession === session && lastTitle) || undefined,
+      })
       helloSession = ok ? session : null
       return ok
     }
@@ -191,12 +201,38 @@ enum ClaudeConnectorFiles {
       return emit($, result.isFilled ? { op: 'ack', request: id } : { op: 'refused', request: id, reason: 'notFilled' })
     }
 
+    async function noteTitle($, e) {
+      if (!('session_title' in e)) return
+      const session = await $.session.id()
+      const next = e.session_title || null
+      if (session !== titleSession) {
+        titleSession = session
+        lastTitle = null
+      }
+      if (next === lastTitle) return
+      lastTitle = next
+      if (config && helloSession === session) await emit($, { op: 'title', session, text: next || '' })
+    }
+
+    async function focus($, id, expiresAt) {
+      const surface = await $.env.get("CMUX_SURFACE_ID")
+      if (!surface) return emit($, { op: 'refused', request: id, reason: 'notInCmux' })
+      if (!(Date.now() < expiresAt)) return emit($, { op: 'refused', request: id, reason: 'expired' })
+      try {
+        const result = await $.process.run(['/usr/bin/env', 'cmux', 'focus-panel', '--panel', surface], { timeoutMs: 3000 })
+        return emit($, result.exitCode === 0 ? { op: 'focused', request: id } : { op: 'refused', request: id, reason: 'focusFailed' })
+      } catch (err) {
+        return emit($, { op: 'refused', request: id, reason: 'focusFailed' })
+      }
+    }
+
     async function handle($, cmd) {
       const live = await $.session.id()
       if (cmd.expectedSession !== live) return emit($, { op: 'refused', request: cmd.id, reason: 'sessionChanged' })
       if (cmd.op === 'submit') return submit($, cmd.id, cmd.text)
       if (cmd.op === 'abort') return abort($, cmd.id, cmd.expectedTurn)
       if (cmd.op === 'fill') return fill($, cmd.id, cmd.text)
+      if (cmd.op === 'focus') return focus($, cmd.id, cmd.expiresAt)
       if (cmd.op === 'offerButton') {
         pendingButton = { id: cmd.id, text: cmd.text, session: cmd.expectedSession }
         $.ui.invalidate('ui.render')
@@ -222,6 +258,7 @@ enum ClaudeConnectorFiles {
         }
         const session = await $.session.id()
         if (session !== helloSession && !(await sayHello($, session))) {
+          $.ui.status('')
           await $.clock.sleep(2000)
           continue
         }
@@ -238,6 +275,8 @@ enum ClaudeConnectorFiles {
             await $.clock.sleep(2000)
           }
         } catch (err) {
+          helloSession = null
+          $.ui.status('')
           await $.clock.sleep(2000)
           continue
         }
@@ -288,8 +327,21 @@ enum ClaudeConnectorFiles {
         return result
       })
 
+      on('classic.SessionStart', async ($, e, next) => {
+        const result = await next(e)
+        void noteTitle($, e)
+        return result
+      })
+
+      on('classic.UserPromptSubmit', async ($, e, next) => {
+        const result = await next(e)
+        void noteTitle($, e)
+        return result
+      })
+
       on('prompt.submit', async ($, e, next) => {
-        if (config && e.origin && e.origin.kind === 'composer') await emit($, { op: 'typed', session: await $.session.id() })
+        const typed = e.origin && (e.origin.kind === 'composer' || e.origin.kind === 'bridge')
+        if (config && typed) await emit($, { op: 'typed', session: await $.session.id() })
         return next(e)
       })
 

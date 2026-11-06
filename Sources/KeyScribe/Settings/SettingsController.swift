@@ -112,6 +112,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let dictionary: DictionarySettingsModel
     private let replacements: ReplacementsSettingsModel
     private let modes: ModesSettingsModel
+    let codingAgents: CodingAgentsSettingsModel
     private let aiServices: AIServiceSettingsModel
     private let history: HistoryPaneModel
     private let problems = SettingsProblemModel()
@@ -162,7 +163,13 @@ final class SettingsController: NSObject, NSWindowDelegate {
         modesDir = repository.modesDir
         dictionary = DictionarySettingsModel(repository: repository)
         replacements = ReplacementsSettingsModel(repository: repository)
-        modes = ModesSettingsModel(repository: repository, voiceCommandsEnabled: settings.features.isEnabled(.voiceCommands))
+        modes = ModesSettingsModel(
+            repository: repository, voiceCommandsEnabled: settings.features.isEnabled(.voiceCommands),
+            codingAgentsEnabled: settings.features.isEnabled(.codingAgents))
+        codingAgents = CodingAgentsSettingsModel(
+            agentsDir: AgentRuntime.bridgeDirectory(supportDir: repository.supportDir),
+            pluginName: ClaudeConnectorInstaller.pluginName(for: KeyScribePaths.variant))
+        modes.codingAgents = codingAgents
         aiServices = AIServiceSettingsModel(repository: repository, permits: AIServiceCatalog.permits)
         history = HistoryPaneModel(
             store: historyStore,
@@ -236,6 +243,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     func update(settings: Settings) {
         model.apply(settings)
         modes.setVoiceCommandsEnabled(settings.features.isEnabled(.voiceCommands))
+        modes.setCodingAgentsEnabled(settings.features.isEnabled(.codingAgents))
         speechModels.syncActive(settings.stt.engine)
         speechModels.syncSTT(settings.stt)
     }

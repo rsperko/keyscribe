@@ -672,24 +672,11 @@ public enum VoiceCommandResolver {
     }
 
     private static func matches(_ target: String, _ form: String, _ match: Match) -> Bool {
-        let spoken = VoiceCommandText.key(target)
-        let name = VoiceCommandText.key(form)
-        guard !spoken.isEmpty, !name.isEmpty else { return false }
         switch match {
-        case .exact:
-            return spoken == name || VoiceCommandText.compact(spoken) == VoiceCommandText.compact(name)
-        case .partial:
-            guard spoken != name, VoiceCommandText.compact(spoken).count >= 3 else { return false }
-            let words = name.split(separator: " ")
-            let wanted = spoken.split(separator: " ")
-            guard wanted.count < words.count else { return false }
-            return (0...(words.count - wanted.count)).contains { Array(words[$0..<$0 + wanted.count]) == wanted }
-        case .words:
-            guard VoiceCommandText.compact(spoken).count >= 3 else { return false }
-            let words = Set(name.split(separator: " "))
-            return spoken.split(separator: " ").allSatisfy(words.contains)
-        case .site(let inner):
-            return matches(target, form, inner)
+        case .exact: SpokenNameMatch.exact.matches(target, form)
+        case .partial: SpokenNameMatch.partial.matches(target, form)
+        case .words: SpokenNameMatch.words.matches(target, form)
+        case .site(let inner): matches(target, form, inner)
         }
     }
 

@@ -263,6 +263,14 @@ struct ModeResolverTests {
         #expect(r.transcript == "send this to bob")
     }
 
+    @Test func aSpokenPhraseNeverRoutesIntoACodingAgentMode() {
+        var agent = mode("agent", phrases: [#"(?i)\bto the agent$"#])
+        agent.output = .agent
+        let r = ModeResolver.resolvePhaseB(eligibleModes: [agent], transcript: "run the tests to the agent")
+        #expect(r.routedModeId == nil)
+        #expect(r.transcript == "run the tests to the agent")
+    }
+
     @Test func noPhraseMatchLeavesTranscriptUnchanged() {
         let email = mode("email", phrases: [#"(?i)\bas an email$"#])
         let r = ModeResolver.resolvePhaseB(eligibleModes: [email], transcript: "just a normal sentence")

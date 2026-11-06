@@ -27,6 +27,11 @@
     2026-06-20.jsonl
   usage/                   # replacement use counts (see "Replacement usage")
     replacements.json
+  agents/                  # coding agent bridge (experimental; see "Coding agent names")
+    token                  #   the access token the Claude Code connector presents
+    bridge.sock            #   the local socket the connector talks to
+    claude-connector/      #   the connector files installed into Claude Code
+    names.json             #   names you chose for conversations
   lkg/                     # last-known-good mode copies + seed-ledger.toml (design.md §5.1)
   models/                  # downloaded STT weights, one dir per model (design.md §4.1)
     parakeet-tdt-0.6b-v3/
@@ -88,6 +93,22 @@
   message the HUD showed for it. A choice offered by a script and answered by clicking, whose second run
   asks again, rewrites the question's entry with the new list.
   An app older than this change skips these rows rather than failing to load history.
+  The optional `summary`, `facts`, and `steps` are written finished by whatever recorded the take, so History shows them
+  without interpreting them. `summary` is the strongest outcome in words, shown in place of the outcome label
+  (and searched); `facts` are ordered `{label, value}` pairs of context fixed when the entry was written; and
+  `steps` are ordered `{at, text}` transitions added when a later result arrives, never removing an earlier one.
+  A **Coding agent** take fills them: `summary` says what happened (`Sent to backend`, `Queued for backend`,
+  `Opened backend`, or why nothing was sent), and `facts` record the command (Open, choosing a recipient, or a
+  message), the spoken address, the conversation chosen with its session id, how it was chosen, the default
+  recipient frozen at the start of the take, and the delivery setting. `result` is the text actually sent,
+  empty for an Open. A queued or uncertain message's entry is updated in place, by `id`, when its receipt
+  arrives while the app is still running; a receipt after a restart, or after Coding agents is turned off,
+  leaves the entry as it was. The update re-reads the entry, so a rewrite that fell back or was skipped
+  keeps `outcome = "local_fallback"` with its `fallback_reason` or `rewrite_skipped_ms`, and
+  `fallback_reason` is kept even when delivery failed. `outcome` stays
+  the coarse `inserted` or `failed` that the rest of History keys on; read `summary` for what reached the
+  agent. These fields hold fixed local wording and names, never an agent's reply, a credential, or an
+  environment value, and they follow the same History setting and per-mode exclusion as everything else.
 
 ### Model storage
 
@@ -133,6 +154,61 @@ never hand-edited, and a write to it does not reload configuration.
   to `replacements.json.unreadable`, logged, and counting starts fresh — it is never silently
   overwritten. Only the most recent unreadable copy is kept; if it cannot be moved, counts are kept in
   memory only until the next launch rather than written over it.
+
+## Coding agent bridge
+
+The Claude Code connector talks to KeyScribe over HTTP on `agents/bridge.sock`, presenting `agents/token`
+as a bearer token. It sends events with `POST /event` and long-polls for commands with `POST /poll`; a
+`409` answer means KeyScribe no longer knows that connector, which says hello again. The message types are
+`AgentEvent` and `AgentCommand` in `AgentBridge.swift`, versioned by `AgentBridgeCodec.protocolVersion`.
+
+- **Hello** names the agent, the connector instance, the session id, and the features the connector offers.
+  KeyScribe uses only what was announced: `label` for the status-line label naming the conversation, and
+  `focus` for selecting the connector's own terminal surface during Open (cmux). A connector that lacks
+  `focus` is reported as outdated, with the steps to update it. A hello may carry the conversation's title.
+- **Every command names the session it expects**, and the connector refuses one whose session has changed.
+- **Typed events** report a prompt the user submitted, in the agent's own input or through Remote Control.
+  One holds a queued take for review and makes that conversation the current recipient. Claude Code runs
+  slash commands and `!` shell commands without the hook the connector listens on, so they send no typed
+  event.
+- **Title events** carry the custom title the user gave the conversation, as reported in Claude Code's hook
+  payload. The connector sends one only when the payload includes the title field, and sends an empty
+  title (name cleared) only after it has reported a non-empty one, so a Claude Code build that omits the
+  field never erases a name found elsewhere.
+- **The status-line label is cleared by the connector** when KeyScribe stops answering, so a label never
+  outlives the app.
+
+## Coding agent names
+
+`agents/names.json` holds the names chosen with **Rename…** on the Coding agent page, keyed by the
+agent's session id (`{"schema_version": 1, "names": {"<session id>": "backend"}}`). Without an override,
+the conversation uses its explicit native name, normalized like a name chosen in KeyScribe. Only an
+unnamed conversation gets a name generated from its folder. Native and generated names are not stored
+in this file. Like `usage/`, it is app-written
+state, and a write to it does not reload configuration.
+
+- Chosen names are restored before any generated name is handed out, so a name keeps meaning the same
+  conversation across restarts, and a chosen name stays reserved while its conversation is closed.
+- For Claude Code, explicit names come from the connector's custom title, registry names whose
+  `nameSource` is `user`, or a `custom-title` transcript record. Automatically generated `ai-title`
+  records and registry names marked `auto` or `derived` are descriptive text, never addresses.
+  An omitted name in a connector hello leaves registry/transcript discovery available; an explicit
+  name-cleared event overrides stale metadata. A subsequent registry rename can supersede that report.
+- A native rename updates an unaliased conversation; a KeyScribe override keeps winning until changed
+  in KeyScribe. Duplicate names gain a distinguishing word without taking an existing conversation's
+  handle. A native name that is empty after normalization or uses reserved `session <number>` syntax
+  falls back to the folder. Identity, pending delivery and a recording's frozen name table remain bound
+  to the original session id.
+- A rename is saved before it takes effect; if the file cannot be written, the rename is refused and
+  every name stays as it was.
+- An absent file means no chosen names. A file that cannot be read, is malformed, or was written by a
+  newer version is **left as it is**, never moved aside or overwritten: until it loads, a take starting
+  with "tell" reaches a conversation only through a row number, never the current recipient (unaddressed
+  takes, including one that starts with a name but no "tell", still go to the current recipient), Rename is unavailable, and the
+  Coding agent page says why, with **Try Again**. This differs from `usage/` on purpose — starting fresh
+  there costs counts, while starting fresh here could hand a familiar name to a different conversation.
+- Session ids and names are kept whether or not History is on, until the file is deleted. No message
+  text is stored there.
 
 ## Mode file — annotated example
 

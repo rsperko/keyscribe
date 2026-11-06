@@ -238,7 +238,7 @@ struct VoiceCommandRunnerTests {
     @Test func tabRevalidationComparesAddressesCaseSensitively() throws {
         func same(_ candidate: String, _ wanted: String) throws -> Bool {
             let source = BrowserScripting.sameURLHandler
-                + "return sameURL(\(BrowserScripting.literal(candidate)), \(BrowserScripting.literal(wanted)))"
+                + "return sameURL(\(PinnedAppleScript.literal(candidate)), \(PinnedAppleScript.literal(wanted)))"
             var error: NSDictionary?
             let result = try #require(NSAppleScript(source: source)?.executeAndReturnError(&error))
             #expect(error == nil)

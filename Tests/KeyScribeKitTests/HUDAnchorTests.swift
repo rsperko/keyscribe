@@ -47,4 +47,8 @@ struct HUDAnchorTests {
         let topMiddle = CGPoint(x: screen.midX, y: 770)
         #expect(HUDAnchor.nearest(toCenter: topMiddle, in: screen, size: size, margin: margin) == .topCenter)
     }
+
+    @Test func onlyABottomAnchorKeepsItsBottomEdgeFixed() {
+        #expect(HUDAnchor.allCases.filter(\.keepsBottomEdge) == [.bottomLeft, .bottomCenter, .bottomRight])
+    }
 }

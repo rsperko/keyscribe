@@ -136,7 +136,10 @@ sees when a span is recognized, but it cannot promise that every sensitive span 
 on the text produced by speech recognition, so it can miss content the recognizer verbalizes or
 normalizes, such as an email address transcribed as words. Treat it as a safety margin, not a
 boundary you can rely on for regulated or high-stakes data. If something must never reach a
-third-party provider, use Plain Dictation or another mode with LLM cleanup off.
+third-party provider, use Plain Dictation or another mode with LLM cleanup off that places text into an
+app you trust with it. The experimental Coding agent mode is not one: turning cleanup off does not
+prevent agent instructions from reaching a provider. KeyScribe sends your words unredacted to the coding
+agent, which uses its own provider settings.
 
 ## Privacy mode and context are mutually exclusive
 
@@ -162,6 +165,14 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
   changed and the day it was last used. No dictation text is stored there, and it is kept whether or
   not History is on.
 - **Downloaded speech model weights** under `models/`.
+- **Coding agent connection** under `agents/`, only if you turn on the experimental Coding agent
+  feature: an access token the Claude Code connector uses to reach KeyScribe on your Mac, the connector's
+  files, and `names.json`, the names you chose for conversations along with their Claude Code session
+  ids. These are kept whether or not History is on, until you delete them. No message text is stored
+  there. To show each conversation's title, KeyScribe reads the end of that conversation's own Claude Code
+  transcript on your Mac; it keeps only the title, in memory, and never logs or stores the transcript. To
+  bring a conversation's terminal forward, it reads a few terminal and multiplexer variables (such as a
+  pane id) from the environment of the processes that hold it; the rest of their environment is ignored.
 
 You can inspect, back up, or delete any of it with the Finder or a text editor. Deleting the history
 files removes that history; removing the application support folder resets KeyScribe.

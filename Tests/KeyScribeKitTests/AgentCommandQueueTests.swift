@@ -154,6 +154,23 @@ struct AgentCommandQueueTests {
         #expect(redelivered == [command("r1")])
     }
 
+    @Test func anExpiredFocusIsNeverDeliveredEvenAfterTheConnectorReconnects() {
+        var queue = AgentCommandQueue()
+        queue.enqueue(.focus(id: "f1", expectedSession: "s1", expiresAt: at(3)), for: "s1", at: t0)
+        queue.hello(session: "s1", instance: "i1", at: at(4))
+        #expect(queue.poll(session: "s1", instance: "i1", at: at(4)) == [])
+    }
+
+    @Test func aFocusRequeuedAfterItExpiredIsDropped() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", at: t0)
+        let focus = AgentCommand.focus(id: "f1", expectedSession: "s1", expiresAt: at(3))
+        queue.enqueue(focus, for: "s1", at: t0)
+        #expect(queue.poll(session: "s1", instance: "i1", at: at(1)) == [focus])
+        queue.tick(at: at(2 + AgentCommandQueue.ackTimeout))
+        #expect(queue.poll(session: "s1", instance: "i1", at: at(3 + AgentCommandQueue.ackTimeout)) == [])
+    }
+
     @Test func withdrawingAQueuedCommandWorksUntilItIsDelivered() {
         var queue = AgentCommandQueue()
         queue.hello(session: "s1", instance: "i1", at: t0)
@@ -177,6 +194,7 @@ struct AgentBridgeCodecTests {
             .fill(id: "r3", expectedSession: "s1", text: "use approach B"),
             .offerButton(id: "r4", expectedSession: "s1", text: "use approach B"),
             .status(id: "r5", expectedSession: "s1", text: "🎙 keyscribe"),
+            .focus(id: "r6", expectedSession: "s1", expiresAt: Date(timeIntervalSince1970: 1_793_400_000.25)),
         ]
         let data = try AgentBridgeCodec.encode(commands)
         #expect(try AgentBridgeCodec.decodeCommands(data) == commands)
@@ -188,6 +206,18 @@ struct AgentBridgeCodecTests {
         """
         let event = try AgentBridgeCodec.decodeEvent(Data(json.utf8))
         #expect(event == .hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "2.1.314", instance: "i1", session: "s1", pid: 4242)))
+    }
+
+    @Test func aConnectorAnnouncesWhatItCanDoAndAnswersAFocus() throws {
+        let hello = #"{"op":"hello","protocol":1,"agent":"claude","instance":"i1","session":"s1","pid":0,"features":["focus"]}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(hello.utf8))
+            == .hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "s1", pid: 0, features: ["focus"])))
+        #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"focused","request":"r6"}"#.utf8)) == .focused(request: "r6"))
+        let titled = #"{"op":"hello","protocol":1,"agent":"claude","instance":"i1","session":"s1","pid":0,"title":"Fix focus"}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(titled.utf8))
+            == .hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "s1", pid: 0, title: "Fix focus")))
+        #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"title","session":"s1","text":"Renamed"}"#.utf8))
+            == .title(session: "s1", text: "Renamed"))
     }
 
     @Test func unknownOpsAndOversizeFramesAreRejected() {
