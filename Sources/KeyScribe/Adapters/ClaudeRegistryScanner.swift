@@ -24,4 +24,18 @@ enum ClaudeRegistryScanner {
     private static func isRunning(pid: Int) -> Bool {
         kill(pid_t(pid), 0) == 0 || errno == EPERM
     }
+
+    static let startLead: TimeInterval = 120
+
+    static func stillRunning(_ remembered: RememberedName) -> Bool {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, Int32(remembered.pid)]
+        guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { return true }
+        guard size > 0 else { return false }
+        let start = info.kp_proc.p_starttime
+        let started = TimeInterval(start.tv_sec) + TimeInterval(start.tv_usec) / 1_000_000
+        let recorded = TimeInterval(remembered.startedAt) / 1000
+        return started <= recorded + 1 && started >= recorded - startLead
+    }
 }

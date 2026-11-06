@@ -16,7 +16,16 @@ struct CodingAgentRecipientSection: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.currentRecipient)
-            if let problem = model.namesProblem { namesUnavailable(problem) }
+            if let problem = model.namesProblem {
+                namesUnavailable(problem)
+            } else if let reason = model.namesNotSaved {
+                VStack(alignment: .leading, spacing: 2) {
+                    IssueText("Names given to these conversations could not be saved, so they may change when \(Branding.appName) restarts. \(Branding.appName) keeps trying.", severity: .advisory)
+                    Text(reason).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.namesNotSaved)
+            }
             ForEach(model.rows) { row in
                 VStack(alignment: .leading, spacing: 2) {
                     PaneListRow(

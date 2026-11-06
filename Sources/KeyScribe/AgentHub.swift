@@ -39,6 +39,9 @@ final class AgentHub {
     var onChange: (() -> Void)?
     private(set) var directory = AgentDirectory()
     private(set) var namesProblem: String?
+    private(set) var namesNotSaved: String?
+    private var savedRemembered: [String: RememberedName] = [:]
+    private let stillRunning: (RememberedName) -> Bool
     private(set) var current: String?
     private(set) var unsent: [AgentOutbox.Message] = []
     private(set) var recent: [AgentReceipt] = []
@@ -57,6 +60,7 @@ final class AgentHub {
     private var waiters: [String: CheckedContinuation<AgentReceipt, Never>] = [:]
     private var focusWaiters: [String: CheckedContinuation<TerminalSelection, Never>] = [:]
     private var features: [String: Set<String>] = [:]
+    private var environments: [String: [String: String]] = [:]
     private var prompts: [String: Int] = [:]
     private var connectorNames: [String: String?] = [:]
     private var registryNames: [String: String?] = [:]
@@ -68,9 +72,11 @@ final class AgentHub {
     init(
         transport: AgentTransport, scan: @escaping () -> [ClaudeRegistryEntry], names: AgentNameStore? = nil,
         focus: AgentTerminalFocusing? = nil, transcriptTitles: ClaudeTranscriptTitles? = nil, receiptTimeout: Duration = .seconds(8),
-        now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString }
+        now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString },
+        stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning
     ) {
         self.transport = transport
+        self.stillRunning = stillRunning
         nameStore = names
         self.focus = focus
         self.scan = scan
@@ -111,7 +117,7 @@ final class AgentHub {
     func open(_ id: String, asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }) async -> AgentFocusResult {
         guard let conversation = directory.conversations.first(where: { $0.id == id }) else { return .none }
         makeCurrent(id)
-        return await focus?.focus(session: id, pid: conversation.pid, asking: asking) ?? .none
+        return await focus?.focus(session: id, pid: conversation.pid, environment: environments[id] ?? [:], asking: asking) ?? .none
     }
 
     static let focusTimeout: Duration = .seconds(3)
@@ -147,10 +153,16 @@ final class AgentHub {
         guard handle(of: id) != nil else { return }
         var renamed = directory
         try renamed.rename(id, to: name)
-        try nameStore?.save(renamed.chosenNames)
+        try nameStore?.save(renamed.chosenNames, remembered: renamed.remembered)
+        savedRemembered = renamed.remembered
+        namesNotSaved = nil
         directory = renamed
         sendLabels()
         onChange?()
+    }
+
+    func renameProblem(_ id: String, to name: String) -> AgentHandles.RenameError? {
+        directory.renameProblem(id, to: name)
     }
 
     func reloadNames() {
@@ -160,10 +172,28 @@ final class AgentHub {
         onChange?()
     }
 
+    private func rememberNames() {
+        let remembered = directory.remembered
+        guard let nameStore, namesProblem == nil else { return }
+        guard remembered != savedRemembered else {
+            namesNotSaved = nil
+            return
+        }
+        do {
+            try nameStore.save(directory.chosenNames, remembered: remembered)
+            savedRemembered = remembered
+            namesNotSaved = nil
+        } catch {
+            namesNotSaved = error.localizedDescription
+            Log.agents.error("conversation names not saved: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     private func adopt(_ loaded: AgentNameStore.Loaded) {
         switch loaded {
-        case .names(let chosen):
-            directory = AgentDirectory(chosen: chosen)
+        case .names(let chosen, let remembered):
+            directory = AgentDirectory(chosen: chosen, remembered: remembered)
+            savedRemembered = remembered
             namesProblem = nil
         case .unavailable(let reason):
             namesProblem = reason
@@ -194,7 +224,9 @@ final class AgentHub {
             shown[id] = native ?? recorded.generatedTitle
         }
         forgetTitles?(Set(entries.map(\.sessionId)))
-        directory.update(claude: entries, live: live, titles: shown, nativeNames: nativeNames)
+        directory.update(claude: entries, live: live, titles: shown, nativeNames: nativeNames, running: stillRunning)
+        let reported = namesNotSaved
+        rememberNames()
         if let current, handle(of: current) == nil { self.current = nil }
         lastUsed = lastUsed.filter { handle(of: $0.key) != nil }
         sendLabels()
@@ -202,7 +234,7 @@ final class AgentHub {
         let stale = now().addingTimeInterval(-Self.runningGrace)
         running = running.filter { !idle.contains($0.key) || $0.value > stale }
         releaseHeld()
-        if directory.revision != before { onChange?() }
+        if directory.revision != before || namesNotSaved != reported { onChange?() }
     }
 
     private func sendLabels() {
@@ -254,6 +286,7 @@ final class AgentHub {
         switch event {
         case .hello(let hello):
             features[hello.session] = Set(hello.features)
+            environments[hello.session] = hello.environment
             prompts[hello.session] = hello.prompts
             labels[hello.session] = nil
             if let title = hello.title {

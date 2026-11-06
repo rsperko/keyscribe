@@ -46,6 +46,15 @@ The coding-agent bridge (`AgentHub`, `AgentBridge`, `AgentHandles`, `AgentRecipi
 the terminal routes, the Claude connector) delivers dictated text to another program, so every rule
 above applies to it, with these sharpenings:
 
+- **Work with agents, terminals, and multiplexers as people normally start them.** Never require a
+  launch flag, a wrapper, an environment variable, a named session, or an edit the user makes to
+  their own configuration; only what installing an integration sets up itself, and removes again, is
+  in bounds. Find each fact from what is already observable (processes, sockets, the tools' own
+  read-only commands). A route that only works for one startup style is a bug for every other style;
+  where nothing observable identifies a session, say unknown.
+- **Confirm the intended session has focus, not a particular view of it.** A session visible in
+  several places counts as focused when every view that could be in front shows it; when the front
+  view could belong to another session, the answer is unknown, never a guess.
 - **Minimal agent impact is a release requirement** (`docs/development/principles.md` §10).
   Observation hooks never await bridge work or perform I/O. They preserve downstream results,
   errors, cancellation, and other extensions' UI; connector failures must not interrupt agent work.

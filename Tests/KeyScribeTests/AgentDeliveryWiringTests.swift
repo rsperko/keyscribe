@@ -523,7 +523,9 @@ struct AgentDeliveryWiringTests {
             self.result = result
             askingApp = asking
         }
-        func focus(session: String, pid: Int, asking: @escaping @MainActor @Sendable (String) -> Void) async -> AgentFocusResult {
+        func focus(
+            session: String, pid: Int, environment: [String: String], asking: @escaping @MainActor @Sendable (String) -> Void
+        ) async -> AgentFocusResult {
             sessions.append(session)
             if let askingApp { await asking(askingApp) }
             return result
@@ -557,7 +559,9 @@ struct AgentDeliveryWiringTests {
         var started = false
         var released = false
         var asked = false
-        func focus(session: String, pid: Int, asking: @escaping @MainActor @Sendable (String) -> Void) async -> AgentFocusResult {
+        func focus(
+            session: String, pid: Int, environment: [String: String], asking: @escaping @MainActor @Sendable (String) -> Void
+        ) async -> AgentFocusResult {
             started = true
             while !released { try? await Task.sleep(for: .milliseconds(5)) }
             await asking("Ghostty")

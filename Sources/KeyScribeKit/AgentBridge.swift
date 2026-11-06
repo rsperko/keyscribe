@@ -36,11 +36,13 @@ public enum AgentEvent: Equatable, Sendable {
         public var gap: Bool?
         public var connection: String?
         public var installation: String?
+        public var environment: [String: String]
         public init(
             protocolVersion: Int, agent: String, agentVersion: String, instance: String, session: String, pid: Int,
             features: [String] = [], title: String? = nil, prompts: Int? = nil, idle: Bool? = nil, gap: Bool? = nil,
-            connection: String? = nil, installation: String? = nil
+            connection: String? = nil, installation: String? = nil, environment: [String: String] = [:]
         ) {
+            self.environment = environment
             self.connection = connection
             self.installation = installation
             self.prompts = prompts
@@ -114,6 +116,7 @@ public enum AgentBridgeCodec {
         var idle: Bool?
         var connection: String?
         var installation: String?
+        var environment: [String: String]?
     }
 
     public static func encode(_ commands: [AgentCommand]) throws -> Data {
@@ -142,7 +145,7 @@ public enum AgentBridgeCodec {
             return .hello(.init(
                 protocolVersion: p, agent: agent, agentVersion: w.agentVersion ?? "", instance: instance, session: session, pid: pid,
                 features: w.features ?? [], title: w.title, prompts: w.prompts, idle: w.idle, gap: w.gap, connection: w.connection,
-                installation: w.installation))
+                installation: w.installation, environment: w.environment ?? [:]))
         case "ack":
             return .ack(request: try required(w.request))
         case "submitted":

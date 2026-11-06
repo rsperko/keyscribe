@@ -43,12 +43,22 @@ let outboxBytes = 0
 let wakeSender = null
 let wakeIdentity = null
 let hello = null
+let place = null
 
 async function loadConfig($) {
   const loaded = JSON.parse(await $.fs.read($.plugin.root + '/keyscribe.json'))
   if (loadedFrom === null) loadedFrom = loaded.installation
   config = loaded
   if (loaded.installation !== loadedFrom) retire($)
+}
+
+async function terminalPlace($) {
+  try {
+    const pane = await $.env.get("ZELLIJ_PANE_ID")
+    return pane ? { ZELLIJ_PANE_ID: pane } : {}
+  } catch (err) {
+    return {}
+  }
 }
 
 async function readiness($) {
@@ -277,6 +287,7 @@ function sayHello($, target, attemptLaunch) {
     op: 'hello', protocol: config.protocol, installation: config.installation, agent: 'claude', agentVersion: '', instance, connection: attempt.connection, session: target, pid: 0,
     features: ['focus', 'label', 'readiness'], title: (titleSession === target && lastTitle) || undefined, prompts,
     idle: turnKnown && currentTurn === null, gap: freshSession !== target,
+    environment: place && Object.keys(place).length ? place : undefined,
   })
   attempt.result = new Promise((resolve) => {
     enqueue($, {
@@ -497,6 +508,7 @@ async function pollLoop($) {
       }
       continue
     }
+    if (place === null) place = await terminalPlace($)
     if (!session) {
       await identify($)
       continue

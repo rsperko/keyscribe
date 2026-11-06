@@ -12,6 +12,20 @@ struct AgentTerminalFocusTests {
         func record(_ event: String) { lock.withLock { _events.append(event) } }
     }
 
+    final class Answers: @unchecked Sendable {
+        private let lock = NSLock()
+        private var queued: [String: [String]]
+        init(_ queued: [String: [String]]) { self.queued = queued }
+        func next(_ command: String) -> String? {
+            lock.withLock {
+                guard var answers = queued[command], !answers.isEmpty else { return nil }
+                let answer = answers.removeFirst()
+                queued[command] = answers.isEmpty ? [answer] : answers
+                return answer
+            }
+        }
+    }
+
     private static let herdr = OpenAction.layer(PaneLayer("herdr", commands: [
         PaneCommand(["/usr/bin/env", "HERDR_SOCKET_PATH=/s.sock", "/bin/herdr", "agent", "focus", "w1:p2"]),
     ]))
@@ -26,21 +40,22 @@ struct AgentTerminalFocusTests {
     ]
 
     private func focuser(
-        _ steps: [OpenAction], failing: [String: String] = [:], selection: TerminalSelection = .selected, opens: Bool = true,
+        _ steps: [OpenAction], failing: [String: String] = [:], answers: Answers = Answers([:]), selection: TerminalSelection = .selected, opens: Bool = true,
         apps: [Int: String] = [10: "Ghostty"], appPid: Int? = 10, asks: Bool = false, calls: Calls,
         waitOnPlan: DispatchSemaphore? = nil, onRun: (@Sendable ([String]) -> Void)? = nil,
         onOpen: (@Sendable () -> Void)? = nil, connector: TerminalSelection = .selected
     ) -> AgentTerminalFocus {
         AgentTerminalFocus(
-            plan: { _ in
+            plan: { _, environment in
                 waitOnPlan?.wait()
-                calls.record("plan")
+                calls.record(environment.map { "plan \($0.key)=\($0.value)" }.first ?? "plan")
                 return steps
             },
             run: { argv in
                 calls.record(argv.joined(separator: " "))
                 onRun?(argv)
-                return failing[argv.joined(separator: " ")].map { (2, $0) } ?? (0, "")
+                let command = argv.joined(separator: " ")
+                return failing[command].map { (2, $0) } ?? (0, answers.next(command) ?? "")
             },
             script: { app, pid, body, asking in
                 if asks { await asking() }
@@ -63,15 +78,21 @@ struct AgentTerminalFocusTests {
             })
     }
 
+    @Test func theOpenIsPlannedWithTheEnvironmentTheConnectorReported() async {
+        let calls = Calls()
+        _ = await focuser(Self.ghostty, calls: calls).focus(session: "s1", pid: 30, environment: ["ZELLIJ_PANE_ID": "3"], asking: { _ in })
+        #expect(calls.events.first == "plan ZELLIJ_PANE_ID=3")
+    }
+
     @Test func aSelectedTerminalTabIsAnExactOpenAndItsAppComesForward() async {
         let calls = Calls()
-        #expect(await focuser(Self.ghostty, calls: calls).focus(session: "s1", pid: 30, asking: { _ in }) == .exact)
+        #expect(await focuser(Self.ghostty, calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .exact)
         #expect(calls.events == ["plan", "script com.mitchellh.ghostty 10 find ttys004", "activate 10"])
     }
 
     @Test func herdrSelectsThePaneThroughItsOwnSocketBeforeTheTerminalIsSelected() async {
         let calls = Calls()
-        #expect(await focuser([Self.herdr] + Self.ghostty, calls: calls).focus(session: "s1", pid: 30, asking: { _ in }) == .exact)
+        #expect(await focuser([Self.herdr] + Self.ghostty, calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .exact)
         #expect(calls.events == [
             "plan", "/usr/bin/env HERDR_SOCKET_PATH=/s.sock /bin/herdr agent focus w1:p2",
             "script com.mitchellh.ghostty 10 find ttys004", "activate 10",
@@ -80,7 +101,7 @@ struct AgentTerminalFocusTests {
 
     @Test func tmuxSelectsThePaneAndShowsItOnTheChosenClient() async {
         let calls = Calls()
-        #expect(await focuser([Self.tmux] + Self.ghostty, calls: calls).focus(session: "s1", pid: 30, asking: { _ in }) == .exact)
+        #expect(await focuser([Self.tmux] + Self.ghostty, calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .exact)
         #expect(calls.events.dropFirst().prefix(3) == [
             "/bin/tmux -S /t select-window -t %4", "/bin/tmux -S /t select-pane -t %4",
             "/bin/tmux -S /t switch-client -c /dev/ttys003 -t %4",
@@ -90,13 +111,13 @@ struct AgentTerminalFocusTests {
     @Test func aMultiplexerThatFailedIsNamedInTheResult() async {
         let calls = Calls()
         let failing = ["/usr/bin/env HERDR_SOCKET_PATH=/s.sock /bin/herdr agent focus w1:p2": "no such pane"]
-        #expect(await focuser([Self.herdr] + Self.ghostty, failing: failing, calls: calls).focus(session: "s1", pid: 30, asking: { _ in })
+        #expect(await focuser([Self.herdr] + Self.ghostty, failing: failing, calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in })
             == .pane(app: "Ghostty", multiplexer: "herdr", uncertain: false))
     }
 
     @Test func aRouteThatMustComeForwardBeforeSelectingRunsInItsOwnOrder() async {
         let calls = Calls()
-        #expect(await focuser(Self.ghostty.reversed(), calls: calls).focus(session: "s1", pid: 30, asking: { _ in }) == .exact)
+        #expect(await focuser(Self.ghostty.reversed(), calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .exact)
         #expect(calls.events == ["plan", "activate 10", "script com.mitchellh.ghostty 10 find ttys004"])
     }
 
@@ -109,63 +130,132 @@ struct AgentTerminalFocusTests {
     func aTerminalOnlyTheAgentsConnectorCanFocusAsksItForTheSession(answer: TerminalSelection, result: AgentFocusResult) async {
         let calls = Calls()
         let cmux: [OpenAction] = [.select(.connector), .activate(app: "com.cmuxterm.app", pid: 10)]
-        #expect(await focuser(cmux, apps: [10: "cmux"], calls: calls, connector: answer).focus(session: "s1", pid: 30, asking: { _ in }) == result)
+        #expect(await focuser(cmux, apps: [10: "cmux"], calls: calls, connector: answer).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == result)
         #expect(calls.events == ["plan", "connector s1", "activate 10"])
     }
 
     @Test func aTabTheTerminalCouldNotFindLeavesOnlyTheTerminalApp() async {
         let calls = Calls()
-        #expect(await focuser(Self.ghostty, selection: .notFound, calls: calls).focus(session: "s1", pid: 30, asking: { _ in }) == .app("Ghostty"))
+        #expect(await focuser(Self.ghostty, selection: .notFound, calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .app("Ghostty"))
         #expect(calls.events.last == "activate 10")
     }
 
     @Test func aTerminalNotAllowedToBeControlledSaysSo() async {
         let calls = Calls()
-        #expect(await focuser(Self.ghostty, selection: .notAllowed, calls: calls).focus(session: "s1", pid: 30, asking: { _ in }) == .notAllowed("Ghostty"))
+        #expect(await focuser(Self.ghostty, selection: .notAllowed, calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .notAllowed("Ghostty"))
     }
 
     @Test func aTerminalAppThatIsNotRunningShowsNothing() async {
         let calls = Calls()
-        #expect(await focuser(Self.ghostty, appPid: nil, calls: calls).focus(session: "s1", pid: 30, asking: { _ in }) == .none)
+        #expect(await focuser(Self.ghostty, appPid: nil, calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .none)
         #expect(calls.events == ["plan"])
     }
 
     @Test func warpIsAskedToShowItsSessionSinceNothingConfirmsWhichTabItSelected() async {
         let calls = Calls()
         let warp: [OpenAction] = [.select(.url("warp://session/abc")), .activate(app: "dev.warp.Warp-Stable", pid: 10)]
-        #expect(await focuser(warp, apps: [10: "Warp"], calls: calls).focus(session: "s1", pid: 30, asking: { _ in }) == .requested("Warp"))
+        #expect(await focuser(warp, apps: [10: "Warp"], calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .requested("Warp"))
         #expect(calls.events == ["plan", "open warp://session/abc", "activate 10"])
-        #expect(await focuser(warp, opens: false, apps: [10: "Warp"], calls: Calls()).focus(session: "s1", pid: 30, asking: { _ in }) == .app("Warp"))
+        #expect(await focuser(warp, opens: false, apps: [10: "Warp"], calls: Calls()).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .app("Warp"))
     }
 
     @Test func aTerminalWithNoRouteToTryAsksTheUserToSelectIt() async {
         let calls = Calls()
-        #expect(await focuser([.activate(app: "dev.warp.Warp-Stable", pid: 10)], apps: [10: "Warp"], calls: calls).focus(session: "s1", pid: 30, asking: { _ in }) == .unsupported("Warp"))
-        #expect(await focuser([.unsupported(app: "net.kovidgoyal.kitty", pid: 10)], apps: [10: "kitty"], calls: calls).focus(session: "s1", pid: 30, asking: { _ in }) == .unsupported("kitty"))
-        #expect(await focuser([.activate(app: "dev.warp.Warp-Stable", pid: 10)], apps: [:], calls: calls).focus(session: "s1", pid: 30, asking: { _ in }) == .none)
+        #expect(await focuser([.activate(app: "dev.warp.Warp-Stable", pid: 10)], apps: [10: "Warp"], calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .unsupported("Warp"))
+        #expect(await focuser([.unsupported(app: "net.kovidgoyal.kitty", pid: 10)], apps: [10: "kitty"], calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .unsupported("kitty"))
+        #expect(await focuser([.activate(app: "dev.warp.Warp-Stable", pid: 10)], apps: [:], calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .none)
     }
 
     @Test func aHerdrPaneThatCouldNotBeIdentifiedIsNamedInTheResult() async {
         let calls = Calls()
         let unknown = OpenAction.layer(.unresolved("herdr"))
-        #expect(await focuser([unknown] + Self.ghostty, calls: calls).focus(session: "s1", pid: 30, asking: { _ in })
+        #expect(await focuser([unknown] + Self.ghostty, calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in })
             == .pane(app: "Ghostty", multiplexer: "herdr", uncertain: false))
         #expect(calls.events == ["plan", "script com.mitchellh.ghostty 10 find ttys004", "activate 10"])
     }
 
-    @Test func onlyTheAlreadyDoneAnswerOfAFailedCommandCountsAsSelected() async {
-        let focus = OpenAction.layer(PaneLayer("Zellij", commands: [PaneCommand(["/bin/zellij", "focus"], alreadyDone: "is already focused")]))
-        let already = ["/bin/zellij focus": "Pane Terminal(2) is already focused"]
-        #expect(await focuser([focus] + Self.ghostty, failing: already, calls: Calls()).focus(session: "s1", pid: 30, asking: { _ in }) == .exact)
-        let missing = ["/bin/zellij focus": "Pane with id Terminal(2) not found"]
-        #expect(await focuser([focus] + Self.ghostty, failing: missing, calls: Calls()).focus(session: "s1", pid: 30, asking: { _ in })
+    private static let walkCommands = [
+        PaneCommand(["/bin/zellij", "next"], until: FocusWalk(check: ["/bin/zellij", "clients"], pane: "terminal_2", steps: 2)),
+    ]
+    private static let walk = OpenAction.layer(PaneLayer("Zellij", commands: walkCommands))
+
+    private static func clients(on pane: String) -> String {
+        "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n1         \(pane)     claude\n"
+    }
+
+    @Test func aFocusWalkStepsUntilTheWindowShowsTheTargetPane() async {
+        let calls = Calls()
+        let answers = Answers(["/bin/zellij clients": ["terminal_1", "terminal_3", "terminal_2"].map(Self.clients)])
+        #expect(await focuser([Self.walk] + Self.ghostty, answers: answers, calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .exact)
+        #expect(calls.events.prefix(6) == ["plan", "/bin/zellij clients", "/bin/zellij next", "/bin/zellij clients", "/bin/zellij next", "/bin/zellij clients"])
+    }
+
+    @Test func aCommandThatAnswersWithAnAcceptedStatusLetsTheWalkContinue() async {
+        let hide = OpenAction.layer(PaneLayer("Zellij", commands: [
+            PaneCommand(["/bin/zellij", "hide"], accepting: [0, 2]),
+            PaneCommand(["/bin/zellij", "next"], until: FocusWalk(check: ["/bin/zellij", "clients"], pane: "terminal_2", steps: 2)),
+        ]))
+        let calls = Calls()
+        let answers = Answers(["/bin/zellij clients": ["terminal_1", "terminal_2"].map(Self.clients)])
+        #expect(await focuser([hide] + Self.ghostty, failing: ["/bin/zellij hide": "already hidden"], answers: answers, calls: calls)
+            .focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .exact)
+        #expect(calls.events.filter { $0 == "/bin/zellij next" }.count == 1)
+        let refused = OpenAction.layer(PaneLayer("Zellij", commands: [PaneCommand(["/bin/zellij", "hide"])] + Self.walkCommands))
+        #expect(await focuser([refused] + Self.ghostty, failing: ["/bin/zellij hide": "already hidden"], calls: Calls())
+            .focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .pane(app: "Ghostty", multiplexer: "Zellij", uncertain: false))
+    }
+
+    @Test func aFocusWalkAlreadyOnTheTargetPaneTakesNoStep() async {
+        let calls = Calls()
+        let answers = Answers(["/bin/zellij clients": [Self.clients(on: "terminal_2")]])
+        #expect(await focuser([Self.walk] + Self.ghostty, answers: answers, calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .exact)
+        #expect(!calls.events.contains("/bin/zellij next"))
+    }
+
+    @Test func aFocusWalkThatNeverReachesTheTargetStopsAfterItsStepsAndSaysThePaneWasNotSelected() async {
+        let calls = Calls()
+        let answers = Answers(["/bin/zellij clients": [Self.clients(on: "terminal_1")]])
+        #expect(await focuser([Self.walk] + Self.ghostty, answers: answers, calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in })
             == .pane(app: "Ghostty", multiplexer: "Zellij", uncertain: false))
+        #expect(calls.events.filter { $0 == "/bin/zellij next" }.count == 2)
+        #expect(calls.events.filter { $0 == "/bin/zellij clients" }.count == 3)
+    }
+
+    @Test func aFocusWalkStopsAtAFailedStep() async {
+        let calls = Calls()
+        let answers = Answers(["/bin/zellij clients": [Self.clients(on: "terminal_1")]])
+        #expect(await focuser([Self.walk] + Self.ghostty, failing: ["/bin/zellij next": "no client"], answers: answers, calls: calls)
+            .focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .pane(app: "Ghostty", multiplexer: "Zellij", uncertain: false))
+        #expect(calls.events.filter { $0 == "/bin/zellij next" }.count == 1)
+    }
+
+    @Test func aFocusWalkWhoseWindowsCannotBeListedTakesNoStep() async {
+        let calls = Calls()
+        #expect(await focuser([Self.walk] + Self.ghostty, failing: ["/bin/zellij clients": "no session"], calls: calls)
+            .focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .pane(app: "Ghostty", multiplexer: "Zellij", uncertain: false))
+        #expect(!calls.events.contains("/bin/zellij next"))
+    }
+
+    @Test func cancellingDuringAFocusWalkTakesNoFurtherStep() async {
+        let calls = Calls()
+        let release = DispatchSemaphore(value: 0)
+        let answers = Answers(["/bin/zellij clients": [Self.clients(on: "terminal_1")]])
+        let focus = focuser([Self.walk] + Self.ghostty, answers: answers, calls: calls, onRun: { argv in
+            if argv.last == "next" { release.wait() }
+        })
+        let task = Task { await focus.focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) }
+        while !calls.events.contains("/bin/zellij next") { await Task.yield() }
+        task.cancel()
+        release.signal()
+        #expect(await task.value == .none)
+        #expect(calls.events.filter { $0 == "/bin/zellij next" }.count == 1)
+        #expect(!calls.events.contains { $0.hasPrefix("script") || $0.hasPrefix("activate") })
     }
 
     @Test func aLayerThatCannotConfirmWhichWindowItMovedSaysSo() async {
         let unsure = OpenAction.layer(PaneLayer("Zellij", commands: [PaneCommand(["/bin/zellij", "focus"])], confirmed: false))
         let calls = Calls()
-        #expect(await focuser([unsure] + Self.ghostty, calls: calls).focus(session: "s1", pid: 30, asking: { _ in })
+        #expect(await focuser([unsure] + Self.ghostty, calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { _ in })
             == .pane(app: "Ghostty", multiplexer: "Zellij", uncertain: true))
         #expect(calls.events.contains("/bin/zellij focus"))
     }
@@ -174,7 +264,7 @@ struct AgentTerminalFocusTests {
         let calls = Calls()
         let release = DispatchSemaphore(value: 0)
         let focus = focuser([Self.tmux] + Self.ghostty, calls: calls, onRun: { _ in release.wait() })
-        let task = Task { await focus.focus(session: "s1", pid: 30, asking: { _ in }) }
+        let task = Task { await focus.focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) }
         while calls.events.count < 2 { await Task.yield() }
         task.cancel()
         release.signal()
@@ -187,7 +277,7 @@ struct AgentTerminalFocusTests {
         let warp: [OpenAction] = [.select(.url("warp://session/abc")), .activate(app: "dev.warp.Warp-Stable", pid: 10)]
         let holder = TaskHolder()
         let focus = focuser(warp, apps: [10: "Warp"], calls: calls, onOpen: { holder.task?.cancel() })
-        holder.task = Task { await focus.focus(session: "s1", pid: 30, asking: { _ in }) }
+        holder.task = Task { await focus.focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) }
         #expect(await holder.task?.value == AgentFocusResult.none)
         #expect(calls.events == ["plan", "open warp://session/abc"])
     }
@@ -199,20 +289,20 @@ struct AgentTerminalFocusTests {
     @Test func aTerminalThatAsksForPermissionNamesItselfWhileTheQuestionIsOpen() async {
         let calls = Calls()
         let asked = Calls()
-        _ = await focuser(Self.ghostty, asks: true, calls: calls).focus(session: "s1", pid: 30, asking: { asked.record($0) })
+        _ = await focuser(Self.ghostty, asks: true, calls: calls).focus(session: "s1", pid: 30, environment: [:], asking: { asked.record($0) })
         #expect(asked.events == ["Ghostty"])
     }
 
     @Test func noStepsShowNothing() async {
-        #expect(await focuser([], calls: Calls()).focus(session: "s1", pid: 30, asking: { _ in }) == .none)
-        #expect(await focuser([Self.herdr], calls: Calls()).focus(session: "s1", pid: 30, asking: { _ in }) == .none)
+        #expect(await focuser([], calls: Calls()).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .none)
+        #expect(await focuser([Self.herdr], calls: Calls()).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .none)
     }
 
     @Test func cancellingWhileThePlanIsGatheredDoesNothing() async {
         let calls = Calls()
         let gate = DispatchSemaphore(value: 0)
         let focus = focuser([Self.herdr] + Self.ghostty, calls: calls, waitOnPlan: gate)
-        let task = Task { await focus.focus(session: "s1", pid: 30, asking: { _ in }) }
+        let task = Task { await focus.focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) }
         await Task.yield()
         task.cancel()
         gate.signal()

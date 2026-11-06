@@ -410,6 +410,21 @@ struct CodingAgentsSettingsModelTests {
         #expect(!model.recipientGuidance().contains("backend, run"))
     }
 
+    @Test func theRenamePreviewAsksTheSameCheckTheRenameUses() {
+        let (model, _, _) = makeModel()
+        model.show([
+            .init(id: "a", agent: "claude", pid: 1, cwd: "/src/api", handle: "backend", state: .idle, connectorLive: true),
+        ], current: "a")
+        var asked: [String] = []
+        model.renameCheck = { id, name in
+            asked.append("\(id) \(name)")
+            return name == "held" ? .taken : nil
+        }
+        #expect(model.renameIssue("a", name: "held") != nil)
+        #expect(model.renameIssue("a", name: "free") == nil)
+        #expect(asked == ["a held", "a free"])
+    }
+
     @Test func renamingReportsWhetherTheEditorCanCloseAndKeepsFailuresEditable() {
         let (model, _, _) = makeModel()
         model.onRename = { _, _ in throw AgentHandles.RenameError.taken }
@@ -481,6 +496,11 @@ struct CodingAgentsSettingsModelTests {
         #expect(reloads == 1)
         model.show([], current: nil)
         #expect(model.namesProblem == nil)
+        model.show([], current: nil, namesNotSaved: "names.json could not be written.")
+        #expect(model.namesNotSaved == "names.json could not be written.")
+        #expect(model.namesProblem == nil)
+        model.show([], current: nil)
+        #expect(model.namesNotSaved == nil)
     }
 
     @Test func aRefusedRenameSaysWhy() {

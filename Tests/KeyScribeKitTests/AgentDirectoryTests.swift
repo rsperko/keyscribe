@@ -7,6 +7,94 @@ struct AgentDirectoryTests {
         ClaudeRegistryEntry(pid: pid, sessionId: session, cwd: cwd, name: nil, status: status, waitingFor: waitingFor)
     }
 
+    private func started(_ pid: Int, _ session: String, at start: Int, cwd: String = "/src/keyscribe", name: String? = nil) -> ClaudeRegistryEntry {
+        ClaudeRegistryEntry(pid: pid, sessionId: session, cwd: cwd, name: name, status: "idle", waitingFor: nil, nameSource: name == nil ? nil : "user", startedAt: start)
+    }
+
+    @Test func generatedNamesComeBackToTheSameRunningSessionsWhateverOrderTheyAreFoundIn() {
+        var before = AgentDirectory()
+        before.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200)], live: [])
+        let names = Dictionary(uniqueKeysWithValues: before.conversations.map { ($0.id, $0.handle) })
+        var after = AgentDirectory(remembered: before.remembered)
+        after.update(claude: [started(20, "b", at: 200), started(10, "a", at: 100)], live: [])
+        #expect(Dictionary(uniqueKeysWithValues: after.conversations.map { ($0.id, $0.handle) }) == names)
+        var fresh = AgentDirectory()
+        fresh.update(claude: [started(20, "b", at: 200), started(10, "a", at: 100)], live: [])
+        #expect(Dictionary(uniqueKeysWithValues: fresh.conversations.map { ($0.id, $0.handle) }) != names)
+    }
+
+    @Test func aRememberedNameIsNotGivenBackToAnotherProcess() {
+        var before = AgentDirectory()
+        before.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200)], live: [])
+        #expect(before.conversation(handle: "keyscribe blue")?.id == "b")
+        for reused in [started(20, "b", at: 900), started(30, "b", at: 200)] {
+            var after = AgentDirectory(remembered: before.remembered)
+            after.update(claude: [reused], live: [])
+            #expect(after.conversation(handle: "keyscribe")?.id == "b")
+        }
+    }
+
+    @Test func aClosedSessionsNameIsFreeForTheNextNewSession() {
+        var before = AgentDirectory()
+        before.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200)], live: [])
+        var after = AgentDirectory(remembered: before.remembered)
+        after.update(claude: [started(20, "b", at: 200), started(30, "c", at: 300)], live: [])
+        #expect(after.conversation(handle: "keyscribe blue")?.id == "b")
+        #expect(after.conversation(handle: "keyscribe")?.id == "c")
+        #expect(Set(after.remembered.keys) == ["b", "c"])
+    }
+
+    @Test func onlyGeneratedNamesOfRunningSessionsWithAKnownStartAreRemembered() throws {
+        var directory = AgentDirectory(chosen: ["gone": "old"])
+        directory.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200), claude(30, "c")], live: [])
+        try directory.rename("a", to: "backend")
+        #expect(directory.remembered == ["b": RememberedName(name: "keyscribe blue", pid: 20, startedAt: 200, native: nil)])
+    }
+
+    @Test func aSessionMissingFromAStartupScanKeepsItsNameUntilItsProcessIsGone() {
+        var before = AgentDirectory()
+        before.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200)], live: [])
+        var after = AgentDirectory(remembered: before.remembered)
+        after.update(claude: [started(20, "b", at: 200), started(30, "c", at: 300)], live: [], running: { $0.pid == 10 })
+        #expect(after.conversation(handle: "keyscribe blue")?.id == "b")
+        #expect(after.conversation(handle: "keyscribe")?.id == nil)
+        #expect(after.remembered["a"] == RememberedName(name: "keyscribe", pid: 10, startedAt: 100, native: nil))
+        after.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200), started(30, "c", at: 300)], live: [], running: { $0.pid == 10 })
+        #expect(after.conversation(handle: "keyscribe")?.id == "a")
+        #expect(Set(after.handles) == ["keyscribe", "keyscribe blue", "keyscribe green"])
+    }
+
+    @Test func aSessionThatDropsOutOfOneScanHoldsItsNameWhileItsProcessRuns() {
+        var directory = AgentDirectory()
+        directory.update(claude: [started(10, "a", at: 100)], live: [])
+        directory.update(claude: [started(30, "c", at: 300)], live: [], running: { $0.pid == 10 })
+        #expect(directory.conversation(handle: "keyscribe")?.id == nil)
+        #expect(directory.remembered.keys.sorted() == ["a", "c"])
+        directory.update(claude: [started(10, "a", at: 100), started(30, "c", at: 300)], live: [], running: { $0.pid == 10 })
+        #expect(directory.conversation(handle: "keyscribe")?.id == "a")
+    }
+
+    @Test func aMissingSessionWhoseProcessIsGoneFreesItsName() {
+        var before = AgentDirectory()
+        before.update(claude: [started(10, "a", at: 100)], live: [])
+        var after = AgentDirectory(remembered: before.remembered)
+        after.update(claude: [started(30, "c", at: 300)], live: [], running: { _ in false })
+        #expect(after.conversation(handle: "keyscribe")?.id == "c")
+        #expect(after.remembered.keys.sorted() == ["c"])
+    }
+
+    @Test func aNativeNameThatChangedWhileTheAppWasClosedIsUsedInsteadOfTheRememberedOne() {
+        var before = AgentDirectory()
+        before.update(claude: [started(10, "a", at: 100, name: "Fix login"), started(20, "b", at: 200, name: "Fix login")], live: [])
+        #expect(before.conversation(handle: "fix login blue")?.id == "b")
+        var same = AgentDirectory(remembered: before.remembered)
+        same.update(claude: [started(20, "b", at: 200, name: "Fix login")], live: [])
+        #expect(same.handles == ["fix login blue"])
+        var renamed = AgentDirectory(remembered: before.remembered)
+        renamed.update(claude: [started(20, "b", at: 200, name: "Fix cache")], live: [])
+        #expect(renamed.handles == ["fix cache"])
+    }
+
     private func named(_ id: String, _ name: String, source: String = "user", cwd: String = "/src/api") -> ClaudeRegistryEntry {
         ClaudeRegistryEntry(pid: 10, sessionId: id, cwd: cwd, name: name, status: "idle", waitingFor: nil, nameSource: source)
     }
@@ -173,6 +261,25 @@ struct AgentDirectoryTests {
         directory.update(claude: [claude(10, "a")], live: [])
         directory.update(claude: [claude(10, "a2")], live: [])
         #expect(directory.conversation(handle: "keyscribe")?.id == "a2")
+        var switching = AgentDirectory()
+        switching.update(claude: [started(10, "a", at: 100)], live: [], running: { _ in true })
+        for next in ["a2", "a3", "a4"] {
+            switching.update(claude: [started(10, next, at: 100)], live: [], running: { _ in true })
+            #expect(switching.conversation(handle: "keyscribe")?.id == next)
+            #expect(switching.remembered.keys.sorted() == [next])
+        }
+    }
+
+    @Test func aNameHeldForAMissingRunningSessionCannotBeTakenByARename() {
+        var directory = AgentDirectory()
+        directory.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200)], live: [])
+        directory.update(claude: [started(20, "b", at: 200)], live: [], running: { $0.pid == 10 })
+        #expect(throws: AgentHandles.RenameError.taken) { try directory.rename("b", to: "keyscribe") }
+        #expect(directory.renameProblem("b", to: "Keyscribe") == .taken)
+        #expect(directory.renameProblem("b", to: "backend") == nil)
+        #expect(directory.renameProblem("b", to: "session 2") == .reserved)
+        directory.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200)], live: [], running: { $0.pid == 10 })
+        #expect(directory.conversation(handle: "keyscribe")?.id == "a")
     }
 
     @Test func aHandleSurvivesTheProcessRestartingWithTheSameSession() {

@@ -9,6 +9,7 @@ function harness(on: any) {
   const statuses: string[] = []
   const store = new Map<string, unknown>()
   const live = { session: 's1' }
+  const env: Record<string, string | undefined> = {}
   const downstream: Record<string, any> = {}
   const fills: string[] = []
   const reads: Array<() => void> = []
@@ -32,6 +33,7 @@ function harness(on: any) {
     return new Promise((resolve) => { releases.push(() => resolve(answer)) })
   })
   on('session.id', () => ({ value: live.session }))
+  on('env.get', ($: any, e: any) => ({ value: env[e.name] }))
   on('store.get', ($: any, e: any) => ({ value: store.get(e.key) }))
   on('store.set', ($: any, e: any) => {
     store.set(e.key, e.value)
@@ -116,7 +118,7 @@ function harness(on: any) {
   const readyChecks = () => fileReads.filter((p) => p === '/tmp/ks-ready.json').length
   const ready = (launch?: string, protocol = 2) => { files['/tmp/ks-ready.json'] = launch === undefined ? undefined : JSON.stringify({ launch, protocol }) }
 
-  return { store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, fills, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed }
+  return { env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, fills, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed }
 }
 
 test('agent hooks return while the bridge never answers, through one sender', async ($, on) => {
@@ -790,6 +792,24 @@ test('a session the module saw start says hello as fresh and idle', async ($, on
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await h.settle()
   expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'label', 'readiness'] })
+})
+
+test('hello reports the zellij pane its session runs in, which only its own process can read', async ($, on) => {
+  const h = harness(on)
+  h.env.ZELLIJ_PANE_ID = '3'
+  h.env.ZELLIJ_SESSION_NAME = 'quiet-otter'
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await h.settle()
+  expect(h.events()[0]).toMatchObject({ op: 'hello', environment: { ZELLIJ_PANE_ID: '3' } })
+  expect(Object.keys(h.events()[0].environment)).toEqual(['ZELLIJ_PANE_ID'])
+})
+
+test('hello outside zellij reports no terminal environment', async ($, on) => {
+  const h = harness(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await h.settle()
+  expect(h.events()[0].op).toBe('hello')
+  expect(h.events()[0].environment).toBeUndefined()
 })
 
 test('a reloaded module does not know its turn and says hello as resuming after a gap', async ($, on) => {

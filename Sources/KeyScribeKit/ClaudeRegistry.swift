@@ -8,8 +8,12 @@ public struct ClaudeRegistryEntry: Equatable, Sendable {
     public var nameSource: String?
     public var status: String
     public var waitingFor: String?
+    public var startedAt: Int?
 
-    public init(pid: Int, sessionId: String, cwd: String, name: String?, status: String, waitingFor: String?, nameSource: String? = nil) {
+    public init(
+        pid: Int, sessionId: String, cwd: String, name: String?, status: String, waitingFor: String?, nameSource: String? = nil,
+        startedAt: Int? = nil
+    ) {
         self.pid = pid
         self.sessionId = sessionId
         self.cwd = cwd
@@ -17,6 +21,7 @@ public struct ClaudeRegistryEntry: Equatable, Sendable {
         self.nameSource = nameSource
         self.status = status
         self.waitingFor = waitingFor
+        self.startedAt = startedAt
     }
 
     public var folder: String { URL(fileURLWithPath: cwd).lastPathComponent }
@@ -48,12 +53,14 @@ public struct ClaudeRegistryEntry: Equatable, Sendable {
         var nameSource: String?
         var status: String?
         var waitingFor: String?
+        var startedAt: Int?
     }
 
     public static func decode(_ data: Data) -> ClaudeRegistryEntry? {
         guard let w = try? JSONDecoder().decode(Wire.self, from: data),
               w.kind == "interactive", let pid = w.pid, let sessionId = w.sessionId, let cwd = w.cwd
         else { return nil }
-        return ClaudeRegistryEntry(pid: pid, sessionId: sessionId, cwd: cwd, name: w.name, status: w.status ?? "busy", waitingFor: w.waitingFor, nameSource: w.nameSource)
+        return ClaudeRegistryEntry(pid: pid, sessionId: sessionId, cwd: cwd, name: w.name, status: w.status ?? "busy", waitingFor: w.waitingFor, nameSource: w.nameSource,
+            startedAt: w.startedAt)
     }
 }

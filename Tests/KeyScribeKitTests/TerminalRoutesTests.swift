@@ -6,23 +6,37 @@ struct TerminalRoutesTests {
     final class Facts: TerminalFacts, @unchecked Sendable {
         var table: [Int: TerminalProcess] = [:]
         var outputs: [[String]: String] = [:]
+        var owners: [String: [String: Int]] = [:]
+        var unreadableTTYs: Set<String> = []
+        var childrenUnreadable = false
+        var namesUnreadable = false
         private(set) var ran: [[String]] = []
 
         @discardableResult
         func add(
             _ pid: Int, parent: Int?, tty: String? = nil, _ arguments: [String], executable: String? = nil,
-            environment: [String: String] = [:], app: String? = nil
+            environment: [String: String] = [:], app: String? = nil, foreground: Bool = true
         ) -> Facts {
             table[pid] = TerminalProcess(
                 pid: pid, parent: parent, tty: tty, arguments: arguments, environment: environment,
-                executable: executable ?? arguments.first ?? "", app: app)
+                executable: executable ?? arguments.first ?? "", app: app, foreground: foreground)
             return self
         }
 
         func process(_ pid: Int) -> TerminalProcess? { table[pid] }
-        func processes(named name: String) -> [TerminalProcess] {
-            table.values.filter { ($0.executable as NSString).lastPathComponent == name }.sorted { $0.pid < $1.pid }
+        func processes(named name: String) -> [TerminalProcess]? {
+            guard !namesUnreadable else { return nil }
+            return table.values.filter { ($0.executable as NSString).lastPathComponent == name }.sorted { $0.pid < $1.pid }
         }
+        func processes(onTTY tty: String) -> [TerminalProcess]? {
+            guard !unreadableTTYs.contains(tty) else { return nil }
+            return table.values.filter { $0.tty == tty }.sorted { $0.pid < $1.pid }
+        }
+        func children(of pid: Int) -> [TerminalProcess]? {
+            guard !childrenUnreadable else { return nil }
+            return table.values.filter { $0.parent == pid }.sorted { $0.pid < $1.pid }
+        }
+        func socketOwners(in directory: String) -> [String: Int]? { owners[directory] }
         func run(_ argv: [String]) -> (status: Int32, output: String) {
             ran.append(argv)
             return outputs[argv].map { (0, $0) } ?? (1, "")
@@ -97,7 +111,40 @@ struct TerminalRoutesTests {
         #expect(TerminalRoutes.plan(agent: 30, facts: facts) == [.activate(app: "dev.warp.Warp-Stable", pid: 10)])
     }
 
-    @Test func anAgentInCmuxAsksItsConnectorToFocusItsSurfaceThenCmuxComesForward() {
+    @Test func anAgentInCmuxFocusesTheSurfaceItsProcessesNameThenCmuxComesForward() throws {
+        let facts = Facts()
+            .add(30, parent: 20, tty: "/dev/ttys050", ["pi"], environment: ["CMUX_SURFACE_ID": "7D77E5A3-\"1"])
+            .add(20, parent: 10, tty: "/dev/ttys050", ["/usr/bin/login"])
+            .add(10, parent: 1, ["/Applications/cmux.app/Contents/MacOS/cmux"], app: "com.cmuxterm.app")
+        let plan = TerminalRoutes.plan(agent: 30, facts: facts)
+        guard case .select(.script(let app, let pid, let body)) = try #require(plan.first) else {
+            Issue.record("expected a script")
+            return
+        }
+        #expect(app == "com.cmuxterm.app" && pid == 10)
+        #expect(body.contains(#"terminal whose id is "7D77E5A3-\"1""#) && body.contains("focus"))
+        #expect(plan.dropFirst() == [.activate(app: "com.cmuxterm.app", pid: 10)])
+    }
+
+    @Test func anAgentInTmuxInCmuxFocusesTheSurfaceItsClientRunsIn() {
+        let socket = "/private/tmp/tmux-501/default"
+        let facts = tmuxFacts(clients: "/dev/ttys005\t56\twork\t100\n")
+        facts.table[10] = TerminalProcess(pid: 10, parent: 1, tty: nil, arguments: ["cmux"], environment: [:], executable: "cmux", app: "com.cmuxterm.app")
+        facts.table[56]?.environment = ["CMUX_SURFACE_ID": "B"]
+        facts.table[70]?.environment = ["CMUX_SURFACE_ID": "A"]
+        let plan = TerminalRoutes.plan(agent: 70, facts: facts)
+        #expect(plan.first == .layer(PaneLayer("tmux", commands: [
+            PaneCommand([Self.tmux, "-S", socket, "select-window", "-t", "%4"]), PaneCommand([Self.tmux, "-S", socket, "select-pane", "-t", "%4"]),
+            PaneCommand([Self.tmux, "-S", socket, "switch-client", "-c", "/dev/ttys005", "-t", "%4"]),
+        ])))
+        guard case .select(.script(_, _, let body)) = plan.dropFirst().first else {
+            Issue.record("expected a script")
+            return
+        }
+        #expect(body.contains(#"terminal whose id is "B""#))
+    }
+
+    @Test func anAgentInCmuxWithNoSurfaceIdInSightAsksItsConnectorThenCmuxComesForward() {
         let facts = Facts()
             .add(30, parent: 20, tty: "/dev/ttys050", ["claude"])
             .add(20, parent: 10, tty: "/dev/ttys050", ["/usr/bin/login"])
@@ -227,7 +274,7 @@ struct TerminalRoutesTests {
     private static let zellijSocket = "/var/folders/T/zellij-501/contract_version_1/work"
 
     private func zellijFacts(clients: [Int] = [80], pane: String? = "2") -> Facts {
-        var environment = ["ZELLIJ_SESSION_NAME": "work"]
+        var environment: [String: String] = [:]
         environment["ZELLIJ_PANE_ID"] = pane
         let facts = Facts()
             .add(90, parent: 85, tty: "/dev/ttys040", ["claude"], environment: environment)
@@ -245,18 +292,26 @@ struct TerminalRoutesTests {
         }
         lsof += "p99\nf5\nd0xstranger\nn->0xelsewhere\n"
         facts.outputs[["/usr/sbin/lsof", "-U", "-a", "-c", "zellij", "-F", "pdn"]] = lsof
+        facts.owners["/var/folders/T/zellij-501/contract_version_1"] = ["work": 84]
         facts.outputs[[Self.zellij, "--session", "work", "action", "list-panes", "-t", "-j"]] = #"""
-            [{"id":0,"is_plugin":true,"tab_id":0},{"id":0,"is_plugin":false,"tab_id":0},
-             {"id":2,"is_plugin":true,"tab_id":3},{"id":2,"is_plugin":false,"tab_id":5}]
+            [{"id":0,"is_plugin":true,"tab_id":0,"is_floating":false,"is_suppressed":false,"is_selectable":true},
+             {"id":0,"is_plugin":false,"tab_id":0,"is_floating":false,"is_suppressed":false,"is_selectable":true},
+             {"id":2,"is_plugin":true,"tab_id":5,"is_floating":false,"is_suppressed":false,"is_selectable":false},
+             {"id":2,"is_plugin":false,"tab_id":5,"is_floating":false,"is_suppressed":false,"is_selectable":true},
+             {"id":3,"is_plugin":false,"tab_id":5,"is_floating":false,"is_suppressed":false,"is_selectable":true},
+             {"id":4,"is_plugin":true,"tab_id":5,"is_floating":false,"is_suppressed":false,"is_selectable":true},
+             {"id":5,"is_plugin":false,"tab_id":5,"is_floating":true,"is_suppressed":false,"is_selectable":true},
+             {"id":6,"is_plugin":false,"tab_id":5,"is_floating":false,"is_suppressed":true,"is_selectable":true}]
             """#
         return facts
     }
 
-    private static func zellijLayer(confirmed: Bool = true) -> OpenAction {
-        let action = [zellij, "--session", "work", "action"]
+    private static func zellijLayer(session: String = "work", confirmed: Bool = true) -> OpenAction {
+        let action = [zellij, "--session", session, "action"]
         return .layer(PaneLayer("Zellij", commands: [
             PaneCommand(action + ["go-to-tab-by-id", "5"]),
-            PaneCommand(action + ["focus-pane-id", "terminal_2"], alreadyDone: "is already focused"),
+            PaneCommand(action + ["hide-floating-panes", "-t", "5"], accepting: [0, 2]),
+            PaneCommand(action + ["focus-next-pane"], until: FocusWalk(check: action + ["list-clients"], pane: "terminal_2", steps: 2)),
         ], confirmed: confirmed))
     }
 
@@ -264,6 +319,21 @@ struct TerminalRoutesTests {
         #expect(TerminalRoutes.plan(agent: 90, facts: zellijFacts()) == [
             Self.zellijLayer(),
         ] + ScriptedTerminalRoute.ghostty.open(pid: 10, ttys: ["/dev/ttys041"]))
+    }
+
+    @Test func aZellijPaneTheAgentReportedOpensThoughItsEnvironmentCannotBeRead() {
+        let facts = zellijFacts(pane: nil).reporting(["ZELLIJ_PANE_ID": "2"], for: 90)
+        #expect(TerminalRoutes.plan(agent: 90, facts: facts) == [
+            Self.zellijLayer(),
+        ] + ScriptedTerminalRoute.ghostty.open(pid: 10, ttys: ["/dev/ttys041"]))
+    }
+
+    @Test func aRenamedZellijSessionIsOpenedUnderItsNewName() {
+        let facts = zellijFacts()
+        facts.owners["/var/folders/T/zellij-501/contract_version_1"] = ["renamed": 84, "work": 184]
+        facts.outputs[[Self.zellij, "--session", "renamed", "action", "list-panes", "-t", "-j"]] =
+            facts.outputs[[Self.zellij, "--session", "work", "action", "list-panes", "-t", "-j"]]
+        #expect(TerminalRoutes.plan(agent: 90, facts: facts).first == Self.zellijLayer(session: "renamed"))
     }
 
     @Test func aZellijSessionInSeveralWindowsCannotConfirmWhichOneItMovedFocusIn() {
@@ -275,6 +345,27 @@ struct TerminalRoutesTests {
     @Test func aZellijPaneItsSessionDoesNotListIsUnresolved() {
         #expect(TerminalRoutes.plan(agent: 90, facts: zellijFacts(pane: "7")).first == .layer(.unresolved("Zellij")))
         #expect(TerminalRoutes.plan(agent: 90, facts: zellijFacts(pane: nil)).first == .layer(.unresolved("Zellij")))
+    }
+
+    @Test func aZellijPaneThatCannotBeReachedByStepppingThroughTiledPanesIsUnresolved() {
+        for pane in ["5", "6"] {
+            #expect(TerminalRoutes.plan(agent: 90, facts: zellijFacts(pane: pane)).first == .layer(.unresolved("Zellij")))
+        }
+    }
+
+    @Test func aZellijPaneListWithoutPaneStateIsUnresolved() {
+        let facts = zellijFacts()
+        facts.outputs[[Self.zellij, "--session", "work", "action", "list-panes", "-t", "-j"]] =
+            #"[{"id":2,"is_plugin":false,"tab_id":5}]"#
+        #expect(TerminalRoutes.plan(agent: 90, facts: facts).first == .layer(.unresolved("Zellij")))
+    }
+
+    @Test func aZellijFocusWalkIsDoneOnlyWhenAWindowShowsTheTargetPaneAndUnknownWhenTheWindowsCannotBeRead() {
+        let walk = FocusWalk(check: ["list-clients"], pane: "terminal_2", steps: 1)
+        #expect(walk.reached((0, "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n1         terminal_2     claude\n")) == true)
+        #expect(walk.reached((0, "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n1         terminal_20    claude terminal_2\n")) == false)
+        #expect(walk.reached((1, "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n1         terminal_2     claude\n")) == nil)
+        #expect(walk.reached((0, "")) == nil)
     }
 
     @Test func aZellijSessionWithNoWindowHasNothingToShowItIn() {
@@ -301,9 +392,9 @@ struct TerminalRoutesTests {
         #expect(TerminalRoutes.layers(of: []).app == nil)
     }
 
-    @Test func onlyTheEnvironmentOpenReadsIsKept() {
+    @Test func onlyTheEnvironmentOpenAndTheFrontCheckReadIsKept() {
         #expect(TerminalRoutes.environmentKeys == [
-            "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "TMUX", "ZELLIJ_SESSION_NAME", "ZELLIJ_PANE_ID", "WARP_FOCUS_URL",
+            "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "TMUX", "ZELLIJ_PANE_ID", "WARP_FOCUS_URL", "CMUX_SURFACE_ID",
         ])
     }
 }

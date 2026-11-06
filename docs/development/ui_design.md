@@ -339,11 +339,15 @@ docs”, “switch to session two”). It makes the conversation current, sends 
 forward. While it looks, the HUD says so (“Opening docs…”). It follows the agent's processes outward and
 selects each layer it passes through: the multiplexer pane showing the agent (herdr or tmux, for example — the
 `PaneRoute`s in `TerminalRoutes`), then the terminal tab and split holding that pane (or holding the agent directly),
-then the terminal app. Each multiplexer is one `PaneRoute` and each terminal app one `TerminalRoute`; both
-return ordered actions, so a terminal that must come forward before it can select a tab says so itself. A
-terminal that admits only its own processes (cmux) is selected by the agent's connector instead: KeyScribe
-asks it to focus its own surface, and only a connector that announced it can is asked. An older connector
-says how to get there: “Brought cmux forward. Update the Claude Code connector in Settings, then run
+then the terminal app. Each multiplexer is one `PaneRoute` and each terminal app one `TerminalRoute`, listed
+in `TerminalRoutes.routes`. Every route answers the same questions inside its own file, so nothing shared
+names a particular terminal or multiplexer: what Open does for an agent it holds, and which of its views is
+in front. Open's answer is ordered actions, so a terminal that must come forward before it can select a tab
+says so itself. A
+terminal that names each surface with an id its processes carry (cmux) is selected by that id, so it works
+for every agent. When no process shows the agent's surface id, the agent's connector is asked instead:
+KeyScribe asks it to focus its own surface, and only a connector that announced it can is asked. An older
+connector says how to get there: “Brought cmux forward. Update the Claude Code connector in Settings, then run
 /reload-plugins in docs to open its tab”. Every layer is found by something stable — a pane id, a tty, or the terminal's own
 session link — never by matching a title, so Open never guesses a pane (`TerminalRoutes`). A terminal with
 no route for its tabs, or one Open had nothing to look for (no session link, no tty), only comes forward and
@@ -1448,7 +1452,10 @@ reserved and already-used names are explained beside the field before submission
 keeps the sheet and draft open for correction or retry, with the diagnostic reason under Technical
 details; Cancel makes no change. Renaming changes the
 name used in KeyScribe and leaves Claude Code's own title alone. A chosen name stays with its session
-across restarts of either app and is held for it while it is closed. The name is saved before it takes
+across restarts of either app and is held for it while it is closed. A name KeyScribe gave a session
+stays with it across KeyScribe restarts while that session keeps running, and is free once it closes. If those names
+cannot be saved, Conversations shows an orange advisory that they may change when the app restarts, with
+the reason beneath it; saving is retried and the advisory clears once it succeeds. The name is saved before it takes
 effect. It overrides subsequent native renames; without a KeyScribe override the native conversation
 name is used automatically.
 

@@ -296,6 +296,12 @@ struct AgentBridgeCodecTests {
             == .title(session: "s1", text: "Renamed"))
     }
 
+    @Test func aConnectorReportsTheTerminalEnvironmentOnlyItsOwnProcessCanRead() throws {
+        let hello = #"{"op":"hello","protocol":1,"agent":"claude","instance":"i1","session":"s1","pid":0,"environment":{"ZELLIJ_PANE_ID":"3"}}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(hello.utf8)) == .hello(.init(
+            protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "s1", pid: 0, environment: ["ZELLIJ_PANE_ID": "3"])))
+    }
+
     @Test func aSubmitCarriesThePromptCountItWasDecidedAgainst() throws {
         let fenced: [AgentCommand] = [.submit(id: "r1", expectedSession: "s1", text: "x", expectedPrompts: 3)]
         let data = try AgentBridgeCodec.encode(fenced)

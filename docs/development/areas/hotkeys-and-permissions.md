@@ -9,7 +9,7 @@ Read before changing trigger matching, Carbon chords, the event taps, keyboard-l
   Automation is browser URL and tabs via AppleScript (requested only when a mode opts into URL context, or
   Voice Commands reads or focuses a browser tab), and selecting a coding agent's tab in a scripted terminal
   (requested only on the first Open into that terminal — the scriptable terminals are the
-  `ScriptedTerminalRoute`s in `TerminalRoutes`). Open also reads other processes' environment through
+  `TerminalRoute`s in `TerminalRoutes` whose Open runs a script). Open also reads other processes' environment through
   `KERN_PROCARGS2` (`SystemTerminalFacts`), which needs no permission; it keeps only the variables in
   `TerminalRoutes.environmentKeys`, never the rest of an environment;
   Microphone is capture.

@@ -2,9 +2,24 @@ import Foundation
 
 struct TmuxRoute: PaneRoute {
     static let key = "TMUX"
+    let name = "tmux"
+    let processName = "tmux"
     let environmentKeys = [key]
 
-    func layer(server: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> (layer: PaneLayer, client: Int?)? {
+    func open(_ server: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> Opening? {
+        layer(server: server, inner: inner, facts: facts).map { Opening([.layer($0.layer)], next: $0.client) }
+    }
+
+    func isClient(_ process: TerminalProcess) -> Bool { process.name == processName }
+
+    func front(client: TerminalProcess, tty: String, facts: TerminalFacts) -> FrontStep {
+        let rows = TerminalRoutes.rows(facts.run([client.executable] + Self.socket(client.arguments) + ["list-clients", "-F", "#{client_tty}\t#{pane_tty}"]))
+        let panes = rows.filter { $0.count == 2 && $0[0] == tty }
+        guard panes.count == 1, !panes[0][1].isEmpty else { return .unknown(.multiplexer(name)) }
+        return .tty(panes[0][1])
+    }
+
+    private func layer(server: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> (layer: PaneLayer, client: Int?)? {
         guard let value = inner.last?.environment[Self.key] else { return nil }
         let parts = value.split(separator: ",", omittingEmptySubsequences: false)
         guard parts.count >= 2, Int(parts[1]) == server.pid else { return nil }
@@ -14,11 +29,18 @@ struct TmuxRoute: PaneRoute {
         let clients = TerminalRoutes.rows(facts.run(
             tmux + ["list-clients", "-F", "#{client_tty}\t#{client_pid}\t#{client_session}\t#{client_activity}"]
         )).filter { $0.count == 4 }
-        guard let pane = panes.first(where: { $0.count == 3 && ttys.contains($0[0]) }) else { return (.unresolved("tmux"), nil) }
+        guard let pane = panes.first(where: { $0.count == 3 && ttys.contains($0[0]) }) else { return (.unresolved(name), nil) }
         let byActivity = clients.sorted { (Int($0[3]) ?? 0) > (Int($1[3]) ?? 0) }
         guard let client = byActivity.first(where: { $0[2] == pane[2] }) ?? byActivity.first, let next = Int(client[1])
-        else { return (.unresolved("tmux"), nil) }
+        else { return (.unresolved(name), nil) }
         let commands = [["select-window", "-t", pane[1]], ["select-pane", "-t", pane[1]], ["switch-client", "-c", client[0], "-t", pane[1]]]
-        return (PaneLayer("tmux", commands: commands.map { PaneCommand(tmux + $0) }), next)
+        return (PaneLayer(name, commands: commands.map { PaneCommand(tmux + $0) }), next)
+    }
+
+    static func socket(_ arguments: [String]) -> [String] {
+        for flag in ["-L", "-S"] {
+            if let index = arguments.firstIndex(of: flag), index + 1 < arguments.count { return [flag, arguments[index + 1]] }
+        }
+        return []
     }
 }

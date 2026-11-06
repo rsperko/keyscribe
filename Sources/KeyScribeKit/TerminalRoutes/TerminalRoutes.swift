@@ -8,11 +8,13 @@ public struct TerminalProcess: Equatable, Sendable {
     public var environment: [String: String]
     public var executable: String
     public var app: String?
+    public var foreground: Bool
 
     public init(
         pid: Int, parent: Int?, tty: String?, arguments: [String], environment: [String: String], executable: String,
-        app: String?
+        app: String?, foreground: Bool = true
     ) {
+        self.foreground = foreground
         self.pid = pid
         self.parent = parent
         self.tty = tty
@@ -27,21 +29,22 @@ public struct TerminalProcess: Equatable, Sendable {
 
 public protocol TerminalFacts {
     func process(_ pid: Int) -> TerminalProcess?
-    func processes(named name: String) -> [TerminalProcess]
+    func processes(named name: String) -> [TerminalProcess]?
+    func processes(onTTY tty: String) -> [TerminalProcess]?
+    func children(of pid: Int) -> [TerminalProcess]?
+    func socketOwners(in directory: String) -> [String: Int]?
     func run(_ argv: [String]) -> (status: Int32, output: String)
 }
 
 public struct PaneCommand: Equatable, Sendable {
     public var arguments: [String]
-    public var alreadyDone: String?
+    public var accepting: Set<Int32>
+    public var until: FocusWalk?
 
-    public init(_ arguments: [String], alreadyDone: String? = nil) {
+    public init(_ arguments: [String], accepting: Set<Int32> = [0], until: FocusWalk? = nil) {
         self.arguments = arguments
-        self.alreadyDone = alreadyDone
-    }
-
-    public func succeeded(status: Int32, output: String) -> Bool {
-        status == 0 || alreadyDone.map(output.contains) == true
+        self.accepting = accepting
+        self.until = until
     }
 }
 
@@ -61,15 +64,47 @@ public struct PaneLayer: Equatable, Sendable {
     }
 }
 
-public protocol PaneRoute: Sendable {
-    var environmentKeys: [String] { get }
-    func layer(server: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> (layer: PaneLayer, client: Int?)?
+public struct Opening: Equatable, Sendable {
+    public var actions: [OpenAction]
+    public var next: Int?
+
+    public init(_ actions: [OpenAction], next: Int? = nil) {
+        self.actions = actions
+        self.next = next
+    }
 }
 
-public protocol TerminalRoute: Sendable {
+public enum FrontStep: Equatable, Sendable {
+    case tty(String)
+    case view(FrontView)
+    case unknown(FrontUnknown)
+}
+
+public protocol Route: Sendable {
+    var name: String { get }
     var environmentKeys: [String] { get }
-    func owns(_ process: TerminalProcess) -> Bool
-    func actions(terminal: TerminalProcess, inner: ArraySlice<TerminalProcess>) -> [OpenAction]
+    func open(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> Opening?
+    func check(agent pid: Int, view: FrontView, facts: TerminalFacts) -> FrontCheck
+}
+
+extension Route {
+    public func check(agent pid: Int, view: FrontView, facts: TerminalFacts) -> FrontCheck { .unknown(.unreported(name)) }
+}
+
+public protocol TerminalRoute: Route {
+    var app: String { get }
+    var frontScript: String? { get }
+    func front(answer: String, appPid: Int, facts: TerminalFacts) -> FrontStep
+}
+
+extension TerminalRoute {
+    public func front(answer: String, appPid: Int, facts: TerminalFacts) -> FrontStep { .tty(answer) }
+}
+
+public protocol PaneRoute: Route {
+    var processName: String { get }
+    func isClient(_ process: TerminalProcess) -> Bool
+    func front(client: TerminalProcess, tty: String, facts: TerminalFacts) -> FrontStep
 }
 
 public enum TerminalSelector: Equatable, Sendable {
@@ -88,28 +123,26 @@ public enum OpenAction: Equatable, Sendable {
 public enum TerminalRoutes {
     public static let maxAncestors = 64
     public static let maxLayers = 4
-    static let paneRoutes: [any PaneRoute] = [HerdrRoute(), TmuxRoute(), ZellijRoute()]
-    static let terminalRoutes: [any TerminalRoute] = [
-        ScriptedTerminalRoute.ghostty, ScriptedTerminalRoute.terminal, ScriptedTerminalRoute.iterm, WarpRoute(), CmuxRoute(),
-    ]
-    public static let environmentKeys: Set<String> = Set(
-        paneRoutes.flatMap(\.environmentKeys) + terminalRoutes.flatMap(\.environmentKeys))
+    public static let terminalRoutes: [any TerminalRoute] = ScriptedTerminalRoute.all.map { $0 as any TerminalRoute } + [WarpRoute(), CmuxRoute()]
+    public static let paneRoutes: [any PaneRoute] = [HerdrRoute(), TmuxRoute(), ZellijRoute()]
+    public static let routes: [any Route] = terminalRoutes.map { $0 as any Route } + paneRoutes.map { $0 as any Route }
+    public static let environmentKeys: Set<String> = Set(routes.flatMap(\.environmentKeys))
 
-    public static func plan(agent pid: Int, facts: TerminalFacts) -> [OpenAction] {
+    public static func terminal(_ app: String) -> (any TerminalRoute)? { terminalRoutes.first { $0.app == app } }
+
+    static func route(named name: String) -> (any Route)? { routes.first { $0.name == name } }
+
+    public static func plan(agent pid: Int, facts: TerminalFacts, routes: [any Route] = routes) -> [OpenAction] {
         var actions: [OpenAction] = []
         var start = pid
         layers: for _ in 0..<maxLayers {
             let chain = ancestors(of: start, facts: facts)
             for (index, process) in chain.enumerated() {
-                let inner = chain[..<index]
-                if let route = terminalRoutes.first(where: { $0.owns(process) }) {
-                    return actions + route.actions(terminal: process, inner: inner)
-                }
-                for route in paneRoutes {
-                    guard let (layer, client) = route.layer(server: process, inner: inner, facts: facts) else { continue }
-                    actions.append(.layer(layer))
-                    guard let client else { return actions }
-                    start = client
+                for route in routes {
+                    guard let opening = route.open(process, inner: chain[..<index], facts: facts) else { continue }
+                    actions += opening.actions
+                    guard let next = opening.next else { return actions }
+                    start = next
                     continue layers
                 }
             }
@@ -164,5 +197,31 @@ extension TerminalRoutes {
             }
         }
         return (app, multiplexers)
+    }
+}
+
+extension TerminalFacts {
+    public func reporting(_ environment: [String: String], for pid: Int) -> TerminalFacts {
+        ReportedFacts(base: self, pid: pid, environment: environment.filter { TerminalRoutes.environmentKeys.contains($0.key) })
+    }
+}
+
+private struct ReportedFacts: TerminalFacts {
+    var base: TerminalFacts
+    var pid: Int
+    var environment: [String: String]
+
+    func process(_ pid: Int) -> TerminalProcess? { base.process(pid).map(reported) }
+    func processes(named name: String) -> [TerminalProcess]? { base.processes(named: name)?.map(reported) }
+    func processes(onTTY tty: String) -> [TerminalProcess]? { base.processes(onTTY: tty)?.map(reported) }
+    func children(of pid: Int) -> [TerminalProcess]? { base.children(of: pid)?.map(reported) }
+    func socketOwners(in directory: String) -> [String: Int]? { base.socketOwners(in: directory) }
+    func run(_ argv: [String]) -> (status: Int32, output: String) { base.run(argv) }
+
+    private func reported(_ process: TerminalProcess) -> TerminalProcess {
+        guard process.pid == pid else { return process }
+        var process = process
+        process.environment.merge(environment) { own, _ in own }
+        return process
     }
 }

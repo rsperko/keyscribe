@@ -688,13 +688,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 runtime.hub.onNotice = { [weak self] in self?.controller.showAgentNotice($0, request: $1) }
                 runtime.hub.onChange = { [weak self, weak hub = runtime.hub] in
                     guard let hub else { return }
-                    self?.settingsController.codingAgents.show(hub.directory.conversations, current: hub.current, namesProblem: hub.namesProblem)
+                    self?.settingsController.codingAgents.show(
+                        hub.directory.conversations, current: hub.current, namesProblem: hub.namesProblem, namesNotSaved: hub.namesNotSaved)
                 }
                 settingsController.codingAgents.onRename = { [weak hub = runtime.hub] in try hub?.rename($0, to: $1) }
                 settingsController.codingAgents.onReloadNames = { [weak hub = runtime.hub] in hub?.reloadNames() }
+                settingsController.codingAgents.renameCheck = { [weak hub = runtime.hub] in hub?.renameProblem($0, to: $1) }
                 settingsController.codingAgents.onRetire = { [weak runtime] in runtime?.retire() }
                 settingsController.codingAgents.show(
-                    runtime.hub.directory.conversations, current: runtime.hub.current, namesProblem: runtime.hub.namesProblem)
+                    runtime.hub.directory.conversations, current: runtime.hub.current, namesProblem: runtime.hub.namesProblem,
+                    namesNotSaved: runtime.hub.namesNotSaved)
                 agentRuntime = runtime
                 controller.agents = runtime.hub
             } catch {
@@ -706,6 +709,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.agents = nil
             settingsController.codingAgents.onRename = nil
             settingsController.codingAgents.onReloadNames = nil
+            settingsController.codingAgents.renameCheck = nil
             settingsController.codingAgents.onRetire = nil
             settingsController.codingAgents.show([], current: nil)
         }

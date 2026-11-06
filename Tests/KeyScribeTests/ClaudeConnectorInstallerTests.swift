@@ -293,10 +293,10 @@ struct ClaudeConnectorInstallerTests {
         #expect(source.contains("keyscribe.json"))
     }
 
-    @Test func theModReadsOnlyTheSurfaceItFocusesNeverAnAccessToken() throws {
+    @Test func theModReadsOnlyWhereItsTerminalShowsItNeverAnAccessToken() throws {
         let source = Self.script
         let reads = try Regex(#"\$\.env\.get\("([A-Z_]+)"\)"#)
-        #expect(source.matches(of: reads).compactMap { $0.output[1].substring.map(String.init) } == ["CMUX_SURFACE_ID"])
+        #expect(source.matches(of: reads).compactMap { $0.output[1].substring.map(String.init) } == ["ZELLIJ_PANE_ID", "CMUX_SURFACE_ID"])
         #expect(source.contains("features: ['focus', 'label', 'readiness']"))
     }
 

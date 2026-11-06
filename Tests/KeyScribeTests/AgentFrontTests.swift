@@ -1,0 +1,154 @@
+import Foundation
+import KeyScribeKit
+import Testing
+@testable import KeyScribeApp
+
+@MainActor
+struct AgentFrontTests {
+    nonisolated final class Facts: TerminalFacts, @unchecked Sendable {
+        var table: [Int: TerminalProcess] = [:]
+        var outputs: [[String]: String] = [:]
+
+        func add(_ pid: Int, parent: Int?, tty: String?, _ name: String) -> Facts {
+            table[pid] = TerminalProcess(pid: pid, parent: parent, tty: tty, arguments: [name], environment: [:], executable: name, app: nil)
+            return self
+        }
+
+        func process(_ pid: Int) -> TerminalProcess? { table[pid] }
+        func processes(named name: String) -> [TerminalProcess]? { [] }
+        func processes(onTTY tty: String) -> [TerminalProcess]? { table.values.filter { $0.tty == tty } }
+        func children(of pid: Int) -> [TerminalProcess]? { table.values.filter { $0.parent == pid } }
+        func socketOwners(in directory: String) -> [String: Int]? { nil }
+        func run(_ argv: [String]) -> (status: Int32, output: String) { outputs[argv].map { (0, $0) } ?? (1, "") }
+
+        func showing(tmuxPane tty: String) -> Facts {
+            outputs[["tmux", "list-clients", "-F", "#{client_tty}\t#{pane_tty}"]] = "/dev/ttys001\t\(tty)"
+            return self
+        }
+    }
+
+    final class Sequence<Value>: @unchecked Sendable {
+        var values: [Value]
+        init(_ values: [Value]) { self.values = values }
+        func next() -> Value { values.count > 1 ? values.removeFirst() : values[0] }
+    }
+
+    final class Front: @unchecked Sendable {
+        var apps: [FrontApp?]
+        init(_ apps: FrontApp?...) { self.apps = apps }
+        func next() -> FrontApp? { apps.count > 1 ? apps.removeFirst() : apps.first ?? nil }
+    }
+
+    nonisolated private static let ghostty = "com.mitchellh.ghostty"
+    private static let ghosttyApp = FrontApp(bundle: ghostty, pid: 10, name: "Ghostty")
+    nonisolated private static let safari = FrontApp(bundle: "com.apple.Safari", pid: 11, name: "Safari")
+    nonisolated private static let facts = Facts()
+        .add(30, parent: 1, tty: "/dev/ttys004", "claude")
+        .add(40, parent: 1, tty: "/dev/ttys005", "pi")
+
+    final class Replies: @unchecked Sendable {
+        var replies: [TerminalRead]
+        init(_ replies: [TerminalRead]) { self.replies = replies }
+        func next() -> TerminalRead { replies.count > 1 ? replies.removeFirst() : replies[0] }
+    }
+
+    private func front(
+        _ front: Front, reply: TerminalRead = .value("/dev/ttys004"), then: [TerminalRead] = [],
+        asked: (@Sendable (String) -> Void)? = nil, facts: [Facts] = [AgentFrontTests.facts],
+        onSecondRead: (@Sendable () -> Void)? = nil
+    ) -> AgentFront {
+        let replies = Replies([reply] + then)
+        let facts = Sequence(facts)
+        let reads = Sequence(Array(1...3))
+        return AgentFront(
+            frontmost: { front.next() },
+            read: { app, pid, body, asking in
+                #expect(app == Self.ghostty && pid == 10 && body == ScriptedTerminalRoute.ghostty.frontScript)
+                if let asked { await asking(); asked(app) }
+                if reads.next() == 2 { onSecondRead?() }
+                return replies.next()
+            },
+            facts: { facts.next() })
+    }
+
+    nonisolated private static func tmux(showing tty: String) -> Facts {
+        Facts()
+            .add(12, parent: 1, tty: "/dev/ttys001", "tmux")
+            .add(30, parent: 1, tty: "/dev/ttys004", "claude")
+            .add(40, parent: 1, tty: "/dev/ttys005", "pi")
+            .showing(tmuxPane: tty)
+    }
+
+    @Test func cmuxIsAskedForItsFocusedTerminalAndAnsweredWithThatSurface() async {
+        let cmux = FrontApp(bundle: "com.cmuxterm.app", pid: 10, name: "cmux")
+        let facts = Facts()
+            .add(20, parent: 10, tty: "/dev/ttys021", "/usr/bin/login")
+            .add(40, parent: 10, tty: "/dev/ttys022", "/usr/bin/login")
+        facts.table[30] = TerminalProcess(
+            pid: 30, parent: 20, tty: "/dev/ttys021", arguments: ["claude"], environment: ["CMUX_SURFACE_ID": "A"], executable: "claude", app: nil)
+        facts.table[50] = TerminalProcess(
+            pid: 50, parent: 40, tty: "/dev/ttys022", arguments: ["pi"], environment: ["CMUX_SURFACE_ID": "B"], executable: "pi", app: nil)
+        let front = AgentFront(
+            frontmost: { cmux },
+            read: { app, pid, body, _ in
+                #expect(app == "com.cmuxterm.app" && pid == 10 && body == TerminalRoutes.terminal("com.cmuxterm.app")?.frontScript)
+                return .value("A")
+            },
+            facts: { facts })
+        #expect(await front.check(agent: 30) == .shown)
+        #expect(await front.check(agent: 50) == .elsewhere)
+    }
+
+    @Test func aMultiplexerPaneThatChangesBehindTheSameTabIsUnknown() async {
+        let steady = front(Front(Self.ghosttyApp), reply: .value("/dev/ttys001"), facts: [Self.tmux(showing: "/dev/ttys004")])
+        #expect(await steady.check(agent: 30) == .shown)
+        let moved = front(
+            Front(Self.ghosttyApp), reply: .value("/dev/ttys001"),
+            facts: [Self.tmux(showing: "/dev/ttys004"), Self.tmux(showing: "/dev/ttys004"), Self.tmux(showing: "/dev/ttys005")])
+        #expect(await moved.check(agent: 30) == .unknown(.changed))
+    }
+
+    @Test func anAppThatChangesDuringTheSecondReadIsUnknown() async {
+        let apps = Front(Self.ghosttyApp)
+        let check = front(apps, onSecondRead: { apps.apps = [Self.safari] })
+        #expect(await check.check(agent: 30) == .unknown(.changed))
+    }
+
+    @Test func anAgentInTheFrontTerminalTabIsShown() async {
+        let check = front(Front(Self.ghosttyApp))
+        #expect(await check.check(agent: 30) == .shown)
+        #expect(await check.check(agent: 40) == .elsewhere)
+    }
+
+    @Test func aFrontAppWithoutATerminalRouteIsUnknown() async {
+        let check = front(Front(Self.safari))
+        #expect(await check.check(agent: 30) == .unknown(.unsupported("com.apple.Safari")))
+        #expect(await front(Front(nil)).check(agent: 30) == .unknown(.noTerminal))
+    }
+
+    @Test func aRefusedOrFailedReadIsUnknownNotElsewhere() async {
+        #expect(await front(Front(Self.ghosttyApp), reply: .notAllowed).check(agent: 30) == .unknown(.notAllowed(Self.ghostty)))
+        #expect(await front(Front(Self.ghosttyApp), reply: .failed).check(agent: 30) == .unknown(.unreadable(Self.ghostty)))
+        #expect(await front(Front(Self.ghosttyApp), reply: .value("")).check(agent: 30) == .unknown(.noTerminal))
+    }
+
+    @Test func aFrontAppThatChangesDuringTheReadIsUnknown() async {
+        let check = front(Front(Self.ghosttyApp, Self.safari))
+        #expect(await check.check(agent: 30) == .unknown(.changed))
+    }
+
+    @Test func aTabThatChangesInTheSameTerminalDuringTheReadIsUnknown() async {
+        let check = front(Front(Self.ghosttyApp), then: [.value("/dev/ttys005")])
+        #expect(await check.check(agent: 30) == .unknown(.changed))
+        #expect(await front(Front(Self.ghosttyApp), then: [.failed]).check(agent: 30) == .unknown(.unreadable(Self.ghostty)))
+    }
+
+    @Test func onlyTheFirstReadMayAskForAutomationAndOnlyThroughTheCaller() async {
+        let asked = AgentTerminalFocusTests.Calls()
+        let check = front(Front(Self.ghosttyApp), asked: { asked.record($0) })
+        let names = AgentTerminalFocusTests.Calls()
+        #expect(await check.check(agent: 30, asking: { names.record($0) }) == .shown)
+        #expect(asked.events == [Self.ghostty, Self.ghostty])
+        #expect(names.events == ["Ghostty"])
+    }
+}

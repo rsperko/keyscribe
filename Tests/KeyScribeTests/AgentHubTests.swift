@@ -19,9 +19,9 @@ struct AgentHubTests {
 
     final class Registry {
         var entries: [ClaudeRegistryEntry] = []
-        func set(_ session: String, status: String = "idle", cwd: String = "/src/keyscribe") {
+        func set(_ session: String, status: String = "idle", cwd: String = "/src/keyscribe", pid: Int = 10, startedAt: Int? = nil) {
             entries.removeAll { $0.sessionId == session }
-            entries.append(ClaudeRegistryEntry(pid: 10, sessionId: session, cwd: cwd, name: nil, status: status, waitingFor: nil))
+            entries.append(ClaudeRegistryEntry(pid: pid, sessionId: session, cwd: cwd, name: nil, status: status, waitingFor: nil, startedAt: startedAt))
         }
     }
 
@@ -426,6 +426,109 @@ struct AgentHubTests {
         #expect(second.names == ["backend": "a", "api": "b"])
     }
 
+    @Test func generatedNamesSurviveARestartForSessionsStillRunning() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-agent-names-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let registry = Registry()
+        registry.set("a", pid: 10, startedAt: 100)
+        registry.set("b", pid: 20, startedAt: 200)
+        let first = AgentHub(transport: FakeTransport(), scan: { registry.entries }, names: AgentNameStore(directory: dir))
+        first.refresh()
+        #expect(first.names == ["keyscribe": "a", "keyscribe blue": "b"])
+        try first.rename("a", to: "backend")
+        registry.entries.reverse()
+        registry.set("c", pid: 30, startedAt: 300)
+
+        let second = AgentHub(transport: FakeTransport(), scan: { registry.entries }, names: AgentNameStore(directory: dir))
+        second.refresh()
+        #expect(second.names == ["backend": "a", "keyscribe blue": "b", "keyscribe": "c"])
+    }
+
+    @Test func aClosedSessionsGeneratedNameIsDroppedFromTheNameFile() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-agent-names-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let registry = Registry()
+        registry.set("a", pid: 10, startedAt: 100)
+        registry.set("b", pid: 20, startedAt: 200)
+        let hub = AgentHub(transport: FakeTransport(), scan: { registry.entries }, names: AgentNameStore(directory: dir))
+        hub.refresh()
+        registry.entries.removeAll { $0.sessionId == "a" }
+        hub.refresh()
+        #expect(AgentNameStore(directory: dir).load() == .names([:], remembered: [
+            "b": RememberedName(name: "keyscribe blue", pid: 20, startedAt: 200, native: nil),
+        ]))
+    }
+
+    @Test func aSessionAStartupScanMissedKeepsItsSavedNameWhileItsProcessRuns() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-agent-names-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let registry = Registry()
+        registry.set("a", pid: 10, startedAt: 100)
+        registry.set("b", pid: 20, startedAt: 200)
+        AgentHub(transport: FakeTransport(), scan: { registry.entries }, names: AgentNameStore(directory: dir)).refresh()
+        let missing = registry.entries.first { $0.sessionId == "a" }!
+        registry.entries.removeAll { $0.sessionId == "a" }
+        registry.set("c", pid: 30, startedAt: 300)
+
+        let second = AgentHub(transport: FakeTransport(), scan: { registry.entries }, names: AgentNameStore(directory: dir),
+                              stillRunning: { $0.pid == 10 })
+        second.refresh()
+        #expect(second.names == ["keyscribe blue": "b", "keyscribe green": "c"])
+        guard case .names(_, let remembered) = AgentNameStore(directory: dir).load() else { Issue.record("names not loaded"); return }
+        #expect(remembered["a"]?.name == "keyscribe")
+        registry.entries.append(missing)
+        second.refresh()
+        #expect(second.names == ["keyscribe": "a", "keyscribe blue": "b", "keyscribe green": "c"])
+    }
+
+    @Test func generatedNamesThatCannotBeSavedAreReportedAndRetried() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-agent-names-\(UUID().uuidString)")
+        FileManager.default.createFile(atPath: dir.path, contents: Data())
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let registry = Registry()
+        registry.set("a", pid: 10, startedAt: 100)
+        let hub = AgentHub(transport: FakeTransport(), scan: { registry.entries }, names: AgentNameStore(directory: dir))
+        var changes = 0
+        hub.onChange = { changes += 1 }
+        hub.refresh()
+        #expect(hub.namesNotSaved != nil)
+        #expect(hub.names == ["keyscribe": "a"])
+        let reported = changes
+        hub.refresh()
+        #expect(changes == reported)
+        try FileManager.default.removeItem(at: dir)
+        hub.refresh()
+        #expect(hub.namesNotSaved == nil)
+        #expect(changes == reported + 1)
+        guard case .names(_, let remembered) = AgentNameStore(directory: dir).load() else { Issue.record("names not saved"); return }
+        #expect(remembered["a"] == RememberedName(name: "keyscribe", pid: 10, startedAt: 100, native: nil))
+    }
+
+    @Test func theSaveWarningClearsWhenNothingIsLeftUnsaved() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-agent-names-\(UUID().uuidString)")
+        FileManager.default.createFile(atPath: dir.path, contents: Data())
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let registry = Registry()
+        registry.set("c", pid: 30, startedAt: 300)
+        let hub = AgentHub(transport: FakeTransport(), scan: { registry.entries }, names: AgentNameStore(directory: dir),
+                           stillRunning: { _ in false })
+        var changes = 0
+        hub.onChange = { changes += 1 }
+        hub.refresh()
+        #expect(hub.namesNotSaved != nil)
+        let reported = changes
+        registry.entries.removeAll()
+        hub.refresh()
+        #expect(hub.namesNotSaved == nil)
+        #expect(changes > reported)
+    }
+
+    @Test func aNameFileWithoutRememberedNamesStillLoads() throws {
+        let dir = try nameDir(#"{"schema_version": 1, "names": {"a": "backend"}}"#)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        #expect(AgentNameStore(directory: dir).load() == .names(["a": "backend"]))
+    }
+
     @Test func aRenameThatCannotBeSavedIsNotApplied() {
         let blocker = FileManager.default.temporaryDirectory.appendingPathComponent("ks-agent-names-\(UUID().uuidString)")
         FileManager.default.createFile(atPath: blocker.path, contents: Data())
@@ -604,11 +707,30 @@ struct AgentHubTests {
 
     final class FakeFocus: AgentTerminalFocusing, @unchecked Sendable {
         var focused: [(String, Int)] = []
+        var environments: [[String: String]] = []
         var result = AgentFocusResult.exact
-        func focus(session: String, pid: Int, asking: @escaping @MainActor @Sendable (String) -> Void) async -> AgentFocusResult {
+        func focus(
+            session: String, pid: Int, environment: [String: String], asking: @escaping @MainActor @Sendable (String) -> Void
+        ) async -> AgentFocusResult {
             focused.append((session, pid))
+            environments.append(environment)
             return result
         }
+    }
+
+    @Test func openingUsesTheTerminalEnvironmentTheConversationsConnectorReported() async {
+        let focus = FakeFocus()
+        let registry = Registry()
+        registry.set("s1")
+        let hub = AgentHub(transport: FakeTransport(), scan: { registry.entries }, focus: focus)
+        hub.refresh()
+        #expect(await hub.open("s1") == .exact)
+        hub.handle(.hello(.init(
+            protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "s1", pid: 0, environment: ["ZELLIJ_PANE_ID": "3"])))
+        #expect(await hub.open("s1") == .exact)
+        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "s1", pid: 0)))
+        #expect(await hub.open("s1") == .exact)
+        #expect(focus.environments == [[:], ["ZELLIJ_PANE_ID": "3"], [:]])
     }
 
     @Test func openingMakesTheConversationCurrentAndBringsItsTerminalForward() async {

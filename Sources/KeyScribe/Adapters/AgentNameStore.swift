@@ -1,21 +1,23 @@
 import Foundation
+import KeyScribeKit
 
 struct AgentNameStore {
     static let fileName = "names.json"
     static let schemaVersion = 1
 
     enum Loaded: Equatable {
-        case names([String: String])
+        case names([String: String], remembered: [String: RememberedName] = [:])
         case unavailable(String)
     }
 
     private struct File: Codable {
         var schemaVersion: Int
         var names: [String: String]
+        var remembered: [String: RememberedName]?
 
         enum CodingKeys: String, CodingKey {
             case schemaVersion = "schema_version"
-            case names
+            case names, remembered
         }
     }
 
@@ -32,13 +34,13 @@ struct AgentNameStore {
         guard file.schemaVersion <= Self.schemaVersion else {
             return .unavailable("\(Self.fileName) was saved by a newer version of \(Branding.appName).")
         }
-        return .names(file.names)
+        return .names(file.names, remembered: file.remembered ?? [:])
     }
 
-    func save(_ names: [String: String]) throws {
+    func save(_ names: [String: String], remembered: [String: RememberedName]) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(File(schemaVersion: Self.schemaVersion, names: names)).write(to: url, options: .atomic)
+        try encoder.encode(File(schemaVersion: Self.schemaVersion, names: names, remembered: remembered.isEmpty ? nil : remembered)).write(to: url, options: .atomic)
     }
 }

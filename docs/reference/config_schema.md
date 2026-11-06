@@ -33,7 +33,7 @@
     ready.json             #   present only while KeyScribe is listening on bridge.sock
     claude-connector/      #   the connector files installed into Claude Code
     claude-installation.json  # which connector installation may connect; kept after removal
-    names.json             #   names you chose for conversations
+    names.json             #   names you chose, and the names open conversations were given
   lkg/                     # last-known-good mode copies + seed-ledger.toml (design.md §5.1)
   models/                  # downloaded STT weights, one dir per model (design.md §4.1)
     parakeet-tdt-0.6b-v3/
@@ -192,8 +192,11 @@ a hello on any other protocol is refused with `426` and is never registered or s
   itself.
 - **Hello** names the agent, the connector instance, the session id, and the features the connector offers.
   KeyScribe uses only what was announced: `label` for the status-line label naming the conversation, and
-  `focus` for selecting the connector's own terminal surface during Open (cmux). A connector that lacks
-  `focus` is reported as outdated, with the steps to update it. A hello may carry the conversation's title.
+  `focus` for selecting the connector's own terminal surface during Open when the terminal cannot be
+  told which surface from outside (cmux, when no process shows the agent's surface id). A connector that lacks
+  `focus` is reported as outdated, with the steps to update it. A hello may carry the conversation's title,
+  and an `environment` map with terminal facts only the agent's own process can read (its Zellij pane);
+  KeyScribe keeps only the keys its terminal routes use (`TerminalRoutes.environmentKeys`).
 - **Every command names the session it expects**, and the connector refuses one whose session has changed.
 - **Each hello opens a new connection.** It carries a fresh `connection` id, and every later poll, event
   and reply carries that id and the connector's `instance`. KeyScribe answers `409` to anything from a
@@ -250,12 +253,22 @@ a hello on any other protocol is refused with `426` and is never registered or s
 `agents/names.json` holds the names chosen with **Rename…** on the Coding agent page, keyed by the
 agent's session id (`{"schema_version": 1, "names": {"<session id>": "backend"}}`). Without an override,
 the conversation uses its explicit native name, normalized like a name chosen in KeyScribe. Only an
-unnamed conversation gets a name generated from its folder. Native and generated names are not stored
-in this file. Like `usage/`, it is app-written
+unnamed conversation gets a name generated from its folder. Like `usage/`, it is app-written
 state, and a write to it does not reload configuration.
 
 - Chosen names are restored before any generated name is handed out, so a name keeps meaning the same
   conversation across restarts, and a chosen name stays reserved while its conversation is closed.
+- `remembered` holds the name each running conversation was given without a chosen name, with the
+  agent's pid and the start time Claude Code recorded for that process
+  (`"remembered": {"<session id>": {"name": "keyscribe blue", "pid": 4821, "started_at": 1793454517559, "native": null}}`).
+  After a KeyScribe restart a conversation gets its remembered name back only when the same process is
+  still running, so names do not move between open sessions. A session missing from a scan keeps its
+  entry, and its name stays reserved, while that process runs: a missing registry file is not a closed
+  session. Once the process has exited, or its pid belongs to a process started at another time, the
+  name is free for the next new session and the entry is dropped. If the native name changed while
+  KeyScribe was closed, the new native name is used instead.
+- These names take effect even when they cannot be saved; Conversations then says so, and every later
+  refresh tries again. A rename, by contrast, is never applied unsaved.
 - For Claude Code, explicit names come from the connector's custom title, registry names whose
   `nameSource` is `user`, or a `custom-title` transcript record. Automatically generated `ai-title`
   records and registry names marked `auto` or `derived` are descriptive text, never addresses.

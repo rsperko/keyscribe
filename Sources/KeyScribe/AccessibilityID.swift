@@ -309,6 +309,7 @@ enum AccessibilityID {
             static let rename = "mode.codingAgents.rename"
             static let renameProblem = "mode.codingAgents.renameProblem"
             static let namesProblem = "mode.codingAgents.namesProblem"
+            static let namesNotSaved = "mode.codingAgents.namesNotSaved"
             static let reloadNames = "mode.codingAgents.reloadNames"
             static let showNamesFile = "mode.codingAgents.showNamesFile"
             static let renameName = "mode.codingAgents.renameName"
@@ -574,7 +575,7 @@ enum AccessibilityID {
         Mode.CodingAgents.connectorStatus, Mode.CodingAgents.currentRecipient, Mode.CodingAgents.summary,
         Mode.CodingAgents.install, Mode.CodingAgents.update, Mode.CodingAgents.remove, Mode.CodingAgents.finishUninstalling, Mode.CodingAgents.manualUninstall,
         Mode.CodingAgents.conversation, Mode.CodingAgents.rename, Mode.CodingAgents.copyDirectory,
-        Mode.CodingAgents.renameProblem, Mode.CodingAgents.namesProblem, Mode.CodingAgents.reloadNames,
+        Mode.CodingAgents.renameProblem, Mode.CodingAgents.namesProblem, Mode.CodingAgents.namesNotSaved, Mode.CodingAgents.reloadNames,
         Mode.CodingAgents.showNamesFile, Mode.CodingAgents.renameName, Mode.CodingAgents.renameSave,
         Mode.CodingAgents.renameCancel,
         Mode.List.list, Mode.List.add, Mode.List.addBlank, Mode.List.chooserCancel,

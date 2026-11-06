@@ -89,6 +89,11 @@ public enum DevCLI {
                                       whether a document is reported, title) with per-app read latency, then
                                       exit. Read-only; prints window titles to this terminal only.
                 --focus <pid>:cg:<id>   Instead, bring that one window forward the way a voice command does.
+              --front-probe           Print the terminal pane in front (app, tty, multiplexers, the processes on
+                                      that pane) and how long the read took, then exit. Read-only; may ask for
+                                      Automation access to the front terminal.
+                --after <s>             Wait this long before the first read.
+                --samples <n>           Read n times, a second apart (default 1).
               --list-engines          Print each shipped catalog engine and whether it is installed
                                       (installed / missing / system), then exit — coverage for the release gate.
               --mlx-smoke             Run a tiny MLX computation on the GPU, then exit 0. A missing or unloadable
@@ -232,6 +237,15 @@ public enum DevCLI {
             let transcript = CommandLine.arguments[i + 1]
             Task { @MainActor in
                 exit(await VoiceCommandCLI.run(transcript: transcript))
+            }
+            dispatchMain()
+        }
+
+        if CommandLine.arguments.contains("--front-probe") {
+            let args = CommandLine.arguments
+            let value = { (flag: String) in args.firstIndex(of: flag).flatMap { $0 + 1 < args.count ? Double(args[$0 + 1]) : nil } }
+            Task { @MainActor in
+                exit(await FrontProbe.run(after: value("--after") ?? 0, samples: Int(value("--samples") ?? 1)))
             }
             dispatchMain()
         }

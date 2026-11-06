@@ -25,6 +25,25 @@ public struct AgentConversation: Equatable, Sendable {
     }
 }
 
+public struct RememberedName: Codable, Equatable, Sendable {
+    public var name: String
+    public var pid: Int
+    public var startedAt: Int
+    public var native: String?
+
+    public init(name: String, pid: Int, startedAt: Int, native: String?) {
+        self.name = name
+        self.pid = pid
+        self.startedAt = startedAt
+        self.native = native
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case name, pid, native
+        case startedAt = "started_at"
+    }
+}
+
 public struct AgentDirectory: Sendable {
     public private(set) var conversations: [AgentConversation] = []
     public private(set) var revision = 0
@@ -32,12 +51,24 @@ public struct AgentDirectory: Sendable {
     private var retired: [String: String] = [:]
     private var chosen: [String: String] = [:]
     private var nativeNameById: [String: String] = [:]
+    private var remembering: [String: RememberedName]
+    private var startById: [String: Int] = [:]
 
-    public init(chosen: [String: String] = [:]) {
+    public init(chosen: [String: String] = [:], remembered: [String: RememberedName] = [:]) {
         self.chosen = chosen
+        self.remembering = remembered
     }
 
     public var chosenNames: [String: String] { chosen }
+
+    public var remembered: [String: RememberedName] {
+        var names = remembering
+        for conversation in conversations where chosen[conversation.id] == nil {
+            guard let start = startById[conversation.id], let name = handleById[conversation.id] else { continue }
+            names[conversation.id] = RememberedName(name: name, pid: conversation.pid, startedAt: start, native: nativeNameById[conversation.id])
+        }
+        return names
+    }
 
     public var handles: [String] { conversations.map(\.handle) }
 
@@ -51,13 +82,31 @@ public struct AgentDirectory: Sendable {
     }
 
     public mutating func update(
-        claude entries: [ClaudeRegistryEntry], live: Set<String>, titles: [String: String] = [:], nativeNames: [String: String?] = [:]
+        claude entries: [ClaudeRegistryEntry], live: Set<String>, titles: [String: String] = [:], nativeNames: [String: String?] = [:],
+        running: (RememberedName) -> Bool = { _ in false }
     ) {
         let liveIds = Set(entries.map(\.sessionId))
+        for conversation in conversations where !liveIds.contains(conversation.id) && chosen[conversation.id] == nil {
+            guard let start = startById[conversation.id], let name = handleById[conversation.id] else { continue }
+            remembering[conversation.id] = RememberedName(name: name, pid: conversation.pid, startedAt: start, native: nativeNameById[conversation.id])
+        }
+        remembering = remembering.filter { id, saved in
+            guard !liveIds.contains(id) else { return true }
+            let replaced = entries.contains { $0.pid == saved.pid && $0.startedAt == saved.startedAt }
+            return !replaced && running(saved)
+        }
         for (id, handle) in handleById where !liveIds.contains(id) {
             retired[id] = handle
         }
         handleById = handleById.filter { liveIds.contains($0.key) }
+        startById = Dictionary(entries.compactMap { entry in entry.startedAt.map { (entry.sessionId, $0) } }, uniquingKeysWith: { first, _ in first })
+        for entry in entries {
+            guard let saved = remembering.removeValue(forKey: entry.sessionId), chosen[entry.sessionId] == nil,
+                  saved.pid == entry.pid, saved.startedAt == entry.startedAt
+            else { continue }
+            retired[entry.sessionId] = saved.name
+            nativeNameById[entry.sessionId] = saved.native
+        }
         var preferred: [String: String] = [:]
         for entry in entries {
             let id = entry.sessionId
@@ -75,9 +124,10 @@ public struct AgentDirectory: Sendable {
             let key = AgentHandles.matchKey(previous)
             let inUse = handleById.values.contains { AgentHandles.matchKey($0) == key }
             let chosenByAnother = chosen.contains { $0.key != entry.sessionId && AgentHandles.matchKey($0.value) == key }
-            if !inUse && !chosenByAnother { handleById[entry.sessionId] = previous }
+            let heldForAnother = remembering.values.contains { AgentHandles.matchKey($0.name) == key }
+            if !inUse && !chosenByAnother && !heldForAnother { handleById[entry.sessionId] = previous }
         }
-        let away = Set(chosen.filter { !liveIds.contains($0.key) }.values)
+        let away = Set(chosen.filter { !liveIds.contains($0.key) }.values).union(remembering.values.map(\.name))
         let named = entries.filter { preferred[$0.sessionId] != nil }.sorted { $0.sessionId < $1.sessionId }
         let unnamed = entries.filter { preferred[$0.sessionId] == nil }
         handleById = AgentHandles.assign(
@@ -96,9 +146,18 @@ public struct AgentDirectory: Sendable {
         }
     }
 
+    public func renameProblem(_ id: String, to raw: String) -> AgentHandles.RenameError? {
+        let handle = AgentHandles.normalize(raw)
+        if handle.isEmpty { return .empty }
+        if AgentHandles.isReserved(handle) { return .reserved }
+        let held = Array(handleById.filter { $0.key != id }.values)
+            + Array(chosen.filter { $0.key != id && handleById[$0.key] == nil }.values)
+            + remembering.filter { $0.key != id }.values.map(\.name)
+        return held.contains { AgentHandles.matchKey($0) == AgentHandles.matchKey(handle) } ? .taken : nil
+    }
+
     public mutating func rename(_ id: String, to raw: String) throws {
-        let heldByAway = chosen.filter { $0.key != id && handleById[$0.key] == nil }.values
-        if heldByAway.contains(where: { AgentHandles.matchKey($0) == AgentHandles.matchKey(raw) }) { throw AgentHandles.RenameError.taken }
+        if let problem = renameProblem(id, to: raw) { throw problem }
         handleById = try AgentHandles.rename(id, to: raw, in: handleById)
         chosen[id] = handleById[id]
         conversations = conversations.map { var c = $0; c.handle = handleById[c.id] ?? c.handle; return c }

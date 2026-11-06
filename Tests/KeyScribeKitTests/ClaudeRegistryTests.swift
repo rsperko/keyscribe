@@ -15,6 +15,11 @@ struct ClaudeRegistryTests {
         #expect(e?.folder == "keyscribe")
     }
 
+    @Test func theProcessStartTimeIsKeptToTellAReusedPidApart() {
+        #expect(entry(#"{"pid":1,"sessionId":"a","cwd":"/src/api","kind":"interactive","startedAt":1793454517559}"#)?.startedAt == 1793454517559)
+        #expect(entry(#"{"pid":1,"sessionId":"a","cwd":"/src/api","kind":"interactive"}"#)?.startedAt == nil)
+    }
+
     @Test(arguments: ["user", "derived", "auto", "unknown"])
     func onlyUserNamesAreExplicit(source: String) {
         let e = entry(#"{"pid":1,"sessionId":"a","cwd":"/src/api","kind":"interactive","name":"Fix authentication retries","nameSource":"\#(source)"}"#)

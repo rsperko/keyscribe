@@ -32,9 +32,11 @@ final class CodingAgentsSettingsModel: ObservableObject {
     @Published private(set) var renameProblem: String?
     @Published private(set) var renameDetails: String?
     @Published private(set) var namesProblem: String?
+    @Published private(set) var namesNotSaved: String?
 
     var onRename: ((String, String) throws -> Void)?
     var onReloadNames: (() -> Void)?
+    var renameCheck: ((String, String) -> AgentHandles.RenameError?)?
     var onRetire: (() -> Void)?
 
     var currentName: String? { rows.first(where: \.current)?.name }
@@ -152,8 +154,9 @@ final class CodingAgentsSettingsModel: ObservableObject {
         onReloadNames?()
     }
 
-    func show(_ conversations: [AgentConversation], current: String?, namesProblem: String? = nil) {
+    func show(_ conversations: [AgentConversation], current: String?, namesProblem: String? = nil, namesNotSaved: String? = nil) {
         if namesProblem != self.namesProblem { self.namesProblem = namesProblem }
+        if namesNotSaved != self.namesNotSaved { self.namesNotSaved = namesNotSaved }
         shown = (conversations, current)
         describeNewTerminals(conversations.map(\.pid))
         let described = conversations.map { terminals[$0.pid] ?? nil }
@@ -177,7 +180,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
             let found = await Task.detached { missing.map { ($0, describe($0)) } }.value
             guard let self else { return }
             for (pid, terminal) in found { self.terminals[pid] = .some(terminal) }
-            if let shown = self.shown { self.show(shown.conversations, current: shown.current, namesProblem: self.namesProblem) }
+            if let shown = self.shown { self.show(shown.conversations, current: shown.current, namesProblem: self.namesProblem, namesNotSaved: self.namesNotSaved) }
         }
     }
 
@@ -210,6 +213,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
         let normalized = AgentHandles.normalize(name)
         if normalized.isEmpty { return Self.problem(.empty, name: normalized) }
         if AgentHandles.isReserved(normalized) { return Self.problem(.reserved, name: normalized) }
+        if let renameCheck { return renameCheck(id, normalized).map { Self.problem($0, name: normalized) } }
         if rows.contains(where: { $0.id != id && AgentHandles.matchKey($0.name) == AgentHandles.matchKey(normalized) }) {
             return Self.problem(.taken, name: normalized)
         }
