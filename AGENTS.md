@@ -61,7 +61,7 @@ before you edit code in its area.
   **One exception:** a replacement that consumes the **entire** utterance (a "whole-utterance
   replacement" like `slash resume`→`/resume`) is inserted verbatim and **bypasses the LLM, trailing,
   and trim** — detected at `ReplacementsStage` (reported via `PipelineContext.bareReplacement`) and
-  short-circuited in `DictationController.produceDictationText`. Only the rule's own text is frozen: the
+  short-circuited in `DictationController.produceDictationText` (through `TakeText.bare`). Only the rule's own text is frozen: the
   words it **captured** (`$1`) still pass through the later text stages (numbers, the dictionary), which
   `Pipeline.forward` runs on `PipelineContext.bareSegments`; a split that does not reproduce the regex
   engine's output keeps the whole output frozen. Regex/literal replacements both match
@@ -129,15 +129,20 @@ are the ones that must never break; the guide explains why and what else applies
   - Flags are `static let`s on `Feature`, opt-in only, read through `settings.features.isEnabled`.
   - Do not delete `consumptionDrivenRestore` until its rollout debt in the guide is paid.
 
-**`DictationController` and `AppDelegate` orchestrate every area**, so no single guide covers them.
-Route by the function you are changing:
+**`DictationController` and `AppDelegate` orchestrate every area**, so no single guide covers them. The
+controller owns the state machine, the take's lease, and the diagnostics record; the per-take work lives in
+`Sources/KeyScribe/Take/`. Route by the function or component you are changing:
 
-- `beginCapture`, `handleStart`, `handleCommit` → audio capture, plus insertion and HUD for the HUD flip.
-- `presenceReading`, `transcribeBounded`, `finalizeStreamingIfActive` → speech-to-text engines.
-- `finishInsertion`, `rewriteSelection`, `pasteLast` → insertion, pasteboard, HUD focus.
-- `probeCandidates`, and in `AppDelegate` `rebuildHotkeyMonitor`, `claimableModes`,
+- `beginCapture`, `handleStart`, `handleCommit`, `TakeRecorder` → audio capture, plus insertion and HUD for
+  the HUD flip.
+- `presenceReading`, `finalizeStreamingIfActive`, `Transcriber`, `EngineKeeper` → speech-to-text engines.
+- `finishInsertion`, `InsertOutput`, `HUDChannel`, `rewriteSelection`, `pasteLast` → insertion, pasteboard,
+  HUD focus.
+- `VoiceCommandOutput` → voice commands.
+- `probeCandidates`, `PressResolver`, and in `AppDelegate` `rebuildHotkeyMonitor`, `claimableModes`,
   `shadowedHotkeyIds`, `launchAttention` → hotkeys, triggers, permissions.
-- `maybePreconnect`, `produceDictationText` → the hard invariants and pipeline footguns above.
+- `maybePreconnect`, `produceDictationText`, `TakeText`, `TakeRewrite`, `SelectionText` → the hard
+  invariants and pipeline footguns above.
 
 ---
 
@@ -171,6 +176,7 @@ keyscribe/
   Sources/
     KeyScribeKit/        # pure, OS-free logic (TDD red→green)
     KeyScribe/           # the menu-bar app: adapters + SwiftUI/AppKit — target/module KeyScribeApp
+      Take/              #   per-take components DictationController coordinates (outputs, recorder, engines)
     KeyScribeMain/       # main.swift only: the thin executable over KeyScribeApp
                          #   (further targets exist — see Package.swift)
   Tests/KeyScribeKitTests/ # pure-logic unit tests
@@ -250,8 +256,8 @@ keyscribe/
 - **File-based storage, no SQLite** — everything under `~/Library/Application Support/KeyScribe/`.
 - **Reuse the UI vocabulary** in `docs/development/ui_components.md`; never overstate privacy (no "secure/safe/
   private" for best-effort redaction — say what actually happens).
-- **Every HUD draw goes through `DictationController.present`** — it keeps a pending voice-command question
-  readable. **Every event that stops voice-command work goes through `stopVoiceCommandChoice`** — its counter
+- **Every HUD draw goes through `HUDChannel.present`** — it keeps a pending voice-command question
+  readable. **Every event that stops voice-command work goes through `VoiceCommandOutput.stop`** — its counter
   is what both the spoken and clicked paths re-check. No direct `hud?.render`, no stop event that cancels by hand.
 - **Never hardcode the product name in user-facing copy — use `Branding.appName`** (resolves from the
   running bundle: "KeyScribe" prod, "KeyScribeDev" dev, the bundle name for a `custom` rebrand). The

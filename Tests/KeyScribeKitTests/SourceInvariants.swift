@@ -21,6 +21,16 @@ struct SourceRule {
 enum SourceInvariants {
     static let rules = [
         SourceRule(
+            pattern: #"\b(ReplacementsStage|FuzzyStage|NumbersStage|LiveEditsStage)\(|TokenizingStage\.(verbatim|clipboard|redaction)\("#,
+            allowed: [
+                "Sources/KeyScribeKit/TakeStages.swift": 9,
+                "Sources/KeyScribeKit/ReplacementPreview.swift": 2,
+            ],
+            reason: "Every stage list is assembled by TakeStages, so the lists a take, a preview, and the "
+                + "commands check run cannot drift apart; ReplacementPreview compares single rule sets, not a "
+                + "pipeline (docs/development/design.md §4.2.1)."
+        ),
+        SourceRule(
             pattern: #"\bsetSystemDefaultInput\b"#,
             allowed: [
                 "Sources/KeyScribe/Adapters/AudioInputDevices.swift": 1,
@@ -42,10 +52,10 @@ enum SourceInvariants {
         SourceRule(
             pattern: #"\bhud\??\.render\("#,
             allowed: [
-                "Sources/KeyScribe/DictationController.swift": 1,
+                "Sources/KeyScribe/Take/HUDChannel.swift": 1,
                 "Sources/KeyScribe/AppDelegate.swift": 1,
             ],
-            reason: "Every HUD draw goes through DictationController.present so a pending voice-command question "
+            reason: "Every HUD draw goes through HUDChannel.present so a pending voice-command question "
                 + "stays readable; AppDelegate's one draw is the HUD preview mode (AGENTS.md)."
         ),
         SourceRule(

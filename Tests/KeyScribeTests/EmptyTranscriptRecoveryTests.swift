@@ -513,7 +513,7 @@ struct EmptyTranscriptRecoveryTests {
     }
 
     @Test func recoveryProgressDistinguishesAnInitialDeadlineFromARetryDeadline() {
-        let recovery = DictationController.RecoveryProgress()
+        let recovery = Transcriber.RecoveryProgress()
         #expect(recovery.retryTrimmedSeconds == nil)
         recovery.noteRetryStarted(trimmedSeconds: 0.256)
         #expect(recovery.retryTrimmedSeconds == 0.256)

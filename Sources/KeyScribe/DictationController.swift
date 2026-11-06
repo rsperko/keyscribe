@@ -19,9 +19,11 @@ final class DictationController {
     private(set) var settings: Settings
     private let provider: SpeechEngineProvider
     private let config: ConfigCache
-    private let history: HistoryStore?
-    private let replacementUsage: ReplacementUsageStore?
-    private let historyWriteQueue = DispatchQueue(label: "com.keyscribe.history.write", qos: .utility)
+    private let reporter: TakeReporter
+    private let inserter: InsertOutput
+    private let commandOutput: VoiceCommandOutput
+    private let rewriter: TakeRewrite
+    private let engines: EngineKeeper
     private let audio: AudioCapturing
     private let presenceDetector: SpeechPresenceDetecting
     private let insert: (InsertionDecision, Mode.Insertion, ClipboardPaste, String, Bool) async -> Bool
@@ -42,17 +44,13 @@ final class DictationController {
     private let permits: @Sendable (Connection) -> Bool
     private let recordModelLoadFailure: @MainActor (_ engineId: String, _ timedOut: Bool, _ error: String) -> Void
     private let effects: DuringDictationEffects
-    private var transcribeGate = SingleFlightDeadline()
-    private var transcribeBusyStreak = 0
-    private var transcribeBusyStreakStartedAt: Double?
+    private let transcriber = Transcriber()
     private var loggedReturnMarkerDropModes: Set<String> = []
-    private static let transcribeBusyStreakLimit = 3
-    private static let transcribeBusyBackstopSeconds: Double = 600
-    private var selfTestGateUsers = 0
-    private static let selfTestSettlePollMs = 20
-    private static let selfTestClearancePolls = 150
-    var selfTestClipURLOverride: URL?
-    private weak var hud: HUDPresenting?
+    var selfTestClipURLOverride: URL? {
+        get { engines.selfTestClipOverride }
+        set { engines.selfTestClipOverride = newValue }
+    }
+    private let hud: HUDChannel
 
     private var machine = DictationMachine()
 
@@ -70,6 +68,7 @@ final class DictationController {
     private struct DictationSession {
         let identity = DictationIdentity()
         let captureLoss = CaptureLossFlag()
+        let recorder = TakeRecorder()
         let voiceCommandStopsAtPress: Int
         var building: DictationRecord
         var pressedAt = DispatchTime.now()
@@ -93,9 +92,6 @@ final class DictationController {
         var rewriteStartedAt: DispatchTime?
         var dictationTask: Task<Void, Never>?
         var rewriteEscapeTask: Task<Void, Never>?
-        var recordingLimitTask: Task<Void, Never>?
-        var recordingDeadline: ContinuousClock.Instant?
-        var recordingLimitSeconds: Double?
         var stoppedAtLimit = false
         var rewriteSkippedAtLimit = false
         var replacementEffects: [ReplacementEffect] = []
@@ -103,10 +99,6 @@ final class DictationController {
         var modeResolveTask: Task<Void, Never>?
         var snapshotAdoptionTask: Task<Void, Never>?
         var captureBringUpTask: Task<Void, Never>?
-        var levelPollTask: Task<Void, Never>?
-        var streamingDriver: StreamingDictationDriver?
-        var streamingSampleContinuation: AsyncStream<[Float]>.Continuation?
-        var streamingFeedTask: Task<Void, Never>?
         var modeReady = false
         var snapshotReady = false
         var effectsBegan = false
@@ -140,23 +132,15 @@ final class DictationController {
 
     private(set) var streamingCancelTask: Task<Void, Never>?
 
-    func transcribeGateBusy() async -> Bool { await transcribeGate.isBusy }
+    func transcribeGateBusy() async -> Bool { await transcriber.gate.isBusy }
 
     private var hideTask: Task<Void, Never>?
     private var noticedReasoning: Set<String> = []
-    private var choicePrompt: VoiceCommandChoicePrompt?
-    private var choiceEntry: HistoryEntry?
-    private var choiceExpiryTask: Task<Void, Never>?
-    private var clickedChoiceTask: Task<Void, Never>?
     private var dictationStarts = 0
-    private var idleEvictionTask: Task<Void, Never>?
     private var preconnectTask: Task<Void, Never>?
-    private var idleEvictionEngine: (any SpeechEngine)?
     private var captureRefreshTask: Task<Void, Never>?
     private static let captureRefreshIdleSeconds: Double = 240
     private var memoryPressureSource: DispatchSourceMemoryPressure?
-    private var lastUsedAt: Double = 0
-    private var lastRetentionSweepDay: String?
     private(set) var lastResult: String?
     // Survives release into transcription because route loss can arrive after release.
     private var captureTruncated = false
@@ -168,7 +152,6 @@ final class DictationController {
     private(set) var lastRecord: DictationRecord?
     private(set) var nextModeOverrideID: String?
     // Bumped by anything that must stop voice-command work already under way; every action re-checks it.
-    private var voiceCommandStops = 0
 
     private let maxRecordingSeconds: Double
     private let modelRecordingLimit: (String) -> Double?
@@ -178,29 +161,19 @@ final class DictationController {
 
     private var activeEngine: any SpeechEngine { session?.capturedEngine ?? provider.active }
 
-    private var warmTask: Task<Void, Error>?
-    private var warmEngineId: String?
-    private var warmClipTask: Task<Void, Never>?
-    private var protectedEngineIds: Set<String> = []
     private static let modelLoadDeadlineSeconds: Double = 300
 
     private var lastRenderedLevel: Float = -1
-    private var lastPresented: HUDState?
 
     private var latchedTriggerName: String?
-
-    private static let levelPollInterval: Duration = .milliseconds(33)
 
     private static let cueAdmitPadSeconds: Double = 0.04
 
     private func pollLevelWhileRecording() {
-        session?.levelPollTask?.cancel()
-        session?.levelPollTask = Task { @MainActor [weak self] in
-            while !Task.isCancelled {
-                guard let self, case .recording = self.machine.state else { return }
-                self.renderLevel(self.audio.currentLevel)
-                try? await Task.sleep(for: Self.levelPollInterval)
-            }
+        session?.recorder.pollLevel { [weak self] in
+            guard let self, case .recording = self.machine.state else { return false }
+            self.renderLevel(self.audio.currentLevel)
+            return true
         }
     }
 
@@ -209,12 +182,12 @@ final class DictationController {
         let quantized = (level * 20).rounded() / 20
         lastRenderedLevel = quantized
         let state = recordingHUD(level: quantized)
-        guard keepingChoiceVisible(state) != lastPresented else { return }
-        present(state)
+        guard hud.shown(state) != hud.lastPresented else { return }
+        hud.present(state)
     }
 
     private func recordingHUD(level: Float) -> HUDState {
-        let countdown = session?.recordingDeadline.flatMap { deadline in
+        let countdown = session?.recorder.deadline.flatMap { deadline in
             RecordingCountdown(
                 remaining: Self.seconds(ContinuousClock.now.duration(to: deadline)),
                 warningSeconds: limitWarningSeconds)
@@ -287,14 +260,16 @@ final class DictationController {
         maxRecordingSeconds: Double = RecordingLimit.backstopSeconds,
         modelRecordingLimit: @escaping (String) -> Double? = RecordingLimit.modelLimit(engineId:),
         limitWarningSeconds: Double = 30,
-        warmupClip: URL? = DictationController.bundledWarmupClip
+        warmupClip: URL? = EngineKeeper.bundledWarmupClip
     ) {
         self.settings = settings
         self.provider = provider
         self.config = config
-        self.history = history
-        self.replacementUsage = replacementUsage
-        self.hud = hud
+        self.reporter = TakeReporter(history: history, replacementUsage: replacementUsage)
+        self.inserter = InsertOutput(
+            snapshotAsync: snapshotAsync ?? { snapshot() }, accessibilityGranted: accessibilityGranted,
+            insert: insert, submitKey: submitKey)
+        self.hud = HUDChannel(hud: hud)
         self.audio = audio ?? AudioCapture()
         self.presenceDetector = presenceDetector ?? SpeechPresenceDetector(modelsDir: KeyScribePaths.modelsDir)
         self.effects = effects ?? DuringDictationEffects()
@@ -312,21 +287,29 @@ final class DictationController {
         self.activeEngineUsable = activeEngineUsable
         self.isSessionLocked = isSessionLocked
         self.llmClient = llmClient
+        self.rewriter = TakeRewrite(client: llmClient, permits: permits, hud: self.hud)
         self.voiceCommands = voiceCommands ?? VoiceCommandRunner(findsInApps: { config.findsInAppsEnabled })
+        self.commandOutput = VoiceCommandOutput(runner: self.voiceCommands, hud: self.hud, reporter: self.reporter)
         self.permits = permits
         self.recordModelLoadFailure = recordModelLoadFailure
         self.maxRecordingSeconds = maxRecordingSeconds
         self.modelRecordingLimit = modelRecordingLimit
         self.limitWarningSeconds = limitWarningSeconds
-        self.warmupClip = warmupClip
+        self.engines = EngineKeeper(warmupClip: warmupClip)
         self.audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         installMemoryPressureHandler()
         self.voiceCommands.onProgress = { [weak self] progress in self?.showCommandProgress(progress) }
+        self.hud.choices = { [weak self] in
+            HUDChannel.Choices(answering: self?.answeringChoicePrompt, pending: self?.pendingVoiceCommandChoice)
+        }
+        reporter.onHistoryUpdated = { [weak self] in self?.onHistoryUpdated?() }
+        commandOutput.host = self
+        engines.host = self
     }
 
     private func showCommandProgress(_ progress: VoiceCommandProgress) {
         guard machine.state == .inserting else { return }
-        present(.transcribing(mode: currentModeName, status: progress.text))
+        hud.present(.transcribing(mode: currentModeName, status: progress.text))
     }
 
     // Record loss here; every terminal handles it at insertion. A stale report must not affect a successor.
@@ -353,8 +336,7 @@ final class DictationController {
                 guard let self, !self.isBusy else { return }
                 let active = self.provider.active
                 self.log.notice("memory pressure (critical): evicting \(active.id, privacy: .public)")
-                self.invalidateWarm(active.id)
-                Task { await active.evict() }
+                self.engines.evictUnderMemoryPressure(active)
             }
         }
         source.resume()
@@ -366,9 +348,7 @@ final class DictationController {
         self.settings = settings
         if !settings.features.isEnabled(.voiceCommands) { stopVoiceCommandChoice() }
         audio.setPreferredInputUID(settings.audio.inputDeviceUID)
-        if !isBusy, let engine = idleEvictionEngine {
-            scheduleIdleEviction(after: 0, engine: engine)
-        }
+        engines.rescheduleIdleEviction()
         if settings.stt.eviction != previousEviction { reconcileCaptureWarmth() }
     }
 
@@ -387,73 +367,19 @@ final class DictationController {
         }
     }
 
-    func evictSwitchedAwayEngine(_ engine: any SpeechEngine) {
-        guard !isProtectedFromEviction(engine) else {
-            runWhenIdle { [weak self] in
-                guard let self else { return }
-                self.invalidateWarm(engine.id)
-                Task { await engine.evict() }
-            }
-            return
-        }
-        invalidateWarm(engine.id)
-        Task { await engine.evict() }
-    }
+    func evictSwitchedAwayEngine(_ engine: any SpeechEngine) { engines.evictSwitchedAway(engine) }
 
-    func evictEngineForSettings(_ engine: any SpeechEngine) async {
-        guard !isProtectedFromEviction(engine) else {
-            await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-                runWhenIdle { [weak self] in
-                    guard let self else { cont.resume(); return }
-                    self.invalidateWarm(engine.id)
-                    Task {
-                        await engine.evict()
-                        cont.resume()
-                    }
-                }
-            }
-            return
-        }
-        invalidateWarm(engine.id)
-        await engine.evict()
-    }
-
-    private func isProtectedFromEviction(_ engine: any SpeechEngine) -> Bool {
-        protectedEngineIds.contains(engine.id)
-    }
+    func evictEngineForSettings(_ engine: any SpeechEngine) async { await engines.evictForSettings(engine) }
 
     func selfTestForSettings(_ engine: any SpeechEngine) async -> Bool? {
         guard !isBusy else { return nil }
-        let gate = transcribeGate
-        let clip = selfTestClipURLOverride ?? ModelSelfTestRunner.clipURL
-        selfTestGateUsers += 1
-        let result = await ModelSelfTestRunner.verify(engine, clipURL: clip) { url, biasTerms in
-            do {
-                return try await gate.run(seconds: Self.selfTestTimeoutSeconds) {
-                    try await engine.transcribe(wavURL: url, biasTerms: biasTerms)
-                }
-            } catch is SingleFlightDeadline.Busy {
-                throw ModelSelfTestRunner.Skipped()
-            }
-        }
-        if result != nil {
-            for _ in 0..<Self.selfTestClearancePolls where await gate.isBusy {
-                try? await Task.sleep(for: .milliseconds(Self.selfTestSettlePollMs))
-            }
-        }
-        selfTestGateUsers -= 1
-        return result
+        return await engines.selfTest(engine, gate: transcriber.gate)
     }
-    private static let selfTestTimeoutSeconds: Double = 30
 
-    private func awaitSelfTestClearance() async {
-        for _ in 0..<Self.selfTestClearancePolls where selfTestGateUsers > 0 {
-            try? await Task.sleep(for: .milliseconds(Self.selfTestSettlePollMs))
-        }
-    }
+    private func awaitSelfTestClearance() async { await engines.awaitSelfTestClearance() }
 
     private func warmActiveEngine() {
-        _ = warm(activeEngine)
+        engines.warm(activeEngine)
     }
 
     private func prepareActiveEngineForDictation() {
@@ -461,58 +387,15 @@ final class DictationController {
         Task { await engine.prepareForDictation() }
     }
 
-    // Returns the load alone, which is all a commit awaits. The warm-up clip follows it but is skipped once
-    // a commit is under way: it would only queue a full inference ahead of the user's own on the engine lock.
-    @discardableResult
-    private func warm(_ engine: any SpeechEngine) -> Task<Void, Error> {
-        if warmEngineId == engine.id, let task = warmTask { return task }
-        let load = Task { try await engine.loadIfNeeded() }
-        warmEngineId = engine.id
-        warmTask = load
-        warmClipTask?.cancel()
-        warmClipTask = nil
-        if let clip = warmupClip, engine.benefitsFromWarmupClip {
-            let biasTerms = Self.warmupBiasTerms(settings: settings, engine: engine, plan: plan)
-            // Cancelled with the warm it belongs to: a clip that outlives an eviction would reload the model.
-            warmClipTask = Task { @MainActor [weak self] in
-                guard (try? await load.value) != nil, !Task.isCancelled,
-                      let self, !self.machine.isBusy || self.machine.isCapturingAudio else { return }
-                _ = try? await engine.transcribe(wavURL: clip, biasTerms: biasTerms)
-            }
-        }
-        return load
-    }
-
-    nonisolated static let bundledWarmupClip = Bundle.main.url(forResource: "model-selftest", withExtension: "wav")
-    private let warmupClip: URL?
-
     static func warmupBiasTerms(settings: Settings, engine: any SpeechEngine, plan: ResolvedConfig) -> [String] {
-        guard settings.stt.recognitionBiasEnabled(
-            engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias) else { return [] }
-        return plan.recognitionBiasTerms(for: nil)
-    }
-
-    private func invalidateWarm(_ engineId: String) {
-        guard warmEngineId == engineId else { return }
-        warmTask = nil
-        warmEngineId = nil
-        warmClipTask?.cancel()
-        warmClipTask = nil
+        EngineKeeper.warmupBiasTerms(settings: settings, engine: engine, plan: plan)
     }
 
     func preloadActiveEngineIfNeeded() {
         let engine = activeEngine
         guard InstalledEngineFilter.shouldRun(engineId: engine.id) else { return }
         prewarmPresenceDetector()
-        guard EvictionPolicy.shouldPreloadModel(mode: settings.stt.eviction) else { return }
-        let load = warm(engine)
-        // The tier and the active engine are read after the load: either can change while it runs, and a
-        // superseded preload must not replace the current engine's idle eviction.
-        Task { @MainActor [weak self] in
-            guard (try? await load.value) != nil, let self, !self.isBusy,
-                  self.warmTask == load, self.provider.active.id == engine.id else { return }
-            self.applyEvictionAfterDictation(engine: engine)
-        }
+        engines.preload(engine)
     }
 
     private func prewarmPresenceDetector() {
@@ -567,14 +450,14 @@ final class DictationController {
     func acknowledgeNextMode() {
         guard !isBusy, let name = nextModeOverrideName else { return }
         dismissVoiceCommandChoice()
-        present(.ready(mode: name))
+        hud.present(.ready(mode: name))
         scheduleHide()
     }
 
     func announceConfigProblems(_ issues: [ConfigFileIssue]) {
         guard !isBusy, !issues.isEmpty else { return }
         let message = issues.map(\.oneLine).joined(separator: " · ")
-        present(issues.contains(where: \.isError) ? .error(message: message, action: nil) : .advisory(message: message))
+        hud.present(issues.contains(where: \.isError) ? .error(message: message, action: nil) : .advisory(message: message))
         scheduleHide(after: 8)
     }
 
@@ -585,7 +468,7 @@ final class DictationController {
         guard !isSessionLocked() else { return }
         guard machine.beginArming() else {
             if pressStyle == .startOnly { return }
-            if case .rewriting(_, _, _, _, true)? = lastPresented {
+            if case .rewriting(_, _, _, _, true)? = hud.lastPresented {
                 insertLocalTranscriptNow()
             } else {
                 playBusyPressCue()
@@ -597,9 +480,9 @@ final class DictationController {
         latchedTriggerName = (pressStyle == .tapToToggle)
             ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
         hideTask?.cancel()
-        idleEvictionTask?.cancel()
+        engines.cancelIdleEviction()
         captureRefreshTask?.cancel()
-        session = DictationSession(voiceCommandStopsAtPress: voiceCommandStops, building: DictationRecord(modeName: currentModeName))
+        session = DictationSession(voiceCommandStopsAtPress: commandOutput.stops, building: DictationRecord(modeName: currentModeName))
         if let pressedAt {
             session?.pressedAt = pressedAt
             building.stageMillis[.grace] = elapsedMs(since: pressedAt)
@@ -615,7 +498,7 @@ final class DictationController {
             return
         }
         session?.capturedEngine = engine
-        protectedEngineIds.insert(engine.id)
+        engines.protect(engine)
         // The mic comes up while the probe and mode resolution below run. Audio never leaves the machine and
         // admission stays closed until the start cue, so nothing here needs the secure-field verdict first:
         // everything content-bearing (preconnect, context, rewrite, history) waits for snapshot adoption. A
@@ -629,7 +512,7 @@ final class DictationController {
         adoptFullSnapshot()
         building.targetBundleId = capturedSnapshot?.bundleId
         session?.capturedPlan = config.resolved
-        session?.replacementUsageEpoch = replacementUsage?.renameEpoch()
+        session?.replacementUsageEpoch = reporter.usageEpoch()
         session?.capturedRecognitionBias = settings.stt.recognitionBiasEnabled(
             engineId: engine.id, supportsRecognitionBias: engine.supportsRecognitionBias)
 
@@ -643,7 +526,7 @@ final class DictationController {
                 guard !Task.isCancelled else { return }
                 // A late resolution must not show the HUD before admission opens.
                 if self.machine.state == .recording {
-                    self.present(self.recordingHUD(level: max(0, self.lastRenderedLevel)))
+                    self.hud.present(self.recordingHUD(level: max(0, self.lastRenderedLevel)))
                 }
             }
         } else {
@@ -654,7 +537,7 @@ final class DictationController {
         }
 
         // Keep the HUD hidden until audio admission opens; showing it earlier invites discarded speech.
-        present(.hidden)
+        hud.present(.hidden)
 
         warmActiveEngine()
         prepareActiveEngineForDictation()
@@ -681,20 +564,14 @@ final class DictationController {
             guard !Task.isCancelled,
                   self.capturedSnapshot?.bundleId == capturedBundle,
                   self.capturedSnapshot?.pid == capturedPid else { return }
-            // Adopt the fuller (secure-aware) snapshot only if the target is unchanged — same bundle AND same
-            // pid at capture and after the detached AX work. If it moved, we could not confirm the field is
-            // safe (a dictation begun in a password field must not leak just because focus shifted during the
-            // probe), so force the dictation fully local — no cloud, no context, no history (KS-01).
-            guard full.bundleId == capturedBundle, full.pid == capturedPid else {
+            guard let adopted = PressResolver.adoption(
+                of: full, capturedBundle: capturedBundle, capturedPid: capturedPid,
+                capturedSecure: self.capturedSnapshot?.isSecureField ?? false)
+            else {
                 self.session?.targetUnconfirmed = true
                 self.activeMode = self.securePolicyApplied(self.activeMode)
                 return   // leave the gate closed: no preconnect, no context probe
             }
-            var adopted = full
-            // Secure is sticky: if the press snapshot already saw a password field, a later non-secure read
-            // of the same process must not clear it — a same-PID secure→nonsecure flip during the probe
-            // window can't re-enable cloud/history (KS-01).
-            adopted.isSecureField = adopted.isSecureField || (self.capturedSnapshot?.isSecureField ?? false)
             self.capturedSnapshot = adopted
             self.building.targetBundleId = adopted.bundleId
             self.activeMode = self.securePolicyApplied(self.activeMode)
@@ -702,41 +579,17 @@ final class DictationController {
         }
     }
 
-    // Audio must exceed this before a streaming session opens, so a short utterance never pays streaming
-    // inference or pins the engine lock. Above the press-time prepare/prewarm latency, so session creation
-    // never races those on the lock.
-    nonisolated static let streamingStartThresholdSeconds: Double = 4
-
-    // Cap on the writer→feed backlog of undelivered PCM chunks. The healthy path stays near-empty; this
-    // bounds memory for a future slow/wedged engine whose append can't keep up — overflow is dropped and the
-    // driver degrades to batch. ~1024 chunks (writer polls ~5 ms) is many seconds of backlog, past the point
-    // streaming has lost its latency win.
-    nonisolated static let streamingBackpressureMaxChunks = 1024
-
     // Stand up the streaming driver + writer→driver feed, or nil when streaming is off / the engine can't
     // stream (the sole gate — the pipeline never branches on flag identity again). Returns the writer-thread
     // sink; nil keeps the batch path byte-for-byte.
     private func setUpStreamingIfEnabled(sampleRate: Int) -> (@Sendable ([Float]) -> Void)? {
-        guard settings.features.isEnabled(.streamingTranscription), activeEngine.supportsStreaming else { return nil }
-        let policy = StreamingStartPolicy(thresholdSeconds: Self.streamingStartThresholdSeconds, sampleRate: sampleRate)
+        guard settings.features.isEnabled(.streamingTranscription), activeEngine.supportsStreaming,
+              let recorder = session?.recorder else { return nil }
         let identity = session?.identity
-        let driver = StreamingDictationDriver(policy: policy, makeSession: { [weak self] in
+        return recorder.startStreaming(sampleRate: sampleRate, makeSession: { [weak self] in
             guard let self, let identity else { throw CancellationError() }
             return try await self.makeStreamingSession(for: identity)
         })
-        let (stream, continuation) = AsyncStream.makeStream(
-            of: [Float].self, bufferingPolicy: .bufferingNewest(Self.streamingBackpressureMaxChunks))
-        session?.streamingDriver = driver
-        session?.streamingSampleContinuation = continuation
-        session?.streamingFeedTask = Task { for await chunk in stream { await driver.ingest(chunk) } }
-        return { [weak driver] chunk in
-            // Writer-thread sink (off-RT, non-blocking). A dropped chunk means the feed loop fell behind (a
-            // wedged/slow append), so trip the driver to batch rather than let memory grow. Off-RT, so a Task
-            // here is fine; no-ops once the driver already fell back.
-            if case .dropped = continuation.yield(chunk), let driver {
-                Task { await driver.noteBackpressureDrop() }
-            }
-        }
     }
 
     // Built lazily at the deferred-start crossing (seconds into the recording), so the mode has resolved and
@@ -842,20 +695,15 @@ final class DictationController {
             self.onRecordingChanged?(true)
             self.startRecordingLimit()
             self.pollLevelWhileRecording()
-            self.present(self.recordingHUD(level: 0))
+            self.hud.present(self.recordingHUD(level: 0))
         }
     }
 
     private func startRecordingLimit() {
-        session?.recordingLimitTask?.cancel()
         let limit = RecordingLimit.seconds(backstop: maxRecordingSeconds, modelLimit: modelRecordingLimit(activeEngine.id))
-        session?.recordingLimitSeconds = limit
-        session?.recordingDeadline = ContinuousClock.now.advanced(by: .seconds(limit))
-        session?.recordingLimitTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(limit))
-            guard let self, !Task.isCancelled, self.machine.state == .recording else { return }
-            self.commitAtRecordingLimit()
-        }
+        session?.recorder.startLimit(
+            seconds: limit, stillRecording: { [weak self] in self?.machine.state == .recording },
+            reached: { [weak self] in self?.commitAtRecordingLimit() })
     }
 
     private func commitAtRecordingLimit() {
@@ -865,7 +713,7 @@ final class DictationController {
         handleCommit()
     }
 
-    private var recordingLimitSeconds: Double { session?.recordingLimitSeconds ?? maxRecordingSeconds }
+    private var recordingLimitSeconds: Double { session?.recorder.limitSeconds ?? maxRecordingSeconds }
     private var limitPhrase: String { RecordingLimit.phrase(seconds: recordingLimitSeconds) }
 
     static let rewriteSkippedAtLimitReason = "The recording limit stopped this dictation, so the rewrite was skipped."
@@ -876,23 +724,17 @@ final class DictationController {
         // Cancel the per-dictation tasks first (dropping the session only releases the references, it does
         // not cancel the Tasks), then drop the whole session as a unit — every captured*/activeMode/
         // routing/building field resets structurally, so none can leak into the next dictation.
-        session?.recordingLimitTask?.cancel()
         session?.modeResolveTask?.cancel()
         session?.snapshotAdoptionTask?.cancel()
         captureBringUpTask?.cancel()
-        session?.levelPollTask?.cancel()
         session?.rewriteEscapeTask?.cancel()
         session?.precedingTextTask?.cancel()
         // Streaming teardown on EVERY terminal (commit, cancel, error): finish the feed and
         // cancel the driver so a session still holding the SerializedEngine lock releases it. Idempotent — a
         // committed dictation already finalized (driver.finish marked it done), so cancel is a no-op there;
         // an aborted dictation with a live session gets its lock freed here (else the engine wedges).
-        session?.streamingSampleContinuation?.finish()
-        session?.streamingFeedTask?.cancel()
-        if let streamingDriver = session?.streamingDriver {
-            streamingCancelTask = Task { await streamingDriver.cancel() }
-        }
-        protectedEngineIds.removeAll()
+        if let teardown = session?.recorder.tearDown() { streamingCancelTask = teardown }
+        engines.releaseProtection()
         session = nil
         activeStartTrigger = nil
         scheduleCaptureRefresh()
@@ -913,12 +755,12 @@ final class DictationController {
         default:
             return
         }
-        session?.recordingLimitTask?.cancel()
+        session?.recorder.stopLimit()
         onRecordingChanged?(false)
         machine.beginTranscribing()
         // Flip the HUD to transcribing now so the tail-drain (commit-on-release flush, ~one buffer) is
         // invisible; finishDraining keeps the engine running just long enough to capture the final word.
-        present(.transcribing(mode: currentModeName))
+        hud.present(.transcribing(mode: currentModeName))
         let drainStart = DispatchTime.now()
         dictationTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -988,7 +830,7 @@ final class DictationController {
                 await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: samples, reading: reading, streamedTranscript: nil)
             case .busy:
                 try? FileManager.default.removeItem(at: url)
-                self.noteTranscribeBusyRejection()
+                self.transcriber.noteBusyRejection()
                 if Task.isCancelled { return }
                 self.log.error("streaming finalize rejected — previous transcription still running (\(self.activeEngine.id, privacy: .public))")
                 self.finishError("Still finishing the previous dictation")
@@ -1038,21 +880,14 @@ final class DictationController {
         let reading = plan.voiceCommandReading(
             heard: heard, mode: activeMode, places: commands.places, scripts: commands.scripts)
         let transcript = reading.text
-        let late = LateCommandResult()
+        let late = VoiceCommandOutput.LateResult()
         let stopsAtStart = session?.voiceCommandStopsAtPress
         // Lookup stays cancellable (still transcribing); the first check that passes is where acting begins.
-        let stillWanted: @MainActor () -> Bool = { [weak self] in
-            guard let self, !Task.isCancelled, !self.captureWasLost, self.voiceCommandStops == stopsAtStart,
-                  self.settings.features.isEnabled(.voiceCommands) else { return false }
-            if self.machine.state == .transcribing {
-                guard self.machine.beginInserting() else { return false }
-                self.hud?.relinquishKeyFocus()
-            }
-            return self.machine.state == .inserting
-        }
+        let lease = lease(for: .voiceCommands, stopsAtPress: stopsAtStart)
+        let stillWanted: @MainActor () -> Bool = { lease.keepActing() }
         let onLateResult: @MainActor (VoiceCommandOutcome) -> Void = { [weak self] outcome in
             late.outcome = outcome
-            self?.applyLateCommandResult(late)
+            self?.commandOutput.applyLateResult(late)
         }
         let reply: VoiceCommandAnswer
         if let id = session?.choiceId {
@@ -1065,17 +900,17 @@ final class DictationController {
                 stillWanted: stillWanted, onLateResult: onLateResult))
         }
         if Task.isCancelled { return }
-        if !reading.firedReplacements.isEmpty, Self.ranACommand(reply) {
-            replacementUsage?.record(reading.firedReplacements, capturedAt: session?.replacementUsageEpoch)
+        if !reading.firedReplacements.isEmpty, VoiceCommandOutput.ranACommand(reply) {
+            reporter.recordUsage(reading.firedReplacements, capturedAt: session?.replacementUsageEpoch)
         }
         building.stageMillis[.insert] = elapsedMs(since: start)
-        if voiceCommands.pendingChoice == nil { clearVoiceCommandChoice() }
+        if voiceCommands.pendingChoice == nil { commandOutput.clear() }
         switch reply {
         case .command(let outcome):
             finishCommand(outcome, heard: heard, transcript: transcript, late: late, excerpt: excerpt)
         case .selected(let selection):
             finishCommand(selection.outcome, heard: heard, transcript: transcript, late: late,
-                          resultPrefix: Self.selectionPrefix(selection))
+                          resultPrefix: VoiceCommandOutput.selectionPrefix(selection))
         case .cancelled(let request):
             finish(machine: .finish(.inserted), cue: .cancel, state: .hidden, record: (.command, nil),
                    history: HistoryWrite(heard: heard, transformed: transcript,
@@ -1084,65 +919,19 @@ final class DictationController {
         case .retry(let message, let reason):
             let shown = reason == .unrecognizedAnswer ? excerpt : nil
             let status: VoiceCommandChoiceStatus = shown.map { .waiting(note: nil, heard: $0) } ?? .waiting(note: message)
-            let state: HUDState = choicePrompt.map { .choice($0, status: status) } ?? .error(message: message, action: nil)
+            let state: HUDState = commandOutput.prompt.map { .choice($0, status: status) } ?? .error(message: message, action: nil)
             finish(machine: .finish(.inserted), cue: nil, endsQuietly: true, state: state,
-                   hideAfter: choicePrompt == nil ? 3 : nil, record: (.command, nil),
+                   hideAfter: commandOutput.prompt == nil ? 3 : nil, record: (.command, nil),
                    history: HistoryWrite(heard: heard, transformed: transcript, result: message, insertion: .inserted,
                                          rewrite: nil, outcome: .commandNeedsChoice))
         }
     }
 
-    private static func selectionPrefix(_ selection: VoiceCommandSelection) -> String {
-        "Selected \(selection.name) for \u{201C}\(selection.request)\u{201D}: "
-    }
-
-    private struct CommandPresentation {
-        let state: HUDState
-        let cue: DuringDictationEffects.EndCue
-        let hideAfter: Double
-        let outcome: HistoryEntry.Outcome
-        let result: String
-        let failure: String?
-        var reported: String?
-    }
-
-    private static let unrecognizedCommandTitle = "Command not recognized"
-
-    private static func presentation(
-        of outcome: VoiceCommandOutcome, resultPrefix: String, excerpt: HeardExcerpt? = nil
-    ) -> CommandPresentation? {
-        switch outcome {
-        case .done(let summary, let command, let report):
-            CommandPresentation(state: commandDoneState(summary: summary, report: report), cue: .success,
-                                hideAfter: report == nil ? 1.5 : 3, outcome: .command,
-                                result: resultPrefix + command, failure: nil, reported: report?.text)
-        case .started(let summary, let command):
-            CommandPresentation(state: .commandDone(summary: summary, detail: HUDState.commandStillRunningDetail),
-                                cue: .success, hideAfter: 1.5, outcome: .commandStarted, result: resultPrefix + command,
-                                failure: nil)
-        case .failed(let message, let command, let action, let kind):
-            CommandPresentation(state: .error(message: kind == .unrecognizedCommand ? unrecognizedCommandTitle : message,
-                                              action: action, heard: kind == .other ? nil : excerpt),
-                                cue: .error, hideAfter: 3,
-                                outcome: .commandFailed, result: resultPrefix + (command ?? ""), failure: message)
-        case .needsChoice, .abandoned:
-            nil
-        }
-    }
-
-    private static func commandDoneState(summary: String, report: ScriptReport.Message?) -> HUDState {
-        switch report?.level {
-        case nil: .commandDone(summary: summary)
-        case .done: .commandDone(summary: report?.text ?? summary, detail: summary)
-        case .info: .advisory(message: report?.text ?? summary)
-        }
-    }
-
     private func finishCommand(
-        _ outcome: VoiceCommandOutcome, heard: String, transcript: String, late: LateCommandResult, resultPrefix: String = "",
+        _ outcome: VoiceCommandOutcome, heard: String, transcript: String, late: VoiceCommandOutput.LateResult, resultPrefix: String = "",
         excerpt: HeardExcerpt? = nil
     ) {
-        if let shown = Self.presentation(of: outcome, resultPrefix: resultPrefix, excerpt: excerpt) {
+        if let shown = VoiceCommandOutput.presentation(of: outcome, resultPrefix: resultPrefix, excerpt: excerpt) {
             let failed = shown.failure != nil
             var write = HistoryWrite(heard: heard, transformed: transcript, result: shown.result,
                                      insertion: failed ? .failed : .inserted, rewrite: nil, failureReason: shown.failure,
@@ -1151,7 +940,7 @@ final class DictationController {
             if started {
                 write.onRecorded = { [weak self] entry in
                     late.entry = entry
-                    self?.applyLateCommandResult(late)
+                    self?.commandOutput.applyLateResult(late)
                 }
             }
             finish(machine: .finish(failed ? .failed : .inserted), cue: shown.cue, state: shown.state,
@@ -1159,7 +948,7 @@ final class DictationController {
                    history: write)
             if started {
                 late.started = true
-                applyLateCommandResult(late)
+                commandOutput.applyLateResult(late)
             }
             return
         }
@@ -1173,90 +962,24 @@ final class DictationController {
                 finish(machine: .cancel, cue: .cancel, state: .hidden)
             }
         case .needsChoice(let pending):
-            let prompt = choicePrompt(for: pending)
-            choicePrompt = prompt
-            choiceEntry = nil
+            let prompt = commandOutput.offer(pending)
             let rows = pending.rows.map { "\($0.number). \($0.name)" }.joined(separator: ", ")
             var write = HistoryWrite(heard: heard, transformed: transcript, result: "Asked to choose: \(rows)",
                                      insertion: .inserted, rewrite: nil, outcome: .commandNeedsChoice)
             write.onRecorded = { [weak self] entry in
-                guard let self, self.choicePrompt?.id == pending.id else { return }
-                self.choiceEntry = entry
+                self?.commandOutput.noteAsked(entry, choice: pending.id)
             }
             finish(machine: .finish(.inserted), cue: nil, endsQuietly: true,
                    state: .choice(prompt, status: .waiting(note: nil)), record: (.command, nil), history: write)
-            scheduleChoiceExpiry(pending.id)
-        }
-    }
-
-    private func choicePrompt(for pending: VoiceCommandPendingChoice) -> VoiceCommandChoicePrompt {
-        let shortcut = plan.modes.first { $0.runsVoiceCommands }?.triggerKeys.first(where: \.startsDictation)
-            .flatMap { try? KeyDescriptor(parsing: $0.key) }?.displayString
-        let use = shortcut.map { "Use \($0)" } ?? "Use your Voice Commands shortcut"
-        let hint = (pending.choice.note.map { "\($0) " } ?? "")
-            + "\(use) and say \u{201C}two\u{201D} or \u{201C}the second one\u{201D}. "
-            + "Say \u{201C}cancel\u{201D} to dismiss, or give a new command."
-        return VoiceCommandChoicePrompt(id: pending.id, title: pending.choice.title, rows: pending.rows, hint: hint)
-    }
-
-    // A replacement counts only when the command it shaped reached its destination, like a dictation that was
-    // inserted; asking which one is not a destination, and a failure ran nothing.
-    private static func ranACommand(_ reply: VoiceCommandAnswer) -> Bool {
-        let outcome: VoiceCommandOutcome
-        switch reply {
-        case .command(let commandOutcome): outcome = commandOutcome
-        case .selected(let selection): outcome = selection.outcome
-        case .cancelled, .retry: return false
-        }
-        switch outcome {
-        case .done, .started: return true
-        case .failed, .needsChoice, .abandoned: return false
-        }
-    }
-
-    private static func choiceWaiting(after state: HUDState?) -> VoiceCommandChoiceStatus {
-        switch state {
-        case .error(let message, let action, _): .waiting(note: message, action: action)
-        case .advisory(let message): .waiting(note: message)
-        case .complete(.noSpeech, _, _): .waiting(note: "No speech detected")
-        case .choice(_, .waiting(let note, let heard, let action), _): .waiting(note: note, heard: heard, action: action)
-        default: .waiting(note: nil)
+            commandOutput.scheduleExpiry(pending.id)
         }
     }
 
     private var answeringChoicePrompt: VoiceCommandChoicePrompt? {
         if session != nil, session?.modeReady != true, let prompt = pendingVoiceCommandChoice { return prompt }
-        guard let id = session?.choiceId, let prompt = choicePrompt, prompt.id == id,
+        guard let id = session?.choiceId, let prompt = commandOutput.prompt, prompt.id == id,
               voiceCommands.pendingChoice?.id == id else { return nil }
         return prompt
-    }
-
-    // The only path to the HUD: a pending choice must stay readable, so anything that would cover it
-    // becomes its status instead.
-    private func present(_ state: HUDState) {
-        let shown = keepingChoiceVisible(state)
-        lastPresented = shown
-        hud?.render(shown)
-    }
-
-    private func keepingChoiceVisible(_ state: HUDState) -> HUDState {
-        if let prompt = answeringChoicePrompt {
-            switch state {
-            case .recording(_, let level, let latched, _):
-                return .choice(prompt, status: .listening(latchedTrigger: latched), level: level)
-            case .transcribing, .loadingModel:
-                return .choice(prompt, status: .working)
-            default:
-                break
-            }
-        }
-        guard let prompt = answeringChoicePrompt ?? pendingVoiceCommandChoice else { return state }
-        switch state {
-        case .hidden, .error, .advisory, .complete(.noSpeech, _, _):
-            return .choice(prompt, status: Self.choiceWaiting(after: state))
-        default:
-            return state
-        }
     }
 
     private func claimOrDismissVoiceCommandChoice() {
@@ -1265,227 +988,31 @@ final class DictationController {
             dismissVoiceCommandChoice()
             return
         }
-        choiceExpiryTask?.cancel()
+        commandOutput.pauseExpiry()
         session?.choiceId = voiceCommands.claimChoice()
         if session?.choiceId == nil { dismissVoiceCommandChoice() }
     }
 
-    private func scheduleChoiceExpiry(_ id: Int) {
-        choiceExpiryTask?.cancel()
-        guard let seconds = voiceCommands.choiceSecondsLeft(id) else { return }
-        choiceExpiryTask = Task { @MainActor [weak self, sleep = choiceExpirySleep] in
-            await sleep(seconds)
-            guard let self, !Task.isCancelled else { return }
-            if self.voiceCommands.expireChoice(id) {
-                self.clearVoiceCommandChoice()
-                if !self.isBusy { self.present(.hidden) }
-            } else if self.voiceCommands.choiceSecondsLeft(id) != nil {
-                self.scheduleChoiceExpiry(id)
-            }
-        }
+    var choiceExpirySleep: @MainActor (Double) async -> Void {
+        get { commandOutput.expirySleep }
+        set { commandOutput.expirySleep = newValue }
     }
 
-    var choiceExpirySleep: @MainActor (Double) async -> Void = { try? await Task.sleep(for: .seconds($0)) }
+    var pendingVoiceCommandChoice: VoiceCommandChoicePrompt? { commandOutput.pendingPrompt }
 
-    private func clearVoiceCommandChoice() {
-        choiceExpiryTask?.cancel()
-        choiceExpiryTask = nil
-        choicePrompt = nil
-        choiceEntry = nil
-    }
+    func dismissVoiceCommandChoice() { commandOutput.dismiss() }
 
-    var pendingVoiceCommandChoice: VoiceCommandChoicePrompt? {
-        guard let prompt = choicePrompt, voiceCommands.pendingChoice?.id == prompt.id else { return nil }
-        return prompt
-    }
+    private func stopVoiceCommandChoice() { commandOutput.stop() }
 
-    func dismissVoiceCommandChoice() {
-        let shown = choicePrompt != nil
-        if let pending = voiceCommands.pendingChoice { voiceCommands.dismissChoice(pending.id) }
-        clearVoiceCommandChoice()
-        guard shown, !isBusy || machine.state == .arming else { return }
-        present(.hidden)
-    }
+    func noteAppActivated(bundleId: String) { commandOutput.noteAppActivated(bundleId: bundleId) }
 
-    private func stopVoiceCommandChoice() {
-        voiceCommandStops += 1
-        clickedChoiceTask?.cancel()
-        clickedChoiceTask = nil
-        dismissVoiceCommandChoice()
-    }
-
-    func noteAppActivated(bundleId: String) {
-        guard let pending = voiceCommands.pendingChoice, bundleId != pending.origin?.bundleId else { return }
-        dismissVoiceCommandChoice()
-    }
-
-    func voiceCommandConfigurationChanged() {
-        guard let pending = voiceCommands.pendingChoice else { return }
-        let current = config.voiceCommands
-        let available = settings.features.isEnabled(.voiceCommands)
-            && config.modes.contains { $0.runsVoiceCommands && $0.enabled }
-        guard !available || current.places != pending.places || current.scripts != pending.scripts else { return }
-        dismissVoiceCommandChoice()
-    }
+    func voiceCommandConfigurationChanged() { commandOutput.configurationChanged() }
 
     func chooseVoiceCommand(choice id: Int, candidate identity: String) {
-        guard settings.features.isEnabled(.voiceCommands), let pending = voiceCommands.takeChoice(id) else { return }
-        let wasAnswering = session?.choiceId == id
-        let entry = choiceEntry
-        clearVoiceCommandChoice()
-        if wasAnswering { cancel() }
-        let commands = config.voiceCommands
-        let late = LateCommandResult()
-        let startsAtClick = dictationStarts
-        let stopsAtClick = voiceCommandStops
-        clickedChoiceTask?.cancel()
-        clickedChoiceTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            let stillWanted: @MainActor () -> Bool = { [weak self] in
-                !Task.isCancelled && self?.dictationStarts == startsAtClick
-                    && self?.voiceCommandStops == stopsAtClick
-                    && self?.settings.features.isEnabled(.voiceCommands) == true
-            }
-            guard let selection = await self.voiceCommands.runChoice(
-                pending, candidate: identity, places: commands.places, scripts: commands.scripts,
-                stillWanted: stillWanted,
-                onLateResult: { [weak self] outcome in
-                    late.outcome = outcome
-                    self?.applyLateCommandResult(late)
-                })
-            else { self.abandonClickedChoice(entry, startsAtClick: startsAtClick); return }
-            self.finishClickedChoice(selection, entry: entry, late: late, startsAtClick: startsAtClick)
-        }
+        commandOutput.choose(choice: id, candidate: identity)
     }
 
-    private func finishClickedChoice(
-        _ selection: VoiceCommandSelection, entry: HistoryEntry?, late: LateCommandResult, startsAtClick: Int
-    ) {
-        if case .needsChoice(let pending) = selection.outcome {
-            askAgainAfterClick(pending, selection: selection, entry: entry, startsAtClick: startsAtClick)
-            return
-        }
-        guard let shown = Self.presentation(of: selection.outcome, resultPrefix: Self.selectionPrefix(selection)) else {
-            abandonClickedChoice(entry, startsAtClick: startsAtClick)
-            return
-        }
-        if let entry, let history {
-            var updated = entry
-            updated.outcome = shown.outcome
-            updated.result = shown.result
-            updated.failureReason = shown.failure
-            updated.reported = shown.reported
-            late.entry = updated
-            historyWriteQueue.async { [weak self] in
-                guard history.replace(entry, with: updated) else { return }
-                Task { @MainActor in self?.onHistoryUpdated?() }
-            }
-        }
-        let show = { [weak self] in
-            guard let self, self.dictationStarts == startsAtClick, !self.isBusy,
-                  self.voiceCommands.pendingChoice == nil else { return }
-            self.effects.alert(self.settings.duringDictation, cue: shown.cue)
-            self.present(shown.state)
-            self.scheduleHide(after: shown.hideAfter)
-        }
-        runWhenIdle(show)
-        if shown.outcome == .commandStarted {
-            late.started = true
-            applyLateCommandResult(late)
-        }
-    }
-
-    private func abandonClickedChoice(_ entry: HistoryEntry?, startsAtClick: Int) {
-        markChoiceCancelled(entry)
-        guard dictationStarts == startsAtClick, !isBusy, voiceCommands.pendingChoice == nil else { return }
-        present(.hidden)
-    }
-
-    private func askAgainAfterClick(
-        _ pending: VoiceCommandPendingChoice, selection: VoiceCommandSelection, entry: HistoryEntry?, startsAtClick: Int
-    ) {
-        var asked = entry
-        if let entry, let history {
-            let rows = pending.rows.map { "\($0.number). \($0.name)" }.joined(separator: ", ")
-            asked?.result = Self.selectionPrefix(selection) + "Asked to choose: \(rows)"
-            let updated = asked ?? entry
-            historyWriteQueue.async { [weak self] in
-                guard history.replace(entry, with: updated) else { return }
-                Task { @MainActor in self?.onHistoryUpdated?() }
-            }
-        }
-        runWhenIdle { [weak self] in
-            guard let self, self.voiceCommands.pendingChoice?.id == pending.id else { return }
-            guard self.dictationStarts == startsAtClick else {
-                self.voiceCommands.dismissChoice(pending.id)
-                return
-            }
-            let prompt = self.choicePrompt(for: pending)
-            self.choicePrompt = prompt
-            self.choiceEntry = asked
-            self.present(.choice(prompt, status: .waiting(note: nil)))
-            self.scheduleChoiceExpiry(pending.id)
-        }
-    }
-
-    func cancelVoiceCommandChoice(choice id: Int) {
-        guard voiceCommands.takeChoice(id) != nil else { return }
-        let wasAnswering = session?.choiceId == id
-        let entry = choiceEntry
-        clearVoiceCommandChoice()
-        if wasAnswering { cancel() }
-        if !isBusy { present(.hidden) }
-        markChoiceCancelled(entry)
-    }
-
-    private func markChoiceCancelled(_ entry: HistoryEntry?) {
-        guard let entry, let history else { return }
-        var updated = entry
-        updated.outcome = .commandCancelled
-        historyWriteQueue.async { [weak self] in
-            guard history.replace(entry, with: updated) else { return }
-            Task { @MainActor in self?.onHistoryUpdated?() }
-        }
-    }
-
-    private final class LateCommandResult {
-        var started = false
-        var entry: HistoryEntry?
-        var outcome: VoiceCommandOutcome?
-        var applied = false
-    }
-
-    private func applyLateCommandResult(_ late: LateCommandResult) {
-        guard late.started, !late.applied, let outcome = late.outcome else { return }
-        late.applied = true
-        let failure: String?
-        let report: ScriptReport.Message?
-        let summary: String
-        switch outcome {
-        case .failed(let message, _, _, _): (failure, report, summary) = (message, nil, "")
-        case .done(let name, _, let message): (failure, report, summary) = (nil, message, name)
-        case .started, .needsChoice, .abandoned: return
-        }
-        if let entry = late.entry, let history {
-            var updated = entry
-            updated.outcome = failure == nil ? .command : .commandFailed
-            updated.failureReason = failure
-            updated.reported = report?.text
-            historyWriteQueue.async { [weak self] in
-                guard history.replace(entry, with: updated) else { return }
-                Task { @MainActor in self?.onHistoryUpdated?() }
-            }
-        }
-        guard !isBusy, voiceCommands.pendingChoice == nil else { return }
-        if let failure {
-            present(.error(message: failure, action: nil))
-        } else if let report {
-            present(Self.commandDoneState(summary: summary, report: report))
-        } else {
-            return
-        }
-        scheduleHide(after: 4)
-    }
+    func cancelVoiceCommandChoice(choice id: Int) { commandOutput.cancel(choice: id) }
 
     private func finishCommandCaptureLost() {
         log.error("capture lost mid-recording — voice command not run")
@@ -1496,7 +1023,7 @@ final class DictationController {
 
     private func finishNoSpeech() {
         guard machine.beginInserting() else { return }
-        hud?.relinquishKeyFocus()
+        hud.relinquishKeyFocus()
         let completion = DictationCompletion(
             outcome: .noSpeech, modeId: activeMode?.id, heard: "", finalText: "")
         finish(machine: .finish(.noSpeech), cue: .cancel,
@@ -1508,7 +1035,7 @@ final class DictationController {
     // (longer hide, action button) but records the same .noSpeech outcome as finishNoSpeech.
     private func finishNothingHeard() {
         guard machine.beginInserting() else { return }
-        hud?.relinquishKeyFocus()
+        hud.relinquishKeyFocus()
         let completion = DictationCompletion(
             outcome: .noSpeech, modeId: activeMode?.id, heard: "", finalText: "")
         finish(machine: .finish(.noSpeech), cue: .error,
@@ -1527,7 +1054,7 @@ final class DictationController {
             return
         }
         guard machine.beginInserting() else { return }
-        hud?.relinquishKeyFocus()
+        hud.relinquishKeyFocus()
         let completion = DictationCompletion(
             outcome: .noSpeech, modeId: activeMode?.id, heard: "", finalText: "")
         finish(machine: .finish(.noSpeech), cue: .error,
@@ -1560,33 +1087,22 @@ final class DictationController {
     // holds the engine's exclusive lock forever) — the gate stays closed until it settles and the next press
     // reports "Still finishing…". Stamps .streamFinalize on success.
     private func finalizeStreamingIfActive(audioSeconds: Double) async -> StreamingFinalizeOutcome {
-        guard let driver = session?.streamingDriver else { return .batch }
+        guard let recorder = session?.recorder, recorder.isStreaming else { return .batch }
         await awaitSelfTestClearance()
-        let continuation = session?.streamingSampleContinuation
-        let feedTask = session?.streamingFeedTask
-        let finalizeStart = DispatchTime.now()
-        let outcome: StreamingDictationDriver.Outcome
-        do {
-            outcome = try await transcribeGate.run(seconds: streamingFinalizeTimeout(audioSeconds: audioSeconds)) {
-                continuation?.finish()
-                await feedTask?.value
-                return await driver.finish()
-            }
-        } catch is SingleFlightDeadline.Busy {
-            return .busy
-        } catch is CancellationError {
-            return .cancelled   // a user cancel, not a wedge — don't misreport it as a timeout
-        } catch {
-            return .timedOut
-        }
-        switch outcome {
-        case .streamed(let text):
-            resetTranscribeBusyStreak()
-            building.stageMillis[.streamFinalize] = elapsedMs(since: finalizeStart)
+        let finalized = await recorder.finalizeStreaming(
+            gate: transcriber.gate, timeout: streamingFinalizeTimeout(audioSeconds: audioSeconds))
+        switch finalized {
+        case nil: return .batch
+        case .busy: return .busy
+        case .cancelled: return .cancelled   // a user cancel, not a wedge — don't misreport it as a timeout
+        case .timedOut: return .timedOut
+        case .streamed(let text, let milliseconds):
+            transcriber.resetBusyStreak()
+            building.stageMillis[.streamFinalize] = milliseconds
             return .streamed(text)
-        case .fallBackToBatch:
-            resetTranscribeBusyStreak()
-            if await driver.fellBehind {
+        case .fellBackToBatch(let fellBehind):
+            transcriber.resetBusyStreak()
+            if fellBehind {
                 log.debug("streaming fell behind real time — falling back to batch transcription")
             } else {
                 log.debug("streaming fell back to batch transcription")
@@ -1634,7 +1150,7 @@ final class DictationController {
         // bring-up task unwinds first.
         machine.beginCancellingBringUp()
         if !silently { effects.end(settings.duringDictation, cue: .cancel) }
-        present(.hidden)
+        hud.present(.hidden)
         clearRewriteEscapeHatch()
     }
 
@@ -1659,42 +1175,20 @@ final class DictationController {
     // URL and window title are fetched only when a matching constraint exists (resolveModeProbing);
     // otherwise they are nil here.
     private func applyResolvedMode(triggerKey: String?, url: String?, windowTitle: String?) {
-        let modes = plan.modes
         let context = RoutingContext(bundleId: capturedSnapshot?.bundleId, url: url, windowTitle: windowTitle)
         session?.routingContext = context
-        let eligible = ModeResolver.eligibleModes(modes, context: context)
-        session?.eligibleModes = eligible
-        // The Direct floor is a persisted system mode, so its user-configured trigger/insertion apply
-        // both when its key is pressed and when a trigger falls through to it. Fall back to the canonical
-        // profile only if it is somehow missing on disk.
-        let directFallback = modes.first { $0.id == Mode.directId } ?? .direct
-        let resolved = ModeResolver.resolvePhaseAWithReason(
-            modes: modes, directFallback: directFallback, context: context, triggerKey: triggerKey,
-            eligible: eligible)
-        // A menu-picked one-shot mode is an explicit choice that bypasses the context gate — it is the
-        // deliberate way to run a constrained mode outside its apps (design.md §4.3). It therefore also
-        // outranks a "nothing can serve this press" verdict, so it is read BEFORE that verdict is acted on.
-        // The Voice Commands shortcut never speaks into a field, so it leaves the one-shot for the next dictation.
-        let commandPress = resolved?.reason == .triggerKey && resolved?.mode.runsVoiceCommands == true
-        let override = commandPress ? nil : nextModeOverrideID.flatMap { id in modes.first { $0.id == id && $0.enabled } }
-        if !commandPress { nextModeOverrideID = nil }
-        let chosen: Mode
-        let choice: ModeChoiceReason
-        if let override {
-            chosen = override
-            choice = .oneShot
-        } else if let resolved {
-            chosen = resolved.mode
-            choice = resolved.reason
-        } else {
+        let press = PressResolver.phaseA(
+            modes: plan.modes, context: context, triggerKey: triggerKey, overrideId: nextModeOverrideID)
+        session?.eligibleModes = press.eligible
+        if press.consumesOverride { nextModeOverrideID = nil }
+        guard let choice = press.choice else {
             abortPressWithNoEligibleMode()
             return
         }
-        session?.modeChoice = choice
-        session?.shortcutCandidates = override == nil
-            ? ModeResolver.keyCandidates(modes: modes, context: context, triggerKey: triggerKey) : []
-        session?.triggerDisplay = choice == .triggerKey
-            ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
+        let chosen = choice.mode
+        session?.modeChoice = choice.reason
+        session?.shortcutCandidates = choice.shortcutCandidates
+        session?.triggerDisplay = choice.triggerDisplay
         activeMode = securePolicyApplied(chosen)
         session?.modeReady = true
         claimOrDismissVoiceCommandChoice()
@@ -1751,28 +1245,7 @@ final class DictationController {
         // press snapshot has none). Bounded by the same AX timeout the URL probe already tolerates; mode is
         // only needed at commit, so this cannot delay anything user-visible past the HUD.
         await session?.snapshotAdoptionTask?.value
-        var url: String?
-        var windowTitle: String?
-        let candidates = probeCandidates()
-        if let bundleId = capturedSnapshot?.bundleId {
-            // Each probe is gated on a mode actually using it: the URL probe needs Apple Events (an
-            // Automation prompt), the title probe an extra AX round trip — neither runs unless a mode's
-            // constraints depend on it. Narrowed to the same candidates the deferral gate used, so a mode
-            // this app's bundle already rules out never costs an Automation prompt here.
-            if ModeResolver.requiresURLContext(candidates) {
-                // The URL selects the mode (which can differ in connection/rewrite/context), so it is bound to
-                // the captured process+window: the probe confirms the captured target is still focused before
-                // and after the AppleScript read and discards the URL otherwise. Only the same-bundle
-                // multiple-instance ambiguity of `tell application id` remains irreducible.
-                url = await ContextProbe.browserURLAsync(
-                    forBundleId: bundleId, pid: capturedSnapshot?.pid, windowId: capturedSnapshot?.focusedWindowId)
-            }
-            // Title routing reads the exact captured process AND, when a window was captured, only that
-            // window — a same-app switch to another window won't route on its title.
-            if ModeResolver.requiresWindowTitleContext(candidates), let pid = capturedSnapshot?.pid {
-                windowTitle = ContextProbe.focusedWindowTitle(pid: pid, expectedWindowId: capturedSnapshot?.focusedWindowId)
-            }
-        }
+        let (url, windowTitle) = await PressResolver.probeContext(candidates: probeCandidates(), captured: capturedSnapshot)
         // The probe is the one per-dictation task that can outlive a cancel (browser-URL round trip runs
         // ~0.6 s after ESC). A cancelled dictation must not apply its stale mode: it would write A's
         // routing/activeMode into a live successor B and consume B's one-shot override (nextModeOverrideID
@@ -1798,144 +1271,14 @@ final class DictationController {
     // so the gate refuses a second concurrent call (throws `Busy`) until it settles — two never run at once.
     // Test seam, mirroring streamingFinalizeTimeoutOverride: production scales the deadline with the recording
     // length; tests pin it to exercise the retry's budget check in bounded time.
-    var transcribeTimeoutOverride: Double?
-    private func transcribeBounded(audioSeconds: Double, biasTerms: [String], engine: any SpeechEngine, url: URL, samples: [Float]?, reading: SpeechPresenceReading?, recovery: RecoveryProgress) async throws -> String {
-        await awaitSelfTestClearance()
-        let timeout = transcribeTimeoutOverride ?? max(30, audioSeconds * 20)
-        let result = try await transcribeGate.run(seconds: timeout) { () async throws -> TranscribeResult in
-            let firstStart = DispatchTime.now()
-            // Prefer the in-memory PCM when the engine accepts it; fall back to the WAV otherwise.
-            let first: String
-            if engine.supportsSampleInput, let samples {
-                first = try await engine.transcribe(
-                    samples: samples, sampleRate: engine.captureSampleRate, biasTerms: biasTerms)
-            } else {
-                first = try await engine.transcribe(wavURL: url, biasTerms: biasTerms)
-            }
-            guard first.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                return TranscribeResult(text: first)
-            }
-            // "No output, some sound" — the engine returned nothing on a take VAD heard speech in, after
-            // provable leading silence. Parakeet TDT v3 collapses to all-blank on exactly that shape,
-            // but nothing here is engine-specific: the gate is the
-            // declared sample capability, never an identity. A nonempty engine annotation (`[BLANK_AUDIO]`) is
-            // the engine asserting blank audio, not a silent failure — it is nonempty here, so it never
-            // retries. Streamed transcripts never reach this call.
-            func skip(_ reason: String) -> TranscribeResult {
-                TranscribeResult(text: first, decision: RecoveryDecision(attempted: false, outcome: reason))
-            }
-            guard reading?.modelUsed == true else { return skip("skipped-vad-fail-open") }
-            guard let speechStart = reading?.speechStart else { return skip("skipped-speech-in-first-chunk") }
-            guard engine.supportsSampleInput else { return skip("skipped-wav-only-engine") }
-            guard let samples else { return skip("skipped-no-pcm") }
-            // Trim BEFORE committing to the retry: speechStart can sit exactly one chunk in, where the 256 ms
-            // pre-roll reaches back to the take's start and the "trim" is the original PCM. Re-running the
-            // engine on identical input can only burn the deadline for the same answer.
-            let trimmed = LeadingSilenceTrim.trimming(
-                samples: samples, sampleRate: engine.captureSampleRate, speechStart: speechStart)
-            guard trimmed.count < samples.count else { return skip("skipped-trim-removed-nothing") }
-            // The two attempts share ONE deadline — extending it would weaken the wedge protection it exists
-            // for. The trimmed input is strictly shorter, so the first attempt's cost is an upper bound on the
-            // retry's: skip rather than risk spending the deadline and reporting a spurious timeout.
-            let firstElapsed = Self.seconds(since: firstStart)
-            guard timeout - firstElapsed >= firstElapsed * Self.retryBudgetMargin else {
-                return skip("skipped-deadline-budget")
-            }
-            let removed = Double(samples.count - trimmed.count) / Double(engine.captureSampleRate)
-            recovery.noteRetryStarted(trimmedSeconds: removed)
-            let second: String
-            do {
-                second = try await engine.transcribe(
-                    samples: trimmed, sampleRate: engine.captureSampleRate, biasTerms: biasTerms)
-            } catch {
-                // The engine already returned nothing once; a failed repair does not make that a different,
-                // generic failure. Report it as what it is — the model produced no text — via the empty
-                // response the caller already knows how to name.
-                return TranscribeResult(
-                    text: "",
-                    decision: RecoveryDecision(attempted: true, outcome: "retry-error: \(error)", trimmedSeconds: removed))
-            }
-            return TranscribeResult(
-                text: second,
-                decision: RecoveryDecision(
-                    attempted: true,
-                    outcome: second.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "retry-still-empty" : "recovered",
-                    trimmedSeconds: removed))
-        }
-        // Only a result the GATE ACCEPTED is the dictation's outcome, so the decision is logged here and never
-        // from inside the closure. A closure abandoned at the deadline keeps running and can still return
-        // `recovered` — logging in there would race the deadline's terminal and could record a success for a
-        // dictation the user saw fail. An abandoned closure never reaches this line; the deadline catch in
-        // transcribeAndInsert owns that line instead.
-        if let decision = result.decision {
-            self.logRecovery(engine: engine, audioSeconds: audioSeconds, reading: reading, decision: decision)
-        }
-        return result.text
+    var transcribeTimeoutOverride: Double? {
+        get { transcriber.timeoutOverride }
+        set { transcriber.timeoutOverride = newValue }
     }
 
-    // Load jitter headroom on the retry's budget check: the retry should cost no more than the first attempt,
-    // but a machine under load can make the same work take somewhat longer.
-    private nonisolated static let retryBudgetMargin = 1.25
-
-    private nonisolated static func seconds(since start: DispatchTime) -> Double {
-        Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1e9
-    }
-
-    // What the recovery decided, carried OUT of the gate closure as a value instead of logged from inside it.
-    private struct RecoveryDecision: Sendable {
-        let attempted: Bool
-        let outcome: String
-        var trimmedSeconds: Double = 0
-    }
-
-    private struct TranscribeResult: Sendable {
-        let text: String
-        // nil ⇔ the first pass produced text, so no recovery decision was ever reached.
-        var decision: RecoveryDecision?
-    }
-
-    // Whether a retry BEGAN — the one fact the caller cannot learn from a return value, because the gate
-    // abandons its closure at the deadline. It is what separates an initial-attempt deadline (a plain
-    // timeout) from a deadline that landed mid-retry (the engine failing to produce text on speech).
-    final class RecoveryProgress: @unchecked Sendable {
-        private let lock = NSLock()
-        private var trimmedSeconds: Double?
-        // Non-nil ⇔ a retry began, carrying what it trimmed for the deadline's log line.
-        var retryTrimmedSeconds: Double? { lock.withLock { trimmedSeconds } }
-        func noteRetryStarted(trimmedSeconds: Double) { lock.withLock { self.trimmedSeconds = trimmedSeconds } }
-    }
-
-    // Test seam: sees each recovery decision line as it is emitted. Production leaves it nil and the line goes
-    // only to Log.audio, which tests cannot read back (see AGENTS.md — `log show` is unreliable here).
-    var recoveryDecisionObserver: ((String) -> Void)?
-
-    // One line per dictation that reached a recovery decision: what the engine and VAD saw, whether the retry
-    // ran, and how it ended. Diagnostics only — never transcript text. Every caller is on the main actor and
-    // owns the dictation's authoritative outcome, so the line always matches the terminal the user saw.
-    private func logRecovery(
-        engine: any SpeechEngine, audioSeconds: Double, reading: SpeechPresenceReading?, decision: RecoveryDecision
-    ) {
-        let speechStart = reading?.speechStart.map { String(format: "%.3fs", $0) } ?? "none"
-        let line = "engine=\(engine.id) audio=\(String(format: "%.2f", audioSeconds))s vad-model=\(reading?.modelUsed == true) speechStart=\(speechStart) attempted=\(decision.attempted) trimmed=\(String(format: "%.3f", decision.trimmedSeconds))s outcome=\(decision.outcome)"
-        Log.audio.notice("empty-transcript recovery: \(line, privacy: .public)")
-        recoveryDecisionObserver?(line)
-    }
-
-    private func noteTranscribeBusyRejection() {
-        let now = ProcessInfo.processInfo.systemUptime
-        let streakStart = transcribeBusyStreakStartedAt ?? now
-        transcribeBusyStreakStartedAt = streakStart
-        transcribeBusyStreak += 1
-        let backstopElapsed = now - streakStart >= Self.transcribeBusyBackstopSeconds
-        guard transcribeBusyStreak >= Self.transcribeBusyStreakLimit || backstopElapsed else { return }
-        log.error("transcribe gate wedged for \(now - streakStart, privacy: .public)s after \(self.transcribeBusyStreak, privacy: .public) rejection(s) — rebuilding the gate")
-        transcribeGate = SingleFlightDeadline()
-        resetTranscribeBusyStreak()
-    }
-
-    private func resetTranscribeBusyStreak() {
-        transcribeBusyStreak = 0
-        transcribeBusyStreakStartedAt = nil
+    var recoveryDecisionObserver: ((String) -> Void)? {
+        get { transcriber.recoveryObserver }
+        set { transcriber.recoveryObserver = newValue }
     }
 
     private func transcribeAndInsert(url: URL, audioSeconds: Double?, samples: [Float]? = nil, reading: SpeechPresenceReading? = nil, streamedTranscript: String? = nil) async {
@@ -1951,7 +1294,7 @@ final class DictationController {
         let commitSecureProbe = Task { @MainActor [snapshotAsync] in await snapshotAsync().isSecureField }
         let engine = activeEngine
         building.audioSeconds = audioSeconds
-        let recovery = RecoveryProgress()
+        let recovery = Transcriber.RecoveryProgress()
 
         let rawFromEngine: String
         if let streamedTranscript {
@@ -1963,8 +1306,8 @@ final class DictationController {
             // A streamed session is spent once finalized and its PCM is deliberately dropped, so there is
             // nothing to retry on — record the decision rather than leaving the streamed arm silent.
             if streamedTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                self.logRecovery(engine: engine, audioSeconds: audioSeconds ?? 0, reading: reading,
-                                 decision: RecoveryDecision(attempted: false, outcome: "skipped-streamed"))
+                self.transcriber.logRecovery(engine: engine, audioSeconds: audioSeconds ?? 0, reading: reading,
+                                 decision: Transcriber.RecoveryDecision(attempted: false, outcome: "skipped-streamed"))
             }
             try? FileManager.default.removeItem(at: url)
         } else {
@@ -1974,13 +1317,13 @@ final class DictationController {
             // running) until it settles. Awaiting the single warm load (started at press) keeps the deadline
             // on inference.
             func loadOnce() async throws {
-                try await runWithDeadline(seconds: Self.modelLoadDeadlineSeconds) { [task = warm(engine)] in
+                try await runWithDeadline(seconds: Self.modelLoadDeadlineSeconds) { [task = engines.warm(engine)] in
                     try await task.value
                 }
             }
             func failModelLoadTerminal(_ error: Error) {
                 try? FileManager.default.removeItem(at: url)
-                invalidateWarm(engine.id)
+                engines.invalidateWarm(engine.id)
                 let timedOut = error is DeadlineExceeded
                 recordModelLoadFailure(engine.id, timedOut, String(describing: error))
                 log.error("model load \(timedOut ? "timed out" : "failed", privacy: .public) (\(engine.id, privacy: .public)): \(error, privacy: .public)")
@@ -2001,7 +1344,7 @@ final class DictationController {
                 // fresh reload usually succeeds. invalidateWarm drops the failed task so warm(engine) builds a
                 // new one; the HUD stays on `transcribing`, so a recovered transient is invisible. Mirrors the
                 // pipeline's one-retry policy (design.md §4.2).
-                invalidateWarm(engine.id)
+                engines.invalidateWarm(engine.id)
                 log.notice("model load failed, retrying once (\(engine.id, privacy: .public)): \(error, privacy: .public)")
                 do {
                     try await loadOnce()
@@ -2018,18 +1361,19 @@ final class DictationController {
             if Task.isCancelled { try? FileManager.default.removeItem(at: url); return }
             // Flip back to Transcribing for the inference that follows. A no-op (render dedupes) unless the
             // loading-model state was actually shown during a slow load.
-            present(.transcribing(mode: currentModeName))
+            hud.present(.transcribing(mode: currentModeName))
             building.stageMillis[.modelWait] = elapsedMs(since: modelWaitStart)
 
             let transcribeStart = DispatchTime.now()
             do {
-                rawFromEngine = try await transcribeBounded(
+                await awaitSelfTestClearance()
+                rawFromEngine = try await transcriber.transcribe(
                     audioSeconds: audioSeconds ?? 0, biasTerms: recognitionBiasTerms(), engine: engine, url: url, samples: samples,
                     reading: reading, recovery: recovery)
-                resetTranscribeBusyStreak()
+                transcriber.resetBusyStreak()
             } catch is SingleFlightDeadline.Busy {
                 try? FileManager.default.removeItem(at: url)
-                noteTranscribeBusyRejection()
+                transcriber.noteBusyRejection()
                 if Task.isCancelled { return }
                 log.error("transcribe rejected — previous transcription still running (\(engine.id, privacy: .public))")
                 finishError("Still finishing the previous dictation")
@@ -2043,9 +1387,9 @@ final class DictationController {
                 // speech in it, so this is that silent failure — not a timeout to hand the user. The
                 // abandoned call keeps the gate closed exactly as it does for any other deadline.
                 if let trimmedSeconds = recovery.retryTrimmedSeconds {
-                    self.logRecovery(
+                    self.transcriber.logRecovery(
                         engine: engine, audioSeconds: audioSeconds ?? 0, reading: reading,
-                        decision: RecoveryDecision(
+                        decision: Transcriber.RecoveryDecision(
                             attempted: true, outcome: "retry-deadline", trimmedSeconds: trimmedSeconds))
                     finishHeardButNoText(engine: engine)
                     return
@@ -2098,18 +1442,18 @@ final class DictationController {
             await finishVoiceCommand(heard: raw)
             return
         }
-        // Phase B (design.md §4.3): a trigger-phrase suffix re-routes to that mode's pipeline
-        // and is stripped from the transcript; otherwise the Phase-A mode stands.
-        let eligible = session?.eligibleModes ?? []
-        let routed = ModeResolver.resolvePhaseB(eligibleModes: eligible, transcript: raw, context: session?.routingContext ?? RoutingContext())
-        if let phraseModeId = routed.routedModeId, eligible.contains(where: { $0.id == phraseModeId }) {
+        let route = TakeRouting.phaseB(
+            raw: raw, eligible: session?.eligibleModes ?? [], context: session?.routingContext ?? RoutingContext(),
+            pressMode: activeMode)
+        let routed = route.result
+        if route.routedByPhrase {
             session?.modeChoice = .spokenPhrase
             session?.routedPhrase = routed.matchedPhrase
         }
         // Neuter the routed mode BEFORE it drives the rewrite: produceFinalText resolves the connection off
         // this mode, so a Phase-B re-route to a cloud mode from a secure field must be local-only here, not
         // only on the stored activeMode.
-        let finalMode = securePolicyApplied(routed.routedModeId.flatMap { id in eligible.first { $0.id == id } } ?? activeMode)
+        let finalMode = securePolicyApplied(route.mode)
         activeMode = finalMode
         session?.pendingHeardTranscript = raw
         let (final, rewrite, transformed) = await produceFinalText(routed: routed, mode: finalMode)
@@ -2123,11 +1467,30 @@ final class DictationController {
             // a destructive op must never overwrite the user's text on failure.
             log.info("aborted: \(message, privacy: .public)")
             clearRewriteEscapeHatch()
-            finishError(message, action: action)   // applies eviction internally
-
+            finishError(message, action: action)
         case .insert(let transcript, let bare, let submit):
             await finishInsertion(transcript: transcript, heard: raw, transformed: transformed, rewrite: rewrite, bare: bare, submitOverride: submit)
         }
+    }
+
+    // The one definition of a take that may still act: not cancelled, its capture intact, still the current
+    // take, its feature still on, no voice-command stop since the press, and the machine where acting is allowed.
+    private func lease(for feature: Feature? = nil, stopsAtPress: Int? = nil) -> TakeLease {
+        let identity = session?.identity
+        return TakeLease(
+            stillWanted: { [weak self] in
+                guard let self, !Task.isCancelled, !self.captureWasLost, let identity,
+                      self.session?.identity === identity,
+                      feature.map(self.settings.features.isEnabled) ?? true,
+                      stopsAtPress.map({ $0 == self.commandOutput.stops }) ?? true else { return false }
+                return self.machine.state == .transcribing || self.machine.state == .inserting
+            },
+            beginActing: { [weak self] in
+                guard let self, self.machine.beginInserting() else { return false }
+                self.hud.relinquishKeyFocus()
+                return true
+            },
+            abortsActuation: { [lossFlag = session?.captureLoss] in lossFlag?.isLost ?? false })
     }
 
     private func finishInsertion(
@@ -2139,108 +1502,36 @@ final class DictationController {
         // the prefix would read as an ordinary success while silently changing what the user said — losing
         // the end of a sentence can invert its meaning — so nothing is inserted and no submit fires. The
         // prefix stays recoverable through "Paste last dictation" instead.
-        if captureWasLost {
-            finishTruncatedCapture(transcript: transcript)
+        let lease = lease()
+        let request = InsertOutput.Request(
+            text: transcript, heard: heard, mode: activeMode, captured: capturedSnapshot,
+            trailing: bare ? "" : (activeMode?.trailing ?? .none).suffix(after: transcript),
+            submit: session?.stoppedAtLimit == true ? .none : submitOverride ?? activeMode?.submit ?? .none,
+            submitOverride: submitOverride, stoppedAtLimit: session?.stoppedAtLimit == true ? limitPhrase : nil,
+            paste: clipboardPaste(for: activeMode))
+        let (result, report) = await inserter.perform(request, lease: lease) { [weak self] in self?.lastResult = $0 }
+        if report.targetCheckMs != nil {
+            building.stageMillis[.targetCheck] = report.targetCheckMs
+            building.stageMillis[.insert] = report.insertMs
+            building.targetBundleId = report.targetBundleId
+            building.delivery = report.delivery
+            // A rewrite fallback reason already recorded (an LLM 400) is the more surprising cause; the
+            // insertion-clipboard reason only fills the slot when nothing else claimed it.
+            if building.fallbackReason == nil { building.fallbackReason = report.clipboardReason }
+            building.fingerprints[.final] = .of(transcript)
+        }
+        let outcome: DictationOutcome
+        switch result {
+        case .preempted:
             return
-        }
-        // Guarded transition: another terminal path may already have won the race.
-        guard machine.beginInserting() else { return }
-        hud?.relinquishKeyFocus()
-        let targetCheckStart = DispatchTime.now()
-        let current = await snapshotAsync()
-        building.stageMillis[.targetCheck] = elapsedMs(since: targetCheckStart)
-        let targetDecision = decideInsertion(
-            captured: capturedSnapshot ?? TargetSnapshot(bundleId: nil), current: current)
-        // Without Accessibility every synthetic insertion path is silently dropped by the OS. Divert to
-        // the clipboard so the text survives and the outcome reports "copied" truthfully.
-        let decision = accessibilityGranted() ? targetDecision : .clipboardFallback(reason: .accessibilityDenied)
-        building.targetBundleId = capturedSnapshot?.bundleId ?? current.bundleId
-        building.delivery = Self.delivery(decision, method: activeMode?.insertion ?? .paste)
-        // Don't clobber a rewrite fallback reason already recorded above — that cause (an LLM 400) is the
-        // more surprising one; the insertion-clipboard reason only fills the slot when nothing else claimed it.
-        if case .clipboardFallback(let reason) = decision, building.fallbackReason == nil {
-            building.fallbackReason = String(describing: reason)
-        }
-        building.fingerprints[.final] = .of(transcript)
-        let initialOutcome = DictationMachine.outcomeForTranscript(finalText: transcript, heard: heard, decision: decision)
-        // May downgrade to .failed if paste silently fails; insertion success is observed, not assumed.
-        var outcome = initialOutcome
-        switch initialOutcome {
-        case .noSpeech:
-            // A whole-utterance replacement whose entire output is `<CR>` (e.g. "press enter" → Return)
-            // trims to empty text, so there is nothing to insert — but the requested keystroke must still
-            // land. Fire the submit under the same guards as the insert path (real target, focus unmoved).
-            if submitOverride != nil, transcript.isEmpty, session?.stoppedAtLimit == true {
-                finishError("Stopped at the \(limitPhrase) limit — Return not pressed")
-                return
-            } else if let submitOverride, transcript.isEmpty {
-                // `!captureTruncated` is re-read AFTER the focus check's suspension, exactly as the paste
-                // path's submit does: a Return is the one thing here that cannot be undone.
-                if decision == .insert, await submitTargetStillFocused(), !captureWasLost {
-                    await submitKey(submitOverride)
-                    outcome = .inserted
-                    machine.finish(.inserted)
-                } else {
-                    // The command WAS heard and the app deliberately declined the Return — that is a refusal,
-                    // not silence. Finish truthfully with the real cause instead of "No speech detected".
-                    let refusal = submitRefusal(for: decision)
-                    finishError(refusal.message, action: refusal.action)
-                    return
-                }
-            } else {
-                machine.finish(.noSpeech)
-            }
-        case .inserted, .copied:
-            lastResult = transcript
-            // Trailing text rides inside the atomic insert (still one ⌘Z). The submit keystroke lands
-            // OUTSIDE that atom and only on a verified insert — never .copied, where a synthesized Return
-            // would hit whatever app is now focused instead of the target the text reached.
-            let trailing = bare ? .none : (activeMode?.trailing ?? .none)
-            // A `<CR>` on a whole-utterance replacement overrides the mode's standing submit for this
-            // insert only; absent an override the mode's submit behaves exactly as before.
-            let submit = session?.stoppedAtLimit == true ? .none : submitOverride ?? activeMode?.submit ?? .none
-            // Await the paste's clipboard settle inline only when a submit Return must land after ⌘V.
-            let submitFollows = initialOutcome == .inserted && submit != .none
-            let insertStart = DispatchTime.now()
-            let paste = clipboardPaste(for: activeMode)
-            let modeId = activeMode?.id ?? ""
-            for (key, value) in activeMode?.invalidClipboardChords ?? [:] {
-                log.error("mode \(modeId, privacy: .public): \(key, privacy: .public) = \"\(value, privacy: .public)\" is not a chord; falling back to the default")
-            }
-            // Last gate before the irreversible act. The check at the top of this function ran before
-            // `snapshotAsync`, and a loss landing during that suspension would otherwise be seen only
-            // after the text was already in the user's document.
-            if captureWasLost {
-                finishTruncatedCapture(transcript: transcript)
-                return
-            }
-            // The gate above is the last check the CALLER can make; actuation suspends again inside (the
-            // clipboard settle, and a suspension between every typed character), so the loss signal has to
-            // reach those points too. Task-local, so it is visible to this insertion's call tree and to
-            // nothing else — a plain property would be shared with Paste Last and the correction panel.
-            let actuated = await TextInserter.$shouldAbortInsertion.withValue(
-                { [lossFlag = session?.captureLoss] in lossFlag?.isLost ?? false }
-            ) {
-                await insert(decision, activeMode?.insertion ?? .paste, paste, transcript + trailing.suffix(after: transcript), submitFollows)
-            }
-            building.stageMillis[.insert] = elapsedMs(since: insertStart)
-            // Aborting mid-actuation surfaces as `actuated == false`; report the microphone rather than a
-            // generic insertion failure.
-            if captureWasLost {
-                finishTruncatedCapture(transcript: transcript)
-                return
-            }
-            if !actuated {
-                // Nothing landed. Report the truth; the text stays recoverable via "Paste last dictation"
-                // (lastResult is set). Never fire submit against a paste that did not happen.
-                outcome = .failed
-            } else if initialOutcome == .inserted, submit != .none,
-                      await submitTargetStillFocused(), !captureWasLost {
-                // Re-read after the focus check's own suspension: a Return is not undoable with the paste.
-                await submitKey(submit)
-            }
-            machine.finish(outcome)
-        case .failed:
+        case .abandoned:
+            if captureWasLost { finishTruncatedCapture(transcript: transcript) }
+            return
+        case .refused(let message, let action):
+            finishError(message, action: action)
+            return
+        case .done(let done):
+            outcome = done
             machine.finish(outcome)
         }
         // Fire the user-perceptible completion (end cue + HUD) the instant the text lands, before
@@ -2269,7 +1560,7 @@ final class DictationController {
         }
         let stoppedAtLimit = session?.stoppedAtLimit == true && textLanded
         if textLanded, let effects = session?.replacementEffects {
-            replacementUsage?.record(effects: effects, capturedAt: session?.replacementUsageEpoch)
+            reporter.recordUsage(effects: effects, capturedAt: session?.replacementUsageEpoch)
         }
         let completedState: HUDState
         if stoppedAtLimit {
@@ -2294,40 +1585,10 @@ final class DictationController {
                completion: completion)
     }
 
-    // The submit Return fires after the paste-settle window and lands outside the insert atom. Re-run the
-    // same focus-race decision against a fresh snapshot before submitting.
-    private func submitTargetStillFocused() async -> Bool {
-        let decision = decideInsertion(
-            captured: capturedSnapshot ?? TargetSnapshot(bundleId: nil), current: await snapshotAsync())
-        if decision == .insert { return true }
-        log.notice("submit skipped: focus moved before Return (\(String(describing: decision), privacy: .public))")
-        return false
-    }
-
-    // Truthful copy for a refused bare-`<CR>` submit, keyed off the guard that declined it (ui_components.md
-    // vocabulary — name the concrete cause, never "secure"/"safe"). `.insert` here means the pre-insert
-    // decision passed but the post-decision focus re-check moved the target out from under the Return.
-    private func submitRefusal(for decision: InsertionDecision) -> (message: String, action: HUDErrorAction?) {
-        switch decision {
-        case .clipboardFallback(.accessibilityDenied):
-            return ("Accessibility is off — \(Branding.appName) can't press Return for you.", .openAccessibilitySettings)
-        case .clipboardFallback(.secureField):
-            return ("Return not sent — the focused field is a password field.", nil)
-        case .clipboardFallback, .insert:
-            return ("Return not sent — the target window changed.", nil)
-        }
-    }
-
     // Local history (design.md §4.7): one append per dictation that produced text, unless history is
     // off or the mode opts out. noSpeech is not recorded (nothing was said). Audio and the redaction
     // map are never written; the stored prompt carries tokens, not their originals.
-    func waitForHistoryWrites() { historyWriteQueue.sync {} }
-
-    static func delivery(_ decision: InsertionDecision, method: Mode.Insertion) -> String {
-        let action = String(describing: insertionAction(decision: decision, method: method))
-        guard case .clipboardFallback(let reason) = decision else { return action }
-        return "\(action) (\(reason))"
-    }
+    func waitForHistoryWrites() { reporter.waitForWrites() }
 
     private var targetMayHoldSecureText: Bool {
         capturedSnapshot?.isSecureField == true || session?.targetUnconfirmed == true
@@ -2389,69 +1650,9 @@ final class DictationController {
         entry.error = building.error
         let candidates = session?.shortcutCandidates ?? []
         entry.shortcutCandidates = candidates.isEmpty ? nil : candidates
-        guard let history else { return false }
+        guard reporter.keepsHistory else { return false }
         onRecorded?(entry)
-        let retentionDays = settings.history.retentionDays
-        let today = HistoryStore.todayString()
-        let sweepRetention = lastRetentionSweepDay != today
-        lastRetentionSweepDay = today
-        let write = { [log] () -> Bool in
-            do {
-                try history.append(entry, today: today)
-                if sweepRetention { history.applyRetention(today: today, retentionDays: retentionDays) }
-                return true
-            } catch {
-                log.error("history append failed: \(error.localizedDescription, privacy: .public)")
-                return false
-            }
-        }
-        guard confirmWrite else {
-            historyWriteQueue.async { _ = write() }
-            return true
-        }
-        return historyWriteQueue.sync(execute: write)
-    }
-
-    // Evicts the engine the dictation actually used (the captured one), not whatever is active now —
-    // a mid-dictation switch leaves provider.active pointing at a different, unloaded engine.
-    private func applyEvictionAfterDictation(engine: any SpeechEngine) {
-        lastUsedAt = ProcessInfo.processInfo.systemUptime
-        let idle = settings.stt.evictionIdleSeconds.map(Double.init)
-        switch EvictionPolicy.afterDictation(mode: settings.stt.eviction, idleSeconds: idle) {
-        case .keepLoaded: break
-        case .evictNow:
-            invalidateWarm(engine.id)
-            Task { await engine.evict() }
-            // Frugal (the only tier that evicts immediately) opens the mic only while dictating, so dispose
-            // the warm capture unit the commit path left stopped-but-realized — including when the user
-            // switched to Frugal mid-dictation, where reconcileCaptureWarmth deferred to this terminal.
-            audio.releaseWarm()
-        case .scheduleIdleCheck(let after): scheduleIdleEviction(after: after, engine: engine)
-        }
-    }
-
-    private func scheduleIdleEviction(after: Double, engine active: any SpeechEngine) {
-        idleEvictionTask?.cancel()
-        idleEvictionEngine = active
-        let mode = settings.stt.eviction
-        let idle = settings.stt.evictionIdleSeconds.map(Double.init)
-        let usedAt = lastUsedAt
-        idleEvictionTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(after))
-            guard let self, !Task.isCancelled, !self.isBusy else { return }
-            let now = ProcessInfo.processInfo.systemUptime
-            switch EvictionPolicy.onIdleCheck(mode: mode, lastUsedAt: usedAt, now: now, idleSeconds: idle) {
-            case .evictNow:
-                self.invalidateWarm(active.id)
-                await active.evict()
-                // Only Fastest holds the mic warm, and it never reaches evictNow — so any idle eviction
-                // (Balanced past its window, or a tier switched to Frugal) also disposes the warm unit.
-                self.audio.releaseWarm()
-                self.idleEvictionEngine = nil
-            case .scheduleIdleCheck(let again): self.scheduleIdleEviction(after: again, engine: active)
-            case .keepLoaded: self.idleEvictionEngine = nil
-            }
-        }
+        return reporter.append(entry, retentionDays: settings.history.retentionDays, confirm: confirmWrite)
     }
 
     private enum FinalText {
@@ -2468,48 +1669,19 @@ final class DictationController {
     // issued token is legitimate user content (a clipboard/verbatim value containing the sentinel) and
     // passes through untouched.
     private func guardedInsert(_ text: String, issuedTokens: [String]) -> FinalText {
-        if Self.shouldAbortInsertion(text: text, issuedTokens: issuedTokens) {
+        if TakeText.leaksIssuedToken(text, issuedTokens: issuedTokens) {
             log.error("insert aborted: unrestored sentinel token survived the restore pass")
             return .abort("Dictation could not be completed — please try again", nil)
         }
         return .insert(text, bare: false, submit: nil)
     }
 
-    static func shouldAbortInsertion(text: String, issuedTokens: [String]) -> Bool {
-        issuedTokens.contains { text.contains($0) }
-    }
-
-    // What a cloud rewrite involved, captured for the History detail view. Built only when a rewrite
-    // actually ran; the prompt carries the ⟦SN:…⟧ tokens, never their originals.
     // Shown on the completion HUD itself, so a following dictation cannot cancel it unseen.
     private func reasoningNotice(for rewrite: RewriteDetails?) -> String? {
         guard let rewrite, !rewrite.fellBack, let reasoning = rewrite.reasoning,
               let notice = reasoning.notice(service: rewrite.connection, model: rewrite.model),
               noticedReasoning.insert(rewrite.connectionId + "\n" + rewrite.model).inserted else { return nil }
         return notice
-    }
-
-    private struct RewriteDetails {
-        let connectionId: String
-        let connection: String
-        let model: String
-        let redaction: Bool
-        let contextCategories: [String]
-        let prompt: String
-        let fellBack: Bool
-        // Why the cloud rewrite was abandoned (HTTP error, missing key, validation failure). nil when the
-        // rewrite succeeded or when fallback was pre-committed before the cause was known (selection path).
-        var fallbackReason: String? = nil
-        // The provider's raw reply, verbatim (RewriteOutcome.received) — for the history record's
-        // "Show exactly what was received". nil when no reply arrived or on the pre-committed paths.
-        var received: String? = nil
-        var reasoning: ReasoningOutcome? = nil
-        var skippedAfterMs: Double? = nil
-    }
-
-    private func trimmedIfNeeded(_ tokenizedText: String, mode: Mode?) -> String {
-        guard mode?.trimTrailingPunctuation ?? false else { return tokenizedText }
-        return OutputCleanup.trimTrailingPunctuation(tokenizedText)
     }
 
     private func produceFinalText(routed: PhaseBResult, mode: Mode?) async -> (FinalText, RewriteDetails?, String?) {
@@ -2540,16 +1712,14 @@ final class DictationController {
             building.fallbackReason = "recording limit"
         }
         let pipeline = dictationPipeline(for: mode, willRewrite: resolved != nil)
-
         let localStart = DispatchTime.now()
-        let payload = pipeline.forward(transcript)
-        let tokenized = payload.text
-        session?.replacementEffects = payload.replacementEffects
+        let take = TakeText(transcript, pipeline: pipeline, trimsTrailingPunctuation: mode?.trimTrailingPunctuation ?? false)
+        session?.replacementEffects = take.payload.replacementEffects
 
         // Whole-utterance replacement: one rule owned the entire utterance, so insert its generated
         // value verbatim — bypassing the LLM (the model never sees it; redaction is moot) and the
         // trailing/trim shaping. Detected at the replacements stage and surfaced on the payload.
-        if let bare = payload.bareReplacement {
+        if let bare = take.bare {
             building.stageMillis[.localProcess] = elapsedMs(since: localStart)
             building.fingerprints[.localProcessed] = .of(bare.text)
             return (.insert(bare.text, bare: true, submit: bare.submit), nil, bare.text)
@@ -2557,7 +1727,7 @@ final class DictationController {
 
         // Locally-processed text (tokens restored, no LLM): the history "middle stage", and what we
         // insert when no rewrite runs or it falls back.
-        let localProcessed = pipeline.restore(trimmedIfNeeded(tokenized, mode: mode))
+        let localProcessed = take.localText
         building.stageMillis[.localProcess] = elapsedMs(since: localStart)
         building.fingerprints[.localProcessed] = .of(localProcessed)
         // Record the on-device intermediate unconditionally — the local pipeline runs every dictation, so a
@@ -2565,14 +1735,12 @@ final class DictationController {
         // when nothing changed; the History diff shows "no differences".
         let transformed = localProcessed
 
-        guard let resolved,
-              !tokenized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return (guardedInsert(localProcessed, issuedTokens: payload.issuedTokens), nil, transformed)
+        guard let resolved, !take.isBlank else {
+            return (guardedInsert(localProcessed, issuedTokens: take.payload.issuedTokens), nil, transformed)
         }
         let result = await rewriteTokenized(
-            pipeline: pipeline, payload: payload, localProcessed: localProcessed,
-            instruction: "", mode: resolved.mode, connection: resolved.connection)
-        return (guardedInsert(result.text, issuedTokens: payload.issuedTokens), result.details, transformed)
+            take, localText: localProcessed, instruction: "", mode: resolved.mode, connection: resolved.connection)
+        return (guardedInsert(result.text, issuedTokens: take.payload.issuedTokens), result.details, transformed)
     }
 
     // Edit-in-place: capture the selection, transform it per the spoken instruction. Any failure —
@@ -2588,37 +1756,27 @@ final class DictationController {
         }
         // The selection-capture ⌘C must reach the target, so drop key focus held for ESC-cancel; the
         // subsequent .rewriting render re-takes it so ESC still cancels the rewrite.
-        hud?.relinquishKeyFocus()
+        hud.relinquishKeyFocus()
         guard let selection = await captureSelection(mode.copyKeystroke), !selection.isEmpty else {
             return (.abort("Select some text first", nil), nil)
         }
         guard let connection = connection(for: mode) else {
             return (.abort("\(mode.name) needs an AI connection", nil), nil)
         }
-        // The selection IS the content (no post-STT text stages); only the tokenization commands run.
-        // A selection can be large (whole documents), and tokenization is pure CPU — run the forward
-        // pass off the main actor so a big selection cannot stutter the HUD.
-        let redactionTokenizer = Tokenizer()
-        let pipeline = selectionPipeline(for: mode, redactionTokenizer: redactionTokenizer)
-        let payload = await Task.detached(priority: .userInitiated) {
-            pipeline.forward(selection)
+        // Tokenization is pure CPU and a selection can be a whole document, so it runs off the main actor.
+        let liveEdits = mode.commands.liveEdits
+        let privacy = mode.commands.privacy
+        let trims = mode.trimTrailingPunctuation
+        let prepared = await Task.detached(priority: .userInitiated) {
+            SelectionText(
+                selection: selection, instruction: instruction, liveEdits: liveEdits, privacy: privacy,
+                trimsTrailingPunctuation: trims)
         }.value
-        // The dictated instruction is user content too (design.md §4.4): with privacy on, redact it
-        // through the SAME tokenizer as the selection. Unlike `payload.issuedTokens`, these ride as
-        // `instructionTokens` (allowed, not required) — most instructions echo nothing back, but one
-        // that inserts a value ("change the recipient to ⟦SN:REDACT:2⟧") needs that occurrence to
-        // pass the gate rather than fail as stray.
-        let contentTokenCount = redactionTokenizer.issuedTokens.count
-        let redactedInstruction = mode.commands.privacy
-            ? RedactionTokenizer.apply(instruction, into: redactionTokenizer)
-            : instruction
-        let instructionTokens = Array(redactionTokenizer.issuedTokens.dropFirst(contentTokenCount))
         let result = await rewriteTokenized(
-            pipeline: pipeline, payload: payload, localProcessed: selection,
-            instruction: redactedInstruction, mode: mode, connection: connection,
-            instructionTokens: instructionTokens)
+            prepared.take, localText: selection, instruction: prepared.instruction, mode: mode, connection: connection,
+            instructionTokens: prepared.instructionTokens)
         let final: FinalText = result.ok
-            ? guardedInsert(result.text, issuedTokens: payload.issuedTokens)
+            ? guardedInsert(result.text, issuedTokens: prepared.take.payload.issuedTokens)
             : .abort("Rewrite failed — selection unchanged", nil)
         return (final, result.details)
     }
@@ -2632,113 +1790,53 @@ final class DictationController {
         return connection
     }
 
-    // The optional LLM rewrite over an already-FORWARD-passed pipeline (design.md §4.2.1): the
-    // content is tokenized, the model runs on it, then `pipeline.reverse` restores every nonce (LIFO,
-    // structurally). Returns (text, ok): ok=false means the model failed and the locally-processed
-    // text was restored — dictation inserts it anyway; selection aborts on !ok.
     private func rewriteTokenized(
-        pipeline: Pipeline, payload: TokenizedPayload, localProcessed: String,
-        instruction: String, mode: Mode, connection: Connection, instructionTokens: [String] = []
+        _ take: TakeText, localText: String, instruction: String, mode: Mode, connection: Connection,
+        instructionTokens: [String] = []
     ) async -> (text: String, ok: Bool, details: RewriteDetails) {
-        let content = payload.text
-        let issuedTokens = payload.issuedTokens
-        // Cloud-boundary metadata for the diagnostics record. `content` is exactly what crosses to the
-        // LLM (forward-tokenized), so its fingerprint is the sentToLLM boundary for both the dictation
-        // and selection paths. The token→original map is never stored — only the count.
+        let identity = session?.identity
         building.cloudInvolved = true
         building.connection = connection.name
         building.model = connection.model
         building.redaction = mode.commands.privacy
-        building.issuedTokenCount = issuedTokens.count
-        building.fingerprints[.sentToLLM] = .of(content)
-        if mode.commands.privacy {
-            log.debug("redaction: \(issuedTokens.count, privacy: .public) span(s) tokenized before cloud rewrite")
+        building.issuedTokenCount = take.payload.issuedTokens.count
+        building.fingerprints[.sentToLLM] = .of(take.payload.text)
+        let snapshot = capturedSnapshot
+        let plan = plan
+        let precedingTextTask = session?.precedingTextTask
+        let probe = precedingTextProbe
+        let result = await rewriter.rewrite(
+            take, localText: localText, mode: mode, connection: connection, instructionTokens: instructionTokens,
+            request: {
+                // Lists `instructionTokens` too, so the model gets the opaque-marker rule even when the selection
+                // itself issued none.
+                await RewriteRequestBuilder(
+                    mode: mode, content: take.payload.text, instruction: instruction,
+                    issuedTokens: take.payload.issuedTokens + instructionTokens,
+                    capturedBundleId: snapshot?.bundleId, capturedPid: snapshot?.pid,
+                    capturedWindowId: snapshot?.focusedWindowId,
+                    plan: plan, connection: connection,
+                    precedingTextTask: precedingTextTask, precedingTextProbe: probe).build()
+            },
+            checkpoint: mode.source == .selection ? nil : { [weak self] point in
+                guard let self else { return }
+                self.session?.rewriteStartedAt = point.startedAt
+                self.session?.pendingLocalTranscript = point.localText
+                self.session?.pendingLocalIssuedTokens = point.issuedTokens
+                self.session?.pendingLocalRewriteDetails = point.details
+                self.scheduleRewriteEscapeHatch(
+                    connection: connection, mode: mode, contextCategories: point.details.contextCategories)
+            })
+        // The reasoning lookup after the reply suspends too: a skip or a newer take landing there owns the record.
+        if let finished = result.finished, !Task.isCancelled, let identity, session?.identity === identity {
+            building.stageMillis[.rewrite] = finished.milliseconds
+            if let output = finished.modelOutput {
+                building.fingerprints[.llmOut] = .of(output)
+            } else {
+                building.fallbackReason = finished.fallbackReason
+            }
         }
-        // Mode prompt + fragments + valid-term hints + opted-in context, fitted to the budget, plus the
-        // size-bumped connection — the change-prone assembly lives in its own builder. `issuedTokens`
-        // here also lists `instructionTokens` so the model gets the opaque-marker rule even when the
-        // selection itself issued none. Built BEFORE the HUD render so the "shared context" badges reflect
-        // what actually crossed (request.contextCategories) — a probe that returned nil must not display
-        // "Preceding text shared" (KS-02). build() only awaits the already-running probe; no network yet.
-        let request = await RewriteRequestBuilder(
-            mode: mode, content: content, instruction: instruction, issuedTokens: issuedTokens + instructionTokens,
-            capturedBundleId: capturedSnapshot?.bundleId, capturedPid: capturedSnapshot?.pid,
-            capturedWindowId: capturedSnapshot?.focusedWindowId,
-            plan: plan, connection: connection,
-            precedingTextTask: session?.precedingTextTask, precedingTextProbe: precedingTextProbe).build()
-
-        // Cancelled while the request built: return before scheduling the escape hatch or rendering.
-        // `.rewriting` holds key focus, so a stale render re-takes it after cancel already hid the HUD, on a
-        // machine state that is no longer cancellable — the panel then sits there swallowing keystrokes meant
-        // for the user's app (X-2). releaseCapturedPlan cancels the preceding-text probe this awaits, which
-        // makes the resume prompt, so the interleaving is near-guaranteed once ESC lands in this window. The
-        // caller re-checks isCancelled before any insert or history write.
-        if Task.isCancelled {
-            return (localProcessed, false, RewriteDetails(
-                connectionId: connection.id, connection: connection.name, model: connection.model,
-                redaction: mode.commands.privacy,
-                contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: true))
-        }
-
-        // Edit-in-place must leave the selection untouched on abandon, so the local-transcript
-        // escape hatch is dictation-only — never offer to paste the captured selection back.
-        let rewriteStart = DispatchTime.now()
-        if mode.source != .selection {
-            session?.rewriteStartedAt = rewriteStart
-            session?.pendingLocalTranscript = localProcessed
-            session?.pendingLocalIssuedTokens = issuedTokens
-            scheduleRewriteEscapeHatch(connection: connection, mode: mode, contextCategories: request.contextCategories)
-        }
-        present(.rewriting(
-            connection: connection.name, mode: mode.name, redacted: mode.commands.privacy,
-            contextCategories: request.contextCategories, offerLocalTranscript: false))
-
-        if mode.source != .selection {
-            session?.pendingLocalRewriteDetails = RewriteDetails(
-                connectionId: connection.id, connection: connection.name, model: connection.model,
-                redaction: mode.commands.privacy,
-                contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: true)
-        }
-
-        let outcome = await RewriteService(
-            client: llmClient, permits: permits,
-            deadlineSeconds: rewriteDeadlineSecondsOverride ?? RewriteService.defaultDeadlineSeconds
-        ).rewrite(
-            payload: payload, inputs: request.inputs, connection: request.sized,
-            allowedTokens: instructionTokens, prompt: request.prompt)
-        // A skip already froze the timing and owns the record; the cancelled request must not overwrite it, or
-        // reach a later session's record once this one is gone.
-        if Task.isCancelled {
-            return (localProcessed, false, RewriteDetails(
-                connectionId: connection.id, connection: connection.name, model: connection.model,
-                redaction: mode.commands.privacy,
-                contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: true))
-        }
-        building.stageMillis[.rewrite] = elapsedMs(since: rewriteStart)
-        let gateApproved: String
-        let fellBack: Bool
-        var fallbackReason: String?
-        let received: String?
-        switch outcome {
-        case .rewritten(let out, let raw):
-            gateApproved = out; fellBack = false; received = raw; building.fingerprints[.llmOut] = .of(out)
-        case .localFallback(let local, let reason, let raw):
-            gateApproved = local; fellBack = true; fallbackReason = reason; received = raw
-            // Log the reason on the dictation path (not just the diagnostics record) so a silent
-            // local-fallback is diagnosable live.
-            log.notice("rewrite fell back to local: \(reason ?? "unknown", privacy: .public)")
-            building.fallbackReason = reason
-        }
-        // Restore runs only on the gate-approved text (or the fallback), never before the gate — the
-        // ordering is structural now that `rewrite` owns the gate and returns the vetted string.
-        let text = pipeline.restore(trimmedIfNeeded(gateApproved, mode: mode))
-        let details = RewriteDetails(
-            connectionId: connection.id, connection: connection.name, model: connection.model,
-            redaction: mode.commands.privacy,
-            contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: fellBack,
-            fallbackReason: fallbackReason, received: received,
-            reasoning: fellBack ? nil : await llmClient.reasoningOutcome(for: request.sized))
-        return (text, !fellBack, details)
+        return (result.text, result.ok, result.details)
     }
 
     // Full dictation pipeline (design.md §4.2.1): the frozen plan's compiled text stages (live edits →
@@ -2748,20 +1846,13 @@ final class DictationController {
     // append order does not matter. Verbatim/redaction hold per-dictation tokenizers and are built
     // fresh here; the text stages are pure config and reused from the plan.
     private func dictationPipeline(for mode: Mode?, willRewrite: Bool) -> Pipeline {
-        var stages = plan.postSTTTextStages(for: mode)
-        logDroppedReturnMarkerRules(in: stages, mode: mode)
-        if mode?.commands.liveEdits ?? true {
-            stages.append(TokenizingStage.verbatim())
-            // Read the clipboard ONLY when the command actually survives to the clipboard stage — an
-            // ordinary dictation never touches the user's clipboard (privacy + no needless copy of large
-            // clipboards). The stage sorts AFTER verbatim and reads lazily, so a phrase deliberately
-            // wrapped in a verbatim span ("begin verbatim insert clipboard contents end verbatim") is
-            // already tokenized away and never triggers a read. The read is main-actor (NSPasteboard);
-            // this pipeline's forward pass runs on the main actor, so the bridge is safe.
-            stages.append(TokenizingStage.clipboard(read: { [clipboard] in MainActor.assumeIsolated { clipboard() } }))
-        }
-        if (mode?.commands.privacy ?? false) && willRewrite { stages.append(TokenizingStage.redaction()) }
-        return Pipeline(stages)
+        let text = plan.postSTTTextStages(for: mode)
+        logDroppedReturnMarkerRules(in: text, mode: mode)
+        // The read is main-actor (NSPasteboard); this pipeline's forward pass runs on the main actor.
+        return TakeStages.dictation(
+            text: text,
+            clipboard: { [clipboard] in MainActor.assumeIsolated { clipboard() } },
+            redaction: (mode?.commands.privacy ?? false) && willRewrite)
     }
 
     // A replacement rule with an unescaped mid-template `<CR>` is invalid config and ReplacementsStage silently
@@ -2773,18 +1864,6 @@ final class DictationController {
         for rule in dropped {
             Log.config.notice("replacement rule dropped: '\(rule.heard, privacy: .public)' has a <CR> that is not at the end of the replacement — a Return marker is only valid as the final token")
         }
-    }
-
-    // Edit-in-place pipeline: the selection IS the content, so no post-STT text stages run — only the
-    // tokenization commands (verbatim if live edits, redaction if privacy; a selection rewrite always
-    // calls the LLM). No clipboard stage: the selection-capture ⌘C has already clobbered the clipboard
-    // with the selection, so "insert clipboard contents" here would be meaningless. `redactionTokenizer`
-    // is exposed so the caller can also redact the spoken instruction through the same tokenizer.
-    private func selectionPipeline(for mode: Mode, redactionTokenizer: Tokenizer = Tokenizer()) -> Pipeline {
-        var stages: [any PipelineStage] = []
-        if mode.commands.liveEdits { stages.append(TokenizingStage.verbatim()) }
-        if mode.commands.privacy { stages.append(TokenizingStage.redaction(tokenizer: redactionTokenizer)) }
-        return Pipeline(stages)
     }
 
     // Every clipboard paste in the app is assembled here — the single gate for the consumption-driven
@@ -2803,7 +1882,7 @@ final class DictationController {
             ownBundleId: Bundle.main.bundleIdentifier,
             accessibilityGranted: accessibilityGranted()
         ) else { _ = TextInserter.copyToClipboard(lastResult); return }
-        hud?.relinquishKeyFocus()
+        hud.relinquishKeyFocus()
         let paste = clipboardPaste(for: nil)
         Task { await TextInserter.insertViaPaste(lastResult, paste: paste) }
     }
@@ -2884,7 +1963,10 @@ final class DictationController {
     // real reason. Overriding it lets the delay be ~0 so the state is reached deterministically.
     var loadingModelHUDDelayOverride: Duration?
     // Test seam for the whole-rewrite deadline, so a test can watch it fire without waiting minutes.
-    var rewriteDeadlineSecondsOverride: Double?
+    var rewriteDeadlineSecondsOverride: Double? {
+        get { rewriter.deadlineSecondsOverride }
+        set { rewriter.deadlineSecondsOverride = newValue }
+    }
     static let rewriteEscapeDelay: Duration = .seconds(5)
     var rewriteEscapeDelayOverride: Duration?
 
@@ -2892,7 +1974,7 @@ final class DictationController {
         Task { @MainActor [weak self, delay = loadingModelHUDDelayOverride ?? Self.loadingModelHUDDelay] in
             try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled, self.machine.state == .transcribing else { return }
-            self.present(.loadingModel(mode: self.currentModeName))
+            self.hud.present(.loadingModel(mode: self.currentModeName))
         }
     }
 
@@ -2902,7 +1984,7 @@ final class DictationController {
             try? await Task.sleep(for: self?.rewriteEscapeDelayOverride ?? Self.rewriteEscapeDelay)
             guard let self, !Task.isCancelled, self.session?.pendingLocalTranscript != nil,
                   self.machine.state == .transcribing else { return }
-            self.present(.rewriting(
+            self.hud.present(.rewriting(
                 connection: connection.name, mode: mode.name, redacted: mode.commands.privacy,
                 contextCategories: contextCategories, offerLocalTranscript: true))
         }
@@ -2983,8 +2065,8 @@ final class DictationController {
         var hideAfter = hideAfter
         var resumedChoice: Int?
         if let id = session?.choiceId, voiceCommands.resumeChoice(id) {
-            if let prompt = choicePrompt, prompt.id == id {
-                state = .choice(prompt, status: Self.choiceWaiting(after: state))
+            if let prompt = commandOutput.prompt, prompt.id == id {
+                state = .choice(prompt, status: HUDChannel.choiceWaiting(after: state))
                 hideAfter = nil
                 resumedChoice = id
             } else {
@@ -2992,10 +2074,10 @@ final class DictationController {
             }
         }
         if let state {
-            present(state)
+            hud.present(state)
             if let hideAfter { scheduleHide(after: hideAfter) }
         }
-        if let resumedChoice { scheduleChoiceExpiry(resumedChoice) }
+        if let resumedChoice { commandOutput.scheduleExpiry(resumedChoice) }
         if let record { finalizeRecord(outcome: record.outcome, error: record.error) }
         if let history {
             recordHistory(heard: history.heard, transformed: history.transformed, result: history.result,
@@ -3006,7 +2088,7 @@ final class DictationController {
         }
         let engineUsed = activeEngine
         releaseCapturedPlan()
-        applyEvictionAfterDictation(engine: engineUsed)
+        engines.applyEvictionAfterDictation(engine: engineUsed)
         if let completion { onDictationCompleted?(completion) }
     }
 
@@ -3042,7 +2124,34 @@ final class DictationController {
         hideTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(seconds))
             guard !Task.isCancelled, !isBusy, voiceCommands.pendingChoice == nil else { return }
-            present(.hidden)
+            hud.present(.hidden)
         }
     }
+}
+
+extension DictationController: VoiceCommandHost {
+    var isArming: Bool { machine.state == .arming }
+    var takeStarts: Int { dictationStarts }
+    var answeringChoiceId: Int? { session?.choiceId }
+    var voiceCommandsEnabled: Bool { settings.features.isEnabled(.voiceCommands) }
+    var voiceCommandsAvailable: Bool {
+        voiceCommandsEnabled && config.modes.contains { $0.runsVoiceCommands && $0.enabled }
+    }
+    var savedCommands: VoiceCommandConfig { config.voiceCommands }
+    var voiceCommandShortcut: String? {
+        plan.modes.first { $0.runsVoiceCommands }?.triggerKeys.first(where: \.startsDictation)
+            .flatMap { try? KeyDescriptor(parsing: $0.key) }?.displayString
+    }
+    func cancelTake() { cancel() }
+    func whenIdle(_ work: @escaping () -> Void) { runWhenIdle(work) }
+    func hide(after seconds: Double) { scheduleHide(after: seconds) }
+    func alert(_ cue: DuringDictationEffects.EndCue) { effects.alert(settings.duringDictation, cue: cue) }
+}
+
+extension DictationController: EngineKeeperHost {
+    var isCapturingAudio: Bool { machine.isCapturingAudio }
+    var engineSettings: Settings { settings }
+    var warmupPlan: ResolvedConfig { plan }
+    var activeProviderEngine: any SpeechEngine { provider.active }
+    func releaseWarmCapture() { audio.releaseWarm() }
 }

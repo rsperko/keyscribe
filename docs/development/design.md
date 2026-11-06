@@ -328,6 +328,11 @@ order is fixed and explicit:
 12. insertion     paste (primary) / insert / type — atomic, one ⌘Z
 ```
 
+Every stage list (a take, a selection, a voice-command reading, the history preview, the commands check)
+is assembled by `TakeStages`, and `SourceInvariantsTests` pins that, so the lists differ only in the inputs
+their callers pass, never in how they are built. The one exception is `ReplacementPreview`, which compares
+two rule sets with a bare `ReplacementsStage` each rather than running a pipeline.
+
 Ordering rules that matter (the footguns):
 - **Verbatim tokenizes FIRST (before the text stages)** — a verbatim span must be protected from
   live edits / replacements / numbers / fuzzy *and* the LLM, i.e. everything except STT. Because it

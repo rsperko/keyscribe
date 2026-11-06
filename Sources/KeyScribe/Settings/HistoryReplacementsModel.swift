@@ -518,7 +518,7 @@ final class HistoryReplacementsModel: ObservableObject, Identifiable {
             VocabularyMerge.words(
                 global: vocabulary.globalWords, local: $0.dictionary.words, includeGlobal: $0.dictionary.includeGlobal)
         } ?? vocabulary.globalWords
-        return [ReplacementsStage(rules: rules), FuzzyStage(terms: words)]
+        return TakeStages.text(liveEdits: false, rules: rules, numbers: false, dictionary: words)
     }
 
     private func offMain<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {

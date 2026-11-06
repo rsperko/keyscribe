@@ -387,7 +387,7 @@ directions.
 
 The app has never sent the whole dictionary. The filter that sends only terms present in the text
 is in the first commit (2026-06-22). It runs over the content after the forward pipeline
-(`DictationController.rewriteTokenized` hands `RewriteRequestBuilder` the tokenized text), so a term
+(`TakeRewrite` hands `RewriteRequestBuilder` the tokenized text), so a term
 inside a redacted span is not present in what the filter sees and is not hinted.
 
 `PromptAssembler` also carries a paired-hint rule ("the transcription may have misheard these

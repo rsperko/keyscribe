@@ -254,13 +254,13 @@ enum BenchmarkRunner {
         guard let samples = try? AudioDecoder.pcmMono(wav, sampleRate: sampleRate) else { return .failed }
 
         let policy = StreamingStartPolicy(
-            thresholdSeconds: DictationController.streamingStartThresholdSeconds, sampleRate: sampleRate)
+            thresholdSeconds: TakeRecorder.streamingStartThresholdSeconds, sampleRate: sampleRate)
         let driver = StreamingDictationDriver(policy: policy, makeSession: {
             try await engine.makeStreamingSession(sampleRate: sampleRate, biasTerms: [])
         })
         let (stream, continuation) = AsyncStream.makeStream(
             of: [Float].self,
-            bufferingPolicy: .bufferingNewest(DictationController.streamingBackpressureMaxChunks))
+            bufferingPolicy: .bufferingNewest(TakeRecorder.streamingBackpressureMaxChunks))
         let feedTask = Task { for await chunk in stream { await driver.ingest(chunk) } }
 
         let chunk = max(1, sampleRate / 10)                     // 0.1 s, the writer's cadence

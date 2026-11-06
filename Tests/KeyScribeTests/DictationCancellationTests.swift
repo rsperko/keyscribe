@@ -814,15 +814,6 @@ struct DictationCancellationTests {
         #expect(state.secondaryText == "Rewriting with Gemini")
         #expect(state.dataBoundaryBadges == ["Cloud rewrite", "App shared", "Preceding text shared"])
     }
-
-    @Test func issuedTokenSurvivorAbortsInsertionDecision() {
-        #expect(DictationController.shouldAbortInsertion(
-            text: "literal ⟦SN:REDACT:1⟧",
-            issuedTokens: ["⟦SN:REDACT:1⟧"]))
-        #expect(!DictationController.shouldAbortInsertion(
-            text: "literal ⟦SN:REDACT:1⟧",
-            issuedTokens: ["⟦SN:REDACT:2⟧"]))
-    }
 }
 
 private final class ThrowingStartAudio: AudioCapturing, @unchecked Sendable {

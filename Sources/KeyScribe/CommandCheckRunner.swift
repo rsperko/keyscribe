@@ -87,12 +87,9 @@ enum CommandCheckRunner {
     // dictationPipeline + produceDictationText, including the whole-utterance replacement bypass (a rule
     // owning the entire utterance is inserted verbatim, short-circuited via `bareReplacement`).
     static func process(transcript: String, clipboard: String, rules: [ReplacementRule]) -> String {
-        var stages: [any PipelineStage] = [LiveEditsStage(), ReplacementsStage(rules: rules)]
-        stages.append(TokenizingStage.verbatim())
-        // Clipboard sorts after verbatim and reads the post-verbatim text, so a phrase inside a verbatim
-        // span stays literal — exactly as dictationPipeline decides.
-        stages.append(TokenizingStage.clipboard(read: { clipboard }))
-        let pipeline = Pipeline(stages)
+        let pipeline = TakeStages.dictation(
+            text: TakeStages.text(liveEdits: true, rules: rules, numbers: false, dictionary: []),
+            clipboard: { clipboard }, redaction: false)
         let payload = pipeline.forward(transcript)
         if let bare = payload.bareReplacement { return bare.text }
         return pipeline.restore(payload.text)

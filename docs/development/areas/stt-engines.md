@@ -256,7 +256,7 @@ tried, so never tune trim behavior against generated clips and never treat a pas
 the bug is gone. Finding a
 shareable regression case is open future work; the unit tests are the real safety net. Nothing in the
 trigger or the repair is engine-specific, so there is **no `SpeechEngine` hook and no per-engine code**: one
-capability-gated policy in `DictationController.transcribeBounded` re-transcribes the trimmed PCM
+capability-gated policy in `Transcriber.transcribe` re-transcribes the trimmed PCM
 (`LeadingSilenceTrim`, KeyScribeKit) when the raw response is empty, the VAD model ran and found speech
 after chunk zero (`SpeechPresenceGate.speechStart` — the proof of leading silence), and the engine is
 sample-capable with the PCM in hand. The retry runs INSIDE the existing single-flight gate and shares its

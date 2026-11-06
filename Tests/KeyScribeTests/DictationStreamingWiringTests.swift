@@ -276,7 +276,7 @@ struct DictationStreamingWiringTests {
     }
 
     @Test func startThresholdSitsAtOrAboveTheStreamingFloor() {
-        #expect(DictationController.streamingStartThresholdSeconds >= StreamingStartPolicy.minimumThresholdSeconds)
+        #expect(TakeRecorder.streamingStartThresholdSeconds >= StreamingStartPolicy.minimumThresholdSeconds)
     }
 
     @Test func streamedTranscriptFlowsThroughWholeUtteranceReplacement() async {

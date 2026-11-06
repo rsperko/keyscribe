@@ -123,7 +123,7 @@ public final class ResolvedConfig: @unchecked Sendable {
     ) -> (text: String, firedReplacements: [ReplacementRule]) {
         let stages = postSTTTextStages(for: mode)
         let fuzzy = stages.filter { $0 is FuzzyStage }
-        let pipeline = Pipeline(stages.filter { !($0 is FuzzyStage) })
+        let pipeline = Pipeline(TakeStages.withoutDictionary(stages))
         let payload = pipeline.forward(heard)
         let read: String
         let corrected: String
@@ -186,16 +186,12 @@ public final class ResolvedConfig: @unchecked Sendable {
     }
 
     private func buildTextStages(for mode: Mode?) -> [any PipelineStage] {
-        var stages: [any PipelineStage] = []
-        if mode?.commands.liveEdits ?? true { stages.append(LiveEditsStage()) }
         let rules = VocabularyMerge.rules(
             global: replacements.toRules().map { $0.from(.global) },
             local: mode.map { m in m.replacements.toRules().map { $0.from(.mode(m.id)) } } ?? [],
             includeGlobal: mode?.replacements.includeGlobal ?? true)
-        stages.append(ReplacementsStage(rules: rules))
-        if mode?.commands.numbers ?? false { stages.append(NumbersStage()) }
-        let terms = mergedDictionary(for: mode)
-        if !terms.isEmpty { stages.append(FuzzyStage(terms: terms)) }
-        return stages
+        return TakeStages.text(
+            liveEdits: mode?.commands.liveEdits ?? true, rules: rules, numbers: mode?.commands.numbers ?? false,
+            dictionary: mergedDictionary(for: mode))
     }
 }

@@ -13,7 +13,7 @@ review keeps finding the same few of them.
   during any `await`, and work that resolves after it must not act.
 - **A late completion must not overwrite newer state.** When an async result arrives, confirm it still
   belongs to the current request (its id or counter) before it touches the HUD, a pending choice, or an
-  editor. Every stop path goes through `DictationController.stopVoiceCommandChoice` (AGENTS.md).
+  editor. Every stop path goes through `VoiceCommandOutput.stop` (AGENTS.md).
 - **Previews, trials, and the CLI run without side effects by construction**: they take an explicit
   no-side-effect path, never the live executor with a flag checked late.
 
