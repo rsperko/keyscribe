@@ -72,7 +72,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
         }
         if example.current {
             guard example.connected else { return "\(example.name) is current but not connected. Connect it before speaking, or start with another conversation\u{2019}s name." }
-            return "Your next instruction goes here. Start with another conversation\u{2019}s name to switch."
+            return "Instructions go here unless another conversation is in front of you. Start with another conversation\u{2019}s name to switch."
         }
         guard example.connected else { return "Connect Claude Code below to send instructions to these conversations." }
         let start = shortcut.map { "Use \($0)" } ?? "Start recording"

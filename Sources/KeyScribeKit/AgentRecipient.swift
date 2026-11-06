@@ -1,7 +1,7 @@
 import Foundation
 
 public enum AgentRecipient {
-    public enum Source: Equatable, Sendable { case fixed, focused, current, spoken }
+    public enum Source: Equatable, Sendable { case fixed, focused, current, front, spoken }
 
     public struct Frozen: Equatable, Sendable {
         public var id: String
@@ -28,7 +28,7 @@ public enum AgentRecipient {
 
         public var makesCurrent: String? {
             switch self {
-            case .deliver(let id, _, .spoken), .select(let id), .open(let id): return id
+            case .deliver(let id, _, .spoken), .deliver(let id, _, .front), .select(let id), .open(let id): return id
             case .deliver, .ask: return nil
             }
         }
@@ -48,8 +48,18 @@ public enum AgentRecipient {
         }
     }
 
+    public static func usesDefault(_ address: AgentAddress) -> Bool {
+        switch address {
+        case .none, .nearMiss: true
+        case .open(let target): usesDefault(target)
+        case .name, .row, .unresolved, .ambiguous: false
+        }
+    }
+
     public static func resolve(_ address: AgentAddress, frozen: Frozen?, rows: [String], names: [String: String]) -> Resolution {
         switch address {
+        case .open(.unresolved(let spoken, _)):
+            return .ask(body: "", reason: suggestion(for: spoken, among: Array(names.keys)))
         case .open(let target):
             switch resolve(target, frozen: frozen, rows: rows, names: names) {
             case .select(let id), .open(let id), .deliver(let id, _, _): return .open(id: id)
@@ -77,6 +87,15 @@ public enum AgentRecipient {
         case .name(let name, let body):
             guard let id = id(named: name, in: names) else { return .ask(body: body, reason: .unknownName(name)) }
             return addressed(id, body: body)
+        }
+    }
+
+    private static func suggestion(for spoken: String, among names: [String]) -> AskReason {
+        let close = AgentAddress.closest(to: spoken, among: names)
+        switch close.count {
+        case 0: return .unknownName(spoken)
+        case 1: return .soundsLike(spoken, name: close[0])
+        default: return .ambiguousName(spoken, matches: close)
         }
     }
 

@@ -19,6 +19,13 @@ private func facts(
 }
 
 struct AgentHistoryFactsTests {
+    @Test func goingBackRecordsTheCommandAndTheRecipientItLeavesInPlace() {
+        let list = AgentHistoryFacts.goBack(frozen: AgentRecipient.Frozen(id: "s-docs", source: .current), conversations: roster)
+        #expect(list.map(\.label) == ["Command", "Default recipient"])
+        #expect(list.map(\.value) == ["Go back", "docs"])
+        #expect(AgentHistoryFacts.goBack(frozen: nil, conversations: roster).map(\.label) == ["Command"])
+    }
+
     @Test func anOpenByNameRecordsTheCommandAddressAndConversation() {
         let recorded = facts(.open(.name("backend", body: "")), .open(id: "s-backend"))
         #expect(recorded["Command"] == "Open")
@@ -42,6 +49,11 @@ struct AgentHistoryFactsTests {
         let recorded = facts(.none(body: "x"), .deliver(id: "s-docs", body: "x", source: .fixed), delivery: .draft)
         #expect(recorded["Delivery"] == "Keep as a draft")
         #expect(recorded["Chosen by"] == "The mode\u{2019}s fixed conversation")
+    }
+
+    @Test func aMessageToTheConversationInFrontRecordsThatItWasInFront() {
+        let recorded = facts(.none(body: "x"), .deliver(id: "s-docs", body: "x", source: .front))
+        #expect(recorded["Chosen by"] == "The conversation in front")
     }
 
     @Test func choosingARecipientBySessionNumberIsNotAMessage() {

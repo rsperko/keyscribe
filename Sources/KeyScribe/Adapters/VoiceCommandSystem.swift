@@ -8,12 +8,29 @@ struct VoiceCommandOrigin: Equatable, Sendable {
     let bundleId: String
     var pid: Int32?
     var windowId: String?
+    var session: String?
 
-    init(bundleId: String, pid: Int32? = nil, windowId: String? = nil) {
+    init(bundleId: String, pid: Int32? = nil, windowId: String? = nil, session: String? = nil) {
         self.bundleId = bundleId
         self.pid = pid
         self.windowId = windowId.flatMap { $0.hasPrefix("cg:") ? $0 : nil }
+        self.session = session
     }
+
+    func leaving(_ shown: FrontSession?) -> VoiceCommandOrigin {
+        var origin = self
+        origin.session = nil
+        guard let shown, shown.app.bundle == bundleId, pid.map({ Int($0) == shown.app.pid }) ?? true else { return origin }
+        if let windowId, shown.app.window != windowId { return origin }
+        origin.session = shown.id
+        return origin
+    }
+}
+
+struct SessionReturns {
+    var inFront: @MainActor () async -> FrontSession?
+    var open: @MainActor (String, _ stillWanted: @escaping @MainActor @Sendable () -> Bool) async -> AgentFocusResult
+    var handle: @MainActor (String) -> String?
 }
 
 enum VoiceCommandFailureKind: Equatable, Sendable {
@@ -133,7 +150,7 @@ protocol VoiceCommandSystem: AnyObject {
     func sidebarItems(in bundleId: String) async -> SidebarRead
     func openSidebarItem(_ item: VoiceCommandCatalog.SidebarItem) async -> SidebarOpenResult
     func windows() async -> VoiceCommandCatalog.WindowScan
-    func focusWindow(_ window: VoiceCommandCatalog.Window, stillWanted: @MainActor () -> Bool) async -> WindowFocusResult
+    func focusWindow(_ window: VoiceCommandCatalog.Window, stillWanted: @escaping @MainActor () -> Bool) async -> WindowFocusResult
     func isRunning(pid: Int32, bundleId: String) -> Bool
     func activate(pid: Int32) -> Bool
     func openURL(_ url: String, browser: String?) async -> Bool
@@ -160,9 +177,11 @@ protocol VoiceCommandRunning: AnyObject {
     var onProgress: (@MainActor (VoiceCommandProgress) -> Void)? { get set }
     func run(
         transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript], origin: VoiceCommandOrigin?,
-        stillWanted: @MainActor () -> Bool, onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
+        stillWanted: @escaping @MainActor () -> Bool, onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
     ) async -> VoiceCommandOutcome
     var pendingChoice: VoiceCommandPendingChoice? { get }
+    func recordReturn(to origin: VoiceCommandOrigin)
+    func returnToSessions(_ sessions: SessionReturns?)
     func claimChoice() -> Int?
     func resumeChoice(_ id: Int) -> Bool
     func choiceSecondsLeft(_ id: Int) -> Double?
@@ -171,18 +190,20 @@ protocol VoiceCommandRunning: AnyObject {
     func takeChoice(_ id: Int) -> VoiceCommandPendingChoice?
     func answer(
         _ transcript: String, choice id: Int, places: [VoiceCommandPlace], scripts: [VoiceCommandScript],
-        origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool,
+        origin: VoiceCommandOrigin?, stillWanted: @escaping @MainActor () -> Bool,
         onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
     ) async -> VoiceCommandAnswer
     func runChoice(
         _ pending: VoiceCommandPendingChoice, candidate identity: String, places: [VoiceCommandPlace],
-        scripts: [VoiceCommandScript], stillWanted: @MainActor () -> Bool,
+        scripts: [VoiceCommandScript], stillWanted: @escaping @MainActor () -> Bool,
         onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
     ) async -> VoiceCommandSelection?
 }
 
 extension VoiceCommandRunning {
     var pendingChoice: VoiceCommandPendingChoice? { nil }
+    func recordReturn(to origin: VoiceCommandOrigin) {}
+    func returnToSessions(_ sessions: SessionReturns?) {}
     func claimChoice() -> Int? { nil }
     func resumeChoice(_ id: Int) -> Bool { false }
     func choiceSecondsLeft(_ id: Int) -> Double? { nil }
@@ -191,7 +212,7 @@ extension VoiceCommandRunning {
     func takeChoice(_ id: Int) -> VoiceCommandPendingChoice? { nil }
     func answer(
         _ transcript: String, choice id: Int, places: [VoiceCommandPlace], scripts: [VoiceCommandScript],
-        origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool,
+        origin: VoiceCommandOrigin?, stillWanted: @escaping @MainActor () -> Bool,
         onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
     ) async -> VoiceCommandAnswer {
         .command(await run(transcript: transcript, places: places, scripts: scripts, origin: origin,
@@ -199,7 +220,7 @@ extension VoiceCommandRunning {
     }
     func runChoice(
         _ pending: VoiceCommandPendingChoice, candidate identity: String, places: [VoiceCommandPlace],
-        scripts: [VoiceCommandScript], stillWanted: @MainActor () -> Bool,
+        scripts: [VoiceCommandScript], stillWanted: @escaping @MainActor () -> Bool,
         onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
     ) async -> VoiceCommandSelection? { nil }
 }
@@ -222,6 +243,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     private let now: () -> Double
     private let idleSeconds: Double
     private(set) var backTarget: VoiceCommandOrigin?
+    private var sessions: SessionReturns?
     private var live: (choice: VoiceCommandPendingChoice, phase: ChoicePhase)?
     private var lastChoiceId = 0
 
@@ -252,7 +274,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
 
     func resolve(
         _ transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = [],
-        stillWanted: @MainActor () -> Bool = { true }
+        stillWanted: @escaping @MainActor () -> Bool = { true }
     ) async -> VoiceCommandResolution {
         let reach = Self.reach(of: transcript, places: places, scripts: scripts)
         if Self.isSavedPhrase(transcript, places: places, scripts: scripts) {
@@ -284,7 +306,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     }
 
     private func reading(
-        _ start: VoiceCommandCatalog, reach: VoiceCommandReach, stillWanted: @MainActor () -> Bool,
+        _ start: VoiceCommandCatalog, reach: VoiceCommandReach, stillWanted: @escaping @MainActor () -> Bool,
         _ resolve: (VoiceCommandCatalog) -> VoiceCommandResolution
     ) async -> VoiceCommandResolution {
         var catalog = start
@@ -330,7 +352,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     // Opening something in an app that is not open starts it, then waits a bounded time for it to fill.
     // A command abandoned meanwhile opens nothing more and stops waiting. A sidebar that stays empty for a
     // few reads is taken as empty rather than as still loading, so it reports what it shows.
-    private func sidebar(of app: String, reach: VoiceCommandReach, stillWanted: @MainActor () -> Bool) async -> SidebarRead {
+    private func sidebar(of app: String, reach: VoiceCommandReach, stillWanted: @escaping @MainActor () -> Bool) async -> SidebarRead {
         let first = await system.sidebarItems(in: app)
         guard case .unreadable(.notRunning) = first, reach == .opening, stillWanted(), await launch(app) else { return first }
         let deadline = now() + Self.launchWaitSeconds
@@ -365,7 +387,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     }
 
     // Only an empty list is worth waiting out while a browser starts; a refusal or a failed read will not change.
-    private func tabs(in browser: String?, reach: VoiceCommandReach, stillWanted: @MainActor () -> Bool) async -> TabRead? {
+    private func tabs(in browser: String?, reach: VoiceCommandReach, stillWanted: @escaping @MainActor () -> Bool) async -> TabRead? {
         guard let browser, !isPreview, wouldStart(browser, reach: reach) else { return await system.browserTabs(in: browser) }
         var read: TabRead? = TabRead(tabs: [])
         guard stillWanted(), await launch(browser) else { return read }
@@ -389,7 +411,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
 
     func run(
         transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript] = [],
-        origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool = { true },
+        origin: VoiceCommandOrigin?, stillWanted: @escaping @MainActor () -> Bool = { true },
         onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void = { _ in }
     ) async -> VoiceCommandOutcome {
         live = nil
@@ -467,7 +489,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
 
     func answer(
         _ transcript: String, choice id: Int, places: [VoiceCommandPlace], scripts: [VoiceCommandScript],
-        origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool = { true },
+        origin: VoiceCommandOrigin?, stillWanted: @escaping @MainActor () -> Bool = { true },
         onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void = { _ in }
     ) async -> VoiceCommandAnswer {
         guard let live, live.choice.id == id, live.phase == .answering else {
@@ -498,7 +520,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
 
     func runChoice(
         _ pending: VoiceCommandPendingChoice, candidate identity: String, places: [VoiceCommandPlace],
-        scripts: [VoiceCommandScript], stillWanted: @MainActor () -> Bool = { true },
+        scripts: [VoiceCommandScript], stillWanted: @escaping @MainActor () -> Bool = { true },
         onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void = { _ in }
     ) async -> VoiceCommandSelection? {
         if live?.choice.id == pending.id { live = nil }
@@ -522,7 +544,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
 
     func run(
         _ resolution: VoiceCommandResolution, origin: VoiceCommandOrigin?, asking: Asking? = nil,
-        reach: VoiceCommandReach = .opening, stillWanted: @MainActor () -> Bool = { true },
+        reach: VoiceCommandReach = .opening, stillWanted: @escaping @MainActor () -> Bool = { true },
         onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void = { _ in }
     ) async -> VoiceCommandOutcome {
         let origin = origin.flatMap { $0.bundleId == system.ownBundleId ? nil : $0 }
@@ -575,14 +597,17 @@ final class VoiceCommandRunner: VoiceCommandRunning {
 
     private func execute(
         _ action: VoiceCommandAction, origin: VoiceCommandOrigin?, asking: Asking?, reach: VoiceCommandReach,
-        stillWanted: @MainActor () -> Bool, onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
+        stillWanted: @escaping @MainActor () -> Bool, onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
     ) async -> VoiceCommandOutcome {
         let summary = action.summary(appName: system.appName(forBundleId:))
         var command = action.command(appName: system.appName(forBundleId:), reach: reach)
         let succeeded: Bool
+        if case .goBack = action { return await goBack(to: origin, stillWanted: stillWanted) }
+        let origin = if case .script = action { origin } else { await departure(from: origin) }
+        guard stillWanted() else { return .abandoned }
         switch action {
         case .goBack:
-            return await goBack(to: origin, stillWanted: stillWanted)
+            return .abandoned
         case .window(let window):
             switch await system.focusWindow(window, stillWanted: stillWanted) {
             case .focused:
@@ -728,9 +753,40 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         }
     }
 
-    private func goBack(to origin: VoiceCommandOrigin?, stillWanted: @MainActor () -> Bool) async -> VoiceCommandOutcome {
+    func recordReturn(to origin: VoiceCommandOrigin) {
+        guard origin.bundleId != system.ownBundleId else { return }
+        backTarget = origin
+    }
+
+    func returnToSessions(_ sessions: SessionReturns?) {
+        self.sessions = sessions
+    }
+
+    private func departure(from origin: VoiceCommandOrigin?) async -> VoiceCommandOrigin? {
+        guard let origin, let sessions else { return origin }
+        return origin.leaving(await sessions.inFront())
+    }
+
+    private func goBack(to origin: VoiceCommandOrigin?, stillWanted: @escaping @MainActor () -> Bool) async -> VoiceCommandOutcome {
         let nothing = VoiceCommandOutcome.failed(message: "Nothing to go back to.")
         guard let back = backTarget else { return nothing }
+        guard stillWanted() else { return .abandoned }
+        let origin = await departure(from: origin)
+        guard stillWanted() else { return .abandoned }
+        if let session = back.session, let sessions, let handle = sessions.handle(session) {
+            let command = "Returns to \(handle)."
+            let result = await sessions.open(session, stillWanted)
+            guard stillWanted() else { return .abandoned }
+            switch result {
+            case .exact, .requested:
+                backTarget = origin
+                return .done(summary: handle, command: command)
+            case .none:
+                break
+            case .app, .pane, .unsupported, .notAllowed, .connectorOutdated:
+                return .failed(message: result.historySummary(handle: handle), command: command)
+            }
+        }
         let name = system.appName(forBundleId: back.bundleId) ?? back.bundleId
         let command = "Returns to \(name)."
         let failure = VoiceCommandOutcome.failed(message: "Could not go back.", command: command)
@@ -1290,7 +1346,7 @@ final class LiveVoiceCommandSystem: VoiceCommandSystem {
         return scan
     }
 
-    func focusWindow(_ window: VoiceCommandCatalog.Window, stillWanted: @MainActor () -> Bool) async -> WindowFocusResult {
+    func focusWindow(_ window: VoiceCommandCatalog.Window, stillWanted: @escaping @MainActor () -> Bool) async -> WindowFocusResult {
         guard let app = NSRunningApplication(processIdentifier: window.pid), !app.isTerminated,
               app.bundleIdentifier == window.bundleId else { return .gone }
         let deadline = Date().addingTimeInterval(Self.focusDeadline)

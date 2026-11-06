@@ -108,13 +108,34 @@ final class DictationController {
         var targetUnconfirmed = false
         var precedingTextTask: Task<String?, Never>?
         var agentRecipient: AgentRecipient.Frozen?
+        var agentFrontTask: Task<Void, Never>?
+        var agentFrontCutoff: ContinuousClock.Instant?
         var agentSnapshot: AgentSnapshot?
         var agentDestination: String?
         var agentFacts: [HistoryEntry.Fact] = []
     }
     private var session: DictationSession?
     var agents: AgentHub? {
-        didSet { if agents !== oldValue { agentOutput.forgetReceipts() } }
+        didSet {
+            if agents !== oldValue { agentOutput.forgetReceipts() }
+            voiceCommands.returnToSessions(agents.map(sessionReturns))
+        }
+    }
+
+    private func sessionReturns(through hub: AgentHub) -> SessionReturns {
+        SessionReturns(
+            inFront: { [weak self, weak hub] in
+                guard let self, self.settings.features.isEnabled(.codingAgents), let hub else { return nil }
+                return await hub.sessionInFront()
+            },
+            open: { [weak self, weak hub] id, stillWanted in
+                guard let self, self.settings.features.isEnabled(.codingAgents), let hub else { return .none }
+                return await hub.open(id, makingCurrent: false, stillWanted: stillWanted)
+            },
+            handle: { [weak self, weak hub] id in
+                guard let self, self.settings.features.isEnabled(.codingAgents) else { return nil }
+                return hub?.handle(of: id)
+            })
     }
 
     private struct AgentSnapshot {
@@ -139,6 +160,7 @@ final class DictationController {
     var captureBringUpTask: Task<Void, Never>? {
         get { session?.captureBringUpTask } set { session?.captureBringUpTask = newValue }
     }
+    var agentFrontTask: Task<Void, Never>? { session?.agentFrontTask }
     var snapshotAdoptionTask: Task<Void, Never>? {
         get { session?.snapshotAdoptionTask } set { session?.snapshotAdoptionTask = newValue }
     }
@@ -367,6 +389,7 @@ final class DictationController {
         let previousEviction = self.settings.stt.eviction
         self.settings = settings
         if !settings.features.isEnabled(.voiceCommands) { stopVoiceCommandChoice() }
+        if !settings.features.isEnabled(.codingAgents) { StopGate.closeAll() }
         audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         engines.rescheduleIdleEviction()
         if settings.stt.eviction != previousEviction { reconcileCaptureWarmth() }
@@ -749,6 +772,7 @@ final class DictationController {
         captureBringUpTask?.cancel()
         session?.rewriteEscapeTask?.cancel()
         session?.precedingTextTask?.cancel()
+        session?.agentFrontTask?.cancel()
         // Streaming teardown on EVERY terminal (commit, cancel, error): finish the feed and
         // cancel the driver so a session still holding the SerializedEngine lock releases it. Idempotent — a
         // committed dictation already finalized (driver.finish marked it done), so cancel is a no-op there;
@@ -776,6 +800,7 @@ final class DictationController {
             return
         }
         session?.recorder.stopLimit()
+        session?.agentFrontCutoff = .now + frontReadingGrace
         onRecordingChanged?(false)
         machine.beginTranscribing()
         // Flip the HUD to transcribing now so the tail-drain (commit-on-release flush, ~one buffer) is
@@ -892,9 +917,7 @@ final class DictationController {
             return
         }
         let excerpt = targetMayHoldSecureText ? nil : HeardExcerpt(heard: heard)
-        let origin = capturedSnapshot.flatMap { snapshot in
-            snapshot.bundleId.map { VoiceCommandOrigin(bundleId: $0, pid: snapshot.pid, windowId: snapshot.focusedWindowId) }
-        }
+        let origin = capturedSnapshot.flatMap(Self.origin)
         let start = DispatchTime.now()
         let commands = config.voiceCommands
         let reading = plan.voiceCommandReading(
@@ -945,6 +968,10 @@ final class DictationController {
                    history: HistoryWrite(heard: heard, transformed: transcript, result: message, insertion: .inserted,
                                          rewrite: nil, outcome: .commandNeedsChoice))
         }
+    }
+
+    private static func origin(of snapshot: TargetSnapshot) -> VoiceCommandOrigin? {
+        snapshot.bundleId.map { VoiceCommandOrigin(bundleId: $0, pid: snapshot.pid, windowId: snapshot.focusedWindowId) }
     }
 
     private func finishCommand(
@@ -1523,6 +1550,34 @@ final class DictationController {
         guard let mode = activeMode, mode.output == .agent else { return }
         session?.agentRecipient = AgentRecipient.initial(
             target: mode.agent.target, focused: nil, current: snapshot.current, names: snapshot.names)
+        followAgentInFront(target: mode.agent.target, snapshot: snapshot, through: agents)
+    }
+
+    var frontReadingGrace: Duration = .seconds(1)
+
+    private func followAgentInFront(target: Mode.Agent.Target, snapshot: AgentSnapshot, through agents: AgentHub) {
+        guard target == .current else { return }
+        let identity = session?.identity
+        session?.agentFrontTask?.cancel()
+        session?.agentFrontTask = Task { @MainActor [weak self, weak agents] in
+            guard let shown = await agents?.sessionInFrontWithoutAsking(), let self, !Task.isCancelled,
+                  let identity, self.session?.identity === identity,
+                  self.session?.agentFrontCutoff.map({ ContinuousClock.now <= $0 }) ?? true,
+                  snapshot.rows.contains(shown.id),
+                  self.capturedSnapshot.flatMap(Self.origin)?.leaving(shown).session == shown.id
+            else { return }
+            self.session?.agentRecipient = AgentRecipient.Frozen(id: shown.id, source: .front)
+            if case .recording = self.machine.state {
+                self.hud.present(self.recordingHUD(level: max(0, self.lastRenderedLevel)))
+            }
+        }
+    }
+
+    private func settleAgentInFront() async {
+        guard let task = session?.agentFrontTask else { return }
+        let left = session?.agentFrontCutoff.map { ContinuousClock.now.duration(to: $0) } ?? frontReadingGrace
+        if left > .zero { _ = try? await runWithDeadline(seconds: Self.seconds(left)) { await task.value } }
+        task.cancel()
     }
 
     private var agentRoster: AgentRoster? {
@@ -1544,9 +1599,25 @@ final class DictationController {
         let snapshot = session?.agentSnapshot ?? AgentSnapshot(
             names: agents.names, conversations: agents.recordingOrder, current: agents.current,
             namesAvailable: agents.namesProblem == nil)
-        let frozen = session?.agentRecipient ?? AgentRecipient.initial(
-            target: mode.agent.target, focused: nil, current: snapshot.current, names: snapshot.names)
-        let address = AgentAddress.parse(routed.transcript, names: Array(snapshot.names.keys), namesKnown: snapshot.namesAvailable)
+        func frozenRecipient() -> AgentRecipient.Frozen? {
+            session?.agentRecipient ?? AgentRecipient.initial(
+                target: mode.agent.target, focused: nil, current: snapshot.current, names: snapshot.names)
+        }
+        if VoiceCommandGrammar.parse(routed.transcript) == .goBack {
+            session?.agentFrontTask?.cancel()
+            await goBackFromAgent(heard: heard, frozen: frozenRecipient(), conversations: snapshot.conversations)
+            return
+        }
+        let address = AgentAddress.parse(
+            routed.transcript, names: Array(snapshot.names.keys), namesKnown: snapshot.namesAvailable,
+            read: plan.agentAddressReader(for: routed.transcript, mode: mode))
+        if AgentRecipient.usesDefault(address) {
+            await settleAgentInFront()
+            if Task.isCancelled { return }
+        } else {
+            session?.agentFrontTask?.cancel()
+        }
+        let frozen = frozenRecipient()
         let resolution = AgentRecipient.resolve(address, frozen: frozen, rows: snapshot.rows, names: snapshot.names)
         let facts = AgentHistoryFacts.facts(
             address: address, resolution: resolution, frozen: frozen, conversations: snapshot.conversations,
@@ -1560,9 +1631,22 @@ final class DictationController {
         case .open(let id):
             let handle = agents.handle(of: id) ?? "it"
             hud.present(.transcribing(mode: mode.name, status: "Opening \(handle)\u{2026}"))
-            let result = await agents.open(id) { [weak self] app in
+            let lease = lease(for: .codingAgents)
+            let place = capturedSnapshot.flatMap(Self.origin)
+            let shown = place == nil ? nil : await agents.sessionInFront { [weak self] app in
+                guard !Task.isCancelled else { return }
+                self?.hud.present(.transcribing(mode: mode.name, status: "Allow access to \(app) to remember where you were"))
+            }
+            let origin = place?.leaving(shown)
+            if Task.isCancelled { return }
+            let result = await agents.open(id, stillWanted: { lease.stillWanted() }) { [weak self] app in
                 guard !Task.isCancelled else { return }
                 self?.hud.present(.transcribing(mode: mode.name, status: "Allow access to \(app) to open the tab for \(handle)"))
+            }
+            let after = Self.origin(of: await snapshotAsync())
+            let movedSession = result == .exact && origin?.session != nil && origin?.session != id
+            if result != .none, movedSession || after != place, lease.stillWanted(), let origin, origin.session != id {
+                voiceCommands.recordReturn(to: origin)
             }
             if Task.isCancelled { return }
             let state = result.hudState(handle: handle, detail: mode.name)
@@ -1582,6 +1666,26 @@ final class DictationController {
             if Task.isCancelled { return }
             await dispatch(final, to: .agent(id: id, facts: facts), heard: heard, transformed: transformed, rewrite: rewrite)
         }
+    }
+
+    private func goBackFromAgent(heard: String, frozen: AgentRecipient.Frozen?, conversations: [AgentConversation]) async {
+        let lease = lease(for: .codingAgents, stopsAtPress: session?.voiceCommandStopsAtPress)
+        guard lease.keepActing() else { return }
+        let outcome = await voiceCommands.run(
+            transcript: VoiceCommandGrammar.goBack, places: [], scripts: [], origin: capturedSnapshot.flatMap(Self.origin),
+            stillWanted: { lease.keepActing() }, onLateResult: { _ in })
+        if Task.isCancelled { return }
+        guard let shown = VoiceCommandOutput.presentation(of: outcome, resultPrefix: "") else {
+            if captureWasLost {
+                finishCommandCaptureLost()
+            } else if machine.isBusy {
+                finish(machine: .cancel, cue: .cancel, state: .hidden)
+            }
+            return
+        }
+        finishAgent(state: shown.state, outcome: shown.failure == nil ? .inserted : .failed, heard: heard, body: "",
+                    transformed: nil, rewrite: nil, transitioned: true, hideAfter: shown.hideAfter, summary: shown.result,
+                    facts: AgentHistoryFacts.goBack(frozen: frozen, conversations: conversations))
     }
 
     private func deliverToAgent(

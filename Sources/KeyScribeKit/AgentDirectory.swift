@@ -9,12 +9,14 @@ public struct AgentConversation: Equatable, Sendable {
     public var state: AgentLiveState
     public var connectorLive: Bool
     public var title: String?
+    public var startedAt: Date?
 
     public init(
         id: String, agent: String, pid: Int, cwd: String, handle: String, state: AgentLiveState, connectorLive: Bool,
-        title: String? = nil
+        title: String? = nil, startedAt: Date? = nil
     ) {
         self.title = title
+        self.startedAt = startedAt
         self.id = id
         self.agent = agent
         self.pid = pid
@@ -138,7 +140,8 @@ public struct AgentDirectory: Sendable {
             AgentConversation(
                 id: $0.sessionId, agent: "claude", pid: $0.pid, cwd: $0.cwd,
                 handle: handleById[$0.sessionId] ?? AgentHandles.base(forFolder: $0.folder),
-                state: $0.liveState, connectorLive: live.contains($0.sessionId), title: titles[$0.sessionId])
+                state: $0.liveState, connectorLive: live.contains($0.sessionId), title: titles[$0.sessionId],
+                startedAt: $0.startedAt.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) })
         }.sorted { $0.handle < $1.handle }
         if next != conversations {
             conversations = next

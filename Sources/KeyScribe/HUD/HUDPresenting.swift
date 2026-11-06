@@ -334,8 +334,10 @@ extension HUDState {
 
     // A retained list is announced once; later edges announce only what changed about it.
     func voiceOverAnnouncement(after previous: HUDState) -> String? {
-        if case .recording(_, _, _, let countdown, _) = self, case .recording(_, _, _, let shown, _) = previous {
-            return shown == nil && countdown != nil ? voiceOverAnnouncement : nil
+        if case .recording(_, _, _, let countdown, let agents) = self, case .recording(_, _, _, let shown, let before) = previous {
+            if shown == nil && countdown != nil { return voiceOverAnnouncement }
+            guard let name = agents?.recipientName, name != before?.recipientName else { return nil }
+            return "Recording to \(name)"
         }
         guard case .choice(let prompt, let status, _) = self,
               case .choice(let shown, _, _) = previous, shown.id == prompt.id else { return voiceOverAnnouncement }
@@ -367,6 +369,7 @@ extension HUDState {
         case nil: return "\(namesOff). Start with \(example(first)), then your message."
         case .focused: source = "The conversation on screen."
         case .fixed: source = "Set by this mode."
+        case .front: source = "The conversation in front of you."
         case .current, .spoken: source = "The last conversation you used."
         }
         guard let other = agents.rows.first(where: { !$0.current }) else {

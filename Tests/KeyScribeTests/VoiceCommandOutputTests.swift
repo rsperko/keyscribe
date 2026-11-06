@@ -9,7 +9,7 @@ struct VoiceCommandOutputTests {
         var onProgress: (@MainActor (VoiceCommandProgress) -> Void)?
         func run(
             transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript], origin: VoiceCommandOrigin?,
-            stillWanted: @MainActor () -> Bool, onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
+            stillWanted: @escaping @MainActor () -> Bool, onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
         ) async -> VoiceCommandOutcome { .abandoned }
     }
 

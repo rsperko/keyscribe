@@ -110,6 +110,7 @@ final class VoiceCommandOutput {
 
     func stop() {
         stops += 1
+        StopGate.closeAll()
         clickedTask?.cancel()
         clickedTask = nil
         dismiss()

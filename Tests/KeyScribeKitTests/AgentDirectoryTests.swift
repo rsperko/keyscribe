@@ -11,6 +11,13 @@ struct AgentDirectoryTests {
         ClaudeRegistryEntry(pid: pid, sessionId: session, cwd: cwd, name: name, status: "idle", waitingFor: nil, nameSource: name == nil ? nil : "user", startedAt: start)
     }
 
+    @Test func aConversationCarriesItsRegistryStartAsADate() {
+        var directory = AgentDirectory()
+        directory.update(claude: [started(10, "a", at: 100_500), claude(20, "b")], live: [])
+        #expect(directory.conversation(pid: 10)?.startedAt == Date(timeIntervalSince1970: 100.5))
+        #expect(directory.conversation(pid: 20)?.startedAt == nil)
+    }
+
     @Test func generatedNamesComeBackToTheSameRunningSessionsWhateverOrderTheyAreFoundIn() {
         var before = AgentDirectory()
         before.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200)], live: [])

@@ -540,15 +540,18 @@ private struct HUDView: View {
         }
     }
 
+    private func scrollToRecipient(_ agents: AgentRoster, _ proxy: ScrollViewProxy) {
+        if let current = agents.rows.first(where: \.current) { proxy.scrollTo(current.id, anchor: .center) }
+    }
+
     private func agentList(_ agents: AgentRoster) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             if let height = HUDState.agentListHeight(rows: agents.rows.count, screenHeight: model.screenHeight) {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) { agentRows(agents) }
                         .frame(height: height)
-                        .onChange(of: model.recordingAdmission, initial: true) { _, _ in
-                            if let current = agents.rows.first(where: \.current) { proxy.scrollTo(current.id, anchor: .center) }
-                        }
+                        .onChange(of: model.recordingAdmission, initial: true) { _, _ in scrollToRecipient(agents, proxy) }
+                        .onChange(of: agents.rows.first(where: \.current)?.id) { _, _ in scrollToRecipient(agents, proxy) }
                 }
             } else if !agents.rows.isEmpty {
                 agentRows(agents)

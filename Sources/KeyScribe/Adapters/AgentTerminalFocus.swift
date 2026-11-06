@@ -54,12 +54,24 @@ enum TerminalSelection: Equatable, Sendable {
 
 protocol AgentTerminalFocusing: Sendable {
     func focus(
-        session: String, pid: Int, environment: [String: String], asking: @escaping @MainActor @Sendable (String) -> Void
+        session: String, pid: Int, environment: [String: String], stillWanted: @escaping @MainActor @Sendable () -> Bool,
+        asking: @escaping @MainActor @Sendable (String) -> Void
     ) async -> AgentFocusResult
 }
 
+extension AgentTerminalFocusing {
+    func focus(
+        session: String, pid: Int, environment: [String: String], asking: @escaping @MainActor @Sendable (String) -> Void
+    ) async -> AgentFocusResult {
+        await focus(session: session, pid: pid, environment: environment, stillWanted: { true }, asking: asking)
+    }
+}
+
 struct AgentTerminalFocus: AgentTerminalFocusing {
-    typealias Script = @Sendable (_ app: String, _ pid: Int, _ body: String, _ asking: @escaping @Sendable () async -> Void) async -> TerminalSelection
+    typealias Script = @Sendable (
+        _ app: String, _ pid: Int, _ body: String, _ asking: @escaping @Sendable () async -> Void,
+        _ wanted: @escaping @Sendable () async -> Bool
+    ) async -> TerminalSelection
 
     var plan: @Sendable (Int, [String: String]) -> [OpenAction] = {
         TerminalRoutes.plan(agent: $0, facts: SystemTerminalFacts().reporting($1, for: $0))
@@ -76,22 +88,27 @@ struct AgentTerminalFocus: AgentTerminalFocusing {
     }
 
     func focus(
-        session: String, pid: Int, environment: [String: String], asking: @escaping @MainActor @Sendable (String) -> Void
+        session: String, pid: Int, environment: [String: String], stillWanted: @escaping @MainActor @Sendable () -> Bool,
+        asking: @escaping @MainActor @Sendable (String) -> Void
     ) async -> AgentFocusResult {
         let (plan, run) = (plan, run)
+        let wanted: @Sendable () async -> Bool = {
+            guard !Task.isCancelled else { return false }
+            return await stillWanted()
+        }
         let actions = await Task.detached { plan(pid, environment) }.value
         var unselectedLayer: (multiplexer: String, uncertain: Bool)?
         var terminal = Terminal.unsupported
         var shown: String?
         for action in actions {
-            guard !Task.isCancelled else { return .none }
+            guard await wanted() else { return .none }
             switch action {
             case .layer(let layer):
                 var failed = false
                 for command in layer.commands {
-                    guard !Task.isCancelled else { return .none }
+                    guard await wanted() else { return .none }
                     let succeeded = if let walk = command.until {
-                        await Self.step(command.arguments, until: walk, run: run)
+                        await Self.step(command.arguments, until: walk, run: run, wanted: wanted)
                     } else {
                         await Task.detached { command.accepting.contains(run(command.arguments).0) }.value
                     }
@@ -104,8 +121,8 @@ struct AgentTerminalFocus: AgentTerminalFocusing {
                     unselectedLayer = (layer.multiplexer, uncertain: !failed && !layer.commands.isEmpty)
                 }
             case .select(.script(let app, let near, let body)):
-                guard let (appPid, name) = await running(app, near) else { return .none }
-                switch await script(app, appPid, body, { await asking(name) }) {
+                guard let (appPid, name) = await running(app, near), await wanted() else { return .none }
+                switch await script(app, appPid, body, { await asking(name) }, wanted) {
                 case .selected: terminal = .selected
                 case .notFound: terminal = .notFound
                 case .notAllowed: terminal = .notAllowed
@@ -121,7 +138,7 @@ struct AgentTerminalFocus: AgentTerminalFocusing {
             case .select(.url(let url)):
                 terminal = await openURL(url) ? .requested : .notFound
             case .activate(let app, let near), .unsupported(let app, let near):
-                guard let (appPid, _) = await running(app, near), let name = await activate(appPid) else { return .none }
+                guard let (appPid, _) = await running(app, near), await wanted(), let name = await activate(appPid) else { return .none }
                 shown = name
             }
         }
@@ -139,13 +156,16 @@ struct AgentTerminalFocus: AgentTerminalFocusing {
         }
     }
 
-    private static func step(_ arguments: [String], until walk: FocusWalk, run: @escaping @Sendable ([String]) -> (Int32, String)) async -> Bool {
+    private static func step(
+        _ arguments: [String], until walk: FocusWalk, run: @escaping @Sendable ([String]) -> (Int32, String),
+        wanted: @escaping @Sendable () async -> Bool
+    ) async -> Bool {
         for taken in 0...max(walk.steps, 0) {
-            guard !Task.isCancelled else { return false }
+            guard await wanted() else { return false }
             let check = await Task.detached { run(walk.check) }.value
             guard let reached = walk.reached(check) else { return false }
             if reached { return true }
-            guard taken < walk.steps, !Task.isCancelled else { return false }
+            guard taken < walk.steps, await wanted() else { return false }
             guard await Task.detached(operation: { run(arguments).0 == 0 }).value else { return false }
         }
         return false
@@ -164,32 +184,38 @@ struct AgentTerminalFocus: AgentTerminalFocusing {
 enum TerminalScripting {
     static let replyTimeout = 3
     private static let queue = DeadlineQueue(label: "com.keyscribe.agents.terminal-scripts", backlog: TimeInterval(replyTimeout))
+    private static let passiveQueue = DeadlineQueue(label: "com.keyscribe.agents.passive-terminal-reads", backlog: TimeInterval(replyTimeout))
 
     static func select(
-        _ app: String, pid: Int, body: String, asking: @escaping @Sendable () async -> Void
+        _ app: String, pid: Int, body: String, asking: @escaping @Sendable () async -> Void,
+        wanted: @escaping @Sendable () async -> Bool = { true }
     ) async -> TerminalSelection {
         let consent = await AutomationConsent.settle([app], willAsk: { _ in await asking() })
         guard consent.readable == [app] else { return consent.refused.isEmpty ? .notFound : .notAllowed }
+        guard await wanted() else { return .notFound }
         let source = PinnedAppleScript.pinned(to: app, timeout: replyTimeout, body)
+        let gate = StopGate.watching(wanted)
         let answer = await queue.run(within: TimeInterval(replyTimeout)) { isCurrent -> TerminalSelection in
-            switch PinnedAppleScript.run(source, pid: pid_t(pid), isCurrent: isCurrent) {
+            switch PinnedAppleScript.run(source, pid: pid_t(pid), isCurrent: { isCurrent() && gate.isOpen }) {
             case .value(let result): result.booleanValue ? .selected : .notFound
             case .refused: .notAllowed
             case .gone, .failed: .notFound
             }
         }
-        guard case .finished(let selection) = answer else { return .notFound }
+        let open = gate.isOpen
+        await gate.finish()
+        guard case .finished(let selection) = answer, open else { return .notFound }
         return selection
     }
 
     static func read(
-        _ app: String, pid: Int, body: String, asking: @escaping @Sendable () async -> Void
+        _ app: String, pid: Int, body: String, asking: @escaping @Sendable () async -> Void, mayAsk: Bool = true
     ) async -> TerminalRead {
-        let consent = await AutomationConsent.settle([app], willAsk: { _ in await asking() })
+        let consent = await AutomationConsent.settle([app], mayAsk: mayAsk, willAsk: { _ in await asking() })
         guard consent.readable == [app] else { return consent.refused.isEmpty ? .failed : .notAllowed }
         let source = PinnedAppleScript.pinned(to: app, timeout: replyTimeout, body)
-        let answer = await queue.run(within: TimeInterval(replyTimeout)) { isCurrent -> TerminalRead in
-            switch PinnedAppleScript.run(source, pid: pid_t(pid), isCurrent: isCurrent) {
+        let answer = await (mayAsk ? queue : passiveQueue).run(within: TimeInterval(replyTimeout)) { isCurrent -> TerminalRead in
+            switch PinnedAppleScript.run(source, pid: pid_t(pid), prompting: mayAsk, isCurrent: isCurrent) {
             case .value(let result): result.stringValue.map(TerminalRead.value) ?? .failed
             case .refused: .notAllowed
             case .gone, .failed: .failed

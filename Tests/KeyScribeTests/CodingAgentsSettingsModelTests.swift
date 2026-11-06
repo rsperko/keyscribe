@@ -391,7 +391,7 @@ struct CodingAgentsSettingsModelTests {
             #expect(!model.recipientGuidance().lowercased().contains("choose"))
         }
         model.show([backend], current: "a")
-        #expect(model.recipientGuidance().contains("Your next instruction goes here"))
+        #expect(model.recipientGuidance().contains("Instructions go here unless another conversation is in front of you"))
     }
 
     @Test func guidanceUsesRealConversationsAndExplainsAnEmptyList() {

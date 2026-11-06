@@ -64,6 +64,18 @@ struct AgentHUDTests {
         #expect(countingChanged.voiceOverAnnouncement(after: counting) == nil)
     }
 
+    @Test func aRecipientThatChangesWhileRecordingIsAnnouncedOnce() {
+        let entry = recording(.init(id: "a", source: .current))
+        let moved = recording(.init(id: "b", source: .front))
+        #expect(moved.voiceOverAnnouncement(after: entry) == "Recording to chatplay")
+        let level = HUDState.recording(mode: "Coding agent", level: 0.9, latchedTrigger: nil, agents: moved.agentRoster)
+        #expect(level.voiceOverAnnouncement(after: moved) == nil)
+    }
+
+    @Test func theConversationInFrontSaysSoInTheHint() {
+        #expect(recording(.init(id: "b", source: .front)).agentRosterHint?.hasPrefix("The conversation in front of you.") == true)
+    }
+
     @Test func aLongListScrollsInsideTheSpaceTheScreenLeaves() {
         #expect(HUDState.agentListHeight(rows: 3, screenHeight: 900) == nil)
         let tall = try? #require(HUDState.agentListHeight(rows: 40, screenHeight: 2000))

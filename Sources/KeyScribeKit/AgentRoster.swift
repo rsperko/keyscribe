@@ -55,9 +55,12 @@ public struct AgentRoster: Equatable, Sendable {
         _ conversations: [AgentConversation], current: String?, lastUsed: [String: Date]
     ) -> [AgentConversation] {
         let alphabetical = conversations.sorted { $0.handle < $1.handle }
+        let recency = { (conversation: AgentConversation) in
+            max(lastUsed[conversation.id] ?? .distantPast, conversation.startedAt ?? .distantPast)
+        }
         let recent = { (list: [AgentConversation]) in
             list.sorted {
-                let (first, second) = (lastUsed[$0.id] ?? .distantPast, lastUsed[$1.id] ?? .distantPast)
+                let (first, second) = (recency($0), recency($1))
                 return first != second ? first > second : $0.handle < $1.handle
             }
         }

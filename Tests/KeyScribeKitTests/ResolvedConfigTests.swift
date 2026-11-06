@@ -151,4 +151,52 @@ struct ResolvedConfigTests {
         #expect(try #require(rc.postSTTTextStages(for: nil).compactMap { $0 as? ReplacementsStage }.first)
             .rules.map(\.origin) == [.global, .global])
     }
+
+    @Test func anAgentAddressReadsThroughTheModesReplacementsAndDictionary() throws {
+        var mode = Mode(id: "agent", name: "Agent")
+        mode.replacements = .init(includeGlobal: true, rules: [.init(heard: "R Sperco", replace: "rsperko", regex: false)])
+        let rc = resolved(modes: [mode], dictionary: ["Kubernetes"], replacements: [
+            .init(heard: "Arsperco", replace: "rsperko", regex: false),
+        ])
+        let read = try #require(rc.agentAddressReader(for: "Tell R Sperco Green to check kabernetas", mode: mode))
+        #expect(read("R Sperco Green") == "rsperko Green")
+        #expect(read("kabernetas") == "Kubernetes")
+    }
+
+    @Test(arguments: [["backend", "backand"], ["backand", "backend"]])
+    func theDictionaryNeverPicksBetweenEquallyCloseSessionNames(dictionary: [String]) throws {
+        let names = ["backend", "backand"]
+        let read = try #require(resolved(dictionary: dictionary).agentAddressReader(for: "Tell backund to stop", mode: nil))
+        #expect(AgentAddress.parse("Tell backund to stop", names: names, read: read)
+            == AgentAddress.parse("Tell backund to stop", names: names))
+    }
+
+    @Test(arguments: [["backend", "backand"], ["backand", "backend"]])
+    func theDictionaryNeverPicksBetweenNamesTwoEditsAway(dictionary: [String]) throws {
+        let names = ["backend", "backand"]
+        let read = try #require(resolved(dictionary: dictionary).agentAddressReader(for: "Tell bickund to stop", mode: nil))
+        #expect(read("bickund") != "bickund")
+        #expect(AgentAddress.parse("Tell bickund to stop", names: names, read: read)
+            == AgentAddress.parse("Tell bickund to stop", names: names))
+    }
+
+    @Test func aCorrectedAddressLeavesALiveEditAfterItInTheMessage() throws {
+        let rc = resolved(replacements: [.init(heard: "Arsperco", replace: "rsperko", regex: false)])
+        let text = "Tell Arsperco Green insert new line hello"
+        let read = try #require(rc.agentAddressReader(for: text, mode: nil))
+        #expect(AgentAddress.parse(text, names: ["rsperko green"], read: read)
+            == .name("rsperko green", body: "insert new line hello"))
+    }
+
+    @Test func aSpanOwnedByALiteralRuleIsStillCorrected() throws {
+        let rc = resolved(replacements: [.init(heard: "Arsperco", replace: "rsperko", regex: false)])
+        let read = try #require(rc.agentAddressReader(for: "Go to Arsperco Green.", mode: nil))
+        #expect(read("Arsperco") == "rsperko")
+    }
+
+    @Test func aTakeOwnedByAWholeUtteranceRuleHasNoAddressReader() {
+        let rc = resolved(replacements: [.init(heard: "slash resume", replace: "/resume", regex: false)])
+        #expect(rc.agentAddressReader(for: "slash resume", mode: nil) == nil)
+        #expect(rc.agentAddressReader(for: "tell keyscribe blue slash resume", mode: nil) != nil)
+    }
 }

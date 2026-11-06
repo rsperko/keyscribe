@@ -49,6 +49,8 @@ final class AgentHub {
     private let transport: AgentTransport
     private let nameStore: AgentNameStore?
     private let focus: AgentTerminalFocusing?
+    private let front: AgentFronting?
+    private let glance: AgentFronting?
     private let scan: () -> [ClaudeRegistryEntry]
     private let transcriptTitle: ((ClaudeRegistryEntry, Bool) -> ClaudeTranscriptTitle)?
     private let forgetTitles: ((Set<String>) -> Void)?
@@ -71,7 +73,8 @@ final class AgentHub {
 
     init(
         transport: AgentTransport, scan: @escaping () -> [ClaudeRegistryEntry], names: AgentNameStore? = nil,
-        focus: AgentTerminalFocusing? = nil, transcriptTitles: ClaudeTranscriptTitles? = nil, receiptTimeout: Duration = .seconds(8),
+        focus: AgentTerminalFocusing? = nil, front: AgentFronting? = nil, glance: AgentFronting? = nil,
+        transcriptTitles: ClaudeTranscriptTitles? = nil, receiptTimeout: Duration = .seconds(8),
         now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString },
         stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning
     ) {
@@ -79,6 +82,8 @@ final class AgentHub {
         self.stillRunning = stillRunning
         nameStore = names
         self.focus = focus
+        self.front = front
+        self.glance = glance
         self.scan = scan
         transcriptTitle = transcriptTitles.map { titles in { titles.titles(for: $0, rereading: $1) } }
         forgetTitles = transcriptTitles.map { titles in { titles.forget(keeping: $0) } }
@@ -114,10 +119,29 @@ final class AgentHub {
         onChange?()
     }
 
-    func open(_ id: String, asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }) async -> AgentFocusResult {
+    func open(
+        _ id: String, makingCurrent: Bool = true, stillWanted: @escaping @MainActor @Sendable () -> Bool = { true },
+        asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }
+    ) async -> AgentFocusResult {
         guard let conversation = directory.conversations.first(where: { $0.id == id }) else { return .none }
-        makeCurrent(id)
-        return await focus?.focus(session: id, pid: conversation.pid, environment: environments[id] ?? [:], asking: asking) ?? .none
+        if makingCurrent { makeCurrent(id) }
+        return await focus?.focus(
+            session: id, pid: conversation.pid, environment: environments[id] ?? [:], stillWanted: stillWanted, asking: asking) ?? .none
+    }
+
+    func sessionInFront(asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }) async -> FrontSession? {
+        guard let front else { return nil }
+        return await front.shown(among: frontCandidates, asking: asking)
+    }
+
+    func sessionInFrontWithoutAsking() async -> FrontSession? {
+        let candidates = frontCandidates
+        guard let glance, !candidates.isEmpty else { return nil }
+        return await glance.shown(among: candidates) { _ in }
+    }
+
+    var frontCandidates: [AgentFrontCandidate] {
+        directory.conversations.map { AgentFrontCandidate(id: $0.id, pid: $0.pid, environment: environments[$0.id] ?? [:]) }
     }
 
     static let focusTimeout: Duration = .seconds(3)
@@ -463,7 +487,7 @@ final class AgentRuntime {
             transport: server, scan: { ClaudeRegistryScanner.scan(configDirs: claudeConfigDirs) },
             names: AgentNameStore(directory: directory),
             focus: AgentTerminalFocus(connector: { session in await box.hub?.focusInPlace(session) ?? .notFound }),
-            transcriptTitles: ClaudeTranscriptTitles(configDirs: claudeConfigDirs))
+            front: AgentFront(), glance: AgentFront.confirmingWithoutAsking, transcriptTitles: ClaudeTranscriptTitles(configDirs: claudeConfigDirs))
         box.hub = hub
         try server.start()
         hub.refresh()

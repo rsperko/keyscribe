@@ -5,9 +5,10 @@ import Testing
 struct AgentRosterTests {
     private func conversation(
         _ id: String, _ handle: String, cwd: String = "/src/keyscribe", state: AgentLiveState = .idle, live: Bool = true,
-        agent: String = "claude", title: String? = nil
+        agent: String = "claude", title: String? = nil, startedAt: Date? = nil
     ) -> AgentConversation {
-        AgentConversation(id: id, agent: agent, pid: 1, cwd: cwd, handle: handle, state: state, connectorLive: live, title: title)
+        AgentConversation(
+            id: id, agent: agent, pid: 1, cwd: cwd, handle: handle, state: state, connectorLive: live, title: title, startedAt: startedAt)
     }
 
     @Test func theRecordingListPutsCurrentThenWaitingThenRecentlyUsedThenTheRestAlphabetically() {
@@ -25,6 +26,20 @@ struct AgentRosterTests {
         let used = ["b": at(10), "d": at(30), "c": at(20), "f": at(40), "h": at(50)]
         let ordered = AgentRoster.recordingOrder(directory, current: "h", lastUsed: used)
         #expect(ordered.map(\.id) == ["h", "d", "b", "e", "f", "c", "a", "g"])
+    }
+
+    @Test func aSessionStartedSinceTheLastUseRanksAsTheMostRecentOne() {
+        let at = { (seconds: Double) in Date(timeIntervalSince1970: seconds) }
+        let directory = [
+            conversation("a", "alpha", startedAt: at(5)),
+            conversation("b", "bravo", startedAt: at(25)),
+            conversation("c", "charlie", startedAt: at(15)),
+            conversation("d", "delta", state: .waitingApproval, startedAt: at(35)),
+            conversation("e", "echo", state: .waitingQuestion, startedAt: at(5)),
+        ]
+        let used = ["a": at(20), "c": at(30), "e": at(10)]
+        let ordered = AgentRoster.recordingOrder(directory, current: nil, lastUsed: used)
+        #expect(ordered.map(\.id) == ["d", "e", "c", "b", "a"])
     }
 
     @Test func withNothingUsedTheRecordingListIsCurrentThenWaitingThenAlphabetical() {

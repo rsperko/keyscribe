@@ -6,6 +6,7 @@ struct FrontApp: Equatable, Sendable {
     var bundle: String
     var pid: Int
     var name: String
+    var window: String? = nil
 }
 
 enum TerminalRead: Equatable, Sendable {
@@ -14,11 +15,29 @@ enum TerminalRead: Equatable, Sendable {
     case failed
 }
 
-struct AgentFront: Sendable {
+struct AgentFrontCandidate: Equatable, Sendable {
+    var id: String
+    var pid: Int
+    var environment: [String: String] = [:]
+}
+
+struct FrontSession: Equatable, Sendable {
+    var id: String
+    var app: FrontApp
+}
+
+protocol AgentFronting: Sendable {
+    func shown(among agents: [AgentFrontCandidate], asking: @escaping @MainActor @Sendable (String) -> Void) async -> FrontSession?
+}
+
+struct AgentFront: AgentFronting, Sendable {
     typealias Read = @Sendable (_ app: String, _ pid: Int, _ body: String, _ asking: @escaping @Sendable () async -> Void) async -> TerminalRead
 
+    static let confirmingWithoutAsking = AgentFront(
+        read: { app, pid, body, _ in await TerminalScripting.read(app, pid: pid, body: body, asking: {}, mayAsk: false) })
+
     var frontmost: @MainActor @Sendable () -> FrontApp? = AgentFront.frontmost
-    var read: Read = TerminalScripting.read
+    var read: Read = { await TerminalScripting.read($0, pid: $1, body: $2, asking: $3) }
     var facts: @Sendable () -> TerminalFacts = { SystemTerminalFacts() }
 
     func reading(asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }) async -> FrontReading {
@@ -41,7 +60,21 @@ struct AgentFront: Sendable {
         }
     }
 
+    func shown(
+        among agents: [AgentFrontCandidate], asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }
+    ) async -> FrontSession? {
+        let facts = facts
+        let result = await confirmed(asking: asking) { reading in
+            await Task.detached {
+                agents.filter { reading.check(agent: $0.pid, facts: facts().reporting($0.environment, for: $0.pid)) == .shown }.map(\.id)
+            }.value
+        }
+        guard case .success(let confirmed) = result, confirmed.value.count == 1 else { return nil }
+        return FrontSession(id: confirmed.value[0], app: confirmed.app)
+    }
+
     private struct Confirmed<Value: Sendable>: Sendable {
+        var app: FrontApp
         var pane: FrontPane
         var value: Value
     }
@@ -57,7 +90,7 @@ struct AgentFront: Sendable {
         let second = await surface(app, route, script, asking: {})
         guard case .pane = second else { return .failure(Self.reason(second)) }
         guard second == first, await frontmost() == app else { return .failure(.changed) }
-        return .success(Confirmed(pane: pane, value: value))
+        return .success(Confirmed(app: app, pane: pane, value: value))
     }
 
     private func surface(
@@ -81,6 +114,7 @@ struct AgentFront: Sendable {
     @MainActor
     static func frontmost() -> FrontApp? {
         guard let app = NSWorkspace.shared.frontmostApplication, let bundle = app.bundleIdentifier else { return nil }
-        return FrontApp(bundle: bundle, pid: Int(app.processIdentifier), name: app.localizedName ?? bundle)
+        let window = ContextProbe.focusedState(pid: app.processIdentifier).windowId
+        return FrontApp(bundle: bundle, pid: Int(app.processIdentifier), name: app.localizedName ?? bundle, window: window)
     }
 }

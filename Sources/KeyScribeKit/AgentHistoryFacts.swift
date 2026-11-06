@@ -6,7 +6,7 @@ public enum AgentHistoryFacts {
         conversations: [AgentConversation], delivery: Mode.Agent.Delivery
     ) -> [HistoryEntry.Fact] {
         let spoken = spokenAddress(address)
-        var facts = [HistoryEntry.Fact(label: "Command", value: command(address, resolution))]
+        var facts = [fact(command: command(address, resolution))]
         if let said = spoken.said { facts.append(.init(label: "Spoken address", value: said)) }
         if let closest = spoken.closest { facts.append(.init(label: "Closest name", value: closest)) }
         if let candidates = spoken.candidates { facts.append(.init(label: "Candidates", value: candidates.sorted().joined(separator: ", "))) }
@@ -18,14 +18,25 @@ public enum AgentHistoryFacts {
         } else {
             facts.append(.init(label: "Conversation", value: "None resolved"))
         }
-        if let frozen {
-            let handle = conversations.first { $0.id == frozen.id }?.handle ?? frozen.id
-            facts.append(.init(label: "Default recipient", value: handle))
-        }
+        facts += defaultRecipient(frozen, in: conversations)
         if case .deliver = resolution {
             facts.append(.init(label: "Delivery", value: delivery == .draft ? "Keep as a draft" : "Send"))
         }
         return facts
+    }
+
+    public static func goBack(frozen: AgentRecipient.Frozen?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
+        [fact(command: "Go back")] + defaultRecipient(frozen, in: conversations)
+    }
+
+    private static func fact(command: String) -> HistoryEntry.Fact {
+        HistoryEntry.Fact(label: "Command", value: command)
+    }
+
+    private static func defaultRecipient(_ frozen: AgentRecipient.Frozen?, in conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
+        guard let frozen else { return [] }
+        let handle = conversations.first { $0.id == frozen.id }?.handle ?? frozen.id
+        return [.init(label: "Default recipient", value: handle)]
     }
 
     private static func command(_ address: AgentAddress, _ resolution: AgentRecipient.Resolution) -> String {
@@ -58,6 +69,7 @@ public enum AgentHistoryFacts {
             return switch source {
             case .fixed: "The mode\u{2019}s fixed conversation"
             case .focused: "The focused conversation"
+            case .front: "The conversation in front"
             case .current, .spoken: "The current conversation"
             }
         }

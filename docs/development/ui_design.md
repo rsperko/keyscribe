@@ -336,7 +336,39 @@ A take that is only a bring-forward word and an address opens that conversation:
 uses to bring something forward (`VoiceCommandGrammar.focusVerbs`, such as “open”, “switch to”, “go to”), an
 optional “the”, then a name or number that meets the same evidence as an address without “tell” (“open
 docs”, “switch to session two”). It makes the conversation current, sends nothing, and brings its terminal
-forward. While it looks, the HUD says so (“Opening docs…”). It follows the agent's processes outward and
+forward. A bring-forward word followed by a few words (at most `AgentAddress.navigationWords`) is navigation
+even when those words name nothing: the take is held with the reason and never sent, so a misheard name
+cannot become a message. The held line names the closest conversation when one sounds like what was heard,
+or the equally close ones, without opening any (`AgentAddress.closest`; the narrow sound-alike that
+addresses is a separate rule and the only one that may open). “session” after a bring-forward word is
+always a name, however long, so “open session zebra” is held, and so is “go to session backend review” when
+only “backend” is a conversation: words left over after a name never turn the take back into a message. More words after the verb than that limit
+make the take a message, as does a pronoun (“open it”), and the limit is fixed, so which conversations are
+running never changes whether a sentence is navigation. An Open that moved focus remembers where the user was
+as the one return destination Voice Commands keeps, so “go back” on either trigger returns there and toggles
+as it does after a voice command. Where the user was is the conversation shown in the terminal the take was
+pressed in, when the terminal can say which one (the same front reading that confirms an Open arrived,
+`AgentFront`), otherwise the app and window. The reading names the app, process and window it was taken in,
+and the conversation is attached only when those are the ones the take was pressed in, so a user who switched
+apps, or windows of the same terminal, while speaking is remembered by the window alone, never by a
+conversation seen somewhere else. A destination is recorded
+only on evidence of movement: the window changed, or the conversation was selected exactly and differs from the
+one left; an Open that brought nothing forward, selected nothing in the same window, found the user already in
+front of that conversation, or was cancelled or superseded before it could tell, leaves the earlier destination
+in place. Every switch that moves focus remembers the conversation it left the same way, whichever trigger
+moved it, and a script run by voice reads nothing. Going back to a conversation opens it the
+way Open does, through the same routes, under the take's own stop check (a stop also closes a terminal script
+already queued or running, before its next Apple event), without making it the current
+recipient, and the destination becomes the conversation the user just left, so two conversations in one window
+toggle. A return the user stopped, or that the feature or a system sleep stopped, ends like a stopped voice
+command and leaves the destination for another try. A conversation that has ended
+or that nothing could show returns to its app and window instead; a terminal that came forward without
+selecting the conversation reports that and keeps the destination for another try. A take that is only “go
+back” in the Coding agent mode is that return, never a message: it moves focus and nothing else, keeps the
+current recipient, sends no pending dictation, and reports what Voice Commands would (“Nothing to go back
+to.” when there is no destination). “Go back” inside a longer take, or after “tell” and a name, is ordinary
+message text. With the Coding agent feature off, a remembered conversation is only its app and window. While
+it looks, the HUD says so (“Opening docs…”). It follows the agent's processes outward and
 selects each layer it passes through: the multiplexer pane showing the agent (herdr or tmux, for example — the
 `PaneRoute`s in `TerminalRoutes`), then the terminal tab and split holding that pane (or holding the agent directly),
 then the terminal app. Each multiplexer is one `PaneRoute` and each terminal app one `TerminalRoute`, listed
@@ -367,16 +399,34 @@ Automation Settings**, held long enough to use. Cancelling the take stops every 
 KeyScribe has not started. A request already handed to a connector is best effort: it is withdrawn if the
 connector has not collected it, and it carries an expiry, so a connector that collects it late (or after a
 reconnect) refuses it instead of moving the terminal seconds later.
-Anything after the address makes the take a message, so “open the readme and fix the typo” is sent as said,
-and “open two files” or “open the readme” stays a message whenever it does not name a conversation.
-A misheard name with nothing after it follows the address rule: held, unless it sounds like the highlighted
-recipient, which is then opened. Words that fit several conversations choose one as an address does.
+Anything after a matched address makes the take a message, so “open keyscribe and run the tests” is sent
+as said, and so is a longer instruction after the verb (“open the readme and fix the typo”). A short one is
+navigation: “open the readme” alone is held with “No conversation named “readme””, and “tell keyscribe open
+the readme” sends it. A misheard name with nothing after it follows the address rule: held, unless it
+sounds closely like the highlighted recipient, which is then opened. Words that fit several conversations
+choose one as an address does.
 Settings has no Open or Talk to button: Settings configures the integration, and choosing or opening a
 conversation belongs where the user is already working.
 
+A take that starts with a Coding agent mode whose target is the current recipient follows the conversation
+in front: when recording starts, KeyScribe reads which conversation the front terminal shows, through the
+same terminal and multiplexer routes that “open” and “go back” use, reading twice and checking that the app
+stayed in front. Exactly one listed conversation must be confirmed there, in the app and window that had
+focus at the press, for it to be this take's recipient. The read never asks for Automation access, so a
+terminal not yet allowed reads as unknown. Unknown, no terminal in front, a different app or window, or a
+front view that could belong to another session leaves the current recipient. The read runs beside the
+recording, and a reading that lands more than a moment after release is ignored, however long transcription
+takes. A spoken name or session number still wins and never waits for the read; a mode with a fixed
+conversation or set to ask never follows the front, and neither does a take that reaches an agent mode only
+through a spoken phrase after the press. A take sent to the conversation in front makes it the current
+recipient. When the read lands, only the highlight and the recipient line change: the list keeps its order
+and numbers, a list that scrolls brings the new recipient into view, and VoiceOver hears the new recipient
+once.
+
 The list opens with the current recipient first, then the sessions waiting for input (approval, an answer,
-or an open dialog), then the other sessions; within each group the most recently used comes first, and
-sessions never used since launch follow alphabetically (`AgentRoster.recordingOrder`). A session is used
+or an open dialog), then the other sessions; within each group the most recent comes first, where a
+session's recency is the later of its last use and its start, so a session just started leads until
+another is used after it; sessions with neither follow alphabetically (`AgentRoster.recordingOrder`). A session is used
 when a take is sent to it, when it is chosen or opened by voice, or when the user submits a prompt in it,
 which also makes it the current recipient; a prompt sent from another device through Claude Code's Remote
 Control counts the same way. Slash commands and `!` shell commands never reach the connector, so they are not
@@ -388,7 +438,7 @@ order, and names never change for that take, new sessions do not join it, and a 
 its row marked Ended rather than handing its number to a neighbour. Live states update in place. A state
 that means the session cannot receive (Not connected, Disconnected, Ended) is orange, and the
 word itself says so, so colour is never the only signal. The recipient line says where it came from and never claims the screen identified a
-conversation it did not: “The conversation on screen”, “The last conversation you used”, or “Set by
+conversation it did not: “The conversation in front of you”, “The conversation on screen”, “The last conversation you used”, or “Set by
 this mode” — followed by a real example of both address forms taken from the list (“docs …” or
 “session 4 …”; a bare “four” starts the message, and “tell four” reaches only a conversation named four). With no recipient, nothing is highlighted. A list
 taller than the screen allows scrolls to the recipient each time recording starts, and keeps its numbers.
@@ -1402,8 +1452,8 @@ Its sections are, in order:
 **No current recipient**, with brief guidance underneath. With no recipient and a connected conversation,
 the example uses a real name and the mode's first recording shortcut (“Use Fn (Globe) and say …”, which reads
 right whether the shortcut is held or tapped); when none is assigned it says to
-start recording without inventing a shortcut. With a current recipient it explains that subsequent
-instructions go there and another name switches the recipient. Compact rows follow, each its own native row of the grouped form (native insets and separators). Rows carry no numbers: Settings is an inventory, not
+start recording without inventing a shortcut. With a current recipient it explains that
+instructions go there unless another conversation is in front, and another name switches the recipient. Compact rows follow, each its own native row of the grouped form (native insets and separators). Rows carry no numbers: Settings is an inventory, not
 an addressing surface, so row numbers appear only on the recording HUD, where “session two” is said and the
 numbering is frozen for the take. Each row is identified to assistive technology by its conversation name.
 The first line holds the name, Current, the text-only live state and a small, native bordered **Rename…**

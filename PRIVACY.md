@@ -170,8 +170,11 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
   files, and `names.json`, the names you chose for conversations along with their Claude Code session
   ids. These are kept whether or not History is on, until you delete them. No message text is stored
   there. To show each conversation's title, KeyScribe reads the end of that conversation's own Claude Code
-  transcript on your Mac; it keeps only the title, in memory, and never logs or stores the transcript. To
-  bring a conversation's terminal forward, it reads a few terminal and multiplexer variables (such as a
+  transcript on your Mac; it keeps only the title, in memory, and never logs or stores the transcript. When
+  you start a Coding agent dictation, KeyScribe asks the terminal in front which tab or pane is selected and
+  reads the same process details, so what you say goes to the conversation you are looking at; it never asks
+  for permission to do so, and the answer stays on your Mac and is not stored. To bring a conversation's
+  terminal forward, it reads a few terminal and multiplexer variables (such as a
   pane id) from the environment of the processes that hold it; the rest of their environment is ignored.
 
 You can inspect, back up, or delete any of it with the Finder or a text editor. Deleting the history

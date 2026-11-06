@@ -9,7 +9,11 @@ struct AgentTerminalFocusTests {
         private let lock = NSLock()
         private var _events: [String] = []
         var events: [String] { lock.withLock { _events } }
-        func record(_ event: String) { lock.withLock { _events.append(event) } }
+        var onRecord: @Sendable (String) -> Void = { _ in }
+        func record(_ event: String) {
+            lock.withLock { _events.append(event) }
+            onRecord(event)
+        }
     }
 
     final class Answers: @unchecked Sendable {
@@ -57,9 +61,10 @@ struct AgentTerminalFocusTests {
                 let command = argv.joined(separator: " ")
                 return failing[command].map { (2, $0) } ?? (0, answers.next(command) ?? "")
             },
-            script: { app, pid, body, asking in
+            script: { app, pid, body, asking, wanted in
                 if asks { await asking() }
                 calls.record("script \(app) \(pid) \(body)")
+                if asks { calls.record("wanted \(await wanted())") }
                 return selection
             },
             openURL: { url in
@@ -82,6 +87,42 @@ struct AgentTerminalFocusTests {
         let calls = Calls()
         _ = await focuser(Self.ghostty, calls: calls).focus(session: "s1", pid: 30, environment: ["ZELLIJ_PANE_ID": "3"], asking: { _ in })
         #expect(calls.events.first == "plan ZELLIJ_PANE_ID=3")
+    }
+
+    @Test func aStopBeforeTheTerminalIsSelectedOrActivatedEndsTheOpenWithoutMovingAnything() async {
+        let calls = Calls()
+        let stopped = await focuser(Self.ghostty, calls: calls)
+            .focus(session: "s1", pid: 30, environment: [:], stillWanted: { false }, asking: { _ in })
+        #expect(stopped == .none)
+        #expect(calls.events == ["plan"])
+        let flag = Flag()
+        let selected = Calls()
+        selected.onRecord = { if $0.hasPrefix("script") { flag.wanted = false } }
+        let late = focuser(Self.ghostty, calls: selected)
+        #expect(await late.focus(session: "s1", pid: 30, environment: [:], stillWanted: { flag.wanted }, asking: { _ in }) == .none)
+        #expect(selected.events == ["plan", "script com.mitchellh.ghostty 10 find ttys004"])
+    }
+
+    final class Flag: @unchecked Sendable { var wanted = true }
+
+    @Test func aStopDuringTheWalkProbeRunsNoFurtherFocusCommand() async {
+        let flag = Flag()
+        let calls = Calls()
+        calls.onRecord = { if $0 == "/bin/zellij clients" { flag.wanted = false } }
+        let answers = Answers(["/bin/zellij clients": [Self.clients(on: "terminal_1")]])
+        let result = await focuser([Self.walk] + Self.ghostty, answers: answers, calls: calls)
+            .focus(session: "s1", pid: 30, environment: [:], stillWanted: { flag.wanted }, asking: { _ in })
+        #expect(result == .none)
+        #expect(calls.events == ["plan", "/bin/zellij clients"])
+    }
+
+    @Test func aStopWhileConsentIsAskedIsHandedToTheTerminalScriptAndEndsTheOpen() async {
+        let flag = Flag()
+        let calls = Calls()
+        let result = await focuser(Self.ghostty, asks: true, calls: calls)
+            .focus(session: "s1", pid: 30, environment: [:], stillWanted: { flag.wanted }, asking: { _ in flag.wanted = false })
+        #expect(result == .none)
+        #expect(calls.events == ["plan", "script com.mitchellh.ghostty 10 find ttys004", "wanted false"])
     }
 
     @Test func aSelectedTerminalTabIsAnExactOpenAndItsAppComesForward() async {

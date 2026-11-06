@@ -17,19 +17,20 @@ enum AutomationConsent {
 
     static func settle(
         _ bundleIds: [String], queue: DeadlineQueue = consentQueue, checkWithin: TimeInterval = checkDeadline,
-        answerWithin: TimeInterval = answerDeadline,
+        answerWithin: TimeInterval = answerDeadline, mayAsk: Bool = true,
         verdict: @escaping @Sendable (String, Bool) -> AutomationVerdict = AutomationConsent.verdict(of:asking:),
         willAsk: @Sendable (String) async -> Void = { _ in }
     ) async -> Settled {
         var settled = Settled()
         for bundleId in bundleIds {
             var answer = await queue.run(within: checkWithin) { verdict(bundleId, false) }
-            if case .finished(.needsAsking) = answer {
+            if mayAsk, case .finished(.needsAsking) = answer {
                 await willAsk(bundleId)
                 answer = await queue.run(within: answerWithin) { verdict(bundleId, true) }
             }
             switch answer {
-            case .finished(.allowed), .finished(.unknown): settled.readable.append(bundleId)
+            case .finished(.allowed): settled.readable.append(bundleId)
+            case .finished(.unknown): mayAsk ? settled.readable.append(bundleId) : settled.unanswered.append(bundleId)
             case .finished(.denied): settled.refused.append(bundleId)
             case .finished(.needsAsking), .expired: settled.unanswered.append(bundleId)
             }

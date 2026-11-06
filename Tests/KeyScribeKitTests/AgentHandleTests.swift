@@ -302,20 +302,43 @@ struct AgentAddressTests {
     }
 
     @Test(arguments: [
-        "Open the readme.",
         "Open keyscribe and run the tests.",
-        "Switch to the main branch.",
-        "Go to the definition of backend.",
-        "Focus on the failing tests.",
+        "Go to the definition of backend and read it.",
+        "Focus on the failing tests in the parser.",
+        "Open the settings page and fix the toggle",
+        "Open it.",
         "Open",
     ])
-    func aBringForwardVerbThatIsNotFollowedByOnlyAnAddressIsTheMessage(text: String) {
+    func aBringForwardVerbFollowedByMoreThanAFewWordsOrAPronounIsTheMessage(text: String) {
         #expect(AgentAddress.parse(text, names: names) == .none(body: text))
+    }
+
+    @Test(arguments: [
+        ("Open the readme.", "readme"),
+        ("Switch to the main branch.", "main branch"),
+        ("Go to the definition of backend.", "definition of backend"),
+        ("Focus on the failing tests.", "failing tests"),
+        ("Go to key scrub", "key scrub"),
+        ("Open session zebra", "zebra"),
+        ("Open session the big long name here", "the big long name here"),
+        ("Go to session backend review", "backend review"),
+        ("Open session two run the build", "two run the build"),
+    ])
+    func aBringForwardVerbWithAFewWordsThatNameNothingIsHeld(text: String, spoken: String) {
+        #expect(AgentAddress.parse(text, names: names) == .open(.unresolved(spoken: spoken, body: "")))
+        #expect(AgentAddress.parse(text, names: ["backend"]) == .open(.unresolved(spoken: spoken, body: "")))
+    }
+
+    @Test func theClosestNamesToAHeldTargetAreSuggestedAndTiesStayTogether() {
+        #expect(AgentAddress.closest(to: "key scrub", among: names) == ["keyscribe"])
+        #expect(AgentAddress.closest(to: "key scrub", among: ["keyscribe", "keyscrabe", "backend"]) == ["keyscrabe", "keyscribe"])
+        #expect(AgentAddress.closest(to: "readme", among: names) == [])
+        #expect(AgentAddress.closest(to: "keyscribe", among: ["backend", "frontend"]) == [])
     }
 
     @Test func openingNeedsTheSameEvidenceAsAnAddressWithoutTell() {
         let names = ["jk boots manager", "jk boots helper", "frontend"]
-        #expect(AgentAddress.parse("open boots", names: names) == .none(body: "open boots"))
+        #expect(AgentAddress.parse("open boots", names: names) == .open(.unresolved(spoken: "boots", body: "")))
         #expect(AgentAddress.parse("open jk boots", names: names)
             == .open(.ambiguous(spoken: "jk boots", names: ["jk boots helper", "jk boots manager"], body: "")))
         #expect(AgentAddress.parse("switch to boots manager", names: names) == .open(.name("jk boots manager", body: "")))
@@ -383,10 +406,74 @@ struct AgentAddressTests {
         #expect(AgentAddress.parse("Two, run tests.", names: names) == .none(body: "Two, run tests."))
     }
 
-    @Test(arguments: ["Open two files.", "open the readme", "Open 2 files and compare them."])
-    func openingFilesIsAMessage(text: String) {
-        #expect(AgentAddress.parse(text, names: numbered) == .none(body: text))
-        #expect(AgentAddress.parse(text, names: ["backend"]) == .none(body: text))
+    @Test func openingFilesIsAMessageOnlyWhenMoreThanAFewWordsFollowTheVerb() {
+        let long = "Open 2 files and compare them."
+        #expect(AgentAddress.parse(long, names: numbered) == .none(body: long))
+        #expect(AgentAddress.parse(long, names: ["backend"]) == .none(body: long))
+        #expect(AgentAddress.parse("Open two files.", names: numbered) == .none(body: "Open two files."))
+        #expect(AgentAddress.parse("Open two files.", names: ["backend"]) == .open(.unresolved(spoken: "two files", body: "")))
+    }
+
+    private static func reading(_ text: String) -> String {
+        text.replacingOccurrences(of: "R Sperco", with: "rsperko", options: .caseInsensitive)
+            .replacingOccurrences(of: "Arsperco", with: "rsperko", options: .caseInsensitive)
+    }
+    private let readable = ["rsperko", "rsperko blue", "rsperko green", "home green"]
+
+    @Test(arguments: [
+        ("Go to Arsperco Green.", AgentAddress.open(.name("rsperko green", body: ""))),
+        ("Go to R Sperco Green", .open(.name("rsperko green", body: ""))),
+        ("Switch to arsperco", .open(.name("rsperko", body: ""))),
+        ("Tell R Sperco Green to run the tests.", .name("rsperko green", body: "to run the tests.")),
+        ("Arsperco blue, run the tests.", .name("rsperko blue", body: "run the tests.")),
+    ])
+    func wordsTheReadingCorrectsIntoANameAddressIt(text: String, expected: AgentAddress) {
+        #expect(AgentAddress.parse(text, names: readable, read: Self.reading) == expected)
+    }
+
+    @Test func theBodyAfterACorrectedAddressIsKeptExactlyAsSaid() {
+        #expect(AgentAddress.parse("Tell Arsperco Green, ask R Sperco about it", names: readable, read: Self.reading)
+            == .name("rsperko green", body: "ask R Sperco about it"))
+    }
+
+    @Test func aRawMatchWinsOverTheReading() {
+        let read: (String) -> String = { $0.replacingOccurrences(of: "home", with: "rsperko") }
+        #expect(AgentAddress.parse("Tell home green to stop", names: readable, read: read) == .name("home green", body: "to stop"))
+    }
+
+    @Test func aReadingThatNamesNothingLeavesTheAddressAsHeard() {
+        let names = ["home green"]
+        #expect(AgentAddress.parse("Go to Arsperco Purple.", names: names, read: Self.reading)
+            == AgentAddress.parse("Go to Arsperco Purple.", names: names))
+    }
+
+    @Test func anAddressHeardAsANearMissOfANameIsTheNameOnceTheReadingCorrectsIt() {
+        let names = ["rsperko green"]
+        guard case .open(.nearMiss) = AgentAddress.parse("Go to Arsperco Green.", names: names) else {
+            Issue.record("the uncorrected address should be a near miss")
+            return
+        }
+        #expect(AgentAddress.parse("Go to Arsperco Green.", names: names, read: Self.reading)
+            == .open(.name("rsperko green", body: "")))
+    }
+
+    @Test func aReadingMayJoinMoreWordsThanTheNameHas() {
+        let read: (String) -> String = { $0.replacingOccurrences(of: "R Sper Co", with: "rsperko") }
+        #expect(AgentAddress.parse("Tell R Sper Co Green to stop", names: readable, read: read)
+            == .name("rsperko green", body: "to stop"))
+    }
+
+    @Test(arguments: ["backend", "backand"])
+    func aCorrectionNeverChoosesBetweenNamesTheWordsSoundEquallyLike(corrected: String) {
+        let names = ["backend", "backand"]
+        let read: (String) -> String = { $0.replacingOccurrences(of: "backund", with: corrected) }
+        #expect(AgentAddress.parse("Tell backund to stop", names: names, read: read)
+            == AgentAddress.parse("Tell backund to stop", names: names))
+    }
+
+    @Test func aCorrectedNameFollowedByAnotherDistinguishingWordStillAsks() {
+        #expect(AgentAddress.parse("Go to Arsperco Purple.", names: readable, read: Self.reading)
+            == .open(.unresolved(spoken: "arsperco purple", body: "")))
     }
 }
 

@@ -63,7 +63,7 @@ public enum VoiceCommandGrammar {
     ]
     static let openingVerbs = ["open", "launch"]
     static let focusVerbs = runningVerbs + openingVerbs
-    static let goBack = "go back"
+    public static let goBack = "go back"
     static let run = "run"
 
     private static let focusVerbPrefix: NSRegularExpression = {

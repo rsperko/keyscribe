@@ -17,10 +17,12 @@ enum PinnedAppleScript {
     private final class PinnedProcess {
         let pid: pid_t
         let isCurrent: () -> Bool
+        let prompting: Bool
         var gone = false
-        init(pid: pid_t, isCurrent: @escaping () -> Bool) {
+        init(pid: pid_t, isCurrent: @escaping () -> Bool, prompting: Bool) {
             self.pid = pid
             self.isCurrent = isCurrent
+            self.prompting = prompting
         }
     }
 
@@ -40,16 +42,20 @@ enum PinnedAppleScript {
         defer { AEDisposeDesc(&address) }
         status = AEPutAttributeDesc(&addressed, AEKeyword(keyAddressAttr), &address)
         guard status == noErr else { return status }
-        let sent = AESendMessage(&addressed, reply, mode, Int(timeout))
+        let sent = AESendMessage(&addressed, reply, sendMode(mode, prompting: process.prompting), Int(timeout))
         if sent == procNotFound || sent == connectionInvalid { process.gone = true }
         return OSErr(truncatingIfNeeded: sent)
     }
 
-    static func run(_ source: String, pid: Int32, isCurrent: () -> Bool) -> Reply {
+    static func sendMode(_ mode: AESendMode, prompting: Bool) -> AESendMode {
+        prompting ? mode : mode | AESendMode(kAEDoNotPromptForUserConsent)
+    }
+
+    static func run(_ source: String, pid: Int32, prompting: Bool = true, isCurrent: () -> Bool) -> Reply {
         guard let language = OSALanguage(forName: "AppleScript") else { return .failed(0) }
         let instance = OSALanguageInstance(language: language)
         return withoutActuallyEscaping(isCurrent) { isCurrent in
-            let process = PinnedProcess(pid: pid, isCurrent: isCurrent)
+            let process = PinnedProcess(pid: pid, isCurrent: isCurrent, prompting: prompting)
             return withExtendedLifetime(process) {
                 guard OSASetSendProc(instance.componentInstance, sendToProcess, Unmanaged.passUnretained(process).toOpaque()) == noErr
                 else { return .failed(0) }

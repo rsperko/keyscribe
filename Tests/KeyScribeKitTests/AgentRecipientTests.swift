@@ -21,6 +21,27 @@ struct AgentRecipientTests {
         #expect(initial(.current, focused: "b", current: "c") == .init(id: "c", source: .current))
     }
 
+    @Test(arguments: ["Run the unit tests.", "Keyscrib run the tests", "Open keyscrib"])
+    func anAddressThatFallsBackToTheRecipientUsesTheDefault(text: String) {
+        #expect(AgentRecipient.usesDefault(AgentAddress.parse(text, names: Array(names.keys))))
+    }
+
+    @Test(arguments: ["Tell backend to run the tests.", "Session 2 run the tests.", "Tell frontend to run the tests.", "Open backend"])
+    func anAddressThatNamesItsRecipientDoesNotUseTheDefault(text: String) {
+        #expect(!AgentRecipient.usesDefault(AgentAddress.parse(text, names: Array(names.keys))))
+    }
+
+    @Test func aMessageToTheConversationInFrontMakesItCurrent() {
+        let resolution = resolve("Run the unit tests.", frozen: .init(id: "b", source: .front))
+        #expect(resolution == .deliver(id: "b", body: "Run the unit tests.", source: .front))
+        #expect(resolution.makesCurrent == "b")
+    }
+
+    @Test func aMessageToTheCurrentOrFixedConversationLeavesCurrentAlone() {
+        #expect(resolve("Run the unit tests.", frozen: .init(id: "c", source: .current)).makesCurrent == nil)
+        #expect(resolve("Run the unit tests.", frozen: .init(id: "c", source: .fixed)).makesCurrent == nil)
+    }
+
     @Test func aFixedTargetUsesItsNameWhateverIsFocused() {
         #expect(initial(.handle("Backend"), focused: "b", current: "a") == .init(id: "c", source: .fixed))
         #expect(initial(.handle("frontend"), focused: "b") == nil)
@@ -133,8 +154,55 @@ struct AgentRecipientTests {
         #expect(resolve("Open backand", frozen: .init(id: "c", source: .current)) == .open(id: "c"))
     }
 
-    @Test func anOpenVerbFollowedByAnInstructionIsAMessageForTheRecipient() {
-        #expect(resolve("Open the readme.") == .deliver(id: "a", body: "Open the readme.", source: .focused))
+    @Test func aShortOpenThatNamesNoConversationIsHeldAndNamesWhatItSoundedLike() {
+        let held = AgentRecipient.Resolution.ask(body: "", reason: .soundsLike("key scrub", name: "keyscribe"))
+        #expect(resolve("Go to key scrub") == held)
+        #expect(resolve("Go to key scrub", frozen: .init(id: "a", source: .current)) == held)
+        #expect(resolve("Go to key scrub", frozen: .init(id: "c", source: .current)) == held)
+        #expect(resolve("Open the readme.") == .ask(body: "", reason: .unknownName("readme")))
+        #expect(resolve("Open the pull request") == .ask(body: "", reason: .unknownName("pull request")))
+    }
+
+    @Test func anOpenVerbFollowedByALongerInstructionOrAPronounIsAMessageForTheRecipient() {
+        let long = "Open the settings page and fix the toggle"
+        #expect(resolve(long) == .deliver(id: "a", body: long, source: .focused))
+        #expect(resolve("Open it.") == .deliver(id: "a", body: "Open it.", source: .focused))
+    }
+
+    @Test func aHeldOpenIsClassifiedTheSameWhateverConversationsExist() {
+        for names in [["backend": "c"], ["backend": "c", "coding agent build": "d"]] {
+            func resolve(_ text: String) -> AgentRecipient.Resolution {
+                AgentRecipient.resolve(
+                    AgentAddress.parse(text, names: Array(names.keys)), frozen: .init(id: "c", source: .current), rows: ["c"], names: names)
+            }
+            #expect(resolve("Go to key scrub") == .ask(body: "", reason: .unknownName("key scrub")))
+            let long = "Open the settings page and fix the toggle"
+            #expect(resolve(long) == .deliver(id: "c", body: long, source: .current))
+        }
+    }
+
+    @Test func equallyCloseSuggestionsAreOfferedTogetherAndACloserOneAlone() {
+        let names = ["keyscribe": "a", "keyscrabe": "b", "backend": "c"]
+        func resolve(_ text: String) -> AgentRecipient.Resolution {
+            AgentRecipient.resolve(
+                AgentAddress.parse(text, names: Array(names.keys)), frozen: .init(id: "a", source: .current), rows: ["a", "b", "c"], names: names)
+        }
+        #expect(resolve("Go to key scrub") == .ask(body: "", reason: .ambiguousName("key scrub", matches: ["keyscrabe", "keyscribe"])))
+        #expect(resolve("Go to back and") == .ask(body: "", reason: .soundsLike("back and", name: "backend")))
+    }
+
+    @Test func aMatchedLongNameAfterAnOpenVerbStillOpens() {
+        let names = ["coding agent build": "d", "backend": "c"]
+        let resolution = AgentRecipient.resolve(
+            AgentAddress.parse("Go to coding agent build", names: Array(names.keys)), frozen: nil, rows: ["c", "d"], names: names)
+        #expect(resolution == .open(id: "d"))
+    }
+
+    @Test func sessionAfterAnOpenVerbIsAlwaysANameHoweverLong() {
+        #expect(resolve("Open session key scrub") == .ask(body: "", reason: .soundsLike("key scrub", name: "keyscribe")))
+        #expect(resolve("Go to session zebra") == .ask(body: "", reason: .unknownName("zebra")))
+        #expect(resolve("Open session the big long name") == .ask(body: "", reason: .unknownName("the big long name")))
+        #expect(resolve("Go to session backend review") == .ask(body: "", reason: .unknownName("backend review")))
     }
 
     @Test func openingANumberNoConversationHasAsksAndNeverPicksThatRow() {

@@ -46,7 +46,7 @@ struct VoiceCommandWiringTests {
         private(set) var lateResult: (@MainActor (VoiceCommandOutcome) -> Void)?
         func run(
             transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript], origin: VoiceCommandOrigin?,
-            stillWanted: @MainActor () -> Bool, onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
+            stillWanted: @escaping @MainActor () -> Bool, onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
         ) async -> VoiceCommandOutcome {
             calls.append((transcript, places, scripts, origin))
             lateResult = onLateResult

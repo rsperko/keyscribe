@@ -108,6 +108,16 @@ struct AgentFrontTests {
         #expect(await moved.check(agent: 30) == .unknown(.changed))
     }
 
+    @Test func aWindowThatChangesDuringTheReadIsUnknownAndTheReadingNamesItsWindow() async {
+        let first = FrontApp(bundle: Self.ghostty, pid: 10, name: "Ghostty", window: "cg:3")
+        let second = FrontApp(bundle: Self.ghostty, pid: 10, name: "Ghostty", window: "cg:5")
+        let agents = [AgentFrontCandidate(id: "a", pid: 30)]
+        #expect(await front(Front(first)).shown(among: agents) == FrontSession(id: "a", app: first))
+        let apps = Front(first)
+        let moved = front(apps, onSecondRead: { apps.apps = [second] })
+        #expect(await moved.shown(among: agents) == nil)
+    }
+
     @Test func anAppThatChangesDuringTheSecondReadIsUnknown() async {
         let apps = Front(Self.ghosttyApp)
         let check = front(apps, onSecondRead: { apps.apps = [Self.safari] })
@@ -118,6 +128,15 @@ struct AgentFrontTests {
         let check = front(Front(Self.ghosttyApp))
         #expect(await check.check(agent: 30) == .shown)
         #expect(await check.check(agent: 40) == .elsewhere)
+    }
+
+    @Test func theOneAgentShownInTheFrontTerminalIsPickedOutOfSeveral() async {
+        let agents = [AgentFrontCandidate(id: "a", pid: 30), AgentFrontCandidate(id: "b", pid: 40)]
+        #expect(await front(Front(Self.ghosttyApp)).shown(among: agents) == FrontSession(id: "a", app: Self.ghosttyApp))
+        #expect(await front(Front(Self.ghosttyApp), reply: .value("/dev/ttys005")).shown(among: agents) == FrontSession(id: "b", app: Self.ghosttyApp))
+        #expect(await front(Front(Self.ghosttyApp), reply: .value("/dev/ttys009")).shown(among: agents) == nil)
+        #expect(await front(Front(Self.safari)).shown(among: agents) == nil)
+        #expect(await front(Front(Self.ghosttyApp), reply: .notAllowed).shown(among: agents) == nil)
     }
 
     @Test func aFrontAppWithoutATerminalRouteIsUnknown() async {

@@ -73,7 +73,7 @@ struct VoiceCommandRunnerTests {
         private(set) var focusedWindows: [VoiceCommandCatalog.Window] = []
         private(set) var activatedPids: [Int32] = []
         func windows() async -> VoiceCommandCatalog.WindowScan { windowReads += 1; return windowScan }
-        func focusWindow(_ window: VoiceCommandCatalog.Window, stillWanted: @MainActor () -> Bool) async -> WindowFocusResult {
+        func focusWindow(_ window: VoiceCommandCatalog.Window, stillWanted: @escaping @MainActor () -> Bool) async -> WindowFocusResult {
             focusedWindows.append(window)
             whileFocusingWindow()
             guard stillWanted() else { return .cancelled }
@@ -177,6 +177,166 @@ struct VoiceCommandRunnerTests {
         _ = await runner.run(transcript: "switch to ghostty", places: [], origin: .init(bundleId: ghostty.bundleId))
         #expect(await runner.run(transcript: "go back", places: [], origin: .init(bundleId: ghostty.bundleId))
                 == .done(summary: "TextEdit", command: "Returns to TextEdit."))
+    }
+
+    @Test func aRecordedReturnDestinationIsWhereGoBackGoesAndItToggles() async {
+        let (runner, system) = make()
+        runner.recordReturn(to: .init(bundleId: textEdit.bundleId))
+        #expect(await runner.run(transcript: "go back", places: [], origin: .init(bundleId: ghostty.bundleId))
+                == .done(summary: "TextEdit", command: "Returns to TextEdit."))
+        #expect(runner.backTarget == .init(bundleId: ghostty.bundleId))
+        #expect(system.activatedPids == [system.runningPid(bundleId: textEdit.bundleId)])
+    }
+
+    @Test func ownAppIsNeverRecordedAsAReturnDestination() async {
+        let (runner, _) = make()
+        runner.recordReturn(to: .init(bundleId: textEdit.bundleId))
+        runner.recordReturn(to: .init(bundleId: "com.keyscribe.app.dev"))
+        #expect(runner.backTarget == .init(bundleId: textEdit.bundleId))
+    }
+
+    nonisolated static let terminal = FrontApp(bundle: "com.mitchellh.ghostty", pid: 9, name: "Ghostty", window: "cg:3")
+
+    final class Sessions: @unchecked Sendable {
+        var inFront: FrontSession?
+        var result: AgentFocusResult = .exact
+        var handles: [String: String] = ["a": "docs", "b": "backend"]
+        var whileOpening: @MainActor () -> Void = {}
+        private(set) var opened: [String] = []
+        private(set) var reads = 0
+        private(set) var wantedAfterOpening: [Bool] = []
+        var returns: SessionReturns {
+            SessionReturns(
+                inFront: { self.reads += 1; return self.inFront },
+                open: { id, stillWanted in
+                    self.opened.append(id)
+                    self.whileOpening()
+                    self.wantedAfterOpening.append(stillWanted())
+                    return self.result
+                },
+                handle: { self.handles[$0] })
+        }
+    }
+
+    @Test func goBackToASessionStopsWhenTheStopCheckFailsDuringTheOpen() async {
+        let (runner, system) = make()
+        let sessions = Sessions()
+        runner.returnToSessions(sessions.returns)
+        let destination = VoiceCommandOrigin(bundleId: ghostty.bundleId, session: "a")
+        runner.recordReturn(to: destination)
+        let flag = Flag()
+        sessions.whileOpening = { flag.wanted = false }
+        #expect(await runner.run(transcript: "go back", places: [], origin: .init(bundleId: textEdit.bundleId), stillWanted: { flag.wanted })
+                == .abandoned)
+        #expect(sessions.wantedAfterOpening == [false])
+        #expect(runner.backTarget == destination)
+        #expect(system.activatedPids.isEmpty)
+    }
+
+    @Test func goBackToAnAppRemembersTheSessionItLeft() async {
+        let (runner, _) = make()
+        let sessions = Sessions()
+        sessions.inFront = FrontSession(id: "b", app: Self.terminal)
+        runner.returnToSessions(sessions.returns)
+        runner.recordReturn(to: .init(bundleId: textEdit.bundleId))
+        #expect(await runner.run(transcript: "go back", places: [], origin: .init(bundleId: ghostty.bundleId, pid: 9, windowId: "cg:3"))
+                == .done(summary: "TextEdit", command: "Returns to TextEdit."))
+        #expect(runner.backTarget == .init(bundleId: ghostty.bundleId, pid: 9, windowId: "cg:3", session: "b"))
+    }
+
+    @Test func switchingAppsRemembersTheSessionItLeftButRunningAScriptReadsNothing() async {
+        let (runner, _) = make()
+        let sessions = Sessions()
+        sessions.inFront = FrontSession(id: "b", app: Self.terminal)
+        runner.returnToSessions(sessions.returns)
+        _ = await runner.run(transcript: "switch to chrome", places: [], origin: .init(bundleId: ghostty.bundleId, pid: 9))
+        #expect(runner.backTarget == .init(bundleId: ghostty.bundleId, pid: 9, session: "b"))
+        #expect(sessions.reads == 1)
+        _ = await runner.run(transcript: "run deploy prod", places: [], scripts: [deploy], origin: .init(bundleId: ghostty.bundleId))
+        #expect(sessions.reads == 1)
+    }
+
+    @Test func aSessionShownInAnotherAppOrProcessThanTheOriginIsNotAttachedToIt() async {
+        let (runner, _) = make()
+        let sessions = Sessions()
+        sessions.inFront = FrontSession(id: "b", app: Self.terminal)
+        runner.returnToSessions(sessions.returns)
+        _ = await runner.run(transcript: "switch to chrome", places: [], origin: .init(bundleId: textEdit.bundleId))
+        #expect(runner.backTarget == .init(bundleId: textEdit.bundleId))
+        _ = await runner.run(transcript: "switch to textedit", places: [], origin: .init(bundleId: ghostty.bundleId, pid: 10))
+        #expect(runner.backTarget == .init(bundleId: ghostty.bundleId, pid: 10))
+    }
+
+    @Test func aSessionShownInAnotherWindowOfTheSameTerminalIsNotAttachedToTheOrigin() async {
+        let (runner, _) = make()
+        let sessions = Sessions()
+        sessions.inFront = FrontSession(id: "b", app: FrontApp(bundle: ghostty.bundleId, pid: 9, name: "Ghostty", window: "cg:5"))
+        runner.returnToSessions(sessions.returns)
+        _ = await runner.run(transcript: "switch to chrome", places: [], origin: .init(bundleId: ghostty.bundleId, pid: 9, windowId: "cg:3"))
+        #expect(runner.backTarget == .init(bundleId: ghostty.bundleId, pid: 9, windowId: "cg:3"))
+        _ = await runner.run(transcript: "switch to textedit", places: [], origin: .init(bundleId: ghostty.bundleId, pid: 9, windowId: "cg:5"))
+        #expect(runner.backTarget == .init(bundleId: ghostty.bundleId, pid: 9, windowId: "cg:5", session: "b"))
+        sessions.inFront = FrontSession(id: "b", app: FrontApp(bundle: ghostty.bundleId, pid: 9, name: "Ghostty"))
+        _ = await runner.run(transcript: "switch to chrome", places: [], origin: .init(bundleId: ghostty.bundleId, pid: 9, windowId: "cg:5"))
+        #expect(runner.backTarget == .init(bundleId: ghostty.bundleId, pid: 9, windowId: "cg:5"))
+    }
+
+    final class Flag: @unchecked Sendable { var wanted = true }
+
+    @Test func goBackToASessionOpensItAndTogglesToTheSessionItLeft() async {
+        let (runner, system) = make()
+        let sessions = Sessions()
+        sessions.inFront = FrontSession(id: "b", app: Self.terminal)
+        runner.returnToSessions(sessions.returns)
+        runner.recordReturn(to: .init(bundleId: ghostty.bundleId, pid: 9, windowId: "cg:3", session: "a"))
+        #expect(await runner.run(transcript: "go back", places: [], origin: .init(bundleId: ghostty.bundleId, pid: 9, windowId: "cg:3"))
+                == .done(summary: "docs", command: "Returns to docs."))
+        #expect(sessions.opened == ["a"])
+        #expect(system.activatedPids.isEmpty)
+        #expect(runner.backTarget == .init(bundleId: ghostty.bundleId, pid: 9, windowId: "cg:3", session: "b"))
+    }
+
+    @Test func goBackToASessionThatEndedReturnsToItsWindow() async {
+        let (runner, system) = make()
+        let sessions = Sessions()
+        sessions.handles = [:]
+        runner.returnToSessions(sessions.returns)
+        runner.recordReturn(to: .init(bundleId: textEdit.bundleId, session: "a"))
+        #expect(await runner.run(transcript: "go back", places: [], origin: .init(bundleId: ghostty.bundleId))
+                == .done(summary: "TextEdit", command: "Returns to TextEdit."))
+        #expect(sessions.opened.isEmpty)
+        #expect(system.activatedPids == [system.runningPid(bundleId: textEdit.bundleId)])
+    }
+
+    @Test func goBackToASessionWhoseTabWasNotSelectedKeepsTheDestination() async {
+        let (runner, _) = make()
+        let sessions = Sessions()
+        sessions.result = .app("Ghostty")
+        runner.returnToSessions(sessions.returns)
+        let destination = VoiceCommandOrigin(bundleId: ghostty.bundleId, session: "a")
+        runner.recordReturn(to: destination)
+        #expect(await runner.run(transcript: "go back", places: [], origin: .init(bundleId: textEdit.bundleId))
+                == .failed(message: "Brought Ghostty forward; docs\u{2019}s tab not found", command: "Returns to docs."))
+        #expect(runner.backTarget == destination)
+    }
+
+    @Test func goBackToASessionNothingCouldShowReturnsToItsWindow() async {
+        let (runner, system) = make()
+        let sessions = Sessions()
+        sessions.result = .none
+        runner.returnToSessions(sessions.returns)
+        runner.recordReturn(to: .init(bundleId: textEdit.bundleId, session: "a"))
+        #expect(await runner.run(transcript: "go back", places: [], origin: .init(bundleId: ghostty.bundleId))
+                == .done(summary: "TextEdit", command: "Returns to TextEdit."))
+        #expect(system.activatedPids == [system.runningPid(bundleId: textEdit.bundleId)])
+    }
+
+    @Test func withoutSessionSupportASessionDestinationReturnsToItsWindow() async {
+        let (runner, system) = make()
+        runner.recordReturn(to: .init(bundleId: textEdit.bundleId, session: "a"))
+        #expect(await runner.run(transcript: "go back", places: [], origin: .init(bundleId: ghostty.bundleId))
+                == .done(summary: "TextEdit", command: "Returns to TextEdit."))
+        #expect(system.activatedPids == [system.runningPid(bundleId: textEdit.bundleId)])
     }
 
     @Test func goBackWithNothingToReturnToFails() async {

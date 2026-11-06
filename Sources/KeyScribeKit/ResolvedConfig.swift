@@ -144,6 +144,15 @@ public final class ResolvedConfig: @unchecked Sendable {
         return (sameCommand ? corrected : read, payload.firedReplacements)
     }
 
+    public func agentAddressReader(for transcript: String, mode: Mode?) -> ((String) -> String)? {
+        let pipeline = Pipeline(postSTTTextStages(for: mode))
+        guard pipeline.forward(transcript).bareReplacement == nil else { return nil }
+        return { words in
+            let payload = pipeline.forward(words)
+            return payload.bareReplacement?.text ?? pipeline.restore(payload.text)
+        }
+    }
+
     // The words a command acts on: what a "switch to" targets, or what follows a saved command's name.
     private static func correctableRange(
         of read: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript]

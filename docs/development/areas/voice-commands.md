@@ -68,6 +68,13 @@ above applies to it, with these sharpenings:
   without waiting for them, verify uninstall state, and keep partial cleanup safe to retry.
 - **An unknown or ambiguous spoken recipient never falls through to the current recipient.** It holds
   and asks, like any unresolved target.
+- **A spoken recipient is matched as heard first, then as the mode's replacements and dictionary read
+  it.** The reading only picks the name (`AgentAddress.parse`'s `read`, built by
+  `ResolvedConfig.agentAddressReader`); the message after it, near misses, and ties come from the words
+  as heard. A correction never picks between names: when the words as heard sound like another live
+  name too, the address stays as heard. A take that a whole-utterance replacement owns is never
+  corrected into an address; only a name said as it is addresses it. Accepted edge: at the start of a
+  longer take, replacement or dictionary output that equals a live session name addresses that session.
 - **Cancel withdraws the request itself, not just its HUD.** A message the user cancelled must not
   still send, and a cancelled message must not stay visible as if it will.
 - **A receipt timeout is "unknown", not "failed" or "gone".** A request that may still be delivered
