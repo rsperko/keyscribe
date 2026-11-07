@@ -1529,8 +1529,9 @@ instructions go there unless another conversation is in front, and another name 
 an addressing surface, so row numbers appear only on the recording HUD, where “session two” is said and the
 numbering is frozen for the take. Each row is identified to assistive technology by its conversation name.
 The first line holds the name, Current and the text-only live state, with small, native bordered actions
-visibly distinct from the status labels. Actions move beneath the heading when they would squeeze the
-name; the name may wrap to two lines and its full text remains available on hover. The second line shows
+visibly distinct from the status labels. Actions stay aligned at the trailing edge; the name wraps within
+the remaining space to two lines and its full text remains available on hover. When the heading is too
+narrow, the state moves below the name while the actions stay on the right. The context line shows
 the directory on the left and the terminal/multiplexer on the right, with the agent type before the
 directory only when the list contains different agent types. The directory abbreviates the home folder
 with `~`, truncates in the middle when needed, and exposes its full path in a tooltip. Clicking it copies

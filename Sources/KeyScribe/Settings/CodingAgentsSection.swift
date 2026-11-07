@@ -79,16 +79,10 @@ struct CodingAgentRecipientSection: View {
     private func conversationRow(_ row: CodingAgentsSettingsModel.Row) -> some View {
         let action = model.action(for: row)
         return VStack(alignment: .leading, spacing: 2) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    conversationHeading(row).fixedSize(horizontal: true, vertical: false)
-                    Spacer(minLength: 0)
-                    HStack(spacing: 8) { rowButtons(row, action: action) }
-                }
-                VStack(alignment: .leading, spacing: 6) {
-                    conversationHeading(row)
-                    HStack(spacing: 8) { rowButtons(row, action: action) }
-                }
+            HStack(alignment: .top, spacing: 12) {
+                conversationHeading(row)
+                HStack(spacing: 8) { rowButtons(row, action: action) }
+                    .fixedSize()
             }
             HStack(spacing: 8) {
                 if model.showsAgentType {
@@ -118,12 +112,22 @@ struct CodingAgentRecipientSection: View {
     }
 
     private func conversationHeading(_ row: CodingAgentsSettingsModel.Row) -> some View {
-        PaneListRow(title: row.name, badges: {
+        let title = PaneListRow(title: row.name, badges: {
             if row.current { PaneBadge("Current", kind: .prominent).fixedSize() }
-        }, trailing: {
-            Text(row.state).font(.caption)
-                .foregroundStyle(row.connected ? Color.secondary : Color.orange).fixedSize()
         })
+        let state = Text(row.state).font(.caption)
+            .foregroundStyle(row.connected ? Color.secondary : Color.orange).fixedSize()
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 8) {
+                title
+                state.padding(.vertical, 2)
+            }
+            .fixedSize(horizontal: true, vertical: false)
+            VStack(alignment: .leading, spacing: 2) {
+                title
+                state
+            }
+        }
         .lineLimit(2).truncationMode(.middle).help(row.name)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
