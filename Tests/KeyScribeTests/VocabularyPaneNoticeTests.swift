@@ -49,6 +49,28 @@ struct VocabularyPaneNoticeTests {
         #expect(model.rules.map(\.heard) == ["recieve"])
     }
 
+    @Test func aRuleAndItsPluralAreSavedTogetherInGlobal() throws {
+        let (repository, support) = try makeSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let model = ReplacementsSettingsModel(repository: repository)
+        #expect(model.add([
+            .init(heard: "pain", replace: "pane", regex: false), .init(heard: "pains", replace: "panes", regex: false),
+        ]))
+        #expect(ReplacementsStore.loadOrDefault(supportDir: support).rules.map(\.heard) == ["pain", "pains"])
+    }
+
+    @Test func aRuleAndItsPluralThatCannotBeSavedSaveNeither() throws {
+        let (repository, support) = try makeSupport()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let url = support.appendingPathComponent(ReplacementsStore.fileName)
+        try broken.write(to: url, atomically: true, encoding: .utf8)
+        let model = ReplacementsSettingsModel(repository: repository)
+        #expect(!model.add([
+            .init(heard: "pain", replace: "pane", regex: false), .init(heard: "pains", replace: "panes", regex: false),
+        ]))
+        #expect(try String(contentsOf: url, encoding: .utf8) == broken)
+    }
+
     @Test func aReloadWhileTheFileIsStillBrokenKeepsTheFailedOperation() throws {
         let (repository, support) = try makeSupport()
         defer { try? FileManager.default.removeItem(at: support) }

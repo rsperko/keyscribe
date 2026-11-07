@@ -52,7 +52,7 @@ struct HistoryRow: Identifiable, Sendable {
 @MainActor
 final class HistoryPaneModel: ObservableObject {
     @Published var query = "" { didSet { scheduleRecompute() } }
-    @Published var selection: HistoryRow.ID?
+    @Published var selection: HistoryRow.ID? { didSet { if selection != oldValue { refreshHints() } } }
     @Published private(set) var groups: [(day: String, rows: [HistoryRow])] = []
     @Published private(set) var isLoading = false
     @Published private(set) var statusMessage: String?
@@ -84,6 +84,9 @@ final class HistoryPaneModel: ObservableObject {
     var copyText: ((String) -> Void)?
     var pasteText: ((String) -> Void)?
     var rewriteAgain: ((HistoryEntry) async -> DictationController.RewriteAgain)?
+    var mishearingHints: ((HistoryEntry) async -> [MishearingHint.Suggestion])?
+    @Published private(set) var hints: [MishearingHint.Suggestion] = []
+    private(set) var hintsTask: Task<Void, Never>?
     @Published private(set) var rewritingAgain = false
     @Published private(set) var unsavedRewrite: (id: String, text: String)?
     private(set) var rewriteAgainTask: Task<Void, Never>?
@@ -314,6 +317,36 @@ final class HistoryPaneModel: ObservableObject {
     func copyResult() { if let r = selected?.result, !r.isEmpty { copyText?(r) } }
     func copyHeard() { if let h = selected?.heard, !h.isEmpty { copyText?(h) } }
     func pasteResult() { if let r = selected?.result, !r.isEmpty { pasteText?(r) } }
+    // Likely mishearings of dictionary words in the selected dictation, for the user to judge. A command or a
+    // Coding agent message is left out: its words were not dictated text.
+    func refreshHints() {
+        hintsTask?.cancel()
+        hints = []
+        guard let entry = selected, !entry.outcome.isCommand, entry.summary == nil, !entry.heard.isEmpty,
+              let mishearingHints else { return }
+        hintsTask = Task { @MainActor [weak self] in
+            let found = await mishearingHints(entry)
+            guard let self, !Task.isCancelled, self.selected?.id == entry.id, self.selected?.heard == entry.heard else { return }
+            self.hints = found
+        }
+    }
+
+    func reviewMishearings(_ hint: MishearingHint.Suggestion) {
+        let scope: CorrectionDestination.Scope = switch hint.origin {
+        case .global: .global
+        case .mode(let id): .mode(id)
+        }
+        guard mishearings == nil,
+              let model = mishearingsFinder?(hint.term, scope, { [weak self] in self?.mishearingsSaved($0) }) else { return }
+        mishearings = model
+    }
+
+    private func mishearingsSaved(_ count: Int) {
+        dismissMishearings()
+        flash(count == 1 ? "Added 1 replacement" : "Added \(count) replacements")
+        refreshHints()
+    }
+
     var canRewriteSelectedAgain: Bool { rewriteAgain != nil && selected?.canRewriteAgain == true }
 
     func rewriteSelectedAgain() {
@@ -377,6 +410,7 @@ final class HistoryPaneModel: ObservableObject {
     func saveReplacement(_ heard: String, _ replace: String) -> String? {
         let added = addReplacement(heard, replace)
         guard added == .saved else { return Self.failureMessage(added) }
+        refreshHints()
         let target = replace.isEmpty ? "nothing" : ReplacementAuthoring.preview(for: replace).text
         flash("\(correctsCommands ? "Future voice commands" : "Future dictations") will replace \u{201C}\(heard)\u{201D} with \u{201C}\(target)\u{201D}.")
         return nil
@@ -385,6 +419,7 @@ final class HistoryPaneModel: ObservableObject {
     func saveDictionaryWord(_ term: String, _ action: VocabularyAnalysis.Action) -> String? {
         let added = addDictionaryWord(term)
         guard added == .saved else { return Self.failureMessage(added) }
+        refreshHints()
         offerMishearings(of: term)
         let destination = correctsCommands
             ? "the Voice Commands dictionary."
@@ -421,10 +456,8 @@ final class HistoryPaneModel: ObservableObject {
     // a second sheet presented while the first is still animating out can be dropped, and would then never show.
     private func offerMishearings(of word: String) {
         guard mishearings == nil, foundMishearings == nil,
-              let model = mishearingsFinder?(word, correctionScope, { [weak self] count in
-                  self?.dismissMishearings()
-                  self?.flash(count == 1 ? "Added 1 replacement" : "Added \(count) replacements")
-              }) else { return }
+              let model = mishearingsFinder?(word, correctionScope, { [weak self] in self?.mishearingsSaved($0) })
+        else { return }
         model.offeredAfterAdding = true
         dictionarySheetClosed = false
         Task { [weak self] in
@@ -828,6 +861,17 @@ private struct HistoryDetailView: View {
                 }
             } else {
                 comparison
+                ForEach(model.hints, id: \.term) { hint in
+                    HStack(spacing: 8) {
+                        Text("\u{201C}\(hint.phrase)\u{201D} may be \u{201C}\(hint.term)\u{201D}")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                        Button("Review Mishearings\u{2026}") { model.reviewMishearings(hint) }
+                            .controlSize(.small)
+                    }
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier(AccessibilityID.History.mishearingHint)
+                }
             }
             if entry.facts != nil || entry.steps != nil {
                 VStack(alignment: .leading, spacing: 8) {

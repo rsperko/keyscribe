@@ -979,6 +979,9 @@ composer and lists do not live inside the mode editor.
   order:
   - one sentence when the rule is not an ordinary word fix: **Matches only when said alone. Presses
     Return.** (or without the second sentence);
+  - in the composer, for a new one-word rule that writes a lowercase word and whose plural has no rule
+    yet, an unchecked **Also replace “pains” with “panes”** checkbox; checked, Add saves the plural as a
+    second, ordinary rule that appears in the list. Rules are never widened at dictation time;
   - an advisory when a Return-pressing rule can act mid-sentence (**This rule also replaces words within
     sentences, where Return is skipped.**), shown whether or not History has an example, with **Only
     Match When Said Alone** beside it. That repair changes where the rule matches — the same setting as
@@ -1925,6 +1928,14 @@ time, so a later rename or reorder does not change them. When an AI rewrite ran,
 rewrite** offers the usual comparison, collapsed, with the final text called **Result**. A message whose
 rewrite fell back or was skipped stays **Local fallback** or **Rewrite skipped** after it is sent. The
 text and Markdown exports carry the same summary and lines, and say why local text was kept.
+
+Under the comparison of a dictation (not a command or a Coding agent message), a line names each likely
+mishearing of a dictionary word that applied to it and that no rule or near match already fixes:
+**“Cryden” may be “Kryten”**, with **Review Mishearings…**, which opens the **Mishearings of “Kryten”**
+sheet in the scope the word lives in (Global, or the mode whose own dictionary holds it). One line per
+word, its likeliest spelling. It uses the History finder's scoring on that one dictation, so a common
+word that sounds like a name can be named too; the user judges it, and nothing is changed or sent anywhere.
+The line goes away once a rule fixes the phrase.
 
 Correction actions are directly beside the relevant text:
 

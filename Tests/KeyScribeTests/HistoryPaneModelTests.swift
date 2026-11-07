@@ -370,6 +370,36 @@ struct HistoryPaneModelTests {
         #expect(model.statusMessage == nil)
     }
 
+    @Test func theSelectedDictationShowsLikelyMishearingsAndACommandShowsNone() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var dictation = entry("Cryden, make a pane")
+        dictation.id = "d"
+        var command = entry("open Cryden")
+        command.id = "c"
+        command.outcome = .command
+        command.timestamp = Date(timeIntervalSince1970: 2_000_000)
+        try store.append(dictation, today: "2026-07-10")
+        try store.append(command, today: "2026-07-10")
+        let model = model(store)
+        var asked: [String] = []
+        model.mishearingHints = { entry in
+            asked.append(entry.heard)
+            return [.init(phrase: "Cryden", term: "Kryten", origin: .global)]
+        }
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+
+        model.selection = model.groups.flatMap(\.rows).first { $0.entry.id == "d" }?.id
+        await model.hintsTask?.value
+        #expect(model.hints == [.init(phrase: "Cryden", term: "Kryten", origin: .global)])
+
+        model.selection = model.groups.flatMap(\.rows).first { $0.entry.id == "c" }?.id
+        await model.hintsTask?.value
+        #expect(model.hints.isEmpty)
+        #expect(asked == ["Cryden, make a pane"])
+    }
+
     private func model(_ store: HistoryStore, corrections: Corrections = Corrections()) -> HistoryPaneModel {
         HistoryPaneModel(
             store: store,

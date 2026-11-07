@@ -8,6 +8,11 @@ private func run(_ rules: [ReplacementRule], on text: String) -> String {
 }
 
 struct ReplacementsStageTests {
+    @Test func aOneWordRuleReplacesExactlyItsOwnWordAndNoPlural() {
+        let rule = ReplacementRule(heard: "pain", replace: "pane", isRegex: false)
+        #expect(run([rule], on: "What pains? One pain.") == "What pains? One pane.")
+    }
+
     @Test func literalReplacement() {
         #expect(run([ReplacementRule(heard: "teh", replace: "the", isRegex: false)], on: "teh cat") == "the cat")
     }

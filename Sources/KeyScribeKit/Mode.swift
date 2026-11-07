@@ -901,3 +901,11 @@ public enum ModeStore {
         saveLedger(ledger, in: ledgerDir)
     }
 }
+
+extension Mode {
+    public func addingReplacements(_ rules: [ReplacementsSet.Rule]) -> Mode {
+        var updated = self
+        updated.replacements.rules = ReplacementsSet(rules: replacements.rules).adding(rules).rules
+        return updated
+    }
+}

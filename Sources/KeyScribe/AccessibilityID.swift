@@ -70,6 +70,7 @@ enum AccessibilityID {
             static let composerUseInsteadExpand = "settings.vocabulary.composer.useInstead.expand"
             static let composerUseInsteadEditor = "settings.vocabulary.composer.useInstead.editor"
             static let composerUseInsteadEditorDone = "settings.vocabulary.composer.useInstead.editorDone"
+            static let composerAddPlural = "settings.vocabulary.composer.addPlural"
             static let composerRegexToggle = "settings.vocabulary.composer.regexToggle"
             static let composerAdvanced = "settings.vocabulary.composer.advanced"
             static let composerAdd = "settings.vocabulary.composer.add"
@@ -487,6 +488,7 @@ enum AccessibilityID {
         static let export = "history.action.export"
         static let rewriteAgain = "history.action.rewriteAgain"
         static let copyUnsavedRewrite = "history.action.copyUnsavedRewrite"
+        static let mishearingHint = "history.detail.mishearingHint"
         static let stagePicker = "history.detail.stagePicker"
         static let whatHappened = "history.detail.whatHappened"
         static let actionOutcome = "history.detail.actionOutcome"
@@ -587,7 +589,7 @@ enum AccessibilityID {
         Settings.HistoryReplacements.cancel, Settings.HistoryReplacements.add,
         Settings.Vocabulary.composerTerm, Settings.Vocabulary.composerUseInstead,
         Settings.Vocabulary.composerUseInsteadExpand, Settings.Vocabulary.composerUseInsteadEditor,
-        Settings.Vocabulary.composerUseInsteadEditorDone,
+        Settings.Vocabulary.composerUseInsteadEditorDone, Settings.Vocabulary.composerAddPlural,
         Settings.Vocabulary.composerRegexToggle, Settings.Vocabulary.composerAdvanced, Settings.Vocabulary.composerAdd,
         Settings.Vocabulary.composerStatus, Settings.Vocabulary.recognitionHelp,
         Settings.Vocabulary.dictionaryList, Settings.Vocabulary.dictionaryDeleteConfirmConfirm,
@@ -659,6 +661,7 @@ enum AccessibilityID {
         HUD.panel, HUD.insertWithoutRewriting, HUD.pasteLast, HUD.repairAction,
         History.list, History.search, History.export, History.stagePicker, History.comparisonPicker, History.whatHappened, History.actionOutcome, History.rewriteComparison,
         History.promptDisclosure, History.receivedDisclosure, History.copyResult, History.pasteResult, History.copyHeard, History.delete,
+        History.rewriteAgain, History.copyUnsavedRewrite, History.mishearingHint,
         History.manageVocabulary, History.createReplacement, History.addToDictionary,
         History.retentionConfirm, History.retentionCancel,
         History.ReplacementSheet.source, History.ReplacementSheet.replace, History.ReplacementSheet.save,

@@ -123,7 +123,13 @@ applies to names of five letters or more, so "marks" never turns into Marks beca
 A near-miss fix only reaches spellings a letter or two away. A name your speech model hears as a
 different word (Kryten as "Croydon") needs a replacement. When you add a word and your History already
 holds likely mishearings of it, KeyScribe offers them straight away, unchecked, each with the sentence
-it came from: tick the ones that really were your word.
+it came from: tick the ones that really were your word. A mishearing that turns up later is pointed out
+in History: open the dictation, and a line under it says "Cryden" may be "Kryten", with **Review
+Mishearings…**.
+
+A replacement changes only the words it names, so `pain` → `pane` leaves "pains" alone. When you add a
+one-word replacement, Settings offers to add its plural as well (`pains` → `panes`): tick **Also replace
+“pains” with “panes”**.
 
 If a word comes out correctly spelled but mis-capitalized or punctuated (say `pi` → `Pi.`), see
 [Tips & Tricks](docs/tips.md) for how to pin the exact output.

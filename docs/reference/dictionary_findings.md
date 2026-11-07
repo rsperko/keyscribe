@@ -516,6 +516,15 @@ are offered unchecked beside their sentences. Adding a word to the dictionary no
 once, so the near match stays as strict as the sections above require and the misheard spellings are
 learned as replacements in the same step.
 
+### Likely mishearings are shown to the user, never sent to the model (2026-11-07)
+
+History names likely mishearings of a dictionary word in the dictation being viewed ("Cryden" may be
+"Kryten"), from the History finder's scoring on that one dictation, leaving out a phrase a rule or the
+near match already fixes (`MishearingHint`). The person who said it judges the suggestion and confirms a
+replacement; nothing is rewritten and nothing reaches the AI rewrite, because a model accepts a sound-alike
+it is handed (above). The cost is the finder's: a common word with the same skeleton ("curtain" for
+Kryten) can be named, which is why it is a line to review, not a correction.
+
 ### What a whole-list competitor actually sends (2026-10-20, live capture)
 
 One MacWhisper (build 1553) request to an OpenAI-compatible endpoint was captured through a logging

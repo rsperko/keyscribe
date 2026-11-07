@@ -649,7 +649,7 @@ struct ReplacementEditor: View {
 struct VocabularyComposer: View {
     let analyze: (VocabularyProposal) -> VocabularyAnalysis
     let onAddWord: (String) -> Bool
-    let onAddReplacement: (ReplacementsSet.Rule) -> Bool
+    let onAddReplacement: ([ReplacementsSet.Rule]) -> Bool
     let existingRules: [ReplacementsSet.Rule]
     @StateObject private var preview: RulePreviewModel
     private let showsPreview: Bool
@@ -658,12 +658,13 @@ struct VocabularyComposer: View {
     @State private var regex = false
     @State private var chosenWholeDictation: Bool?
     @State private var advancedExpanded = false
+    @State private var addsPlural = false
     @FocusState private var focus: Field?
 
     init(
         analyze: @escaping (VocabularyProposal) -> VocabularyAnalysis,
         onAddWord: @escaping (String) -> Bool,
-        onAddReplacement: @escaping (ReplacementsSet.Rule) -> Bool,
+        onAddReplacement: @escaping ([ReplacementsSet.Rule]) -> Bool,
         existingRules: [ReplacementsSet.Rule] = [],
         previewSource: RulePreviewModel.Source? = nil
     ) {
@@ -762,6 +763,13 @@ struct VocabularyComposer: View {
                     replace: rule.replace, regex: rule.regex, wholeDictation: rule.wholeDictation) {
                     Text(summary).font(.callout)
                 }
+                if existingRule == nil, let plural = ReplacementPlural.offer(for: rule, among: existingRules) {
+                    Toggle(
+                        "Also replace \u{201C}\(plural.heard)\u{201D} with \u{201C}\(plural.replace)\u{201D}",
+                        isOn: $addsPlural)
+                        .toggleStyle(.checkbox)
+                        .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerAddPlural)
+                }
             }
             DisclosureSection("Advanced", isExpanded: advancedBinding) {
                 Toggle("Match heard phrase as a regular expression", isOn: $regex)
@@ -819,13 +827,21 @@ struct VocabularyComposer: View {
         let saved = switch proposal {
         case .word(let word): onAddWord(word)
         case .replacement(let heard, let replace, let regex):
-            onAddReplacement(ReplacementsSet.Rule(
+            addReplacement(ReplacementsSet.Rule(
                 heard: heard, replace: replace, regex: regex, wholeDictation: wholeDictation.wrappedValue))
         }
         if saved { reset() }
     }
 
+    // The plural is a second, ordinary rule of its own, saved only when asked for, so the list shows everything
+    // that runs.
+    private func addReplacement(_ rule: ReplacementsSet.Rule) -> Bool {
+        let plural = addsPlural && existingRule == nil ? ReplacementPlural.offer(for: rule, among: existingRules) : nil
+        return onAddReplacement([rule] + (plural.map { [$0] } ?? []))
+    }
+
     private func reset() {
+        addsPlural = false
         heard = ""
         replace = ""
         regex = false
@@ -985,7 +1001,7 @@ struct VocabularySettingsView: View {
                 },
                 onAddWord: { dictionary.add($0) },
                 onRemoveWord: dictionary.remove,
-                onAddReplacement: { replacements.add(heard: $0.heard, replace: $0.replace, regex: $0.regex, wholeDictation: $0.wholeDictation) },
+                onAddReplacement: { replacements.add($0) },
                 onUpdateReplacement: replacements.update,
                 rulePreviewSource: rulePreviewSource?(.global),
                 onMoveReplacement: replacements.move,
@@ -1035,12 +1051,7 @@ struct VocabularySettingsView: View {
                 updated.dictionary.words.removeAll { $0 == word }
                 modes.update(updated)
             },
-            onAddReplacement: { rule in
-                var updated = mode
-                updated.replacements.rules = ReplacementsSet(rules: mode.replacements.rules)
-                    .adding(heard: rule.heard, replace: rule.replace, regex: rule.regex, wholeDictation: rule.wholeDictation).rules
-                return modes.update(updated)
-            },
+            onAddReplacement: { modes.update(mode.addingReplacements($0)) },
             onUpdateReplacement: { original, replacement in
                 let set = ReplacementsSet(rules: mode.replacements.rules).replacing(original, with: replacement)
                 guard set.rules != mode.replacements.rules else { return false }
@@ -1089,7 +1100,7 @@ private struct VocabularyEditor: View {
     var historyReplacements: ((String, @escaping (Int) -> Void) -> HistoryReplacementsModel)? = nil
     let onAddWord: (String) -> Bool
     let onRemoveWord: (String) -> Void
-    let onAddReplacement: (ReplacementsSet.Rule) -> Bool
+    let onAddReplacement: ([ReplacementsSet.Rule]) -> Bool
     let onUpdateReplacement: (ReplacementsSet.Rule, ReplacementsSet.Rule) -> Bool
     var rulePreviewSource: RulePreviewModel.Source? = nil
     let onMoveReplacement: (IndexSet, Int) -> Void
@@ -1381,11 +1392,18 @@ final class ReplacementsSettingsModel: ObservableObject {
 
     @discardableResult
     func add(heard: String, replace: String, regex: Bool, wholeDictation: Bool = false) -> Bool {
-        let trimmed = heard.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-        return mutate("Replacement wasn’t saved") { set in
-            set = set.adding(heard: trimmed, replace: replace, regex: regex, wholeDictation: wholeDictation)
+        add([ReplacementsSet.Rule(heard: heard, replace: replace, regex: regex, wholeDictation: wholeDictation)])
+    }
+
+    // Several rules in one write, so a rule and the plural added with it are saved together or not at all.
+    func add(_ rules: [ReplacementsSet.Rule]) -> Bool {
+        let trimmed = rules.map {
+            ReplacementsSet.Rule(
+                heard: $0.heard.trimmingCharacters(in: .whitespacesAndNewlines), replace: $0.replace, regex: $0.regex,
+                wholeDictation: $0.wholeDictation)
         }
+        guard !trimmed.isEmpty, trimmed.allSatisfy({ !$0.heard.isEmpty }) else { return false }
+        return mutate("Replacement wasn’t saved") { set in set = set.adding(trimmed) }
     }
 
     func remove(at index: Int) {

@@ -495,11 +495,8 @@ final class HistoryReplacementsModel: ObservableObject, Identifiable {
     private var requiredWord: String? { word }
 
     private func mergedWords(_ vocabulary: Vocabulary) -> [String] {
-        guard case .mode(let id) = destination, let mode = vocabulary.modes.first(where: { $0.id == id }) else {
-            return vocabulary.globalWords
-        }
-        return VocabularyMerge.words(
-            global: vocabulary.globalWords, local: mode.dictionary.words, includeGlobal: mode.dictionary.includeGlobal)
+        guard case .mode(let id) = destination else { return vocabulary.globalWords }
+        return Self.words(vocabulary, mode: vocabulary.modes.first { $0.id == id })
     }
 
     private nonisolated static func mode(
@@ -510,18 +507,39 @@ final class HistoryReplacementsModel: ObservableObject, Identifiable {
         return named.count == 1 ? named.first : nil
     }
 
+    // Likely mishearings of the dictionary words that applied to one dictation, each offered for review in the
+    // scope its word lives in.
+    nonisolated static func mishearingHints(
+        heard: String, modeName: String, vocabulary: Vocabulary
+    ) -> [MishearingHint.Suggestion] {
+        let mode = mode(evaluating: modeName, for: .global, in: vocabulary)
+        let hints = MishearingHint.find(
+            heard: heard, dictionary: words(vocabulary, mode: mode), stages: currentStages(vocabulary, mode: mode))
+        return hints.map { hint in
+            let local = mode.flatMap { $0.dictionary.words.contains(hint.term) ? $0.id : nil }
+            return .init(phrase: hint.phrase, term: hint.term, origin: local.map { .mode($0) } ?? .global)
+        }
+    }
+
+    private nonisolated static func words(_ vocabulary: Vocabulary, mode: Mode?) -> [String] {
+        mode.map {
+            VocabularyMerge.words(
+                global: vocabulary.globalWords, local: $0.dictionary.words, includeGlobal: $0.dictionary.includeGlobal)
+        } ?? vocabulary.globalWords
+    }
+
     private nonisolated static func currentStages(_ vocabulary: Vocabulary, mode: Mode?) -> [any PipelineStage] {
         let rules = VocabularyMerge.rules(
             global: vocabulary.global.toRules(), local: mode?.replacements.rules.toReplacementRules() ?? [],
             includeGlobal: mode?.replacements.includeGlobal ?? true)
-        let words = mode.map {
-            VocabularyMerge.words(
-                global: vocabulary.globalWords, local: $0.dictionary.words, includeGlobal: $0.dictionary.includeGlobal)
-        } ?? vocabulary.globalWords
-        return TakeStages.text(liveEdits: false, rules: rules, numbers: false, dictionary: words)
+        return TakeStages.text(liveEdits: false, rules: rules, numbers: false, dictionary: words(vocabulary, mode: mode))
     }
 
     private func offMain<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {
+        await Self.offMain(body)
+    }
+
+    nonisolated static func offMain<T: Sendable>(_ body: @escaping @Sendable () -> T) async -> T {
         let worker = Task.detached(priority: .userInitiated, operation: body)
         return await withTaskCancellationHandler { await worker.value } onCancel: { worker.cancel() }
     }

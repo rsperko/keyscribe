@@ -225,6 +225,19 @@ final class SettingsController: NSObject, NSWindowDelegate {
             return RulePreviewModel.Source(scope: scope, config: config, history: historyEnabled ? loadHistory : nil)
         }
         history.mishearingsFinder = { [weak self] word, scope, onSaved in self?.mishearingsFinder(word, scope, onSaved) }
+        history.mishearingHints = { entry in
+            let supportDir = repository.supportDir
+            let modesDir = repository.modesDir
+            let heard = entry.heard
+            let modeName = entry.modeName
+            return await HistoryReplacementsModel.offMain {
+                let vocabulary = HistoryReplacementsModel.Vocabulary(
+                    global: ReplacementsStore.loadOrDefault(supportDir: supportDir),
+                    globalWords: DictionaryStore.loadOrDefault(supportDir: supportDir).words,
+                    modes: ModeStore.loadAll(in: modesDir))
+                return HistoryReplacementsModel.mishearingHints(heard: heard, modeName: modeName, vocabulary: vocabulary)
+            }
+        }
         history.openSettings = { [weak self] destination in self?.navigation.destination = destination }
         codingAgents.onOpenAIServices = { [weak self] in self?.navigation.destination = .aiServices }
         history.voiceCommandsEnabled = { repository.voiceCommandsEnabled }

@@ -738,3 +738,27 @@ struct HistoryReplacementsModelTests {
         #expect(excerpt.after == " a b c d e f g h…")
     }
 }
+
+struct MishearingHintScopeTests {
+    private func vocabulary(globalWords: [String], mode: Mode) -> HistoryReplacementsModel.Vocabulary {
+        .init(global: ReplacementsSet(), globalWords: globalWords, modes: [mode])
+    }
+
+    @Test func aWordFromAModesOwnDictionaryIsReviewedInThatMode() {
+        var mode = Mode(id: "code", name: "Code")
+        mode.dictionary.words = ["Kryten"]
+        let hints = HistoryReplacementsModel.mishearingHints(
+            heard: "Cryden, make a pane", modeName: "Code", vocabulary: vocabulary(globalWords: [], mode: mode))
+        #expect(hints == [.init(phrase: "Cryden", term: "Kryten", origin: .mode("code"))])
+    }
+
+    @Test func aGlobalWordIsReviewedInGlobalAndAModesRuleThatFixesItHidesTheHint() {
+        var mode = Mode(id: "code", name: "Code")
+        #expect(HistoryReplacementsModel.mishearingHints(
+            heard: "Cryden, make a pane", modeName: "Code", vocabulary: vocabulary(globalWords: ["Kryten"], mode: mode))
+            == [.init(phrase: "Cryden", term: "Kryten", origin: .global)])
+        mode.replacements = .init(rules: [.init(heard: "cryden", replace: "Kryten", regex: false)])
+        #expect(HistoryReplacementsModel.mishearingHints(
+            heard: "Cryden, make a pane", modeName: "Code", vocabulary: vocabulary(globalWords: ["Kryten"], mode: mode)).isEmpty)
+    }
+}

@@ -131,6 +131,10 @@ public struct ReplacementsSet: Codable, Equatable, Sendable {
 
     // An update in place keeps the saved rule's scope unless the caller sets one: a correction that only
     // changes the text must not let a command rule start acting inside sentences.
+    public func adding(_ rules: [Rule]) -> ReplacementsSet {
+        rules.reduce(self) { $0.adding(heard: $1.heard, replace: $1.replace, regex: $1.regex, wholeDictation: $1.wholeDictation) }
+    }
+
     public func adding(heard: String, replace: String, regex: Bool, wholeDictation: Bool? = nil) -> ReplacementsSet {
         var copy = regex ? addingRegex(heard: heard, replace: replace) : addingLiteral(heard: heard, replace: replace)
         guard let wholeDictation else { return copy }

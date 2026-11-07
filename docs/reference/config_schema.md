@@ -1201,6 +1201,9 @@ How a rule behaves once it matches:
   literal rules use the same actual-match-length comparison; zero-length regex matches do nothing.
 - **Literal rules match case-insensitively, on whole words** (`pipe` never fires inside `pipeline`);
   the replacement text is inserted verbatim (`$` / `\` are not template refs).
+- **A literal rule matches only the words it names.** `pain` → `pane` leaves "pains" as said; a plural
+  needs a rule of its own. When you add a one-word rule that writes a lowercase word, Settings offers that
+  rule (`pains` → `panes`) as an unchecked option, saved as a separate rule (`ReplacementPlural`).
 - **Regex rules also match case-insensitively by default.** The input is STT output, whose casing
   the engine chooses (it commonly capitalizes the first word), so a case-sensitive pattern would
   silently miss. Opt back into case sensitivity with an inline `(?-i)`. Capture substitution (`$1`,
