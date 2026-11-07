@@ -265,7 +265,7 @@ struct ComparisonPane: View {
             }
             SelectableComparisonText(spans: spans) { onSelect(role, $0) }
                 .accessibilityIdentifier(AccessibilityID.History.comparisonPane(role.idSegment))
-                .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
                 .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
                 .overlay {
                     if role == .heard {
@@ -300,6 +300,16 @@ struct SelectableComparisonText: NSViewRepresentable {
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         return scroll
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView scroll: NSScrollView, context: Context) -> CGSize? {
+        guard let width = proposal.width, let textView = scroll.documentView as? NSTextView,
+              let container = textView.textContainer, let layout = textView.layoutManager
+        else { return nil }
+        let inset = textView.textContainerInset
+        container.containerSize = NSSize(width: max(0, width - inset.width * 2), height: .greatestFiniteMagnitude)
+        layout.ensureLayout(for: container)
+        return CGSize(width: width, height: ceil(layout.usedRect(for: container).height + inset.height * 2))
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
