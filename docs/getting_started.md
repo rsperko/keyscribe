@@ -125,7 +125,9 @@ Useful phrases:
 - `insert new paragraph`
 - `insert tab character`
 - `insert clipboard contents`
+- `insert clipboard as code`
 - `scratch that`
+- `never mind` or `start over`, said on their own at the very end, throw the whole dictation away
 - `begin verbatim ... end verbatim`
 
 The insert commands use a deliberate carrier phrase so a stray "new line" spoken in prose stays as
@@ -140,7 +142,12 @@ Say:
 first item insert new line second item scratch that revised second item insert new paragraph final note
 ```
 
-With live edits on, KeyScribe inserts line breaks and removes the scratched segment.
+With live edits on, KeyScribe inserts line breaks and removes the scratched segment. A common
+mishearing such as `scratch dat` counts as `scratch that`.
+
+`never mind` and `start over` throw the dictation away only when they end it as a sentence of their own
+(`I have three things. Never mind.`): nothing is inserted or saved to History, and the HUD says it was
+discarded. In the middle of a sentence (`we need to start over`) they stay text.
 
 Use verbatim spans when the words sound like commands but should stay literal:
 
@@ -164,6 +171,11 @@ point. Two guarantees:
 
 If the clipboard has no text — for example you copied an image or files — nothing is pasted and the
 words "insert clipboard contents" are left in place so you can see it and fix it.
+
+Say `insert clipboard as code` (or `insert clipboard as a code block`) to insert the clipboard inside a
+Markdown code fence on lines of its own, for example after "this fails with this error:". The same
+guarantees apply. The fence is longer than any run of backticks in what you copied, so a fence inside
+the clipboard cannot end the block early.
 
 To control this per mode, open Settings > Modes, choose a mode, and toggle **Turn spoken commands into
 edits**.

@@ -83,7 +83,9 @@ point. Two guarantees make this useful for sensitive material:
   token, or private URL stays on your machine.
 - **It's inserted exactly as copied**, character for character, no cleanup.
 
-Handy when you want a polished, rewritten sentence *around* a value that must stay untouched.
+Handy when you want a polished, rewritten sentence *around* a value that must stay untouched. Say
+`insert clipboard as code` instead to put the clipboard in a Markdown code fence, such as an error
+message for a coding agent.
 
 ## Keep words literal when they sound like commands
 

@@ -83,6 +83,10 @@ final class HistoryPaneModel: ObservableObject {
     var openSettings: (SettingsDestination) -> Void
     var copyText: ((String) -> Void)?
     var pasteText: ((String) -> Void)?
+    var rewriteAgain: ((HistoryEntry) async -> DictationController.RewriteAgain)?
+    @Published private(set) var rewritingAgain = false
+    @Published private(set) var unsavedRewrite: (id: String, text: String)?
+    private(set) var rewriteAgainTask: Task<Void, Never>?
     var supportSetup: () -> String = { DiagnosticsCollector.collect().render(includingPrivacyNote: false) }
 
     // Shared across the main-actor load path and the detached search task; `nonisolated` opts out of the
@@ -138,6 +142,10 @@ final class HistoryPaneModel: ObservableObject {
         searchCache = nil
         groups = []
         selection = nil
+        rewriteAgainTask?.cancel()
+        rewriteAgainTask = nil
+        rewritingAgain = false
+        unsavedRewrite = nil
         statsLine = nil
         statusMessage = nil
         isLoading = false
@@ -224,7 +232,7 @@ final class HistoryPaneModel: ObservableObject {
         searchTask?.cancel()
         recomputeTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(150))
-            guard let self, !Task.isCancelled else { return }
+            guard let self else { return }
             self.recomputeGroups()
         }
     }
@@ -279,7 +287,7 @@ final class HistoryPaneModel: ObservableObject {
         selectionTask?.cancel()
         selectionTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(50))
-            guard let self, !Task.isCancelled else { return }
+            guard let self else { return }
             let stillVisible = Set(self.groups.flatMap { $0.rows.map(\.id) })
             if let current = self.selection, stillVisible.contains(current) { return }
             self.selection = self.groups.first?.rows.first?.id
@@ -306,6 +314,49 @@ final class HistoryPaneModel: ObservableObject {
     func copyResult() { if let r = selected?.result, !r.isEmpty { copyText?(r) } }
     func copyHeard() { if let h = selected?.heard, !h.isEmpty { copyText?(h) } }
     func pasteResult() { if let r = selected?.result, !r.isEmpty { pasteText?(r) } }
+    var canRewriteSelectedAgain: Bool { rewriteAgain != nil && selected?.canRewriteAgain == true }
+
+    func rewriteSelectedAgain() {
+        guard canRewriteSelectedAgain, !rewritingAgain, let entry = selected, let id = entry.id, let rewriteAgain else { return }
+        rewritingAgain = true
+        rewriteAgainTask = Task { @MainActor [weak self] in
+            let outcome = await rewriteAgain(entry)
+            guard let self, !Task.isCancelled else { return }
+            self.rewritingAgain = false
+            switch outcome {
+            case .unavailable(let reason):
+                self.flash(reason)
+            case .rewritten(let text, let details):
+                let saved = self.store.update(id: id, near: entry.timestamp) {
+                    $0.rewrittenAgain(
+                        text, connection: details.connection, model: details.model, redaction: details.redaction,
+                        prompt: details.prompt, received: details.received, reasoning: details.reasoning?.summary)
+                }
+                switch saved {
+                case .updated:
+                    if self.unsavedRewrite?.id == id { self.unsavedRewrite = nil }
+                case .notFound:
+                    if self.unsavedRewrite?.id == id { self.unsavedRewrite = nil }
+                    self.flash("This dictation was deleted, so its rewrite was not kept.")
+                    return
+                case .failed:
+                    self.unsavedRewrite = (id, text)
+                    self.flash("The rewrite could not be saved to History. Use Copy Rewrite to keep it.")
+                    return
+                }
+                self.flash("Rewritten with \(details.connection). Nothing was inserted: copy or paste the result to use it.")
+                self.reload()
+            }
+        }
+    }
+
+    var selectedUnsavedRewrite: String? {
+        guard let unsavedRewrite, selected?.id == unsavedRewrite.id else { return nil }
+        return unsavedRewrite.text
+    }
+
+    func copyUnsavedRewrite() { if let text = selectedUnsavedRewrite { copyText?(text) } }
+
     func copyReport() {
         guard let entry = selected else { return }
         copyText?(SupportReport.render(entry: entry, appName: Branding.appName, setup: supportSetup()))
@@ -352,9 +403,11 @@ final class HistoryPaneModel: ObservableObject {
     }
 
     func deleteSelected() {
-        guard let entry = selected else { return }
+        guard let entry = selected, !rewritingAgain else { return }
         switch store.delete(entry) {
-        case .deleted, .notFound: reload()
+        case .deleted, .notFound:
+            if unsavedRewrite?.id == entry.id { unsavedRewrite = nil }
+            reload()
         case .writeFailed: flash("Could not delete this entry.")
         }
     }
@@ -403,7 +456,7 @@ final class HistoryPaneModel: ObservableObject {
         statusTask?.cancel()
         statusTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .seconds(4))
-            guard let self, !Task.isCancelled else { return }
+            guard let self else { return }
             self.statusMessage = nil
         }
     }
@@ -867,7 +920,8 @@ private struct HistoryDetailView: View {
     }
 
     private var resultTitle: String {
-        entry.outcome.isCommand ? "Command" : entry.summary == nil ? "Inserted" : "Result"
+        if entry.outcome.isCommand { return "Command" }
+        return entry.summary == nil && entry.outcome != .rewrittenLater ? "Inserted" : "Result"
     }
 
     private var rewriteContext: String {
@@ -927,6 +981,17 @@ private struct HistoryDetailView: View {
                 Button { model.copyHeard() } label: { Label("Copy Heard", systemImage: "text.quote") }
                     .accessibilityIdentifier(AccessibilityID.History.copyHeard)
             }
+            if model.canRewriteSelectedAgain {
+                Button { model.rewriteSelectedAgain() } label: { Label("Rewrite Again", systemImage: "arrow.clockwise") }
+                    .disabled(model.rewritingAgain)
+                    .help("Runs the AI rewrite again on what was heard, with this mode as it is now. Nothing from the screen is sent, and nothing is inserted: the new text replaces this dictation's result.")
+                    .accessibilityIdentifier(AccessibilityID.History.rewriteAgain)
+                if model.rewritingAgain { ProgressView().controlSize(.small) }
+            }
+            if model.selectedUnsavedRewrite != nil {
+                Button { model.copyUnsavedRewrite() } label: { Label("Copy Rewrite", systemImage: "doc.on.doc") }
+                    .accessibilityIdentifier(AccessibilityID.History.copyUnsavedRewrite)
+            }
             Button { model.copyReport() } label: { Label("Copy Report", systemImage: "ladybug") }
                 .help("Copies this dictation for a bug report: what you said, the inserted text, the app it was for, your microphone's name, any AI request and reply (which can include your dictionary words, selected text, or text from the app), and details about your setup.")
                 .accessibilityIdentifier(AccessibilityID.History.copyReport)
@@ -942,6 +1007,7 @@ private struct HistoryDetailView: View {
                 .lineLimit(2, reservesSpace: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             PaneDeleteButton(title: "Delete Dictation") { confirmingDelete = true }
+                .disabled(model.rewritingAgain)
                 .accessibilityIdentifier(AccessibilityID.History.delete)
         }
     }
@@ -1082,5 +1148,6 @@ func outcomeLabel(_ entry: HistoryEntry) -> String {
     case .commandStarted: "Command started"
     case .commandNeedsChoice: "Needs a choice"
     case .commandCancelled: "Choice cancelled"
+    case .rewrittenLater: "Rewritten later, not inserted"
     }
 }

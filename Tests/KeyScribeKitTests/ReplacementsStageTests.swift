@@ -248,7 +248,17 @@ struct ReplacementsStageTests {
         let ctx = context([rule], "I copy the pieces")
         #expect(ctx.text == "I copi the pices")
         #expect(ctx.replacementEffects == [
-            ReplacementEffect(rule: rule, changedText: true, insideWord: true, returnOmitted: true, ownsWholeDictation: false),
+            ReplacementEffect(rule: rule, changedWords: false, insideWord: true, returnOmitted: true, ownsWholeDictation: false),
+        ])
+        #expect(ctx.replacementEffects.map(\.isMeaningful) == [false])
+    }
+
+    @Test func aRuleThatAlsoFixesAWholeWordIsMeaningfulAndStillFlagged() {
+        let rule = ReplacementRule(heard: "p[iy]e?", replace: "pi", isRegex: true)
+        let ctx = context([rule], "pie and copy")
+        #expect(ctx.text == "pi and copi")
+        #expect(ctx.replacementEffects == [
+            ReplacementEffect(rule: rule, changedWords: true, insideWord: true, returnOmitted: false, ownsWholeDictation: false),
         ])
     }
 
@@ -256,7 +266,7 @@ struct ReplacementsStageTests {
         let rule = ReplacementRule(heard: "p[iy]e?", replace: "pi<CR>", isRegex: true)
         let ctx = context([rule], "pi")
         #expect(ctx.replacementEffects == [
-            ReplacementEffect(rule: rule, changedText: false, insideWord: false, returnOmitted: false, ownsWholeDictation: true),
+            ReplacementEffect(rule: rule, changedWords: false, insideWord: false, returnOmitted: false, ownsWholeDictation: true),
         ])
         #expect(ctx.replacementEffects.map(\.isMeaningful) == [true])
     }

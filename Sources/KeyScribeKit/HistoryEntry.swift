@@ -15,11 +15,12 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case commandStarted = "command_started"
         case commandNeedsChoice = "command_needs_choice"
         case commandCancelled = "command_cancelled"
+        case rewrittenLater = "rewritten_later"
 
         public var isCommand: Bool {
             switch self {
             case .command, .commandFailed, .commandStarted, .commandNeedsChoice, .commandCancelled: true
-            case .inserted, .copied, .localFallback, .failed: false
+            case .inserted, .copied, .localFallback, .failed, .rewrittenLater: false
             }
         }
     }
@@ -211,7 +212,34 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
 
     public var contextLabels: [String] { contextCategories.compactMap(Self.contextLabel) }
 
-    public var keptLocalText: Bool { outcome == .localFallback || fallbackReason != nil || rewriteSkippedMs != nil }
+    public var keptLocalText: Bool {
+        outcome != .rewrittenLater && (outcome == .localFallback || fallbackReason != nil || rewriteSkippedMs != nil)
+    }
+
+    public var canRewriteAgain: Bool {
+        outcome == .localFallback && summary == nil && id != nil && !heard.isEmpty
+    }
+
+    // Nothing was inserted: the user takes the new result from History. No context was sent, because the
+    // context of the original dictation is never stored.
+    public func rewrittenAgain(
+        _ text: String, connection: String, model: String, redaction: Bool, prompt: String, received: String?,
+        reasoning: String?
+    ) -> HistoryEntry {
+        var next = self
+        next.result = text
+        next.outcome = .rewrittenLater
+        next.cloudInvolved = true
+        next.connection = connection
+        next.model = model
+        next.redaction = redaction
+        next.prompt = prompt
+        next.received = received
+        next.reasoning = reasoning
+        next.contextCategories = []
+        next.rewriteSkippedMs = nil
+        return next
+    }
 
     public var listTextIsHeard: Bool { result.isEmpty && !heard.isEmpty }
 

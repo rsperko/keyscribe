@@ -32,14 +32,14 @@ public struct ReplacementRule: Sendable, Equatable {
 // land inside a word and drop its Return.
 public struct ReplacementEffect: Sendable, Equatable {
     public var rule: ReplacementRule
-    public var changedText: Bool
+    public var changedWords: Bool
     public var insideWord: Bool
     public var returnOmitted: Bool
     public var ownsWholeDictation: Bool
 
-    public init(rule: ReplacementRule, changedText: Bool, insideWord: Bool, returnOmitted: Bool, ownsWholeDictation: Bool) {
+    public init(rule: ReplacementRule, changedWords: Bool, insideWord: Bool, returnOmitted: Bool, ownsWholeDictation: Bool) {
         self.rule = rule
-        self.changedText = changedText
+        self.changedWords = changedWords
         self.insideWord = insideWord
         self.returnOmitted = returnOmitted
         self.ownsWholeDictation = ownsWholeDictation
@@ -47,7 +47,7 @@ public struct ReplacementEffect: Sendable, Equatable {
 
     // Owning the dictation is an effect even when the words come out the same: it skips the AI rewrite and can
     // press Return.
-    public var isMeaningful: Bool { changedText || ownsWholeDictation }
+    public var isMeaningful: Bool { changedWords || ownsWholeDictation }
 }
 
 // Post-STT text stage. Literal matches are case-insensitive and word-boundary constrained ("pipe" never
@@ -188,7 +188,7 @@ public struct ReplacementsStage: PipelineStage {
         context.bareSegments = owner?.segments
         context.firedReplacements = owner.map { [$0.rule] } ?? effects.map(\.rule)
         context.replacementEffects = owner.map {
-            [ReplacementEffect(rule: $0.rule, changedText: $0.changed, insideWord: false, returnOmitted: false, ownsWholeDictation: true)]
+            [ReplacementEffect(rule: $0.rule, changedWords: $0.changed, insideWord: false, returnOmitted: false, ownsWholeDictation: true)]
         } ?? effects
     }
 
@@ -204,12 +204,13 @@ public struct ReplacementsStage: PipelineStage {
                     let output = winner.rule.regex.replacementString(
                         for: winner.result, in: run, offset: 0, template: winner.rule.template)
                     let changed = output != run[winner.range]
+                    let insideWord = changed && Self.landsInsideWord(winner.range, in: run)
                     let effect = ReplacementEffect(
-                        rule: winner.rule.source, changedText: changed,
-                        insideWord: changed && Self.landsInsideWord(winner.range, in: run),
+                        rule: winner.rule.source, changedWords: changed && !insideWord,
+                        insideWord: insideWord,
                         returnOmitted: winner.rule.submit != nil, ownsWholeDictation: false)
                     if let i = effects.firstIndex(where: { $0.rule == effect.rule }) {
-                        effects[i].changedText = effects[i].changedText || effect.changedText
+                        effects[i].changedWords = effects[i].changedWords || effect.changedWords
                         effects[i].insideWord = effects[i].insideWord || effect.insideWord
                     } else {
                         effects.append(effect)

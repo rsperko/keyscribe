@@ -485,6 +485,8 @@ enum AccessibilityID {
         static func row(_ id: String) -> String { "history.list.row.\(id)" }
         static let search = "history.search"
         static let export = "history.action.export"
+        static let rewriteAgain = "history.action.rewriteAgain"
+        static let copyUnsavedRewrite = "history.action.copyUnsavedRewrite"
         static let stagePicker = "history.detail.stagePicker"
         static let whatHappened = "history.detail.whatHappened"
         static let actionOutcome = "history.detail.actionOutcome"

@@ -120,7 +120,7 @@ struct ModeEditorView: View {
             Section("What it does") {
                 SettingRow(
                     title: "Turn spoken editing phrases into edits",
-                    help: "Turns phrases you say into edits: \u{201C}insert new line\u{201D}, \u{201C}insert new paragraph\u{201D}, \u{201C}insert tab character\u{201D}, \u{201C}insert clipboard contents\u{201D}, \u{201C}scratch that\u{201D}, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
+                    help: "Turns phrases you say into edits: \u{201C}insert new line\u{201D}, \u{201C}insert new paragraph\u{201D}, \u{201C}insert tab character\u{201D}, \u{201C}insert clipboard contents\u{201D} (or \u{201C}insert clipboard as code\u{201D} for a code block), \u{201C}scratch that\u{201D}, \u{201C}never mind\u{201D} at the end to throw the dictation away, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
                 {
                     Toggle("", isOn: bind.commandsBinding(\.liveEdits)).labelsHidden()
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.liveEdits)
@@ -176,7 +176,7 @@ struct ModeEditorView: View {
                 }
                 SettingRow(
                     title: "Turn spoken editing phrases into edits",
-                    help: "Turns phrases you say into edits: \u{201C}insert new line\u{201D}, \u{201C}insert new paragraph\u{201D}, \u{201C}insert tab character\u{201D}, \u{201C}insert clipboard contents\u{201D}, \u{201C}scratch that\u{201D}, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
+                    help: "Turns phrases you say into edits: \u{201C}insert new line\u{201D}, \u{201C}insert new paragraph\u{201D}, \u{201C}insert tab character\u{201D}, \u{201C}insert clipboard contents\u{201D} (or \u{201C}insert clipboard as code\u{201D} for a code block), \u{201C}scratch that\u{201D}, \u{201C}never mind\u{201D} at the end to throw the dictation away, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
                 {
                     Toggle("", isOn: bind.commandsBinding(\.liveEdits)).labelsHidden()
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.liveEdits)

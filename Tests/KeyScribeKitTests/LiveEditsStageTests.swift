@@ -7,7 +7,41 @@ private func run(_ text: String) -> String {
     return ctx.text
 }
 
+private func discards(_ text: String) -> Bool {
+    var ctx = PipelineContext(text: text)
+    LiveEditsStage().apply(&ctx)
+    return ctx.discarded
+}
+
 struct LiveEditsStageTests {
+    @Test(arguments: ["Never mind.", "never mind", "I have three things. Never mind.", "Okay, start over.", "blah blah, never mind!"])
+    func aDiscardPhraseSaidAloneAtTheEndThrowsAwayTheTake(_ text: String) {
+        var ctx = PipelineContext(text: text)
+        LiveEditsStage().apply(&ctx)
+        #expect(ctx.discarded)
+        #expect(ctx.text.isEmpty)
+    }
+
+    @Test(arguments: [
+        "We need to start over.", "Never mind the cost, ship it.", "I said never mind to him",
+        "start over with the intro", "never mind me. I am fine.",
+    ])
+    func aDiscardPhraseInsideASentenceStaysText(_ text: String) {
+        #expect(!discards(text))
+        #expect(run(text) == text)
+    }
+
+    @Test func aDiscardPhraseInsideCapturedWordsNeverEmptiesTheCapture() {
+        let segments = Pipeline.applying(LiveEditsStage(), toCapturesIn: [.literal("tell bob "), .captured("never mind")])
+        #expect(Pipeline.joined(segments) == "tell bob never mind")
+    }
+
+    @Test(arguments: ["Hello, my name is Robert. Stratchdat.", "first part, scratch dat.", "first part, stratch that."])
+    func commonMishearingsOfScratchThatStillScratch(_ text: String) {
+        #expect(!run(text).lowercased().contains("dat"))
+        #expect(!run(text).lowercased().contains("stratch"))
+    }
+
     @Test func newLineCommand() {
         #expect(run("alpha insert new line beta") == "alpha\nbeta")
     }

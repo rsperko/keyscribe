@@ -263,6 +263,12 @@ struct ModeResolverTests {
         #expect(r.transcript == "send this to bob")
     }
 
+    @Test func aRecordedRoutingPhraseIsStrippedTheSameWayLater() {
+        let phrase = #"(?i)\bas an email$"#
+        #expect(ModeResolver.strippingRoutingPhrase(phrase, from: "send this to bob as an email.") == "send this to bob")
+        #expect(ModeResolver.strippingRoutingPhrase(phrase, from: "no phrase here") == "no phrase here")
+    }
+
     @Test func aSpokenPhraseNeverRoutesIntoACodingAgentMode() {
         var agent = mode("agent", phrases: [#"(?i)\bto the agent$"#])
         agent.output = .agent

@@ -121,6 +121,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
     let codingAgents: CodingAgentsSettingsModel
     private let aiServices: AIServiceSettingsModel
     private let history: HistoryPaneModel
+    var rewriteAgain: ((HistoryEntry) async -> DictationController.RewriteAgain)? {
+        didSet { history.rewriteAgain = rewriteAgain }
+    }
     private let problems = SettingsProblemModel()
     private let navigation = SettingsNavigationModel()
     private let detectProblems: () -> [SettingsProblem]

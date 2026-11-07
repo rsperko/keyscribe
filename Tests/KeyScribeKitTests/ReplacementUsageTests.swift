@@ -337,7 +337,7 @@ struct ReplacementUsageCaptionTests {
         _ rule: ReplacementRule = piRule, changed: Bool = true, insideWord: Bool = false,
         returnOmitted: Bool = false, owns: Bool = false
     ) -> ReplacementEffect {
-        ReplacementEffect(rule: rule, changedText: changed, insideWord: insideWord, returnOmitted: returnOmitted, ownsWholeDictation: owns)
+        ReplacementEffect(rule: rule, changedWords: changed, insideWord: insideWord, returnOmitted: returnOmitted, ownsWholeDictation: owns)
     }
 
     private static let key = ReplacementUsage.key(for: piRule)!

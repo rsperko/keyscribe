@@ -350,6 +350,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.settingsController.mishearingsFinder(word, destination.scope, onSaved)
         }
         controller.onHistoryUpdated = { [weak self] in self?.settingsController.historyDidChange() }
+        settingsController.rewriteAgain = { [weak controller] entry in
+            await controller?.rewriteAgain(entry) ?? .unavailable("\(Branding.appName) has quit.")
+        }
         settingsController.recordingState.onChange = { [weak self] recording in
             self?.hotkey?.isSuspended = recording
         }

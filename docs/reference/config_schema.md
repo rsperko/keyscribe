@@ -95,6 +95,11 @@
   message the HUD showed for it. A choice offered by a script and answered by clicking, whose second run
   asks again, rewrites the question's entry with the new list.
   An app older than this change skips these rows rather than failing to load history.
+  A dictation whose rewrite fell back can be rewritten again from History. The entry is updated in place,
+  by `id`, to `outcome = "rewritten_later"`: `result` becomes the new text, which was not inserted;
+  `connection`, `model`, `prompt`, `received`, `reasoning` and `redaction` describe the new request;
+  `context_categories` is empty, because no context is sent; `rewrite_skipped_ms` is removed; and
+  `fallback_reason` keeps why the first rewrite fell back. `heard` and `transformed` are kept.
   The optional `summary`, `facts`, and `steps` are written finished by whatever recorded the take, so History shows them
   without interpreting them. `summary` is the strongest outcome in words, shown in place of the outcome label
   (and searched); `facts` are ordered `{label, value}` pairs of context fixed when the entry was written; and
@@ -508,7 +513,7 @@ context = { app = true, preceding_text = false }
 | `source` | enum | `dictation` \| `selection`. |
 | `output` | enum | `cursor` \| `replace_selection` \| `voice_command` \| `agent`. `voice_command` is the Voice Commands system mode's output: the take is run as a command (`voice_commands.toml`) and nothing is inserted. `agent` is the Coding agent system mode's output: the take goes to a coding agent conversation ("Coding agent bridge" above). Any other mode file that sets either fails to load. |
 | `[agent]` | table | Read only with `output = "agent"`. `target` picks the conversation a take goes to when it does not start with one's name: `current` (default) is the conversation the front terminal shows when the take starts, if that can be confirmed in the window that had focus, without asking for access, shortly after release at the latest, and otherwise the current recipient; `ask` holds the take until one is named, and any other text is the name of a fixed conversation (the take is held if no live conversation has that name). An older `focused` is read as `current`. |
-| `commands.live_edits` | bool | Opt-in to the spoken-command list (insert new line, insert new paragraph, insert tab character, scratch that, **insert clipboard contents**, **begin/end verbatim**). |
+| `commands.live_edits` | bool | Opt-in to the spoken-command list (insert new line, insert new paragraph, insert tab character, scratch that, **never mind** / **start over** to discard the whole take, **insert clipboard contents**, **begin/end verbatim**). |
 | `commands.privacy` | bool | Opt-in to best-effort redaction. When true, **context is forced off** — `ai_rewrite.context` is locked to all-false so only the redacted transcript leaves. |
 | `commands.numbers` | bool | Opt-in to inverse text normalization ("twenty five" → "25"); bails on ambiguous/year-like runs. |
 | `dictionary` | table | `include_global` + `words[]`. |
@@ -1485,6 +1490,8 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
   "insert clipboard contents"; pastes the
   clipboard at that point, tokenized like a verbatim span so it is inserted as-is and never sent to
   the LLM. Dictation only (not edit-in-place). Empty/absent clipboard leaves the phrase as text.
+  "insert clipboard as code" (`ClipboardTokenizer.codePhrases`) inserts the same value inside a Markdown
+  fence on lines of its own, with a fence longer than any backtick run in the clipboard.
 - **`include_global` is per-set** — dictionary and replacements each carry their own flag.
 - **Key descriptor format** — lowercase tokens joined by `+`, and the token list decides the shape:
   **every token a modifier and no base key → a modifier-only trigger** (the set is held with no key

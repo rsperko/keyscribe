@@ -68,7 +68,7 @@ struct RewriteRequestBuilder {
         // Report a context channel only when it actually contributed content — history must not claim
         // "preceding text" was shared when the probe returned nothing (KS-02).
         var contextCategories: [String] = []
-        if ctx.app { contextCategories.append("app") }
+        if appName != nil { contextCategories.append("app") }
         if ctx.precedingText, precedingText != nil { contextCategories.append("preceding text") }
 
         // The spelling clause only ever meant en-GB vs en-US, so it is gated on an ENGLISH LOCALE, not

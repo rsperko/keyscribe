@@ -7,7 +7,8 @@ enum VoiceCommandCLI {
     // the app open apps or run the user's scripts. Only the person's own shortcut runs a command.
     static func run(
         transcript: String, supportDir: URL = KeyScribePaths.supportDir,
-        system: any VoiceCommandSystem = LiveVoiceCommandSystem.shared
+        system: any VoiceCommandSystem = LiveVoiceCommandSystem.shared,
+        output: (String) -> Void = { print($0) }
     ) async -> Int32 {
         let findsInApps: Bool
         if case .loaded(let settings) = SettingsStore.load(supportDir: supportDir) {
@@ -21,12 +22,20 @@ enum VoiceCommandCLI {
         config.voiceCommandsEnabled = true
         let readAs = config.resolved.voiceCommandText(heard: transcript, places: commands.places, scripts: commands.scripts)
         let resolution = await runner.resolve(readAs, places: commands.places, scripts: commands.scripts)
-        print("heard:      \(transcript)")
-        if readAs != transcript { print("read as:    \(readAs)") }
-        print("resolution: \(describe(resolution, spoken: readAs, commands: commands, system: system))")
+        output("heard:      \(transcript)")
+        if readAs != transcript { output("read as:    \(readAs)") }
+        output("resolution: \(describe(resolution, spoken: readAs, commands: commands, system: system))")
+        for issue in (config.loadFailures + config.fileWarnings) where readFiles.contains(issue.relativePath) {
+            output("ignored:    \(issue.oneLine)")
+        }
         guard case .action = resolution else { return 1 }
         return 0
     }
+
+    private static let readFiles: Set<String> = [
+        SettingsStore.fileName, DictionaryStore.fileName, ReplacementsStore.fileName, VoiceCommandStore.fileName,
+        "modes/\(Mode.voiceCommandsId).toml",
+    ]
 
     private static func describe(
         _ resolution: VoiceCommandResolution, spoken: String, commands: VoiceCommandConfig, system: any VoiceCommandSystem

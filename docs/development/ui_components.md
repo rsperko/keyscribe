@@ -127,6 +127,7 @@ it as a shared type — never a one-off inline pattern. (Anatomy, behavior, and 
 | `Best-effort redaction` | protected, anonymized, safe |
 | `Insert without rewriting` | local transcript (implies raw STT), bypass, raw fallback |
 | `Copied instead of inserted` | failed paste |
+| `Rewrite Again`, `Rewritten later, not inserted` (a fallback rewritten from History) | retry, regenerate, redo, fixed |
 | `speech model` / `model` | engine (in user copy) |
 | `compatibility mode` (Apple Dictation standing in for Apple Speech) | fallback, legacy, older model, degraded |
 | `Rewrite selected text` | edit mode, work on selection |

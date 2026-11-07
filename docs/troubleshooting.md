@@ -96,6 +96,18 @@ The AI rewrite did not complete, so your local transcript was kept. The `fallbac
 row gives the reason. Note that this outcome replaces `inserted`/`copied`, so it does not tell you
 how the text was delivered — if the text also never appeared, treat it as the `inserted` case above.
 
+To try the rewrite again, open the dictation in History and click **Rewrite Again**. It runs the
+mode's AI rewrite, as the mode is set up now, on what was heard, and keeps redaction on if the
+original dictation had it. Nothing from the screen is sent and
+nothing is inserted: the entry becomes `rewritten_later`, and **Copy Result** or **Paste Result** puts the
+new text where you want it.
+
+### `rewritten_later`
+
+The rewrite fell back when you dictated, and you ran it again from History. The result is the
+rewritten text, which was never inserted for you. The text inserted at the time is still shown as the
+text before the rewrite.
+
 ### `failed`
 
 KeyScribe tried to deliver the text and nothing landed. The transcript is not lost: it is still the

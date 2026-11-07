@@ -1089,6 +1089,19 @@ final class DictationController {
                hideAfter: 2, record: (.noSpeech, nil), completion: completion)
     }
 
+    // The user threw the take away by voice: nothing is inserted or kept in History, like a cancel.
+    private func finishDiscarded() {
+        guard machine.beginInserting() else { return }
+        hud.relinquishKeyFocus()
+        let completion = DictationCompletion(
+            outcome: .noSpeech, modeId: activeMode?.id, heard: "", finalText: "")
+        finish(machine: .finish(.noSpeech), cue: .cancel,
+               state: .advisory(message: Self.discardedMessage),
+               hideAfter: 2, record: (.noSpeech, nil), completion: completion)
+    }
+
+    static let discardedMessage = "Discarded: nothing was inserted"
+
     // Nothing was heard — a hardware/mute problem. Renders like an error with the microphone-settings repair
     // (longer hide, action button) but records the same .noSpeech outcome as finishNoSpeech.
     private func finishNothingHeard() {
@@ -1544,6 +1557,9 @@ final class DictationController {
             log.info("aborted: \(message, privacy: .public)")
             clearRewriteEscapeHatch()
             finishError(message, action: action)
+        case (.discard, _):
+            clearRewriteEscapeHatch()
+            finishDiscarded()
         case (.insert(let text, _, _), .agent(let id, let facts)):
             await deliverToAgent(id, text: text, heard: heard, transformed: transformed, rewrite: rewrite, facts: facts)
         case (.insert(let text, let bare, let submit), .cursor):
@@ -1987,6 +2003,7 @@ final class DictationController {
         case insert(String, bare: Bool, submit: Mode.Submit?)
         // leave the target untouched; surface this message, optionally with a repair action
         case abort(String, HUDErrorAction?)
+        case discard
     }
 
     // Defense-in-depth before insert (design.md §4.2): after the LIFO restore pass, no ISSUED nonce should
@@ -2041,6 +2058,7 @@ final class DictationController {
         let localStart = DispatchTime.now()
         let take = TakeText(transcript, pipeline: pipeline, trimsTrailingPunctuation: mode?.trimTrailingPunctuation ?? false)
         session?.replacementEffects = take.payload.replacementEffects
+        if take.discarded { return (.discard, nil, nil) }
 
         // Whole-utterance replacement: one rule owned the entire utterance, so insert its generated
         // value verbatim — bypassing the LLM (the model never sees it; redaction is moot) and the
@@ -2105,6 +2123,54 @@ final class DictationController {
             ? guardedInsert(result.text, issuedTokens: prepared.take.payload.issuedTokens)
             : .abort("Rewrite failed — selection unchanged", nil)
         return (final, result.details)
+    }
+
+    enum RewriteAgain {
+        case rewritten(text: String, details: RewriteDetails)
+        case unavailable(String)
+    }
+
+    // Asked for from History, after the take is over: no HUD, no insertion, and no context, since the
+    // original take's context is never stored and today's screen is not what was dictated into. Redaction
+    // stays on when the original take had it, even if the mode has turned it off since.
+    func rewriteAgain(_ entry: HistoryEntry) async -> RewriteAgain {
+        guard var mode = plan.modes.first(where: { $0.name == entry.modeName }) else {
+            return .unavailable("No mode is named \u{201C}\(entry.modeName)\u{201D} now.")
+        }
+        guard let connection = connection(for: mode) else {
+            return .unavailable("\(mode.name) has no AI service now.")
+        }
+        if entry.redaction { mode.commands.privacy = true }
+        let heard = entry.modeChoice == .spokenPhrase
+            ? entry.routedPhrase.map { ModeResolver.strippingRoutingPhrase($0, from: entry.heard) } ?? entry.heard
+            : entry.heard
+        let clipboardRead = OSAllocatedUnfairLock(initialState: false)
+        let pipeline = TakeStages.dictation(
+            text: plan.postSTTTextStages(for: mode),
+            clipboard: { clipboardRead.withLock { $0 = true }; return nil },
+            redaction: mode.commands.privacy)
+        let take = TakeText(heard, pipeline: pipeline, trimsTrailingPunctuation: mode.trimTrailingPunctuation)
+        if clipboardRead.withLock({ $0 }) {
+            return .unavailable("It inserted the clipboard, which may have changed since.")
+        }
+        if take.bare != nil { return .unavailable("A replacement rule took the whole dictation, so nothing is rewritten.") }
+        if take.isBlank { return .unavailable("There are no words to rewrite.") }
+        let plan = plan
+        let result = await rewriter.rewrite(
+            take, localText: take.localText, mode: mode, connection: connection,
+            request: {
+                await RewriteRequestBuilder(
+                    mode: mode, content: take.payload.text, instruction: "", issuedTokens: take.payload.issuedTokens,
+                    capturedBundleId: nil, capturedPid: nil, plan: plan, connection: connection).build()
+            },
+            checkpoint: nil, presentsHUD: false)
+        guard result.ok else {
+            return .unavailable("The AI rewrite failed again: \(result.details.fallbackReason ?? "no reason given").")
+        }
+        guard !TakeText.leaksIssuedToken(result.text, issuedTokens: take.payload.issuedTokens) else {
+            return .unavailable("The rewrite could not be completed.")
+        }
+        return .rewritten(text: result.text, details: result.details)
     }
 
     private func connection(for mode: Mode) -> Connection? {

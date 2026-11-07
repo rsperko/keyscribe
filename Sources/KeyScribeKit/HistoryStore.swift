@@ -128,21 +128,34 @@ public struct HistoryStore: Sendable {
         return ([derived] + dayFiles().filter { $0 != derived }).contains { rewrite(entry, with: replacement, inFile: $0) }
     }
 
+    // `notFound` means no readable day file holds the entry; a file that could not be read or written makes it
+    // `failed`, so an entry that is still on disk is never reported as gone.
+    public enum UpdateOutcome: Sendable { case updated, notFound, failed }
+
     @discardableResult
-    public func update(id: String, near date: Date, _ change: (HistoryEntry) -> HistoryEntry) -> Bool {
+    public func update(id: String, near date: Date, _ change: (HistoryEntry) -> HistoryEntry) -> UpdateOutcome {
         let derived = "\(HistoryStore.todayString(date: date)).jsonl"
-        return ([derived] + dayFiles().filter { $0 != derived }).contains { file in
-            Self.mutationQueue.sync {
+        var failed = false
+        for file in [derived] + dayFiles().filter({ $0 != derived }) {
+            let outcome: UpdateOutcome = Self.mutationQueue.sync {
                 let url = dir.appendingPathComponent(file)
-                guard let content = try? String(contentsOf: url, encoding: .utf8) else { return false }
+                guard FileManager.default.fileExists(atPath: url.path) else { return .notFound }
+                guard let content = try? String(contentsOf: url, encoding: .utf8) else { return .failed }
                 var lines = content.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-                guard let index = lines.firstIndex(where: { (try? HistoryEntry(jsonLine: $0))?.id == id }),
-                      let current = try? HistoryEntry(jsonLine: lines[index]),
-                      let line = try? change(current).jsonLine() else { return false }
+                guard let index = lines.firstIndex(where: { (try? HistoryEntry(jsonLine: $0))?.id == id }) else { return .notFound }
+                guard let current = try? HistoryEntry(jsonLine: lines[index]),
+                      let line = try? change(current).jsonLine() else { return .failed }
                 lines[index] = line
                 return (try? Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)) != nil
+                    ? .updated : .failed
+            }
+            switch outcome {
+            case .updated: return .updated
+            case .failed: failed = true
+            case .notFound: continue
             }
         }
+        return failed ? .failed : .notFound
     }
 
     private func rewrite(_ entry: HistoryEntry, with replacement: HistoryEntry, inFile file: String) -> Bool {

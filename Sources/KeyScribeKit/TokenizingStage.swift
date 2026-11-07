@@ -79,7 +79,7 @@ extension Tokenizer {
     // sentence ("It's broken. <paste> fixes it") untouched.
     func spliceAbsorbing(
         _ text: String, spans: [(range: Range<String.Index>, value: String)], type: TokenType, dedup: Bool = true,
-        foldBracketedTerminators: Bool = true, collapseTrailingTerminator: Bool = false
+        foldBracketedTerminators: Bool = true, collapseTrailingTerminator: Bool = false, block: Bool = false
     ) -> String {
         guard !spans.isEmpty else { return text }
         let absorb: Set<Character> = [" ", "\t", ","]
@@ -102,6 +102,16 @@ extension Tokenizer {
             var end = span.range.upperBound
             while end < text.endIndex, absorb.contains(text[end]) { end = text.index(after: end) }
             result += text[cursor..<start]
+
+            // A block keeps its separators and the terminator after it, so the commands around it still read as
+            // words and sentences; the restore puts it on lines of its own and drops that terminator.
+            if block {
+                if let last = result.last, last != " ", last != "\n", last != "\t" { result += " " }
+                result += tokenizeUnique(span.value, type: type, block: true)
+                if hadRightSeparator { result += " " }
+                cursor = end
+                continue
+            }
 
             let leadingTerminator = result.last.flatMap { terminators.contains($0) ? $0 : nil }
             let bracketed = end < text.endIndex && terminators.contains(text[end])

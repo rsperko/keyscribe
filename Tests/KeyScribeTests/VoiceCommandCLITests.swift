@@ -41,4 +41,41 @@ struct VoiceCommandCLITests {
         #expect(status == 0)
         #expect(system.scriptRuns.isEmpty)
     }
+
+    @Test func theDryRunNamesRulesThatNeverRunAndSkipsOtherModesFiles() async throws {
+        let dir = try supportDir(voiceCommandsOn: true)
+        try """
+        schema_version = 1
+        [[rules]]
+        heard = '(o+)+'
+        replace = 'oh'
+        regex = true
+        """.write(to: dir.appendingPathComponent(ReplacementsStore.fileName), atomically: true, encoding: .utf8)
+        let modesDir = dir.appendingPathComponent("modes", isDirectory: true)
+        try FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
+        try "name = \"Broken\"\nnot = [valid".write(
+            to: modesDir.appendingPathComponent("broken.toml"), atomically: true, encoding: .utf8)
+        var lines: [String] = []
+        _ = await VoiceCommandCLI.run(
+            transcript: "note hello", supportDir: dir, system: VoiceCommandRunnerTests.FakeSystem()) { lines.append($0) }
+        let ignored = lines.filter { $0.hasPrefix("ignored:") }
+        #expect(ignored.count == 1)
+        #expect(ignored.first?.contains("replacements.toml") == true)
+        #expect(ignored.first?.contains("(o+)+") == true)
+    }
+
+    @Test func theDryRunNamesARuleInTheVoiceCommandsModeThatNeverRuns() async throws {
+        let dir = try supportDir(voiceCommandsOn: true)
+        let modesDir = dir.appendingPathComponent("modes", isDirectory: true)
+        try FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
+        var mode = Mode(id: Mode.voiceCommandsId, name: "Voice Commands")
+        mode.replacements = .init(rules: [.init(heard: "(o+)+", replace: "oh", regex: true)])
+        try ModeStore.write(mode, to: modesDir)
+        var lines: [String] = []
+        _ = await VoiceCommandCLI.run(
+            transcript: "note hello", supportDir: dir, system: VoiceCommandRunnerTests.FakeSystem()) { lines.append($0) }
+        let ignored = lines.filter { $0.hasPrefix("ignored:") }
+        #expect(ignored.count == 1)
+        #expect(ignored.first?.contains("\(Mode.voiceCommandsId).toml — \u{201C}(o+)+\u{201D}") == true)
+    }
 }

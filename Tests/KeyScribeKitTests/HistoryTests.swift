@@ -461,7 +461,7 @@ struct HistoryStoreTests {
             entry.steps = [.init(at: entry.timestamp, text: entry.summary ?? "")]
             return entry
         }
-        #expect(changed)
+        #expect(changed == .updated)
         let entries = store.entries()
         #expect(entries.map(\.heard) == ["two", "one"])
         #expect(entries.last?.steps?.map(\.text) == ["edited elsewhere"])
@@ -474,7 +474,19 @@ struct HistoryStoreTests {
         entry.id = "a"
         try store.append(entry, today: HistoryStore.todayString(date: entry.timestamp))
         #expect(store.delete(entry) == .deleted)
-        #expect(!store.update(id: "a", near: entry.timestamp) { $0 })
+        #expect(store.update(id: "a", near: entry.timestamp) { $0 } == .notFound)
+    }
+
+    @Test func updateOfAnEntryInAFileThatCannotBeReadIsAFailureNotAMissingEntry() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        var entry = sampleEntry(heard: "one", at: 0)
+        entry.id = "a"
+        let day = HistoryStore.todayString(date: entry.timestamp)
+        try store.append(entry, today: day)
+        let file = store.dir.appendingPathComponent("\(day).jsonl")
+        try Data([0xFF, 0xFE, 0x00]).write(to: file)
+        #expect(store.update(id: "a", near: entry.timestamp) { $0 } == .failed)
     }
 
     @Test func appendThenReadRoundTrips() throws {

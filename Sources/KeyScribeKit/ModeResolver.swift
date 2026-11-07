@@ -277,6 +277,11 @@ public enum ModeResolver {
     //   2. anchored to the end — trailing whitespace/punctuation trimmed first, then the matched span must
     //      reach the end (a bare phrase has no `$`, so scan for the last match at the end);
     //   3. a leading word boundary, so "as prompt" doesn't fire inside "has prompt".
+    // What routing handed to the mode after the phrase that chose it, for a take that is processed again later.
+    public static func strippingRoutingPhrase(_ phrase: String, from transcript: String) -> String {
+        matchSuffix(phrase, in: transcript) ?? transcript
+    }
+
     private static func matchSuffix(_ pattern: String, in transcript: String) -> String? {
         let trimmed = trimTrailingNoise(transcript)
         guard let re = RegexCache.routingRegex(pattern, options: [.caseInsensitive]) else { return nil }

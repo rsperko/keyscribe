@@ -13,6 +13,7 @@ public struct TakeText: Sendable {
 
     public var bare: BareReplacement? { payload.bareReplacement }
 
+    public var discarded: Bool { payload.discarded }
     public var isBlank: Bool { payload.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     public var localText: String { bare?.text ?? finish(payload.text) }

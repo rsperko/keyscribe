@@ -84,7 +84,8 @@ public enum DevCLI {
                                       against this Mac's running and installed apps, open browser tabs, and
                                       the saved commands, print what it resolved to, and exit. Never opens an
                                       app or runs a script or shortcut: only your shortcut runs commands.
-                                      Exits non-zero when it does not resolve.
+                                      Also lists any rule or file it read that is ignored, and why. Exits
+                                      non-zero when it does not resolve.
               --windows-probe         List every regular app's Accessibility windows (subrole, id, minimized,
                                       whether a document is reported, title) with per-app read latency, then
                                       exit. Read-only; prints window titles to this terminal only.

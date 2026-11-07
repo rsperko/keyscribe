@@ -58,7 +58,7 @@ final class TakeRewrite {
     func rewrite(
         _ take: TakeText, localText: String, mode: Mode, connection: Connection, instructionTokens: [String] = [],
         request build: () async -> RewriteRequestBuilder.Assembled,
-        checkpoint: ((Checkpoint) -> Void)?
+        checkpoint: ((Checkpoint) -> Void)?, presentsHUD: Bool = true
     ) async -> Result {
         if mode.commands.privacy {
             log.debug("redaction: \(take.payload.issuedTokens.count, privacy: .public) span(s) tokenized before cloud rewrite")
@@ -76,9 +76,11 @@ final class TakeRewrite {
 
         let start = DispatchTime.now()
         checkpoint?(Checkpoint(startedAt: start, localText: localText, issuedTokens: take.payload.issuedTokens, details: pending))
-        hud.present(.rewriting(
-            connection: connection.name, mode: mode.name, redacted: mode.commands.privacy,
-            contextCategories: request.contextCategories, offerLocalTranscript: false))
+        if presentsHUD {
+            hud.present(.rewriting(
+                connection: connection.name, mode: mode.name, redacted: mode.commands.privacy,
+                contextCategories: request.contextCategories, offerLocalTranscript: false))
+        }
 
         let outcome = await RewriteService(
             client: client, permits: permits,

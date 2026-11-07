@@ -260,6 +260,7 @@ not to its label.
 | Voice command not recognized (Voice Commands mode) | “Command not recognized” | What the speech model heard, before any replacement: “Heard “stitch to Mail”” — omitted when the target was a password field or could not be confirmed | None; dismiss automatically |
 | Voice command matched nothing (Voice Commands mode) | What found nothing: “No script or shortcut is called “sorb legs”.”, “No matching app, place, or window found for “kiwi”.”, or “No open tab matches …” | The heard excerpt, under the same rules as above | None; dismiss automatically |
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
+| Discarded by voice (live edits, “never mind” or “start over” ending the take) | “Discarded: nothing was inserted” | — (an Advisory: the user chose this, so no failure styling) | None; dismiss automatically. Nothing is written to History |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
 | Config problem (idle, after an external edit) | “Couldn’t read [file] — [parser message] — previous version still in use” (or “— ignored until fixed”), or “[file] — “[key]” (did you mean “[key]”?) has no effect” | — | None; dismisses automatically |
@@ -1104,7 +1105,8 @@ composer and lists do not live inside the mode editor.
   `Added today`. A rule that already existed when counting began has no known add date, so it never
   claims one: it reads `No uses recorded since <the day counting began>` (`No uses recorded yet` on that
   day). It counts dictations that reached their destination and that the rule actually affected — a
-  match that left the words and the behaviour unchanged is not a use — independent of History. It is
+  match that left the words and the behaviour unchanged is not a use, and neither is one that changed
+  only text inside other words — independent of History. It is
   read-only: rows keep the user's order because order is tie priority, and nothing is ever removed
   automatically. Below the row, an advisory names problems the rule caused as it is now: `Changed text
   inside other words in 6 dictations`, `Did not press Return in 2 dictations, because it matched
@@ -1279,7 +1281,8 @@ sections:
 
 Plain Dictation stays deliberately small: the same header card as other modes (name, **Built in**, its
 shortcut), then **How to start Plain Dictation**, **What it does**, and **Result handling**.
-Its spoken-editing control explicitly names phrases such as “insert new line” and “scratch that”; it
+Its spoken-editing control explicitly names phrases such as “insert new line”, “scratch that”, and
+“never mind”; it
 does not imply an AI rewrite or a separate expert mode. What it does also carries the vocabulary row,
 which says Plain Dictation uses Global vocabulary and whose **Edit Vocabulary…** opens Global.
 
@@ -1864,7 +1867,7 @@ The list is grouped by day and supports search over locally stored text. Each ro
   recording limit), what was heard, in secondary text, so the entry the error pointed to is
   recognizable without opening it;
 - time and mode;
-- outcome (`Inserted`, `Copied`, `Local fallback`, `Rewrite skipped`, or `Failed`; a voice command reads `Command`,
+- outcome (`Inserted`, `Copied`, `Local fallback`, `Rewrite skipped`, `Rewritten later, not inserted`, or `Failed`; a voice command reads `Command`,
   `Command failed`, `Command started`, `Needs a choice`, or `Choice cancelled`);
   an entry that recorded its own summary shows that instead, so a Coding agent take reads `Sent to backend`,
   `Queued for backend`, `Opened backend`, or why nothing was sent, never a generic `Inserted`;
@@ -1929,7 +1932,19 @@ Correction actions are directly beside the relevant text:
 - **Create Replacement** for a repeated heard-to-intended correction.
 
 Reuse actions (**Copy Result**, **Paste Result**, **Copy Heard**) lead an action row at the top of the
-detail, followed by **Copy Report**, which copies that one dictation for a bug report: every field the
+detail. On a dictation whose rewrite fell back or was skipped (not a Coding agent message, which was
+already sent), **Rewrite Again** follows them. It runs the AI rewrite again, with the
+mode as it is now, on what was heard (less the spoken phrase that chose the mode), without context: the
+original take's context was never stored, and the screen now is not what was dictated into. Redaction
+stays on when the original take had it, even if the mode has turned it off since. It shows a small
+spinner while it runs, Delete Dictation is unavailable until it finishes, and it inserts nothing. On success the entry is updated in place to **Rewritten later, not inserted**, its Result is the
+new text, and the status line says which service rewrote it and to copy or paste the result. When it
+cannot run (the mode is gone or has no AI service, the dictation inserted the clipboard, a rule took the
+whole dictation) or the service fails again, the entry is unchanged and the status line says why. If the
+dictation was deleted meanwhile, the rewrite is dropped and the status line says so; if History could not
+save it, **Copy Rewrite** appears beside the other actions so the text is never lost and the clipboard is
+changed only when the user asks.
+**Copy Report** follows, which copies that one dictation for a bug report: every field the
 entry recorded, including what was said, the request sent to an AI service and its reply, plus the install
 summary Copy Diagnostics produces. Nothing is redacted. The report's first lines, the button's help, and
 the confirmation after copying all say it includes what was said and any AI request and reply (which can

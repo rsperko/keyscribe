@@ -41,7 +41,9 @@ KeyScribe itself sends content off your Mac on two paths only, both **optional, 
 LLM calls** to a service you configured, and both off unless you turn them on:
 
 - **LLM cleanup**, which rewrites a transcript (removing filler, fixing grammar, reformatting). It runs only
-  for a mode you enabled it for.
+  for a mode you enabled it for. When a rewrite falls back, **Rewrite Again** in History sends that
+  dictation's transcript to the mode's service once more, with no context. It is redacted if the original
+  dictation was or the mode is now, so turning redaction off later never sends that dictation unredacted.
 - **Spoken updates**, in the experimental Coding agent feature. Notices that a conversation is waiting for you or
   lost its connector are fixed sentences and send nothing, with one exception: when a Pi conversation you
   dictated to opens a prompt, the prompt's kind and title, the tool call it seems to be about (its name and up

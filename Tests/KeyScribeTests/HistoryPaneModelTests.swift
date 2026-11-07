@@ -223,6 +223,153 @@ struct HistoryPaneModelTests {
         var replacements: [(String, String, CorrectionDestination.Scope)] = []
     }
 
+    private func fallbackEntry() -> HistoryEntry {
+        var value = entry("the plan.")
+        value.id = "take-1"
+        value.heard = "the plan"
+        value.outcome = .localFallback
+        value.fallbackReason = "HTTP 503"
+        return value
+    }
+
+    private func rewriteDetails() -> RewriteDetails {
+        RewriteDetails(
+            connectionId: "c1", connection: "Smart", model: "m2", redaction: false, contextCategories: [],
+            prompt: "new prompt", fellBack: false, received: "The plan.")
+    }
+
+    @Test func aRewriteAgainUpdatesTheSelectedFallbackInPlaceAndKeepsItSelected() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try store.append(fallbackEntry(), today: "2026-07-10")
+        let model = model(store)
+        let details = rewriteDetails()
+        var asked: [String] = []
+        model.rewriteAgain = { asked.append($0.heard); return .rewritten(text: "The plan.", details: details) }
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.selection = model.groups.first?.rows.first?.id
+        #expect(model.canRewriteSelectedAgain)
+
+        model.rewriteSelectedAgain()
+        await model.rewriteAgainTask?.value
+        for _ in 0..<80 where model.selected?.outcome != .rewrittenLater { try await Task.sleep(for: .milliseconds(25)) }
+
+        #expect(asked == ["the plan"])
+        #expect(model.selected?.result == "The plan.")
+        #expect(model.selected?.connection == "Smart")
+        #expect(store.entries(limit: nil).map(\.outcome) == [.rewrittenLater])
+        #expect(!model.canRewriteSelectedAgain)
+        #expect(model.statusMessage?.contains("Smart") == true)
+    }
+
+    @Test func aRewriteThatCannotRunLeavesTheEntryAndSaysWhy() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try store.append(fallbackEntry(), today: "2026-07-10")
+        let model = model(store)
+        model.rewriteAgain = { _ in .unavailable("The AI rewrite failed again: HTTP 503.") }
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.selection = model.groups.first?.rows.first?.id
+
+        model.rewriteSelectedAgain()
+        await model.rewriteAgainTask?.value
+
+        #expect(store.entries(limit: nil).map(\.outcome) == [.localFallback])
+        #expect(model.statusMessage == "The AI rewrite failed again: HTTP 503.")
+        #expect(model.canRewriteSelectedAgain)
+    }
+
+    @Test func aDictationDeletedDuringARewriteIsNotRecreatedAndTheClipboardIsLeftAlone() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let original = fallbackEntry()
+        try store.append(original, today: "2026-07-10")
+        let model = model(store)
+        var copied: [String] = []
+        model.copyText = { copied.append($0) }
+        let details = rewriteDetails()
+        model.rewriteAgain = { entry in
+            _ = store.delete(entry)
+            return .rewritten(text: "The plan.", details: details)
+        }
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.selection = model.groups.first?.rows.first?.id
+
+        model.rewriteSelectedAgain()
+        await model.rewriteAgainTask?.value
+
+        #expect(store.entries(limit: nil).isEmpty)
+        #expect(copied.isEmpty)
+        #expect(model.statusMessage == "This dictation was deleted, so its rewrite was not kept.")
+        #expect(model.selectedUnsavedRewrite == nil)
+    }
+
+    @Test func aRewriteThatCouldNotBeSavedIsOfferedUntilALaterRetrySavesOne() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try store.append(fallbackEntry(), today: "2026-07-10")
+        let file = store.dir.appendingPathComponent("2026-07-10.jsonl")
+        let saved = try Data(contentsOf: file)
+        let model = model(store)
+        let details = rewriteDetails()
+        model.rewriteAgain = { _ in
+            try? Data([0xFF, 0xFE]).write(to: file)
+            return .rewritten(text: "First try.", details: details)
+        }
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.selection = model.groups.first?.rows.first?.id
+
+        model.rewriteSelectedAgain()
+        await model.rewriteAgainTask?.value
+        #expect(model.selectedUnsavedRewrite == "First try.")
+
+        try saved.write(to: file)
+        model.rewriteAgain = { _ in .rewritten(text: "Second try.", details: details) }
+        model.rewriteSelectedAgain()
+        await model.rewriteAgainTask?.value
+        #expect(model.selectedUnsavedRewrite == nil)
+        #expect(store.entries(limit: nil).map(\.result) == ["Second try."])
+    }
+
+    @MainActor private final class Gate { var open = false }
+
+    @Test(arguments: [false, true])
+    func aRewriteThatFinishesAfterHistoryClosedChangesNothing(saveFails: Bool) async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try store.append(fallbackEntry(), today: "2026-07-10")
+        let file = store.dir.appendingPathComponent("2026-07-10.jsonl")
+        let before = try Data(contentsOf: file)
+        let model = model(store)
+        let gate = Gate()
+        let details = rewriteDetails()
+        model.rewriteAgain = { _ in
+            while !gate.open { try? await Task.sleep(for: .milliseconds(5)) }
+            if saveFails { try? Data([0xFF, 0xFE]).write(to: file) }
+            return .rewritten(text: "Late.", details: details)
+        }
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.selection = model.groups.first?.rows.first?.id
+
+        model.rewriteSelectedAgain()
+        let task = model.rewriteAgainTask
+        model.releaseForClose()
+        gate.open = true
+        await task?.value
+        try await Task.sleep(for: .milliseconds(100))
+
+        if !saveFails { #expect(try Data(contentsOf: file) == before) }
+        #expect(!model.hasEntries)
+        #expect(!model.rewritingAgain)
+        #expect(model.unsavedRewrite == nil)
+        #expect(model.statusMessage == nil)
+    }
+
     private func model(_ store: HistoryStore, corrections: Corrections = Corrections()) -> HistoryPaneModel {
         HistoryPaneModel(
             store: store,

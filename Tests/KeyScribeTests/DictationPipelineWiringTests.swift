@@ -370,11 +370,11 @@ struct DictationPipelineWiringTests {
         #expect(out.usage.rules["mode:code|l|slash resume"]?.count == 1)
     }
 
-    @Test func aRuleThatChangedTextInsideAWordIsRecordedAsSuch() async {
+    @Test func aRuleThatChangedTextOnlyInsideWordsIsRecordedAsSuchAndIsNotAUse() async {
         let m = mode(id: "code", replacements: [ReplacementsSet.Rule(heard: "p[iy]e?", replace: "pi<CR>", regex: true)])
         let out = await run(transcript: "I copy the pieces", mode: m)
         let entry = out.usage.rules[#"mode:code|r|p[iy]e?"#]
-        #expect(entry?.count == 1)
+        #expect(entry?.count == 0)
         #expect(entry?.health?.insideWord == 1)
         #expect(entry?.health?.returnOmitted == 1)
     }

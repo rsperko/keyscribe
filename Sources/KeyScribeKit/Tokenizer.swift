@@ -17,6 +17,7 @@ public final class Tokenizer: @unchecked Sendable {
     private var byValue: [String: String] = [:]      // type+value → token (stability)
     private var order: [String] = []                 // allocation order (LIFO restore)
     private var counters: [TokenType: Int] = [:]
+    private var blocks: Set<String> = []             // restored on lines of their own
     private let lock = NSLock()
 
     public init() {}
@@ -45,7 +46,7 @@ public final class Tokenizer: @unchecked Sendable {
     // returns exactly once) isn't tripped by one token appearing at N sites — e.g. two "insert clipboard
     // contents", both wrapping the whole clipboard.
     @discardableResult
-    public func tokenizeUnique(_ value: String, type: TokenType) -> String {
+    public func tokenizeUnique(_ value: String, type: TokenType, block: Bool = false) -> String {
         lock.lock()
         defer { lock.unlock() }
         var n = (counters[type] ?? 0) + 1
@@ -57,6 +58,7 @@ public final class Tokenizer: @unchecked Sendable {
         counters[type] = n
         originals[token] = value
         order.append(token)
+        if block { blocks.insert(token) }
         return token
     }
 
@@ -89,14 +91,29 @@ public final class Tokenizer: @unchecked Sendable {
             var cursor = result.startIndex
             while let tokenRange = SentinelText.firstToken(in: result, from: cursor) {
                 let token = String(result[tokenRange])
-                out += result[cursor..<tokenRange.lowerBound]
-                if let original = originals[token] {
-                    out += original
-                    didRestore = true
-                } else {
-                    out += token
+                var dictated = result[cursor..<tokenRange.lowerBound]
+                // Only the dictated separators before a block go; a value restored earlier keeps its own spaces.
+                if blocks.contains(token) {
+                    while dictated.last == " " || dictated.last == "\t" { dictated = dictated.dropLast() }
                 }
-                cursor = tokenRange.upperBound
+                out += dictated
+                guard let original = originals[token] else {
+                    out += token
+                    cursor = tokenRange.upperBound
+                    continue
+                }
+                didRestore = true
+                guard blocks.contains(token) else {
+                    out += original
+                    cursor = tokenRange.upperBound
+                    continue
+                }
+                if let last = out.last, last != "\n" { out += "\n" }
+                out += original
+                var next = tokenRange.upperBound
+                while next < result.endIndex, ".!? \t".contains(result[next]) { next = result.index(after: next) }
+                if next < result.endIndex, result[next] != "\n" { out += "\n" }
+                cursor = next
             }
             out += result[cursor..<result.endIndex]
             result = out

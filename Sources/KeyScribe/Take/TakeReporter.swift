@@ -65,7 +65,7 @@ final class TakeReporter {
     ) {
         guard let history else { return }
         queue.async { [weak self] in
-            let changed = history.update(id: id, near: date, change)
+            let changed = history.update(id: id, near: date, change) == .updated
             Task { @MainActor in
                 if changed { self?.onHistoryUpdated?() }
                 then(changed)

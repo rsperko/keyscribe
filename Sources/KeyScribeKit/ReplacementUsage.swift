@@ -118,7 +118,7 @@ public struct ReplacementUsage: Codable, Equatable, Sendable {
         for effect in effects {
             guard let key = Self.key(for: effect.rule) else { continue }
             if var existing = merged[key] {
-                existing.changedText = existing.changedText || effect.changedText
+                existing.changedWords = existing.changedWords || effect.changedWords
                 existing.ownsWholeDictation = existing.ownsWholeDictation || effect.ownsWholeDictation
                 existing.insideWord = existing.insideWord || effect.insideWord
                 existing.returnOmitted = existing.returnOmitted || effect.returnOmitted

@@ -7,6 +7,80 @@ private func tokenize(_ text: String, clipboard: String?) -> (out: String, tok: 
 }
 
 struct ClipboardTokenizerTests {
+    @Test func asCodeMidSentenceFencesTheClipboardOnItsOwnLines() {
+        let (out, t) = tokenize("this fails with this error: insert clipboard as code. Please fix it.", clipboard: "boom\n  at main\n")
+        #expect(out == "this fails with this error: ⟦SN:CLIP:1⟧. Please fix it.")
+        #expect(t.restore(out) == "this fails with this error:\n```\nboom\n  at main\n```\nPlease fix it.")
+    }
+
+    @Test(arguments: [
+        "insert clipboard as code", "insert the clipboard as code", "insert clipboard as a code block",
+        "insert clipboard contents as code", "Insert the clipboard contents as code.",
+        "insert clipboard content as code", "insert the clipboard contents as a code block",
+    ])
+    func asCodeAloneIsJustTheBlock(_ phrase: String) {
+        let (out, t) = tokenize(phrase, clipboard: "x = 1")
+        #expect(t.restore(out) == "```\nx = 1\n```")
+    }
+
+    @Test func aClipboardHoldingAFenceGetsALongerOne() {
+        let (out, t) = tokenize("insert clipboard as code", clipboard: "````md\n```\ninner\n```\n````")
+        #expect(t.restore(out) == "`````\n````md\n```\ninner\n```\n````\n`````")
+    }
+
+    @Test func aRewriteThatMovedSpacesOrLinesAroundABlockStillLeavesItOnLinesOfItsOwn() {
+        let (out, t) = tokenize("error: insert clipboard as code please", clipboard: "x")
+        let token = out.split(separator: " ")[1]
+        #expect(t.restore("Error:   \(token)  Please.") == "Error:\n```\nx\n```\nPlease.")
+        #expect(t.restore("Error:\n\(token)\nPlease.") == "Error:\n```\nx\n```\nPlease.")
+        #expect(t.restore("Error: \(token). Please.") == "Error:\n```\nx\n```\nPlease.")
+    }
+
+    @Test func repeatedBlocksEachGetTheirOwnLines() {
+        let (out, t) = tokenize("insert clipboard as code and insert clipboard as code", clipboard: "x")
+        #expect(t.restore(out) == "```\nx\n```\nand\n```\nx\n```")
+    }
+
+    @Test func aPlainPasteBeforeABlockKeepsItsOwnTrailingSpaces() {
+        let (out, t) = tokenize("insert clipboard contents insert clipboard as code", clipboard: "x \t")
+        #expect(t.restore(out) == "x \t\n```\nx \t\n```")
+    }
+
+    @Test func neverMindRightAfterABlockStillDiscardsTheTake() {
+        let pipeline = TakeStages.dictation(text: [LiveEditsStage()], clipboard: { "x" }, redaction: false)
+        let take = TakeText("insert clipboard as code. Never mind.", pipeline: pipeline, trimsTrailingPunctuation: false)
+        #expect(take.discarded)
+    }
+
+    @Test func aSentenceAfterABlockStartsOnItsOwnLineWithoutTheStrayPeriod() {
+        let pipeline = TakeStages.dictation(text: [LiveEditsStage()], clipboard: { "x" }, redaction: false)
+        let take = TakeText("Look: insert clipboard as code. Thanks.", pipeline: pipeline, trimsTrailingPunctuation: false)
+        #expect(take.localText == "Look:\n```\nx\n```\nThanks.")
+    }
+
+    @Test func spokenEditsBesideABlockStillFire() {
+        let pipeline = TakeStages.dictation(text: [LiveEditsStage()], clipboard: { "x" }, redaction: false)
+        let scratched = TakeText("look insert clipboard as code scratch that", pipeline: pipeline, trimsTrailingPunctuation: false)
+        #expect(scratched.localText == "look")
+        let broken = TakeText("insert clipboard as code insert new line done", pipeline: pipeline, trimsTrailingPunctuation: false)
+        #expect(broken.localText == "```\nx\n```\ndone")
+    }
+
+    @Test func aWindowsLineEndingDoesNotLeaveABlankLineBeforeTheClosingFence() {
+        let (out, t) = tokenize("insert clipboard as code", clipboard: "x = 1\r\n")
+        #expect(t.restore(out) == "```\nx = 1\n```")
+    }
+
+    @Test func asCodeWithAnEmptyClipboardStaysText() {
+        let (out, _) = tokenize("insert clipboard as code", clipboard: "")
+        #expect(out == "insert clipboard as code")
+    }
+
+    @Test func asCodeAndPlainInOneTakeKeepTheirOwnShapes() {
+        let (out, t) = tokenize("see insert clipboard contents and insert clipboard as code", clipboard: "X")
+        #expect(t.restore(out) == "see X and\n```\nX\n```")
+    }
+
     @Test(arguments: [
         ("the url is insert clipboard contents thanks", "https://ex.com/a?b=c", "the url is ⟦SN:CLIP:1⟧ thanks", "the url is https://ex.com/a?b=c thanks"),
         ("insert the clipboard contents", "X", "⟦SN:CLIP:1⟧", "X"),
