@@ -9,7 +9,8 @@ struct PiDiscoveryTests {
         var running: Set<Int> = [10, 11]
         var starts: [Int: TimeInterval] = [10: 1_700_000_000, 11: 1_700_000_050]
         func isRunning(_ pid: Int) -> Bool { running.contains(pid) }
-        func start(_ pid: Int) -> ProcessStart.Reading { starts[pid].map { .started($0) } ?? .gone }
+        func start(_ pid: Int) -> ProcessStart.Reading { starts[pid].map { .started(milliseconds: Int($0 * 1000)) } ?? .gone }
+        var found = AgentProcesses.Found()
     }
 
     final class DuringScan: @unchecked Sendable {
@@ -17,7 +18,7 @@ struct PiDiscoveryTests {
     }
 
     private func make(_ processes: Processes = Processes()) -> PiDiscovery {
-        PiDiscovery(processStart: processes.start, isRunning: processes.isRunning)
+        PiDiscovery(processStart: processes.start, isRunning: processes.isRunning, processes: { processes.found })
     }
 
     private func hello(_ session: String, pid: Int = 10, cwd: String? = "/src/api", title: String? = nil, idle: Bool = true, features: [String] = ["readiness"]) -> AgentEvent {
@@ -37,7 +38,7 @@ struct PiDiscoveryTests {
     @Test func anOpenDialogShowsAsADialogUntilItClosesWhateverTheTurnDoes() async {
         let discovery = make()
         func state() async -> AgentLiveState? {
-            if case .found(let sessions) = await discovery.scan(rereadingTitles: false) { return sessions.first?.state }
+            if case .found(let sessions, _) = await discovery.scan(rereadingTitles: false) { return sessions.first?.state }
             return nil
         }
         discovery.observe(hello("s1", idle: false))
@@ -122,7 +123,7 @@ struct PiDiscoveryTests {
             isRunning: { pid in
                 DispatchQueue.main.async { MainActor.assumeIsolated { during.deliver?() } }
                 return pid != 99
-            })
+            }, processes: { AgentProcesses.Found() })
         discovery.observe(hello("s1", pid: 10))
         discovery.observe(hello("gone", pid: 99))
         let late = hello("s2", pid: 11, cwd: "/src/docs")
@@ -152,11 +153,69 @@ struct PiDiscoveryTests {
         #expect(found.map { ($0.pid, $0.startedAt) }.map { "\($0.0) \($0.1 ?? 0)" } == ["11 1700000050000"])
     }
 
-    @Test func retiringForgetsEverySession() async {
+    @Test func retiringForgetsOnlyTheRetiredSessions() async {
         let discovery = make()
-        discovery.observe(hello("s1"))
-        discovery.retire()
-        #expect(await discovery.scan(rereadingTitles: false) == .found([]))
+        discovery.observe(hello("s1", pid: 10))
+        discovery.observe(hello("s2", pid: 11))
+        discovery.retire(sessions: ["s1"])
+        #expect(sessions(await discovery.scan(rereadingTitles: false)).map(\.id) == ["s2"])
+    }
+
+    private func candidate(_ pid: Int, started seconds: TimeInterval, setup: String = "/u/.pi/agent") -> AgentCandidate {
+        AgentCandidate(agent: "pi", pid: pid, startedAt: Int(seconds * 1000), cwd: "/src/atlas", setup: setup, tty: "/dev/ttys001")
+    }
+
+    @Test func aRunningPiWithoutAConnectorIsACandidateWithItsOwnSetup() async {
+        let processes = Processes()
+        processes.found = AgentProcesses.Found(candidates: [candidate(12, started: 1_700_000_100, setup: "/u/pi-work")])
+        let discovery = make(processes)
+        let scan = await discovery.scan(rereadingTitles: false)
+        #expect(scan == .found([], AgentScanExtras(candidates: [candidate(12, started: 1_700_000_100, setup: "/u/pi-work")], setups: ["/u/pi-work"])))
+    }
+
+    @Test func aHelloIdentifiesItsCandidateByProcessAndStartAndTakesItsSetup() async {
+        let processes = Processes()
+        processes.found = AgentProcesses.Found(candidates: [candidate(10, started: 1_700_000_000, setup: "/u/pi-work")])
+        let discovery = make(processes)
+        discovery.observe(hello("s1", pid: 10))
+        guard case .found(let found, let extras) = await discovery.scan(rereadingTitles: false) else { Issue.record("unreadable"); return }
+        #expect(found.map(\.setup) == ["/u/pi-work"])
+        #expect(extras.candidates.isEmpty)
+        #expect(extras.setups == ["/u/pi-work"])
+    }
+
+    @Test func aReusedProcessIdWithAnotherStartIsNotTheSameConversation() async {
+        let processes = Processes()
+        processes.found = AgentProcesses.Found(candidates: [candidate(10, started: 1_700_009_000)])
+        let discovery = make(processes)
+        discovery.observe(hello("s1", pid: 10))
+        guard case .found(let found, let extras) = await discovery.scan(rereadingTitles: false) else { Issue.record("unreadable"); return }
+        #expect(found.map(\.setup) == [nil])
+        #expect(extras.candidates.map(\.pid) == [10])
+    }
+
+    @Test func processesThatCouldNotBeReadAreAPartialResultNotAnEmptyOne() async {
+        let processes = Processes()
+        processes.found = AgentProcesses.Found(candidates: [candidate(11, started: 1_700_000_050)], stale: true)
+        let discovery = make(processes)
+        guard case .found(_, let stale) = await discovery.scan(rereadingTitles: false) else { Issue.record("unreadable"); return }
+        #expect(stale.problem == PiDiscovery.partialProblem)
+        #expect(stale.candidates.map(\.pid) == [11])
+        processes.found = AgentProcesses.Found(candidates: [candidate(12, started: 1_700_000_060)], unreadable: [11])
+        guard case .found(_, let partial) = await discovery.scan(rereadingTitles: false) else { Issue.record("unreadable"); return }
+        #expect(partial.problem == PiDiscovery.partialProblem)
+        processes.found = AgentProcesses.Found(candidates: [candidate(12, started: 1_700_000_060)])
+        guard case .found(_, let whole) = await discovery.scan(rereadingTitles: false) else { Issue.record("unreadable"); return }
+        #expect(whole.problem == nil)
+    }
+
+    @Test func aQuietHelloKeepsTheNameTheConversationAlreadyHad() async {
+        let discovery = make()
+        discovery.observe(hello("s1", pid: 10, title: "frontend"))
+        var quiet = AgentEvent.Hello(protocolVersion: 3, agent: "pi", agentVersion: "", instance: "i1", session: "s1", pid: 10, cwd: "/src/atlas")
+        quiet.quiet = true
+        discovery.observe(.hello(quiet))
+        #expect(sessions(await discovery.scan(rereadingTitles: false)).first?.explicitName == "frontend")
     }
 
     @Test func eventsForUnknownSessionsAndRequestEventsChangeNothing() async {
@@ -176,7 +235,7 @@ struct PiDiscoveryTests {
     }
 
     private func sessions(_ scan: AgentScan) -> [AgentSession] {
-        if case .found(let sessions) = scan { return sessions.sorted { $0.id < $1.id } }
+        if case .found(let sessions, _) = scan { return sessions.sorted { $0.id < $1.id } }
         return []
     }
 }
@@ -187,8 +246,8 @@ struct ProcessStartTests {
             Issue.record("own process not found")
             return
         }
-        #expect(at <= Date().timeIntervalSince1970)
-        #expect(at > Date().timeIntervalSince1970 - 86_400)
+        #expect(at <= Int(Date().timeIntervalSince1970 * 1000))
+        #expect(at > Int((Date().timeIntervalSince1970 - 86_400) * 1000))
         #expect(ProcessStart.read(pid: 999_999) == .gone)
         #expect(ProcessStart.isRunning(pid: Int(getpid())))
         #expect(!ProcessStart.isRunning(pid: 999_999))
@@ -199,7 +258,7 @@ struct ProcessStartTests {
             Issue.record("own process not found")
             return
         }
-        let recorded = Int(at * 1000)
+        let recorded = at
         let name = { (startedAt: Int) in RememberedName(name: "x", pid: Int(getpid()), startedAt: startedAt, native: nil, agent: "") }
         #expect(ProcessStart.stillRunning(name(recorded), lead: 1))
         #expect(ProcessStart.stillRunning(name(recorded + 60_000), lead: 120))

@@ -19,7 +19,8 @@ final class AgentBridgeServer: @unchecked Sendable {
     private(set) var launch: String?
 
     private let token: String
-    private let installation: @Sendable (String) -> String?
+    private let admits: @Sendable (_ agent: String, _ installation: String?) -> Bool
+    private let excludes: @Sendable (_ session: String) -> Bool
     private let pollHold: TimeInterval
     private let onEvent: @Sendable (AgentEvent) -> Void
     private let onHello: @Sendable (AgentEvent.Hello, @escaping @Sendable () -> Void) -> Void
@@ -32,10 +33,12 @@ final class AgentBridgeServer: @unchecked Sendable {
     private var parked: [Parked] = []
     private var greeting: Set<Int32> = []
     private var agentByInstance: [String: String] = [:]
+    private var installationByInstance: [String: String] = [:]
     private var commands: AgentCommandQueue
 
     init(
-        directory: URL, token: String, installation: @escaping @Sendable (String) -> String?, pollHold: TimeInterval = 25,
+        directory: URL, token: String, admits: @escaping @Sendable (_ agent: String, _ installation: String?) -> Bool,
+        excludes: @escaping @Sendable (_ session: String) -> Bool = { _ in false }, pollHold: TimeInterval = 25,
         activeWindow: TimeInterval = AgentCommandQueue.activeWindow,
         onHello: @escaping @Sendable (AgentEvent.Hello, @escaping @Sendable () -> Void) -> Void = { $1() },
         onEvent: @escaping @Sendable (AgentEvent) -> Void
@@ -44,7 +47,8 @@ final class AgentBridgeServer: @unchecked Sendable {
         commands = AgentCommandQueue(activeWindow: activeWindow)
         self.directory = directory
         self.token = token
-        self.installation = installation
+        self.admits = admits
+        self.excludes = excludes
         self.pollHold = pollHold
         self.onEvent = onEvent
     }
@@ -151,18 +155,23 @@ final class AgentBridgeServer: @unchecked Sendable {
     func retire() {
         queue.async {
             self.agentByInstance = [:]
+            self.installationByInstance = [:]
             self.answerRetired(self.commands.retire(), parked: self.parked)
             self.parked = []
         }
     }
 
-    func retire(agent: String) {
+    func retire(installation: String) {
         queue.async {
-            let belongs: (String) -> Bool = { AgentSessionID.agent(of: $0) == agent }
-            self.agentByInstance = self.agentByInstance.filter { $0.value != agent }
-            let waiting = self.parked.filter { belongs($0.session) }
-            self.parked.removeAll { belongs($0.session) }
-            self.answerRetired(self.commands.retire(where: belongs), parked: waiting)
+            let instances = Set(self.installationByInstance.filter { $0.value == installation }.keys)
+            guard !instances.isEmpty else { return }
+            for instance in instances {
+                self.agentByInstance[instance] = nil
+                self.installationByInstance[instance] = nil
+            }
+            let waiting = self.parked.filter { instances.contains($0.instance) }
+            self.parked.removeAll { instances.contains($0.instance) }
+            self.answerRetired(self.commands.retire(instances: instances), parked: waiting)
         }
     }
 
@@ -249,13 +258,16 @@ final class AgentBridgeServer: @unchecked Sendable {
         if case .hello(let hello) = received {
             guard hello.protocolVersion == AgentBridgeCodec.protocolVersion else { return respond(fd, status: 426) }
             guard hello.connection != nil else { return respond(fd, status: 400) }
-            guard let current = installation(hello.agent), hello.installation == current else { return respond(fd, status: 403) }
+            guard admits(hello.agent, hello.installation) else { return respond(fd, status: 403) }
             event = received.renamingSession { AgentSessionID.make(agent: hello.agent, native: $0) }
         } else {
             guard let instance = envelope.instance, let connection = envelope.connection,
                   commands.isCurrent(instance: instance, connection: connection), let agent = agentByInstance[instance]
             else { return respond(fd, status: 409) }
             event = received.renamingSession { AgentSessionID.make(agent: agent, native: $0) }
+            if let session = event.session, excludes(session) {
+                return respond(fd, status: 200, body: Data(#"{"ok":true,"quiet":true}"#.utf8))
+            }
         }
         switch event {
         case .hello(let hello):
@@ -304,8 +316,9 @@ final class AgentBridgeServer: @unchecked Sendable {
 
     private func register(_ hello: AgentEvent.Hello, answering fd: Int32) {
         guard greeting.remove(fd) != nil else { return }
-        guard let current = installation(hello.agent), hello.installation == current else { return respond(fd, status: 403) }
+        guard admits(hello.agent, hello.installation) else { return respond(fd, status: 403) }
         agentByInstance[hello.instance] = hello.agent
+        installationByInstance[hello.instance] = hello.installation
         if hello.resumesAfterGap {
             for refusal in commands.connectionGap(session: hello.session, instance: hello.instance) {
                 onEvent(.undelivered(request: refusal.command.id, reason: refusal.reason.rawValue, handedOff: refusal.handedOff))
@@ -317,8 +330,13 @@ final class AgentBridgeServer: @unchecked Sendable {
         let earlier = parked.filter { $0.session == hello.session }
         parked.removeAll { $0.session == hello.session }
         for p in earlier { send([], to: p.fd) }
-        respond(fd, status: 200, body: Data(#"{"ok":true}"#.utf8))
-        onEvent(.hello(hello))
+        if excludes(hello.session) {
+            respond(fd, status: 200, body: Data(#"{"ok":true,"quiet":true}"#.utf8))
+            onEvent(.hello(hello.withoutContent))
+        } else {
+            respond(fd, status: 200, body: Data(#"{"ok":true}"#.utf8))
+            onEvent(.hello(hello))
+        }
     }
 
     private func send(_ commands: [AgentCommand], to fd: Int32) {

@@ -94,6 +94,26 @@ enum SourceInvariants {
             exempt: { ($0 as NSString).lastPathComponent.hasPrefix("Claude") }
         ),
         SourceRule(
+            pattern: #""(PI_CODING_AGENT_DIR|CLAUDE_CONFIG_DIR)""#,
+            allowed: [
+                "Sources/KeyScribe/Adapters/ClaudeConnector.swift": 1,
+                "Sources/KeyScribeKit/PiAgent.swift": 1,
+                "Sources/KeyScribeKit/ClaudeRegistry.swift": 1,
+            ],
+            reason: "An agent's setup folder comes from the conversation's own process, an enrolled setup, or a folder the "
+                + "user chose; never from the app's own environment, which differs between a Finder and a terminal launch "
+                + "(docs/development/areas/voice-commands.md). Each adapter names its variable once."
+        ),
+        SourceRule(
+            pattern: #"environment\[setupVariable\]"#,
+            allowed: [
+                "Sources/KeyScribe/Adapters/ClaudeConnector.swift": 1,
+                "Sources/KeyScribeKit/AgentProcesses.swift": 1,
+            ],
+            reason: "A setup variable is read only from a scanned process's environment and written only into the "
+                + "environment of a command run for one chosen setup; the app's own environment never picks a setup."
+        ),
+        SourceRule(
             pattern: #"(?<![.\w])Pi(?![a-z])"#,
             allowed: [
                 "Sources/KeyScribe/AppDelegate.swift": 1,

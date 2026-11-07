@@ -24,13 +24,15 @@ struct AgentBridgeServerTests {
 
     private func makeServer(
         pollHold: TimeInterval = 2, activeWindow: TimeInterval = 0.5, installation: Installation = Installation(),
-        installationFor: (@Sendable (String) -> String?)? = nil,
+        installationFor: (@Sendable (String) -> String?)? = nil, excludes: @escaping @Sendable (String) -> Bool = { _ in false },
         onHello: @escaping @Sendable (AgentEvent.Hello, @escaping @Sendable () -> Void) -> Void = { $1() }
     ) throws -> (AgentBridgeServer, Events, URL) {
         let dir = URL(fileURLWithPath: "/tmp/ks-bridge-\(UUID().uuidString.prefix(8))", isDirectory: true)
         let events = Events()
         let server = AgentBridgeServer(
-            directory: dir, token: "secret", installation: { agent in installationFor.map { $0(agent) } ?? installation.current }, pollHold: pollHold,
+            directory: dir, token: "secret",
+            admits: { agent, offered in offered != nil && offered == (installationFor.map { $0(agent) } ?? installation.current) },
+            excludes: excludes, pollHold: pollHold,
             activeWindow: activeWindow, onHello: onHello
         ) {
             events.append($0)
@@ -73,12 +75,12 @@ struct AgentBridgeServerTests {
     private func hello(
         _ dir: URL, session: String = "s1", instance: String = "i1", connection: String? = nil, installation: String = "inst-1", agent: String = "claude"
     ) throws -> Int {
-        let body = #"{"op":"hello","protocol":2,"agent":"\#(agent)","agentVersion":"2.1.314","instance":"\#(instance)","session":"\#(session)","pid":1,"connection":"\#(connection ?? instance)","installation":"\#(installation)"}"#
+        let body = #"{"op":"hello","protocol":3,"agent":"\#(agent)","agentVersion":"2.1.314","instance":"\#(instance)","session":"\#(session)","pid":1,"connection":"\#(connection ?? instance)","installation":"\#(installation)"}"#
         return try request(dir, path: "/event", body: body).0
     }
 
     private func readyHello(_ dir: URL, session: String = "s1", instance: String = "i1", connection: String? = nil, gap: Bool) throws -> Int {
-        let body = #"{"op":"hello","protocol":2,"agent":"claude","instance":"\#(instance)","session":"\#(session)","pid":1,"features":["readiness"],"gap":\#(gap),"connection":"\#(connection ?? instance)","installation":"inst-1"}"#
+        let body = #"{"op":"hello","protocol":3,"agent":"claude","instance":"\#(instance)","session":"\#(session)","pid":1,"features":["readiness"],"gap":\#(gap),"connection":"\#(connection ?? instance)","installation":"inst-1"}"#
         return try request(dir, path: "/event", body: body).0
     }
 
@@ -104,17 +106,49 @@ struct AgentBridgeServerTests {
         #expect(!body.contains("r1"))
     }
 
-    @Test func retiringOneAgentLeavesTheOthersConnected() async throws {
-        let (server, events, dir) = try makeServer(pollHold: 5)
+    @Test func anExcludedConversationIsAnsweredQuietlyAndOnlyItsIdentityReachesTheApp() async throws {
+        let (server, events, dir) = try makeServer(excludes: { $0 == "claude:s1" })
+        defer { server.stop() }
+        let body = #"{"op":"hello","protocol":3,"agent":"claude","instance":"i1","session":"s1","pid":1,"connection":"i1","installation":"inst-1","title":"secret plan","prompts":4,"environment":{"TMUX":"/t"},"waiting":{"title":"Allow?"}}"#
+        let (status, answer) = try request(dir, path: "/event", body: body)
+        #expect(status == 200)
+        #expect(answer.contains(#""quiet":true"#))
+        guard case .hello(let quietHello) = events.all.first else { Issue.record("no hello"); return }
+        #expect(quietHello.session == "claude:s1")
+        #expect(quietHello.quiet)
+        #expect(quietHello.title == nil && quietHello.prompts == nil && quietHello.waiting == nil && quietHello.environment.isEmpty)
+        let turn = #"{"op":"turnComplete","session":"s1","reason":"complete","answer":"private","instance":"i1","connection":"i1"}"#
+        let (eventStatus, eventAnswer) = try request(dir, path: "/event", body: turn)
+        #expect(eventStatus == 200)
+        #expect(eventAnswer.contains(#""quiet":true"#))
+        #expect(events.all.count == 1)
+        try hello(dir, session: "s2", instance: "i2")
+        #expect(events.all.contains { if case .hello(let other) = $0 { other.session == "claude:s2" && !other.quiet } else { false } })
+    }
+
+    @Test func quietAndAdmitTravelAsCommandsToTheConversation() async throws {
+        let (server, _, dir) = try makeServer(pollHold: 5)
         defer { server.stop() }
         try hello(dir)
-        try hello(dir, session: "s2", instance: "i2", agent: "pi")
+        server.enqueue(.quiet(id: "q1", expectedSession: "claude:s1"), for: "claude:s1")
+        let (status, body) = try poll(dir)
+        #expect(status == 200)
+        let frame = try JSONSerialization.jsonObject(with: Data(body.utf8)) as? [[String: Any]]
+        #expect(frame?.first?["op"] as? String == "quiet")
+        #expect(frame?.first?["expectedSession"] as? String == "s1")
+    }
+
+    @Test func retiringOneInstallationLeavesTheOthersConnected() async throws {
+        let (server, events, dir) = try makeServer(pollHold: 5, installationFor: { $0 == "pi" ? "inst-pi" : "inst-1" })
+        defer { server.stop() }
+        try hello(dir)
+        try hello(dir, session: "s2", instance: "i2", installation: "inst-pi", agent: "pi")
         server.enqueue(.submit(id: "r1", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture), for: "claude:s1")
         server.enqueue(.submit(id: "r2", expectedSession: "pi:s2", text: "y", expiresAt: .distantFuture), for: "pi:s2")
         #expect(try poll(dir, session: "s2", instance: "i2").1.contains("r2"))
         async let polled = Task.detached { try self.poll(dir, session: "s2", instance: "i2") }.value
         try await Task.sleep(for: .milliseconds(300))
-        server.retire(agent: "pi")
+        server.retire(installation: "inst-pi")
         let (status, body) = try await polled
         #expect(status == 200)
         let frame = try JSONSerialization.jsonObject(with: Data(body.utf8)) as? [[String: Any]]
@@ -222,7 +256,7 @@ struct AgentBridgeServerTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         try Data(#"{"launch":"crashed","protocol":1}"#.utf8).write(to: dir.appendingPathComponent("ready.json"))
-        let server = AgentBridgeServer(directory: dir, token: "secret", installation: { _ in "inst-1" }) { _ in }
+        let server = AgentBridgeServer(directory: dir, token: "secret", admits: { $1 == "inst-1" }) { _ in }
         #expect(throws: AgentBridgeServer.StartError.self) { try server.start() }
         #expect(readiness(dir) == nil)
         #expect(server.launch == nil)
@@ -365,7 +399,7 @@ struct AgentBridgeServerTests {
         let registry = Registry()
         let dir = URL(fileURLWithPath: "/tmp/ks-bridge-\(UUID().uuidString.prefix(8))", isDirectory: true)
         let server = AgentBridgeServer(
-            directory: dir, token: "secret", installation: { _ in "inst-1" }, pollHold: 0.3, activeWindow: 5,
+            directory: dir, token: "secret", admits: { $1 == "inst-1" }, pollHold: 0.3, activeWindow: 5,
             onHello: { hello, done in Task { @MainActor in box.hub?.prepare(for: hello); done() } }
         ) { event in Task { @MainActor in box.hub?.handle(event) } }
         try server.start()
@@ -377,7 +411,7 @@ struct AgentBridgeServerTests {
         var notices: [AgentReceipt] = []
         hub.onNotice = { receipt, _ in notices.append(receipt) }
         let send = { (body: String) in try await Task.detached { try self.request(dir, path: "/event", body: body) }.value }
-        let ready = #"{"op":"hello","protocol":2,"agent":"claude","instance":"i1","session":"s1","pid":1,"installation":"inst-1","features":["readiness"]"#
+        let ready = #"{"op":"hello","protocol":3,"agent":"claude","instance":"i1","session":"s1","pid":1,"installation":"inst-1","features":["readiness"]"#
 
         _ = try await send(ready + #","idle":true,"gap":false,"connection":"c1"}"#)
         _ = try await Task.detached { try self.poll(dir, connection: "c1") }.value
@@ -457,7 +491,7 @@ struct AgentBridgeServerTests {
         defer { server.stop() }
         let old = #"{"op":"hello","protocol":1,"agent":"claude","instance":"i1","session":"s1","pid":1,"connection":"c1"}"#
         #expect(try request(dir, path: "/event", body: old).0 == 426)
-        let unbound = #"{"op":"hello","protocol":2,"agent":"claude","instance":"i1","session":"s1","pid":1,"installation":"inst-1"}"#
+        let unbound = #"{"op":"hello","protocol":3,"agent":"claude","instance":"i1","session":"s1","pid":1,"installation":"inst-1"}"#
         #expect(try request(dir, path: "/event", body: unbound).0 == 400)
         #expect(events.all.isEmpty)
         #expect(!server.isLive(session: "claude:s1"))
@@ -500,7 +534,7 @@ struct AgentBridgeServerTests {
         let (server, events, dir) = try makeServer(installation: installation)
         defer { server.stop() }
         #expect(try hello(dir, installation: "inst-0") == 403)
-        let unmarked = #"{"op":"hello","protocol":2,"agent":"claude","instance":"i1","session":"s1","pid":1,"connection":"c1"}"#
+        let unmarked = #"{"op":"hello","protocol":3,"agent":"claude","instance":"i1","session":"s1","pid":1,"connection":"c1"}"#
         #expect(try request(dir, path: "/event", body: unmarked).0 == 403)
         installation.current = nil
         #expect(try hello(dir) == 403)

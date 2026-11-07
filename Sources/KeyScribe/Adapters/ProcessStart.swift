@@ -4,7 +4,7 @@ import KeyScribeKit
 
 enum ProcessStart {
     enum Reading: Equatable {
-        case started(TimeInterval)
+        case started(milliseconds: Int)
         case gone
         case unknown
     }
@@ -15,8 +15,11 @@ enum ProcessStart {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, Int32(pid)]
         guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { return .unknown }
         guard size > 0 else { return .gone }
-        let start = info.kp_proc.p_starttime
-        return .started(TimeInterval(start.tv_sec) + TimeInterval(start.tv_usec) / 1_000_000)
+        return .started(milliseconds: milliseconds(info.kp_proc.p_starttime))
+    }
+
+    static func milliseconds(_ start: timeval) -> Int {
+        Int(start.tv_sec) * 1000 + Int(start.tv_usec) / 1000
     }
 
     static func isRunning(pid: Int) -> Bool {
@@ -28,8 +31,7 @@ enum ProcessStart {
         case .unknown: return true
         case .gone: return false
         case .started(let started):
-            let recorded = TimeInterval(remembered.startedAt) / 1000
-            return started <= recorded + 1 && started >= recorded - lead
+            return started <= remembered.startedAt + 1000 && started >= remembered.startedAt - Int(lead * 1000)
         }
     }
 }

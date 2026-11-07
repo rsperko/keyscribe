@@ -16,7 +16,7 @@ extension AgentBridgeServer: AgentTransport {
 
 enum AgentReceipt: Equatable {
     enum KeptReason: Equatable { case composing, typedSince, interrupted, connectionGap, dialog }
-    enum NotSentReason: Equatable { case conversationEnded, connectorNotRunning, conversationChanged, stopped, expired, refused(String) }
+    enum NotSentReason: Equatable { case conversationEnded, connectorNotRunning, conversationChanged, stopped, expired, disconnected, refused(String) }
 
     case sent(String)
     case queued(String)
@@ -52,6 +52,9 @@ final class AgentHub {
     private(set) var discoveryProblems: [String: String] = [:]
     private var shownProblems: [String: String] = [:]
     private var lastScan: [String: [AgentSession]] = [:]
+    private var lastExtras: [String: AgentScanExtras] = [:]
+    private var staleAgents: Set<String> = []
+    private var shownExtras: [String: AgentScanExtras] = [:]
     private var scanTask: Task<Void, Never>?
     private var rescanWanted = false
     private var outstanding: [String: Outstanding] = [:]
@@ -59,6 +62,10 @@ final class AgentHub {
     private var stopped = false
     private var savedRemembered: [String: RememberedName] = [:]
     private(set) var current: String?
+    let exclusions: AgentExclusions
+    private(set) var exclusionsNotSaved: String?
+    var disconnected: [AgentConversation] { directory.disconnected }
+    var onSilence: ((_ conversation: String) -> Void)?
 
     private let transport: AgentTransport
     private let nameStore: AgentNameStore?
@@ -75,6 +82,8 @@ final class AgentHub {
     private var waiters: [String: CheckedContinuation<AgentReceipt, Never>] = [:]
     private var focusWaiters: [String: CheckedContinuation<TerminalSelection, Never>] = [:]
     private var features: [String: Set<String>] = [:]
+    private var installations: [String: String] = [:]
+    private(set) var loadedVersions: [String: String] = [:]
     private var environments: [String: [String: String]] = [:]
     private var prompts: [String: Int] = [:]
     private var connectorNames: [String: String?] = [:]
@@ -88,9 +97,10 @@ final class AgentHub {
         transport: AgentTransport, discovery: [any AgentDiscovery], names: AgentNameStore? = nil,
         focus: AgentTerminalFocusing? = nil, front: AgentFronting? = nil, glance: AgentFronting? = nil,
         receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30), disconnectGrace: Duration = AgentHub.defaultDisconnectGrace,
-        scanDeadline: Duration = AgentHub.defaultScanDeadline,
+        scanDeadline: Duration = AgentHub.defaultScanDeadline, exclusions: AgentExclusions = AgentExclusions(nil),
         now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString }
     ) {
+        self.exclusions = exclusions
         self.transport = transport
         self.disconnectGrace = disconnectGrace
         self.scanDeadline = scanDeadline
@@ -116,6 +126,19 @@ final class AgentHub {
     }
 
     var rows: [String] { directory.conversations.map(\.id) }
+
+    var candidates: [AgentCandidate] { discoveries.flatMap { lastExtras[$0.kind.id]?.candidates ?? [] } }
+
+    var discoveredSetupsByAgent: [String: [String]] { lastExtras.mapValues(\.setups) }
+
+    var lastSeen: Set<String> {
+        var seen: Set<String> = []
+        for (agent, sessions) in lastScan {
+            let carried = staleAgents.contains(agent) ? Set(sessions.map(\.id)) : lastExtras[agent]?.carried ?? []
+            for native in carried { seen.insert(AgentSessionID.make(agent: agent, native: native)) }
+        }
+        return seen
+    }
 
     func handle(of id: String) -> String? {
         directory.conversations.first { $0.id == id }?.handle
@@ -163,7 +186,7 @@ final class AgentHub {
     }
 
     var frontCandidates: [AgentFrontCandidate] {
-        directory.conversations.map { AgentFrontCandidate(id: $0.id, pid: $0.pid, environment: environments[$0.id] ?? [:]) }
+        (directory.conversations + disconnected).map { AgentFrontCandidate(id: $0.id, pid: $0.pid, environment: environments[$0.id] ?? [:]) }
     }
 
     static let focusTimeout: Duration = .seconds(3)
@@ -199,12 +222,68 @@ final class AgentHub {
         guard handle(of: id) != nil else { return }
         var renamed = directory
         try renamed.rename(id, to: name)
-        try nameStore?.save(renamed.chosenNames, remembered: renamed.remembered)
+        try nameStore?.save(renamed.chosenNames, remembered: renamed.remembered, excluded: exclusions.excluded)
         savedRemembered = renamed.remembered
         namesNotSaved = nil
         directory = renamed
         sendLabels()
         onChange?()
+    }
+
+    func isExcluded(_ id: String) -> Bool { exclusions.excludes(id) }
+
+    var disconnectedNames: [String: String] {
+        guard namesProblem == nil else { return [:] }
+        return Dictionary(disconnected.map { ($0.handle, $0.id) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    func disconnect(_ id: String) {
+        guard exclusions.isKnown else { return }
+        exclusions.insert(id)
+        saveExclusions()
+        if current == id { current = nil }
+        for message in outbox.withdraw(conversation: id) {
+            report(.notSent(handle(of: id), reason: .disconnected), for: message.id)
+        }
+        for (request, entry) in requests where entry.message.conversation == id && !entry.timedOut {
+            if transport.withdraw(request) {
+                clearHandOff(request)
+                settle(request, .notSent(entry.handle, reason: .disconnected))
+            }
+        }
+        awaitingResult[id] = nil
+        waitingPrompts[id] = nil
+        lastUsed[id] = nil
+        onSilence?(id)
+        transport.enqueue(.quiet(id: makeId(), expectedSession: id), for: id)
+        refresh()
+        onChange?()
+    }
+
+    func reconnect(_ id: String) {
+        guard exclusions.isKnown, exclusions.remove(id) else { return }
+        saveExclusions()
+        transport.enqueue(.admit(id: makeId(), expectedSession: id), for: id)
+        refresh()
+        onChange?()
+        Task { [weak self] in await self?.rescan(rereadingTitles: true) }
+    }
+
+    func retrySavingExclusions() {
+        saveExclusions()
+        onChange?()
+    }
+
+    private func saveExclusions() {
+        guard let nameStore else { return }
+        do {
+            try nameStore.save(directory.chosenNames, remembered: directory.remembered, excluded: exclusions.excluded)
+            savedRemembered = directory.remembered
+            exclusionsNotSaved = nil
+        } catch {
+            exclusionsNotSaved = error.localizedDescription
+            Log.agents.error("disconnected conversations not saved: \(error.localizedDescription, privacy: .public)")
+        }
     }
 
     func renameProblem(_ id: String, to name: String) -> AgentHandles.RenameError? {
@@ -226,7 +305,7 @@ final class AgentHub {
             return
         }
         do {
-            try nameStore.save(directory.chosenNames, remembered: remembered)
+            try nameStore.save(directory.chosenNames, remembered: remembered, excluded: exclusions.excluded)
             savedRemembered = remembered
             namesNotSaved = nil
         } catch {
@@ -237,10 +316,11 @@ final class AgentHub {
 
     private func adopt(_ loaded: AgentNameStore.Loaded) {
         switch loaded {
-        case .names(let chosen, let remembered):
+        case .names(let chosen, let remembered, let excluded):
             directory = AgentDirectory(chosen: chosen, remembered: remembered)
             savedRemembered = remembered
             namesProblem = nil
+            exclusions.adopt(excluded)
         case .unavailable(let reason):
             namesProblem = reason
             Log.agents.error("conversation names unavailable: \(reason, privacy: .public)")
@@ -297,11 +377,14 @@ final class AgentHub {
         guard !stopped else { return }
         for (agent, result) in results {
             switch result {
-            case .found(let scanned):
+            case .found(let scanned, let extras):
                 lastScan[agent] = scanned
-                discoveryProblems[agent] = nil
+                lastExtras[agent] = extras
+                discoveryProblems[agent] = extras.problem
+                staleAgents.remove(agent)
             case .unreadable(let why):
                 discoveryProblems[agent] = why
+                staleAgents.insert(agent)
             }
         }
         refresh(scannedAt: scannedAt)
@@ -387,15 +470,17 @@ final class AgentHub {
             }
             entries += found
         }
-        let live = Set(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }.filter(transport.isLive(session:)))
-        directory.update(entries: entries, live: live, titles: shown, nativeNames: nativeNames, running: stillRunning)
+        let excluded = Set(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }.filter(exclusions.excludes))
+        let live = Set(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }.filter { !excluded.contains($0) && transport.isLive(session: $0) })
+        directory.update(entries: entries, live: live, titles: shown, nativeNames: nativeNames, running: stillRunning, excluded: excluded)
         let reported = namesNotSaved
         rememberNames()
         if let current, handle(of: current) == nil { self.current = nil }
         lastUsed = lastUsed.filter { handle(of: $0.key) != nil }
-        let listed = Set(directory.conversations.map(\.id))
+        let listed = Set((directory.conversations + directory.disconnected).map(\.id))
         let ended = connectorStateSessions.filter { !listed.contains($0) && !transport.isLive(session: $0) }
-        forgetConnectorState { !ended.contains($0) }
+        forgetConnectorState(keepingEnvironments: { !ended.contains($0) }) { !ended.contains($0) && !exclusions.excludes($0) }
+        installations = installations.filter { !ended.contains($0.key) }
         for session in ended { transport.forget(session: session) }
         sendLabels()
         let idle = Set(directory.conversations.filter { $0.state == .idle }.map(\.id))
@@ -404,7 +489,9 @@ final class AgentHub {
         releaseHeld()
         reconcileAttention()
         shownProblems = discoveryProblems
-        if directory.revision != before || namesNotSaved != reported || discoveryProblems != problemsBefore { onChange?() }
+        let extrasChanged = lastExtras != shownExtras
+        shownExtras = lastExtras
+        if directory.revision != before || namesNotSaved != reported || discoveryProblems != problemsBefore || extrasChanged { onChange?() }
     }
 
     private func reconcileAttention() {
@@ -455,9 +542,10 @@ final class AgentHub {
         waitingPrompts = waitingPrompts.filter { live.contains($0.key) }
     }
 
-    private func forgetConnectorState(keeping kept: (String) -> Bool) {
+    private func forgetConnectorState(keepingEnvironments keptEnvironment: ((String) -> Bool)? = nil, keeping kept: (String) -> Bool) {
         features = features.filter { kept($0.key) }
-        environments = environments.filter { kept($0.key) }
+        loadedVersions = loadedVersions.filter { kept($0.key) }
+        environments = environments.filter { keptEnvironment?($0.key) ?? kept($0.key) }
         prompts = prompts.filter { kept($0.key) }
         connectorNames = connectorNames.filter { kept($0.key) }
         connectorNamesAt = connectorNamesAt.filter { kept($0.key) }
@@ -497,6 +585,7 @@ final class AgentHub {
     }
 
     func deliver(_ text: String, to id: String, request: String? = nil) async -> AgentReceipt {
+        if exclusions.excludes(id) { return .notSent(disconnected.first { $0.id == id }?.handle, reason: .disconnected) }
         guard let conversation = directory.conversations.first(where: { $0.id == id }) else {
             return .notSent(nil, reason: .conversationEnded)
         }
@@ -519,16 +608,23 @@ final class AgentHub {
     }
 
     func prepare(for hello: AgentEvent.Hello) {
+        guard !exclusions.excludes(hello.session) else { return }
         if hello.resumesAfterGap { outbox.noteConnectionGap(conversation: hello.session) }
         running[hello.session] = hello.knownIdle ? nil : now()
     }
 
-    func retire(agent: String) {
-        let kept = { (session: String) in AgentSessionID.agent(of: session) != agent }
+    func retire(installation: String) {
+        let retiring = Set(installations.filter { $0.value == installation }.keys)
+        guard !retiring.isEmpty else { return }
+        let kept = { (session: String) in !retiring.contains(session) }
         awaitingResult = awaitingResult.filter { kept($0.key) }
         waitingPrompts = waitingPrompts.filter { kept($0.key) }
         forgetConnectorState(keeping: kept)
-        discoveries.first { $0.kind.id == agent }?.retire()
+        installations = installations.filter { kept($0.key) }
+        for session in retiring.sorted() { onSilence?(session) }
+        for (agent, sessions) in Dictionary(grouping: retiring, by: { AgentSessionID.agent(of: $0) ?? "" }) {
+            discoveries.first { $0.kind.id == agent }?.retire(sessions: Set(sessions.map(AgentSessionID.native)))
+        }
         Task { [weak self] in await self?.rescan(rereadingTitles: false) }
     }
 
@@ -537,10 +633,16 @@ final class AgentHub {
         if let session = event.session, let agent = AgentSessionID.agent(of: session) {
             discoveries.first { $0.kind.id == agent }?.observe(event.renamingSession(AgentSessionID.native))
         }
+        if let session = event.session, exclusions.excludes(session) {
+            if case .hello(let hello) = event { installations[session] = hello.installation }
+            return
+        }
         switch event {
         case .hello(let hello):
             awaitingResult[hello.session] = nil
             features[hello.session] = Set(hello.features)
+            installations[hello.session] = hello.installation
+            loadedVersions[hello.session] = hello.version
             environments[hello.session] = hello.environment
             prompts[hello.session] = hello.prompts
             waitingPrompts[hello.session] = hello.waiting
@@ -722,6 +824,7 @@ final class AgentHub {
         if reason == "sessionChanged" { return .conversationChanged }
         if reason == "stopped" { return .stopped }
         if reason == "expired" { return .expired }
+        if reason == "disconnected" { return .disconnected }
         return .refused(reason)
     }
 }
@@ -738,13 +841,15 @@ final class AgentRuntime {
         supportDir.appendingPathComponent("agents", isDirectory: true)
     }
 
-    init(supportDir: URL, discovery: [any AgentDiscovery], legacyAgent: String) throws {
+    init(supportDir: URL, discovery: [any AgentDiscovery], setups: ConnectorSetupRegistry, legacyAgent: String) throws {
         let directory = Self.bridgeDirectory(supportDir: supportDir)
         let token = try AgentBridgeToken.loadOrCreate(in: directory)
         let box = HubBox()
+        let exclusions = AgentExclusions(nil)
         server = AgentBridgeServer(
             directory: directory, token: token,
-            installation: { AgentInstallationRecord.current(agent: $0, in: directory) },
+            admits: { setups.admits(agent: $0, installation: $1) },
+            excludes: { exclusions.excludes($0) },
             onHello: { hello, done in
                 Task { @MainActor in
                     box.hub?.prepare(for: hello)
@@ -758,7 +863,7 @@ final class AgentRuntime {
             transport: server, discovery: discovery,
             names: AgentNameStore(directory: directory, legacyAgent: legacyAgent),
             focus: AgentTerminalFocus(connector: { session in await box.hub?.focusInPlace(session) ?? .notFound }),
-            front: AgentFront(), glance: AgentFront.confirmingWithoutAsking)
+            front: AgentFront(), glance: AgentFront.confirmingWithoutAsking, exclusions: exclusions)
         box.hub = hub
         try server.start()
         Task { @MainActor [weak hub] in await hub?.rescan() }
@@ -767,9 +872,9 @@ final class AgentRuntime {
         }
     }
 
-    func retire(agent: String) {
-        server.retire(agent: agent)
-        hub.retire(agent: agent)
+    func retire(installation: String) {
+        server.retire(installation: installation)
+        hub.retire(installation: installation)
     }
 
     func stop() {

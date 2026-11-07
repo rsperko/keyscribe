@@ -116,4 +116,12 @@ struct AgentRosterTests {
         #expect(!AgentRoster.isAvailable(conversation("a", "k", state: .disconnected)))
         #expect(!AgentRoster.isAvailable(conversation("a", "k", live: false)))
     }
+
+    @Test func aDisconnectedConversationInFrontIsNamedAsDisconnectedNotLeftBlank() {
+        let listed = AgentConversation(id: "a", agent: "claude", pid: 1, cwd: "/src/api", handle: "api", state: .idle, connectorLive: true)
+        let away = AgentConversation(id: "b", agent: "claude", pid: 2, cwd: "/src/api", handle: "api blue", state: .idle, connectorLive: false)
+        let roster = AgentRoster(frozen: [listed], live: [listed], recipient: .init(id: "b", source: .front), disconnected: [away])
+        #expect(roster.recipientName == "api blue, disconnected")
+        #expect(roster.rows.allSatisfy { !$0.current })
+    }
 }

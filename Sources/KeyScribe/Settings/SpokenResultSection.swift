@@ -127,12 +127,12 @@ private struct SpokenVoiceRows: View {
         case .ready:
             SettingRow(title: "Voice", help: Self.help, combinesAccessibilityChildren: false) {
                 wrapping {
-                    Picker("", selection: selection) {
+                    Picker("Voice", selection: selection) {
                         ForEach(SpokenVoices.all) { option in
                             Text(option.label).tag(option.id)
                         }
                     }
-                    .labelsHidden().fixedSize()
+                    .labelsHidden()
                     .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenResultVoice)
                     previewButton
                 }

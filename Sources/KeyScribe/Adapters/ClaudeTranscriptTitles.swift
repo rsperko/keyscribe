@@ -65,7 +65,8 @@ final class ClaudeTranscriptTitles: @unchecked Sendable {
 
     private func locate(_ entry: ClaudeRegistryEntry) -> URL? {
         let file = "\(entry.sessionId).jsonl"
-        for dir in configDirs {
+        let own = entry.configDir.map { [URL(fileURLWithPath: $0, isDirectory: true)] } ?? []
+        for dir in own + configDirs.filter({ $0.path != entry.configDir }) {
             let projects = dir.appendingPathComponent("projects", isDirectory: true)
             let direct = projects.appendingPathComponent(ClaudeTranscriptTitle.projectFolder(for: entry.cwd)).appendingPathComponent(file)
             if FileManager.default.fileExists(atPath: direct.path) { return direct }

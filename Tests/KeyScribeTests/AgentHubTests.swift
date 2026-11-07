@@ -899,7 +899,7 @@ struct AgentHubTests {
                               stillRunning: { $0.pid == 10 })
         await second.rescan()
         #expect(second.names == ["keyscribe blue": "claude:b", "keyscribe green": "claude:c"])
-        guard case .names(_, let remembered) = AgentNameStore(directory: dir).load() else { Issue.record("names not loaded"); return }
+        guard case .names(_, let remembered, _) = AgentNameStore(directory: dir).load() else { Issue.record("names not loaded"); return }
         #expect(remembered["claude:a"]?.name == "keyscribe")
         registry.entries.append(missing)
         await second.rescan()
@@ -925,7 +925,7 @@ struct AgentHubTests {
         await hub.rescan()
         #expect(hub.namesNotSaved == nil)
         #expect(changes == reported + 1)
-        guard case .names(_, let remembered) = AgentNameStore(directory: dir).load() else { Issue.record("names not saved"); return }
+        guard case .names(_, let remembered, _) = AgentNameStore(directory: dir).load() else { Issue.record("names not saved"); return }
         #expect(remembered["claude:a"] == RememberedName(name: "keyscribe", pid: 10, startedAt: 100, native: nil, agent: "claude"))
     }
 
@@ -987,7 +987,7 @@ struct AgentHubTests {
         guard case .unavailable = AgentNameStore(directory: newer).load() else { Issue.record("newer file loaded"); return }
     }
 
-    @Test func whileNamesCannotBeLoadedNoNameAddressesAnythingAndTheFileIsKept() async throws {
+    @Test func whileNamesCannotBeLoadedNoConversationIsAdmittedAndTheFileIsKept() async throws {
         let dir = try nameDir("not json")
         defer { try? FileManager.default.removeItem(at: dir) }
         let registry = Registry()
@@ -996,7 +996,7 @@ struct AgentHubTests {
         await hub.rescan()
         #expect(hub.namesProblem != nil)
         #expect(hub.names.isEmpty)
-        #expect(hub.rows == ["claude:a"])
+        #expect(hub.rows.isEmpty)
         #expect(throws: (any Error).self) { try hub.rename("claude:a", to: "backend") }
         #expect(try String(contentsOf: dir.appendingPathComponent(AgentNameStore.fileName), encoding: .utf8) == "not json")
     }
@@ -1174,7 +1174,7 @@ struct AgentHubTests {
         private var waiting: [CheckedContinuation<Void, Never>] = []
         private(set) var scans = 0
         private(set) var observed: [AgentEvent] = []
-        private(set) var retired = 0
+        private(set) var retired: [Set<String>] = []
         init(kind: AgentKind = AgentKind(id: "fake", displayName: "Fake", connectorName: "Fake connector")) { self.kind = kind }
         func scan(rereadingTitles: Bool) async -> AgentScan {
             scans += 1
@@ -1184,9 +1184,9 @@ struct AgentHubTests {
         }
         func stillRunning(_ remembered: RememberedName) -> Bool { false }
         func observe(_ event: AgentEvent) { observed.append(event) }
-        func retire() {
-            retired += 1
-            result = .found([])
+        func retire(sessions: Set<String>) {
+            retired.append(sessions)
+            if case .found(let found, let extras) = result { result = .found(found.filter { !sessions.contains($0.id) }, extras) }
         }
     }
 
@@ -1206,18 +1206,135 @@ struct AgentHubTests {
         #expect(one.observed == [.title(session: "s9", text: "x")])
     }
 
-    @Test func retiringAnAgentForgetsWhatItsConnectorsAnnounced() async {
+    @Test func retiringAnInstallationForgetsOnlyWhatItsConnectorsAnnounced() async {
+        let fake = FakeDiscovery()
+        var other = Self.fakeSession("f2")
+        other.pid = 11
+        fake.result = .found([Self.fakeSession("f1"), other])
+        let transport = FakeTransport()
+        transport.live = ["fake:f1", "fake:f2"]
+        let hub = AgentHub(transport: transport, discovery: [fake])
+        hub.handle(.hello(.init(protocolVersion: 3, agent: "fake", agentVersion: "", instance: "i1", session: "fake:f1", pid: 10, installation: "a")))
+        hub.handle(.hello(.init(protocolVersion: 3, agent: "fake", agentVersion: "", instance: "i2", session: "fake:f2", pid: 11, installation: "b")))
+        await hub.rescan()
+        hub.retire(installation: "a")
+        await hub.rescan()
+        #expect(fake.retired == [["f1"]])
+        #expect(hub.directory.conversations.map(\.id) == ["fake:f2"])
+    }
+
+    @Test func retiringAnInstallationSilencesSpokenUpdatesForItsConversations() async {
+        let fake = FakeDiscovery()
+        fake.result = .found([Self.fakeSession("f1")])
+        let transport = FakeTransport()
+        transport.live = ["fake:f1"]
+        let hub = AgentHub(transport: transport, discovery: [fake])
+        hub.handle(.hello(.init(protocolVersion: 3, agent: "fake", agentVersion: "", instance: "i1", session: "fake:f1", pid: 10, installation: "a")))
+        await hub.rescan()
+        var silenced: [String] = []
+        hub.onSilence = { silenced.append($0) }
+        hub.retire(installation: "a")
+        #expect(silenced == ["fake:f1"])
+    }
+
+    @Test func disconnectingAConversationNeverHandsItsNameToAnother() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-nm-\(UUID().uuidString)")
+        let fake = FakeDiscovery()
+        var other = Self.fakeSession("f2")
+        other.pid = 11
+        fake.result = .found([Self.fakeSession("f1"), other])
+        let transport = FakeTransport()
+        transport.live = ["fake:f1", "fake:f2"]
+        let hub = AgentHub(transport: transport, discovery: [fake], names: AgentNameStore(directory: dir))
+        await hub.rescan()
+        let before = hub.names
+        #expect(before.count == 2)
+        let (name, id) = try #require(before.first { $0.value == "fake:f2" })
+        hub.disconnect(id)
+        #expect(hub.disconnectedNames == [name: id])
+        #expect(hub.names[name] == nil)
+        #expect(hub.names == before.filter { $0.value != id })
+    }
+
+    @Test func aDisconnectedConversationLeavesTheRecipientsAndItsHeldMessagesAreNotSent() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-ex-\(UUID().uuidString)")
+        let fake = FakeDiscovery()
+        fake.result = .found([Self.fakeSession("f1")])
+        let transport = FakeTransport()
+        transport.live = ["fake:f1"]
+        let hub = AgentHub(transport: transport, discovery: [fake], names: AgentNameStore(directory: dir))
+        await hub.rescan()
+        hub.makeCurrent("fake:f1")
+        var forgotten: [String] = []
+        hub.onSilence = { forgotten.append($0) }
+        hub.disconnect("fake:f1")
+        #expect(hub.directory.conversations.isEmpty)
+        #expect(hub.disconnected.map(\.id) == ["fake:f1"])
+        #expect(hub.current == nil)
+        #expect(hub.names.isEmpty)
+        #expect(hub.disconnectedNames == ["api": "fake:f1"])
+        #expect(forgotten == ["fake:f1"])
+        #expect(transport.sent.contains { if case .quiet(_, "fake:f1") = $0.0 { true } else { false } })
+        #expect(await hub.deliver("run the tests", to: "fake:f1") == .notSent("api", reason: .disconnected))
+        guard case .names(_, _, let excluded) = AgentNameStore(directory: dir).load() else { Issue.record("not saved"); return }
+        #expect(excluded == ["fake:f1"])
+
+        let reopened = AgentHub(transport: FakeTransport(), discovery: [fake], names: AgentNameStore(directory: dir))
+        await reopened.rescan()
+        #expect(reopened.isExcluded("fake:f1"))
+        #expect(reopened.directory.conversations.isEmpty)
+
+        hub.reconnect("fake:f1")
+        #expect(transport.sent.contains { if case .admit(_, "fake:f1") = $0.0 { true } else { false } })
+        #expect(hub.directory.conversations.map(\.id) == ["fake:f1"])
+        guard case .names(_, _, let after) = AgentNameStore(directory: dir).load() else { Issue.record("not saved"); return }
+        #expect(after.isEmpty)
+    }
+
+    @Test func eventsFromADisconnectedConversationAreIgnored() async {
         let fake = FakeDiscovery()
         fake.result = .found([Self.fakeSession("f1")])
         let transport = FakeTransport()
         transport.live = ["fake:f1"]
         let hub = AgentHub(transport: transport, discovery: [fake])
         await hub.rescan()
-        #expect(hub.directory.conversations.map(\.id) == ["fake:f1"])
-        hub.retire(agent: "fake")
+        hub.disconnect("fake:f1")
+        var results: [String] = []
+        hub.onResult = { _, _, answer in results.append(answer) }
+        hub.handle(.turnComplete(session: "fake:f1", reason: "complete", answer: "private"))
+        #expect(results.isEmpty)
+    }
+
+    @Test func aDisconnectThatCannotBeSavedStillHoldsForThisSessionAndSaysSo() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-ro-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fake = FakeDiscovery()
+        fake.result = .found([Self.fakeSession("f1")])
+        let hub = AgentHub(transport: FakeTransport(), discovery: [fake], names: AgentNameStore(directory: dir))
         await hub.rescan()
-        #expect(fake.retired == 1)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path) }
+        hub.disconnect("fake:f1")
+        #expect(hub.isExcluded("fake:f1"))
+        #expect(hub.exclusionsNotSaved != nil)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        hub.retrySavingExclusions()
+        #expect(hub.exclusionsNotSaved == nil)
+    }
+
+    @Test func unreadableSavedChoicesAdmitNoConversationUntilTheyCanBeRead() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-bad-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data("not json".utf8).write(to: dir.appendingPathComponent(AgentNameStore.fileName))
+        let fake = FakeDiscovery()
+        fake.result = .found([Self.fakeSession("f1")])
+        let hub = AgentHub(transport: FakeTransport(), discovery: [fake], names: AgentNameStore(directory: dir))
+        await hub.rescan()
+        #expect(hub.isExcluded("fake:f1"))
         #expect(hub.directory.conversations.isEmpty)
+        try AgentNameStore(directory: dir).save([:], remembered: [:])
+        hub.reloadNames()
+        #expect(!hub.isExcluded("fake:f1"))
     }
 
     @Test func aSubmitRefusedBecauseADialogIsOpenIsKeptForReview() async {

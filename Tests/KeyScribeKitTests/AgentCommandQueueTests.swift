@@ -102,6 +102,18 @@ struct AgentCommandQueueTests {
         #expect(!queue.isLive(session: "s1", at: at(1 + quiet)))
     }
 
+    @Test func retiringSomeInstancesWithdrawsOnlyTheirSessionsCommands() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)
+        queue.hello(session: "s2", instance: "i2", connection: "c2", at: t0)
+        queue.enqueue(command("r1"), for: "s1", at: t0)
+        queue.enqueue(.submit(id: "r2", expectedSession: "s2", text: "other", expiresAt: .distantFuture), for: "s2", at: t0)
+        #expect(queue.retire(instances: ["i1"]).map(\.command.id) == ["r1"])
+        #expect(!queue.isCurrent(instance: "i1", connection: "c1"))
+        #expect(queue.isCurrent(instance: "i2", connection: "c2"))
+        #expect(queue.poll(session: "s2", instance: "i2", connection: "c2", at: at(1))?.map(\.id) == ["r2"])
+    }
+
     @Test func retiringWithdrawsEveryCommandAndEndsEveryConnection() {
         var queue = AgentCommandQueue()
         queue.hello(session: "s1", instance: "i1", connection: "c1", at: t0)

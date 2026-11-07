@@ -244,7 +244,7 @@ not to its label.
 |---|---|---|---|
 | Ready (one-shot mode picked from the menu) | Mode name | “Next dictation” | None; replaced when recording starts |
 | Recording | Mode name + a red level circle (halo + dot; Reduce Motion: intensity-only dot) | “Listening”, or “Listening — tap [trigger] again to stop” for a latched tap-to-toggle recording | Stop if tap-to-toggle |
-| Recording (Coding agent mode, experimental) | “To [name]” for the frozen recipient, or “No recipient yet”, + the level circle | “Listening” as above, then the open sessions as numbered rows (name over agent and project, live state at the trailing edge, the recipient highlighted and marked Current), then one line saying where the recipient came from and how to name another | As Recording; rows are not clickable while recording |
+| Recording (Coding agent mode, experimental) | “To [name]” for the frozen recipient (“To [name], disconnected” when it is a disconnected conversation in front), or “No recipient yet”, + the level circle | “Listening” as above, then the open sessions as numbered rows (name over agent and project, live state at the trailing edge, the recipient highlighted and marked Current), then one line saying where the recipient came from and how to name another | As Recording; rows are not clickable while recording |
 | Recording, near the limit | Same, plus an orange ring around the level circle that drains to empty | “Stops in 0:SS”, counting down | As Recording |
 | Transcribing | “Transcribing” | Mode name | Cancel when safe |
 | Voice command opening an app | Mode name | “Opening [app]…” only while “open” starts an app, then “Looking in [app]…” while its tabs or sidebar fill; “switch to” never starts one, so never shows it | None; shown only once the command is acting, so it is not cancellable and does not take key focus away from the app being opened |
@@ -467,6 +467,15 @@ example, the user sent that conversation a message after the take was decided, i
 or its prompt box holds a message the user has not sent. The HUD says so and why (“Not sent to docs: it has
 a message you haven’t sent”). An unsent message in the agent's prompt box is left exactly as it was, and
 what was said stays in History.
+
+A take addressed to a conversation that is not connected, or that the user disconnected, says so by name
+(“Not sent: docs isn’t connected to {app}”, “docs is disconnected”, or “The conversation in front is
+disconnected”) with **Open Coding Agent Settings**, and never falls through to another recipient. A
+disconnected conversation's name is still recognized for this, but it never appears in the numbered list.
+"The conversation in front is disconnected" needs the conversation's terminal facts, which only a connected
+conversation sends; one disconnected since before the app last started, in a multiplexer pane, may not be
+recognized as the one in front, and the take then asks for a name.
+What was said is kept for Paste last dictation, and connecting the conversation never sends it.
 
 **Voice command choice.** The list interrupts the user, so it is used sparingly (`principles.md` §4,
 “Asking is a last resort”): navigation settles ties it can order by itself, and the list appears only when
@@ -1519,10 +1528,11 @@ start recording without inventing a shortcut. With a current recipient it explai
 instructions go there unless another conversation is in front, and another name switches the recipient. Compact rows follow, each its own native row of the grouped form (native insets and separators). Rows carry no numbers: Settings is an inventory, not
 an addressing surface, so row numbers appear only on the recording HUD, where “session two” is said and the
 numbering is frozen for the take. Each row is identified to assistive technology by its conversation name.
-The first line holds the name, Current, the text-only live state and a small, native bordered **Rename…**
-button, visibly distinct from the status labels. The agent type
-appears beside the state only when the list contains different agent types. The second line shows the
-directory on the left and the terminal/multiplexer on the right. The directory abbreviates the home folder
+The first line holds the name, Current and the text-only live state, with small, native bordered actions
+visibly distinct from the status labels. Actions move beneath the heading when they would squeeze the
+name; the name may wrap to two lines and its full text remains available on hover. The second line shows
+the directory on the left and the terminal/multiplexer on the right, with the agent type before the
+directory only when the list contains different agent types. The directory abbreviates the home folder
 with `~`, truncates in the middle when needed, and exposes its full path in a tooltip. Clicking it copies
 the full, unabridged path; it is a `CopyableValue`, whose copy icon briefly becomes a checkmark without moving the row. The directory
 is a keyboard-accessible button named for its conversation. There is no action menu, details popover,
@@ -1630,42 +1640,103 @@ run on their own queue, so agents finishing never delay a voice command's termin
 summary plays when the front cannot be confirmed. A value
 redaction hid from the service is spoken as "a hidden value", never read aloud.
 
-Connector setup is one section per agent, each drawn from that agent's own adapter: its status, Install,
-Update and Uninstall, its reload advice, and its wording. Installing, updating or uninstalling one agent's
-connector never disconnects another agent's sessions. When an agent's session list cannot be read, or does
-not answer in time, its section says so as an advisory and the sessions last seen stay listed rather than
-vanishing.
+Connector setup is one section per agent, each drawn from that agent's own adapter, holding one block per
+setup: the folder an agent loads its configuration from (Pi's agent folder, Claude Code's config folder). The
+setups shown are the default one, the ones a connector is installed in, and the ones open conversations were
+found using, read from each conversation's own process, so a Finder launch and a terminal launch show the
+same setups; finding a setup never installs into it. With one setup the section looks like a single
+connector: a `SettingRow` with the status and one primary action, the folder as a `CopyableValue`, a line
+naming the conversations that use it ("Used by Atlas and Build API." or "No open conversations use this
+folder."), its issues, reload advice while a conversation using it is not connected or still runs the previous
+connector, and **Uninstall Connector…** alone at the trailing edge. More setups
+repeat the same block, each titled with its folder; there is no chooser or extra disclosure around them.
+Installing, updating or uninstalling one setup's connector never disconnects another setup's or another
+agent's conversations. When an agent's conversations cannot all be checked, its section says so as an
+advisory and the conversations last seen stay listed rather than vanishing; only those are marked Last
+seen. When `connectors.json` cannot be read, a **Connectors** section above the agents says no connector
+can connect, shows why, explains that removing the file means installing every connector again, and offers
+**Try Again**, which reads the file again, and **Show in Finder**.
 
-**Uninstall Connector…** asks for confirmation first, which says that open sessions disconnect at
-once, new ones will not connect, work already sent may still finish, each open session unloads the
-connector with its agent's reload command (`/reload-plugins` in Claude Code, `/reload` in Pi) or a
-restart, and the app's own settings and names are kept. For Claude Code, the
-uninstall is done only once Claude Code no longer lists the plugin or its marketplace; a step that
-reports something already gone is not a failure. Connector setup warns that open sessions still
-receive instructions only when Claude Code reports the connector removed while at least one session is
-still connected, which happens when it was uninstalled outside the app; that warning says how to stop
-them. Checking installation does not imply that the connector was removed. An uninstall the app
-started that Claude Code did not finish shows **Uninstall not finished** as soon as it fails, with what
-Claude Code said, explains that its sessions no longer connect, and offers **Finish Uninstalling**; it
-stays until Claude Code lists neither the plugin nor its marketplace and the connector's files are gone,
-across refreshes and reopening the pane. When the claude command cannot be found but the connector's
-files are still in place, setup keeps **Uninstall Connector…** (it disconnects open sessions) and lists
-the terminal commands that finish the job, each copyable, named for this copy of the app. After that
-button is used, the lead line confirms the result: disconnected from the app, run these to finish
-uninstalling. A copy of the app that is missing its connector shows the connector as
-Unavailable, with guidance to reinstall the app; nothing else in the app is affected.
+**Install…** on a setup and **Connect…** on a conversation open the same consent sheet, presented like the
+Rename sheet: the title "Connect conversations using this {agent} setup?", then the open conversations it
+affects by name and that future conversations using the setup connect too ("Atlas, Build API, and future
+conversations using this setup will connect to {app}. You can disconnect individual conversations later."),
+a `DisclosureSection` for a longer list, the conversations that stay disconnected (one being reconnected is
+listed with those that connect), that other setups are
+unaffected, that the app keeps this connector up to date and open conversations keep the version they loaded
+until they reload, the folder it installs in as a `CopyableValue`, and the reload advice when conversations
+are already open. The details grow only to a bounded height and then scroll, while the title and
+**Cancel** and **Install and Connect** remain visible. The buttons carry the standard cancel and default shortcuts.
+Opening the sheet changes nothing, and Install and Connect is the consent: there is no second confirmation
+and no result sheet. Progress and the outcome appear in the setup's block and the conversation rows.
 
-The Pi connector is files only: Install writes an extension folder into Pi's own extensions folder, which
-every Pi the user starts loads on its own, and Uninstall deletes that folder; Pi is never asked to run a
-command. Its status is read from those files: Installed when the folder holds the packaged extension for
-this installation, Update available when it holds another version, Not installed when it is gone, and
-Uninstall not finished when the app recorded an uninstall but the folder remains, with Finish Uninstalling.
-Because Pi is only consulted for its version, a Pi older than the first version the connector works with
-(`PiCLI.minimumVersion`) shows **Pi too old** with that version and advice to update, and offers no Install;
-when the folder is in place it still offers Uninstall Connector…, since removal needs nothing from Pi.
-When the pi command cannot be found but the folder is in place, setup keeps Uninstall Connector… and shows
-the one terminal command that deletes the folder. An open Pi session picks up an install, update or removal
-when the user runs `/reload` in it or restarts it; the reload advice in this section says so.
+A setup's status says what its files show: **Installed**, **Update available**, **Not installed**, the
+agent's own turned-off wording when the agent's configuration turns the connector off, **Uninstall not
+finished** with **Finish Uninstalling**, or a failure with what went wrong and **Try Again**, which repeats
+the step that failed. A failed install is not Installed: its conversations still offer **Connect…**. Installed is
+never Ready: a conversation is Ready only when its own connector has connected. When the app starts it
+updates the connector in every setup it is installed in, never one it is not installed in or one the agent
+has turned off; a conversation still running the previous connector says so under its row, and that
+connector keeps working until the conversation reloads.
+
+Failed connector operations and unreadable or unsaved conversation choices use the same error-marker
+chain as other Settings failures: the connector label where applicable, Coding agent in the mode list,
+Modes in the sidebar, and Settings in the menu. Not installed, Not connected and deliberate disconnections
+do not create errors. Lifecycle and help buttons retain their own action names in accessibility.
+
+**Uninstall Connector…** asks for confirmation first, which says that conversations using this setup
+disconnect at once, new ones will not connect, work already sent may still finish, each open conversation
+unloads the connector with its agent's reload command (`/reload-plugins` in Claude Code, `/reload` in Pi) or
+a restart, and the app's names and disconnected conversations are kept. The setup stops admitting its
+connectors before anything is removed. For Claude Code, the uninstall is done only once Claude Code no longer
+lists the plugin or its marketplace in that setup; a step that reports something already gone is not a
+failure. A setup that is not installed but still has a connected conversation warns that the conversation
+keeps receiving instructions until it reloads, which happens when the connector was removed outside the app.
+An uninstall that did not finish shows **Uninstall not finished** as soon as it fails, with what the agent
+said, explains that its conversations no longer connect, and offers **Finish Uninstalling**; finishing never
+lets them connect again. When the agent's command cannot be found but the connector's files are still in
+place, the block keeps **Uninstall Connector…** and lists the terminal commands that finish the job, each
+copyable, named for this copy of the app and its setup. A copy of the app that is missing its connector shows
+the connector as Unavailable, with guidance to reinstall the app; nothing else in the app is affected.
+
+The Pi connector is files only: Install writes an extension folder into the setup's `extensions/` folder,
+which every Pi using that setup loads on its own, and Uninstall deletes that folder; Pi is never asked to run
+a command. Because Pi is only consulted for its version, a Pi older than the first version the connector
+works with (`PiCLI.minimumVersion`) shows **Pi too old** with that version and advice to update, and offers
+no Install; when the folder is in place it still offers Uninstall Connector…, since removal needs nothing
+from Pi.
+
+**Conversation rows and their connection.** Besides the conversations whose connectors connected, the list
+shows agent processes found without one, described honestly ("Pi in atlas", Not connected) with no Rename
+until the agent identifies the conversation; when it does, the same row is updated in place, matched by
+process and start time, and focus and position stay put. Otherwise identical process-only rows add their
+start date and time for recognition, including in the consent list; this context never becomes a spoken
+name. A row whose setup has no connector offers
+**Connect…**. A row whose setup has a connector but which has not connected says "Connector installed. Run
+/reload in this conversation." with the command as a `CopyableValue`, **Show Conversation** (which only brings
+it forward and never types) when it can be located, and **Try Again**; the app never infers a reload is needed
+from process age or a missing hello. A connected row offers **Rename…** and **Disconnect**. Connecting never
+changes the current recipient or sends anything.
+
+**Disconnect** takes effect at once without confirmation: the conversation leaves the recipients and the
+recording HUD's numbered list, stops being the current recipient, and its held hand-offs and waiting spoken
+updates are dropped; work the agent already accepted may finish. It then appears under a **Disconnected
+conversations** `DisclosureSection`, shown only when needed, which says once "These conversations stay
+disconnected when reopened. New conversations connect normally." Each row has its name, folder and
+**Reconnect**, which takes effect at once without a reload, or opens the consent sheet when the setup was
+uninstalled and reconnects the conversation once the install succeeds. A disconnected conversation keeps
+its name, and no other conversation takes it. A disconnection that could not be saved stays in effect for this session, with "Disconnected for
+now. Couldn't save this choice for the next launch." and **Try Again**. While the saved choices cannot be
+read, no conversation connects, the names problem says so, the list says "Conversations stay disconnected
+until names.json can be read.", and nothing is offered for Reconnect.
+
+**Conversation missing?** is a `DisclosureSection` under the list with **Try Again**, a plain account of what
+discovery can miss (agents started through unusual wrappers or hosted inside other programs), and a
+**Choose {agent} Setup Folder…** button per agent. A chosen folder that does not look like that agent's setup
+is explained beside the buttons; one that does opens the consent sheet. These actions stack vertically
+when they do not fit across the pane, keeping their labels whole. Choosing a folder says where to
+install, not which conversations use it. With nothing found the list says "No open conversations found.", and
+when some conversations could not be checked it says so instead; neither claims no agent is running.
 
 **Rename…** opens a compact sheet, focused on the existing name, with a live spoken example. When fewer of
 the name's leading words already reach only this conversation, the example offers them as well (“Say “fix

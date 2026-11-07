@@ -194,21 +194,10 @@ public struct VoiceCommandScript: Encodable, Equatable, Sendable {
             let input = arguments.first.map { " with \u{201C}\($0)\u{201D} as its input" } ?? ""
             return "Runs the shortcut \u{201C}\(shortcut.name)\u{201D}\(input)."
         }
-        let shownProgram = program.hasPrefix("~/") && !Self.isShellSafe(program.dropFirst(2))
-            ? "~/" + Self.shellQuoted(program.dropFirst(2))
-            : Self.shellQuoted(program, allowingHome: true)
-        return ([shownProgram] + arguments.map { Self.shellQuoted($0) }).joined(separator: " ")
-    }
-
-    private static func isShellSafe(_ text: Substring, allowingHome: Bool = false) -> Bool {
-        !text.isEmpty && text.first != "=" && text.allSatisfy {
-            $0.isASCII && ($0.isLetter || $0.isNumber || "_-./:,@%+=".contains($0) || (allowingHome && $0 == "~"))
-        }
-    }
-
-    private static func shellQuoted(_ text: some StringProtocol, allowingHome: Bool = false) -> String {
-        if isShellSafe(Substring(text), allowingHome: allowingHome) { return String(text) }
-        return "'" + text.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        let shownProgram = program.hasPrefix("~/") && !ShellWord.isSafe(program.dropFirst(2))
+            ? "~/" + ShellWord.quoted(program.dropFirst(2))
+            : ShellWord.quoted(program, allowingHome: true)
+        return ([shownProgram] + arguments.map { ShellWord.quoted($0) }).joined(separator: " ")
     }
 
     public var spokenForms: [String] { VoiceCommandNaming.spokenForms(name: name, say: say) }

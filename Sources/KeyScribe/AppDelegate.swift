@@ -232,6 +232,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         hud.onCancelVoiceCommandChoice = { [weak self] id in self?.controller.cancelVoiceCommandChoice(choice: id) }
         hud.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
         hud.onOpenAIService = { [weak self] id in self?.settingsController.presentAIService(id: id) }
+        hud.onOpenCodingAgents = { [weak self] mode in self?.settingsController.presentMode(id: mode) }
         hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
         hud.onVisibilityChange = { SpeechSilencer.shared.dictationHUD(visible: $0) }
         hud.onEscapeCancel = { [weak self] in
@@ -709,25 +710,28 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         guard enabled != (agentRuntime != nil) else { return }
         if enabled {
             do {
+                let setups = settingsController.codingAgents.setups
+                let processes = AgentProcessTable()
                 let runtime = try AgentRuntime(
                     supportDir: KeyScribePaths.supportDir,
-                    discovery: [ClaudeDiscovery(configDirs: [ClaudeRegistryScanner.defaultConfigDir()]), PiDiscovery()],
+                    discovery: [ClaudeDiscovery(setups: setups, processes: processes), PiDiscovery(processes: { processes.found(.pi) })], setups: setups,
                     legacyAgent: AgentKind.claude.id)
                 runtime.hub.onNotice = { [weak self] in self?.controller.showAgentNotice($0, request: $1) }
                 runtime.hub.onForget = { [weak self] in self?.controller.forgetAgentReceipt(request: $0) }
                 runtime.hub.onChange = { [weak self, weak hub = runtime.hub] in
                     guard let hub else { return }
-                    self?.settingsController.codingAgents.show(
-                        hub.directory.conversations, current: hub.current, namesProblem: hub.namesProblem, namesNotSaved: hub.namesNotSaved,
-                        discoveryProblems: hub.discoveryProblems)
+                    self?.showCodingAgents(hub)
                 }
                 settingsController.codingAgents.onRename = { [weak hub = runtime.hub] in try hub?.rename($0, to: $1) }
                 settingsController.codingAgents.onReloadNames = { [weak hub = runtime.hub] in hub?.reloadNames() }
                 settingsController.codingAgents.renameCheck = { [weak hub = runtime.hub] in hub?.renameProblem($0, to: $1) }
-                settingsController.codingAgents.onRetire = { [weak runtime] in runtime?.retire(agent: $0.id) }
-                settingsController.codingAgents.show(
-                    runtime.hub.directory.conversations, current: runtime.hub.current, namesProblem: runtime.hub.namesProblem,
-                    namesNotSaved: runtime.hub.namesNotSaved, discoveryProblems: runtime.hub.discoveryProblems)
+                settingsController.codingAgents.onRetire = { [weak runtime] in runtime?.retire(installation: $0) }
+                settingsController.codingAgents.onDisconnect = { [weak hub = runtime.hub] in hub?.disconnect($0) }
+                settingsController.codingAgents.onReconnect = { [weak hub = runtime.hub] in hub?.reconnect($0) }
+                settingsController.codingAgents.onRetrySavingExclusions = { [weak hub = runtime.hub] in hub?.retrySavingExclusions() }
+                settingsController.codingAgents.onShow = { [weak hub = runtime.hub] id in Task { _ = await hub?.open(id, makingCurrent: false) } }
+                settingsController.codingAgents.onCheckAgain = { [weak hub = runtime.hub] in Task { await hub?.rescan(rereadingTitles: true) } }
+                showCodingAgents(runtime.hub)
                 let spoken = SpokenResultOutput(
                     client: llmClient, permits: AIServiceCatalog.permits, speech: spokenVoice.makeSpeech(),
                     settings: { [weak self] in self?.settings.codingAgents.spokenResult ?? SpokenResultSettings() },
@@ -739,12 +743,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     })
                 runtime.hub.onResult = { [weak spoken] in spoken?.finished(conversation: $0, handle: $1, answer: $2) }
                 runtime.hub.onAttention = { [weak spoken] in spoken?.attention(conversation: $0, handle: $1, $2) }
+                runtime.hub.onSilence = { [weak spoken] in spoken?.forget(conversation: $0) }
                 spoken.onSpeaking = { [weak self] name in self?.showSpeaking(name) }
                 speakingHUD.onStop = { [weak spoken] in spoken?.stop() }
                 spokenResult = spoken
                 controller.spokenUpdates = spoken
                 agentRuntime = runtime
                 controller.agents = runtime.hub
+                Task { [weak self, weak codingAgents = settingsController.codingAgents] in
+                    await codingAgents?.maintain()
+                    self?.settingsController.refreshProblems()
+                }
             } catch {
                 Log.agents.error("agent bridge did not start: \(String(describing: error), privacy: .public)")
             }
@@ -758,8 +767,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsController.codingAgents.onReloadNames = nil
             settingsController.codingAgents.renameCheck = nil
             settingsController.codingAgents.onRetire = nil
+            settingsController.codingAgents.onDisconnect = nil
+            settingsController.codingAgents.onReconnect = nil
+            settingsController.codingAgents.onRetrySavingExclusions = nil
+            settingsController.codingAgents.onShow = nil
+            settingsController.codingAgents.onCheckAgain = nil
             settingsController.codingAgents.show([], current: nil)
         }
+    }
+
+    private func showCodingAgents(_ hub: AgentHub) {
+        let hadError = settingsController.codingAgents.hasError
+        settingsController.codingAgents.show(
+            hub.directory.conversations, current: hub.current, namesProblem: hub.namesProblem, namesNotSaved: hub.namesNotSaved,
+            discoveryProblems: hub.discoveryProblems, discoveredSetups: hub.discoveredSetupsByAgent, candidates: hub.candidates,
+            disconnected: hub.disconnected, exclusionsNotSaved: hub.exclusionsNotSaved, loadedVersions: hub.loadedVersions,
+            lastSeen: hub.lastSeen)
+        if hadError != settingsController.codingAgents.hasError { settingsController.refreshProblems() }
     }
 
     private func showSpeaking(_ speaking: SpokenResultOutput.Speaking?) {
@@ -1032,7 +1056,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             // must not blink on and off as the user switches apps.
             hotkeyConflict: Self.hotkeyConflictDetected(
                 shadowed: shadowedHotkeyIds(in: config.modes.filter(\.enabled))),
-            modeTriggerUnreachable: TriggerKeyConflicts.hasUnreachableTrigger(in: config.modes) || config.voiceCommandsShutOut)
+            modeTriggerUnreachable: TriggerKeyConflicts.hasUnreachableTrigger(in: config.modes) || config.voiceCommandsShutOut,
+            codingAgentConnectionFailed: settings.features.isEnabled(.codingAgents) && (settingsController?.codingAgents.hasError ?? false))
     }
 
     private func connectionUnavailable(for mode: Mode) -> Bool {

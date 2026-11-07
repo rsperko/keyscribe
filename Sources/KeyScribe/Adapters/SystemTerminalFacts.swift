@@ -4,25 +4,55 @@ import Foundation
 import KeyScribeKit
 
 struct SystemTerminalFacts: TerminalFacts {
+    var environmentKeys: Set<String> = TerminalRoutes.environmentKeys
+
     func process(_ pid: Int) -> TerminalProcess? {
+        guard let info = Self.info(pid) else { return nil }
+        let read = Self.arguments(of: pid, keeping: environmentKeys)
+        let (executable, arguments, environment) = read ?? ("", [], [:])
+        let tty = Self.tty(info.kp_eproc.e_tdev)
+        let foreground = tty == nil || (info.kp_eproc.e_pgid == info.kp_eproc.e_tpgid && Int32(info.kp_proc.p_stat) != SSTOP)
+        let start = info.kp_proc.p_un.__p_starttime
+        return TerminalProcess(
+            pid: pid, parent: Int(info.kp_eproc.e_ppid), tty: tty, arguments: arguments,
+            environment: environment, executable: executable, app: Self.app(pid), foreground: foreground,
+            directory: Self.directory(of: pid), startedAt: ProcessStart.milliseconds(start),
+            argumentsReadable: read != nil)
+    }
+
+    static func info(_ pid: Int) -> kinfo_proc? {
         var info = kinfo_proc()
         var size = MemoryLayout<kinfo_proc>.stride
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, Int32(pid)]
         guard sysctl(&mib, u_int(mib.count), &info, &size, nil, 0) == 0, size > 0 else { return nil }
-        let (executable, arguments, environment) = Self.arguments(of: pid)
-        let tty = Self.tty(info.kp_eproc.e_tdev)
-        let foreground = tty == nil || (info.kp_eproc.e_pgid == info.kp_eproc.e_tpgid && Int32(info.kp_proc.p_stat) != SSTOP)
-        return TerminalProcess(
-            pid: pid, parent: Int(info.kp_eproc.e_ppid), tty: tty, arguments: arguments,
-            environment: environment, executable: executable, app: Self.app(pid), foreground: foreground)
+        return info
+    }
+
+    static func parent(of pid: Int) -> Int? {
+        info(pid).map { Int($0.kp_eproc.e_ppid) }
+    }
+
+    static func allPids() -> [pid_t]? {
+        guard let count = listed({ proc_listallpids(nil, 0) }) else { return nil }
+        guard count > 0 else { return [] }
+        var pids = [pid_t](repeating: 0, count: count * 2)
+        guard let filled = listed({ proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size)) }) else { return nil }
+        return pids.prefix(filled).filter { $0 > 0 }
+    }
+
+    private static func directory(of pid: Int) -> String? {
+        var info = proc_vnodepathinfo()
+        let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
+        guard proc_pidinfo(pid_t(pid), PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }
+        let path = withUnsafeBytes(of: info.pvi_cdir.vip_path) { raw in
+            String(decoding: raw.prefix(while: { $0 != 0 }), as: UTF8.self)
+        }
+        return path.isEmpty ? nil : path
     }
 
     func processes(named name: String) -> [TerminalProcess]? {
-        guard let count = Self.listed({ proc_listallpids(nil, 0) }) else { return nil }
-        guard count > 0 else { return [] }
-        var pids = [pid_t](repeating: 0, count: count * 2)
-        guard let filled = Self.listed({ proc_listallpids(&pids, Int32(pids.count * MemoryLayout<pid_t>.size)) }) else { return nil }
-        return pids.prefix(filled).filter { $0 > 0 && Self.name(of: $0) == name }.compactMap { process(Int($0)) }
+        guard let pids = Self.allPids() else { return nil }
+        return pids.filter { Self.name(of: $0) == name }.compactMap { process(Int($0)) }
     }
 
     static func listed(_ list: () -> Int32) -> Int? {
@@ -108,7 +138,7 @@ struct SystemTerminalFacts: TerminalFacts {
         return (status, output)
     }
 
-    private static func name(of pid: pid_t) -> String {
+    static func name(of pid: pid_t) -> String {
         var buffer = [CChar](repeating: 0, count: Int(MAXCOMLEN) * 2 + 1)
         guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return "" }
         return String(cString: buffer)
@@ -124,31 +154,38 @@ struct SystemTerminalFacts: TerminalFacts {
         return app.bundleIdentifier
     }
 
-    static func arguments(of pid: Int) -> (executable: String, arguments: [String], environment: [String: String]) {
+    static func arguments(
+        of pid: Int, keeping keys: Set<String> = TerminalRoutes.environmentKeys
+    ) -> (executable: String, arguments: [String], environment: [String: String])? {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, Int32(pid)]
         var size = 0
-        guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return ("", [], [:]) }
+        guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
         var buffer = [UInt8](repeating: 0, count: size)
-        guard sysctl(&mib, u_int(mib.count), &buffer, &size, nil, 0) == 0 else { return ("", [], [:]) }
-        return parse(procargs: Array(buffer.prefix(size)))
+        guard sysctl(&mib, u_int(mib.count), &buffer, &size, nil, 0) == 0 else { return nil }
+        return parse(procargs: Array(buffer.prefix(size)), keeping: keys)
     }
 
     static func parse(
         procargs buffer: [UInt8], keeping keys: Set<String> = TerminalRoutes.environmentKeys
-    ) -> (executable: String, arguments: [String], environment: [String: String]) {
-        guard buffer.count > MemoryLayout<Int32>.size else { return ("", [], [:]) }
+    ) -> (executable: String, arguments: [String], environment: [String: String])? {
+        guard buffer.count > MemoryLayout<Int32>.size else { return nil }
         let argc = buffer.withUnsafeBytes { Int($0.loadUnaligned(as: Int32.self)) }
         var index = MemoryLayout<Int32>.size
+        func skipPadding() { while index < buffer.count, buffer[index] == 0 { index += 1 } }
         func string() -> String? {
             guard index < buffer.count else { return nil }
             let end = buffer[index...].firstIndex(of: 0) ?? buffer.count
             defer { index = end + 1 }
             return String(decoding: buffer[index..<end], as: UTF8.self)
         }
-        let executable = string() ?? ""
-        while index < buffer.count, buffer[index] == 0 { index += 1 }
+        guard let executable = string() else { return nil }
+        skipPadding()
         var arguments: [String] = []
-        while arguments.count < argc, let argument = string() { arguments.append(argument) }
+        while arguments.count < argc, let argument = string() {
+            arguments.append(argument)
+        }
+        while arguments.last?.isEmpty == true { arguments.removeLast() }
+        skipPadding()
         var environment: [String: String] = [:]
         while let entry = string(), !entry.isEmpty {
             guard let equals = entry.firstIndex(of: "="), keys.contains(String(entry[..<equals])) else { continue }

@@ -19,6 +19,7 @@ enum SettingsProblem: Equatable, CaseIterable {
     case modeUsesFailedConnection
     case hotkeyConflict
     case modeTriggerUnreachable
+    case codingAgentConnectionFailed
 
     var pane: SettingsDestination {
         switch self {
@@ -26,7 +27,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         case .microphonePermission, .accessibilityPermission, .accessibilityNeedsRelaunch: .permissions
         case .activeEngineUnavailable, .modelSelfTestFailed: .speechModels
         case .aiConnectionTestFailed, .aiConnectionMisconfigured: .aiServices
-        case .modeNeedsAIService, .modeUsesFailedConnection, .modeTriggerUnreachable: .modes
+        case .modeNeedsAIService, .modeUsesFailedConnection, .modeTriggerUnreachable, .codingAgentConnectionFailed: .modes
         case .hotkeyConflict: .general
         }
     }
@@ -44,7 +45,8 @@ enum SettingsProblem: Equatable, CaseIterable {
         aiConnectionMisconfigured: Bool = false, modeNeedsAIService: Bool = false,
         modeUsesFailedConnection: Bool = false,
         hotkeyConflict: Bool = false,
-        modeTriggerUnreachable: Bool = false
+        modeTriggerUnreachable: Bool = false,
+        codingAgentConnectionFailed: Bool = false
     ) -> [SettingsProblem] {
         var problems: [SettingsProblem] = []
         if hasConfigError { problems.append(.malformedConfig) }
@@ -59,6 +61,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         if modeUsesFailedConnection { problems.append(.modeUsesFailedConnection) }
         if hotkeyConflict { problems.append(.hotkeyConflict) }
         if modeTriggerUnreachable { problems.append(.modeTriggerUnreachable) }
+        if codingAgentConnectionFailed { problems.append(.codingAgentConnectionFailed) }
         return problems
     }
 }
@@ -79,10 +82,13 @@ final class SettingsNavigationModel: ObservableObject {
 @MainActor
 final class SettingsProblemModel: ObservableObject {
     @Published var flaggedPanes: Set<SettingsDestination> = []
+    @Published private(set) var codingAgentHasError = false
     // The menu-bar dot reads this, never its own detection, so the Settings poll moves both together.
     var onErrorsChanged: ((Bool) -> Void)?
     // Only republish when the set changes, so unchanged poll ticks don't re-render the whole split view.
     func update(_ problems: [SettingsProblem]) {
+        let codingAgentFailed = problems.contains(.codingAgentConnectionFailed)
+        if codingAgentHasError != codingAgentFailed { codingAgentHasError = codingAgentFailed }
         let panes = Set(problems.map(\.pane))
         guard panes != flaggedPanes else { return }
         let hadErrors = !flaggedPanes.isEmpty
@@ -168,7 +174,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
             codingAgentsEnabled: settings.features.isEnabled(.codingAgents))
         let agentsDir = AgentRuntime.bridgeDirectory(supportDir: repository.supportDir)
         codingAgents = CodingAgentsSettingsModel(
-            agentsDir: agentsDir,
+            agentsDir: agentsDir, setups: ConnectorSetupRegistry(directory: agentsDir),
             connectors: [
                 ClaudeConnector(agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug),
                 PiConnector(agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug),
@@ -270,6 +276,11 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     // Connections whose last user-run Test Connection failed — drives the error badge.
     var failedConnectionIds: Set<String> { aiServices.failedTestIds }
+
+    func presentMode(id: String) {
+        modes.selectedID = id
+        present(.modes)
+    }
 
     func presentAIService(id: String) {
         aiServices.reload()
@@ -512,7 +523,7 @@ struct SettingsRootView: View {
             case .aiServices:
                 AIServiceSettingsView(model: aiServices)
             case .modes:
-                ModesSettingsView(model: modes, brokenConnectionIds: aiServices.failedTestIds) { modeID in
+                ModesSettingsView(model: modes, brokenConnectionIds: aiServices.failedTestIds, codingAgentHasError: problems.codingAgentHasError) { modeID in
                     navigation.openVocabulary(for: modeID)
                 }
             case .history:

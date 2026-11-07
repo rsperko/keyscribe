@@ -31,10 +31,9 @@
     token                  #   the access token the Claude Code connector presents
     bridge.sock            #   the local socket the connector talks to
     ready.json             #   present only while KeyScribe is listening on bridge.sock
-    claude-connector/      #   the connector files installed into Claude Code
-    claude-installation.json  # which Claude Code connector installation may connect; kept after removal
-    pi-installation.json   #   the same for the Pi connector, whose files live in Pi's own extensions folder
-    names.json             #   names you chose, and the names open conversations were given
+    claude-connector/      #   one local marketplace per Claude Code setup the connector is installed in
+    connectors.json        #   each setup a connector is installed in, and the installation that may connect from it
+    names.json             #   names you chose, the names open conversations were given, and disconnected conversations
   lkg/                     # last-known-good mode copies + seed-ledger.toml (design.md §5.1)
   models/                  # downloaded STT weights, one dir per model (design.md §4.1)
     parakeet-tdt-0.6b-v3/
@@ -167,26 +166,43 @@ same protocol. It sends events with `POST /event` and long-polls for commands wi
 `AgentEvent` and `AgentCommand` in `AgentBridge.swift`, versioned by `AgentBridgeCodec.protocolVersion`;
 a hello on any other protocol is refused with `426` and is never registered or sent commands.
 
-- **Only the current installation connects.** Each install of a connector gets a new `installation` id,
-  written both into the connector's own settings and into that agent's installation record
-  (`agents/claude-installation.json`, `agents/pi-installation.json`); an update
-  keeps it. Every hello carries the id it was loaded with, and KeyScribe refuses any other with `403`,
-  including every hello once the connector is removed (the record then holds no id). Removal records that
-  first, then sends `retire` to connectors waiting for commands without waiting for an answer, and
-  withdraws every command still outstanding. A connector told to retire, one whose hello is refused with
-  `403`, or one whose settings now name a different installation, stops for good: it makes no further
-  requests in any session until Claude Code loads it fresh. An install records the new id before it writes
-  the connector's settings, and writes the id into the connector's code as well: Claude Code's
+- **A connector is installed into a setup, and only enrolled setups connect.** A setup is the folder an
+  agent loads its configuration from: Pi's agent folder (`~/.pi/agent` unless a conversation's
+  `PI_CODING_AGENT_DIR` names another) and Claude Code's config folder (`~/.claude` unless its
+  `CLAUDE_CONFIG_DIR` names another). KeyScribe finds the setups conversations actually use from their own
+  processes, never from its own environment, and lists the default too; finding a setup never installs into
+  it. `agents/connectors.json` (`ConnectorSetups`, with `schema_version`) lists each setup a connector was
+  installed in, as `agent`, `folder` (with symlinks resolved), `installation` and `removing`. Installing
+  enrolls the setup with a new `installation` id before anything is written, and an update keeps the id.
+  Every hello carries the id its connector was loaded with, and KeyScribe refuses with `403` any id that is
+  not enrolled, or whose setup is being removed. A file that cannot be read admits no connector and refuses
+  every install and uninstall until it can; Settings says so and **Try Again** reads it again. One that
+  later becomes unreadable keeps the setups already loaded.
+- **Removing one setup leaves the others connected.** Removal marks the setup `removing` first, then sends
+  `retire` to that installation's connectors waiting for commands without waiting for an answer, and
+  withdraws their outstanding commands; connectors of other setups and other agents keep working. Only once
+  the agent no longer lists the connector is the entry dropped; an entry still `removing` means an uninstall
+  did not finish, and finishing it never readmits the old id. A connector told to retire, one whose hello is
+  refused with `403`, or one whose settings now name a different installation, stops for good until the
+  agent loads it fresh. The install writes the id into the connector's code as well: Claude Code's
   `/reload-plugins` loads only code that changed, so code identical to a retired copy would leave that copy
-  in place. Uninstalling runs each Claude Code removal step even when an earlier one fails, then deletes
-  `claude-connector/` only once `claude plugin list --json` and `claude plugin marketplace list --json`
-  no longer show the connector, and keeps the installation record; a record with no id while Claude Code
-  still lists the plugin or `claude-connector/` remains means an uninstall did not finish. The Pi
-  connector is installed by writing its folder into Pi's extensions folder (`~/.pi/agent/extensions/`, or
-  the `extensions` folder under `PI_CODING_AGENT_DIR`) and uninstalled by deleting it; Pi loads whatever is
-  there when it starts or on `/reload`, so no Pi command is run, and the record with no id while the folder
-  remains means an uninstall did not finish. The folder's `keyscribe.json` carries the connection settings,
-  the installation id, the connector version and the environment keys the terminal routes read.
+  in place.
+- **Claude Code commands run against the chosen setup.** Each setup gets its own local marketplace under
+  `claude-connector/`, registered and installed at user scope with `claude plugin` commands run with that
+  setup's `CLAUDE_CONFIG_DIR` (and without it for the default setup), so no other setup's plugins change.
+  Uninstalling runs each removal step even when an earlier one fails, and deletes that setup's marketplace
+  folder only once `claude plugin list --json` and `claude plugin marketplace list --json` no longer show
+  the connector.
+- **The Pi connector is a folder in the setup's `extensions/`.** It is installed by writing that folder and
+  uninstalled by deleting it; Pi loads whatever is there when it starts or on `/reload`, so no Pi command
+  is run. The folder's `keyscribe.json` carries the connection settings, the installation id, the connector
+  version and the environment keys the terminal routes read. An extension turned off in the setup's
+  `settings.json` (an `extensions` entry `-path` or a matching `!pattern`, unless `+path` brings it back) is
+  reported as turned off, and an update never turns it back on.
+- **Updates keep setups as they are.** When KeyScribe starts, it updates the connector in each enrolled setup
+  whose installed copy differs from the bundled one, and never in a setup that is not enrolled or whose
+  connector the agent has turned off. Open conversations keep the connector they loaded, which keeps working,
+  until they reload; Settings notes a conversation whose hello reports an older `version`.
 
 - **The connector connects only when KeyScribe is listening.** KeyScribe writes `agents/ready.json`
   (`launch`, a new random id each time the bridge starts, and `protocol`) after its socket is listening,
@@ -198,8 +214,8 @@ a hello on any other protocol is refused with `426` and is never registered or s
   hello, a `protocol` the connector does not speak, or missing connector settings make the connector go
   quiet until the next session or a plugin reload. It clears only a status line or button it showed
   itself.
-- **Hello** names the agent, the connector instance, the session id, the agent's process id, and the features
-  the connector offers. A connector whose agent keeps no session registry (Pi) also sends the session's
+- **Hello** names the agent, the connector instance, the session id, the agent's process id, the connector
+  `version`, and the features the connector offers. A connector whose agent keeps no session registry (Pi) also sends the session's
   working directory (`cwd`), and its hello is how KeyScribe learns the session exists: the session is listed
   while its process runs, and a hello from the same process for another session id replaces the earlier one
   (`/new`, `/resume`, `/fork`). The start time recorded for such a session is its process's start time; a
@@ -212,6 +228,13 @@ a hello on any other protocol is refused with `426` and is never registered or s
   and an `environment` map with terminal facts only the agent's own process can read (its Zellij pane);
   KeyScribe keeps only the keys its terminal routes use (`TerminalRoutes.environmentKeys`).
 - **Every command names the session it expects**, and the connector refuses one whose session has changed.
+- **A disconnected conversation goes quiet.** KeyScribe answers the hello of a conversation listed in
+  `names.json`'s `excluded` with `{"ok":true,"quiet":true}` and passes on only who it is (agent, session,
+  process, folder), never its title, prompt count, open dialog or terminal facts. A quiet connector keeps
+  one long poll open and observes nothing; later events from that conversation are answered and dropped.
+  Disconnecting a connected conversation sends it `quiet`; reconnecting sends `admit`, and the connector says
+  a full hello again without a reload. Until `names.json` can be read, every conversation is treated as
+  disconnected.
 - **Each hello opens a new connection.** It carries a fresh `connection` id, and every later poll, event
   and reply carries that id and the connector's `instance`. KeyScribe answers `409` to anything from a
   connection that a newer hello replaced: it is not passed on, and it does not count as that connector
@@ -302,7 +325,9 @@ a hello on any other protocol is refused with `426` and is never registered or s
 ## Coding agent names
 
 `agents/names.json` holds the names chosen with **Rename…** on the Coding agent page, keyed by the
-agent's session id (`{"schema_version": 1, "names": {"<session id>": "backend"}}`). Without an override,
+agent's session id (`{"schema_version": 1, "names": {"<session id>": "backend"}}`), and in `excluded` the
+session ids of conversations you disconnected (`"excluded": ["pi:<session id>"]`). A disconnected conversation
+stays disconnected when it resumes; a new or forked conversation has a new id, so it connects normally. Without an override,
 the conversation uses its explicit native name, normalized like a name chosen in KeyScribe. Only an
 unnamed conversation gets a name generated from its folder. Like `usage/`, it is app-written
 state, and a write to it does not reload configuration.

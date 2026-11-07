@@ -149,7 +149,9 @@ final class DictationController {
         let conversations: [AgentConversation]
         let current: String?
         var namesAvailable = true
+        var disconnected: [String: String] = [:]
         var rows: [String] { conversations.map(\.id) }
+        var addressable: [String: String] { names.merging(disconnected) { kept, _ in kept } }
     }
     private var activeStartTrigger: String?
 
@@ -1554,7 +1556,7 @@ final class DictationController {
         agents.refresh()
         let snapshot = AgentSnapshot(
             names: agents.names, conversations: agents.recordingOrder, current: agents.current,
-            namesAvailable: agents.namesProblem == nil)
+            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames)
         session?.agentSnapshot = snapshot
         guard let mode = activeMode, mode.output == .agent else { return }
         session?.agentRecipient = AgentRecipient.initial(
@@ -1572,7 +1574,7 @@ final class DictationController {
             guard let shown = await agents?.sessionInFrontWithoutAsking(), let self, !Task.isCancelled,
                   let identity, self.session?.identity === identity,
                   self.session?.agentFrontCutoff.map({ ContinuousClock.now <= $0 }) ?? true,
-                  snapshot.rows.contains(shown.id),
+                  snapshot.rows.contains(shown.id) || snapshot.disconnected.values.contains(shown.id),
                   self.capturedSnapshot.flatMap(Self.origin)?.leaving(shown).session == shown.id
             else { return }
             self.session?.agentRecipient = AgentRecipient.Frozen(id: shown.id, source: .front)
@@ -1593,7 +1595,7 @@ final class DictationController {
         guard activeMode?.output == .agent, let agents, let snapshot = session?.agentSnapshot else { return nil }
         return AgentRoster(
             frozen: snapshot.conversations, live: agents.directory.conversations, recipient: session?.agentRecipient,
-            namesAvailable: snapshot.namesAvailable)
+            namesAvailable: snapshot.namesAvailable, disconnected: snapshot.namesAvailable ? agents.disconnected : [])
     }
 
     private func finishAgentTake(routed: PhaseBResult, heard: String, mode: Mode) async {
@@ -1607,7 +1609,7 @@ final class DictationController {
         }
         let snapshot = session?.agentSnapshot ?? AgentSnapshot(
             names: agents.names, conversations: agents.recordingOrder, current: agents.current,
-            namesAvailable: agents.namesProblem == nil)
+            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames)
         func frozenRecipient() -> AgentRecipient.Frozen? {
             session?.agentRecipient ?? AgentRecipient.initial(target: mode.agent.target, current: snapshot.current, names: snapshot.names)
         }
@@ -1627,7 +1629,7 @@ final class DictationController {
             break
         }
         let address = AgentAddress.parse(
-            routed.transcript, names: Array(snapshot.names.keys), namesKnown: snapshot.namesAvailable,
+            routed.transcript, names: Array(snapshot.addressable.keys), namesKnown: snapshot.namesAvailable,
             read: plan.agentAddressReader(for: routed.transcript, mode: mode))
         if AgentRecipient.usesDefault(address) {
             await settleAgentInFront()
@@ -1636,11 +1638,18 @@ final class DictationController {
             session?.agentFrontTask?.cancel()
         }
         let frozen = frozenRecipient()
-        let resolution = AgentRecipient.resolve(address, frozen: frozen, rows: snapshot.rows, names: snapshot.names)
+        let resolution = AgentRecipient.resolve(address, frozen: frozen, rows: snapshot.rows, names: snapshot.addressable)
         let facts = AgentHistoryFacts.facts(
             address: address, resolution: resolution, frozen: frozen, conversations: snapshot.conversations)
         if captureWasLost {
             if case .deliver(_, let body, _) = resolution { finishTruncatedCapture(transcript: body) } else { finishCommandCaptureLost() }
+            return
+        }
+        if let (id, front, body) = Self.target(of: resolution), snapshot.disconnected.values.contains(id) || agents.isExcluded(id) {
+            let name = snapshot.disconnected.first { $0.value == id }?.key ?? "That conversation"
+            let line = front ? "The conversation in front is disconnected" : "\(name) is disconnected"
+            finishAgent(state: .error(message: line, action: .openCodingAgents(mode.id), heard: HeardExcerpt(heard: body)),
+                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, facts: facts)
             return
         }
         if let id = resolution.makesCurrent { agents.makeCurrent(id) }
@@ -1686,6 +1695,14 @@ final class DictationController {
                 routed: PhaseBResult(routedModeId: routed.routedModeId, transcript: body), mode: mode)
             if Task.isCancelled { return }
             await dispatch(final, to: .agent(id: id, facts: facts), heard: heard, transformed: transformed, rewrite: rewrite)
+        }
+    }
+
+    private static func target(of resolution: AgentRecipient.Resolution) -> (id: String, front: Bool, body: String)? {
+        switch resolution {
+        case .deliver(let id, let body, let source): (id, source == .front, body)
+        case .select(let id), .open(let id): (id, false, "")
+        case .ask: nil
         }
     }
 
@@ -1738,7 +1755,7 @@ final class DictationController {
         lastResult = text
         hud.present(.transcribing(mode: mode.name, status: "Sending to \(agents.handle(of: id) ?? "it")"))
         let (request, receipt) = await agentOutput.deliver(text, to: id, via: agents)
-        finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text), outcome: AgentOutput.dictationOutcome(receipt),
+        finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id), outcome: AgentOutput.dictationOutcome(receipt),
                     heard: heard, body: text, transformed: transformed, rewrite: rewrite, transitioned: true,
                     facts: facts, awaitingReceipt: (request, receipt))
     }

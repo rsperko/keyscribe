@@ -82,4 +82,10 @@ public struct AgentOutbox: Sendable {
         guard let index = queue.firstIndex(where: { $0.message.id == id }) else { return nil }
         return queue.remove(at: index).message
     }
+
+    public mutating func withdraw(conversation: String) -> [Message] {
+        let withdrawn = queue.filter { $0.message.conversation == conversation }.map(\.message)
+        queue.removeAll { $0.message.conversation == conversation }
+        return withdrawn
+    }
 }

@@ -58,12 +58,13 @@ struct DisclosureSection<Label: View, Content: View>: View {
 
 extension DisclosureSection where Label == Text {
     init(
-        _ title: String, isExpanded: Binding<Bool>, hasError: Bool = false, hasWarning: Bool = false,
+        _ title: String, isExpanded: Binding<Bool>, hasError: Bool = false, hasWarning: Bool = false, headerID: String? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self._isExpanded = isExpanded
         self.hasError = hasError
         self.hasWarning = hasWarning
+        self.headerID = headerID
         self.label = { Text(title) }
         self.content = content
     }
@@ -143,6 +144,7 @@ struct SettingRow<Control: View>: View {
     var dependencyReason: String? = nil
     var combinesAccessibilityChildren = true
     var controlBelowLabel = false
+    var hasError = false
     @ViewBuilder var control: () -> Control
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -150,6 +152,7 @@ struct SettingRow<Control: View>: View {
     var body: some View {
         if combinesAccessibilityChildren {
             content.accessibilityElement(children: .combine)
+                .accessibilityLabel([title, result].compactMap { $0 }.joined(separator: ", "))
         } else {
             content.accessibilityElement(children: .contain)
         }
@@ -158,7 +161,7 @@ struct SettingRow<Control: View>: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 6) {
             if controlBelowLabel {
-                rowLabel.accessibilityElement(children: .combine)
+                rowLabel
                 control()
             } else {
                 HStack(alignment: .firstTextBaseline) {
@@ -180,6 +183,7 @@ struct SettingRow<Control: View>: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.secondary)
+            .accessibilityLabel("\(expanded ? "Hide details" : "Learn more") about \(title)")
             if expanded {
                 Text(help).font(.caption).foregroundStyle(.secondary)
             }
@@ -188,14 +192,20 @@ struct SettingRow<Control: View>: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
-        .accessibilityLabel([title, result].compactMap { $0 }.joined(separator: ", "))
     }
 
     private var rowLabel: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title)
+            HStack(spacing: 6) {
+                Text(title)
+                if hasError {
+                    Circle().fill(.red).frame(width: 7, height: 7).accessibilityHidden(true)
+                }
+            }
             if let result { Text(result).font(.caption).foregroundStyle(.secondary) }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(([title, result].compactMap { $0 } + (hasError ? ["Needs attention"] : [])).joined(separator: ", "))
     }
 }
 

@@ -92,6 +92,22 @@ final class SpokenResultOutput {
         }
     }
 
+    func forget(conversation: String) {
+        generating.removeValue(forKey: conversation)?.cancel()
+        checkingNotice.removeValue(forKey: conversation)?.cancel()
+        queued.removeAll { $0.conversation == conversation }
+        if replay?.conversation == conversation { replay = nil }
+        if heard?.conversation == conversation { heard = nil }
+        guard let playing, playing.conversation == conversation else { return }
+        self.playing = nil
+        speech.stop()
+        if announced {
+            announced = false
+            onSpeaking?(nil)
+        }
+        playNext()
+    }
+
     func finished(conversation: String, handle: String, answer: String) {
         let settings = settings()
         guard settings.enabled else { return }

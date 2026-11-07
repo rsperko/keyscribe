@@ -50,81 +50,31 @@ enum PiCLI {
 }
 
 struct PiConnectorInstaller {
-    let extensionsDir: URL
-    let agentsDir: URL
+    let setupFolder: URL
     let pluginName: String
     let socketPath: String
     let tokenPath: String
     let readyPath: String
     let script: String
 
-    static let installationFile = AgentInstallationRecord.file(for: AgentKind.pi.id)
 
-    static func defaultExtensionsDir(
-        environment: [String: String] = ProcessInfo.processInfo.environment, home: URL = FileManager.default.homeDirectoryForCurrentUser
-    ) -> URL {
-        let agentDir = environment["PI_CODING_AGENT_DIR"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
-            ?? home.appendingPathComponent(".pi/agent", isDirectory: true)
-        return agentDir.appendingPathComponent("extensions", isDirectory: true)
+    static func defaultSetupFolder(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+        home.appendingPathComponent(".pi/agent", isDirectory: true)
     }
 
-    static func pluginDir(in extensionsDir: URL, pluginName: String) -> URL {
-        extensionsDir.appendingPathComponent(pluginName, isDirectory: true)
+    static func pluginDir(in setupFolder: URL, pluginName: String) -> URL {
+        setupFolder.appendingPathComponent("extensions", isDirectory: true).appendingPathComponent(pluginName, isDirectory: true)
     }
 
-    var pluginDir: URL { Self.pluginDir(in: extensionsDir, pluginName: pluginName) }
+    var pluginDir: URL { Self.pluginDir(in: setupFolder, pluginName: pluginName) }
     var scriptURL: URL { pluginDir.appendingPathComponent("index.ts") }
     var configURL: URL { pluginDir.appendingPathComponent("keyscribe.json") }
 
-    static func currentInstallation(in agentsDir: URL) -> String? {
-        AgentInstallationRecord.current(agent: AgentKind.pi.id, in: agentsDir)
+    static func manualUninstall(pluginDir: URL, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> [String] {
+        ["rm -r \(ShellWord.path(pluginDir.path, home: home))"]
     }
 
-    static func wasRemoved(in agentsDir: URL) -> Bool {
-        AgentInstallationRecord.wasRemoved(agent: AgentKind.pi.id, in: agentsDir)
-    }
-
-    static func disable(in agentsDir: URL) throws {
-        try AgentInstallationRecord.disable(agent: AgentKind.pi.id, in: agentsDir)
-    }
-
-    static func manualUninstall(pluginDir: URL) -> [String] {
-        ["rm -r \((pluginDir.path as NSString).abbreviatingWithTildeInPath)"]
-    }
-
-    func install() throws {
-        try writeFiles(installation: UUID().uuidString)
-    }
-
-    func update() throws {
-        try writeFiles(installation: Self.currentInstallation(in: agentsDir) ?? UUID().uuidString)
-    }
-
-    func uninstall() throws {
-        try Self.disable(in: agentsDir)
-        guard FileManager.default.fileExists(atPath: pluginDir.path) else { return }
-        try FileManager.default.removeItem(at: pluginDir)
-    }
-
-    enum Installed: Equatable {
-        case absent
-        case current
-        case other(version: String)
-    }
-
-    func installed() -> Installed {
-        guard FileManager.default.fileExists(atPath: scriptURL.path), let data = FileManager.default.contents(atPath: configURL.path),
-              let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return .absent }
-        let version = config["version"] as? String ?? ""
-        guard version == PiConnectorFiles.version(for: script), config["installation"] as? String == Self.currentInstallation(in: agentsDir),
-              (try? String(contentsOf: scriptURL, encoding: .utf8)) == PiConnectorFiles.installedScript(script, installation: config["installation"] as? String ?? "", configPath: configURL.path)
-        else { return .other(version: version) }
-        return .current
-    }
-
-    private func writeFiles(installation: String) throws {
-        try AgentInstallationRecord.record(installation: installation, agent: AgentKind.pi.id, in: agentsDir)
+    func install(installation: String) throws {
         try FileManager.default.createDirectory(at: pluginDir, withIntermediateDirectories: true)
         let files: [(URL, String)] = [
             (scriptURL, PiConnectorFiles.installedScript(script, installation: installation, configPath: configURL.path)),
@@ -135,6 +85,36 @@ struct PiConnectorInstaller {
         for (url, text) in files {
             try Data(text.utf8).write(to: url, options: .atomic)
         }
+    }
+
+    func uninstall() throws {
+        guard FileManager.default.fileExists(atPath: pluginDir.path) else { return }
+        try FileManager.default.removeItem(at: pluginDir)
+    }
+
+    enum Installed: Equatable {
+        case absent
+        case current
+        case other(version: String)
+    }
+
+    func installed(installation: String?) -> Installed {
+        guard FileManager.default.fileExists(atPath: scriptURL.path), let data = FileManager.default.contents(atPath: configURL.path),
+              let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return .absent }
+        let version = config["version"] as? String ?? ""
+        guard let installation, version == PiConnectorFiles.version(for: script), config["installation"] as? String == installation,
+              (try? String(contentsOf: scriptURL, encoding: .utf8)) == PiConnectorFiles.installedScript(script, installation: installation, configPath: configURL.path)
+        else { return .other(version: version) }
+        return .current
+    }
+
+    func turnedOffInPi(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> Bool {
+        guard let data = FileManager.default.contents(atPath: setupFolder.appendingPathComponent("settings.json").path),
+              let settings = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = settings["extensions"] as? [String]
+        else { return false }
+        return PiExtensionSettings.excludes(entries, pluginDir: pluginDir.path, setupFolder: setupFolder.path, home: home.path)
     }
 }
 
@@ -166,38 +146,49 @@ enum PiConnectorFiles {
 @MainActor
 final class PiConnector: AgentConnector {
     let kind = AgentKind.pi
+    let defaultFolder: URL
     private let locate: () -> String?
     private let run: @Sendable ([String]) -> (Int32, String)
     private let agentsDir: URL
-    private let extensionsDir: URL
     private let pluginName: String
     private let script: String?
+    private let home: URL
 
     init(
         locate: @escaping () -> String? = { PiCLI.locate() },
         run: @escaping @Sendable ([String]) -> (Int32, String) = { PiCLI.run($0) },
-        agentsDir: URL, extensionsDir: URL = PiConnectorInstaller.defaultExtensionsDir(), pluginName: String,
-        script: String? = PiConnectorFiles.indexTS
+        agentsDir: URL, pluginName: String, script: String? = PiConnectorFiles.indexTS,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
         self.locate = locate
         self.run = run
         self.agentsDir = agentsDir
-        self.extensionsDir = extensionsDir
         self.pluginName = pluginName
         self.script = script
+        self.home = home
+        defaultFolder = PiConnectorInstaller.defaultSetupFolder(home: home)
     }
 
-    private var pluginDir: URL { PiConnectorInstaller.pluginDir(in: extensionsDir, pluginName: pluginName) }
     private var knownVersion: (tool: String, modified: Date?, version: [Int])?
     var isBundled: Bool { script != nil }
-    var hasFiles: Bool { FileManager.default.fileExists(atPath: pluginDir.path) }
-    var wasRemoved: Bool { PiConnectorInstaller.wasRemoved(in: agentsDir) }
-    var manualUninstall: [String] { PiConnectorInstaller.manualUninstall(pluginDir: pluginDir) }
+    var bundledVersion: String? { script.map(PiConnectorFiles.version(for:)) }
+
+    func hasFiles(in target: ConnectorTarget) -> Bool {
+        FileManager.default.fileExists(atPath: PiConnectorInstaller.pluginDir(in: target.folder, pluginName: pluginName).path)
+    }
+
+    func manualUninstall(for target: ConnectorTarget) -> [String] {
+        PiConnectorInstaller.manualUninstall(pluginDir: PiConnectorInstaller.pluginDir(in: target.folder, pluginName: pluginName))
+    }
+
+    func recognizes(folder: URL) -> Bool {
+        ConnectorFolders.contains(any: ["settings.json", "auth.json", "models.json", "extensions", "sessions"], in: folder)
+    }
 
     func locateTool() -> String? { locate() }
 
-    func check(tool: String) async -> AgentConnectorModel.State {
-        guard let installer = installer() else { return .unavailable }
+    func check(tool: String, target: ConnectorTarget) async -> AgentConnectorModel.State {
+        guard let installer = installer(for: target) else { return .unavailable }
         let modified = (try? FileManager.default.attributesOfItem(atPath: tool))?[.modificationDate] as? Date
         let version: [Int]
         if let known = knownVersion, known.tool == tool, known.modified == modified {
@@ -212,32 +203,39 @@ final class PiConnector: AgentConnector {
             knownVersion = (tool, modified, found)
         }
         guard PiCLI.isSupported(version) else { return .toolTooOld(PiCLI.describe(version)) }
-        let installed = await Task.detached { installer.installed() }.value
-        if installed != .absent, wasRemoved { return .removalUnfinished(nil) }
+        let home = home
+        let (installed, turnedOff) = await Task.detached {
+            (installer.installed(installation: target.removing ? nil : target.installation), installer.turnedOffInPi(home: home))
+        }.value
+        if installed != .absent, target.removing { return .removalUnfinished(nil) }
+        guard target.installation != nil, !target.removing else { return .status(.notInstalled) }
         switch installed {
         case .absent: return .status(.notInstalled)
-        case .current: return .status(.ready)
+        case .current: return .status(turnedOff ? .disabled : .ready)
         case .other(let version): return .status(.outdated(installed: version))
         }
     }
 
-    func install(tool: String) async throws { try await perform { try $0.install() } }
-    func update(tool: String) async throws { try await perform { try $0.update() } }
-    func uninstall(tool: String) async throws { try await perform { try $0.uninstall() } }
-    func disable() throws { try PiConnectorInstaller.disable(in: agentsDir) }
+    func install(tool: String, target: ConnectorTarget) async throws {
+        guard let installation = target.installation else { throw AgentConnectorError(message: copy.noReason) }
+        try await perform(target) { try $0.install(installation: installation) }
+    }
 
-    private func installer() -> PiConnectorInstaller? {
+    func update(tool: String, target: ConnectorTarget) async throws { try await install(tool: tool, target: target) }
+    func uninstall(tool: String, target: ConnectorTarget) async throws { try await perform(target) { try $0.uninstall() } }
+
+    private func installer(for target: ConnectorTarget) -> PiConnectorInstaller? {
         guard let script else { return nil }
         return PiConnectorInstaller(
-            extensionsDir: extensionsDir, agentsDir: agentsDir, pluginName: pluginName,
+            setupFolder: target.folder, pluginName: pluginName,
             socketPath: agentsDir.appendingPathComponent("bridge.sock").path,
             tokenPath: agentsDir.appendingPathComponent("token").path,
             readyPath: agentsDir.appendingPathComponent("ready.json").path,
             script: script)
     }
 
-    private func perform(_ action: @escaping @Sendable (PiConnectorInstaller) throws -> Void) async throws {
-        guard let installer = installer() else { throw AgentConnectorError(message: copy.unavailable) }
+    private func perform(_ target: ConnectorTarget, _ action: @escaping @Sendable (PiConnectorInstaller) throws -> Void) async throws {
+        guard let installer = installer(for: target) else { throw AgentConnectorError(message: copy.unavailable) }
         let failure: String? = await Task.detached {
             do {
                 try action(installer)
@@ -255,11 +253,10 @@ final class PiConnector: AgentConnector {
     }
 
     let copy = AgentConnectorCopy(
-        help: "\(Branding.appName) reaches Pi through a small extension installed for your user account. Installed means the extension is in place; each session then connects on its own.",
-        reloadHint: "Already running Pi? Run /reload once in each open session. New sessions connect on their own.",
-        uninstallTitle: "Uninstall the Pi connector?",
-        uninstallMessage: "Open Pi sessions disconnect now, and new ones will not connect. Work you already sent may still finish. Each open session unloads the connector when you run /reload in it or restart it. Your conversation names and other \(Branding.appName) settings are kept.",
-        noSessions: "No Pi sessions are running.",
+        help: "\(Branding.appName) reaches Pi through a small extension installed in the folder Pi loads its configuration from. Installed means the extension is in place; each conversation using this folder then connects on its own, unless you disconnect it.",
+        reloadHint: "Already running Pi here? Run /reload once in each open conversation. New conversations connect on their own.",
+        uninstallTitle: "Uninstall the Pi connector from this folder?",
+        uninstallMessage: "Pi conversations using this folder disconnect now, and new ones will not connect. Work you already sent may still finish. Each open conversation unloads the connector when you run /reload in it or restart it. Other folders stay connected, and your conversation names, disconnected conversations and other \(Branding.appName) settings are kept.",
         toolNotFoundLabel: "Pi not found",
         toolNotFoundAdvice: "Install Pi, then come back here. \(Branding.appName) looks for the pi command on your PATH, in the usual install folders, and under Node version managers.",
         unavailable: "This copy of \(Branding.appName) is missing its Pi connector. Reinstall \(Branding.appName) to connect Pi.",

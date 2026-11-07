@@ -441,40 +441,57 @@ tells you when this happens. A mode that normally presses Return after inserting
 an unfinished message is never sent. In an edit-in-place mode, a dictation stopped by the limit leaves your
 selected text unchanged.
 
-### How do I remove the Claude Code connector?
+### How do I connect a coding agent conversation?
 
-In **Settings ▸ Modes ▸ Coding agent**, choose **Uninstall Connector…**. Open Claude Code sessions
-disconnect at once, and new ones do not connect; an instruction a session already received may still
-finish. Each open session unloads the connector the next time you run `/reload-plugins` in it or
-restart it. Uninstalling keeps your settings, history, conversation names, and models.
+In **Settings ▸ Modes ▸ Coding agent**, find the conversation in **Conversations** and choose **Connect…**,
+or choose **Install…** in the agent's section. KeyScribe finds the folder that conversation's agent loads its
+configuration from (for Pi usually `~/.pi/agent`, for Claude Code `~/.claude`, or whatever folder that
+agent was started with), and asks before installing there. Connecting a folder connects the conversations
+open in it now and future ones that use it; other folders are left alone. No flag, wrapper, or edit to your
+own configuration is needed. A conversation that is already open picks the connector up when you run
+`/reload` in Pi or `/reload-plugins` in Claude Code, or restart it; its row says so until it connects. The
+Pi connector needs Pi 1.4.0 or later.
 
-If KeyScribe cannot find Claude Code, or you already deleted KeyScribe, run these in a terminal:
+If a conversation is not listed, open **Conversation missing?** below the list: **Try Again** looks again,
+and **Choose Setup Folder…** lets you pick the agent's folder yourself. KeyScribe can miss an agent started
+through an unusual wrapper or hosted inside another program.
+
+### How do I stop one conversation from receiving what I say?
+
+Choose **Disconnect** on its row. It stops receiving dictation and spoken updates at once and stays
+disconnected when you reopen or resume it; a new conversation connects normally. Work the agent already
+accepted may finish. **Disconnected conversations** lists it with **Reconnect**, which takes effect without a
+reload. Your disconnections are saved with your conversation names; if that file cannot be read, no
+conversation connects until it can, and Settings says so.
+
+### How do I remove a connector?
+
+Choose **Uninstall Connector…** in the block for that folder. Conversations using it disconnect at once, and
+new ones do not connect; an instruction a conversation already received may still finish. Each open
+conversation unloads the connector the next time you run `/reload` (Pi) or `/reload-plugins` (Claude Code)
+in it, or restart it. Other folders stay connected, and your settings, history, conversation names and
+disconnections are kept. If the uninstall cannot finish, the block says what went wrong and offers **Finish
+Uninstalling**.
+
+If KeyScribe cannot find the agent's command, or you already deleted KeyScribe, Settings shows the exact
+terminal commands for that folder and the copy of the app you are using. For the released app and the
+default folders they are:
 
 ```sh
 claude plugin uninstall keyscribe@keyscribe-local --scope user
 claude plugin marketplace remove keyscribe-local
+rm -r ~/.pi/agent/extensions/keyscribe
 ```
 
-Settings shows the exact commands for the copy of the app you are using, since a development or
-renamed build has its own connector name. Removing the marketplace also removes its plugin, so a
-"not found" answer from either command means that part is already gone. Check with
-`claude plugin list --json` and `claude plugin marketplace list --json`: neither should list the
-connector. Then run `/reload-plugins` in each open session or restart it.
+For a Claude Code folder other than `~/.claude`, run the `claude` commands with `CLAUDE_CONFIG_DIR` set to
+that folder; for `~/.claude` itself, make sure it is not set (`env -u CLAUDE_CONFIG_DIR claude …`). Removing the marketplace also removes its plugin, so a "not found" answer means that part is
+already gone. Then reload or restart each open conversation.
 
-### How do I connect Pi, and how do I remove its connector?
+### Does KeyScribe keep the connector up to date?
 
-In **Settings ▸ Modes ▸ Coding agent**, the **Pi** section has its own **Install**. It writes a small
-extension into Pi's extensions folder (`~/.pi/agent/extensions/`, or the `extensions` folder under
-`PI_CODING_AGENT_DIR` when that is set), and every Pi you start from then on loads it on its own: no flag,
-no wrapper, nothing to add to your own configuration. A Pi that is already running picks it up when you
-run `/reload` in it or restart it. The connector needs Pi 1.4.0 or later; an older Pi is reported in that
-section, nothing is installed until Pi is updated, and a connector already installed can still be removed.
-
-**Uninstall Connector…** in the same section deletes that folder. Open Pi sessions disconnect at once; each
-one unloads the extension the next time you run `/reload` in it or restart it. If KeyScribe cannot find Pi,
-or you already deleted KeyScribe, delete the folder yourself: Settings shows the exact command for the copy
-of the app you are using (`rm -r ~/.pi/agent/extensions/keyscribe` for the released app). Nothing else in
-Pi's folders is touched, and your settings, history and conversation names are kept.
+Yes, in each folder you connected. When KeyScribe starts after an update, it updates the connector there, and
+never in a folder you did not connect or where you turned the connector off in the agent. Open conversations
+keep the version they loaded, which keeps working, until you reload them; their row says so.
 
 ### Can KeyScribe tell me when an agent finishes, without reading the whole reply?
 

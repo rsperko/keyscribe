@@ -102,6 +102,14 @@ struct SettingsProblemTests {
             activeEngineUsable: true, aiConnectionTestFailed: false)
         #expect(problems.isEmpty)
     }
+
+    @Test func aCodingAgentFailureFlagsModes() {
+        let problems = SettingsProblem.detect(
+            hasConfigError: false, microphoneGranted: true, accessibilityGranted: true,
+            codingAgentConnectionFailed: true)
+        #expect(problems == [.codingAgentConnectionFailed])
+        #expect(problems.first?.pane == .modes)
+    }
 }
 
 @MainActor
@@ -143,5 +151,14 @@ struct SettingsPaneMarkerTests {
         model.updateAdvisories([.advanced])
         model.updateAdvisories([])
         #expect(model.marker(for: .advanced) == nil)
+    }
+
+    @Test func fixingCodingAgentsClearsItsModeMarkerEvenWhenAnotherModeStillHasAnError() {
+        let model = SettingsProblemModel()
+        model.update([.codingAgentConnectionFailed, .modeNeedsAIService])
+        #expect(model.codingAgentHasError)
+        model.update([.modeNeedsAIService])
+        #expect(!model.codingAgentHasError)
+        #expect(model.marker(for: .modes) == .failure)
     }
 }

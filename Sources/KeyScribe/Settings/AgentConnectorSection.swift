@@ -1,43 +1,97 @@
+import AppKit
 import KeyScribeKit
 import SwiftUI
 
+struct ConnectorSetupsProblemSection: View {
+    @ObservedObject var model: CodingAgentsSettingsModel
+
+    var body: some View {
+        if let problem = model.setupsProblem {
+            Section("Connectors") {
+                VStack(alignment: .leading, spacing: 8) {
+                    IssueText("Connector choices could not be loaded, so no connector can connect.")
+                    Text(problem).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text("Restore the file, then try again. If you remove it, every connector must be installed again.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        Button("Try Again") { Task { await model.retrySetups() } }
+                            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.reloadSetups)
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([model.setups.url]) }
+                            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.showSetupsFile)
+                        Spacer()
+                    }
+                }
+                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.setupsProblem)
+            }
+        }
+    }
+}
+
 struct AgentConnectorSection: View {
     @ObservedObject var model: AgentConnectorModel
-    @State private var confirmingRemove = false
+    let onInstall: (ConnectorSetupModel) -> Void
 
     var body: some View {
         Section(model.kind.displayName) {
-            SettingRow(title: "Connector", result: statusText, help: model.copy.help, combinesAccessibilityChildren: false) {
-                primaryAction
-            }
-            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.connectorStatus)
-            issue
             if let problem = model.discoveryProblem {
                 IssueText(problem, severity: .advisory)
             }
-            if model.showsRemovalWarning {
-                IssueText(model.copy.stillConnected(model.connectedCount), severity: .advisory)
-            }
-            if !model.manualUninstall.isEmpty {
-                manualUninstall
-            }
-            if model.isInstalled {
-                Text(summary).font(.callout)
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.summary)
-                if model.connectedCount < model.sessions || model.needsReload {
-                    Text(model.copy.reloadHint).font(.caption).foregroundStyle(.secondary)
-                }
-                uninstallButton
-            } else if model.offersUninstall {
-                uninstallButton
+            ForEach(model.setups) { setup in
+                ConnectorSetupBlock(setup: setup, showsFolderInTitle: model.setups.count > 1, onInstall: { onInstall(setup) })
             }
         }
         .task { await model.refresh() }
-        .confirmationDialog(model.copy.uninstallTitle, isPresented: $confirmingRemove, titleVisibility: .visible) {
-            Button("Uninstall", role: .destructive) { Task { await model.remove() } }
+    }
+}
+
+private struct ConnectorSetupBlock: View {
+    @ObservedObject var setup: ConnectorSetupModel
+    let showsFolderInTitle: Bool
+    let onInstall: () -> Void
+    @State private var confirmingRemove = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SettingRow(title: title, result: statusText, help: setup.copy.help, combinesAccessibilityChildren: false, hasError: setup.hasError) {
+                primaryAction
+            }
+            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.connectorStatus)
+            CopyableValue(setup.display, value: setup.folder.path, what: "folder", of: "this setup")
+                .font(.caption)
+                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.setupFolder)
+            Text(usage).font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.summary)
+            issue
+            if setup.showsRemovalWarning {
+                IssueText(setup.copy.stillConnected(setup.lingering), severity: .advisory)
+            }
+            if !setup.manualUninstall.isEmpty {
+                manualUninstall
+            }
+            if setup.needsReload {
+                Text(setup.copy.reloadHint).font(.caption).foregroundStyle(.secondary)
+            }
+            if setup.offersUninstall {
+                uninstallButton
+            }
+        }
+        .confirmationDialog(setup.copy.uninstallTitle, isPresented: $confirmingRemove, titleVisibility: .visible) {
+            Button("Uninstall", role: .destructive) { Task { await setup.remove() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(model.copy.uninstallMessage)
+            Text(setup.copy.uninstallMessage)
+        }
+    }
+
+    private var title: String {
+        showsFolderInTitle ? "Connector in \(setup.display)" : "Connector"
+    }
+
+    private var usage: String {
+        switch setup.usedBy.count {
+        case 0: "No open conversations use this folder."
+        case 1: "Used by \(setup.usedBy[0])."
+        default: "Used by \(ListFormatter.localizedString(byJoining: setup.usedBy))."
         }
     }
 
@@ -48,17 +102,18 @@ struct AgentConnectorSection: View {
                 .buttonStyle(.borderless)
                 .font(.caption)
                 .foregroundStyle(.red)
-                .disabled(model.operation != nil)
+                .disabled(setup.operation != nil)
+                .accessibilityLabel("Uninstall \(setup.connector.kind.displayName) connector in \(setup.display)")
                 .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.remove)
         }
     }
 
     private var manualUninstall: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let lead = model.manualUninstallLead {
+            if let lead = setup.manualUninstallLead {
                 Text(lead).font(.caption).foregroundStyle(.secondary)
             }
-            ForEach(model.manualUninstall, id: \.self) { command in
+            ForEach(setup.manualUninstall, id: \.self) { command in
                 CopyableValue(command, value: command, what: "command", of: "uninstalling the connector")
                     .font(.caption.monospaced())
             }
@@ -66,71 +121,65 @@ struct AgentConnectorSection: View {
         .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.manualUninstall)
     }
 
-    private var summary: String {
-        switch (model.sessions, model.connectedCount) {
-        case (0, _): model.copy.noSessions
-        case (let total, let connected): "\(connected) of \(total) \(total == 1 ? "conversation" : "conversations") connected"
-        }
-    }
-
     private var statusText: String {
-        if let operation = model.operation { return operation }
-        return switch model.state {
-        case .checking: "Checking…"
-        case .toolNotFound: model.copy.toolNotFoundLabel
-        case .toolTooOld: model.copy.toolTooOldLabel
+        if let operation = setup.operation { return operation }
+        return switch setup.state {
+        case .checking: "Checking\u{2026}"
+        case .toolNotFound: setup.copy.toolNotFoundLabel
+        case .toolTooOld: setup.copy.toolTooOldLabel
         case .unavailable: "Unavailable"
         case .failed: "Something went wrong"
         case .removalUnfinished: "Uninstall not finished"
         case .status(.ready): "Installed"
         case .status(.notInstalled): "Not installed"
         case .status(.outdated): "Update available"
-        case .status(.disabled): model.copy.disabledLabel
+        case .status(.disabled): setup.copy.disabledLabel
         case .status(.unknown): "Unknown"
         }
     }
 
     @ViewBuilder private var primaryAction: some View {
-        if model.operation != nil {
-            EmptyView()
-        } else {
-            installOrUpdate
-        }
-    }
-
-    @ViewBuilder private var installOrUpdate: some View {
-        switch model.state {
-        case .status(.notInstalled), .failed:
-            Button("Install") { Task { await model.install() } }
-                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.install)
-        case .status(.outdated):
-            Button("Update") { Task { await model.update() } }
-                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.update)
-        case .removalUnfinished:
-            Button("Finish Uninstalling") { Task { await model.remove() } }
-                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.finishUninstalling)
-        default:
-            EmptyView()
+        if setup.operation == nil {
+            switch setup.state {
+            case .status(.notInstalled):
+                Button("Install\u{2026}", action: onInstall)
+                    .accessibilityLabel("Install \(setup.connector.kind.displayName) connector in \(setup.display)")
+                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.install)
+            case .failed:
+                Button("Try Again") { Task { await setup.retry() } }
+                    .accessibilityLabel("Try again for \(setup.connector.kind.displayName) connector in \(setup.display)")
+                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.tryAgain)
+            case .status(.outdated):
+                Button("Update") { Task { await setup.update() } }
+                    .accessibilityLabel("Update \(setup.connector.kind.displayName) connector in \(setup.display)")
+                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.update)
+            case .removalUnfinished:
+                Button("Finish Uninstalling") { Task { await setup.remove() } }
+                    .accessibilityLabel("Finish uninstalling \(setup.connector.kind.displayName) connector in \(setup.display)")
+                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.finishUninstalling)
+            default:
+                EmptyView()
+            }
         }
     }
 
     @ViewBuilder private var issue: some View {
-        switch model.state {
+        switch setup.state {
         case .toolNotFound:
-            IssueText(model.copy.toolNotFoundAdvice, severity: .advisory)
+            IssueText(setup.copy.toolNotFoundAdvice, severity: .advisory)
         case .toolTooOld(let found):
-            IssueText(model.copy.toolTooOldAdvice(found), severity: .advisory)
+            IssueText(setup.copy.toolTooOldAdvice(found), severity: .advisory)
         case .unavailable:
-            IssueText(model.copy.unavailable)
+            IssueText(setup.copy.unavailable)
         case .failed(let message):
-            IssueText(message.isEmpty ? model.copy.noReason : message)
+            IssueText(message.isEmpty ? setup.copy.noReason : message)
         case .status(.disabled):
-            IssueText(model.copy.disabledAdvice, severity: .advisory)
+            IssueText(setup.copy.disabledAdvice, severity: .advisory)
         case .removalUnfinished(let message):
-            IssueText(model.copy.removalUnfinishedAdvice, severity: .advisory)
-            if let message { IssueText(message.isEmpty ? model.copy.noReason : message) }
+            IssueText(setup.copy.removalUnfinishedAdvice, severity: .advisory)
+            if let message { IssueText(message.isEmpty ? setup.copy.noReason : message) }
         case .status(.unknown):
-            IssueText(model.copy.listUnreadable, severity: .advisory)
+            IssueText(setup.copy.listUnreadable, severity: .advisory)
         default:
             EmptyView()
         }

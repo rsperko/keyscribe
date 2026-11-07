@@ -10,11 +10,13 @@ public struct AgentConversation: Equatable, Sendable {
     public var connectorLive: Bool
     public var title: String?
     public var startedAt: Date?
+    public var setup: String?
 
     public init(
         id: String, agent: String, pid: Int, cwd: String, handle: String, state: AgentLiveState, connectorLive: Bool,
-        title: String? = nil, startedAt: Date? = nil
+        title: String? = nil, startedAt: Date? = nil, setup: String? = nil
     ) {
+        self.setup = setup
         self.title = title
         self.startedAt = startedAt
         self.id = id
@@ -59,6 +61,7 @@ public struct RememberedName: Codable, Equatable, Sendable {
 
 public struct AgentDirectory: Sendable {
     public private(set) var conversations: [AgentConversation] = []
+    public private(set) var disconnected: [AgentConversation] = []
     public private(set) var revision = 0
     private var handleById: [String: String] = [:]
     private var retired: [String: String] = [:]
@@ -76,7 +79,7 @@ public struct AgentDirectory: Sendable {
 
     public var remembered: [String: RememberedName] {
         var names = remembering
-        for conversation in conversations where chosen[conversation.id] == nil {
+        for conversation in conversations + disconnected where chosen[conversation.id] == nil {
             guard let start = startById[conversation.id], let name = handleById[conversation.id] else { continue }
             names[conversation.id] = RememberedName(
                 name: name, pid: conversation.pid, startedAt: start, native: nativeNameById[conversation.id], agent: conversation.agent)
@@ -97,11 +100,11 @@ public struct AgentDirectory: Sendable {
 
     public mutating func update(
         entries: [AgentSession], live: Set<String>, titles: [String: String] = [:], nativeNames: [String: String?] = [:],
-        running: (RememberedName) -> Bool = { _ in false }
+        running: (RememberedName) -> Bool = { _ in false }, excluded: Set<String> = []
     ) {
         func conversationId(_ entry: AgentSession) -> String { AgentSessionID.make(agent: entry.agent, native: entry.id) }
         let liveIds = Set(entries.map(conversationId))
-        for conversation in conversations where !liveIds.contains(conversation.id) && chosen[conversation.id] == nil {
+        for conversation in conversations + disconnected where !liveIds.contains(conversation.id) && chosen[conversation.id] == nil {
             guard let start = startById[conversation.id], let name = handleById[conversation.id] else { continue }
             remembering[conversation.id] = RememberedName(
                 name: name, pid: conversation.pid, startedAt: start, native: nativeNameById[conversation.id], agent: conversation.agent)
@@ -126,8 +129,9 @@ public struct AgentDirectory: Sendable {
         var preferred: [String: String] = [:]
         for entry in entries {
             let id = conversationId(entry)
-            let native = (nativeNames[id] ?? entry.explicitName).map(AgentHandles.normalize)
+            let reported = (nativeNames[id] ?? entry.explicitName).map(AgentHandles.normalize)
                 .flatMap { $0.isEmpty || AgentHandles.isReserved($0) ? nil : $0 }
+            let native = reported ?? (excluded.contains(id) ? nativeNameById[id] : nil)
             preferred[id] = native
             if chosen[id] == nil, native != nativeNameById[id] {
                 handleById[id] = nil
@@ -155,10 +159,13 @@ public struct AgentDirectory: Sendable {
                 id: conversationId($0), agent: $0.agent, pid: $0.pid, cwd: $0.cwd,
                 handle: handleById[conversationId($0)] ?? AgentHandles.base(forFolder: $0.folder),
                 state: $0.state, connectorLive: live.contains(conversationId($0)), title: titles[conversationId($0)],
-                startedAt: $0.startedAt.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) })
+                startedAt: $0.startedAt.map { Date(timeIntervalSince1970: TimeInterval($0) / 1000) }, setup: $0.setup)
         }.sorted { $0.handle < $1.handle }
-        if next != conversations {
-            conversations = next
+        let shown = next.filter { !excluded.contains($0.id) }
+        let excludedNow = next.filter { excluded.contains($0.id) }
+        if shown != conversations || excludedNow != disconnected {
+            conversations = shown
+            disconnected = excludedNow
             revision += 1
         }
     }
@@ -178,6 +185,8 @@ public struct AgentDirectory: Sendable {
         handleById = try AgentHandles.rename(id, to: raw, in: handleById)
         chosen[id] = handleById[id]
         conversations = conversations.map { var c = $0; c.handle = handleById[c.id] ?? c.handle; return c }
+            .sorted { $0.handle < $1.handle }
+        disconnected = disconnected.map { var c = $0; c.handle = handleById[c.id] ?? c.handle; return c }
             .sorted { $0.handle < $1.handle }
         revision += 1
     }

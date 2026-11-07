@@ -24,9 +24,14 @@ public struct AgentRoster: Equatable, Sendable {
     public let rows: [Row]
     public let source: AgentRecipient.Source?
     public let namesAvailable: Bool
+    public let disconnectedRecipient: String?
 
-    public init(frozen: [AgentConversation], live: [AgentConversation], recipient: AgentRecipient.Frozen?, namesAvailable: Bool = true) {
+    public init(
+        frozen: [AgentConversation], live: [AgentConversation], recipient: AgentRecipient.Frozen?, namesAvailable: Bool = true,
+        disconnected: [AgentConversation] = []
+    ) {
         self.namesAvailable = namesAvailable
+        disconnectedRecipient = disconnected.first { $0.id == recipient?.id }?.handle
         let byId = Dictionary(live.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let listed = recipient.map { wanted in frozen.contains { $0.id == wanted.id } } ?? false
         let mixed = Set(frozen.map(\.agent)).count > 1
@@ -42,7 +47,9 @@ public struct AgentRoster: Equatable, Sendable {
         source = listed ? recipient?.source : nil
     }
 
-    public var recipientName: String? { rows.first(where: \.current)?.name }
+    public var recipientName: String? {
+        rows.first(where: \.current)?.name ?? disconnectedRecipient.map { "\($0), disconnected" }
+    }
 
     public static func isWaitingForInput(_ conversation: AgentConversation) -> Bool {
         switch conversation.state {

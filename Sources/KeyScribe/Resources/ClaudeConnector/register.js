@@ -38,6 +38,7 @@ let connection = null
 const admitted = new Set()
 let loadedFrom = null
 let retired = false
+let quiet = false
 
 const outbox = []
 let outboxBytes = 0
@@ -190,7 +191,7 @@ function bound(event) {
 }
 
 function observe($, event) {
-  if (!session || helloSession !== session) return
+  if (!session || helloSession !== session || quiet) return
   enqueue($, { kind: 'observe', session, generation, body: bound(event) })
 }
 
@@ -223,6 +224,7 @@ async function sender($) {
       continue
     }
     const outcome = result === unreachable ? 'unreachable' : result.status === 403 ? 'retired' : !result.ok ? 'rejected' : deliverable(item) ? 'ok' : 'stale'
+    if (outcome === 'ok' && item.answer) item.answer(result.text)
     settle(item, outcome)
     if (outcome !== 'ok' && item.kind !== 'hello' && item.generation === generation) lose($)
   }
@@ -284,8 +286,13 @@ function heard($, outcome, attemptLaunch) {
 function sayHello($, target, attemptLaunch) {
   if (hello && hello.target === target && hello.generation === generation) return hello.result
   const attempt = { target, generation, connection: Math.random().toString(36).slice(2, 12) }
-  const render = () => JSON.stringify({
-    op: 'hello', protocol: config.protocol, installation: config.installation, agent: 'claude', agentVersion: '', instance, connection: attempt.connection, session: target, pid: 0,
+  const render = () => JSON.stringify(quiet ? {
+    op: 'hello', protocol: config.protocol, installation: config.installation, version: config.version, agent: 'claude', agentVersion: '',
+    instance, connection: attempt.connection, session: target, pid: 0,
+    features: ['focus', 'label', 'readiness'], idle: turnKnown && currentTurn === null, gap: freshSession !== target,
+  } : {
+    op: 'hello', protocol: config.protocol, installation: config.installation, version: config.version, agent: 'claude', agentVersion: '',
+    instance, connection: attempt.connection, session: target, pid: 0,
     features: ['focus', 'label', 'readiness'], title: (titleSession === target && lastTitle) || undefined, prompts,
     idle: turnKnown && currentTurn === null, gap: freshSession !== target,
     environment: place && Object.keys(place).length ? place : undefined,
@@ -293,6 +300,7 @@ function sayHello($, target, attemptLaunch) {
   attempt.result = new Promise((resolve) => {
     enqueue($, {
       kind: 'hello', session: target, generation, render, body: render(),
+      answer: (text) => { goQuiet($, quietIn(text)) },
       done: (outcome) => {
         if (hello === attempt) hello = null
         if (outcome === 'retired') retire($)
@@ -308,6 +316,21 @@ function sayHello($, target, attemptLaunch) {
   })
   hello = attempt
   return attempt.result
+}
+
+function quietIn(text) {
+  try {
+    return JSON.parse(text).quiet === true
+  } catch (err) {
+    return false
+  }
+}
+
+function goQuiet($, on) {
+  quiet = on
+  if (!on) return
+  drain((item) => item.kind !== 'observe')
+  clearOwnedUI($)
 }
 
 function clearOwnedUI($) {
@@ -411,6 +434,7 @@ function ownPrompt(started, sent) {
 async function submit($, id, text, expiresAt, gen, expected) {
   if (!current(expected, gen)) return reply($, gen, { op: 'refused', request: id, reason: 'sessionChanged' })
   if (!((await $.clock.now()) < expiresAt)) return reply($, gen, { op: 'refused', request: id, reason: 'expired' })
+  if (quiet) return reply($, gen, { op: 'refused', request: id, reason: 'disconnected' })
   const own = { text: asText(text), turn: null }
   ownSubmit = own
   let result
@@ -458,6 +482,7 @@ async function handle($, cmd, gen) {
   }
   if (cmd.op === 'submit') {
     const hold = () => {
+      if (quiet) return 'disconnected'
       if (typeof cmd.expectedPrompts === 'number' && cmd.expectedPrompts !== prompts) return 'typedSince'
       if (currentTurn) return 'working'
       return null
@@ -542,6 +567,15 @@ async function pollLoop($) {
       if (cmd.op === 'retire') {
         retire($)
         break
+      }
+      if (cmd.op === 'quiet' || cmd.op === 'admit') {
+        reply($, gen, { op: 'ack', request: cmd.id })
+        goQuiet($, cmd.op === 'quiet')
+        if (cmd.op === 'admit') {
+          lose($)
+          break
+        }
+        continue
       }
       if (admitted.has(cmd.id)) {
         reply($, gen, { op: 'ack', request: cmd.id })

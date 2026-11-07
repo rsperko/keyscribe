@@ -5,6 +5,7 @@ import KeyScribeKit
 struct ModesSettingsView: View {
     @ObservedObject var model: ModesSettingsModel
     var brokenConnectionIds: Set<String> = []
+    var codingAgentHasError = false
     var onEditVocabulary: (String) -> Void = { _ in }
     @EnvironmentObject private var recordingState: HotkeyRecordingState
     @State private var modePendingDelete: Mode?
@@ -163,6 +164,7 @@ struct ModesSettingsView: View {
 
     private func issue(for mode: Mode) -> ModeSummaryIssue? {
         guard mode.enabled else { return nil }
+        if mode.id == Mode.codingAgentId, codingAgentHasError { return .codingAgentFailed }
         // A trigger the shadowing pass drops means this mode can never start — worth saying in the list,
         // since the trigger row that explains it is only visible once this mode is selected.
         if TriggerKeyConflicts.conflict(for: mode, in: model.registeredModes)?.kind == .unreachable {
@@ -382,6 +384,7 @@ private enum ModeSummaryIssue {
     case failedService
     case triggerUnreachable
     case voiceCommandsShutOut
+    case codingAgentFailed
 
     var summary: String {
         switch self {
@@ -389,6 +392,7 @@ private enum ModeSummaryIssue {
         case .missingService: "AI service missing"
         case .failedService: "AI service failed"
         case .triggerUnreachable, .voiceCommandsShutOut: "Shortcut never fires"
+        case .codingAgentFailed: "Needs attention"
         }
     }
 
@@ -399,6 +403,7 @@ private enum ModeSummaryIssue {
         case .failedService: "This mode's AI service failed its last connection test."
         case .triggerUnreachable: "Another mode claims the same press, written a different way, so no shortcut on this mode fires."
         case .voiceCommandsShutOut: "Another mode uses this shortcut, and it keeps it, so Voice Commands never starts. Select Voice Commands and choose Move Shortcut to take it, or record a different shortcut."
+        case .codingAgentFailed: "A connector or saved conversation choice needs attention. Select Coding agent to fix it."
         }
     }
 }

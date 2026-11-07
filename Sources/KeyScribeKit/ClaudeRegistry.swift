@@ -9,6 +9,7 @@ public struct ClaudeRegistryEntry: Equatable, Sendable {
     public var status: String
     public var waitingFor: String?
     public var startedAt: Int?
+    public var configDir: String?
 
     public init(
         pid: Int, sessionId: String, cwd: String, name: String?, status: String, waitingFor: String?, nameSource: String? = nil,
@@ -79,7 +80,8 @@ public struct ClaudeRegistryEntry: Equatable, Sendable {
 
 extension ClaudeRegistryEntry {
     public var session: AgentSession {
-        AgentSession(agent: AgentKind.claude.id, id: sessionId, pid: pid, cwd: cwd, explicitName: explicitName, state: liveState, startedAt: startedAt)
+        AgentSession(agent: AgentKind.claude.id, id: sessionId, pid: pid, cwd: cwd, explicitName: explicitName, state: liveState, startedAt: startedAt,
+            setup: configDir)
     }
 }
 
@@ -96,4 +98,10 @@ extension AgentDirectory {
     ) {
         update(entries: entries.map(\.session), live: live, titles: titles, nativeNames: nativeNames, running: running)
     }
+}
+
+extension AgentProcesses.Rule {
+    public static let claude = AgentProcesses.Rule(
+        agent: AgentKind.claude.id, names: ["node", "claude"], anyVersionName: true, command: "claude", setupVariable: "CLAUDE_CONFIG_DIR",
+        defaultSetup: "~/.claude", needsTerminal: false)
 }

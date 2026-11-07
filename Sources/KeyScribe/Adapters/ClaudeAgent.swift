@@ -4,39 +4,87 @@ import KeyScribeKit
 @MainActor
 final class ClaudeDiscovery: AgentDiscovery {
     let kind = AgentKind.claude
-    private let scanRegistry: @Sendable () -> [ClaudeRegistryEntry]?
+    private let scanRegistry: @Sendable () -> ClaudeRegistryScanner.Scan
     private let titles: ClaudeTranscriptTitles?
     private let running: (RememberedName) -> Bool
+    private let isRunning: @Sendable (Int) -> Bool
+    private var lastByFolder: [String: [ClaudeRegistryEntry]] = [:]
+
+    nonisolated static let partialProblem = "Some Claude Code session lists couldn\u{2019}t be read. Conversations seen earlier stay listed."
 
     init(
+        scanEach: @escaping @Sendable () -> ClaudeRegistryScanner.Scan, titles: ClaudeTranscriptTitles? = nil,
+        stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning,
+        isRunning: @escaping @Sendable (Int) -> Bool = ProcessStart.isRunning(pid:)
+    ) {
+        scanRegistry = scanEach
+        self.titles = titles
+        running = stillRunning
+        self.isRunning = isRunning
+    }
+
+    convenience init(
         scan: @escaping @Sendable () -> [ClaudeRegistryEntry]?, titles: ClaudeTranscriptTitles? = nil,
         stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning
     ) {
-        scanRegistry = scan
-        self.titles = titles
-        running = stillRunning
+        self.init(
+            scanEach: { scan().map { ClaudeRegistryScanner.Scan(entries: $0, unreadable: []) } ?? ClaudeRegistryScanner.Scan(entries: [], unreadable: [Self.unknownFolder]) },
+            titles: titles, stillRunning: stillRunning)
     }
 
-    convenience init(configDirs: [URL]) {
-        self.init(scan: { ClaudeRegistryScanner.scan(configDirs: configDirs) }, titles: ClaudeTranscriptTitles(configDirs: configDirs))
+    convenience init(
+        enrolled: @escaping @Sendable () -> [URL], defaultFolder: URL = ClaudeConnectorInstaller.defaultSetupFolder(),
+        processes: @escaping @Sendable () -> AgentProcesses.Found
+    ) {
+        self.init(scanEach: {
+            let running = processes()
+            let fromProcesses = running.setups.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            var seen: Set<String> = []
+            let dirs = ([ConnectorFolders.canonical(defaultFolder)] + enrolled() + fromProcesses).filter { seen.insert($0.path).inserted }
+            var found = ClaudeRegistryScanner.scanEach(configDirs: dirs)
+            found.processesUnreadable = running.isPartial
+            found.folders = fromProcesses.map(\.path)
+            return found
+        }, titles: ClaudeTranscriptTitles(configDirs: []))
+    }
+
+    convenience init(setups: ConnectorSetupRegistry, processes: AgentProcessTable) {
+        self.init(enrolled: {
+            (setups.setups?.enrolled(agent: AgentKind.claude.id) ?? []).map { URL(fileURLWithPath: $0.folder, isDirectory: true) }
+        }, processes: { processes.found(.claude) })
     }
 
     func scan(rereadingTitles: Bool) async -> AgentScan {
-        let (scanRegistry, titles) = (scanRegistry, titles)
-        return await Task.detached {
-            guard let found = scanRegistry() else {
-                return .unreadable("The Claude Code session list could not be read, so these are the sessions last seen.")
+        let (scanRegistry, titles, previous, isRunning) = (scanRegistry, titles, lastByFolder, isRunning)
+        let (scan, kept) = await Task.detached { () -> (AgentScan, [String: [ClaudeRegistryEntry]]) in
+            let found = scanRegistry()
+            var entries = found.entries
+            var carried: Set<String> = []
+            for folder in found.unreadable {
+                for entry in previous[folder] ?? [] where !entries.contains(where: { $0.sessionId == entry.sessionId }) && isRunning(entry.pid) {
+                    entries.append(entry)
+                    carried.insert(entry.sessionId)
+                }
             }
-            titles?.forget(keeping: Set(found.map(\.sessionId)))
-            return .found(found.map { entry in
+            titles?.forget(keeping: Set(entries.map(\.sessionId)))
+            let sessions = entries.map { entry in
                 var session = entry.session
                 if let recorded = titles?.titles(for: entry, rereading: rereadingTitles) {
                     session.title = AgentTitle(explicitName: recorded.explicitName, generatedTitle: recorded.generatedTitle)
                 }
                 return session
-            })
+            }
+            var setups: [String] = []
+            for setup in found.folders + entries.compactMap(\.configDir) where !setups.contains(setup) { setups.append(setup) }
+            let problem = found.unreadable.isEmpty && !found.processesUnreadable ? nil : Self.partialProblem
+            let kept = Dictionary(grouping: entries) { $0.configDir ?? Self.unknownFolder }
+            return (.found(sessions, AgentScanExtras(setups: setups, problem: problem, carried: carried)), kept)
         }.value
+        lastByFolder = kept
+        return scan
     }
+
+    nonisolated static let unknownFolder = ""
 
     func stillRunning(_ remembered: RememberedName) -> Bool {
         running(remembered)
@@ -70,67 +118,93 @@ enum ClaudeCLI {
             isExecutable: isExecutable)
     }
 
-    static func run(_ argv: [String], timeout: TimeInterval = 120, grace: TimeInterval = 2) -> (Int32, String) {
-        ToolCLI.run(argv, timeout: timeout, grace: grace)
+    static func run(_ argv: [String], environment: [String: String], timeout: TimeInterval = 120, grace: TimeInterval = 2) -> (Int32, String) {
+        ToolCLI.run(argv, timeout: timeout, grace: grace, environment: environment)
     }
 }
 
 @MainActor
 final class ClaudeConnector: AgentConnector {
     let kind = AgentKind.claude
+    let defaultFolder: URL
     private let locate: () -> String?
-    private let run: @Sendable ([String]) -> (Int32, String)
+    private let run: @Sendable ([String], [String: String]) -> (Int32, String)
     private let agentsDir: URL
     private let pluginName: String
     private let script: String?
+    private let baseEnvironment: [String: String]
 
     init(
         locate: @escaping () -> String? = { ClaudeCLI.locate() },
-        run: @escaping @Sendable ([String]) -> (Int32, String) = { ClaudeCLI.run($0) },
-        agentsDir: URL, pluginName: String, script: String? = ClaudeConnectorFiles.registerJS
+        run: @escaping @Sendable ([String], [String: String]) -> (Int32, String) = { ClaudeCLI.run($0, environment: $1) },
+        agentsDir: URL, pluginName: String, script: String? = ClaudeConnectorFiles.registerJS,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser,
+        baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
     ) {
         self.locate = locate
         self.run = run
         self.agentsDir = agentsDir
         self.pluginName = pluginName
         self.script = script
+        self.baseEnvironment = baseEnvironment
+        defaultFolder = ClaudeConnectorInstaller.defaultSetupFolder(home: home)
     }
 
     private var pluginId: String { "\(pluginName)@\(pluginName)-local" }
     var isBundled: Bool { script != nil }
-    var hasFiles: Bool { FileManager.default.fileExists(atPath: ClaudeConnectorInstaller.marketplaceDir(in: agentsDir).path) }
-    var wasRemoved: Bool { ClaudeConnectorInstaller.wasRemoved(in: agentsDir) }
-    var manualUninstall: [String] { ClaudeConnectorInstaller.manualUninstall(pluginName: pluginName) }
+    var bundledVersion: String? { script.map(ClaudeConnectorFiles.version(for:)) }
+
+    func hasFiles(in target: ConnectorTarget) -> Bool {
+        FileManager.default.fileExists(atPath: ClaudeConnectorInstaller.marketplaceDir(in: agentsDir, setupFolder: target.folder).path)
+    }
+
+    func manualUninstall(for target: ConnectorTarget) -> [String] {
+        ClaudeConnectorInstaller.manualUninstall(pluginName: pluginName, setupFolder: target.folder, isDefault: target.isDefault)
+    }
+
+    func recognizes(folder: URL) -> Bool {
+        ConnectorFolders.contains(any: ["settings.json", ".credentials.json", "sessions", "projects", "plugins"], in: folder)
+    }
 
     func locateTool() -> String? { locate() }
 
-    func check(tool: String) async -> AgentConnectorModel.State {
+    func check(tool: String, target: ConnectorTarget) async -> AgentConnectorModel.State {
         guard let script else { return .unavailable }
         let (run, pluginId) = (run, pluginId)
-        let (status, output) = await Task.detached { run([tool, "plugin", "list", "--json"]) }.value
+        let environment = ClaudeConnectorInstaller.environment(for: target.folder, isDefault: target.isDefault, base: baseEnvironment)
+        let (status, output) = await Task.detached { run([tool, "plugin", "list", "--json"], environment) }.value
         guard status == 0 else { return .failed(Self.trimmed(output)) }
         let found = AgentConnectorStatus.parse(pluginList: Data(output.utf8), pluginId: pluginId, bundledVersion: ClaudeConnectorFiles.version(for: script))
         let registered = switch found {
         case .ready, .outdated, .disabled: true
         case .notInstalled, .unknown: false
         }
-        let leftOver = registered || hasFiles
-        return leftOver && wasRemoved ? .removalUnfinished(nil) : .status(found)
+        if target.removing { return registered || hasFiles(in: target) ? .removalUnfinished(nil) : .status(.notInstalled) }
+        guard target.installation != nil else { return found == .unknown ? .status(.unknown) : .status(.notInstalled) }
+        return .status(found)
     }
 
-    func install(tool: String) async throws { try await perform(tool) { try $0.install() } }
-    func update(tool: String) async throws { try await perform(tool) { try $0.update() } }
-    func uninstall(tool: String) async throws { try await perform(tool) { try $0.uninstall() } }
-    func disable() throws { try ClaudeConnectorInstaller.disable(in: agentsDir) }
+    func install(tool: String, target: ConnectorTarget) async throws {
+        guard let installation = target.installation else { throw AgentConnectorError(message: copy.noReason) }
+        try await perform(tool, target) { try $0.install(installation: installation) }
+    }
 
-    private func perform(_ tool: String, _ action: @escaping @Sendable (ClaudeConnectorInstaller) throws -> Void) async throws {
+    func update(tool: String, target: ConnectorTarget) async throws {
+        guard let installation = target.installation else { throw AgentConnectorError(message: copy.noReason) }
+        try await perform(tool, target) { try $0.update(installation: installation) }
+    }
+
+    func uninstall(tool: String, target: ConnectorTarget) async throws { try await perform(tool, target) { try $0.uninstall() } }
+
+    private func perform(_ tool: String, _ target: ConnectorTarget, _ action: @escaping @Sendable (ClaudeConnectorInstaller) throws -> Void) async throws {
         guard let script else { throw AgentConnectorError(message: copy.unavailable) }
+        let run = run
         let installer = ClaudeConnectorInstaller(
-            agentsDir: agentsDir, pluginName: pluginName, claude: tool,
+            agentsDir: agentsDir, setupFolder: target.folder, isDefaultSetup: target.isDefault, pluginName: pluginName, claude: tool,
             socketPath: agentsDir.appendingPathComponent("bridge.sock").path,
             tokenPath: agentsDir.appendingPathComponent("token").path,
             readyPath: agentsDir.appendingPathComponent("ready.json").path,
-            script: script, run: run)
+            script: script, run: run, baseEnvironment: baseEnvironment)
         let failure: String? = await Task.detached {
             do {
                 try action(installer)
@@ -150,11 +224,10 @@ final class ClaudeConnector: AgentConnector {
     }
 
     let copy = AgentConnectorCopy(
-        help: "\(Branding.appName) reaches Claude Code through a small plugin installed for your user account. Installed means the plugin is in place; each session then connects on its own.",
-        reloadHint: "Already running Claude Code? Run /reload-plugins once in each open session. New sessions connect on their own once you trust their folder.",
-        uninstallTitle: "Uninstall the Claude Code connector?",
-        uninstallMessage: "Open Claude Code sessions disconnect now, and new ones will not connect. Work you already sent may still finish. Each open session unloads the connector when you run /reload-plugins in it or restart it. Your conversation names and other \(Branding.appName) settings are kept.",
-        noSessions: "No Claude Code sessions are running.",
+        help: "\(Branding.appName) reaches Claude Code through a small plugin installed in the folder Claude Code loads its configuration from. Installed means the plugin is in place; each conversation using this folder then connects on its own, unless you disconnect it.",
+        reloadHint: "Already running Claude Code here? Run /reload-plugins once in each open conversation. New conversations connect on their own once you trust their folder.",
+        uninstallTitle: "Uninstall the Claude Code connector from this folder?",
+        uninstallMessage: "Claude Code conversations using this folder disconnect now, and new ones will not connect. Work you already sent may still finish. Each open conversation unloads the connector when you run /reload-plugins in it or restart it. Other folders stay connected, and your conversation names, disconnected conversations and other \(Branding.appName) settings are kept.",
         toolNotFoundLabel: "Claude Code not found",
         toolNotFoundAdvice: "Install Claude Code, then come back here. \(Branding.appName) looks for the claude command on your PATH and in the usual install folders.",
         unavailable: "This copy of \(Branding.appName) is missing its Claude Code connector. Reinstall \(Branding.appName) to connect Claude Code.",
@@ -170,17 +243,4 @@ final class ClaudeConnector: AgentConnector {
                 ? "The connector was uninstalled outside \(Branding.appName), so 1 open session is still connected and keeps receiving what you say until you run /reload-plugins in it or restart it."
                 : "The connector was uninstalled outside \(Branding.appName), so \(count) open sessions are still connected and keep receiving what you say until you run /reload-plugins in each one or restart them."
         })
-}
-
-extension CodingAgentsSettingsModel {
-    convenience init(
-        locateClaude: @escaping () -> String? = { ClaudeCLI.locate() },
-        run: @escaping @Sendable ([String]) -> (Int32, String) = { ClaudeCLI.run($0) },
-        describeTerminal: @escaping @Sendable (Int) -> String? = TerminalDescription.describe(pid:),
-        agentsDir: URL, pluginName: String, script: String? = ClaudeConnectorFiles.registerJS
-    ) {
-        self.init(
-            describeTerminal: describeTerminal, agentsDir: agentsDir,
-            connectors: [ClaudeConnector(locate: locateClaude, run: run, agentsDir: agentsDir, pluginName: pluginName, script: script)])
-    }
 }

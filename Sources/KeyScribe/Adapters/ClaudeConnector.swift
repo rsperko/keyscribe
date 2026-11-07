@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import KeyScribeKit
 import Security
@@ -28,59 +29,66 @@ struct ClaudeConnectorInstaller {
     }
 
     let agentsDir: URL
+    let setupFolder: URL
+    let isDefaultSetup: Bool
     let pluginName: String
     let claude: String
     let socketPath: String
     let tokenPath: String
     let readyPath: String
     let script: String
-    let run: ([String]) -> (Int32, String)
+    let run: @Sendable ([String], [String: String]) -> (Int32, String)
+    var baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
 
-    static let installationFile = AgentInstallationRecord.file(for: AgentKind.claude.id)
+    static let setupVariable = "CLAUDE_CONFIG_DIR"
 
-    static func currentInstallation(in agentsDir: URL) -> String? {
-        AgentInstallationRecord.current(agent: AgentKind.claude.id, in: agentsDir)
+    static func defaultSetupFolder(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+        home.appendingPathComponent(".claude", isDirectory: true)
     }
+
+    static func environment(for setupFolder: URL, isDefault: Bool, base: [String: String]) -> [String: String] {
+        var environment = base
+        environment[setupVariable] = isDefault ? nil : setupFolder.path
+        return environment
+    }
+
+    var environment: [String: String] { Self.environment(for: setupFolder, isDefault: isDefaultSetup, base: baseEnvironment) }
 
     var marketplaceName: String { "\(pluginName)-local" }
-    var marketplaceDir: URL { Self.marketplaceDir(in: agentsDir) }
+    var marketplaceDir: URL { Self.marketplaceDir(in: agentsDir, setupFolder: setupFolder) }
 
-    static func marketplaceDir(in agentsDir: URL) -> URL {
-        agentsDir.appendingPathComponent("claude-connector", isDirectory: true)
+    static func marketplaceDir(in agentsDir: URL, setupFolder: URL) -> URL {
+        let key = SHA256.hash(data: Data(setupFolder.path.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
+        return agentsDir.appendingPathComponent("claude-connector", isDirectory: true).appendingPathComponent(key, isDirectory: true)
     }
 
-    static func manualUninstall(pluginName: String) -> [String] {
-        [
-            "claude plugin uninstall \(pluginName)@\(pluginName)-local --scope user",
-            "claude plugin marketplace remove \(pluginName)-local",
+    static func manualUninstall(
+        pluginName: String, setupFolder: URL, isDefault: Bool, home: String = FileManager.default.homeDirectoryForCurrentUser.path
+    ) -> [String] {
+        let prefix = isDefault ? "env -u \(setupVariable) " : "\(setupVariable)=\(ShellWord.path(setupFolder.path, home: home)) "
+        return [
+            "\(prefix)claude plugin uninstall \(pluginName)@\(pluginName)-local --scope user",
+            "\(prefix)claude plugin marketplace remove \(pluginName)-local",
         ]
     }
+
     private var pluginId: String { "\(pluginName)@\(marketplaceName)" }
 
     static func pluginName(for variant: AppVariant) -> String { variant.connectorSlug }
 
-    func install() throws {
-        try writeFiles(installation: UUID().uuidString)
+    func install(installation: String) throws {
+        try writeFiles(installation: installation)
         try claudeCommand(["plugin", "marketplace", "add", marketplaceDir.path])
         try claudeCommand(["plugin", "install", pluginId, "--scope", "user"])
     }
 
-    func update() throws {
-        try writeFiles(installation: Self.currentInstallation(in: agentsDir) ?? UUID().uuidString)
+    func update(installation: String) throws {
+        try writeFiles(installation: installation)
         try claudeCommand(["plugin", "marketplace", "update", marketplaceName])
-        try claudeCommand(["plugin", "update", pluginId])
-    }
-
-    static func wasRemoved(in agentsDir: URL) -> Bool {
-        AgentInstallationRecord.wasRemoved(agent: AgentKind.claude.id, in: agentsDir)
-    }
-
-    static func disable(in agentsDir: URL) throws {
-        try AgentInstallationRecord.disable(agent: AgentKind.claude.id, in: agentsDir)
+        try claudeCommand(["plugin", "update", pluginId, "--scope", "user"])
     }
 
     func uninstall() throws {
-        try Self.disable(in: agentsDir)
         let failures = [
             attempt(["plugin", "uninstall", pluginId, "--scope", "user"]),
             attempt(["plugin", "marketplace", "remove", marketplaceName]),
@@ -107,7 +115,7 @@ struct ClaudeConnectorInstaller {
 
     private func listed(_ args: [String], _ name: ([String: Any]) -> String?) throws -> Set<String> {
         let argv = [claude] + args
-        let (status, output) = run(argv)
+        let (status, output) = run(argv, environment)
         guard status == 0,
               let entries = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [[String: Any]]
         else { throw InstallError(command: argv, status: status, output: output) }
@@ -116,19 +124,20 @@ struct ClaudeConnectorInstaller {
 
     private func claudeCommand(_ args: [String]) throws {
         let argv = [claude] + args
-        let (status, output) = run(argv)
+        let (status, output) = run(argv, environment)
         guard status == 0 else { throw InstallError(command: argv, status: status, output: output) }
     }
 
     private func writeFiles(installation: String) throws {
-        try AgentInstallationRecord.record(installation: installation, agent: AgentKind.claude.id, in: agentsDir)
         let plugin = marketplaceDir.appendingPathComponent(pluginName, isDirectory: true)
         let files: [(URL, String)] = [
             (marketplaceDir.appendingPathComponent(".claude-plugin/marketplace.json"), ClaudeConnectorFiles.marketplaceJSON(name: marketplaceName, plugin: pluginName)),
             (plugin.appendingPathComponent(".claude-plugin/plugin.json"), ClaudeConnectorFiles.pluginJSON(name: pluginName, version: ClaudeConnectorFiles.version(for: script))),
             (plugin.appendingPathComponent("hooks/hooks.json"), ClaudeConnectorFiles.hooksJSON),
             (plugin.appendingPathComponent("hooks/register.js"), ClaudeConnectorFiles.installedScript(script, installation: installation)),
-            (plugin.appendingPathComponent("keyscribe.json"), ClaudeConnectorFiles.configJSON(socketPath: socketPath, tokenPath: tokenPath, readyPath: readyPath, installation: installation)),
+            (plugin.appendingPathComponent("keyscribe.json"), ClaudeConnectorFiles.configJSON(
+                socketPath: socketPath, tokenPath: tokenPath, readyPath: readyPath, installation: installation,
+                version: ClaudeConnectorFiles.version(for: script))),
         ]
         for (url, text) in files {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -173,10 +182,10 @@ enum ClaudeConnectorFiles {
 
     static let hooksJSON = json(["description": "Voice connector", "modules": ["./register.js"]])
 
-    static func configJSON(socketPath: String, tokenPath: String, readyPath: String, installation: String) -> String {
+    static func configJSON(socketPath: String, tokenPath: String, readyPath: String, installation: String, version: String) -> String {
         json([
             "protocol": AgentBridgeCodec.protocolVersion, "socketPath": socketPath, "tokenPath": tokenPath, "readyPath": readyPath,
-            "installation": installation,
+            "installation": installation, "version": version,
         ])
     }
 }

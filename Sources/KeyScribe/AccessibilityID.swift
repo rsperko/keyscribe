@@ -304,6 +304,23 @@ enum AccessibilityID {
             static let remove = "mode.codingAgents.remove"
             static let finishUninstalling = "mode.codingAgents.finishUninstalling"
             static let manualUninstall = "mode.codingAgents.manualUninstall"
+            static let setupFolder = "mode.codingAgents.setupFolder"
+            static let tryAgain = "mode.codingAgents.tryAgain"
+            static let connect = "mode.codingAgents.connect"
+            static let disconnect = "mode.codingAgents.disconnect"
+            static let reconnect = "mode.codingAgents.reconnect"
+            static let disconnected = "mode.codingAgents.disconnected"
+            static let exclusionsProblem = "mode.codingAgents.exclusionsProblem"
+            static let recovery = "mode.codingAgents.recovery"
+            static let reloadCommand = "mode.codingAgents.reloadCommand"
+            static let showConversation = "mode.codingAgents.showConversation"
+            static let checkAgain = "mode.codingAgents.checkAgain"
+            static let missing = "mode.codingAgents.missing"
+            static let chooseSetupFolder = "mode.codingAgents.chooseSetupFolder"
+            static let consentInstall = "mode.codingAgents.consentInstall"
+            static let consentCancel = "mode.codingAgents.consentCancel"
+            static let consentFolder = "mode.codingAgents.consentFolder"
+            static let consentConversations = "mode.codingAgents.consentConversations"
             static let conversation = "mode.codingAgents.conversation"
             static let copyDirectory = "mode.codingAgents.copyDirectory"
             static let rename = "mode.codingAgents.rename"
@@ -312,6 +329,9 @@ enum AccessibilityID {
             static let namesNotSaved = "mode.codingAgents.namesNotSaved"
             static let reloadNames = "mode.codingAgents.reloadNames"
             static let showNamesFile = "mode.codingAgents.showNamesFile"
+            static let setupsProblem = "mode.codingAgents.setupsProblem"
+            static let reloadSetups = "mode.codingAgents.reloadSetups"
+            static let showSetupsFile = "mode.codingAgents.showSetupsFile"
             static let renameName = "mode.codingAgents.renameName"
             static let renameSave = "mode.codingAgents.renameSave"
             static let renameCancel = "mode.codingAgents.renameCancel"
@@ -593,9 +613,14 @@ enum AccessibilityID {
         Settings.Advanced.eraseAllData, Settings.Advanced.eraseConfirmConfirm, Settings.Advanced.eraseConfirmCancel,
         Mode.CodingAgents.connectorStatus, Mode.CodingAgents.currentRecipient, Mode.CodingAgents.summary,
         Mode.CodingAgents.install, Mode.CodingAgents.update, Mode.CodingAgents.remove, Mode.CodingAgents.finishUninstalling, Mode.CodingAgents.manualUninstall,
+        Mode.CodingAgents.setupFolder, Mode.CodingAgents.tryAgain, Mode.CodingAgents.connect, Mode.CodingAgents.disconnect,
+        Mode.CodingAgents.reconnect, Mode.CodingAgents.disconnected, Mode.CodingAgents.exclusionsProblem, Mode.CodingAgents.recovery,
+        Mode.CodingAgents.reloadCommand, Mode.CodingAgents.showConversation, Mode.CodingAgents.checkAgain, Mode.CodingAgents.missing,
+        Mode.CodingAgents.chooseSetupFolder, Mode.CodingAgents.consentInstall, Mode.CodingAgents.consentCancel, Mode.CodingAgents.consentFolder, Mode.CodingAgents.consentConversations,
         Mode.CodingAgents.conversation, Mode.CodingAgents.rename, Mode.CodingAgents.copyDirectory,
         Mode.CodingAgents.renameProblem, Mode.CodingAgents.namesProblem, Mode.CodingAgents.namesNotSaved, Mode.CodingAgents.reloadNames,
-        Mode.CodingAgents.showNamesFile, Mode.CodingAgents.renameName, Mode.CodingAgents.renameSave,
+        Mode.CodingAgents.showNamesFile, Mode.CodingAgents.setupsProblem, Mode.CodingAgents.reloadSetups, Mode.CodingAgents.showSetupsFile,
+        Mode.CodingAgents.renameName, Mode.CodingAgents.renameSave,
         Mode.CodingAgents.renameCancel,
         Mode.List.list, Mode.List.add, Mode.List.addBlank, Mode.List.chooserCancel,
         Mode.List.deleteConfirmConfirm, Mode.List.deleteConfirmCancel,

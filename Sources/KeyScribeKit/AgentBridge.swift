@@ -4,18 +4,20 @@ public enum AgentCommand: Equatable, Sendable {
     case submit(id: String, expectedSession: String, text: String, expectedPrompts: Int? = nil, expiresAt: Date)
     case status(id: String, expectedSession: String, text: String)
     case focus(id: String, expectedSession: String, expiresAt: Date)
+    case quiet(id: String, expectedSession: String)
+    case admit(id: String, expectedSession: String)
 
     public var id: String {
         switch self {
         case .submit(let id, _, _, _, _), .status(let id, _, _): id
-        case .focus(let id, _, _): id
+        case .focus(let id, _, _), .quiet(let id, _), .admit(let id, _): id
         }
     }
 
     public var expiresAt: Date? {
         switch self {
         case .focus(_, _, let expiresAt), .submit(_, _, _, _, let expiresAt): expiresAt
-        case .status: nil
+        case .status, .quiet, .admit: nil
         }
     }
 }
@@ -53,12 +55,16 @@ public enum AgentEvent: Equatable, Sendable {
         public var environment: [String: String]
         public var cwd: String?
         public var waiting: AgentPrompt?
+        public var version: String?
+        public var quiet: Bool
         public init(
             protocolVersion: Int, agent: String, agentVersion: String, instance: String, session: String, pid: Int,
             features: [String] = [], title: String? = nil, prompts: Int? = nil, idle: Bool? = nil, gap: Bool? = nil,
             connection: String? = nil, installation: String? = nil, environment: [String: String] = [:], cwd: String? = nil,
-            waiting: AgentPrompt? = nil
+            waiting: AgentPrompt? = nil, version: String? = nil, quiet: Bool = false
         ) {
+            self.version = version
+            self.quiet = quiet
             self.waiting = waiting
             self.cwd = cwd
             self.environment = environment
@@ -123,7 +129,21 @@ extension AgentCommand {
             .submit(id: id, expectedSession: rename(s), text: text, expectedPrompts: prompts, expiresAt: expiresAt)
         case .status(let id, let s, let text): .status(id: id, expectedSession: rename(s), text: text)
         case .focus(let id, let s, let expiresAt): .focus(id: id, expectedSession: rename(s), expiresAt: expiresAt)
+        case .quiet(let id, let s): .quiet(id: id, expectedSession: rename(s))
+        case .admit(let id, let s): .admit(id: id, expectedSession: rename(s))
         }
+    }
+}
+
+extension AgentEvent.Hello {
+    public var withoutContent: AgentEvent.Hello {
+        var stripped = self
+        stripped.title = nil
+        stripped.prompts = nil
+        stripped.waiting = nil
+        stripped.environment = [:]
+        stripped.quiet = true
+        return stripped
     }
 }
 
@@ -133,7 +153,7 @@ extension AgentEvent.Hello {
 }
 
 public enum AgentBridgeCodec {
-    public static let protocolVersion = 2
+    public static let protocolVersion = 3
     public static let maxFrameBytes = 256 * 1024
 
     public enum CodecError: Error, Equatable { case tooLarge, unknownOp(String), malformed }
@@ -174,6 +194,7 @@ public enum AgentBridgeCodec {
         var environment: [String: String]?
         var cwd: String?
         var waiting: AgentPrompt?
+        var version: String?
     }
 
     public static func encode(_ commands: [AgentCommand]) throws -> Data {
@@ -202,7 +223,7 @@ public enum AgentBridgeCodec {
             return .hello(.init(
                 protocolVersion: p, agent: agent, agentVersion: w.agentVersion ?? "", instance: instance, session: session, pid: pid,
                 features: w.features ?? [], title: w.title, prompts: w.prompts, idle: w.idle, gap: w.gap, connection: w.connection,
-                installation: w.installation, environment: w.environment ?? [:], cwd: w.cwd, waiting: w.waiting))
+                installation: w.installation, environment: w.environment ?? [:], cwd: w.cwd, waiting: w.waiting, version: w.version))
         case "ack":
             return .ack(request: try required(w.request))
         case "submitted":
@@ -238,6 +259,8 @@ public enum AgentBridgeCodec {
         case .status(let id, let s, let t): Wire(op: "status", id: id, expectedSession: s, text: t)
         case .focus(let id, let s, let expiresAt):
             Wire(op: "focus", id: id, expectedSession: s, expiresAt: milliseconds(expiresAt))
+        case .quiet(let id, let s): Wire(op: "quiet", id: id, expectedSession: s)
+        case .admit(let id, let s): Wire(op: "admit", id: id, expectedSession: s)
         }
     }
 
@@ -258,6 +281,8 @@ public enum AgentBridgeCodec {
                 id: id, expectedSession: s, text: try required(w.text), expectedPrompts: w.expectedPrompts, expiresAt: try date(w.expiresAt))
         case "status": return .status(id: id, expectedSession: s, text: try required(w.text))
         case "focus": return .focus(id: id, expectedSession: s, expiresAt: try date(w.expiresAt))
+        case "quiet": return .quiet(id: id, expectedSession: s)
+        case "admit": return .admit(id: id, expectedSession: s)
         default: throw CodecError.unknownOp(w.op)
         }
     }
@@ -332,6 +357,13 @@ public struct AgentCommandQueue: Sendable {
         inFlight.removeAll { retiring($0.entry.session) }
         pending.removeAll { retiring($0.session) }
         registrations = registrations.filter { !retiring($0.value.session) }
+        return refusals
+    }
+
+    public mutating func retire(instances: Set<String>) -> [Refusal] {
+        let sessions = Set(registrations.filter { instances.contains($0.key) }.map(\.value.session))
+        let refusals = retire(where: sessions.contains)
+        registrations = registrations.filter { !instances.contains($0.key) }
         return refusals
     }
 

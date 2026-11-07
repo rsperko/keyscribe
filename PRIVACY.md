@@ -190,10 +190,16 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
   alone, because another app may be using it; delete it yourself if nothing else needs it.
 - **Coding agent connection** under `agents/`, only if you turn on the experimental Coding agent
   feature: an access token the agent connectors use to reach KeyScribe on your Mac, the Claude Code
-  connector's files, a record of which connector installation may connect for each agent, and
-  `names.json`, the names you chose for conversations along with their agent session ids. The Pi
-  connector's files live in Pi's own extensions folder instead, because that is where Pi loads them
-  from; they hold the same connection settings and nothing else. These are kept whether or not History
+  connector's files, `connectors.json`, the agent folders you connected and which connector installation
+  may connect from each, and `names.json`, the names you chose for conversations along with their agent
+  session ids and the conversations you disconnected. The Pi connector's files live in the extensions
+  folder of each Pi folder you connected, because that is where Pi loads them from; they hold the same
+  connection settings and nothing else. To find the conversations on your Mac and the folders their agents
+  use, KeyScribe looks at your own running Pi and Claude Code processes: their working folder, start time,
+  terminal, and a short list of environment variables (the agent's folder variable and the terminal and
+  multiplexer variables its terminal routes use). It never reads or keeps any other variable or a full
+  command line, and keeps what it found in memory only. A conversation you disconnect sends KeyScribe only
+  who it is (its agent, session id, process and folder), never its title, prompts or replies. These are kept whether or not History
   is on, until you delete them. No message text is stored there. To show each conversation's title,
   KeyScribe reads the end of that conversation's own Claude Code transcript on your Mac; it keeps only
   the title, in memory, and never logs or stores the transcript. Pi's titles come from the connector,

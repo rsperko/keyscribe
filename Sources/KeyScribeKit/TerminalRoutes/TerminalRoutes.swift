@@ -9,12 +9,18 @@ public struct TerminalProcess: Equatable, Sendable {
     public var executable: String
     public var app: String?
     public var foreground: Bool
+    public var directory: String?
+    public var startedAt: Int?
+    public var argumentsReadable: Bool
 
     public init(
         pid: Int, parent: Int?, tty: String?, arguments: [String], environment: [String: String], executable: String,
-        app: String?, foreground: Bool = true
+        app: String?, foreground: Bool = true, directory: String? = nil, startedAt: Int? = nil, argumentsReadable: Bool = true
     ) {
         self.foreground = foreground
+        self.directory = directory
+        self.startedAt = startedAt
+        self.argumentsReadable = argumentsReadable
         self.pid = pid
         self.parent = parent
         self.tty = tty
@@ -24,7 +30,7 @@ public struct TerminalProcess: Equatable, Sendable {
         self.app = app
     }
 
-    var name: String { (executable as NSString).lastPathComponent }
+    public var name: String { (executable as NSString).lastPathComponent }
 }
 
 public protocol TerminalFacts {

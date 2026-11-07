@@ -75,8 +75,27 @@ every rule above applies to it, with these sharpenings:
   to the agent the user addressed, not into the field, so the secure-field policy that keeps a dictation
   local does not stop it. The take is still left out of History (`design.md` §4.7), and the turn's reply
   can still go to the summary service like any dictated turn's.
-- **Removal preserves user data and unrelated agent configuration.** Retire loaded connectors
-  without waiting for them, verify uninstall state, and keep partial cleanup safe to retry.
+- **Removal preserves user data and unrelated agent configuration.** Revoke the setup's installation
+  first, retire its loaded connectors without waiting for them, verify uninstall state in that same setup,
+  and keep partial cleanup safe to retry; retrying never readmits the revoked installation.
+- **A connector is installed into a setup the user chose, never the app's own environment.** A setup is
+  the folder an agent loads its configuration from, found from each conversation's own process
+  (`AgentProcesses`, `AgentProcessTable`), an enrolled setup, or a folder the user chose. A relative setup
+  variable is resolved from that process's working folder (`FolderPath`). Every
+  operation takes an explicit `ConnectorTarget`, and a command run for it gets that setup's variable set
+  (or removed for the default) explicitly. Discovery never installs or enrolls; only the consent sheet does
+  (`ConnectorSetupRegistry.grant`). `SourceInvariantsTests` pins where a setup variable may be named.
+- **Installation authorizes a setup; exclusions take conversations back out.** Every current and future
+  conversation of an enrolled setup connects, except those the user disconnected (`AgentExclusions`, saved
+  in `names.json`). Check exclusion at the bridge (a quiet hello carries identity only, later events are
+  dropped), in the connector immediately before it submits (a submission held for the keyboard is refused
+  once the conversation goes quiet), in the hub before every hand-off and after every wait, and in the take
+  before any rewrite. Saved choices that cannot be read admit no conversation; a disconnection that cannot
+  be saved still holds for the session and says so. Uninstalling a setup silences spoken updates for its
+  conversations exactly as Disconnect does.
+- **A disconnected conversation keeps its name.** The directory names connected and disconnected
+  conversations together (`AgentDirectory.update(excluded:)`), so disconnecting never renames a
+  conversation and no other conversation takes its name.
 - **A spoken recipient never falls through to the current recipient.** An unknown one holds and asks,
   like any unresolved target; one that fits several names goes to the first of them alphabetically
   (`AgentRecipient.resolve`).
@@ -110,8 +129,9 @@ every rule above applies to it, with these sharpenings:
   agent, behind `AgentDiscovery` and `AgentConnector`, with the facts shared code needs carried by
   `AgentKind` and `AgentSession`. Shared code never branches on an agent's name; a new agent is a new
   adapter and a line in the composition root. `SourceInvariantsTests` pins the boundary.
-- **Agents are isolated at the bridge.** Each agent has its own installation record, and retiring one
-  agent's connectors leaves the others' sessions connected. Inside the app a conversation id is
+- **Agents and setups are isolated at the bridge.** Each enrolled setup has its own installation id
+  (`ConnectorSetups`), and retiring one installation's connectors leaves every other setup's and agent's
+  sessions connected. Inside the app a conversation id is
   `agent:nativeId` (`AgentSessionID`); the bridge is the only place that translates, namespacing every
   event by the hello's agent and handing connectors their native id back, so two agents may reuse an id
   and never meet. Saved names carry the namespaced key; a legacy key gets the agent the composition root
@@ -119,12 +139,19 @@ every rule above applies to it, with these sharpenings:
   on its hello (`features`); a missing feature is unsupported unless that agent's shipped connector has it,
   which is the only case that reads as an outdated connector.
 - **Discovery failure is not an empty roster.** A scan that cannot read its source says so, the hub keeps
-  the sessions last seen for that agent, and Settings shows the problem beside that agent's connector.
-- **An agent without a registry is discovered through its connector.** The hub hands every session event
-  to the adapter of that event's agent (`AgentDiscovery.observe`, with the native id), so an adapter may
-  build its roster from hellos, turn and title events; its scan then keeps only sessions whose process
-  still runs, and retiring the agent's connectors forgets them (`AgentDiscovery.retire`). Such a session is
-  never "not connected": without its connector it is simply not seen.
+  the sessions last seen for that agent, and Settings shows the problem beside that agent's connector. A
+  scan that read only part of its source keeps what it last saw from the unread part (`AgentScanExtras.carried`)
+  and returns the rest fresh; only carried conversations are labeled Last seen.
+- **An agent without a registry is discovered through its connector and its processes.** The hub hands
+  every session event to the adapter of that event's agent (`AgentDiscovery.observe`, with the native id),
+  so an adapter may build its roster from hellos, turn and title events; its scan then keeps only sessions
+  whose process still runs, and retiring an installation's connectors forgets them
+  (`AgentDiscovery.retire`). A running agent process no hello has identified is a candidate
+  (`AgentCandidate`): listed so the user can connect it, never a recipient, and matched to its hello by
+  process id and start time, never the process id alone. Processes that could not be read make the scan
+  partial, never empty, and only when the process's own name is the agent's; a candidate whose process
+  could not be read stays listed. The process table is listed once for every agent's discovery and reused
+  until it ages out (`AgentProcessTable`), so the liveness tick never sweeps it per agent.
 - **Discovery never runs on the main actor.** An adapter's `scan` does its reading off the main actor; the
   hub's `rescan` waits for it under a deadline (`AgentHub.defaultScanDeadline`) and treats a scan that does
   not answer like an unreadable one. `refresh` is the synchronous half: it applies the sessions last scanned

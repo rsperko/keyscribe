@@ -836,6 +836,27 @@ test("a key pressed just before dictation arrives holds it until the keyboard ha
   assert.equal(h.sends.length, 1)
 })
 
+test("a submission held for the keyboard is refused and never sent once the conversation is disconnected", async () => {
+  const h = harness()
+  await h.connect()
+  await h.key()
+  await h.deliver([h.submit("r1")])
+  await h.deliver([{ op: "quiet", id: "q1", expectedSession: "s1" }])
+  await h.advance(6_000)
+  assert.equal(h.sends.length, 0)
+  assert.deepEqual(h.replies().filter((b) => b.request === "r1").map((b) => b.reason).filter(Boolean), ["disconnected"])
+})
+
+test("a submission that arrives while the conversation is disconnected is refused", async () => {
+  const h = harness()
+  await h.connect()
+  await h.deliver([{ op: "quiet", id: "q1", expectedSession: "s1" }])
+  await h.deliver([h.submit("r1")])
+  await h.advance(1_000)
+  assert.equal(h.sends.length, 0)
+  assert.deepEqual(h.replies().filter((b) => b.request === "r1").map((b) => b.reason).filter(Boolean), ["disconnected"])
+})
+
 test("a submission held past the deadline the app gave it is refused as expired and never sent", async () => {
   const h = harness()
   await h.connect()
@@ -1204,4 +1225,60 @@ test("no handler waits on the bridge", async () => {
   assert.ok(Date.now() - started < 50)
   await h.settle()
   assert.deepEqual(h.ops(), ["hello", "typed", "turnStarted", "turnComplete", "title"])
+})
+
+test("a hello answered quietly keeps polling but sends nothing about the conversation", async () => {
+  const h = harness()
+  h.live.name = "secret plan"
+  await h.start()
+  h.open("/event")[0].answer(200, JSON.stringify({ ok: true, quiet: true }))
+  await h.settle()
+  assert.equal(h.open("/poll").length, 1)
+  h.emit("input", { text: "x", source: "interactive" })
+  h.live.idle = false
+  h.emit("agent_start")
+  h.emit("session_info_changed", { name: "renamed" })
+  await h.settle()
+  assert.deepEqual(h.ops(), ["hello"])
+})
+
+test("a quiet command stops observing and admit says a full hello again", async () => {
+  const h = harness()
+  h.live.name = "frontend"
+  h.env.ZELLIJ_PANE_ID = "7"
+  await h.connect()
+  await h.deliver([{ op: "quiet", id: "q1", expectedSession: "s1" }])
+  await h.answerEvents()
+  const before = h.events().length
+  h.emit("input", { text: "x", source: "interactive" })
+  await h.settle()
+  assert.equal(h.events().length, before)
+  await h.deliver([{ op: "admit", id: "a1", expectedSession: "s1" }])
+  await h.advance(1_000)
+  const hellos = h.events().filter((b) => b.op === "hello")
+  assert.equal(hellos.length, 2)
+  assert.equal(hellos[1].title, "frontend")
+  assert.deepEqual(hellos[1].environment, { ZELLIJ_PANE_ID: "7" })
+  h.emit("input", { text: "y", source: "interactive" })
+  await h.answerEvents()
+  assert.ok(h.events().some((b) => b.op === "typed"))
+})
+
+test("while quiet a hello again carries only who the connector is", async () => {
+  const h = harness()
+  h.live.name = "secret plan"
+  h.env.ZELLIJ_PANE_ID = "7"
+  await h.connect()
+  await h.deliver([{ op: "quiet", id: "q1", expectedSession: "s1" }])
+  await h.answerEvents()
+  h.open("/poll")[0].answer(409)
+  await h.advance(1_000)
+  const again = h.events().filter((b) => b.op === "hello")[1]
+  assert.ok(again, "no second hello")
+  assert.equal(again.title, undefined)
+  assert.equal(again.prompts, undefined)
+  assert.equal(again.environment, undefined)
+  assert.equal(again.waiting, undefined)
+  assert.equal(again.session, "s1")
+  assert.equal(again.installation, "I1")
 })

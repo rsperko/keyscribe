@@ -555,6 +555,19 @@ test('a prompt sent while the draft is being read holds the dictation', async ($
   expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).toEqual(['ack', 'typedSince'])
 })
 
+test('a dictation still being checked when the conversation is disconnected is refused and never sent', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  h.box.held = true
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
+  expect(h.reads.length).toBe(1)
+  await h.deliver([{ op: 'quiet', id: 'q1', expectedSession: 's1' }])
+  h.reads[0]()
+  await h.answerEvents()
+  expect(h.submits).toEqual([])
+  expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).toEqual(['ack', 'disconnected'])
+})
+
 test('a turn starting while the draft is being read holds the dictation until it finishes', async ($, on) => {
   const h = harness(on)
   await h.connect($)
@@ -966,4 +979,37 @@ test('an older completion never clears a newer turn', async ($, on) => {
   await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'three' }])
   await h.answerEvents()
   expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).toEqual(['ack', 'working'])
+})
+
+test('a hello answered quietly keeps polling but sends nothing about the conversation', async ($, on) => {
+  const h = harness(on)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await h.settle()
+  h.open('/event')[0].answer(200, JSON.stringify({ ok: true, quiet: true }))
+  await h.settle()
+  expect(h.open('/poll').length).toBe(1)
+  await h.typed($)
+  await $.turn.start({ text: 'typed by me', turnId: 't1' })
+  await $.turn.complete({ turnId: 't1', answer: 'secret answer', durationMs: 5, isAborted: false, usage: null, reason: 'answer' })
+  await h.settle()
+  expect(h.ops()).toEqual(['hello'])
+})
+
+test('a quiet command stops observing and admit says hello again', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await h.deliver([{ op: 'quiet', id: 'q1', expectedSession: 's1' }])
+  await h.answerEvents()
+  const before = h.events().length
+  await h.typed($)
+  await h.settle()
+  expect(h.events().length).toBe(before)
+  await h.deliver([{ op: 'admit', id: 'a1', expectedSession: 's1' }])
+  await h.clock.advance(1000)
+  await h.settle()
+  expect(h.events().filter((b) => b.op === 'hello').length).toBe(2)
+  await h.answerEvents()
+  await h.typed($, 'again')
+  await h.answerEvents()
+  expect(h.events().some((b) => b.op === 'typed')).toBe(true)
 })

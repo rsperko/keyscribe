@@ -529,7 +529,7 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.captured.insertedText == nil)
-        #expect(rig.hub.current == "claude:s1")
+        #expect(rig.hub.directory.conversations.isEmpty)
         #expect(rosters(rig).compactMap { $0 }.last?.namesAvailable == false)
     }
 
@@ -542,11 +542,11 @@ struct AgentDeliveryWiringTests {
         #expect(rig.captured.insertedText == nil)
     }
 
-    @Test func whileNamesCannotBeLoadedARowNumberStillWorks() async {
+    @Test func whileSavedChoicesCannotBeLoadedEvenARowNumberSendsNothing() async {
         let rig = await rig("Tell session 2 to run the tests.", current: "claude:s1", namesFile: "not json")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        #expect(rig.sent.map(\.1) == ["claude:s2"])
+        #expect(rig.sent.isEmpty)
     }
 
     @Test func withTheFeatureOffNothingIsSent() async {
@@ -1232,7 +1232,9 @@ struct AgentDeliveryWiringTests {
         rig.hub.refresh()
         await take(rig)
         let expected = "Not sent: keyscribe isn\u{2019}t connected to \(Branding.appName)"
-        #expect(rig.hud.states.contains(.error(message: expected, action: nil, heard: HeardExcerpt(heard: "Run the tests."))))
+        #expect(rig.hud.states.contains {
+            if case .error(expected, .openCodingAgents?, HeardExcerpt(heard: "Run the tests.")) = $0 { true } else { false }
+        })
         #expect(await lastHistoryEntry(rig)?.failureReason == expected)
     }
 

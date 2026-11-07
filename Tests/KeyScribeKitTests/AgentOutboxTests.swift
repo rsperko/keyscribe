@@ -101,4 +101,13 @@ struct AgentOutboxTests {
         #expect(outbox.withdraw("m1") == nil)
         #expect(outbox.release { _ in .idle }.isEmpty)
     }
+
+    @Test func withdrawingAConversationReturnsEveryMessageHeldForItAndKeepsTheOthers() {
+        var outbox = AgentOutbox()
+        _ = outbox.send(AgentOutbox.Message(id: "a1", conversation: "a", text: "one"), state: .working)
+        _ = outbox.send(AgentOutbox.Message(id: "b1", conversation: "b", text: "two"), state: .working)
+        _ = outbox.send(AgentOutbox.Message(id: "a2", conversation: "a", text: "three"), state: .working)
+        #expect(outbox.withdraw(conversation: "a").map(\.id) == ["a1", "a2"])
+        #expect(outbox.held.map(\.id) == ["b1"])
+    }
 }

@@ -73,8 +73,54 @@ struct ClaudeRegistryScannerTests {
         #expect(Set(ClaudeRegistryScanner.scan(configDirs: [a, b])?.map(\.sessionId) ?? []) == ["one", "two"])
     }
 
-    @Test func theDefaultConfigDirHonorsTheEnvironment() {
-        #expect(ClaudeRegistryScanner.defaultConfigDir(environment: ["CLAUDE_CONFIG_DIR": "/x/claude"]).path == "/x/claude")
-        #expect(ClaudeRegistryScanner.defaultConfigDir(environment: [:]).path.hasSuffix("/.claude"))
+    @Test func eachEntryRemembersItsConfigFolderAndAnUnreadableFolderKeepsTheOthers() throws {
+        let a = try configDir()
+        let b = try configDir()
+        try write(a, pid: getpid(), session: "one")
+        try Data("not json".utf8).write(to: b.appendingPathComponent("sessions/bad.json"))
+        let found = ClaudeRegistryScanner.scanEach(configDirs: [a, b])
+        #expect(found.entries.map(\.sessionId) == ["one"])
+        #expect(found.entries.map(\.configDir) == [a.path])
+        #expect(found.entries.first?.session.setup == a.path)
+        #expect(found.unreadable == [b.path])
+        #expect(ClaudeRegistryScanner.scan(configDirs: [a, b]) == nil)
+    }
+
+    final class Scans: @unchecked Sendable {
+        var next = ClaudeRegistryScanner.Scan(entries: [], unreadable: [])
+    }
+
+    private func entry(_ session: String, pid: Int, in folder: String) -> ClaudeRegistryEntry {
+        var entry = ClaudeRegistryEntry(pid: pid, sessionId: session, cwd: "/src/\(session)", name: nil, status: "idle", waitingFor: nil)
+        entry.configDir = folder
+        return entry
+    }
+
+    @MainActor
+    @Test func aFolderThatBecomesUnreadableKeepsItsConversationsAsLastSeenWhileTheOthersStayFresh() async {
+        let scans = Scans()
+        let discovery = ClaudeDiscovery(scanEach: { scans.next }, isRunning: { $0 != 99 })
+        scans.next = ClaudeRegistryScanner.Scan(
+            entries: [entry("one", pid: 10, in: "/a"), entry("two", pid: 20, in: "/b"), entry("gone", pid: 99, in: "/b")], unreadable: [])
+        _ = await discovery.scan(rereadingTitles: false)
+        scans.next = ClaudeRegistryScanner.Scan(entries: [entry("one", pid: 10, in: "/a")], unreadable: ["/b"])
+        guard case .found(let sessions, let extras) = await discovery.scan(rereadingTitles: false) else { Issue.record("unreadable"); return }
+        #expect(sessions.map(\.id) == ["one", "two"])
+        #expect(extras.carried == ["two"])
+        #expect(extras.problem == ClaudeDiscovery.partialProblem)
+        scans.next = ClaudeRegistryScanner.Scan(entries: [entry("one", pid: 10, in: "/a")], unreadable: [])
+        guard case .found(let after, let clear) = await discovery.scan(rereadingTitles: false) else { Issue.record("unreadable"); return }
+        #expect(after.map(\.id) == ["one"])
+        #expect(clear.carried.isEmpty)
+        #expect(clear.problem == nil)
+    }
+
+    @MainActor
+    @Test func processesThatCouldNotBeReadArePartialSetupDiscoveryNotAnUnreadableSessionList() async {
+        var scan = ClaudeRegistryScanner.Scan(entries: [], unreadable: [])
+        scan.processesUnreadable = true
+        let fixed = scan
+        let discovery = ClaudeDiscovery(scanEach: { fixed })
+        #expect(await discovery.scan(rereadingTitles: false) == .found([], AgentScanExtras(problem: ClaudeDiscovery.partialProblem)))
     }
 }

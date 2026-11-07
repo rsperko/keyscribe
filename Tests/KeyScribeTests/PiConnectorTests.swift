@@ -43,11 +43,10 @@ struct PiCLITests {
         #expect(output.hasPrefix("/bin:/usr/bin"))
     }
 
-    @Test func theExtensionsFolderFollowsPisOwnDirectoryVariable() {
+    @Test func theDefaultSetupIsPisOwnFolderNeverTheAppsEnvironment() {
         let home = URL(fileURLWithPath: "/Users/me")
-        #expect(PiConnectorInstaller.defaultExtensionsDir(environment: [:], home: home).path == "/Users/me/.pi/agent/extensions")
-        #expect(PiConnectorInstaller.defaultExtensionsDir(environment: ["PI_CODING_AGENT_DIR": "/scratch/pi"], home: home).path == "/scratch/pi/extensions")
-        #expect(PiConnectorInstaller.defaultExtensionsDir(environment: ["PI_CODING_AGENT_DIR": ""], home: home).path == "/Users/me/.pi/agent/extensions")
+        #expect(PiConnectorInstaller.defaultSetupFolder(home: home).path == "/Users/me/.pi/agent")
+        #expect(PiConnectorInstaller.pluginDir(in: URL(fileURLWithPath: "/scratch/pi"), pluginName: "keyscribe").path == "/scratch/pi/extensions/keyscribe")
     }
 }
 
@@ -60,14 +59,14 @@ struct PiConnectorInstallerTests {
     private func setup() -> (PiConnectorInstaller, URL, URL) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ks-pi-\(UUID().uuidString)")
         let agents = root.appendingPathComponent("agents")
-        let extensions = root.appendingPathComponent("extensions")
+        let folder = root.appendingPathComponent("pi-setup")
         let installer = PiConnectorInstaller(
-            extensionsDir: extensions, agentsDir: agents, pluginName: "keyscribe-dev",
+            setupFolder: folder, pluginName: "keyscribe-dev",
             socketPath: agents.appendingPathComponent("bridge.sock").path,
             tokenPath: agents.appendingPathComponent("token").path,
             readyPath: agents.appendingPathComponent("ready.json").path,
             script: Self.script)
-        return (installer, agents, extensions)
+        return (installer, agents, folder.appendingPathComponent("extensions"))
     }
 
     private func json(_ url: URL) throws -> [String: Any] {
@@ -79,9 +78,9 @@ struct PiConnectorInstallerTests {
         #expect(Data(Self.script.utf8) == (try Data(contentsOf: Self.source)))
     }
 
-    @Test func installWritesTheExtensionAndItsSettingsIntoPisExtensionsFolder() throws {
+    @Test func installWritesTheExtensionAndItsSettingsIntoTheChosenSetupsExtensionsFolder() throws {
         let (installer, agents, extensions) = setup()
-        try installer.install()
+        try installer.install(installation: "id-1")
         let plugin = extensions.appendingPathComponent("keyscribe-dev")
         let config = try json(plugin.appendingPathComponent("keyscribe.json"))
         #expect(config["protocol"] as? Int == AgentBridgeCodec.protocolVersion)
@@ -91,64 +90,61 @@ struct PiConnectorInstallerTests {
         #expect(config["plugin"] as? String == "keyscribe-dev")
         #expect(config["version"] as? String == PiConnectorFiles.version(for: Self.script))
         #expect(Set(config["environmentKeys"] as? [String] ?? []) == TerminalRoutes.environmentKeys)
-        let id = try #require(config["installation"] as? String)
-        #expect(PiConnectorInstaller.currentInstallation(in: agents) == id)
+        #expect(config["installation"] as? String == "id-1")
         let code = try String(contentsOf: plugin.appendingPathComponent("index.ts"), encoding: .utf8)
-        #expect(code.contains("const loadedFrom: string | null = \"\(id)\""))
+        #expect(code.contains("const loadedFrom: string | null = \"id-1\""))
         #expect(code.contains("const configPath: string | null = \"\(plugin.appendingPathComponent("keyscribe.json").path)\""))
         let restored = code
-            .replacingOccurrences(of: "const loadedFrom: string | null = \"\(id)\"", with: "const loadedFrom: string | null = null")
+            .replacingOccurrences(of: "const loadedFrom: string | null = \"id-1\"", with: "const loadedFrom: string | null = null")
             .replacingOccurrences(of: "const configPath: string | null = \"\(plugin.appendingPathComponent("keyscribe.json").path)\"", with: "const configPath: string | null = null")
         #expect(restored == Self.script)
-        #expect(installer.installed() == .current)
+        #expect(installer.installed(installation: "id-1") == .current)
+        #expect(installer.installed(installation: "id-2") == .other(version: PiConnectorFiles.version(for: Self.script)))
+        #expect(installer.installed(installation: nil) == .other(version: PiConnectorFiles.version(for: Self.script)))
     }
 
-    @Test func eachInstallGetsANewInstallationAndAnUpdateKeepsIt() throws {
-        let (installer, agents, _) = setup()
-        try installer.install()
-        let first = try #require(PiConnectorInstaller.currentInstallation(in: agents))
-        try installer.install()
-        let second = try #require(PiConnectorInstaller.currentInstallation(in: agents))
-        #expect(first != second)
-        try installer.update()
-        #expect(PiConnectorInstaller.currentInstallation(in: agents) == second)
-        #expect(installer.installed() == .current)
-    }
-
-    @Test func uninstallRetiresTheInstallationThenRemovesOnlyTheConnectorsFolder() throws {
-        let (installer, agents, extensions) = setup()
+    @Test func uninstallRemovesOnlyTheConnectorsFolder() throws {
+        let (installer, _, extensions) = setup()
         let other = extensions.appendingPathComponent("someone-else.ts")
-        try installer.install()
+        try installer.install(installation: "id-1")
         try Data("export default function () {}\n".utf8).write(to: other)
         try installer.uninstall()
-        #expect(PiConnectorInstaller.wasRemoved(in: agents))
-        #expect(PiConnectorInstaller.currentInstallation(in: agents) == nil)
         #expect(!FileManager.default.fileExists(atPath: extensions.appendingPathComponent("keyscribe-dev").path))
         #expect(FileManager.default.fileExists(atPath: other.path))
-        #expect(FileManager.default.fileExists(atPath: agents.appendingPathComponent(PiConnectorInstaller.installationFile).path))
         try installer.uninstall()
-        #expect(installer.installed() == .absent)
+        #expect(installer.installed(installation: "id-1") == .absent)
     }
 
     @Test func anOlderOrEditedInstallIsReportedAsAnotherVersion() throws {
         let (installer, _, extensions) = setup()
-        #expect(installer.installed() == .absent)
-        try installer.install()
+        #expect(installer.installed(installation: "id-1") == .absent)
+        try installer.install(installation: "id-1")
         let plugin = extensions.appendingPathComponent("keyscribe-dev")
         let config = plugin.appendingPathComponent("keyscribe.json")
         var settings = try json(config)
         settings["version"] = "0.1.0-old"
         try JSONSerialization.data(withJSONObject: settings).write(to: config)
-        #expect(installer.installed() == .other(version: "0.1.0-old"))
-        try installer.update()
-        #expect(installer.installed() == .current)
+        #expect(installer.installed(installation: "id-1") == .other(version: "0.1.0-old"))
+        try installer.install(installation: "id-1")
+        #expect(installer.installed(installation: "id-1") == .current)
         try Data("edited\n".utf8).write(to: plugin.appendingPathComponent("index.ts"))
-        #expect(installer.installed() == .other(version: PiConnectorFiles.version(for: Self.script)))
+        #expect(installer.installed(installation: "id-1") == .other(version: PiConnectorFiles.version(for: Self.script)))
+    }
+
+    @Test func anExtensionTurnedOffInPisSettingsIsSeen() throws {
+        let (installer, _, extensions) = setup()
+        try installer.install(installation: "id-1")
+        #expect(!installer.turnedOffInPi())
+        let settings = extensions.deletingLastPathComponent().appendingPathComponent("settings.json")
+        try Data(#"{"extensions": ["-extensions/keyscribe-dev"]}"#.utf8).write(to: settings)
+        #expect(installer.turnedOffInPi())
     }
 
     @Test func theCommandToUninstallByHandNamesTheConnectorsOwnFolder() {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".pi/agent/extensions/keyscribe")
         #expect(PiConnectorInstaller.manualUninstall(pluginDir: dir) == ["rm -r ~/.pi/agent/extensions/keyscribe"])
+        #expect(PiConnectorInstaller.manualUninstall(pluginDir: URL(fileURLWithPath: "/Users/a/pi work/extensions/keyscribe"), home: "/Users/a")
+            == ["rm -r ~/'pi work/extensions/keyscribe'"])
     }
 
     @Test func theExtensionNeverHardcodesAVariantOrPathAndReadsOnlyTheTerminalFactsItsSettingsName() throws {
@@ -191,116 +187,136 @@ struct PiConnectorStatusTests {
     private func make(pi: String? = "/bin/pi-test", cli: CLI = CLI(), script: String? = PiConnectorFiles.indexTS) -> (PiConnector, CLI, URL, URL) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ks-pi-conn-\(UUID().uuidString)")
         let agents = root.appendingPathComponent("agents")
-        let extensions = root.appendingPathComponent("extensions")
-        let connector = PiConnector(locate: { pi }, run: cli.run, agentsDir: agents, extensionsDir: extensions, pluginName: "keyscribe-dev", script: script)
-        return (connector, cli, agents, extensions)
+        let home = root.appendingPathComponent("home")
+        let connector = PiConnector(locate: { pi }, run: cli.run, agentsDir: agents, pluginName: "keyscribe-dev", script: script, home: home)
+        return (connector, cli, agents, home.appendingPathComponent(".pi/agent"))
+    }
+
+    private func target(_ folder: URL, installation: String? = "id-1", removing: Bool = false) -> ConnectorTarget {
+        ConnectorTarget(folder: folder, isDefault: true, installation: installation, removing: removing)
     }
 
     @Test func anInstallIsFilesOnlyAndIsSeenAsReadyUntilTheBundledExtensionChanges() async throws {
-        let (connector, cli, _, extensions) = make()
-        #expect(await connector.check(tool: "/bin/pi-test") == .status(.notInstalled))
-        try await connector.install(tool: "/bin/pi-test")
+        let (connector, cli, _, folder) = make()
+        #expect(await connector.check(tool: "/bin/pi-test", target: target(folder, installation: nil)) == .status(.notInstalled))
+        try await connector.install(tool: "/bin/pi-test", target: target(folder))
         #expect(cli.calls == [["/bin/pi-test", "--version"]])
-        #expect(await connector.check(tool: "/bin/pi-test") == .status(.ready))
-        #expect(connector.hasFiles)
-        var settings = try JSONSerialization.jsonObject(with: Data(contentsOf: extensions.appendingPathComponent("keyscribe-dev/keyscribe.json"))) as? [String: Any] ?? [:]
+        #expect(await connector.check(tool: "/bin/pi-test", target: target(folder)) == .status(.ready))
+        #expect(connector.hasFiles(in: target(folder)))
+        let config = folder.appendingPathComponent("extensions/keyscribe-dev/keyscribe.json")
+        var settings = try JSONSerialization.jsonObject(with: Data(contentsOf: config)) as? [String: Any] ?? [:]
         settings["version"] = "0.1.0-old"
-        try JSONSerialization.data(withJSONObject: settings).write(to: extensions.appendingPathComponent("keyscribe-dev/keyscribe.json"))
-        #expect(await connector.check(tool: "/bin/pi-test") == .status(.outdated(installed: "0.1.0-old")))
-        try await connector.update(tool: "/bin/pi-test")
-        #expect(await connector.check(tool: "/bin/pi-test") == .status(.ready))
+        try JSONSerialization.data(withJSONObject: settings).write(to: config)
+        #expect(await connector.check(tool: "/bin/pi-test", target: target(folder)) == .status(.outdated(installed: "0.1.0-old")))
+        try await connector.update(tool: "/bin/pi-test", target: target(folder))
+        #expect(await connector.check(tool: "/bin/pi-test", target: target(folder)) == .status(.ready))
+    }
+
+    @Test func filesFromAnotherInstallationAreNotThisSetupsConnector() async throws {
+        let (connector, _, _, folder) = make()
+        try await connector.install(tool: "/bin/pi-test", target: target(folder, installation: "old"))
+        #expect(await connector.check(tool: "/bin/pi-test", target: target(folder, installation: nil)) == .status(.notInstalled))
+    }
+
+    @Test func aConnectorTurnedOffInPiReadsAsDisabled() async throws {
+        let (connector, _, _, folder) = make()
+        try await connector.install(tool: "/bin/pi-test", target: target(folder))
+        try Data(#"{"extensions": ["!extensions/*"]}"#.utf8).write(to: folder.appendingPathComponent("settings.json"))
+        #expect(await connector.check(tool: "/bin/pi-test", target: target(folder)) == .status(.disabled))
     }
 
     @Test func theVersionIsAskedOnceUntilTheToolChangesOnDisk() async throws {
-        let (connector, cli, _, _) = make()
-        _ = await connector.check(tool: "/bin/pi-test")
-        _ = await connector.check(tool: "/bin/pi-test")
+        let (connector, cli, _, folder) = make()
+        _ = await connector.check(tool: "/bin/pi-test", target: target(folder))
+        _ = await connector.check(tool: "/bin/pi-test", target: target(folder))
         #expect(cli.calls.count == 1)
         let tool = FileManager.default.temporaryDirectory.appendingPathComponent("ks-pi-tool-\(UUID().uuidString)")
         try Data("#!/bin/sh\n".utf8).write(to: tool)
-        _ = await connector.check(tool: tool.path)
-        _ = await connector.check(tool: tool.path)
+        _ = await connector.check(tool: tool.path, target: target(folder))
+        _ = await connector.check(tool: tool.path, target: target(folder))
         #expect(cli.calls.count == 2)
         try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 60)], ofItemAtPath: tool.path)
-        _ = await connector.check(tool: tool.path)
+        _ = await connector.check(tool: tool.path, target: target(folder))
         #expect(cli.calls.count == 3)
     }
 
     @Test func aPiBelowTheFloorIsReportedBeforeAnyFileIsLooked() async {
         let cli = CLI()
         cli.version = "1.3.2\n"
-        let (connector, _, _, _) = make(cli: cli)
-        #expect(await connector.check(tool: "/bin/pi-test") == .toolTooOld("1.3.2"))
+        let (connector, _, _, folder) = make(cli: cli)
+        #expect(await connector.check(tool: "/bin/pi-test", target: target(folder)) == .toolTooOld("1.3.2"))
         #expect(connector.copy.toolTooOldAdvice("1.3.2").contains("1.4.0"))
-    }
-
-    @Test func aConnectorInstalledUnderAPiThatIsNowTooOldStillOffersUninstall() async throws {
-        let cli = CLI()
-        let (connector, _, agents, _) = make(cli: cli)
-        try await connector.install(tool: "/bin/pi-test")
-        cli.version = "1.3.2\n"
-        let model = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
-        await model.refresh()
-        #expect(model.connectors[0].state == .toolTooOld("1.3.2"))
-        #expect(model.connectors[0].offersUninstall)
-        #expect(model.connectors[0].manualUninstall.isEmpty)
-        await model.connectors[0].remove()
-        #expect(!connector.hasFiles)
-        #expect(model.connectors[0].state == .toolTooOld("1.3.2"))
-        #expect(!model.connectors[0].offersUninstall)
     }
 
     @Test func aPiThatCannotReportItsVersionFailsWithWhatItSaid() async {
         let cli = CLI()
         cli.status = 1
-        let (connector, _, _, _) = make(cli: cli)
-        #expect(await connector.check(tool: "/bin/pi-test") == .failed("boom"))
+        let (connector, _, _, folder) = make(cli: cli)
+        #expect(await connector.check(tool: "/bin/pi-test", target: target(folder)) == .failed("boom"))
     }
 
-    @Test func anUninstallRemovesTheFolderAndLeftoverFilesReadAsUnfinished() async throws {
-        let (connector, _, agents, extensions) = make()
-        try await connector.install(tool: "/bin/pi-test")
-        try connector.disable()
-        #expect(connector.wasRemoved)
-        #expect(await connector.check(tool: "/bin/pi-test") == .removalUnfinished(nil))
-        try await connector.uninstall(tool: "/bin/pi-test")
-        #expect(!connector.hasFiles)
-        #expect(await connector.check(tool: "/bin/pi-test") == .status(.notInstalled))
-        #expect(FileManager.default.fileExists(atPath: agents.appendingPathComponent("pi-installation.json").path))
-        #expect(connector.manualUninstall == ["rm -r \((extensions.appendingPathComponent("keyscribe-dev").path as NSString).abbreviatingWithTildeInPath)"])
+    @Test func leftoverFilesOfASetupBeingRemovedReadAsUnfinished() async throws {
+        let (connector, _, _, folder) = make()
+        try await connector.install(tool: "/bin/pi-test", target: target(folder))
+        #expect(await connector.check(tool: "/bin/pi-test", target: target(folder, removing: true)) == .removalUnfinished(nil))
+        try await connector.uninstall(tool: "/bin/pi-test", target: target(folder, removing: true))
+        #expect(!connector.hasFiles(in: target(folder)))
+        #expect(await connector.check(tool: "/bin/pi-test", target: target(folder, removing: true)) == .status(.notInstalled))
+        #expect(connector.manualUninstall(for: target(folder)) == ["rm -r \((folder.appendingPathComponent("extensions/keyscribe-dev").path as NSString).abbreviatingWithTildeInPath)"])
     }
 
     @Test func aMissingBundledExtensionIsUnavailable() async {
-        let (connector, cli, _, _) = make(script: nil)
+        let (connector, cli, _, folder) = make(script: nil)
         #expect(!connector.isBundled)
-        #expect(await connector.check(tool: "/bin/pi-test") == .unavailable)
-        await #expect(throws: AgentConnectorError.self) { try await connector.install(tool: "/bin/pi-test") }
+        #expect(await connector.check(tool: "/bin/pi-test", target: target(folder)) == .unavailable)
+        await #expect(throws: AgentConnectorError.self) { try await connector.install(tool: "/bin/pi-test", target: target(folder)) }
         #expect(cli.calls.isEmpty)
     }
 
-    @Test func theSettingsModelDrivesThePiConnectorLikeAnyOther() async {
-        let (connector, _, agents, _) = make()
+    @Test func theSettingsModelInstallsIntoOneSetupAndUninstallLeavesItsRecordGone() async throws {
+        let (connector, _, agents, folder) = make()
         let model = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
         await model.refresh()
-        #expect(model.connectors.map(\.id) == ["pi"])
-        #expect(model.connectors[0].state == .status(.notInstalled))
-        await model.connectors[0].install()
-        #expect(model.connectors[0].state == .status(.ready))
-        #expect(model.connectors[0].needsReload)
-        #expect(model.connectors[0].copy.reloadHint.contains("/reload"))
-        await model.connectors[0].remove()
-        #expect(model.connectors[0].state == .status(.notInstalled))
-        #expect(!model.connectors[0].needsReload)
+        let setup = try #require(model.connectors[0].setups.first)
+        #expect(setup.folder.path == ConnectorFolders.canonical(folder).path)
+        #expect(setup.state == .status(.notInstalled))
+        await setup.install()
+        #expect(setup.state == .status(.ready))
+        #expect(model.setups.setups?.enrolled(agent: "pi").count == 1)
+        var retired: [String] = []
+        model.onRetire = { retired.append($0) }
+        let installation = try #require(setup.target.installation)
+        await setup.remove()
+        #expect(retired == [installation])
+        #expect(setup.state == .status(.notInstalled))
+        #expect(model.setups.setups?.setups.isEmpty == true)
+        #expect(!model.setups.admits(agent: "pi", installation: installation))
+    }
+
+    @Test func installingOneSetupLeavesAnotherUntouched() async throws {
+        let (connector, _, agents, folder) = make()
+        let other = agents.deletingLastPathComponent().appendingPathComponent("pi-work")
+        let model = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
+        model.show([], current: nil, discoveredSetups: ["pi": [ConnectorFolders.canonical(other).path]])
+        let work = try #require(model.connectors[0].setup(for: ConnectorFolders.canonical(other).path))
+        await work.install()
+        #expect(connector.hasFiles(in: target(other)))
+        #expect(!connector.hasFiles(in: target(folder)))
+        #expect(model.setups.setups?.enrolled(agent: "pi").map(\.folder) == [ConnectorFolders.canonical(other).path])
     }
 
     @Test func withoutPiAnInstalledConnectorStillOffersTheCommandToFinishByHand() async throws {
-        let (installed, _, agents, extensions) = make()
-        try await installed.install(tool: "/bin/pi-test")
-        let (connector, _, _, _) = (PiConnector(locate: { nil }, run: { _ in (0, "") }, agentsDir: agents, extensionsDir: extensions, pluginName: "keyscribe-dev", script: PiConnectorFiles.indexTS), (), (), ())
-        let model = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
+        let (installed, _, agents, folder) = make()
+        let model = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [installed])
         await model.refresh()
-        #expect(model.connectors[0].state == .toolNotFound)
-        #expect(model.connectors[0].manualUninstall.first?.hasPrefix("rm -r ") == true)
-        #expect(model.connectors[0].canUninstallWithoutTool)
+        await model.connectors[0].setups[0].install()
+        let connector = PiConnector(
+            locate: { nil }, run: { _ in (0, "") }, agentsDir: agents, pluginName: "keyscribe-dev", script: PiConnectorFiles.indexTS,
+            home: folder.deletingLastPathComponent().deletingLastPathComponent())
+        let without = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
+        await without.refresh()
+        #expect(without.connectors[0].setups[0].state == .toolNotFound)
+        #expect(without.connectors[0].setups[0].manualUninstall.first?.hasPrefix("rm -r ") == true)
+        #expect(without.connectors[0].setups[0].canUninstallWithoutTool)
     }
 }

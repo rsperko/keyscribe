@@ -11,6 +11,35 @@ struct AgentDirectoryTests {
         ClaudeRegistryEntry(pid: pid, sessionId: session, cwd: cwd, name: name, status: "idle", waitingFor: nil, nameSource: name == nil ? nil : "user", startedAt: start)
     }
 
+    @Test func aDisconnectedConversationKeepsItsNameAndNoOtherConversationTakesIt() {
+        var directory = AgentDirectory()
+        directory.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200)], live: [])
+        let names = Dictionary(uniqueKeysWithValues: directory.conversations.map { ($0.id, $0.handle) })
+        directory.update(entries: [started(10, "a", at: 100).session, started(20, "b", at: 200).session], live: [], excluded: ["claude:b"])
+        #expect(directory.conversations.map(\.id) == ["claude:a"])
+        #expect(directory.disconnected.map(\.id) == ["claude:b"])
+        #expect(directory.disconnected.first?.handle == names["claude:b"])
+        #expect(directory.conversations.first?.handle == names["claude:a"])
+        #expect(directory.conversation(handle: names["claude:b"]!) == nil)
+    }
+
+    @Test func aDisconnectedConversationWhoseNameIsNoLongerReportedKeepsItEvenAfterARestart() {
+        var directory = AgentDirectory()
+        directory.update(entries: [started(10, "a", at: 100, name: "frontend").session, started(20, "b", at: 200).session], live: [])
+        #expect(directory.conversation(pid: 10)?.handle == "frontend")
+        directory.update(entries: [started(10, "a", at: 100).session, started(20, "b", at: 200).session], live: [], excluded: ["claude:a"])
+        #expect(directory.disconnected.first?.handle == "frontend")
+        var reopened = AgentDirectory(remembered: directory.remembered)
+        reopened.update(entries: [started(10, "a", at: 100).session, started(20, "b", at: 200).session], live: [], excluded: ["claude:a"])
+        #expect(reopened.disconnected.first?.handle == "frontend")
+    }
+
+    @Test func aConversationDisconnectedBeforeItWasNamedStillGetsItsOwnName() {
+        var directory = AgentDirectory()
+        directory.update(entries: [started(10, "a", at: 100).session, started(20, "b", at: 200).session], live: [], excluded: ["claude:a"])
+        #expect(Set([directory.conversations.first?.handle, directory.disconnected.first?.handle]).count == 2)
+    }
+
     @Test func aConversationCarriesItsRegistryStartAsADate() {
         var directory = AgentDirectory()
         directory.update(claude: [started(10, "a", at: 100_500), claude(20, "b")], live: [])

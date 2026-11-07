@@ -9,6 +9,7 @@ enum HUDErrorAction: Equatable {
     case openAutomationSettings
     case openSpeechModels
     case openAIService(String)
+    case openCodingAgents(String)
 
     var buttonTitle: String {
         switch self {
@@ -17,6 +18,7 @@ enum HUDErrorAction: Equatable {
         case .openAutomationSettings: "Open Automation Settings"
         case .openSpeechModels: "Open Speech Models"
         case .openAIService: "AI Service Settings…"
+        case .openCodingAgents: "Open Coding Agent Settings"
         }
     }
 }

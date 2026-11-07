@@ -167,7 +167,7 @@ final class AgentOutput {
         }
     }
 
-    static func receiptState(_ receipt: AgentReceipt, mode: String, heard: String) -> HUDState {
+    static func receiptState(_ receipt: AgentReceipt, mode: String, heard: String, settingsMode: String? = nil) -> HUDState {
         switch receipt {
         case .sent(let handle):
             return .commandDone(summary: "Sent to \(handle)", detail: mode)
@@ -191,8 +191,13 @@ final class AgentOutput {
             case .stopped: "Not sent: \(name) is stopped until you type in it"
             case .expired: "Not sent: \(name) didn\u{2019}t take it in time"
             case .refused: "Not sent: \(name) refused the message"
+            case .disconnected: "Not sent: \(name) is disconnected"
             }
-            return .error(message: message, action: nil, heard: HeardExcerpt(heard: heard))
+            let action: HUDErrorAction? = switch reason {
+            case .connectorNotRunning, .disconnected: settingsMode.map(HUDErrorAction.openCodingAgents)
+            default: nil
+            }
+            return .error(message: message, action: action, heard: HeardExcerpt(heard: heard))
         case .uncertain(let handle):
             return .advisory(message: "May not have reached \(handle): check its terminal")
         }

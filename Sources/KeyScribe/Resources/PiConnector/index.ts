@@ -24,6 +24,7 @@ type Config = {
   tokenPath: string
   readyPath: string
   installation: string
+  version?: string
   plugin?: string
   environmentKeys?: string[]
 }
@@ -36,6 +37,7 @@ type Item = {
   session?: string | null
   connection?: string | null
   render?: () => string
+  answer?: (text: string) => void
   done?: (outcome: Outcome) => void
 }
 type Outcome = "ok" | "late" | "unreachable" | "retired" | "rejected" | "stale" | false
@@ -108,6 +110,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   const admitted = new Set<string>()
   let installation = settings.loadedFrom
   let retired = false
+  let quiet = false
   let ctx: ExtensionContext | null = null
   let cwd = ""
   let stopKeys: (() => void) | null = null
@@ -261,7 +264,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   }
 
   function observe(event: Record<string, unknown>): void {
-    if (!session || helloSession !== session) return
+    if (!session || helloSession !== session || quiet) return
     enqueue({ kind: "observe", session, generation, body: bound(event) })
   }
 
@@ -297,6 +300,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
         : (result as Response).status === 403 ? "retired"
         : !(result as Response).ok ? "rejected"
         : deliverable(item) ? "ok" : "stale"
+      if (outcome === "ok" && item.answer) item.answer((result as Response).text)
       settle(item, outcome)
       if (outcome !== "ok" && item.kind !== "hello" && item.generation === generation) lose()
     }
@@ -362,8 +366,13 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   function sayHello(target: string, attemptLaunch: string): Promise<boolean> {
     if (hello && hello.target === target && hello.generation === generation) return hello.result
     const attempt = { target, generation, connection: Math.random().toString(36).slice(2, 12), result: Promise.resolve(false) }
-    const render = () => JSON.stringify({
-      op: "hello", protocol: (config as Config).protocol, installation: (config as Config).installation, agent: "pi", agentVersion: "",
+    const render = () => JSON.stringify(quiet ? {
+      op: "hello", protocol: (config as Config).protocol, installation: (config as Config).installation,
+      version: (config as Config).version, agent: "pi", agentVersion: "",
+      instance, connection: attempt.connection, session: target, pid: host.pid, cwd, features, idle: idle(), gap: freshSession !== target,
+    } : {
+      op: "hello", protocol: (config as Config).protocol, installation: (config as Config).installation,
+      version: (config as Config).version, agent: "pi", agentVersion: "",
       instance, connection: attempt.connection, session: target, pid: host.pid, cwd,
       features, title: pi.getSessionName() || undefined, prompts, waiting: waiting || undefined,
       idle: idle(), gap: freshSession !== target,
@@ -372,6 +381,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     attempt.result = new Promise<boolean>((resolve) => {
       enqueue({
         kind: "hello", session: target, generation, render, body: render(),
+        answer: (text) => { goQuiet(quietIn(text)) },
         done: (outcome) => {
           if (hello === attempt) hello = null
           if (outcome === "retired") retire()
@@ -394,6 +404,21 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
       ownedStatus = false
       if (ctx) ctx.ui.setStatus(statusKey(), undefined)
     }
+  }
+
+  function quietIn(text: string): boolean {
+    try {
+      return JSON.parse(text).quiet === true
+    } catch (err) {
+      return false
+    }
+  }
+
+  function goQuiet(on: boolean): void {
+    quiet = on
+    if (!on) return
+    drain((item) => item.kind !== "observe")
+    clearOwnedUI()
   }
 
   function forget(): void {
@@ -490,6 +515,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     const expected = cmd.expectedSession
     const hold = (): string | null => {
       if (!current(expected, gen)) return "sessionChanged"
+      if (quiet) return "disconnected"
       if (!(host.now() < (cmd.expiresAt || 0))) return "expired"
       if (typeof cmd.expectedPrompts === "number" && cmd.expectedPrompts !== prompts) return "typedSince"
       if (!idle() || pending.some((item) => !item.late)) return "working"
@@ -637,6 +663,15 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
         if (cmd.op === "retire") {
           retire()
           break
+        }
+        if (cmd.op === "quiet" || cmd.op === "admit") {
+          reply(gen, { op: "ack", request: cmd.id })
+          goQuiet(cmd.op === "quiet")
+          if (cmd.op === "admit") {
+            lose()
+            break
+          }
+          continue
         }
         if (admitted.has(cmd.id)) {
           reply(gen, { op: "ack", request: cmd.id })

@@ -6,7 +6,7 @@ struct AgentNameStore {
     static let schemaVersion = 1
 
     enum Loaded: Equatable {
-        case names([String: String], remembered: [String: RememberedName] = [:])
+        case names([String: String], remembered: [String: RememberedName] = [:], excluded: Set<String> = [])
         case unavailable(String)
     }
 
@@ -14,10 +14,11 @@ struct AgentNameStore {
         var schemaVersion: Int
         var names: [String: String]
         var remembered: [String: RememberedName]?
+        var excluded: [String]?
 
         enum CodingKeys: String, CodingKey {
             case schemaVersion = "schema_version"
-            case names, remembered
+            case names, remembered, excluded
         }
     }
 
@@ -44,13 +45,16 @@ struct AgentNameStore {
             if named.agent.isEmpty { named.agent = AgentSessionID.agent(of: key) ?? legacyAgent }
             return (migrated(key), named)
         }, uniquingKeysWith: { first, _ in first })
-        return .names(names, remembered: remembered)
+        return .names(names, remembered: remembered, excluded: Set((file.excluded ?? []).map(migrated)))
     }
 
-    func save(_ names: [String: String], remembered: [String: RememberedName]) throws {
+    func save(_ names: [String: String], remembered: [String: RememberedName], excluded: Set<String> = []) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(File(schemaVersion: Self.schemaVersion, names: names, remembered: remembered.isEmpty ? nil : remembered)).write(to: url, options: .atomic)
+        let file = File(
+            schemaVersion: Self.schemaVersion, names: names, remembered: remembered.isEmpty ? nil : remembered,
+            excluded: excluded.isEmpty ? nil : excluded.sorted())
+        try encoder.encode(file).write(to: url, options: .atomic)
     }
 }
