@@ -179,3 +179,51 @@ struct RuleEffectPreviewTests {
         #expect(global.checked == 2)
     }
 }
+
+struct SharedRuleEffectPreviewTests {
+    private let vocabulary = SharedVocabulary(id: "programming", name: "Programming", rules: [pi])
+
+    private func code(rules: [ReplacementsSet.Rule] = []) -> Mode {
+        var m = Mode(id: "code", name: "Code")
+        m.replacements = .init(includeGlobal: true, rules: rules)
+        m.commands.liveEdits = false
+        m.sharedVocabularies = ["programming"]
+        return m
+    }
+
+    private var config: RuleEffectPreview.Config {
+        .init(modes: [code(), notes()], dictionary: DictionarySet(words: []), replacements: ReplacementsSet(rules: []),
+              shared: [vocabulary])
+    }
+
+    @Test func checksOnlyDictationsInModesThatUseTheVocabulary() throws {
+        let rule = ReplacementsSet.Rule(heard: "ugabyte", replace: "Yugabyte", regex: false)
+        let result = try RuleEffectPreview.make(
+            draft: rule, replacing: nil, scope: .shared("programming"), config: config,
+            history: [item("ugabyte", mode: "Code", line: 0), item("ugabyte", mode: "Notes", line: 1)], limit: 100)
+        #expect(result.checked == 1)
+        #expect(result.entries.map(\.after.text) == ["Yugabyte"])
+    }
+
+    @Test func sampleTextRunsWithTheVocabularysOwnRules() throws {
+        let rule = ReplacementsSet.Rule(heard: "ugabyte", replace: "Yugabyte", regex: false)
+        let entry = try RuleEffectPreview.sample(
+            "ugabyte and pie", draft: rule, replacing: nil, scope: .shared("programming"), config: config)
+        #expect(entry.before.text == "ugabyte and pi")
+        #expect(entry.after.text == "Yugabyte and pi")
+    }
+
+    @Test func theAuditChecksTheVocabularysRules() throws {
+        let audit = try RuleEffectPreview.audit(
+            scope: .shared("programming"), config: config,
+            history: [item("I copy the pieces", mode: "Code", line: 0)], limit: 100)
+        #expect(audit.findings.map(\.rule) == [pi])
+        #expect(audit.checked == 1)
+    }
+
+    @Test func aMissingVocabularyIsReported() throws {
+        #expect(throws: ReplacementPreview.Failure.destinationMissing) {
+            try RuleEffectPreview.audit(scope: .shared("gone"), config: config, history: [], limit: 100)
+        }
+    }
+}

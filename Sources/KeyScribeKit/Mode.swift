@@ -16,6 +16,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public var commands: Commands
     public var dictionary: ModeDictionary
     public var replacements: ModeReplacements
+    // Ids of the shared vocabularies this mode uses, in `vocabularies/`. Never on Plain Dictation.
+    public var sharedVocabularies: [String]
     public var aiRewrite: AIRewrite?
     public var insertion: Insertion
     public var trailing: Trailing
@@ -289,6 +291,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         case triggerKeys = "trigger_keys"
         case triggerPhrases = "trigger_phrases"
         case constraints, source, output, commands, dictionary, replacements
+        case sharedVocabularies = "shared_vocabularies"
         case aiRewrite = "ai_rewrite"
         case insertion, trailing, submit
         case pasteKey = "paste_key"
@@ -315,6 +318,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         commands = .init()
         dictionary = .init()
         replacements = .init()
+        sharedVocabularies = []
         aiRewrite = nil
         insertion = .paste
         trailing = .space
@@ -344,6 +348,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         commands = try c.decodeIfPresent(Commands.self, forKey: .commands) ?? .init()
         dictionary = try c.decodeIfPresent(ModeDictionary.self, forKey: .dictionary) ?? .init()
         replacements = try c.decodeIfPresent(ModeReplacements.self, forKey: .replacements) ?? .init()
+        sharedVocabularies = try c.decodeIfPresent([String].self, forKey: .sharedVocabularies) ?? []
         aiRewrite = try c.decodeIfPresent(AIRewrite.self, forKey: .aiRewrite)
         insertion = try c.decodeIfPresent(Insertion.self, forKey: .insertion) ?? .paste
         trailing = try c.decodeIfPresent(Trailing.self, forKey: .trailing) ?? .none
@@ -372,6 +377,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         try c.encode(commands, forKey: .commands)
         try c.encode(dictionary, forKey: .dictionary)
         try c.encode(replacements, forKey: .replacements)
+        if !sharedVocabularies.isEmpty { try c.encode(sharedVocabularies, forKey: .sharedVocabularies) }
         try c.encodeIfPresent(aiRewrite, forKey: .aiRewrite)
         try c.encode(insertion, forKey: .insertion)
         if trailing != .none { try c.encode(trailing, forKey: .trailing) }
@@ -430,6 +436,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
             mode.commands.privacy = commands.privacy
             mode.dictionary = dictionary
             mode.replacements = replacements
+            mode.sharedVocabularies = sharedVocabularies
             mode.aiRewrite = aiRewrite.map { AIRewrite(connection: $0.connection, prompt: $0.prompt, fragments: $0.fragments) }
             mode.excludeFromHistory = excludeFromHistory
             return mode
@@ -440,6 +447,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
             mode.enabled = enabled
             mode.dictionary = dictionary
             mode.replacements = replacements
+            mode.sharedVocabularies = sharedVocabularies
             mode.excludeFromHistory = excludeFromHistory
             return mode
         }
@@ -547,6 +555,7 @@ public enum ModeStore {
         mode.constraints = [.init(bundleId: "a", bundlePrefix: "a", urlPattern: "a", windowTitle: "a")]
         mode.dictionary = .init(includeGlobal: false, words: ["a"])
         mode.replacements = .init(includeGlobal: false, rules: [.init(heard: "a", replace: "b", regex: true)])
+        mode.sharedVocabularies = ["a"]
         mode.aiRewrite = .init(
             connection: "a", prompt: "a", fragments: ["a"],
             context: .init(app: true, precedingText: true))

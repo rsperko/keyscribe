@@ -5,6 +5,7 @@ import KeyScribeKit
 enum VocabularyRemovalScope {
     case global
     case mode
+    case shared(String)
 }
 
 struct VocabularyRemovalCopy {
@@ -21,6 +22,10 @@ struct VocabularyRemovalCopy {
             Self(
                 title: "Remove “\(word)” from this mode?",
                 message: "This mode-only word will be removed. This cannot be undone.")
+        case .shared(let name):
+            Self(
+                title: "Remove “\(word)” from \(name)?",
+                message: "Every mode that uses \(name) will stop using this word. This cannot be undone.")
         }
     }
 
@@ -34,6 +39,10 @@ struct VocabularyRemovalCopy {
             Self(
                 title: "Delete the replacement for “\(heard)” from this mode?",
                 message: "This mode-only replacement will be removed. This cannot be undone.")
+        case .shared(let name):
+            Self(
+                title: "Delete the replacement for “\(heard)” from \(name)?",
+                message: "Every mode that uses \(name) will stop applying it. This cannot be undone.")
         }
     }
 }
@@ -53,10 +62,18 @@ struct DictionaryRows: View {
     let deleteConfirmCancelID: String
     var onFindReplacements: ((String) -> Void)? = nil
     var taughtSpellings: (String) -> [String] = { _ in [] }
+    var onMoveToShared: ((String) -> Void)? = nil
+    var overrides: (String) -> [SharedVocabularyOverrides.Override] = { _ in [] }
+    var onShowOverride: (SharedVocabularyOverrides.Override) -> Void = { _ in }
     let onRemove: (String) -> Void
 
     var body: some View {
         ForEach(words, id: \.self) { word in
+            row(word).moveToSharedAction(onMoveToShared.map { move in { move(word) } })
+        }
+    }
+
+    private func row(_ word: String) -> some View {
             HStack(alignment: .firstTextBaseline, spacing: 16) {
                 VStack(alignment: .leading, spacing: 2) {
                     if let onFindReplacements {
@@ -80,6 +97,7 @@ struct DictionaryRows: View {
                             .font(.caption).foregroundStyle(.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
+                    OverrideLines(overrides: overrides(word), shared: .word(word), onShow: onShowOverride)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 RemoveButton(
@@ -90,7 +108,6 @@ struct DictionaryRows: View {
                 ) { onRemove(word) }
                     .accessibilityIdentifier(removeID(word))
             }
-        }
     }
 
     private func historyAction(_ word: String, action: @escaping (String) -> Void) -> some View {
@@ -111,6 +128,9 @@ struct ReplacementRows: View {
     let onRemove: (Int) -> Void
     var usageCaption: (ReplacementsSet.Rule) -> String? = { _ in nil }
     var usageHealth: (ReplacementsSet.Rule) -> [String] = { _ in [] }
+    var onMoveToShared: ((Int) -> Void)? = nil
+    var overrides: (ReplacementsSet.Rule) -> [SharedVocabularyOverrides.Override] = { _ in [] }
+    var onShowOverride: (SharedVocabularyOverrides.Override) -> Void = { _ in }
     @State private var tableHeight: CGFloat = 76
 
     var body: some View {
@@ -170,6 +190,7 @@ struct ReplacementRows: View {
                 ForEach(usageHealth(rule), id: \.self) { line in
                     IssueText(line, severity: .advisory, font: .caption)
                 }
+                OverrideLines(overrides: overrides(rule), shared: .rule(rule), onShow: onShowOverride)
             }
             Spacer()
             Button { editingRule = rule } label: {
@@ -198,6 +219,10 @@ struct ReplacementRows: View {
                 .disabled(index == rules.startIndex)
             Button("Move down") { onMove(IndexSet(integer: index), index + 2) }
                 .disabled(index == rules.index(before: rules.endIndex))
+            if let onMoveToShared {
+                Divider()
+                Button(moveToSharedTitle) { onMoveToShared(index) }
+            }
         }
         .accessibilityAction(named: Text("Move up")) {
             guard index > rules.startIndex else { return }
@@ -207,8 +232,26 @@ struct ReplacementRows: View {
             guard index < rules.index(before: rules.endIndex) else { return }
             onMove(IndexSet(integer: index), index + 2)
         }
+        .moveToSharedAccessibilityAction(onMoveToShared.map { move in { move(index) } })
     }
 
+}
+
+let moveToSharedTitle = "Move to Shared Vocabulary\u{2026}"
+
+extension View {
+    @ViewBuilder func moveToSharedAccessibilityAction(_ action: (() -> Void)?) -> some View {
+        if let action { accessibilityAction(named: Text(moveToSharedTitle), action) } else { self }
+    }
+
+    @ViewBuilder func moveToSharedAction(_ action: (() -> Void)?) -> some View {
+        if let action {
+            contextMenu { Button(moveToSharedTitle, action: action) }
+                .accessibilityAction(named: Text(moveToSharedTitle), action)
+        } else {
+            self
+        }
+    }
 }
 
 enum ReplacementDropValidation {
@@ -485,6 +528,9 @@ struct ReplacementEditor: View {
     let onUpdate: (ReplacementsSet.Rule) -> Bool
     let onCancel: () -> Void
     let showsPreview: Bool
+    var settling: SharedEditSettling? = nil
+    var onMoveToShared: (() -> Void)? = nil
+    @State private var choices: [String: SharedVocabularyMove.Entry] = [:]
     @State private var heard: String
     @State private var replace: String
     @State private var regex: Bool
@@ -503,13 +549,17 @@ struct ReplacementEditor: View {
         previewSource: RulePreviewModel.Source?,
         analyze: @escaping (VocabularyProposal) -> VocabularyAnalysis,
         onUpdate: @escaping (ReplacementsSet.Rule) -> Bool,
-        onCancel: @escaping () -> Void
+        onCancel: @escaping () -> Void,
+        settling: SharedEditSettling? = nil,
+        onMoveToShared: (() -> Void)? = nil
     ) {
+        self.onMoveToShared = onMoveToShared
         self.rule = rule
         self.ids = ids
         self.analyze = analyze
         self.onUpdate = onUpdate
         self.onCancel = onCancel
+        self.settling = settling
         showsPreview = previewSource != nil
         _heard = State(initialValue: rule.heard)
         _replace = State(initialValue: rule.replace)
@@ -579,6 +629,7 @@ struct ReplacementEditor: View {
                     } content: {
                         RuleScopePicker(wholeDictation: $wholeDictation, id: AccessibilityID.Settings.Vocabulary.replacementEditorRule.scope)
                     }
+                    VocabularyConflictChoices(review: review(draft), choices: $choices)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 // Room for the focus ring, which the scroll view would otherwise clip.
@@ -589,20 +640,28 @@ struct ReplacementEditor: View {
             // As tall as the content up to a bound, so a short rule leaves no gap above the buttons and
             // expanded examples scroll inside the sheet instead of growing it past the window.
             .frame(height: min(max(contentHeight, 1), Self.maxContentHeight))
-            if let issue = draft.validationIssue {
+            if staleUpdate {
+                IssueText("This replacement changed elsewhere. Close this editor and try again.")
+                    .accessibilityIdentifier(ids.status)
+            } else if let issue = draft.validationIssue {
                 VocabularyDraftIssueText(issue: issue)
                     .accessibilityIdentifier(ids.status)
             } else if draft.hasReplacementIdentityConflict {
                 IssueText("Another replacement already uses this heard phrase or pattern.")
-                    .accessibilityIdentifier(ids.status)
-            } else if staleUpdate {
-                IssueText("This replacement changed elsewhere. Close this editor and try again.")
                     .accessibilityIdentifier(ids.status)
             } else if case let .advisory(message) = draft.feedback {
                 IssueText(message, severity: .advisory)
                     .accessibilityIdentifier(ids.status)
             }
             HStack {
+                if let onMoveToShared {
+                    Button(moveToSharedTitle, action: onMoveToShared)
+                        .disabled(draftRule(draft) != rule)
+                        .help(draftRule(draft) == rule
+                            ? "Move this replacement into a shared vocabulary, so other modes can use it too."
+                            : "Save or cancel your changes first.")
+                        .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.replacementEditorMoveToShared)
+                }
                 Spacer()
                 Button("Cancel", role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
@@ -634,15 +693,29 @@ struct ReplacementEditor: View {
         return rule
     }
 
-    private func canUpdate(_ draft: VocabularyDraftAnalysis) -> Bool {
+    private func review(_ draft: VocabularyDraftAnalysis) -> AttachmentReview {
+        guard let settling, let updated = draftRule(draft), canChange(draft) else { return AttachmentReview() }
+        return settling.review(.update(rule, updated))
+    }
+
+    private func canChange(_ draft: VocabularyDraftAnalysis) -> Bool {
         guard let updated = draftRule(draft) else { return false }
         return updated != rule && !draft.hasReplacementIdentityConflict
+    }
+
+    private func canUpdate(_ draft: VocabularyDraftAnalysis) -> Bool {
+        canChange(draft) && !PendingAttachment.unsettled(review(draft).pending, choices: choices)
     }
 
     private func commit() {
         let draft = draft
         guard canUpdate(draft), let updatedRule = draftRule(draft) else { return }
-        staleUpdate = !onUpdate(updatedRule)
+        if let settling {
+            let settlements = PendingAttachment.settlements(review(draft).pending, choices: choices)
+            staleUpdate = !settling.apply(.update(rule, updatedRule), settlements)
+        } else {
+            staleUpdate = !onUpdate(updatedRule)
+        }
     }
 }
 
@@ -651,6 +724,10 @@ struct VocabularyComposer: View {
     let onAddWord: (String) -> Bool
     let onAddReplacement: ([ReplacementsSet.Rule]) -> Bool
     let existingRules: [ReplacementsSet.Rule]
+    var settling: SharedEditSettling? = nil
+    var seed: ComposerSeed? = nil
+    var onSeedUsed: () -> Void = {}
+    @State private var choices: [String: SharedVocabularyMove.Entry] = [:]
     @StateObject private var preview: RulePreviewModel
     private let showsPreview: Bool
     @State private var heard = ""
@@ -666,12 +743,18 @@ struct VocabularyComposer: View {
         onAddWord: @escaping (String) -> Bool,
         onAddReplacement: @escaping ([ReplacementsSet.Rule]) -> Bool,
         existingRules: [ReplacementsSet.Rule] = [],
-        previewSource: RulePreviewModel.Source? = nil
+        previewSource: RulePreviewModel.Source? = nil,
+        seed: ComposerSeed? = nil,
+        onSeedUsed: @escaping () -> Void = {},
+        settling: SharedEditSettling? = nil
     ) {
+        self.seed = seed
+        self.onSeedUsed = onSeedUsed
         self.analyze = analyze
         self.onAddWord = onAddWord
         self.onAddReplacement = onAddReplacement
         self.existingRules = existingRules
+        self.settling = settling
         showsPreview = previewSource != nil
         _preview = StateObject(wrappedValue: RulePreviewModel(source: previewSource ?? .unavailable))
     }
@@ -787,6 +870,8 @@ struct VocabularyComposer: View {
             }
             .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerAdvanced)
             if let issue = draft.validationIssue { VocabularyDraftIssueText(issue: issue) }
+            let review = review(draft)
+            VocabularyConflictChoices(review: review, choices: $choices)
             HStack {
                 Spacer()
                 Button(action: commit) {
@@ -794,11 +879,15 @@ struct VocabularyComposer: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
-                    .disabled(!draft.canCommit)
+                    .disabled(!draft.canCommit || PendingAttachment.unsettled(review.pending, choices: choices))
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.composerAdd)
             }
         }
-        .onAppear { focus = .heard }
+        .onAppear {
+            focus = .heard
+            useSeed()
+        }
+        .onChange(of: seed?.id) { useSeed() }
         .onChange(of: draftRule(draft)) { _, current in
             if let current { preview.update(draft: current, original: existingRule) }
         }
@@ -822,8 +911,35 @@ struct VocabularyComposer: View {
         "Regex always creates a replacement, so Use instead is required. Use captures like $1."
     }
 
+    // What Add would save, as entries, so a shared vocabulary can check it before saving.
+    private func entries(_ draft: VocabularyDraftAnalysis) -> [SharedVocabularyMove.Entry]? {
+        guard draft.canCommit, let proposal = draft.proposal else { return nil }
+        switch proposal {
+        case .word(let word): return [.word(word)]
+        case .replacement(let heard, let replace, let regex):
+            let rule = ReplacementsSet.Rule(
+                heard: heard, replace: replace, regex: regex, wholeDictation: wholeDictation.wrappedValue)
+            let plural = addsPlural && existingRule == nil ? ReplacementPlural.offer(for: rule, among: existingRules) : nil
+            return ([rule] + (plural.map { [$0] } ?? [])).map { .rule($0) }
+        }
+    }
+
+    private func review(_ draft: VocabularyDraftAnalysis) -> AttachmentReview {
+        guard let settling, let entries = entries(draft) else { return AttachmentReview() }
+        return settling.review(.add(entries))
+    }
+
     private func commit() {
         guard draft.canCommit, let proposal = draft.proposal else { return }
+        if let settling, let entries = entries(draft) {
+            let pending = review(draft).pending
+            guard !PendingAttachment.unsettled(pending, choices: choices) else { return }
+            if settling.apply(.add(entries), PendingAttachment.settlements(pending, choices: choices)) {
+                if case .word(let word) = proposal { settling.onAddedWord(word) }
+                reset()
+            }
+            return
+        }
         let saved = switch proposal {
         case .word(let word): onAddWord(word)
         case .replacement(let heard, let replace, let regex):
@@ -840,7 +956,18 @@ struct VocabularyComposer: View {
         return onAddReplacement([rule] + (plural.map { [$0] } ?? []))
     }
 
+    private func useSeed() {
+        guard let seed else { return }
+        heard = seed.heard
+        replace = seed.replace
+        regex = seed.regex
+        chosenWholeDictation = seed.wholeDictation
+        choices = [:]
+        onSeedUsed()
+    }
+
     private func reset() {
+        choices = [:]
         addsPlural = false
         heard = ""
         replace = ""
@@ -891,15 +1018,24 @@ struct VocabularySettingsView: View {
 
     @ObservedObject var dictionary: DictionarySettingsModel
     @ObservedObject var replacements: ReplacementsSettingsModel
+    @ObservedObject var shared: SharedVocabulariesModel
     @ObservedObject var modes: ModesSettingsModel
     @Binding var navigationSelection: VocabularyScopeDestination
+    @Binding var composerSeed: ComposerSeed?
     var historyReplacements: HistoryReplacementsLauncher? = nil
     var rulePreviewSource: ((ReplacementPreview.Destination) -> RulePreviewModel.Source)? = nil
     @State private var selection: VocabularyScopeDestination = .global
+    @State private var creatingShared = false
+    @State private var renamingShared: SharedVocabulary?
+    @State private var choosingModesFor: SharedVocabulary?
+    @State private var choosingSharedFor: Mode?
+    @State private var deletingShared: SharedVocabulary?
+    @State private var movingToShared: MoveToSharedRequest?
+    @State private var editRequest: EditRequest?
 
     var body: some View {
         VStack(spacing: 0) {
-            PaneNoticeBanner(notices: [dictionary.notice, replacements.notice, modes.notice].compactMap { $0 })
+            PaneNoticeBanner(notices: [dictionary.notice, replacements.notice, shared.notice, modes.notice].compactMap { $0 })
             HStack(spacing: 0) {
                 List(selection: $selection) {
                     Section {
@@ -911,6 +1047,21 @@ struct VocabularySettingsView: View {
                             .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.global)
                     } header: {
                         PaneListSectionHeader("Everywhere")
+                    }
+
+                    if !shared.vocabularies.isEmpty {
+                        Section {
+                            ForEach(shared.vocabularies) { vocabulary in
+                                PaneListRow(
+                                    title: vocabulary.name,
+                                    subtitle: VocabularyScopePicker.sharedListSubtitle(
+                                        vocabulary, users: VocabularyScopePicker.usedBy(vocabulary.id, in: modes.modes)))
+                                    .tag(VocabularyScopeDestination.shared(vocabulary.id))
+                                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.shared(vocabulary.id))
+                            }
+                        } header: {
+                            PaneListSectionHeader("Shared")
+                        }
                     }
 
                     if !sections.enabled.isEmpty {
@@ -934,6 +1085,12 @@ struct VocabularySettingsView: View {
                     }
                 }
                 .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.scopeList)
+                .paneListActionBar {
+                    Button("Add Shared Vocabulary\u{2026}", systemImage: "plus") { creatingShared = true }
+                        .buttonStyle(.borderless)
+                        .help("Create a named set of words and replacements that the modes you choose use together.")
+                        .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.addShared)
+                }
                 .frame(width: PaneMetrics.listWidth)
 
                 Divider()
@@ -946,8 +1103,74 @@ struct VocabularySettingsView: View {
         .onAppear {
             dictionary.reload()
             replacements.reload()
+            shared.reload()
             modes.reload()
             synchronizeSelection(navigationSelection, in: modes.modes)
+        }
+        .onChange(of: shared.vocabularies) { _, _ in
+            synchronizeSelection(selection, in: modes.modes)
+        }
+        .sheet(isPresented: $creatingShared) {
+            SharedVocabularyNameSheet(
+                title: "Add Shared Vocabulary", confirmTitle: "Create",
+                problem: { shared.nameProblem($0) },
+                onSave: { name in
+                    switch shared.create(named: name) {
+                    case .created(let id):
+                        selection = .shared(id)
+                        return nil
+                    case .problem(let message):
+                        return message
+                    }
+                })
+        }
+        .sheet(item: $renamingShared) { vocabulary in
+            SharedVocabularyNameSheet(
+                title: "Rename Shared Vocabulary", confirmTitle: "Rename", initialName: vocabulary.name,
+                problem: { shared.nameProblem($0, renaming: vocabulary.id) },
+                onSave: { shared.rename(vocabulary.id, to: $0) })
+        }
+        .sheet(item: $choosingModesFor) { vocabulary in
+            SharedVocabularyModesSheet(
+                vocabularyName: vocabulary.name, modes: modes.modes.filter(\.hasOwnVocabulary),
+                selected: Set(VocabularyScopePicker.usedBy(vocabulary.id, in: modes.modes).map(\.id)),
+                review: { shared.reviewMembership(of: vocabulary.id, selected: $0) }
+            ) { chosen, settlements in
+                defer { modes.reload() }
+                return shared.applyMembership(of: vocabulary.id, selected: chosen, settlements: settlements)
+            }
+        }
+        .sheet(item: $movingToShared) { request in
+            MoveToSharedVocabularySheet(
+                request: request, vocabularies: shared.vocabularies, modes: modes.modes,
+                nameProblem: { shared.nameProblem($0) },
+                review: { shared.reviewMove($0, from: $1, to: $2) }
+            ) { destination, newName, settlements in
+                defer { modes.reload() }
+                return shared.move(
+                    request.entry, fromMode: request.mode.id, to: destination, newName: newName, settlements: settlements)
+            }
+        }
+        .sheet(item: $choosingSharedFor) { mode in
+            ModeSharedVocabulariesSheet(
+                mode: mode, vocabularies: shared.vocabularies,
+                review: { shared.reviewChoice(for: mode, selected: $0) }
+            ) { chosen, settlements in
+                defer { modes.reload() }
+                return shared.applyChoice(for: mode, selected: chosen, settlements: settlements)
+            }
+        }
+        .confirmationDialog(
+            deletingShared.map { "Delete \u{201C}\($0.name)\u{201D}?" } ?? "",
+            isPresented: Binding(get: { deletingShared != nil }, set: { if !$0 { deletingShared = nil } }),
+            titleVisibility: .visible, presenting: deletingShared
+        ) { vocabulary in
+            Button("Delete Shared Vocabulary", role: .destructive) {
+                if shared.delete(vocabulary.id) { modes.reload() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { vocabulary in
+            Text(Self.deletionMessage(vocabulary, users: VocabularyScopePicker.usedBy(vocabulary.id, in: modes.modes)))
         }
         .onChange(of: selection) { _, current in
             synchronizeSelection(current, in: modes.modes)
@@ -965,11 +1188,18 @@ struct VocabularySettingsView: View {
     }
 
     private var resolvedSelection: VocabularyScopeDestination {
-        VocabularyScopePicker.resolved(selection, in: modes.modes)
+        VocabularyScopePicker.resolved(selection, in: modes.modes, shared: shared.vocabularies)
+    }
+
+    static func deletionMessage(_ vocabulary: SharedVocabulary, users: [Mode]) -> String {
+        let stops = users.isEmpty
+            ? "No mode uses it."
+            : "Its words and replacements will stop applying in \(ListFormatter.localizedString(byJoining: users.map(\.name)))."
+        return "\(stops) Global and mode-only entries remain. This cannot be undone."
     }
 
     private func synchronizeSelection(_ requested: VocabularyScopeDestination, in modes: [Mode]) {
-        let resolved = VocabularyScopePicker.resolved(requested, in: modes)
+        let resolved = VocabularyScopePicker.resolved(requested, in: modes, shared: shared.vocabularies)
         if selection != resolved { selection = resolved }
         if navigationSelection != resolved { navigationSelection = resolved }
     }
@@ -1008,6 +1238,14 @@ struct VocabularySettingsView: View {
                 onRemoveReplacement: replacements.remove(at:),
                 replacementUsageCaption: { replacements.usageCaption(for: $0, in: .global) },
                 replacementUsageHealth: { replacements.usageHealth(for: $0, in: .global) })
+        case let .shared(id):
+            if let vocabulary = shared.vocabulary(id) {
+                sharedDetail(vocabulary)
+            } else {
+                ContentUnavailableView(
+                    "Choose a vocabulary scope", systemImage: "text.book.closed",
+                    description: Text("Select Global, a shared vocabulary, or a mode to edit its vocabulary."))
+            }
         case let .mode(id):
             if let mode = modes.modes.first(where: { $0.id == id && $0.hasOwnVocabulary }) {
                 modeDetail(mode)
@@ -1019,18 +1257,108 @@ struct VocabularySettingsView: View {
         }
     }
 
+    private func sharedDetail(_ vocabulary: SharedVocabulary) -> some View {
+        let users = VocabularyScopePicker.usedBy(vocabulary.id, in: modes.modes)
+        let audience = VocabularyScopePicker.audience(users)
+        let id = vocabulary.id
+        return VocabularyEditor(
+            title: vocabulary.name,
+            subtitle: "Shared vocabulary",
+            wordsDescription: "Names, product terms, and jargon \(Branding.appName) should recognize as written in every mode that uses \(vocabulary.name).",
+            scope: VocabularyScope(globalWords: vocabulary.words, globalRules: vocabulary.rules),
+            words: vocabulary.words,
+            rules: vocabulary.rules,
+            deletionScope: .shared(vocabulary.name),
+            historyReplacements: historyReplacements.map { launcher in
+                { word, onSaved in launcher.make(word, .shared(id), vocabulary.name, onSaved) }
+            },
+            onAddWord: { _ in false },
+            onRemoveWord: { shared.removeWord($0, from: id) },
+            onAddReplacement: { _ in false },
+            onUpdateReplacement: { _, _ in false },
+            rulePreviewSource: rulePreviewSource?(.shared(id)),
+            seed: composerSeed?.scope == .shared(id) ? composerSeed : nil,
+            onSeedUsed: { composerSeed = nil },
+            overrides: { SharedVocabularyOverrides.of($0, in: vocabulary, modes: modes.modes, shared: shared.vocabularies) },
+            onShowOverride: showOverride,
+            editRequest: editRequest?.scope == .shared(id) ? editRequest : nil,
+            onEditRequestUsed: { editRequest = nil },
+            onMoveReplacement: { shared.moveRules($0, to: $1, in: id) },
+            onRemoveReplacement: { shared.removeRule(at: $0, from: id) },
+            replacementUsageCaption: { replacements.usageCaption(for: $0, in: .shared(id)) },
+            replacementUsageHealth: { replacements.usageHealth(for: $0, in: .shared(id)) },
+            audience: AnyView(Section {
+                LabeledContent("Used by") {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(audience.names)
+                        Text(audience.effect).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .multilineTextAlignment(.trailing)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Used by")
+                .accessibilityValue("\(audience.names) \(audience.effect)")
+                .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.sharedUsedBy)
+                HStack {
+                    Button("Choose Modes\u{2026}") { choosingModesFor = vocabulary }
+                        .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.sharedChooseModes)
+                    Button("Rename\u{2026}") { renamingShared = vocabulary }
+                        .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.sharedRename)
+                }
+            }),
+            footer: AnyView(Section {
+                HStack {
+                    Spacer()
+                    PaneDeleteButton(title: "Delete Shared Vocabulary") { deletingShared = vocabulary }
+                        .accessibilityLabel("Delete Shared Vocabulary \(vocabulary.name)")
+                        .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.sharedDelete)
+                }
+            }),
+            settling: SharedEditSettling(
+                review: { edit in shared.reviewEdit(of: id) { try edit.apply(to: &$0) } },
+                apply: { edit, settlements in
+                    defer { modes.reload() }
+                    return shared.applyEdit(edit.failureTitle, of: id, settlements: settlements) { try edit.apply(to: &$0) }
+                }))
+    }
+
+    // Opens what decides instead of a shared entry: the mode's own vocabulary, or the vocabulary listed before it,
+    // with the overriding rule's editor open.
+    private func showOverride(_ override: SharedVocabularyOverrides.Override) {
+        let scope: VocabularyScopeDestination = switch override.by {
+        case .mode: .mode(override.modeId)
+        case .shared(let id, _): .shared(id)
+        }
+        if case .rule(let rule) = override.entry { editRequest = EditRequest(scope: scope, rule: rule) }
+        selection = scope
+    }
+
+    private func modeAudience(_ mode: Mode) -> AnyView? {
+        guard !shared.vocabularies.isEmpty else { return nil }
+        let using = VocabularyMerge.using(mode, shared.vocabularies)
+        return AnyView(Section {
+            ForEach(using) { vocabulary in
+                LabeledContent(vocabulary.name) {
+                    Button("Edit\u{2026}") { selection = .shared(vocabulary.id) }
+                        .help("Edit \(vocabulary.name). Changes apply to every mode that uses it.")
+                        .accessibilityLabel("Edit \(vocabulary.name)")
+                        .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.modeEditShared(vocabulary.id))
+                }
+            }
+            Button("Choose Shared Vocabulary\u{2026}") { choosingSharedFor = mode }
+                .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.modeChooseShared)
+        } header: {
+            Text("Shared Vocabulary")
+        })
+    }
+
     private func modeDetail(_ mode: Mode) -> some View {
-        let scope = VocabularyScope(
-            globalWords: dictionary.words,
-            globalRules: replacements.rules,
-            local: VocabularyScope.Local(
-                words: mode.dictionary.words,
-                rules: mode.replacements.rules,
-                includeGlobalWords: mode.dictionary.includeGlobal,
-                includeGlobalRules: mode.replacements.includeGlobal))
+        let scope = VocabularyScope.of(
+            mode, globalWords: dictionary.words, globalRules: replacements.rules, shared: shared.vocabularies)
         return VocabularyEditor(
             title: mode.name,
-            subtitle: modeScopeDescription(mode),
+            subtitle: shared.vocabularies.isEmpty
+                ? modeScopeDescription(mode) : VocabularyScopePicker.modeUses(mode, shared: shared.vocabularies),
             wordsDescription: mode.runsVoiceCommands
                 ? "App and place names \(Branding.appName) should recognize as written in a command."
                 : "Names, product terms, and jargon \(Branding.appName) should recognize as written in this mode.",
@@ -1060,6 +1388,8 @@ struct VocabularySettingsView: View {
                 return modes.update(updated)
             },
             rulePreviewSource: rulePreviewSource?(.mode(mode.id)),
+            editRequest: editRequest?.scope == .mode(mode.id) ? editRequest : nil,
+            onEditRequestUsed: { editRequest = nil },
             onMoveReplacement: { source, destination in
                 var rules = mode.replacements.rules
                 guard ReplacementMoveValidation.isValid(source: source, destination: destination, count: rules.count)
@@ -1076,7 +1406,21 @@ struct VocabularySettingsView: View {
                 modes.update(updated)
             },
             replacementUsageCaption: { replacements.usageCaption(for: $0, in: .mode(mode.id)) },
-            replacementUsageHealth: { replacements.usageHealth(for: $0, in: .mode(mode.id)) })
+            replacementUsageHealth: { replacements.usageHealth(for: $0, in: .mode(mode.id)) },
+            audience: modeAudience(mode),
+            footer: includedVocabulary(mode),
+            onMoveToShared: { movingToShared = MoveToSharedRequest(mode: mode, entry: $0) })
+    }
+
+    private func includedVocabulary(_ mode: Mode) -> AnyView {
+        let included = VocabularyMerge.included(
+            in: mode, globalWords: dictionary.words, global: ReplacementsSet(rules: replacements.rules),
+            shared: shared.vocabularies)
+        let names = Dictionary(uniqueKeysWithValues: shared.vocabularies.map { ($0.id, $0.name) })
+        return AnyView(IncludedVocabularySection(
+            words: included.words, rules: included.rules,
+            sourceName: { $0.flatMap { names[$0] } ?? "Global" },
+            onOpenSource: { selection = $0.map { .shared($0) } ?? .global }))
     }
 
     private func modeScopeDescription(_ mode: Mode) -> String {
@@ -1103,10 +1447,20 @@ private struct VocabularyEditor: View {
     let onAddReplacement: ([ReplacementsSet.Rule]) -> Bool
     let onUpdateReplacement: (ReplacementsSet.Rule, ReplacementsSet.Rule) -> Bool
     var rulePreviewSource: RulePreviewModel.Source? = nil
+    var seed: ComposerSeed? = nil
+    var onSeedUsed: () -> Void = {}
+    var overrides: (SharedVocabularyMove.Entry) -> [SharedVocabularyOverrides.Override] = { _ in [] }
+    var onShowOverride: (SharedVocabularyOverrides.Override) -> Void = { _ in }
+    var editRequest: EditRequest? = nil
+    var onEditRequestUsed: () -> Void = {}
     let onMoveReplacement: (IndexSet, Int) -> Void
     let onRemoveReplacement: (Int) -> Void
     var replacementUsageCaption: (ReplacementsSet.Rule) -> String? = { _ in nil }
     var replacementUsageHealth: (ReplacementsSet.Rule) -> [String] = { _ in [] }
+    var audience: AnyView? = nil
+    var footer: AnyView? = nil
+    var onMoveToShared: ((SharedVocabularyMove.Entry) -> Void)? = nil
+    var settling: SharedEditSettling? = nil
     @State private var recognitionHelpExpanded = false
     @State private var discovery: HistoryReplacementsModel?
     @State private var addedMessage: String?
@@ -1117,6 +1471,7 @@ private struct VocabularyEditor: View {
             Section {
                 PaneDetailHeader(systemImage: "text.book.closed", title: title, subtitle: subtitle)
             }
+            if let audience { audience }
             Section("Add to Vocabulary") {
                 VocabularyComposer(
                     analyze: { [scope] in VocabularyAdvisor.analyze($0, in: scope) },
@@ -1127,7 +1482,14 @@ private struct VocabularyEditor: View {
                     },
                     onAddReplacement: onAddReplacement,
                     existingRules: rules,
-                    previewSource: rulePreviewSource)
+                    previewSource: rulePreviewSource,
+                    seed: seed,
+                    onSeedUsed: onSeedUsed,
+                    settling: settling.map { settling in
+                        var settling = settling
+                        settling.onAddedWord = offerMishearings(of:)
+                        return settling
+                    })
             }
             Section("Words to Recognize") {
                 Text(wordsDescription)
@@ -1146,6 +1508,9 @@ private struct VocabularyEditor: View {
                     deleteConfirmCancelID: AccessibilityID.Settings.Vocabulary.dictionaryDeleteConfirmCancel,
                     onFindReplacements: findAction,
                     taughtSpellings: { [scope] in scope.taughtSpellings(of: $0) },
+                    onMoveToShared: onMoveToShared.map { move in { move(.word($0)) } },
+                    overrides: { overrides(.word($0)) },
+                    onShowOverride: onShowOverride,
                     onRemove: onRemoveWord)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.dictionaryList)
@@ -1171,7 +1536,12 @@ private struct VocabularyEditor: View {
                     onMove: onMoveReplacement,
                     onRemove: onRemoveReplacement,
                     usageCaption: replacementUsageCaption,
-                    usageHealth: replacementUsageHealth)
+                    usageHealth: replacementUsageHealth,
+                    onMoveToShared: onMoveToShared.map { move in
+                        { index in if rules.indices.contains(index) { move(.rule(rules[index])) } }
+                    },
+                    overrides: { overrides(.rule($0)) },
+                    onShowOverride: onShowOverride)
                 if let rulePreviewSource, rulePreviewSource.history != nil, !rules.isEmpty {
                     RuleAuditSection(source: rulePreviewSource, rules: rules) { editingRule = $0 }
                 }
@@ -1182,6 +1552,7 @@ private struct VocabularyEditor: View {
                         .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.replacementsAdded)
                 }
             }
+            if let footer { footer }
         }
         .formStyle(.grouped)
         .padding(16)
@@ -1195,15 +1566,36 @@ private struct VocabularyEditor: View {
                         editingRule = nil
                         return true
                     },
-                    onCancel: { editingRule = nil })
+                    onCancel: { editingRule = nil },
+                    settling: settling.map { settling in
+                        SharedEditSettling(review: settling.review) { edit, settlements in
+                            guard settling.apply(edit, settlements) else { return false }
+                            editingRule = nil
+                            return true
+                        }
+                    },
+                    onMoveToShared: onMoveToShared.map { move in
+                        {
+                            editingRule = nil
+                            DispatchQueue.main.async { move(.rule(rule)) }
+                        }
+                    })
             }
         }
+        .onAppear(perform: useEditRequest)
+        .onChange(of: editRequest) { useEditRequest() }
         .sheet(item: $discovery, onDismiss: { discovery?.close() }) { model in
             HistoryReplacementsSheet(model: model) {
                 model.close()
                 discovery = nil
             }
         }
+    }
+
+    private func useEditRequest() {
+        guard let editRequest else { return }
+        if rules.contains(editRequest.rule) { editingRule = editRequest.rule }
+        onEditRequestUsed()
     }
 
     private var findAction: ((String) -> Void)? {
@@ -1453,6 +1845,116 @@ final class ReplacementsSettingsModel: ObservableObject {
                 title, error: error, file: replacementsFile,
                 relativePath: ReplacementsStore.fileName, stillRunning: stillRunning)
             return false
+        }
+    }
+}
+
+// A change to a shared vocabulary's own entries.
+enum SharedEdit {
+    case add([SharedVocabularyMove.Entry])
+    case update(ReplacementsSet.Rule, ReplacementsSet.Rule)
+
+    var failureTitle: String {
+        if case .add(let entries) = self, entries.allSatisfy({ if case .word = $0 { true } else { false } }) {
+            return "Word wasn\u{2019}t saved"
+        }
+        return "Replacement wasn\u{2019}t saved"
+    }
+
+    func apply(to vocabulary: inout SharedVocabulary) throws {
+        switch self {
+        case .add(let entries):
+            for entry in entries {
+                switch entry {
+                case .word(let word): vocabulary.words = DictionarySet(words: vocabulary.words).adding(word: word).words
+                case .rule(let rule): vocabulary.rules = ReplacementsSet(rules: vocabulary.rules).adding([rule]).rules
+                }
+            }
+        case .update(let original, let replacement):
+            guard vocabulary.rules.contains(original) else { throw Stale() }
+            vocabulary.rules = ReplacementsSet(rules: vocabulary.rules).replacing(original, with: replacement).rules
+        }
+    }
+
+    // The rule being edited is no longer saved as it was when the editor opened.
+    struct Stale: Error {}
+}
+
+// How a shared vocabulary's composer and editor check a change against every mode using it, and save it with the
+// choices that settle what it leaves disagreeing.
+struct SharedEditSettling {
+    let review: (SharedEdit) -> AttachmentReview
+    let apply: (SharedEdit, [String: PendingAttachment.Settlement]) -> Bool
+    var onAddedWord: (String) -> Void = { _ in }
+}
+
+// A draft carried into a scope's composer from elsewhere, such as a quick correction that needs a choice made
+// there, so nothing has to be typed again.
+struct ComposerSeed: Equatable, Identifiable {
+    let id = UUID()
+    let scope: VocabularyScopeDestination
+    let heard: String
+    let replace: String
+    let regex: Bool
+    let wholeDictation: Bool?
+}
+
+// Asks a scope's detail to open one of its rules in the editor once it is shown.
+struct EditRequest: Equatable {
+    let id = UUID()
+    let scope: VocabularyScopeDestination
+    let rule: ReplacementsSet.Rule
+}
+
+enum OverrideCopy {
+    static func line(_ override: SharedVocabularyOverrides.Override, of shared: SharedVocabularyMove.Entry) -> String {
+        let place = switch override.by {
+        case .mode: "Overridden in \(override.modeName)"
+        case .shared(_, let name): "Overridden in \(override.modeName) by \(name)"
+        }
+        switch (override.entry, shared) {
+        case (.word(let word), _):
+            return "\(place): spelled \u{201C}\(word)\u{201D} there."
+        case let (.rule(theirs), .rule(ours)) where theirs.replace == ours.replace:
+            return "\(place): there it acts \(scope(theirs))."
+        case let (.rule(theirs), .rule(ours)):
+            let output = "\u{201C}\(ReplacementAuthoring.preview(for: theirs.replace).text)\u{201D}"
+            let scope = theirs.wholeDictation != ours.wholeDictation ? ", \(scope(theirs))" : ""
+            return "\(place): there it becomes \(output)\(scope)."
+        case (.rule, .word):
+            return "\(place)."
+        }
+    }
+
+    static func action(_ override: SharedVocabularyOverrides.Override) -> String {
+        switch override.by {
+        case .mode: "Show in \(override.modeName)"
+        case .shared(_, let name): "Show in \(name)"
+        }
+    }
+
+    private static func scope(_ rule: ReplacementsSet.Rule) -> String {
+        rule.wholeDictation ? "only when said alone" : "anywhere in a sentence"
+    }
+}
+
+// Under a shared entry: each mode where something else decides instead, with a way to open it.
+struct OverrideLines: View {
+    let overrides: [SharedVocabularyOverrides.Override]
+    let shared: SharedVocabularyMove.Entry
+    let onShow: (SharedVocabularyOverrides.Override) -> Void
+
+    var body: some View {
+        ForEach(Array(overrides.enumerated()), id: \.offset) { _, override in
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(OverrideCopy.line(override, of: shared))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(OverrideCopy.action(override)) { onShow(override) }
+                    .buttonStyle(.link)
+                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.showOverride(override.modeId))
+            }
+            .font(.caption)
         }
     }
 }

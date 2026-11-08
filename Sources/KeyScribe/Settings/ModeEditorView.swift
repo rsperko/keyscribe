@@ -20,6 +20,7 @@ struct ModeEditorView: View {
     var onEditVocabulary: () -> Void = {}
     let onDelete: () -> Void
     var codingAgents: CodingAgentsSettingsModel?
+    var sharedVocabularyNames: [String] = []
 
     private var bind: ModeBinding { ModeBinding(mode: mode, onUpdate: onUpdate) }
     private var trigger: ModeTrigger {
@@ -286,7 +287,7 @@ struct ModeEditorView: View {
         SettingRow(
             title: "Recognition and replacements",
             result: VocabularyScopePicker.summary(for: mode),
-            help: Self.vocabularyHelp(for: mode),
+            help: Self.vocabularyHelp(for: mode, shared: sharedVocabularyNames),
             combinesAccessibilityChildren: false)
         {
             Button("Edit Vocabulary…", action: onEditVocabulary)
@@ -294,11 +295,13 @@ struct ModeEditorView: View {
         }
     }
 
-    static func vocabularyHelp(for mode: Mode) -> String {
-        guard mode.dictionary.includeGlobal || mode.replacements.includeGlobal else {
-            return "This mode uses only the words and replacements you add for it."
-        }
-        return "Mode-only words and replacements apply only here. Global vocabulary is also included where this mode allows it."
+    static func vocabularyHelp(for mode: Mode, shared: [String] = []) -> String {
+        let base = mode.dictionary.includeGlobal || mode.replacements.includeGlobal
+            ? "Mode-only words and replacements apply only here. Global vocabulary is also included where this mode allows it."
+            : shared.isEmpty ? "This mode uses only the words and replacements you add for it."
+            : "Mode-only words and replacements apply only here."
+        guard !shared.isEmpty else { return base }
+        return "\(base) It also uses \(ListFormatter.localizedString(byJoining: shared)), shared with other modes."
     }
 
     @ViewBuilder private var finishingControls: some View {

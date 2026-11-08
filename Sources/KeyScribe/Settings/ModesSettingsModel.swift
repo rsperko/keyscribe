@@ -369,6 +369,11 @@ final class ModesSettingsModel: ObservableObject {
         modes.first { $0.id == selectedID }
     }
 
+    func sharedVocabularyNames(for mode: Mode) -> [String] {
+        guard !mode.sharedVocabularies.isEmpty else { return [] }
+        return VocabularyMerge.using(mode, repository.sharedVocabularies()).map(\.name)
+    }
+
     private var fragmentsDir: URL { supportDir.appendingPathComponent("fragments", isDirectory: true) }
 
     private func loadFragmentIds() -> [String] {

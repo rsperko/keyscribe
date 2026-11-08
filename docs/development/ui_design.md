@@ -948,9 +948,69 @@ modes remain visible in their own group so their existing vocabulary and pre-ena
 Plain Dictation is not listed: it always uses Global. Voice Commands is listed while its flag is on, and
 the correction shortcut can add to it.
 Selecting a scope edits only its own words and replacements. A mode detail states whether it also includes
-Global vocabulary, rather than mixing inherited entries into its editable lists. Mode editors keep an
+Global vocabulary, rather than mixing inherited entries into its editable lists.
+
+**Shared vocabularies** are named sets of words and replacements that selected modes use together
+(mode-only overrides shared, shared overrides Global). Someone who never creates one sees the pane as
+before, plus one **Add Shared Vocabulary…** action at the foot of the list, which asks only for a name
+(not empty, not Global, not a name already used) and opens the new, empty vocabulary. Shared
+vocabularies are listed in a **Shared** group after Global, each with the usual count summary, or **Not used
+by any modes** / **Used only by disabled modes** when no enabled mode uses it, so saved entries are never
+mistaken for active ones. A shared detail leads with **Used by**: the mode names, a disabled one marked
+(“Email (disabled)”), then what that means (“Changes here apply to both modes.”, “Changes here apply to
+Code now, and to Email when it is enabled.”, “Used when these modes are enabled.”, or “Not used by any
+modes. Choose modes below to start using it.”), with **Choose Modes…** and **Rename…**, then the
+usual composer and lists; it ends with the standard trailing red **Delete Shared Vocabulary**, whose
+confirmation names the modes it stops applying in and says Global and mode-only entries remain.
+**Choose Modes…** lists every mode with its own vocabulary, disabled ones marked, and explains that
+selected modes use its words and replacements and future changes apply to them; **Use in Selected
+Modes** applies, **Cancel** changes nothing, and an empty choice is allowed. A new mode is never added
+automatically; a duplicated mode keeps its choices. Removing a mode from it applies immediately and
+keeps every entry; both choosers say so as soon as a mode or vocabulary is unticked (“Markdown will stop
+using Programming. Global and mode-only entries will still apply.”), since a choice saved to settle a
+disagreement is the mode's own and keeps working. A mode detail, once a shared vocabulary exists, says what it uses (“Uses Global and
+Programming. Entries added below apply only to Markdown.”) and has a **Shared Vocabulary** section
+listing each one it uses with **Edit…**, which opens that vocabulary's own detail, plus **Choose Shared
+Vocabulary…**. Every change that could leave the shared vocabularies a mode uses disagreeing — attaching,
+adding or editing a shared entry, or moving an entry into one — is checked against the state it would
+leave, in every mode it reaches, before anything is saved. Saves from outside Settings (the Add to
+Vocabulary panel, History's replacement review) pass the same check; a save there that would leave a new
+disagreement is refused and says which vocabularies disagree about which phrase in which mode, and where
+to settle it — the panel offers **Open in Settings**, which opens that shared vocabulary with the
+correction already in its composer, so only the choice is left to make. Where two replace the same phrase or spell the
+same word differently, the change shows **“pain” in Code** with one stacked choice per distinct entry: its
+full output (**Replace with “pane”** or **Spell it “Kubernetes”**), its sources, and for a replacement
+where it acts (**Anywhere in a sentence** or **Only when said alone**), so entries with the same output
+but a different scope stay distinct. The chosen entry is saved whole, as an entry of the mode's own that
+stays when the shared vocabularies change, together with the change itself; the change's one action
+(**Use in Selected Modes**, **Use Selected**, **Move**, **Add**, **Save Changes**) stays disabled until
+each disagreement has a choice. A chooser reopened over a disagreement left unsettled shows it again.
+Attaching also describes, as a secondary line, any word or replacement that will replace Global's. The
+choosers' lists and these choices share one area that grows with its content up to a bound, then
+scrolls. A chooser or move saves its whole change in one step or nothing: if it cannot be saved the sheet
+stays open with its choices and shows the standard failure notice — which file needs fixing, **Show in
+Finder**, and technical details — and, only when putting back an already-written file also failed, says
+which ones kept the change instead of claiming nothing changed. Editing a shared replacement that changed
+elsewhere since the editor opened keeps the editor and its draft open and says so. There is no priority order to manage. A mode may still add its
+own spelling of a word it inherits (**Overrides the spelling “Quorlan” from Programming in this mode.**).
+A shared detail's rule preview, rule
+check, and **Review mishearings…** run over the dictations of the modes that use it. A shared entry that
+does not take effect in a mode using it says so beneath it — **Overridden in Markdown: there it becomes
+“panel”.** (or the spelling, or where it acts, whichever differs) — with **Show in Markdown**, which opens
+that mode's vocabulary with the overriding replacement's editor open, so a shared change that seems to do
+nothing explains itself. A mode detail ends with a collapsed **Included Vocabulary** disclosure listing,
+read-only, the words and replacements it inherits that are in effect there. Each source name (Global or
+the shared vocabulary's) opens that vocabulary; each replacement says where it acts, and one too long for
+its row offers **Show All** to read it whole in place. A mode's own word or replacement offers **Move to
+Shared Vocabulary…** in its context menu and as an accessibility action, and the replacement editor shows
+it beside **Cancel** (disabled, with a reason, while the editor holds unsaved changes). Its sheet picks an existing shared vocabulary or names a new one, then says
+“Move this replacement to Programming?”, who uses it (“Programming is used by Coding agent and Markdown.
+Future edits will apply to both.”), and what else the mode starts using; the mode is attached to the
+vocabulary so it keeps the entry. A different entry already in the destination blocks **Move** and is
+never overwritten. A vocabulary created for a move that then fails is removed again. Mode editors keep an
 always-visible **Recognition and replacements** summary with an **Edit Vocabulary…** action; the full
-composer and lists do not live inside the mode editor.
+composer and lists do not live inside the mode editor. That summary's help names the shared
+vocabularies the mode uses.
 
 - Add to Vocabulary: one compact composer with two labeled fields, **Word or heard phrase** (with an
   in-field example prompt) and **Use instead (optional)** — each field carries exactly one label, in
@@ -1141,7 +1201,12 @@ composer and lists do not live inside the mode editor.
   and Return advisory with **Only Match When Said Alone** are the composer's. A replacement shows one
   summary line (**Replace “Cryden” with “Kryten” in modes that include Global vocabulary.**), and the
   destination reads **Saved on this Mac.** followed by **Applies in modes that include Global
-  vocabulary.** or **Applies only in {mode}.** It has no History preview. A word already added never
+  vocabulary.** or **Applies only in {mode}.** Shared vocabularies follow the modes under a **Shared**
+  heading; one reads **Applies in {modes}.**, adds **and in {disabled modes} once enabled**, reads **Saved
+here. Applies once {modes} is enabled.** when only disabled modes use it, or **Saved here, but not
+currently used by any mode.** The
+  default destination is unchanged, so a correction never reaches more modes than before unless the user
+  picks a shared vocabulary. It has no History preview. A word already added never
   dead-ends: it offers **Review Mishearings…**, and when the panel opened on selected words that differ
   from it (“Crayton”), **Correct “Crayton” to “Kryten”**. Adding a word runs the same mishearing review
   as Settings: it opens over the panel only when History holds likely mishearings, offered unchecked;

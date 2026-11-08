@@ -22,6 +22,8 @@ final class CorrectionPanelController {
     private let captureSelection: () async -> String?
     // Set once Settings exists: the History finder for a word in a destination. nil means no History to search.
     var mishearingsFinder: ((String, CorrectionDestination, @escaping (Int) -> Void) -> HistoryReplacementsModel?)?
+    // Set once Settings exists: opens a shared vocabulary, where a disagreement a save would leave is settled.
+    var openSharedVocabulary: ((String, ComposerSeed) -> Void)?
     private let clipboardPaste: () -> ClipboardPaste
     private var previousApp: NSRunningApplication?
     private let status = CorrectionPanelStatus()
@@ -60,6 +62,7 @@ final class CorrectionPanelController {
     private func show(prefill: String?) {
         window?.close()
         status.message = nil
+        status.resolveIn = nil
         status.addedWord = nil
         status.mishearings = nil
         let view = CorrectionPanelView(
@@ -80,13 +83,18 @@ final class CorrectionPanelController {
                     }
                 case .noChange:
                     self.status.refresh()
-                case .failed(let refusal):
+                case .failed(let refusal, let resolveIn):
                     self.status.message = refusal ?? Self.saveFailedMessage(for: Self.destination(of: result))
+                    self.status.resolveIn = resolveIn
                 }
             },
             onCorrect: { [weak self] result, pasteText in self?.applyAndCorrect(result, pasteText: pasteText) },
             onReview: { [weak self] word, destination in self?.offerMishearings(of: word, in: destination, afterAdding: false) },
-            onCancel: { [weak self] in self?.window?.close() })
+            onCancel: { [weak self] in self?.window?.close() },
+            onOpenVocabulary: { [weak self] id, result in
+                self?.window?.close()
+                self?.openSharedVocabulary?(id, Self.seed(result, in: id))
+            })
         let window = NSWindow(contentViewController: NSHostingController(rootView: view))
         window.title = "Add to Vocabulary"
         window.styleMask = [.titled, .closable]
@@ -140,7 +148,7 @@ final class CorrectionPanelController {
         if afterAdding { window?.close() }
     }
 
-    private enum SaveOutcome { case saved, noChange, failed(refusal: String?) }
+    private enum SaveOutcome { case saved, noChange, failed(refusal: String?, resolveIn: String? = nil) }
 
     private func apply(_ result: CorrectionPanelView.SaveResult) -> SaveOutcome {
         if case .noChange = analyze(Self.proposal(of: result), Self.destination(of: result)).action {
@@ -155,6 +163,7 @@ final class CorrectionPanelController {
         switch added {
         case .saved: return .saved
         case .refused(let message): return .failed(refusal: message)
+        case .needsChoice(let message, let id): return .failed(refusal: message, resolveIn: id)
         case .failed: return .failed(refusal: nil)
         }
     }
@@ -165,6 +174,17 @@ final class CorrectionPanelController {
             return "\(Branding.appName) could not save this — a configuration file may be malformed. Open Settings ▸ Maintenance to fix it."
         case .mode:
             return "\(Branding.appName) could not save this to \(destination.title). Its mode file may be malformed. Open Settings ▸ Modes to fix it."
+        case .shared:
+            return "\(Branding.appName) could not save this to \(destination.title). Its file may be malformed. Open Settings ▸ Vocabulary to fix it."
+        }
+    }
+
+    fileprivate static func seed(_ result: CorrectionPanelView.SaveResult, in vocabularyId: String) -> ComposerSeed {
+        switch result {
+        case .dictionary(let word, _):
+            ComposerSeed(scope: .shared(vocabularyId), heard: word, replace: "", regex: false, wholeDictation: nil)
+        case .replacement(let heard, let replace, let regex, let wholeDictation, _):
+            ComposerSeed(scope: .shared(vocabularyId), heard: heard, replace: replace, regex: regex, wholeDictation: wholeDictation)
         }
     }
 
@@ -185,13 +205,15 @@ final class CorrectionPanelController {
 
     private func applyAndCorrect(_ result: CorrectionPanelView.SaveResult, pasteText: String) {
         switch apply(result) {
-        case .failed(let refusal):
+        case .failed(let refusal, let resolveIn):
             status.message = refusal ?? Self.saveFailedMessage(for: Self.destination(of: result))
+            status.resolveIn = resolveIn
             return
         case .noChange, .saved:
             break
         }
         status.message = nil
+        status.resolveIn = nil
         guard hasPasteTarget, let target = previousApp, !pasteText.isEmpty else {
             window?.close()
             return
@@ -212,6 +234,7 @@ final class CorrectionPanelController {
 @MainActor
 final class CorrectionPanelStatus: ObservableObject {
     @Published var message: String?
+    @Published var resolveIn: String?
     @Published var notice: String?
     @Published var addedWord: String?
     @Published var mishearings: HistoryReplacementsModel?
@@ -224,11 +247,15 @@ struct CorrectionDestination: Hashable, Identifiable {
     enum Scope: Hashable {
         case global
         case mode(String)
+        case shared(String)
     }
 
     let scope: Scope
     let title: String
     let menuTitle: String
+    var usedBy: [String] = []
+    // Modes that list the vocabulary but are disabled, so it reaches them only once they are enabled.
+    var waiting: [String] = []
 
     var id: Scope { scope }
 
@@ -238,17 +265,37 @@ struct CorrectionDestination: Hashable, Identifiable {
         CorrectionDestination(scope: .mode(id), title: name, menuTitle: name)
     }
 
+    static func shared(_ vocabulary: SharedVocabulary, usedBy modes: [Mode]) -> CorrectionDestination {
+        let users = modes.filter { $0.hasOwnVocabulary && $0.sharedVocabularies.contains(vocabulary.id) }
+        return CorrectionDestination(
+            scope: .shared(vocabulary.id), title: vocabulary.name, menuTitle: vocabulary.name,
+            usedBy: users.filter(\.enabled).map(\.name), waiting: users.filter { !$0.enabled }.map(\.name))
+    }
+
+    var isShared: Bool { if case .shared = scope { true } else { false } }
+
     var scopeLine: String {
         switch scope {
         case .global: "Saved on this Mac. Applies in modes that include Global vocabulary."
         case .mode: "Saved on this Mac. Applies only in \(title)."
+        case .shared:
+            switch (usedBy.isEmpty, waiting.isEmpty) {
+            case (true, true): "Saved here, but not currently used by any mode."
+            case (true, false):
+                "Saved here. Applies once \(ListFormatter.localizedString(byJoining: waiting)) \(waiting.count == 1 ? "is" : "are") enabled."
+            case (false, true): "Saved on this Mac. Applies in \(ListFormatter.localizedString(byJoining: usedBy))."
+            case (false, false):
+                "Saved on this Mac. Applies in \(ListFormatter.localizedString(byJoining: usedBy)), and in "
+                    + "\(ListFormatter.localizedString(byJoining: waiting)) once enabled."
+            }
         }
     }
 
-    // Global plus the user's enabled, non-system modes. A disabled mode is excluded: a term routed there
-    // would do nothing until the mode is enabled, with no hint at the panel.
-    static func list(for modes: [Mode]) -> [CorrectionDestination] {
+    // Global, the user's enabled non-system modes, then the shared vocabularies. A disabled mode is excluded: a
+    // term routed there would do nothing until the mode is enabled, with no hint at the panel.
+    static func list(for modes: [Mode], shared: [SharedVocabulary] = []) -> [CorrectionDestination] {
         [.global] + modes.filter { $0.hasOwnVocabulary && $0.enabled }.map { .mode(id: $0.id, name: $0.name) }
+            + shared.map { .shared($0, usedBy: modes) }
     }
 }
 
@@ -269,6 +316,7 @@ private struct CorrectionPanelView: View {
     let onCorrect: (SaveResult, String) -> Void
     let onReview: (String, CorrectionDestination) -> Void
     let onCancel: () -> Void
+    let onOpenVocabulary: (String, SaveResult) -> Void
     @ObservedObject var status: CorrectionPanelStatus
 
     @State private var term: String
@@ -289,7 +337,8 @@ private struct CorrectionPanelView: View {
         status: CorrectionPanelStatus,
         onSave: @escaping (SaveResult) -> Void, onCorrect: @escaping (SaveResult, String) -> Void,
         onReview: @escaping (String, CorrectionDestination) -> Void,
-        onCancel: @escaping () -> Void
+        onCancel: @escaping () -> Void,
+        onOpenVocabulary: @escaping (String, SaveResult) -> Void = { _, _ in }
     ) {
         let destinations = destinations.isEmpty ? [.global] : destinations
         self.originalSelection = prefill
@@ -302,6 +351,7 @@ private struct CorrectionPanelView: View {
         self.onCorrect = onCorrect
         self.onReview = onReview
         self.onCancel = onCancel
+        self.onOpenVocabulary = onOpenVocabulary
         _term = State(initialValue: prefill)
         _replace = State(initialValue: "")
         _destination = State(initialValue: destinations[0])
@@ -423,8 +473,16 @@ private struct CorrectionPanelView: View {
                         .foregroundStyle(.primary)
                 } else {
                     Picker("", selection: $destination) {
-                        ForEach(destinations) { destination in
+                        ForEach(destinations.filter { !$0.isShared }) { destination in
                             Text(destination.menuTitle).tag(destination)
+                        }
+                        let shared = destinations.filter(\.isShared)
+                        if !shared.isEmpty {
+                            Section("Shared") {
+                                ForEach(shared) { destination in
+                                    Text(destination.menuTitle).tag(destination)
+                                }
+                            }
                         }
                     }
                     .labelsHidden()
@@ -457,6 +515,10 @@ private struct CorrectionPanelView: View {
             if let message = status.message {
                 IssueText(message, severity: .advisory)
                     .fixedSize(horizontal: false, vertical: true)
+                if let id = status.resolveIn {
+                    Button("Open in Settings") { onOpenVocabulary(id, buildResult()) }
+                        .accessibilityIdentifier(AccessibilityID.Correction.openVocabulary)
+                }
             } else if let notice = status.notice {
                 Label(notice, systemImage: "checkmark.circle.fill")
                     .font(.caption).foregroundStyle(.green)

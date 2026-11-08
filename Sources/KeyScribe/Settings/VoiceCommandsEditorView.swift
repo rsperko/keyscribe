@@ -9,6 +9,7 @@ struct VoiceCommandsEditorView: View {
     let onMoveShortcut: (Mode) -> Void
     @ObservedObject var model: VoiceCommandsSettingsModel
     var onEditVocabulary: () -> Void = {}
+    var sharedVocabularyNames: [String] = []
     @State private var editing: PlaceDraft?
     @State private var editingScript: ScriptDraft?
     @State private var editingShortcut: ShortcutDraft?
@@ -71,7 +72,7 @@ struct VoiceCommandsEditorView: View {
                 SettingRow(
                     title: "Vocabulary",
                     result: VocabularyScopePicker.summary(for: mode),
-                    help: ModeEditorView.vocabularyHelp(for: mode) + " Replacements apply before a command is read. Use them to correct a name or phrase that is often misheard.",
+                    help: ModeEditorView.vocabularyHelp(for: mode, shared: sharedVocabularyNames) + " Replacements apply before a command is read. Use them to correct a name or phrase that is often misheard.",
                     combinesAccessibilityChildren: false)
                 {
                     Button("Edit Vocabulary…", action: onEditVocabulary)

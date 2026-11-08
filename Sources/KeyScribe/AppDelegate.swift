@@ -346,6 +346,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsController.onErrorsChanged = { [weak self] in self?.menu.setErrorBadge($0) }
         settingsController.codingAgents.voice = spokenVoice
         applyCodingAgents()
+        correctionPanel.openSharedVocabulary = { [weak self] id, draft in
+            self?.settingsController.presentSharedVocabulary(id: id, draft: draft)
+        }
         correctionPanel.mishearingsFinder = { [weak self] word, destination, onSaved in
             self?.settingsController.mishearingsFinder(word, destination.scope, onSaved)
         }
@@ -930,7 +933,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func correctionDestinations() -> [CorrectionDestination] {
-        CorrectionDestination.list(for: config.modes)
+        CorrectionDestination.list(for: config.modes, shared: config.shared)
     }
 
     // Relaunch into guided setup so the new process reads the just-granted Accessibility verdict fresh

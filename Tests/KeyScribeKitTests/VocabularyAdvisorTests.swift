@@ -169,3 +169,58 @@ struct VocabularyAdvisorTests {
     }
 
 }
+
+struct SharedVocabularyAdvisorTests {
+    private func rule(_ heard: String, _ replace: String) -> ReplacementsSet.Rule {
+        ReplacementsSet.Rule(heard: heard, replace: replace, regex: false)
+    }
+
+    private func mode(own: [ReplacementsSet.Rule] = [], globalWords: [String] = [], globalRules: [ReplacementsSet.Rule] = [])
+        -> VocabularyScope {
+        VocabularyScope(
+            globalWords: globalWords, globalRules: globalRules,
+            local: VocabularyScope.Local(rules: own),
+            shared: [
+                .init(name: "Programming", words: ["Kubernetes"], rules: [rule("cube control", "kubectl")]),
+                .init(name: "Medical", words: ["kubernetes"], rules: [rule("cube control", "KC")]),
+            ])
+    }
+
+    @Test func aWordFromASharedVocabularyIsAlreadyIncluded() {
+        let analysis = VocabularyAdvisor.analyze(.word("Kubernetes"), in: mode(globalWords: ["Kubernetes"]))
+        #expect(analysis.action == .noChange(.wordCoveredByShared("Programming")))
+    }
+
+    @Test func aDifferentlyCapitalizedWordOverridesTheSharedSpellingInThisMode() {
+        let analysis = VocabularyAdvisor.analyze(.word("KUBERNETES"), in: mode())
+        #expect(analysis.action == .addWord)
+        #expect(analysis.advisories == [.init(
+            kind: .overridesShared, message: "Overrides the spelling “Kubernetes” from Programming in this mode.")])
+        let global = VocabularyAdvisor.analyze(.word("postgres"), in: mode(globalWords: ["Postgres"]))
+        #expect(global.action == .addWord)
+        #expect(global.advisories.map(\.message) == ["Overrides the spelling “Postgres” from Global in this mode."])
+    }
+
+    @Test func aMatchingSharedReplacementIsAlreadyIncluded() {
+        let analysis = VocabularyAdvisor.analyze(
+            .replacement(heard: "Cube Control", replace: "kubectl", regex: false), in: mode())
+        #expect(analysis.action == .noChange(.replacementCoveredByShared("Programming")))
+    }
+
+    @Test func aDifferentReplacementOverridesTheSharedOneNotGlobal() {
+        let analysis = VocabularyAdvisor.analyze(
+            .replacement(heard: "cube control", replace: "k", regex: false),
+            in: mode(globalRules: [rule("cube control", "G")]))
+        #expect(analysis.action == .addReplacement)
+        #expect(analysis.advisories == [.init(
+            kind: .overridesShared,
+            message: "Overrides the replacement for “cube control” from Programming, which currently becomes “kubectl”.")])
+    }
+
+    @Test func theModesOwnRuleStillComesFirst() {
+        let analysis = VocabularyAdvisor.analyze(
+            .replacement(heard: "cube control", replace: "kubectl", regex: false),
+            in: mode(own: [rule("cube control", "mine")]))
+        #expect(analysis.action == .updateReplacement(currentReplace: "mine"))
+    }
+}

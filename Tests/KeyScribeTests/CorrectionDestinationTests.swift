@@ -143,6 +143,29 @@ struct CorrectionDestinationTests {
         #expect(CorrectionDestination.mode(id: "email", name: "Email").scopeLine == "Saved on this Mac. Applies only in Email.")
     }
 
+    @Test func aSharedVocabularySaysWhichModesItReachesAndIsListedLast() {
+        var code = Mode(id: "code", name: "Code")
+        code.sharedVocabularies = ["programming"]
+        var docs = Mode(id: "docs", name: "Docs")
+        docs.sharedVocabularies = ["programming"]
+        let programming = SharedVocabulary(id: "programming", name: "Programming")
+        let unused = SharedVocabulary(id: "medical", name: "Medical")
+        let list = CorrectionDestination.list(for: [code, docs], shared: [programming, unused])
+        #expect(list.map(\.title) == ["Global", "Code", "Docs", "Programming", "Medical"])
+        #expect(list[3].scopeLine == "Saved on this Mac. Applies in Code and Docs.")
+        #expect(list[4].scopeLine == "Saved here, but not currently used by any mode.")
+        var email = Mode(id: "email", name: "Email")
+        email.enabled = false
+        email.sharedVocabularies = ["programming"]
+        #expect(CorrectionDestination.shared(programming, usedBy: [code, email]).scopeLine
+            == "Saved on this Mac. Applies in Code, and in Email once enabled.")
+        #expect(CorrectionDestination.shared(programming, usedBy: [email]).scopeLine
+            == "Saved here. Applies once Email is enabled.")
+        #expect(list[3].isShared)
+        let rule = VocabularyDraftAnalysis(term: "pain", replacement: "pane", regex: false, analyze: { _ in VocabularyAnalysis(action: .addWord) })
+        #expect(rule.replacementSummary(in: list[3]) == "Replace \u{201C}pain\u{201D} with \u{201C}pane\u{201D} in the modes that use Programming.")
+    }
+
     @Test func aNameAlreadyAddedLeadsToTeachingTheSelectedSpelling() {
         let offer = VocabularyDraftAnalysis.teachableCorrection(
             selected: " Crayton ", term: "Kryten", action: .noChange(.wordAlreadyListed))

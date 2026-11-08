@@ -335,6 +335,7 @@ final class HistoryPaneModel: ObservableObject {
         let scope: CorrectionDestination.Scope = switch hint.origin {
         case .global: .global
         case .mode(let id): .mode(id)
+        case .shared(let id): .shared(id)
         }
         guard mishearings == nil,
               let model = mishearingsFinder?(hint.term, scope, { [weak self] in self?.mishearingsSaved($0) }) else { return }

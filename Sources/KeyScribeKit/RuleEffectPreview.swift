@@ -8,11 +8,13 @@ public struct RuleEffectPreview: Sendable {
         public let modes: [Mode]
         public let dictionary: DictionarySet
         public let replacements: ReplacementsSet
+        public let shared: [SharedVocabulary]
 
-        public init(modes: [Mode], dictionary: DictionarySet, replacements: ReplacementsSet) {
+        public init(modes: [Mode], dictionary: DictionarySet, replacements: ReplacementsSet, shared: [SharedVocabulary] = []) {
             self.modes = modes
             self.dictionary = dictionary
             self.replacements = replacements
+            self.shared = shared
         }
     }
 
@@ -110,6 +112,11 @@ public struct RuleEffectPreview: Sendable {
         case .mode(let id):
             guard let mode = config.modes.first(where: { $0.id == id }) else { throw ReplacementPreview.Failure.destinationMissing }
             rules = mode.replacements.rules
+        case .shared(let id):
+            guard let vocabulary = config.shared.first(where: { $0.id == id }) else {
+                throw ReplacementPreview.Failure.destinationMissing
+            }
+            rules = vocabulary.rules
         }
         var findings: [Finding] = []
         var checked = 0
@@ -137,24 +144,37 @@ public struct RuleEffectPreview: Sendable {
         let without: ResolvedConfig
         let with: ResolvedConfig
         let target: Mode?
+        let sharedId: String?
         let draft: ReplacementRule?
 
-        var scopeMode: Mode? { target }
+        // Sample text in a shared scope runs as a mode that uses Global and only that vocabulary.
+        var scopeMode: Mode? {
+            guard let sharedId else { return target }
+            var mode = Mode(id: "shared vocabulary \(sharedId)", name: "")
+            mode.sharedVocabularies = [sharedId]
+            return mode
+        }
 
         init(
             draft: ReplacementsSet.Rule?, replacing original: ReplacementsSet.Rule?,
             scope: ReplacementPreview.Destination, config: Config, baseline: Baseline
         ) throws {
-            let target: Mode?
+            var target: Mode?
+            var sharedTarget: SharedVocabulary?
             switch scope {
-            case .global: target = nil
+            case .global: break
             case .mode(let id):
                 guard let mode = config.modes.first(where: { $0.id == id }) else {
                     throw ReplacementPreview.Failure.destinationMissing
                 }
                 target = mode
+            case .shared(let id):
+                guard let vocabulary = config.shared.first(where: { $0.id == id }) else {
+                    throw ReplacementPreview.Failure.destinationMissing
+                }
+                sharedTarget = vocabulary
             }
-            let current = target?.replacements.rules ?? config.replacements.rules
+            let current = target?.replacements.rules ?? sharedTarget?.rules ?? config.replacements.rules
             let position = original.flatMap { current.firstIndex(of: $0) }
             var withoutOriginal = current
             if let position { withoutOriginal.remove(at: position) }
@@ -164,27 +184,32 @@ public struct RuleEffectPreview: Sendable {
             func resolved(_ rules: [ReplacementsSet.Rule]) -> ResolvedConfig {
                 var modes = config.modes
                 var global = config.replacements
+                var shared = config.shared
                 if let target, let i = modes.firstIndex(where: { $0.id == target.id }) {
                     modes[i].replacements.rules = rules
+                } else if let sharedTarget, let i = shared.firstIndex(where: { $0.id == sharedTarget.id }) {
+                    shared[i].rules = rules
                 } else {
                     global.rules = rules
                 }
                 return ResolvedConfig(
                     modes: modes, dictionary: config.dictionary, replacements: global,
-                    connections: ConnectionSet(), fragments: [:])
+                    connections: ConnectionSet(), fragments: [:], shared: shared)
             }
             let with = resolved(withRules)
             self.without = resolved(withoutRules)
             self.with = with
             self.target = target.flatMap { t in with.modes.first { $0.id == t.id } }
+            self.sharedId = sharedTarget?.id
             self.draft = draft?.toReplacementRule()
         }
 
         // A History entry from a mode this config no longer has (renamed, deleted, or a name two modes share)
         // cannot be placed, so only a Global scope, which applies without a mode, counts it.
         func reaches(_ resolved: Mode?) -> Bool {
-            guard let resolved else { return target == nil }
+            guard let resolved else { return target == nil && sharedId == nil }
             if let target { return resolved.id == target.id }
+            if let sharedId { return resolved.sharedVocabularies.contains(sharedId) }
             return resolved.replacements.includeGlobal
         }
 
@@ -195,7 +220,7 @@ public struct RuleEffectPreview: Sendable {
         func entry(
             _ heard: String, mode: Mode?, reference: HistorySnapshot.Reference?, modeName: String?, date: Date?
         ) -> Entry {
-            let before = Self.run(without, mode: without.modes.first { $0.id == mode?.id }, heard)
+            let before = Self.run(without, mode: without.modes.first { $0.id == mode?.id } ?? mode, heard)
             let after = Self.run(with, mode: mode, heard)
             let rule = draft.flatMap { draft in after.effects.first { $0.rule.sameRule(as: draft) } }
             return Entry(

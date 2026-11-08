@@ -23,14 +23,51 @@ public struct VocabularyScope: Equatable, Sendable {
         }
     }
 
+    public struct Included: Equatable, Sendable {
+        public var name: String
+        public var words: [String]
+        public var rules: [ReplacementsSet.Rule]
+
+        public init(name: String, words: [String] = [], rules: [ReplacementsSet.Rule] = []) {
+            self.name = name
+            self.words = words
+            self.rules = rules
+        }
+    }
+
     public var globalWords: [String]
     public var globalRules: [ReplacementsSet.Rule]
     public var local: Local?
+    // The shared vocabularies a mode uses, in the order that decides between them.
+    public var shared: [Included]
 
-    public init(globalWords: [String] = [], globalRules: [ReplacementsSet.Rule] = [], local: Local? = nil) {
+    public init(
+        globalWords: [String] = [], globalRules: [ReplacementsSet.Rule] = [], local: Local? = nil,
+        shared: [Included] = []
+    ) {
         self.globalWords = globalWords
         self.globalRules = globalRules
         self.local = local
+        self.shared = shared
+    }
+}
+
+extension VocabularyScope {
+    public static func of(
+        _ mode: Mode, globalWords: [String], globalRules: [ReplacementsSet.Rule], shared: [SharedVocabulary]
+    ) -> VocabularyScope {
+        VocabularyScope(
+            globalWords: globalWords, globalRules: globalRules,
+            local: Local(
+                words: mode.dictionary.words, rules: mode.replacements.rules,
+                includeGlobalWords: mode.dictionary.includeGlobal, includeGlobalRules: mode.replacements.includeGlobal),
+            shared: VocabularyMerge.using(mode, shared).map(Included.init))
+    }
+}
+
+extension VocabularyScope.Included {
+    init(_ vocabulary: SharedVocabulary) {
+        self.init(name: vocabulary.name, words: vocabulary.words, rules: vocabulary.rules)
     }
 }
 
@@ -46,13 +83,16 @@ public struct VocabularyAnalysis: Equatable, Sendable {
     public enum Reason: Equatable, Sendable {
         case wordAlreadyListed
         case wordCoveredByGlobal
+        case wordCoveredByShared(String)
         case replacementAlreadyListed
         case replacementCoveredByGlobal
+        case replacementCoveredByShared(String)
     }
 
     public struct Advisory: Equatable, Sendable {
         public enum Kind: Equatable, Sendable {
             case overridesGlobal
+            case overridesShared
         }
 
         public let kind: Kind
@@ -77,9 +117,9 @@ public enum VocabularyAdvisor {
     public static func analyze(_ proposal: VocabularyProposal, in scope: VocabularyScope) -> VocabularyAnalysis {
         switch proposal {
         case .word(let word):
-            return analyzeWord(word, in: scope)
+            analyzeWord(word, in: scope)
         case .replacement(let heard, let replace, let regex):
-            return analyzeReplacement(heard: heard, replace: replace, isRegex: regex, in: scope)
+            analyzeReplacement(heard: heard, replace: replace, isRegex: regex, in: scope)
         }
     }
 
@@ -96,8 +136,24 @@ public enum VocabularyAdvisor {
         }
         if let local = scope.local {
             if let action = action(for: local.words) { return VocabularyAnalysis(action: action) }
-            if local.includeGlobalWords, scope.globalWords.contains(trimmed) {
-                return VocabularyAnalysis(action: .noChange(.wordCoveredByGlobal))
+            func spelling(in words: [String]) -> String? {
+                words.first { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
+            }
+            func overriding(_ theirs: String, from source: String) -> VocabularyAnalysis {
+                VocabularyAnalysis(action: .addWord, advisories: [VocabularyAnalysis.Advisory(
+                    kind: source == "Global" ? .overridesGlobal : .overridesShared,
+                    message: "Overrides the spelling “\(theirs)” from \(source) in this mode.")])
+            }
+            for included in scope.shared {
+                guard let theirs = spelling(in: included.words) else { continue }
+                return theirs == trimmed
+                    ? VocabularyAnalysis(action: .noChange(.wordCoveredByShared(included.name)))
+                    : overriding(theirs, from: included.name)
+            }
+            if local.includeGlobalWords, let theirs = spelling(in: scope.globalWords) {
+                return theirs == trimmed
+                    ? VocabularyAnalysis(action: .noChange(.wordCoveredByGlobal))
+                    : overriding(theirs, from: "Global")
             }
             return VocabularyAnalysis(action: .addWord)
         }
@@ -120,6 +176,17 @@ public enum VocabularyAdvisor {
                 return VocabularyAnalysis(action: .noChange(.replacementAlreadyListed))
             }
             return VocabularyAnalysis(action: .updateReplacement(currentReplace: existing.replace))
+        }
+        if scope.local != nil {
+            for included in scope.shared {
+                guard let inherited = included.rules.first(where: identityMatches) else { continue }
+                if inherited.replace == replace {
+                    return VocabularyAnalysis(action: .noChange(.replacementCoveredByShared(included.name)))
+                }
+                return VocabularyAnalysis(action: .addReplacement, advisories: [VocabularyAnalysis.Advisory(
+                    kind: .overridesShared,
+                    message: "Overrides the replacement for “\(inherited.heard)” from \(included.name), which currently becomes \(quoted(inherited.replace)).")])
+            }
         }
         if let local = scope.local, local.includeGlobalRules,
            let global = scope.globalRules.first(where: identityMatches) {

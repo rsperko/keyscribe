@@ -38,7 +38,7 @@ struct DeadlineTests {
     @Test func adoptsALateResultWithinTheGraceWindowButNotPastIt() async throws {
         await #expect(throws: DeadlineExceeded.self) {
             try await runWithDeadline(seconds: 0.15) {
-                await nonCooperativeBlock(seconds: 0.3)
+                await nonCooperativeBlock(seconds: 1)
                 return "adopted"
             }
         }

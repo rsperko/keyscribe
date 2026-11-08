@@ -100,4 +100,36 @@ struct ReplacementBatchSaveTests {
         #expect(repo.replacementRules().isEmpty)
         #expect(!FileManager.default.fileExists(atPath: repo.modesDir.appendingPathComponent("gone.toml").path))
     }
+
+    @Test func savesIntoASharedVocabularyAndLeavesGlobalAlone() throws {
+        let (repo, dir) = repository()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let programming = try repo.createSharedVocabulary(named: "Programming")
+        try repo.mutateSharedVocabulary(id: programming.id) { $0.words = ["Yugabyte"] }
+        let outcome = try repo.saveReplacementBatch(
+            to: .shared(programming.id), expected: [], proposed: [rule("Ugabyte")], requiringWord: "Yugabyte")
+        #expect(outcome == .saved)
+        #expect(repo.sharedVocabularies().first?.rules == [rule("Ugabyte")])
+        #expect(repo.replacementRules().isEmpty)
+    }
+
+    @Test func aSharedVocabularySaveWritesNothingWhenItIsStale() throws {
+        let (repo, dir) = repository()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let programming = try repo.createSharedVocabulary(named: "Programming")
+        #expect(try repo.saveReplacementBatch(
+            to: .shared(programming.id), expected: [], proposed: [rule("Ugabyte")], requiringWord: "Yugabyte")
+            == .stale(.wordRemoved))
+        try repo.mutateSharedVocabulary(id: programming.id) {
+            $0.words = ["Yugabyte"]
+            $0.rules = [rule("added elsewhere", "x")]
+        }
+        #expect(try repo.saveReplacementBatch(
+            to: .shared(programming.id), expected: [], proposed: [rule("Ugabyte")], requiringWord: "Yugabyte")
+            == .stale(.rulesChanged))
+        #expect(try repo.saveReplacementBatch(
+            to: .shared("gone"), expected: [], proposed: [rule("Ugabyte")], requiringWord: nil)
+            == .stale(.destinationMissing))
+        #expect(repo.sharedVocabularies().first?.rules == [rule("added elsewhere", "x")])
+    }
 }

@@ -117,6 +117,12 @@ speech model: some models can also steer recognition toward your terms as they l
 Speech Models** says which — and on every model KeyScribe fixes near-misses right after
 transcription. The fix sticks for next time.
 
+Words and replacements that belong to several modes, but not all of them, can live in a **shared
+vocabulary**: Settings ▸ Vocabulary ▸ **Add Shared Vocabulary…**, give it a name such as Programming, then
+**Choose Modes…**. A correction made there applies in every mode that uses it, and a mode's own entries
+still win. The correction shortcut can save straight to one under **Shared**, and a word or replacement
+already in one mode moves there with **Move to Shared Vocabulary…** (Control-click the entry).
+
 A plural is fixed too: with `Metafield` in your dictionary, "meta fields" becomes Metafields. That only
 applies to names of five letters or more, so "marks" never turns into Marks because you added Mark.
 

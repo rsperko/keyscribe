@@ -15,6 +15,7 @@
   connections.toml         # named LLM connections (BYOK)
   dictionary.toml          # global dictionary
   replacements.toml        # global replacements
+  vocabularies/            # shared vocabularies, one file each (id = filename stem)
   voice_commands.toml      # saved commands for the Voice Commands mode (experimental)
   fragments/               # shared prompt fragments (one file per fragment)
     my-voice.md            #   markdown body + YAML frontmatter
@@ -806,6 +807,29 @@ heard = "teh"
 replace = "the"
 regex = false
 ```
+
+### `vocabularies/<id>.toml` — shared vocabularies
+
+A named set of words and replacements that the modes listing it use together. The id is the file name
+and never changes, so a rename keeps every mode's connection.
+```toml
+# vocabularies/programming.toml
+schema_version = 1
+name = "Programming"
+words = ["Kubernetes", "Postgres"]
+[[rules]]
+heard = "pain"
+replace = "pane"
+regex = false
+```
+A mode uses one by listing its id: `shared_vocabularies = ["programming"]` (omitted when it uses none).
+Plain Dictation never uses one. Precedence: a mode's own entries override shared entries, and shared
+entries override Global. A replacement overrides another with the same heard phrase and rule type; a
+word overrides another with the same letters ignoring case. When two shared vocabularies a mode uses
+disagree, Settings asks the user to settle it with a rule or word of the mode's own; in a
+hand-edited file, the vocabulary listed first wins. `include_global` affects Global only, never shared
+vocabularies. A shared vocabulary file that fails to load keeps its last good version while the app
+runs, and is reported like any other config file. Replacement use counts are kept per vocabulary.
 
 ### `voice_commands.toml` — saved commands for Voice Commands (experimental)
 

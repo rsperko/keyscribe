@@ -4,6 +4,7 @@ public struct ReplacementPreview: Sendable {
     public enum Destination: Hashable, Sendable {
         case global
         case mode(String)
+        case shared(String)
     }
 
     public enum Failure: Error, Equatable {
@@ -60,26 +61,39 @@ public struct ReplacementPreview: Sendable {
 
     public static func make(
         phrases: [String], replacement: String, destination: Destination,
-        global: ReplacementsSet, modes: [Mode],
+        global: ReplacementsSet, modes: [Mode], shared: [SharedVocabulary] = [],
         history: [HistorySnapshot.Item], searched: Set<HistorySnapshot.Reference>
     ) throws -> ReplacementPreview {
-        let target: Mode?
+        var target: Mode?
+        var sharedTarget: SharedVocabulary?
         switch destination {
-        case .global: target = nil
+        case .global: break
         case .mode(let id):
             guard let mode = modes.first(where: { $0.id == id }) else { throw Failure.destinationMissing }
             target = mode
+        case .shared(let id):
+            guard let vocabulary = shared.first(where: { $0.id == id }) else { throw Failure.destinationMissing }
+            sharedTarget = vocabulary
         }
-        let currentLocal = target?.replacements.rules ?? global.rules
+        let currentLocal = target?.replacements.rules ?? sharedTarget?.rules ?? global.rules
         var proposed = ReplacementsSet(rules: currentLocal)
         var statuses: [PhraseStatus] = []
         var seen = Set<String>()
+        let overridable = target.map { $0.replacements.includeGlobal } ?? (sharedTarget != nil)
         for raw in phrases {
             let phrase = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !phrase.isEmpty, seen.insert(phrase.lowercased()).inserted else { continue }
-            let kind = status(of: phrase, replacement: replacement, local: currentLocal, target: target, global: global)
+            let kind = status(
+                of: phrase, replacement: replacement, local: currentLocal, overridesGlobal: overridable, global: global)
             statuses.append(.init(phrase: phrase, kind: kind))
             if statuses.last!.isSaved { proposed = proposed.addingLiteral(heard: phrase, replace: replacement) }
+        }
+        let nextGlobal = destination == .global ? proposed : global
+        let nextShared = shared.map { vocabulary in
+            guard vocabulary.id == sharedTarget?.id else { return vocabulary }
+            var changed = vocabulary
+            changed.rules = proposed.rules
+            return changed
         }
         let modesByName = Dictionary(grouping: modes, by: \.name)
         var current: [String: ReplacementsStage] = [:]
@@ -87,15 +101,14 @@ public struct ReplacementPreview: Sendable {
         func stages(for mode: Mode?) -> (ReplacementsStage, ReplacementsStage) {
             let key = mode?.id ?? ""
             if let c = current[key], let n = next[key] { return (c, n) }
-            let globalRules = target == nil ? proposed.rules : global.rules
-            let localRules = mode.map { $0.id == target?.id ? proposed.rules : $0.replacements.rules } ?? []
-            let includeGlobal = mode?.replacements.includeGlobal ?? true
-            let c = ReplacementsStage(rules: VocabularyMerge.rules(
-                global: global.toRules(), local: (mode?.replacements.rules ?? []).toReplacementRules(),
-                includeGlobal: includeGlobal))
-            let n = ReplacementsStage(rules: VocabularyMerge.rules(
-                global: globalRules.toReplacementRules(), local: localRules.toReplacementRules(),
-                includeGlobal: includeGlobal))
+            let nextMode = mode.map { mode in
+                guard mode.id == target?.id else { return mode }
+                var changed = mode
+                changed.replacements.rules = proposed.rules
+                return changed
+            }
+            let c = ReplacementsStage(rules: VocabularyMerge.rules(for: mode, global: global, shared: shared))
+            let n = ReplacementsStage(rules: VocabularyMerge.rules(for: nextMode, global: nextGlobal, shared: nextShared))
             current[key] = c
             next[key] = n
             return (c, n)
@@ -110,6 +123,9 @@ public struct ReplacementPreview: Sendable {
             if let target {
                 if let resolved, resolved.id != target.id { continue }
                 evaluated = target
+            } else if let sharedTarget {
+                guard let resolved, resolved.sharedVocabularies.contains(sharedTarget.id) else { continue }
+                evaluated = resolved
             } else {
                 if let resolved, !resolved.replacements.includeGlobal { continue }
                 evaluated = resolved
@@ -139,7 +155,8 @@ public struct ReplacementPreview: Sendable {
     }
 
     private static func status(
-        of phrase: String, replacement: String, local: [ReplacementsSet.Rule], target: Mode?, global: ReplacementsSet
+        of phrase: String, replacement: String, local: [ReplacementsSet.Rule], overridesGlobal: Bool,
+        global: ReplacementsSet
     ) -> PhraseStatus.Kind {
         func literal(_ rules: [ReplacementsSet.Rule]) -> ReplacementsSet.Rule? {
             rules.first { !$0.regex && $0.heard.caseInsensitiveCompare(phrase) == .orderedSame }
@@ -147,7 +164,7 @@ public struct ReplacementPreview: Sendable {
         if let existing = literal(local) {
             return existing.replace == replacement ? .alreadyAdded : .conflicts(currentOutput: existing.replace)
         }
-        if let target, target.replacements.includeGlobal, let inherited = literal(global.rules) {
+        if overridesGlobal, let inherited = literal(global.rules) {
             return inherited.replace == replacement ? .alreadyAdded : .overridesGlobal(globalOutput: inherited.replace)
         }
         return .add

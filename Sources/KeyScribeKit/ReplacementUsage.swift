@@ -76,6 +76,7 @@ public struct ReplacementUsage: Codable, Equatable, Sendable {
         let scope = switch origin {
         case .global: "global"
         case .mode(let id): "mode:\(id)"
+        case .shared(let id): "shared:\(id)"
         }
         return isRegex ? "\(scope)|r|\(heard)" : "\(scope)|l|\(heard.lowercased())"
     }
@@ -84,8 +85,11 @@ public struct ReplacementUsage: Codable, Equatable, Sendable {
         rule.origin.map { key(origin: $0, heard: rule.heard, isRegex: rule.isRegex) }
     }
 
-    public static func configuredKeys(global: ReplacementsSet, modes: [Mode]) -> Set<String> {
+    public static func configuredKeys(global: ReplacementsSet, modes: [Mode], shared: [SharedVocabulary] = []) -> Set<String> {
         var keys = Set(global.rules.map { key(origin: .global, heard: $0.heard, isRegex: $0.regex) })
+        for vocabulary in shared {
+            for rule in vocabulary.rules { keys.insert(key(origin: .shared(vocabulary.id), heard: rule.heard, isRegex: rule.regex)) }
+        }
         for mode in modes {
             for rule in mode.replacements.rules {
                 keys.insert(key(origin: .mode(mode.id), heard: rule.heard, isRegex: rule.regex))

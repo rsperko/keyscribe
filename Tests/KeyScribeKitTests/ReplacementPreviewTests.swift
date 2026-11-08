@@ -148,3 +148,66 @@ struct ReplacementPreviewTests {
         await #expect(throws: CancellationError.self) { try await task.value }
     }
 }
+
+struct SharedReplacementPreviewTests {
+    private let programming = SharedVocabulary(id: "programming", name: "Programming", rules: [rule("yuga db", "YugaDB")])
+
+    private func using(_ id: String, _ name: String, rules: [ReplacementsSet.Rule] = []) -> Mode {
+        var m = mode(id, name, rules: rules)
+        m.sharedVocabularies = ["programming"]
+        return m
+    }
+
+    private func sharedPreview(
+        _ phrases: [String], to destination: ReplacementPreview.Destination, global: [ReplacementsSet.Rule] = [],
+        modes: [Mode], history: [HistorySnapshot.Item]
+    ) throws -> ReplacementPreview {
+        try ReplacementPreview.make(
+            phrases: phrases, replacement: "Yugabyte", destination: destination,
+            global: ReplacementsSet(rules: global), modes: modes, shared: [programming],
+            history: history, searched: Set(history.map(\.reference)))
+    }
+
+    @Test func changesOnlyDictationsInModesThatUseTheVocabulary() throws {
+        let history = [item("Restart Ugabyte.", mode: "Code", line: 0), item("Restart Ugabyte.", mode: "Notes", line: 1)]
+        let result = try sharedPreview(
+            ["Ugabyte"], to: .shared("programming"), modes: [using("code", "Code"), mode("notes", "Notes")],
+            history: history)
+        #expect(result.effects.map(\.modeName) == ["Code"])
+        #expect(result.proposedRules == programming.rules + [rule("Ugabyte", "Yugabyte")])
+    }
+
+    @Test func skipsDictationsWhoseModeIsUnknown() throws {
+        let result = try sharedPreview(
+            ["Ugabyte"], to: .shared("programming"), modes: [using("code", "Code")],
+            history: [item("Restart Ugabyte.", mode: "Gone", line: 0)])
+        #expect(result.effects.isEmpty)
+    }
+
+    @Test func aModesOwnRuleStillWins() throws {
+        let result = try sharedPreview(
+            ["Ugabyte"], to: .shared("programming"), modes: [using("code", "Code", rules: [rule("Ugabyte", "UGA")])],
+            history: [item("Restart Ugabyte.", mode: "Code", line: 0)])
+        #expect(result.effects.isEmpty)
+    }
+
+    @Test func reportsAPhraseTheVocabularyAlreadyHasAndOneItOverridesInGlobal() throws {
+        let result = try sharedPreview(
+            ["yuga db", "Ugabyte"], to: .shared("programming"), global: [rule("Ugabyte", "Uga")],
+            modes: [using("code", "Code")], history: [])
+        #expect(result.statuses.map(\.kind) == [.conflicts(currentOutput: "YugaDB"), .overridesGlobal(globalOutput: "Uga")])
+    }
+
+    @Test func aGlobalRuleDoesNotChangeWhatASharedRuleAlreadyDecides() throws {
+        let result = try sharedPreview(
+            ["yuga db"], to: .global, modes: [using("code", "Code"), mode("notes", "Notes")],
+            history: [item("Start yuga db.", mode: "Code", line: 0), item("Start yuga db.", mode: "Notes", line: 1)])
+        #expect(result.effects.map(\.modeName) == ["Notes"])
+    }
+
+    @Test func aMissingVocabularyIsReported() throws {
+        #expect(throws: ReplacementPreview.Failure.destinationMissing) {
+            try sharedPreview(["Ugabyte"], to: .shared("gone"), modes: [], history: [])
+        }
+    }
+}

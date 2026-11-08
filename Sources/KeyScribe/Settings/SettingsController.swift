@@ -72,6 +72,7 @@ enum SettingsProblem: Equatable, CaseIterable {
 final class SettingsNavigationModel: ObservableObject {
     @Published var destination: SettingsDestination? = .general
     @Published var vocabularyScope: VocabularyScopeDestination = .global
+    @Published var composerSeed: ComposerSeed?
 
     func openVocabulary(for modeID: String) {
         vocabularyScope = modeID == Mode.directId ? .global : .mode(modeID)
@@ -117,6 +118,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let speechModels: SpeechModelsModel
     private let dictionary: DictionarySettingsModel
     private let replacements: ReplacementsSettingsModel
+    private let shared: SharedVocabulariesModel
     private let modes: ModesSettingsModel
     let codingAgents: CodingAgentsSettingsModel
     private let aiServices: AIServiceSettingsModel
@@ -172,6 +174,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         modesDir = repository.modesDir
         dictionary = DictionarySettingsModel(repository: repository)
         replacements = ReplacementsSettingsModel(repository: repository)
+        shared = SharedVocabulariesModel(repository: repository)
         modes = ModesSettingsModel(
             repository: repository, voiceCommandsEnabled: settings.features.isEnabled(.voiceCommands),
             codingAgentsEnabled: settings.features.isEnabled(.codingAgents))
@@ -204,7 +207,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
                         .init(
                             global: ReplacementsSet(rules: repository.replacementRules()),
                             globalWords: repository.dictionaryWords(),
-                            modes: ModeStore.loadAll(in: repository.modesDir))
+                            modes: ModeStore.loadAll(in: repository.modesDir),
+                            shared: repository.sharedVocabularies())
                     },
                     save: { destination, expected, proposed, word in
                         try repository.saveReplacementBatch(
@@ -219,7 +223,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
                 RuleEffectPreview.Config(
                     modes: ModeStore.loadAll(in: modesDir),
                     dictionary: DictionaryStore.loadOrDefault(supportDir: supportDir),
-                    replacements: ReplacementsStore.loadOrDefault(supportDir: supportDir))
+                    replacements: ReplacementsStore.loadOrDefault(supportDir: supportDir),
+                    shared: SharedVocabularyStore.load(in: SharedVocabularyStore.directory(in: supportDir)).vocabularies)
             }
             let historyEnabled = self?.model.historyEnabled ?? true
             return RulePreviewModel.Source(scope: scope, config: config, history: historyEnabled ? loadHistory : nil)
@@ -234,7 +239,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
                 let vocabulary = HistoryReplacementsModel.Vocabulary(
                     global: ReplacementsStore.loadOrDefault(supportDir: supportDir),
                     globalWords: DictionaryStore.loadOrDefault(supportDir: supportDir).words,
-                    modes: ModeStore.loadAll(in: modesDir))
+                    modes: ModeStore.loadAll(in: modesDir),
+                    shared: SharedVocabularyStore.load(in: SharedVocabularyStore.directory(in: supportDir)).vocabularies)
                 return HistoryReplacementsModel.mishearingHints(heard: heard, modeName: modeName, vocabulary: vocabulary)
             }
         }
@@ -265,6 +271,10 @@ final class SettingsController: NSObject, NSWindowDelegate {
         case .mode(let id):
             destination = .mode(id)
             name = ModeStore.loadAll(in: modesDir).first { $0.id == id }?.name ?? id
+        case .shared(let id):
+            destination = .shared(id)
+            shared.reload()
+            name = shared.vocabulary(id)?.name ?? id
         }
         return launcher.make(word, destination, name, onSaved)
     }
@@ -298,6 +308,13 @@ final class SettingsController: NSObject, NSWindowDelegate {
         present(.modes)
     }
 
+    func presentSharedVocabulary(id: String, draft: ComposerSeed? = nil) {
+        shared.reload()
+        navigation.composerSeed = draft
+        navigation.vocabularyScope = .shared(id)
+        present(.vocabulary)
+    }
+
     func presentAIService(id: String) {
         aiServices.reload()
         aiServices.selectedID = aiServices.connections.first(where: { $0.id == id })?.id
@@ -323,7 +340,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         }
         let root = SettingsRootView(
             general: model, speechModels: speechModels, dictionary: dictionary,
-            replacements: replacements, aiServices: aiServices, modes: modes, history: history,
+            replacements: replacements, shared: shared, aiServices: aiServices, modes: modes, history: history,
             problems: problems, navigation: navigation, recordingState: recordingState,
             accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch,
             onHistoryPaneChange: { [weak self] active in self?.handleHistoryPaneChange(active: active) },
@@ -461,6 +478,7 @@ struct SettingsRootView: View {
     @ObservedObject var speechModels: SpeechModelsModel
     @ObservedObject var dictionary: DictionarySettingsModel
     @ObservedObject var replacements: ReplacementsSettingsModel
+    @ObservedObject var shared: SharedVocabulariesModel
     @ObservedObject var aiServices: AIServiceSettingsModel
     @ObservedObject var modes: ModesSettingsModel
     @ObservedObject var history: HistoryPaneModel
@@ -529,8 +547,9 @@ struct SettingsRootView: View {
                 SpeechModelsView(model: speechModels, settings: general)
             case .vocabulary:
                 VocabularySettingsView(
-                    dictionary: dictionary, replacements: replacements, modes: modes,
+                    dictionary: dictionary, replacements: replacements, shared: shared, modes: modes,
                     navigationSelection: $navigation.vocabularyScope,
+                    composerSeed: $navigation.composerSeed,
                     historyReplacements: history.hasStoredHistory ? historyReplacements : nil,
                     rulePreviewSource: rulePreviewSource)
                     .task {

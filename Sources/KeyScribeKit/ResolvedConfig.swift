@@ -9,6 +9,7 @@ public final class ResolvedConfig: @unchecked Sendable {
     public let modes: [Mode]
     public let dictionary: DictionarySet
     public let replacements: ReplacementsSet
+    public let shared: [SharedVocabulary]
     public let connections: ConnectionSet
     private let fragments: [String: String]
     private let voiceCommands: VoiceCommandConfig
@@ -22,21 +23,23 @@ public final class ResolvedConfig: @unchecked Sendable {
 
     public convenience init(
         modes: [Mode], dictionary: DictionarySet, replacements: ReplacementsSet,
-        connections: ConnectionSet, fragments: [String: String], voiceCommands: VoiceCommandConfig = VoiceCommandConfig()
+        connections: ConnectionSet, fragments: [String: String], voiceCommands: VoiceCommandConfig = VoiceCommandConfig(),
+        shared: [SharedVocabulary] = []
     ) {
         self.init(
             modes: modes, dictionary: dictionary, replacements: replacements, connections: connections,
-            fragments: fragments, voiceCommands: voiceCommands, onBuildTextStages: nil)
+            fragments: fragments, voiceCommands: voiceCommands, shared: shared, onBuildTextStages: nil)
     }
 
     init(
         modes: [Mode], dictionary: DictionarySet, replacements: ReplacementsSet,
         connections: ConnectionSet, fragments: [String: String], voiceCommands: VoiceCommandConfig = VoiceCommandConfig(),
-        onBuildTextStages: (@Sendable (String) -> Void)?
+        shared: [SharedVocabulary] = [], onBuildTextStages: (@Sendable (String) -> Void)?
     ) {
         self.modes = modes
         self.dictionary = dictionary
         self.replacements = replacements
+        self.shared = shared
         self.connections = connections
         self.fragments = fragments
         self.voiceCommands = voiceCommands
@@ -55,10 +58,7 @@ public final class ResolvedConfig: @unchecked Sendable {
     // published result wins, which is harmless because a build is a pure function of this frozen config.
     public func mergedDictionary(for mode: Mode?) -> [String] {
         memoized(mode, in: \.mergedDictionaryCache) {
-            mode.map { m in
-                VocabularyMerge.words(
-                    global: dictionary.words, local: m.dictionary.words, includeGlobal: m.dictionary.includeGlobal)
-            } ?? dictionary.words
+            VocabularyMerge.words(for: mode, global: dictionary.words, shared: shared)
         }
     }
 
@@ -195,10 +195,7 @@ public final class ResolvedConfig: @unchecked Sendable {
     }
 
     private func buildTextStages(for mode: Mode?) -> [any PipelineStage] {
-        let rules = VocabularyMerge.rules(
-            global: replacements.toRules().map { $0.from(.global) },
-            local: mode.map { m in m.replacements.toRules().map { $0.from(.mode(m.id)) } } ?? [],
-            includeGlobal: mode?.replacements.includeGlobal ?? true)
+        let rules = VocabularyMerge.rules(for: mode, global: replacements, shared: shared)
         return TakeStages.text(
             liveEdits: mode?.commands.liveEdits ?? true, rules: rules, numbers: mode?.commands.numbers ?? false,
             dictionary: mergedDictionary(for: mode))

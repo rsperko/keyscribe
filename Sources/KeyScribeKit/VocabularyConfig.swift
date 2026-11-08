@@ -183,6 +183,83 @@ extension [ReplacementsSet.Rule] {
 }
 
 public enum VocabularyMerge {
+    // Mode-only over shared over Global. Among shared vocabularies the one the mode lists first wins; Settings
+    // asks the user to settle a real conflict, so the order only decides a hand-edited one.
+    public static func words(global: [String], shared: [[String]], local: [String], includeGlobal: Bool) -> [String] {
+        let sharedWords = shared.reversed().reduce([String]()) { below, above in
+            words(global: below, local: above, includeGlobal: true)
+        }
+        let base = includeGlobal ? words(global: global, local: sharedWords, includeGlobal: true) : sharedWords
+        return words(global: base, local: local, includeGlobal: true)
+    }
+
+    public static func rules(
+        global: [ReplacementRule], shared: [[ReplacementRule]], local: [ReplacementRule], includeGlobal: Bool
+    ) -> [ReplacementRule] {
+        let sharedRules = shared.reduce([ReplacementRule]()) { above, below in
+            rules(global: below, local: above, includeGlobal: true)
+        }
+        let base = includeGlobal ? rules(global: global, local: sharedRules, includeGlobal: true) : sharedRules
+        return rules(global: base, local: local, includeGlobal: true)
+    }
+
+    // What one mode uses, from Global, the shared vocabularies it lists, and its own entries.
+    public static func words(for mode: Mode?, global: [String], shared: [SharedVocabulary]) -> [String] {
+        guard let mode else { return global }
+        return words(
+            global: global, shared: using(mode, shared).map(\.words), local: mode.dictionary.words,
+            includeGlobal: mode.dictionary.includeGlobal)
+    }
+
+    public static func rules(for mode: Mode?, global: ReplacementsSet, shared: [SharedVocabulary]) -> [ReplacementRule] {
+        let globalRules = global.toRules().map { $0.from(.global) }
+        guard let mode else { return globalRules }
+        return rules(
+            global: globalRules, shared: using(mode, shared).map(\.replacementRules),
+            local: mode.replacements.toRules().map { $0.from(.mode(mode.id)) },
+            includeGlobal: mode.replacements.includeGlobal)
+    }
+
+    // An entry a mode uses but does not list itself; `source` is the shared vocabulary's id, or nil for Global.
+    public struct Included<Value: Equatable & Sendable>: Equatable, Sendable {
+        public let value: Value
+        public let source: String?
+
+        public init(value: Value, source: String?) {
+            self.value = value
+            self.source = source
+        }
+    }
+
+    // What a mode inherits, only the entries in effect there, in the order the merge decides them.
+    public static func included(
+        in mode: Mode, globalWords: [String], global: ReplacementsSet, shared: [SharedVocabulary]
+    ) -> (words: [Included<String>], rules: [Included<ReplacementsSet.Rule>]) {
+        let using = using(mode, shared)
+        var seenWords = Set(mode.dictionary.words.map(wordKey))
+        var words: [Included<String>] = []
+        let wordLayers = using.map { ($0.words, Optional($0.id)) } + (mode.dictionary.includeGlobal ? [(globalWords, nil)] : [])
+        for (layer, source) in wordLayers {
+            for word in layer where seenWords.insert(wordKey(word)).inserted {
+                words.append(.init(value: word, source: source))
+            }
+        }
+        func ruleKey(_ rule: ReplacementsSet.Rule) -> String { key(rule.toReplacementRule()) }
+        var seenRules = Set(mode.replacements.rules.map(ruleKey))
+        var rules: [Included<ReplacementsSet.Rule>] = []
+        let ruleLayers = using.map { ($0.rules, Optional($0.id)) } + (mode.replacements.includeGlobal ? [(global.rules, nil)] : [])
+        for (layer, source) in ruleLayers {
+            for rule in layer where seenRules.insert(ruleKey(rule)).inserted {
+                rules.append(.init(value: rule, source: source))
+            }
+        }
+        return (words, rules)
+    }
+
+    public static func using(_ mode: Mode, _ shared: [SharedVocabulary]) -> [SharedVocabulary] {
+        mode.sharedVocabularies.compactMap { id in shared.first { $0.id == id } }
+    }
+
     public static func words(global: [String], local: [String], includeGlobal: Bool) -> [String] {
         var seen = Set<String>()
         let uniqueLocal = local.filter { seen.insert(wordKey($0)).inserted }

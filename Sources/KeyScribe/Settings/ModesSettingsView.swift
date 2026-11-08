@@ -73,7 +73,8 @@ struct ModesSettingsView: View {
                                 VoiceCommandsEditorView(
                                     mode: mode, allModes: model.modes, onUpdate: { model.update($0) },
                                     onMoveShortcut: model.proposeMove(to:), model: model.voiceCommands,
-                                    onEditVocabulary: { onEditVocabulary(mode.id) })
+                                    onEditVocabulary: { onEditVocabulary(mode.id) },
+                                    sharedVocabularyNames: model.sharedVocabularyNames(for: mode))
                             } else {
                                 ModeEditorView(
                                     mode: mode, allModes: model.modes,
@@ -90,7 +91,8 @@ struct ModesSettingsView: View {
                                     onDuplicate: { model.duplicate(mode) },
                                     onEditVocabulary: { onEditVocabulary(mode.id) },
                                     onDelete: { modePendingDelete = mode },
-                                    codingAgents: model.codingAgents)
+                                    codingAgents: model.codingAgents,
+                                    sharedVocabularyNames: model.sharedVocabularyNames(for: mode))
                             }
                         }
                         .disabled(model.loadFailure(for: mode.id) != nil)

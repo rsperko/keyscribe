@@ -16,6 +16,7 @@ final class HistoryReplacementsModel: ObservableObject, Identifiable {
         let global: ReplacementsSet
         let globalWords: [String]
         let modes: [Mode]
+        var shared: [SharedVocabulary] = []
     }
 
     struct PreviewRequest: Sendable {
@@ -29,7 +30,8 @@ final class HistoryReplacementsModel: ObservableObject, Identifiable {
         func make() throws -> ReplacementPreview {
             try ReplacementPreview.make(
                 phrases: phrases, replacement: replacement, destination: destination,
-                global: vocabulary.global, modes: vocabulary.modes, history: history, searched: searched)
+                global: vocabulary.global, modes: vocabulary.modes, shared: vocabulary.shared,
+                history: history, searched: searched)
         }
     }
 
@@ -341,7 +343,8 @@ final class HistoryReplacementsModel: ObservableObject, Identifiable {
             statuses = try Dictionary(uniqueKeysWithValues: candidates.compactMap { phrase in
                 let made = try ReplacementPreview.make(
                     phrases: [phrase.heard], replacement: replacement, destination: destination,
-                    global: vocabulary.global, modes: vocabulary.modes, history: [], searched: [])
+                    global: vocabulary.global, modes: vocabulary.modes, shared: vocabulary.shared,
+                    history: [], searched: [])
                 return made.statuses.first.map { (phrase.id, $0.kind) }
             })
         } catch {
@@ -412,6 +415,7 @@ final class HistoryReplacementsModel: ObservableObject, Identifiable {
             switch try dependencies.save(destination, reviewBase, preview.proposedRules, requiredWord) {
             case .saved: onSaved(preview.replacementCount)
             case .stale(let reason): await recover(from: reason)
+            case .disagreement(let message): problem = Problem(message: message, recovery: nil)
             }
         } catch {
             problem = Problem(message: "Could not save the replacements. Nothing was added. Try again.", recovery: nil)
@@ -428,6 +432,9 @@ final class HistoryReplacementsModel: ObservableObject, Identifiable {
                 return .destinationMissing
             }
             words = mode.dictionary.words
+        case .shared(let id):
+            guard let shared = vocabulary.shared.first(where: { $0.id == id }) else { return .destinationMissing }
+            words = shared.words
         }
         guard let requiredWord, !words.contains(where: { $0.caseInsensitiveCompare(requiredWord) == .orderedSame }) else {
             return nil
@@ -495,8 +502,14 @@ final class HistoryReplacementsModel: ObservableObject, Identifiable {
     private var requiredWord: String? { word }
 
     private func mergedWords(_ vocabulary: Vocabulary) -> [String] {
-        guard case .mode(let id) = destination else { return vocabulary.globalWords }
-        return Self.words(vocabulary, mode: vocabulary.modes.first { $0.id == id })
+        switch destination {
+        case .global: vocabulary.globalWords
+        case .mode(let id): Self.words(vocabulary, mode: vocabulary.modes.first { $0.id == id })
+        case .shared(let id):
+            VocabularyMerge.words(
+                global: vocabulary.globalWords, shared: [vocabulary.shared.first { $0.id == id }?.words ?? []],
+                local: [], includeGlobal: true)
+        }
     }
 
     private nonisolated static func mode(
@@ -516,22 +529,26 @@ final class HistoryReplacementsModel: ObservableObject, Identifiable {
         let hints = MishearingHint.find(
             heard: heard, dictionary: words(vocabulary, mode: mode), stages: currentStages(vocabulary, mode: mode))
         return hints.map { hint in
-            let local = mode.flatMap { $0.dictionary.words.contains(hint.term) ? $0.id : nil }
-            return .init(phrase: hint.phrase, term: hint.term, origin: local.map { .mode($0) } ?? .global)
+            .init(phrase: hint.phrase, term: hint.term, origin: origin(of: hint.term, in: mode, vocabulary: vocabulary))
         }
     }
 
+    // Where a word a mode uses lives: its own list first, then a shared vocabulary it uses, else Global.
+    private nonisolated static func origin(of term: String, in mode: Mode?, vocabulary: Vocabulary) -> ReplacementOrigin {
+        guard let mode else { return .global }
+        if mode.dictionary.words.contains(term) { return .mode(mode.id) }
+        if let shared = VocabularyMerge.using(mode, vocabulary.shared).first(where: { $0.words.contains(term) }) {
+            return .shared(shared.id)
+        }
+        return .global
+    }
+
     private nonisolated static func words(_ vocabulary: Vocabulary, mode: Mode?) -> [String] {
-        mode.map {
-            VocabularyMerge.words(
-                global: vocabulary.globalWords, local: $0.dictionary.words, includeGlobal: $0.dictionary.includeGlobal)
-        } ?? vocabulary.globalWords
+        VocabularyMerge.words(for: mode, global: vocabulary.globalWords, shared: vocabulary.shared)
     }
 
     private nonisolated static func currentStages(_ vocabulary: Vocabulary, mode: Mode?) -> [any PipelineStage] {
-        let rules = VocabularyMerge.rules(
-            global: vocabulary.global.toRules(), local: mode?.replacements.rules.toReplacementRules() ?? [],
-            includeGlobal: mode?.replacements.includeGlobal ?? true)
+        let rules = VocabularyMerge.rules(for: mode, global: vocabulary.global, shared: vocabulary.shared)
         return TakeStages.text(liveEdits: false, rules: rules, numbers: false, dictionary: words(vocabulary, mode: mode))
     }
 
@@ -545,8 +562,11 @@ final class HistoryReplacementsModel: ObservableObject, Identifiable {
     }
 
     private func destinationRules(_ vocabulary: Vocabulary) -> [ReplacementsSet.Rule] {
-        guard case .mode(let id) = destination else { return vocabulary.global.rules }
-        return vocabulary.modes.first { $0.id == id }?.replacements.rules ?? []
+        switch destination {
+        case .global: vocabulary.global.rules
+        case .mode(let id): vocabulary.modes.first { $0.id == id }?.replacements.rules ?? []
+        case .shared(let id): vocabulary.shared.first { $0.id == id }?.rules ?? []
+        }
     }
 
     private func invalidatePreview() {

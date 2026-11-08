@@ -50,7 +50,8 @@ final class ConfigRepository {
     func reconcileReplacementUsage() {
         guard let replacementUsage, config.configFileError == nil else { return }
         replacementUsage.reconcile(
-            keys: ReplacementUsage.configuredKeys(global: config.replacements, modes: config.storedModes))
+            keys: ReplacementUsage.configuredKeys(
+                global: config.replacements, modes: config.storedModes, shared: config.shared))
     }
 
     func addChangeObserver(_ observer: @escaping () -> Void) {
@@ -105,6 +106,8 @@ final class ConfigRepository {
     enum AddResult: Equatable {
         case saved
         case refused(String)
+        // Saving would leave shared vocabularies disagreeing; the vocabulary named is where to settle it.
+        case needsChoice(String, vocabularyId: String)
         case failed
     }
 
@@ -116,6 +119,9 @@ final class ConfigRepository {
                 try mutateMode(id: id) { mode in
                     mode.dictionary.words = DictionarySet(words: mode.dictionary.words).adding(word: word).words
                 }
+            case .shared(let id):
+                try commitVocabularyChange(
+                    shared: (id, { $0.words = DictionarySet(words: $0.words).adding(word: word).words }), modes: [:])
             }
         }
     }
@@ -132,6 +138,11 @@ final class ConfigRepository {
                     mode.replacements.rules = ReplacementsSet(rules: mode.replacements.rules)
                         .adding(heard: heard, replace: replace, regex: regex, wholeDictation: wholeDictation).rules
                 }
+            case .shared(let id):
+                try commitVocabularyChange(shared: (id, {
+                    $0.rules = ReplacementsSet(rules: $0.rules)
+                        .adding(heard: heard, replace: replace, regex: regex, wholeDictation: wholeDictation).rules
+                }), modes: [:])
             }
         }
     }
@@ -140,9 +151,12 @@ final class ConfigRepository {
         do {
             try save()
             return .saved
-        } catch let refused as UnreadKeys {
-            return .refused(refused.localizedDescription)
+        } catch let disagreement as Disagreement {
+            guard let id = disagreement.vocabularyId else { return .refused(disagreement.localizedDescription) }
+            return .needsChoice(disagreement.localizedDescription, vocabularyId: id)
         } catch {
+            let underlying = (error as? VocabularyFileFailure)?.underlying ?? error
+            if let refused = underlying as? UnreadKeys { return .refused(refused.localizedDescription) }
             return .failed
         }
     }
@@ -150,15 +164,18 @@ final class ConfigRepository {
     func vocabularyScope(for scope: CorrectionDestination.Scope) -> VocabularyScope {
         let globalWords = dictionaryWords()
         let globalRules = replacementRules()
-        guard case .mode(let id) = scope, let mode = resolved.modes.first(where: { $0.id == id }) else {
+        switch scope {
+        case .global:
             return VocabularyScope(globalWords: globalWords, globalRules: globalRules)
+        case .shared(let id):
+            guard let vocabulary = resolved.shared.first(where: { $0.id == id }) else { return VocabularyScope() }
+            return VocabularyScope(globalWords: vocabulary.words, globalRules: vocabulary.rules)
+        case .mode(let id):
+            guard let mode = resolved.modes.first(where: { $0.id == id }) else {
+                return VocabularyScope(globalWords: globalWords, globalRules: globalRules)
+            }
+            return VocabularyScope.of(mode, globalWords: globalWords, globalRules: globalRules, shared: resolved.shared)
         }
-        return VocabularyScope(
-            globalWords: globalWords, globalRules: globalRules,
-            local: VocabularyScope.Local(
-                words: mode.dictionary.words, rules: mode.replacements.rules,
-                includeGlobalWords: mode.dictionary.includeGlobal,
-                includeGlobalRules: mode.replacements.includeGlobal))
     }
 
     @discardableResult
@@ -202,6 +219,7 @@ final class ConfigRepository {
         enum StaleReason: Equatable { case rulesChanged, wordRemoved, destinationMissing }
         case saved
         case stale(StaleReason)
+        case disagreement(String)
     }
 
     func saveReplacementBatch(
@@ -229,6 +247,22 @@ final class ConfigRepository {
             guard mode.replacements.rules == expected else { return .stale(.rulesChanged) }
             mode.replacements.rules = proposed
             try writeMode(mode)
+        case .shared(let id):
+            let file = SharedVocabularyStore.fileURL(id: id, in: sharedVocabularyDir)
+            guard FileManager.default.fileExists(atPath: file.path) else { return .stale(.destinationMissing) }
+            let current = try SharedVocabularyStore.decode(from: readForMutation(file), id: id)
+            guard contains(current.words) else { return .stale(.wordRemoved) }
+            guard current.rules == expected else { return .stale(.rulesChanged) }
+            do {
+                try commitVocabularyChange(shared: (id, { vocabulary in
+                    guard vocabulary.rules == expected else { throw StaleBatch() }
+                    vocabulary.rules = proposed
+                }), modes: [:])
+            } catch is StaleBatch {
+                return .stale(.rulesChanged)
+            } catch let disagreement as Disagreement {
+                return .disagreement(disagreement.localizedDescription)
+            }
         }
         return .saved
     }
@@ -321,6 +355,189 @@ final class ConfigRepository {
         transform(&mode)
         try writeMode(mode)
         return mode
+    }
+
+    // MARK: Shared vocabularies
+
+    var sharedVocabularyDir: URL { SharedVocabularyStore.directory(in: supportDir) }
+
+    func sharedVocabularies() -> [SharedVocabulary] { SharedVocabularyStore.load(in: sharedVocabularyDir).vocabularies }
+
+    struct NameProblem: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    // A new vocabulary starts empty and used by no mode. Its id never matches one a mode still lists, so a mode
+    // that pointed at a deleted vocabulary does not pick up a new one by accident.
+    @discardableResult
+    func createSharedVocabulary(named name: String) throws -> SharedVocabulary {
+        let existing = sharedVocabularies()
+        if let problem = SharedVocabularyStore.nameProblem(name, among: existing) { throw NameProblem(message: problem) }
+        let referenced = ModeStore.loadAll(in: modesDir).flatMap(\.sharedVocabularies)
+        let id = SharedVocabularyStore.newId(for: name, existing: Set(existing.map(\.id) + referenced))
+        let vocabulary = SharedVocabulary(id: id, name: name.trimmingCharacters(in: .whitespacesAndNewlines))
+        try commit(touching: [SharedVocabularyStore.fileURL(id: id, in: sharedVocabularyDir)]) {
+            try SharedVocabularyStore.write(vocabulary, to: sharedVocabularyDir)
+        }
+        return vocabulary
+    }
+
+    @discardableResult
+    func mutateSharedVocabulary(id: String, _ transform: (inout SharedVocabulary) -> Void) throws -> SharedVocabulary {
+        let file = SharedVocabularyStore.fileURL(id: id, in: sharedVocabularyDir)
+        let toml = try readForMutation(file)
+        var vocabulary = try SharedVocabularyStore.decode(from: toml, id: id)
+        try refuseUnreadKeys(toml, in: file, SharedVocabularyStore.unknownKeys(in:))
+        transform(&vocabulary)
+        try commit(touching: [file]) { try SharedVocabularyStore.write(vocabulary, to: sharedVocabularyDir) }
+        return vocabulary
+    }
+
+    func renameSharedVocabulary(id: String, to name: String) throws {
+        if let problem = SharedVocabularyStore.nameProblem(name, among: sharedVocabularies(), renaming: id) {
+            throw NameProblem(message: problem)
+        }
+        try mutateSharedVocabulary(id: id) { $0.name = name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
+    // Which modes use a vocabulary. Plain Dictation never does.
+    func setSharedVocabulary(id: String, usedBy modeIds: Set<String>) throws {
+        var changes: [String: (inout Mode) -> Void] = [:]
+        for mode in ModeStore.loadAll(in: modesDir) where mode.hasOwnVocabulary {
+            guard mode.sharedVocabularies.contains(id) != modeIds.contains(mode.id) else { continue }
+            changes[mode.id] = { $0.setUsing(id, modeIds.contains($0.id)) }
+        }
+        try commitVocabularyChange(modes: changes)
+    }
+
+    // A change that would leave shared vocabularies disagreeing in a mode, refused before anything is written.
+    struct Disagreement: LocalizedError {
+        let vocabularyId: String?
+        let vocabularyName: String?
+        let items: [SharedVocabularyConflicts.Introduced]
+
+        var errorDescription: String? {
+            guard let first = items.first else { return nil }
+            var sources: [String] = []
+            for source in first.competition.options.flatMap(\.sources) where !sources.contains(source) { sources.append(source) }
+            let where_ = vocabularyName.map { "Add it from Settings \u{25B8} Vocabulary \u{25B8} \($0) instead, where you can choose" }
+                ?? "Choose in Settings \u{25B8} Vocabulary"
+            let more = items.count > 1 ? " It would also leave \(items.count - 1) more to settle." : ""
+            return "This would make \(ListFormatter.localizedString(byJoining: sources)) disagree about "
+                + "\u{201C}\(first.competition.phrase)\u{201D} in \(first.modeName). \(where_) which one \(first.modeName) uses.\(more)"
+        }
+    }
+
+    // A file the change needed could not be read, so nothing was written.
+    struct VocabularyFileFailure: Error {
+        let file: URL
+        let relativePath: String
+        let underlying: Error
+    }
+
+    // One change to a shared vocabulary and the modes it needs, written together: each file is re-read at write
+    // time, a change that would leave shared vocabularies disagreeing anywhere is refused, and anything already
+    // written is put back if a later write fails. Every save into a shared vocabulary goes through here.
+    func commitVocabularyChange(
+        shared change: (id: String, transform: (inout SharedVocabulary) throws -> Void)? = nil,
+        modes changes: [String: (inout Mode) -> Void]
+    ) throws {
+        var originals: [Mode] = []
+        var updated: [Mode] = []
+        for (id, transform) in changes.sorted(by: { $0.key < $1.key }) {
+            let original = try readingFile(modeFileURL(id: id), "modes/\(id).toml") { try loadModeForMutation(id: id) }
+            guard original.hasOwnVocabulary else { throw ConfigError.invalid("Plain Dictation uses only global vocabulary") }
+            var mode = original
+            transform(&mode)
+            guard mode != original else { continue }
+            originals.append(original)
+            updated.append(mode)
+        }
+        var file: URL?
+        var before: SharedVocabulary?
+        var after: SharedVocabulary?
+        if let change {
+            let url = SharedVocabularyStore.fileURL(id: change.id, in: sharedVocabularyDir)
+            let original = try readingFile(url, "\(SharedVocabularyStore.directoryName)/\(change.id).toml") {
+                let toml = try readForMutation(url)
+                let vocabulary = try SharedVocabularyStore.decode(from: toml, id: change.id)
+                try refuseUnreadKeys(toml, in: url, SharedVocabularyStore.unknownKeys(in:))
+                return vocabulary
+            }
+            var vocabulary = original
+            try change.transform(&vocabulary)
+            if vocabulary != original { (file, before, after) = (url, original, vocabulary) }
+        }
+        guard after != nil || !updated.isEmpty else { return }
+        let modesBefore = ModeStore.loadAll(in: modesDir)
+        let sharedBefore = sharedVocabularies()
+        let introduced = SharedVocabularyConflicts.introduced(
+            modesBefore: modesBefore, sharedBefore: sharedBefore,
+            modesAfter: modesBefore.map { mode in updated.first { $0.id == mode.id } ?? mode },
+            sharedAfter: sharedBefore.map { $0.id == after?.id ? after! : $0 })
+        if !introduced.isEmpty { throw Disagreement(vocabularyId: after?.id, vocabularyName: after?.name, items: introduced) }
+        if let file, let after {
+            try commit(touching: [file]) { try SharedVocabularyStore.write(after, to: sharedVocabularyDir) }
+        }
+        guard !updated.isEmpty else { return }
+        do {
+            try writeModes(updated, restoring: originals)
+        } catch let writeError {
+            guard let file, let before else { throw writeError }
+            do {
+                try commit(touching: [file]) { try SharedVocabularyStore.write(before, to: sharedVocabularyDir) }
+            } catch {
+                let unrestored = ((writeError as? IncompleteRestore)?.unrestored ?? []) + [before.name]
+                throw IncompleteRestore(underlying: writeError, unrestored: unrestored)
+            }
+            throw writeError
+        }
+    }
+
+    private func readingFile<T>(_ file: URL, _ relativePath: String, _ read: () throws -> T) throws -> T {
+        do { return try read() } catch { throw VocabularyFileFailure(file: file, relativePath: relativePath, underlying: error) }
+    }
+
+    private struct StaleBatch: Error {}
+
+    struct MoveConflict: LocalizedError {
+        let message: String
+        var errorDescription: String? { message }
+    }
+
+    // The entry joins the vocabulary and leaves the mode, which starts using the vocabulary so it keeps the entry.
+    // `settlements` are the entries of each mode's own that settle what the move leaves disagreeing there.
+    func moveToSharedVocabulary(
+        _ entry: SharedVocabularyMove.Entry, fromMode modeId: String, to vocabularyId: String,
+        settlements: [String: PendingAttachment.Settlement]
+    ) throws {
+        let file = SharedVocabularyStore.fileURL(id: vocabularyId, in: sharedVocabularyDir)
+        let destination = try SharedVocabularyStore.decode(from: readForMutation(file), id: vocabularyId)
+        let origin = try loadModeForMutation(id: modeId)
+        if let conflict = SharedVocabularyMove.plan(entry, from: origin, to: destination, modes: []).conflict {
+            throw MoveConflict(message: conflict)
+        }
+        var changes: [String: (inout Mode) -> Void] = settlements.mapValues { settlement in { $0.settle(settlement) } }
+        let settleOrigin = changes[modeId]
+        changes[modeId] = { mode in
+            var vocabulary = destination
+            SharedVocabularyMove.apply(entry, to: &vocabulary, from: &mode)
+            settleOrigin?(&mode)
+        }
+        try commitVocabularyChange(
+            shared: (vocabularyId, { vocabulary in
+                var scratch = origin
+                SharedVocabularyMove.apply(entry, to: &vocabulary, from: &scratch)
+            }),
+            modes: changes)
+    }
+
+    // The modes stop using it first, so a failure never leaves a mode pointing at a vocabulary that is gone.
+    func deleteSharedVocabulary(id: String) throws {
+        try setSharedVocabulary(id: id, usedBy: [])
+        let file = SharedVocabularyStore.fileURL(id: id, in: sharedVocabularyDir)
+        try commit(touching: [file]) { try SharedVocabularyStore.delete(id: id, from: sharedVocabularyDir) }
     }
 
     func deleteMode(_ mode: Mode) throws {

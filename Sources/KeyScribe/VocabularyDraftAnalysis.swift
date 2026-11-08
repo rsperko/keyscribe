@@ -114,6 +114,7 @@ struct VocabularyDraftAnalysis {
         let place = switch destination.scope {
         case .global: "modes that include Global vocabulary"
         case .mode: destination.title
+        case .shared: "the modes that use \(destination.title)"
         }
         let what = regex ? "matches of “\(heard)”" : "“\(heard)”"
         return "Replace \(what) with “\(ReplacementAuthoring.preview(for: replace).text)” in \(place)."
@@ -121,7 +122,10 @@ struct VocabularyDraftAnalysis {
 
     static func isAlreadyAdded(_ action: VocabularyAnalysis.Action?) -> Bool {
         guard case .noChange(let reason)? = action else { return false }
-        return reason == .wordAlreadyListed || reason == .wordCoveredByGlobal
+        switch reason {
+        case .wordAlreadyListed, .wordCoveredByGlobal, .wordCoveredByShared: return true
+        case .replacementAlreadyListed, .replacementCoveredByGlobal, .replacementCoveredByShared: return false
+        }
     }
 
     // The selected words were a known name misheard: adding the name again does nothing, but correcting that
@@ -177,10 +181,14 @@ struct VocabularyDraftAnalysis {
             return .existing("Already in Words to Recognize.")
         case .noChange(.wordCoveredByGlobal):
             return .existing("Already included from your global vocabulary.")
+        case .noChange(.wordCoveredByShared(let name)):
+            return .existing("Already included from \(name).")
         case .noChange(.replacementAlreadyListed):
             return .existing("Already in Automatic Replacements.")
         case .noChange(.replacementCoveredByGlobal):
             return .existing("Already included from your global replacements.")
+        case .noChange(.replacementCoveredByShared(let name)):
+            return .existing("Already included from \(name).")
         case .updateReplacement(let current):
             let current = current.isEmpty
                 ? "nothing"
@@ -189,8 +197,8 @@ struct VocabularyDraftAnalysis {
         case .updateWord(let current):
             return .update("Updates the existing word — “\(term)” is currently spelled “\(current)”.")
         case .addWord, .addReplacement:
-            if let message = analysis.advisories.first(where: { $0.kind == .overridesGlobal })?.message {
-                return .advisory(message)
+            if !analysis.advisories.isEmpty {
+                return .advisory(analysis.advisories.map(\.message).joined(separator: " "))
             }
             if case let .replacement(_, replace, regex) = proposal {
                 if let literal = ReplacementAuthoring.literalReturnMarkerAdvisory(replace: replace, regex: regex) {

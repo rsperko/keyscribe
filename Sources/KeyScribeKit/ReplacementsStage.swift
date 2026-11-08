@@ -3,6 +3,7 @@ import Foundation
 public enum ReplacementOrigin: Sendable, Hashable {
     case global
     case mode(String)
+    case shared(String)
 }
 
 public struct ReplacementRule: Sendable, Equatable {

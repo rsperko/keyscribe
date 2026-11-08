@@ -65,6 +65,28 @@ enum AccessibilityID {
             static let scopeList = "settings.vocabulary.scopeList"
             static let global = "settings.vocabulary.scope.global"
             static func mode(_ modeID: String) -> String { "settings.vocabulary.scope.mode.\(modeID)" }
+            static func shared(_ id: String) -> String { "settings.vocabulary.scope.shared.\(id)" }
+            static let addShared = "settings.vocabulary.shared.add"
+            static let sharedName = "settings.vocabulary.shared.name"
+            static let sharedNameSave = "settings.vocabulary.shared.nameSave"
+            static let sharedUsedBy = "settings.vocabulary.shared.usedBy"
+            static let sharedChooseModes = "settings.vocabulary.shared.chooseModes"
+            static func sharedModeChoice(_ modeID: String) -> String { "settings.vocabulary.shared.modeChoice.\(modeID)" }
+            static let sharedModesApply = "settings.vocabulary.shared.modesApply"
+            static let sharedRename = "settings.vocabulary.shared.rename"
+            static let sharedDelete = "settings.vocabulary.shared.delete"
+            static let modeUses = "settings.vocabulary.mode.uses"
+            static let modeChooseShared = "settings.vocabulary.mode.chooseShared"
+            static func modeEditShared(_ id: String) -> String { "settings.vocabulary.mode.editShared.\(id)" }
+            static func modeSharedChoice(_ id: String) -> String { "settings.vocabulary.mode.sharedChoice.\(id)" }
+            static let modeSharedApply = "settings.vocabulary.mode.sharedApply"
+            static let modeIncluded = "settings.vocabulary.mode.included"
+            static let moveSharedChoice = "settings.vocabulary.moveShared.choice"
+            static let replacementEditorMoveToShared = "settings.vocabulary.replacementEditor.moveToShared"
+            static func includedSource(_ id: String) -> String { "settings.vocabulary.included.source.\(id)" }
+            static func showOverride(_ modeId: String) -> String { "settings.vocabulary.showOverride.\(modeId)" }
+            static let moveSharedName = "settings.vocabulary.moveShared.name"
+            static let moveSharedApply = "settings.vocabulary.moveShared.apply"
             static let composerTerm = "settings.vocabulary.composer.term"
             static let composerUseInstead = "settings.vocabulary.composer.useInstead"
             static let composerUseInsteadExpand = "settings.vocabulary.composer.useInstead.expand"
@@ -528,6 +550,7 @@ enum AccessibilityID {
         static let regexToggle = "correction.regexToggle"
         static let destination = "correction.destination"
         static let status = "correction.status"
+        static let openVocabulary = "correction.openVocabulary"
         static let add = "correction.add"
         static let addAndReplace = "correction.addAndReplace"
         static let cancel = "correction.cancel"
@@ -590,6 +613,11 @@ enum AccessibilityID {
         Settings.Vocabulary.composerTerm, Settings.Vocabulary.composerUseInstead,
         Settings.Vocabulary.composerUseInsteadExpand, Settings.Vocabulary.composerUseInsteadEditor,
         Settings.Vocabulary.composerUseInsteadEditorDone, Settings.Vocabulary.composerAddPlural,
+        Settings.Vocabulary.addShared, Settings.Vocabulary.sharedName, Settings.Vocabulary.sharedNameSave,
+        Settings.Vocabulary.sharedUsedBy, Settings.Vocabulary.sharedChooseModes, Settings.Vocabulary.sharedModesApply,
+        Settings.Vocabulary.sharedRename, Settings.Vocabulary.sharedDelete, Settings.Vocabulary.modeUses,
+        Settings.Vocabulary.modeChooseShared, Settings.Vocabulary.modeSharedApply, Settings.Vocabulary.modeIncluded,
+        Settings.Vocabulary.moveSharedChoice, Settings.Vocabulary.replacementEditorMoveToShared, Settings.Vocabulary.moveSharedName, Settings.Vocabulary.moveSharedApply,
         Settings.Vocabulary.composerRegexToggle, Settings.Vocabulary.composerAdvanced, Settings.Vocabulary.composerAdd,
         Settings.Vocabulary.composerStatus, Settings.Vocabulary.recognitionHelp,
         Settings.Vocabulary.dictionaryList, Settings.Vocabulary.dictionaryDeleteConfirmConfirm,
@@ -668,7 +696,7 @@ enum AccessibilityID {
         History.DictionarySheet.term, History.DictionarySheet.status, History.DictionarySheet.save,
         History.DictionarySheet.correct,
         Correction.term, Correction.useInstead, Correction.regexToggle, Correction.destination, Correction.status,
-        Correction.add, Correction.addAndReplace, Correction.cancel, Correction.advanced, Correction.scope,
+        Correction.add, Correction.addAndReplace, Correction.cancel, Correction.openVocabulary, Correction.advanced, Correction.scope,
         Correction.teach, Correction.review, Correction.done,
     ]
 }

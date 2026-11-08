@@ -26,6 +26,8 @@ final class ConfigCache {
     private var connectionsCache: ConnectionSet?
     private var dictionaryCache: DictionarySet?
     private var voiceCommandsCache: VoiceCommandConfig?
+    private var sharedCache: [SharedVocabulary]?
+    private var lastGoodShared: [String: SharedVocabulary] = [:]
     private var resolvedCache: ResolvedConfig?
 
     // Per generation: present-but-undecodable files (malformed or newer schema after a downgrade). Recorded
@@ -54,6 +56,7 @@ final class ConfigCache {
         connectionsCache = nil
         dictionaryCache = nil
         voiceCommandsCache = nil
+        sharedCache = nil
         resolvedCache = nil
         loadFailures = []
         fileWarningsCache = nil
@@ -67,7 +70,7 @@ final class ConfigCache {
     }
 
     var fileFailures: [ConfigFileIssue] {
-        _ = dictionary; _ = replacements; _ = connections; _ = modes
+        _ = dictionary; _ = replacements; _ = connections; _ = modes; _ = shared
         if voiceCommandsEnabled { _ = voiceCommands }
         return loadFailures
     }
@@ -80,6 +83,10 @@ final class ConfigCache {
         let modeFiles = ((try? FileManager.default.contentsOfDirectory(atPath: modesDir.path)) ?? [])
             .filter { $0.hasSuffix(".toml") }
             .sorted()
+        let sharedDir = SharedVocabularyStore.directory(in: supportDir)
+        let sharedFiles = ((try? FileManager.default.contentsOfDirectory(atPath: sharedDir.path)) ?? [])
+            .filter { $0.hasSuffix(".toml") }
+            .sorted()
         let warnings = ([
             warning(SettingsStore.fileName, in: supportDir, SettingsStore.unknownKeys(in:)),
             warning(DictionaryStore.fileName, in: supportDir, DictionaryStore.unknownKeys(in:)),
@@ -87,11 +94,17 @@ final class ConfigCache {
             warning(ConnectionStore.fileName, in: supportDir, ConnectionStore.unknownKeys(in:)),
             voiceCommandsEnabled
                 ? warning(VoiceCommandStore.fileName, in: supportDir, VoiceCommandStore.unknownKeys(in:)) : nil,
-        ] + modeFiles.map { warning($0, in: modesDir, ModeStore.unknownKeys(in:)) }).compactMap { $0 }
+        ] + modeFiles.map { warning($0, in: modesDir, ModeStore.unknownKeys(in:)) }
+            + sharedFiles.map { warning($0, in: sharedDir, SharedVocabularyStore.unknownKeys(in:)) }).compactMap { $0 }
             + ([inactiveRules(ReplacementsStore.fileName, in: supportDir) { try ReplacementsStore.decode(from: $0).toRules() }]
                 + modeFiles.map { file in
                     inactiveRules(file, in: modesDir) {
                         try ModeStore.decode(from: $0, id: String(file.dropLast(".toml".count))).replacements.toRules()
+                    }
+                }
+                + sharedFiles.map { file in
+                    inactiveRules(file, in: sharedDir) {
+                        try SharedVocabularyStore.decode(from: $0, id: String(file.dropLast(".toml".count))).rules.toReplacementRules()
                     }
                 }).compactMap { $0 }
         fileWarningsCache = warnings
@@ -144,9 +157,31 @@ final class ConfigCache {
         let resolved = ResolvedConfig(
             modes: modes, dictionary: dictionary, replacements: replacements,
             connections: connections, fragments: fragments,
-            voiceCommands: modes.contains(where: \.runsVoiceCommands) ? voiceCommands : VoiceCommandConfig())
+            voiceCommands: modes.contains(where: \.runsVoiceCommands) ? voiceCommands : VoiceCommandConfig(),
+            shared: shared)
         resolvedCache = resolved
         return resolved
+    }
+
+    // A shared vocabulary that stops loading keeps its last good version this run, like a mode, so a typo in
+    // one file never silently drops its words from every mode that uses it.
+    var shared: [SharedVocabulary] {
+        if let sharedCache { return sharedCache }
+        let result = SharedVocabularyStore.load(in: SharedVocabularyStore.directory(in: supportDir))
+        var vocabularies = result.vocabularies
+        for failure in result.failures {
+            let lastGood = lastGoodShared[failure.id]
+            if let lastGood { vocabularies.append(lastGood) }
+            let path = "\(SharedVocabularyStore.directoryName)/\(failure.id).toml"
+            let issue = ConfigFileIssue.unreadable(
+                "\(failure.id).toml", relativePath: path, error: failure.error,
+                recovery: lastGood == nil ? .ignored : .previousVersion)
+            if !loadFailures.contains(issue) { loadFailures.append(issue) }
+            log.error("shared vocabulary '\(failure.id, privacy: .public)' failed to load (\(failure.error.category, privacy: .public)): \(failure.error.summary, privacy: .private)")
+        }
+        for vocabulary in result.vocabularies { lastGoodShared[vocabulary.id] = vocabulary }
+        sharedCache = vocabularies
+        return vocabularies
     }
 
     // Realizes this generation's plan now, and compiles each enabled mode's text stages and bias terms off
