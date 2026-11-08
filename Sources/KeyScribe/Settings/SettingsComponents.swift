@@ -274,6 +274,9 @@ struct CommittedTextField: View {
     let validation: ((String) -> UserInputValidation.Issue?)?
     let onIssueChange: ((UserInputValidation.Issue?) -> Void)?
     let commit: (String) -> Void
+    // Reports a problem found only when saving, shown beside the field with the draft kept for correction.
+    let save: ((String) -> UserInputValidation.Issue?)?
+    let pending: PendingCommit?
     @State private var draft: String
     @State private var validationIssue: UserInputValidation.Issue?
     @FocusState private var focused: Bool
@@ -284,6 +287,31 @@ struct CommittedTextField: View {
         onIssueChange: ((UserInputValidation.Issue?) -> Void)? = nil,
         commit: @escaping (String) -> Void
     ) {
+        self.init(
+            title, text: text, prompt: prompt, suffix: suffix, autofocus: autofocus, validation: validation,
+            onIssueChange: onIssueChange, pending: nil, save: nil, commit: commit)
+    }
+
+    // For a save that can fail after validation passed, such as a name taken meanwhile.
+    init(
+        _ title: String, text: String, prompt: String? = nil, autofocus: Bool = false,
+        validation: ((String) -> UserInputValidation.Issue?)? = nil, pending: PendingCommit,
+        save: @escaping (String) -> UserInputValidation.Issue?
+    ) {
+        self.init(
+            title, text: text, prompt: prompt, suffix: nil, autofocus: autofocus, validation: validation,
+            onIssueChange: nil, pending: pending, save: save, commit: { _ in })
+    }
+
+    private init(
+        _ title: String, text: String, prompt: String?, suffix: String?, autofocus: Bool,
+        validation: ((String) -> UserInputValidation.Issue?)?,
+        onIssueChange: ((UserInputValidation.Issue?) -> Void)?,
+        pending: PendingCommit?, save: ((String) -> UserInputValidation.Issue?)?,
+        commit: @escaping (String) -> Void
+    ) {
+        self.save = save
+        self.pending = pending
         self.title = title
         self.text = text
         self.prompt = prompt
@@ -320,11 +348,15 @@ struct CommittedTextField: View {
             .onSubmit { commitIfChanged() }
             .onExitCommand { draft = text; validationIssue = nil }
             .onChange(of: focused) { _, nowFocused in if !nowFocused { commitIfChanged() } }
-            .onChange(of: text) { _, newValue in if !focused { draft = newValue; validationIssue = nil } }
+            .onChange(of: text) { _, newValue in
+                if !focused { draft = newValue; validationIssue = nil }
+                pending?.commit = { commitIfChanged() }
+            }
             .onChange(of: validationIssue) { _, issue in onIssueChange?(issue) }
             // A container teardown (`.id` swap, pane switch) can remove the field without a focus-loss commit.
             .onDisappear { commitIfChanged() }
             .onAppear {
+                pending?.commit = { commitIfChanged() }
                 onIssueChange?(validationIssue)
                 guard autofocus else { return }
                 Task { @MainActor in
@@ -334,18 +366,31 @@ struct CommittedTextField: View {
             }
     }
 
-    private func commitIfChanged() {
+    @discardableResult
+    private func commitIfChanged() -> Bool {
         guard draft != text else {
             validationIssue = nil
-            return
+            return true
         }
         if let issue = validation?(draft) {
             validationIssue = issue
-            return
+            return false
+        }
+        if let save {
+            validationIssue = save(draft)
+            return validationIssue == nil
         }
         validationIssue = nil
         commit(draft)
+        return true
     }
+}
+
+// Lets an action next to a field save what was typed there first, such as opening a sheet that shows the name.
+@MainActor final class PendingCommit {
+    var commit: (() -> Bool)?
+    // False when the typed value could not be saved; the field then says why.
+    func commitNow() -> Bool { commit?() ?? true }
 }
 
 // A popover's own onDisappear commit does NOT fire reliably on teardown, so the debounce alone can lose

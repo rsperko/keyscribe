@@ -42,6 +42,17 @@ final class SharedVocabulariesModel: ObservableObject {
         }
     }
 
+    // A new vocabulary under the first free placeholder name, to be named in place.
+    // The name comes from what is saved now, not the list as last shown, since another file may have taken it.
+    func createNew() -> String? {
+        switch create(named: SharedVocabularyStore.newName(among: repository.sharedVocabularies())) {
+        case .created(let id): return id
+        case .problem(let problem):
+            if notice == nil { notice = PaneNotice(title: "Shared vocabulary wasn\u{2019}t created", message: problem) }
+            return nil
+        }
+    }
+
     func rename(_ id: String, to name: String) -> String? {
         do {
             try repository.renameSharedVocabulary(id: id, to: name)

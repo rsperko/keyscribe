@@ -105,6 +105,12 @@ struct SharedVocabularyTests {
         #expect(ReplacementUsage.key(for: rule) == "shared:programming|l|pain")
     }
 
+    @Test func aNewVocabularyGetsTheFirstFreePlaceholderName() {
+        #expect(SharedVocabularyStore.newName(among: []) == "New Vocabulary")
+        let taken = [SharedVocabulary(id: "a", name: "new vocabulary"), SharedVocabulary(id: "b", name: "New Vocabulary 2")]
+        #expect(SharedVocabularyStore.newName(among: taken) == "New Vocabulary 3")
+    }
+
     @Test func aNameMustBeGivenAndTellableFromGlobalAndTheOthers() {
         let existing = [programming]
         #expect(SharedVocabularyStore.nameProblem("  ", among: existing) == "Enter a name.")

@@ -68,12 +68,11 @@ enum AccessibilityID {
             static func shared(_ id: String) -> String { "settings.vocabulary.scope.shared.\(id)" }
             static let addShared = "settings.vocabulary.shared.add"
             static let sharedName = "settings.vocabulary.shared.name"
-            static let sharedNameSave = "settings.vocabulary.shared.nameSave"
             static let sharedUsedBy = "settings.vocabulary.shared.usedBy"
             static let sharedChooseModes = "settings.vocabulary.shared.chooseModes"
             static func sharedModeChoice(_ modeID: String) -> String { "settings.vocabulary.shared.modeChoice.\(modeID)" }
             static let sharedModesApply = "settings.vocabulary.shared.modesApply"
-            static let sharedRename = "settings.vocabulary.shared.rename"
+            static let modeEditMode = "settings.vocabulary.mode.editMode"
             static let sharedDelete = "settings.vocabulary.shared.delete"
             static let modeUses = "settings.vocabulary.mode.uses"
             static let modeChooseShared = "settings.vocabulary.mode.chooseShared"
@@ -613,9 +612,9 @@ enum AccessibilityID {
         Settings.Vocabulary.composerTerm, Settings.Vocabulary.composerUseInstead,
         Settings.Vocabulary.composerUseInsteadExpand, Settings.Vocabulary.composerUseInsteadEditor,
         Settings.Vocabulary.composerUseInsteadEditorDone, Settings.Vocabulary.composerAddPlural,
-        Settings.Vocabulary.addShared, Settings.Vocabulary.sharedName, Settings.Vocabulary.sharedNameSave,
+        Settings.Vocabulary.addShared, Settings.Vocabulary.sharedName,
         Settings.Vocabulary.sharedUsedBy, Settings.Vocabulary.sharedChooseModes, Settings.Vocabulary.sharedModesApply,
-        Settings.Vocabulary.sharedRename, Settings.Vocabulary.sharedDelete, Settings.Vocabulary.modeUses,
+        Settings.Vocabulary.modeEditMode, Settings.Vocabulary.sharedDelete, Settings.Vocabulary.modeUses,
         Settings.Vocabulary.modeChooseShared, Settings.Vocabulary.modeSharedApply, Settings.Vocabulary.modeIncluded,
         Settings.Vocabulary.moveSharedChoice, Settings.Vocabulary.replacementEditorMoveToShared, Settings.Vocabulary.moveSharedName, Settings.Vocabulary.moveSharedApply,
         Settings.Vocabulary.composerRegexToggle, Settings.Vocabulary.composerAdvanced, Settings.Vocabulary.composerAdd,

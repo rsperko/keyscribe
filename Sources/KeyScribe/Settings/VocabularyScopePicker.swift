@@ -7,6 +7,14 @@ enum VocabularyScopeDestination: Hashable {
     case shared(String)
 }
 
+extension Mode {
+    var vocabularyScope: VocabularyScopeDestination { .mode(id) }
+}
+
+extension SharedVocabulary {
+    var vocabularyScope: VocabularyScopeDestination { .shared(id) }
+}
+
 struct VocabularyScopeSections {
     let enabled: [Mode]
     let disabled: [Mode]

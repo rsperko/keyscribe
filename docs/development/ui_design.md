@@ -949,17 +949,29 @@ Plain Dictation is not listed: it always uses Global. Voice Commands is listed w
 the correction shortcut can add to it.
 Selecting a scope edits only its own words and replacements. A mode detail states whether it also includes
 Global vocabulary, rather than mixing inherited entries into its editable lists.
+Modes and shared vocabularies may have the same name; each remains a separate selectable row and opens
+only its own entries.
 
 **Shared vocabularies** are named sets of words and replacements that selected modes use together
 (mode-only overrides shared, shared overrides Global). Someone who never creates one sees the pane as
-before, plus one **Add Shared Vocabulary…** action at the foot of the list, which asks only for a name
-(not empty, not Global, not a name already used) and opens the new, empty vocabulary. Shared
+before, plus one **Add Shared Vocabulary…** action at the foot of the list. It creates an empty vocabulary
+used by no mode under the first free placeholder name (**New Vocabulary**, **New Vocabulary 2**, …) and opens
+its detail with the **Name** field focused, so it is named in place the way a blank mode is; leaving
+without renaming keeps it, as a blank mode is kept. Shared
 vocabularies are listed in a **Shared** group after Global, each with the usual count summary, or **Not used
 by any modes** / **Used only by disabled modes** when no enabled mode uses it, so saved entries are never
-mistaken for active ones. A shared detail leads with **Used by**: the mode names, a disabled one marked
+mistaken for active ones. A detail's header names what it is — **Shared vocabulary** or **Mode
+vocabulary** — so a shared vocabulary and a mode with the same name are never confused. A shared detail
+starts with its **Name** field in an untitled group: Return or leaving the field saves a valid name,
+Escape restores the saved one, a problem (empty, Global, or a name another shared vocabulary uses) shows
+beside it, and a save that fails — such as a name another vocabulary took meanwhile — keeps the typed name
+and says why beside it. **Choose Modes…** saves a typed name first, so its sheet shows the new name, and
+stays closed with the problem beside the field when the name cannot be saved. Renaming keeps the
+selection and every mode's connection; there is no rename dialog. Next comes **Modes using this
+vocabulary**: the mode names, a disabled one marked
 (“Email (disabled)”), then what that means (“Changes here apply to both modes.”, “Changes here apply to
 Code now, and to Email when it is enabled.”, “Used when these modes are enabled.”, or “Not used by any
-modes. Choose modes below to start using it.”), with **Choose Modes…** and **Rename…**, then the
+modes. Choose modes below to start using it.”), with **Choose Modes…**, then the
 usual composer and lists; it ends with the standard trailing red **Delete Shared Vocabulary**, whose
 confirmation names the modes it stops applying in and says Global and mode-only entries remain.
 **Choose Modes…** lists every mode with its own vocabulary, disabled ones marked, and explains that
@@ -968,10 +980,15 @@ Modes** applies, **Cancel** changes nothing, and an empty choice is allowed. A n
 automatically; a duplicated mode keeps its choices. Removing a mode from it applies immediately and
 keeps every entry; both choosers say so as soon as a mode or vocabulary is unticked (“Markdown will stop
 using Programming. Global and mode-only entries will still apply.”), since a choice saved to settle a
-disagreement is the mode's own and keeps working. A mode detail, once a shared vocabulary exists, says what it uses (“Uses Global and
-Programming. Entries added below apply only to Markdown.”) and has a **Shared Vocabulary** section
+disagreement is the mode's own and keeps working. A mode detail edits the mode's entries, not the mode:
+its header offers **Edit Mode…**, which opens the mode in Modes, where its name and other settings live.
+It then says what the mode uses (“Uses Global and Programming. Entries added below apply only to
+Markdown.”); once a shared vocabulary exists, that line heads **Shared vocabularies used by this mode**,
 listing each one it uses with **Edit…**, which opens that vocabulary's own detail, plus **Choose Shared
-Vocabulary…**. Every change that could leave the shared vocabularies a mode uses disagreeing — attaching,
+Vocabularies…**, whose sheet is titled for the mode (**Shared Vocabularies for Markdown Mode**) so the
+destination stays clear when a mode and a vocabulary share a name. Headings name a group's purpose; none classifies settings as basic. The vocabulary sheets
+(**Choose Modes**, **Shared Vocabularies for … Mode**, **Move to Shared Vocabulary**) take the same title,
+description, validation, and trailing **Cancel** / primary action treatment as the other Settings sheets. Every change that could leave the shared vocabularies a mode uses disagreeing — attaching,
 adding or editing a shared entry, or moving an entry into one — is checked against the state it would
 leave, in every mode it reaches, before anything is saved. Saves from outside Settings (the Add to
 Vocabulary panel, History's replacement review) pass the same check; a save there that would leave a new
@@ -1307,7 +1324,7 @@ way, with a notice naming the file and key, and a sheet that refused keeps its d
 The editor presents a short **Mode summary** at the top. The editor is divided into progressive
 sections:
 
-1. **Basics** — name and enabled. (There is no "default mode" — the **Direct** system mode is the
+1. Name and **Enabled**, together in an untitled group directly under the summary. (There is no "default mode" — the **Direct** system mode is the
    floor and owns Fn; bind Fn to another mode to change the everyday default. Direct's own editor is a
    reduced, mostly-locked form: shortcut + result handling only.)
 2. **How to start this mode** — keeps the shortcut and **Press behavior** together, followed by an

@@ -11,6 +11,8 @@ public enum UserInputValidation {
         case invalidRegex
         case unsafeRegex
         case wholeNumberAtLeast(Int)
+        // A rule a caller owns, such as a name another item already uses.
+        case described(String)
 
         public var message: String {
             switch self {
@@ -23,6 +25,7 @@ public enum UserInputValidation {
             case .invalidRegex: "That is not a valid regular expression."
             case .unsafeRegex: "That regular expression could make routing unresponsive."
             case .wholeNumberAtLeast(let minimum): "Enter a whole number of at least \(minimum.formatted())."
+            case .described(let message): message
             }
         }
     }

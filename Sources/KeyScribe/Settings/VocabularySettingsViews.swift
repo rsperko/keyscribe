@@ -1022,11 +1022,13 @@ struct VocabularySettingsView: View {
     @ObservedObject var modes: ModesSettingsModel
     @Binding var navigationSelection: VocabularyScopeDestination
     @Binding var composerSeed: ComposerSeed?
+    var onEditMode: ((String) -> Void)? = nil
     var historyReplacements: HistoryReplacementsLauncher? = nil
     var rulePreviewSource: ((ReplacementPreview.Destination) -> RulePreviewModel.Source)? = nil
     @State private var selection: VocabularyScopeDestination = .global
-    @State private var creatingShared = false
-    @State private var renamingShared: SharedVocabulary?
+    // A vocabulary just added opens with its Name field focused, so it is named in place.
+    @State private var namingShared: String?
+    @State private var pendingName = PendingCommit()
     @State private var choosingModesFor: SharedVocabulary?
     @State private var choosingSharedFor: Mode?
     @State private var deletingShared: SharedVocabulary?
@@ -1051,12 +1053,12 @@ struct VocabularySettingsView: View {
 
                     if !shared.vocabularies.isEmpty {
                         Section {
-                            ForEach(shared.vocabularies) { vocabulary in
+                            ForEach(shared.vocabularies, id: \.vocabularyScope) { vocabulary in
                                 PaneListRow(
                                     title: vocabulary.name,
                                     subtitle: VocabularyScopePicker.sharedListSubtitle(
                                         vocabulary, users: VocabularyScopePicker.usedBy(vocabulary.id, in: modes.modes)))
-                                    .tag(VocabularyScopeDestination.shared(vocabulary.id))
+                                    .tag(vocabulary.vocabularyScope)
                                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.shared(vocabulary.id))
                             }
                         } header: {
@@ -1066,7 +1068,7 @@ struct VocabularySettingsView: View {
 
                     if !sections.enabled.isEmpty {
                         Section {
-                            ForEach(sections.enabled) { mode in
+                            ForEach(sections.enabled, id: \.vocabularyScope) { mode in
                                 scopeRow(mode)
                             }
                         } header: {
@@ -1076,7 +1078,7 @@ struct VocabularySettingsView: View {
 
                     if !sections.disabled.isEmpty {
                         Section {
-                            ForEach(sections.disabled) { mode in
+                            ForEach(sections.disabled, id: \.vocabularyScope) { mode in
                                 scopeRow(mode, disabled: true)
                             }
                         } header: {
@@ -1086,7 +1088,12 @@ struct VocabularySettingsView: View {
                 }
                 .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.scopeList)
                 .paneListActionBar {
-                    Button("Add Shared Vocabulary\u{2026}", systemImage: "plus") { creatingShared = true }
+                    Button("Add Shared Vocabulary\u{2026}", systemImage: "plus") {
+                        if let id = shared.createNew() {
+                            namingShared = id
+                            selection = .shared(id)
+                        }
+                    }
                         .buttonStyle(.borderless)
                         .help("Create a named set of words and replacements that the modes you choose use together.")
                         .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.addShared)
@@ -1110,25 +1117,8 @@ struct VocabularySettingsView: View {
         .onChange(of: shared.vocabularies) { _, _ in
             synchronizeSelection(selection, in: modes.modes)
         }
-        .sheet(isPresented: $creatingShared) {
-            SharedVocabularyNameSheet(
-                title: "Add Shared Vocabulary", confirmTitle: "Create",
-                problem: { shared.nameProblem($0) },
-                onSave: { name in
-                    switch shared.create(named: name) {
-                    case .created(let id):
-                        selection = .shared(id)
-                        return nil
-                    case .problem(let message):
-                        return message
-                    }
-                })
-        }
-        .sheet(item: $renamingShared) { vocabulary in
-            SharedVocabularyNameSheet(
-                title: "Rename Shared Vocabulary", confirmTitle: "Rename", initialName: vocabulary.name,
-                problem: { shared.nameProblem($0, renaming: vocabulary.id) },
-                onSave: { shared.rename(vocabulary.id, to: $0) })
+        .onChange(of: selection) { _, current in
+            if let naming = namingShared, current != .shared(naming) { namingShared = nil }
         }
         .sheet(item: $choosingModesFor) { vocabulary in
             SharedVocabularyModesSheet(
@@ -1208,7 +1198,7 @@ struct VocabularySettingsView: View {
         PaneListRow(title: mode.name, subtitle: VocabularyScopePicker.summary(for: mode), badges: {
             if disabled { PaneBadge("Disabled") }
         })
-        .tag(VocabularyScopeDestination.mode(mode.id))
+        .tag(mode.vocabularyScope)
         .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.mode(mode.id))
     }
 
@@ -1287,23 +1277,37 @@ struct VocabularySettingsView: View {
             onRemoveReplacement: { shared.removeRule(at: $0, from: id) },
             replacementUsageCaption: { replacements.usageCaption(for: $0, in: .shared(id)) },
             replacementUsageHealth: { replacements.usageHealth(for: $0, in: .shared(id)) },
-            audience: AnyView(Section {
-                LabeledContent("Used by") {
-                    VStack(alignment: .trailing, spacing: 2) {
+            audience: AnyView(Group {
+                Section {
+                    CommittedTextField(
+                        "Name", text: vocabulary.name, autofocus: namingShared == id,
+                        validation: { name in
+                            UserInputValidation.nameIssue(name)
+                                ?? shared.nameProblem(name, renaming: id).map(UserInputValidation.Issue.described)
+                        },
+                        pending: pendingName,
+                        save: { name in
+                            if let problem = shared.rename(id, to: name) { return .described(problem) }
+                            if namingShared == id { namingShared = nil }
+                            return nil
+                        })
+                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.sharedName)
+                }
+                Section("Modes using this vocabulary") {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(audience.names)
                         Text(audience.effect).font(.caption).foregroundStyle(.secondary)
                     }
-                    .multilineTextAlignment(.trailing)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Used by")
-                .accessibilityValue("\(audience.names) \(audience.effect)")
-                .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.sharedUsedBy)
-                HStack {
-                    Button("Choose Modes\u{2026}") { choosingModesFor = vocabulary }
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Modes using this vocabulary")
+                    .accessibilityValue("\(audience.names) \(audience.effect)")
+                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.sharedUsedBy)
+                    Button("Choose Modes\u{2026}") {
+                        guard pendingName.commitNow() else { return }
+                        choosingModesFor = shared.vocabulary(id) ?? vocabulary
+                    }
                         .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.sharedChooseModes)
-                    Button("Rename\u{2026}") { renamingShared = vocabulary }
-                        .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.sharedRename)
                 }
             }),
             footer: AnyView(Section {
@@ -1333,10 +1337,14 @@ struct VocabularySettingsView: View {
         selection = scope
     }
 
-    private func modeAudience(_ mode: Mode) -> AnyView? {
-        guard !shared.vocabularies.isEmpty else { return nil }
+    private func modeAudience(_ mode: Mode) -> AnyView {
+        let hasShared = !shared.vocabularies.isEmpty
         let using = VocabularyMerge.using(mode, shared.vocabularies)
         return AnyView(Section {
+            Text(hasShared ? VocabularyScopePicker.modeUses(mode, shared: shared.vocabularies) : modeScopeDescription(mode))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.modeUses)
             ForEach(using) { vocabulary in
                 LabeledContent(vocabulary.name) {
                     Button("Edit\u{2026}") { selection = .shared(vocabulary.id) }
@@ -1345,10 +1353,12 @@ struct VocabularySettingsView: View {
                         .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.modeEditShared(vocabulary.id))
                 }
             }
-            Button("Choose Shared Vocabulary\u{2026}") { choosingSharedFor = mode }
-                .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.modeChooseShared)
+            if hasShared {
+                Button("Choose Shared Vocabularies\u{2026}") { choosingSharedFor = mode }
+                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.modeChooseShared)
+            }
         } header: {
-            Text("Shared Vocabulary")
+            if hasShared { Text("Shared vocabularies used by this mode") }
         })
     }
 
@@ -1357,8 +1367,7 @@ struct VocabularySettingsView: View {
             mode, globalWords: dictionary.words, globalRules: replacements.rules, shared: shared.vocabularies)
         return VocabularyEditor(
             title: mode.name,
-            subtitle: shared.vocabularies.isEmpty
-                ? modeScopeDescription(mode) : VocabularyScopePicker.modeUses(mode, shared: shared.vocabularies),
+            subtitle: "Mode vocabulary",
             wordsDescription: mode.runsVoiceCommands
                 ? "App and place names \(Branding.appName) should recognize as written in a command."
                 : "Names, product terms, and jargon \(Branding.appName) should recognize as written in this mode.",
@@ -1407,6 +1416,11 @@ struct VocabularySettingsView: View {
             },
             replacementUsageCaption: { replacements.usageCaption(for: $0, in: .mode(mode.id)) },
             replacementUsageHealth: { replacements.usageHealth(for: $0, in: .mode(mode.id)) },
+            headerAction: onEditMode.map { edit in
+                AnyView(Button("Edit Mode\u{2026}") { edit(mode.id) }
+                    .help("Open \(mode.name) in Modes to change its name, shortcut, and other settings.")
+                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.modeEditMode))
+            },
             audience: modeAudience(mode),
             footer: includedVocabulary(mode),
             onMoveToShared: { movingToShared = MoveToSharedRequest(mode: mode, entry: $0) })
@@ -1457,6 +1471,7 @@ private struct VocabularyEditor: View {
     let onRemoveReplacement: (Int) -> Void
     var replacementUsageCaption: (ReplacementsSet.Rule) -> String? = { _ in nil }
     var replacementUsageHealth: (ReplacementsSet.Rule) -> [String] = { _ in [] }
+    var headerAction: AnyView? = nil
     var audience: AnyView? = nil
     var footer: AnyView? = nil
     var onMoveToShared: ((SharedVocabularyMove.Entry) -> Void)? = nil
@@ -1469,7 +1484,9 @@ private struct VocabularyEditor: View {
     var body: some View {
         Form {
             Section {
-                PaneDetailHeader(systemImage: "text.book.closed", title: title, subtitle: subtitle)
+                PaneDetailHeader(systemImage: "text.book.closed", title: title, subtitle: subtitle, trailing: {
+                    if let headerAction { headerAction }
+                })
             }
             if let audience { audience }
             Section("Add to Vocabulary") {

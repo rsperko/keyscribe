@@ -184,4 +184,29 @@ struct SharedVocabulariesModelTests {
         #expect(model.vocabulary(programming)?.rules == [])
         #expect(repository.addReplacement(heard: "kube", replace: "k8s", to: .shared(programming)) == .saved)
     }
+
+    @Test func addingCreatesAPlaceholderNamedVocabularyUsedByNoModeToNameInPlace() throws {
+        let (model, repository, support) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+        let first = try #require(model.createNew())
+        let second = try #require(model.createNew())
+        #expect(model.vocabularies.map(\.name).sorted() == ["New Vocabulary", "New Vocabulary 2"])
+        #expect(model.rename(first, to: "Programming") == nil)
+        #expect(model.vocabulary(first)?.name == "Programming")
+        #expect(model.vocabulary(second)?.words == [])
+        #expect(ModeStore.loadAll(in: repository.modesDir).allSatisfy { $0.sharedVocabularies.isEmpty })
+    }
+
+    @Test func addingPicksTheNameFromWhatIsSavedNowAndExplainsAFailure() throws {
+        let (model, repository, support) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+        try SharedVocabularyStore.write(
+            SharedVocabulary(id: "elsewhere", name: "New Vocabulary"), to: repository.sharedVocabularyDir)
+        let id = try #require(model.createNew())
+        #expect(model.vocabulary(id)?.name == "New Vocabulary 2")
+        try FileManager.default.removeItem(at: repository.sharedVocabularyDir)
+        try "not a folder".write(to: repository.sharedVocabularyDir, atomically: true, encoding: .utf8)
+        #expect(model.createNew() == nil)
+        #expect(model.notice?.title == "Shared vocabulary wasn’t created")
+    }
 }

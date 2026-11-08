@@ -550,6 +550,10 @@ struct SettingsRootView: View {
                     dictionary: dictionary, replacements: replacements, shared: shared, modes: modes,
                     navigationSelection: $navigation.vocabularyScope,
                     composerSeed: $navigation.composerSeed,
+                    onEditMode: { id in
+                        modes.selectedID = id
+                        navigation.destination = .modes
+                    },
                     historyReplacements: history.hasStoredHistory ? historyReplacements : nil,
                     rulePreviewSource: rulePreviewSource)
                     .task {

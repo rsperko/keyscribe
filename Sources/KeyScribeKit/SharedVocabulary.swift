@@ -122,6 +122,18 @@ public enum SharedVocabularyStore {
         return nil
     }
 
+    // The name a vocabulary starts with when it is added, renamed in place right after.
+    public static func newName(among existing: [SharedVocabulary]) -> String {
+        let base = "New Vocabulary"
+        var candidate = base
+        var number = 2
+        while nameProblem(candidate, among: existing) != nil {
+            candidate = "\(base) \(number)"
+            number += 1
+        }
+        return candidate
+    }
+
     // A file name from the name, never one already in use.
     public static func newId(for name: String, existing: Set<String>) -> String {
         let slug = name.lowercased().split { !($0.isLetter || $0.isNumber) || !$0.isASCII }.joined(separator: "-")

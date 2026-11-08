@@ -1,67 +1,6 @@
 import SwiftUI
 import KeyScribeKit
 
-// Names a new shared vocabulary, or renames one. The save returns a problem to show, or nil to close.
-struct SharedVocabularyNameSheet: View {
-    let title: String
-    let confirmTitle: String
-    let problem: (String) -> String?
-    let onSave: (String) -> String?
-    @Environment(\.dismiss) private var dismiss
-    @State private var name: String
-    @State private var saveFailure: String?
-    @FocusState private var focused: Bool
-
-    init(
-        title: String, confirmTitle: String, initialName: String = "",
-        problem: @escaping (String) -> String?, onSave: @escaping (String) -> String?
-    ) {
-        self.title = title
-        self.confirmTitle = confirmTitle
-        self.problem = problem
-        self.onSave = onSave
-        _name = State(initialValue: initialName)
-    }
-
-    private var issue: String? {
-        name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : problem(name)
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(title).font(.headline)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Name").font(.caption).foregroundStyle(.secondary)
-                TextField("", text: $name, prompt: Text("e.g. Programming"))
-                    .labelsHidden()
-                    .multilineTextAlignment(.leading)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($focused)
-                    .onSubmit(save)
-                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.sharedName)
-            }
-            if let issue { IssueText(issue) }
-            if let saveFailure { IssueText(saveFailure) }
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(confirmTitle, action: save)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(problem(name) != nil)
-                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.sharedNameSave)
-            }
-        }
-        .padding(20).frame(width: 380)
-        .onAppear { focused = true }
-    }
-
-    private func save() {
-        guard problem(name) == nil else { return }
-        saveFailure = onSave(name)
-        if saveFailure == nil { dismiss() }
-    }
-}
-
 // Ticks the modes a shared vocabulary applies to. Cancel changes nothing; an empty choice is allowed. The
 // sheet stays open with its choices until the whole change is saved.
 struct SharedVocabularyModesSheet: View {
@@ -90,10 +29,10 @@ struct SharedVocabularyModesSheet: View {
 
     var body: some View {
         let review = review(selected)
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Choose Modes").font(.headline)
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Choose Modes").font(.title2.bold())
             Text("Selected modes use the words and replacements in \(vocabularyName). Future changes to this vocabulary apply to those modes too.")
-                .font(.callout).foregroundStyle(.secondary)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             BoundedScroll {
                 VStack(alignment: .leading, spacing: 8) {
@@ -119,7 +58,7 @@ struct SharedVocabularyModesSheet: View {
             if let failure { PaneNoticeRow(notice: failure) }
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Use in Selected Modes") {
                     failure = onApply(selected, PendingAttachment.settlements(review.pending, choices: choices))
                     if failure == nil { dismiss() }
@@ -129,7 +68,7 @@ struct SharedVocabularyModesSheet: View {
                 .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.sharedModesApply)
             }
         }
-        .padding(20).frame(width: 440)
+        .padding(24).frame(width: 480)
     }
 
     private func binding(_ id: String) -> Binding<Bool> {
@@ -164,10 +103,10 @@ struct ModeSharedVocabulariesSheet: View {
 
     var body: some View {
         let review = review(selected)
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Choose Shared Vocabulary").font(.headline)
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Shared Vocabularies for \(mode.name) Mode").font(.title2.bold())
             Text("\(mode.name) uses the words and replacements in the vocabularies you select, and keeps using them as they change. Its own entries still take priority.")
-                .font(.callout).foregroundStyle(.secondary)
+                .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             BoundedScroll {
                 VStack(alignment: .leading, spacing: 8) {
@@ -194,7 +133,7 @@ struct ModeSharedVocabulariesSheet: View {
             if let failure { PaneNoticeRow(notice: failure) }
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Use Selected") {
                     failure = onApply(selected, PendingAttachment.settlements(review.pending, choices: choices))
                     if failure == nil { dismiss() }
@@ -204,7 +143,7 @@ struct ModeSharedVocabulariesSheet: View {
                 .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.modeSharedApply)
             }
         }
-        .padding(20).frame(width: 440)
+        .padding(24).frame(width: 480)
     }
 
     private func binding(_ id: String) -> Binding<Bool> {
@@ -560,8 +499,8 @@ struct MoveToSharedVocabularySheet: View {
         let plan = target.map { SharedVocabularyMove.plan(request.entry, from: request.mode, to: $0, modes: modes) }
         let review = target.flatMap { plan?.conflict == nil ? self.review(request.entry, request.mode, $0) : nil }
             ?? AttachmentReview()
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Move to Shared Vocabulary").font(.headline)
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Move to Shared Vocabulary").font(.title2.bold())
             Picker("Vocabulary", selection: $destination) {
                 ForEach(vocabularies) { Text($0.name).tag(Optional($0.id)) }
                 Text("New Shared Vocabulary\u{2026}").tag(Optional(Self.newVocabulary))
@@ -598,7 +537,7 @@ struct MoveToSharedVocabularySheet: View {
             if let failure { PaneNoticeRow(notice: failure) }
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("Cancel", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Move") {
                     failure = onMove(
                         creating ? nil : destination, newName, PendingAttachment.settlements(review.pending, choices: choices))
@@ -609,6 +548,6 @@ struct MoveToSharedVocabularySheet: View {
                 .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.moveSharedApply)
             }
         }
-        .padding(20).frame(width: 440)
+        .padding(24).frame(width: 480)
     }
 }

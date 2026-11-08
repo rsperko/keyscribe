@@ -156,7 +156,7 @@ struct ModeEditorView: View {
         Form {
             Section { summaryCard }
 
-            Section("Basics") {
+            Section {
                 CommittedTextField("Name", text: mode.name, autofocus: autofocusName, validation: UserInputValidation.nameIssue) { value in
                     var updated = mode; updated.name = value.trimmingCharacters(in: .whitespacesAndNewlines); onUpdate(updated)
                 }
