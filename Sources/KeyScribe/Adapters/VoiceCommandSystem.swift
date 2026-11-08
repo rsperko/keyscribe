@@ -774,9 +774,9 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         guard let sessions else { return .failed(message: Self.nothingToRepeat, command: command) }
         guard stillWanted() else { return .abandoned }
         switch sessions.replay() {
-        case .repeating(let name): return .done(summary: name.isEmpty ? "Summary" : name, command: command)
+        case .repeating(let name): return .done(summary: name.isEmpty ? "Reply" : name, command: command)
         case .nothingHeard: return .failed(message: Self.nothingToRepeat, command: command)
-        case .off: return .failed(message: "Spoken updates are off.", command: command)
+        case .off: return .failed(message: "Spoken replies are off.", command: command)
         }
     }
 

@@ -69,8 +69,8 @@ struct SpeakingHUDTests {
     }
 
     @Test func theDisclosureNamesItsActionAndReportsItsState() {
-        #expect(SpeakingHUDLayout.disclosureLabel(showsSummary: false) == "Show summary")
-        #expect(SpeakingHUDLayout.disclosureLabel(showsSummary: true) == "Hide summary")
+        #expect(SpeakingHUDLayout.disclosureLabel(showsSummary: false) == "Show spoken text")
+        #expect(SpeakingHUDLayout.disclosureLabel(showsSummary: true) == "Hide spoken text")
         #expect(SpeakingHUDLayout.disclosureValue(showsSummary: false) == "Collapsed")
         #expect(SpeakingHUDLayout.disclosureValue(showsSummary: true) == "Expanded")
     }
@@ -181,7 +181,7 @@ struct SpokenUpdatesMenuTests {
         menu.install()
         let item = menu.spokenUpdatesMenuItem
         #expect(item.isHidden)
-        #expect(item.title == "Spoken Updates")
+        #expect(item.title == "Read Agent Replies Aloud")
         menu.setSpokenUpdates(available: true, on: true)
         #expect(!item.isHidden)
         #expect(item.isEnabled)

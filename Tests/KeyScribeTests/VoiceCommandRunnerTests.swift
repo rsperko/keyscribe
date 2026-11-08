@@ -224,14 +224,14 @@ struct VoiceCommandRunnerTests {
     @Test func repeatThatReplaysTheLastSummaryAndSaysWhenThereIsNone() async {
         let (runner, system) = make()
         #expect(await runner.run(transcript: "repeat that", places: [], origin: nil, stillWanted: { true })
-                == .failed(message: "Nothing to repeat yet.", command: "Replays the last spoken update."))
+                == .failed(message: "Nothing to repeat yet.", command: "Replays the last spoken reply."))
         let sessions = Sessions()
         runner.returnToSessions(sessions.returns)
         #expect(await runner.run(transcript: "Say that again.", places: [], origin: nil, stillWanted: { true })
-                == .done(summary: "docs", command: "Replays the last spoken update."))
+                == .done(summary: "docs", command: "Replays the last spoken reply."))
         sessions.replay = .off
         #expect(await runner.run(transcript: "repeat that", places: [], origin: nil, stillWanted: { true })
-                == .failed(message: "Spoken updates are off.", command: "Replays the last spoken update."))
+                == .failed(message: "Spoken replies are off.", command: "Replays the last spoken reply."))
         #expect(await runner.run(transcript: "repeat that", places: [], origin: nil, stillWanted: { false }) == .abandoned)
         #expect(sessions.replays == 2)
         #expect(system.activatedPids.isEmpty)

@@ -72,7 +72,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusLine = NSMenuItem(title: "starting…", action: nil, keyEquivalent: "")
     private let pasteLastItem = NSMenuItem(title: "Paste Last Dictation", action: nil, keyEquivalent: "")
     private let addVocabularyItem = NSMenuItem(title: "Add to Vocabulary…", action: nil, keyEquivalent: "")
-    private let spokenUpdatesItem = NSMenuItem(title: "Spoken Updates", action: nil, keyEquivalent: "")
+    private let spokenUpdatesItem = NSMenuItem(title: "Read Agent Replies Aloud", action: nil, keyEquivalent: "")
     private let speechModelsMenu = NSMenu()
     private let modesMenu = NSMenu()
 

@@ -301,7 +301,7 @@ the HUD is visible and cancellable (see the HUD-is-key footgun in `insertion-and
 ESC does not apply there; the trigger cancels instead). A local `NSEvent` monitor needs no
 permission, but it only sees keys routed to a key window of THIS process.
 
-**ESC-to-stop a spoken update** is the one exception, because the speaking panel never takes key focus:
+**ESC-to-stop a spoken reply** is the one exception, because the speaking panel never takes key focus:
 `SpeakingHUDController` registers a bare Escape (key code 53, layout-independent) as a Carbon hot key on its
 own `CarbonHotKeys` **only while the panel shows**, and unregisters it when the panel hides, so Escape is
 consumed then and reaches the foreground app at every other time. This does not loosen the bare-key rule

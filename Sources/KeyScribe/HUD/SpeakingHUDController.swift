@@ -155,7 +155,7 @@ enum SpeakingHUDLayout {
             captionHeight: shownCaption, captionScrolls: shownCaption < captionHeight)
     }
 
-    static func disclosureLabel(showsSummary: Bool) -> String { showsSummary ? "Hide summary" : "Show summary" }
+    static func disclosureLabel(showsSummary: Bool) -> String { showsSummary ? "Hide spoken text" : "Show spoken text" }
     static func disclosureValue(showsSummary: Bool) -> String { showsSummary ? "Expanded" : "Collapsed" }
 }
 

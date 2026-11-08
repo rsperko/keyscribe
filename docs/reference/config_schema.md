@@ -835,7 +835,7 @@ runs, and is reported like any other config file. Replacement use counts are kep
 
 Read only while the `voice_commands` flag is on. The Voice Commands mode understands
 a saved command's spoken name (below, checked first), an app-switching verb followed by a target (`VoiceCommandGrammar.focusVerbs`), `run <action> [words]`, `go back`, and `repeat that` or `say that again` (`VoiceCommandGrammar.repeatSummary`, which
-replays the last spoken update of the Coding agent feature), matched against the whole
+replays the last spoken reply of the Coding agent feature), matched against the whole
 utterance (case and punctuation ignored; a leading "the" is dropped from an app-switching target, so
 `switch to the browser` looks for `browser`, but not from a `run` action name). The app-switching prefixes also accept
 `which to` and `witch to` for `switch to`, and `two` or `too` in place of `to` after `switch`, `which`,
@@ -1416,8 +1416,8 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 # keep_captures = false                          # debug: retain a copy of each committed capture WAV
 # keep_captures_max_mb = 500                     # soft budget for the archive; oldest pruned first
 
-[coding_agents.spoken_result]               # Settings ▸ Modes ▸ Coding agent ▸ Spoken updates
-# enabled = true                                 # Read updates aloud; absent = on exactly when a
+[coding_agents.spoken_result]               # Settings ▸ Modes ▸ Coding agent ▸ Spoken replies
+# enabled = true                                 # Read replies aloud; absent = on exactly when a
                                                  #   connection is set
 # connection = "omlx"                            # id of the AI service that summarizes a finished reply
                                                  #   and describes a Pi prompt; absent or "" = None:

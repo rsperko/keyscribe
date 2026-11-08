@@ -7,10 +7,10 @@ struct SpokenResultSection: View {
     @State private var advancedExpanded = false
 
     var body: some View {
-        Section("Spoken updates") {
+        Section("Spoken replies") {
             SettingRow(
-                title: "Read updates aloud", result: "Skipped when the conversation is already in front of you.",
-                help: "When a conversation you spoke to finishes, waits for approval or an answer, or loses its connector, you hear its name and what happened. A short finished reply is read as it is; a longer one is read as a short summary from the AI service you choose, or announced as finished without one. When \(Branding.appName) can\u{2019}t confirm the conversation is in front, the update plays.")
+                title: "Read replies aloud", result: "Hear replies to messages you dictate, and know when the agent needs you.",
+                help: "For conversations you send messages to by dictation. Replies aren\u{2019}t read while you\u{2019}re viewing the conversation. A short reply is read as it is; a longer one is summarized by the AI service you choose, or announced as finished without one. You also hear when the agent needs approval or disconnects before finishing. When \(Branding.appName) can\u{2019}t confirm the conversation is in front, it reads the reply aloud.")
             {
                 Toggle("", isOn: enabled)
                     .labelsHidden().toggleStyle(.switch)
@@ -118,7 +118,7 @@ private struct SpokenVoiceRows: View {
         if let error = voice.error {
             IssueText(error, severity: voice.status == .needsAttention ? .failure : .advisory)
         } else if voice.status == .ready, voice.fellBack {
-            IssueText("The natural voice couldn\u{2019}t read the last summary, so the macOS voice read it.", severity: .advisory)
+            IssueText("The natural voice couldn\u{2019}t read the last reply, so the macOS voice read it.", severity: .advisory)
         }
     }
 
@@ -224,7 +224,7 @@ private struct SpokenVoiceFiles: View {
                 Button("Cancel", role: .cancel) { voice.cancelDelete() }
                     .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenVoiceDeleteCancel)
             } message: {
-                Text("Summaries are read in the macOS voice until you download it again.")
+                Text("Replies are read in the macOS voice until you download it again.")
             }
         }
     }

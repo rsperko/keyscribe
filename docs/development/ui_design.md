@@ -373,11 +373,11 @@ back” in the Coding agent mode is that return, never a message: it moves focus
 current recipient, sends no pending dictation, and reports what Voice Commands would (“Nothing to go back
 to.” when there is no destination). “Go back” inside a longer take, or after “tell” and a name, is ordinary
 message text. A take that is only “repeat that” or “say that again” (`VoiceCommandGrammar.repeatSummary`) is
-the same kind of local command on either trigger: it replays the last spoken update that started playing,
+the same kind of local command on either trigger: it replays the last spoken reply that started playing,
 exactly as it was heard, ahead of any still waiting, and sends nothing. The replay waits in its own place
 rather than the queue, so a newer result for the same conversation does not replace it and an unavailable
 notice is never merged again with notices still waiting. It does not repeat the front check, since the user asked for it.
-The HUD names the conversation (“docs”), or says “Nothing to repeat yet.” or “Spoken updates are off.”;
+The HUD names the conversation (“docs”), or says “Nothing to repeat yet.” or “Spoken replies are off.”;
 History records the command and never the summary. Inside a longer take or after “tell” and a name it is
 message text. With the Coding agent feature off, a remembered conversation is only its app and window. While
 it looks, the HUD says so (“Opening docs…”). It follows the agent's processes outward and
@@ -534,18 +534,18 @@ governs it (KeyScribe does not currently distinguish a "polishing on this Mac" s
 
 ### The speaking panel
 
-A spoken update (§7 Coding agent) has its own small panel, separate from the dictation HUD and drawn with the
+A spoken reply (§7 Coding agent) has its own small panel, separate from the dictation HUD and drawn with the
 same card, appearance and anchor, at the dictation HUD's normal width (`SpeakingHUDLayout.width`) whether or
 not the summary is shown. Its header shows a stop button, the exact name of the conversation being read with
 "Speaking · Esc to stop" beneath it, and a small trailing chevron; a long name wraps within that width. The
 stop button is a steady 16-point rounded square on a 26-point rounded-square halo, the same filled-halo
 language as the listening indicator; while audio plays the halo's opacity gently rises and falls on a timer,
 never its size, and under Reduce Motion it is static. The button's 30-point hit target never changes, and its
-accessible label is "Stop speaking". The chevron's tooltip and accessible label are "Show summary" or "Hide
-summary", and VoiceOver hears whether it is collapsed or expanded. The halo does not follow the audio level or
+accessible label is "Stop speaking". The chevron's tooltip and accessible label are "Show spoken text" or "Hide
+spoken text", and VoiceOver hears whether it is collapsed or expanded. The halo does not follow the audio level or
 the voice.
 
-Showing the summary adds the complete text the moment playback starts: exactly the words handed to speech,
+Showing the spoken text adds the complete text the moment playback starts: exactly the words handed to speech,
 after redaction and cleanup, without the spoken conversation-name prefix the header already shows. The text
 wraps at the panel's width and is never truncated or highlighted word by word.
 A subtle inset divider separates the expanded caption from the controls, with space on either side; it stays
@@ -652,7 +652,7 @@ Next Dictation ▸
   Manage Modes…
 
 Paste Last Dictation
-Spoken Updates ✓
+Read Agent Replies Aloud ✓
 
 ────────────────
 Add to Vocabulary…
@@ -706,9 +706,9 @@ so they sit together above Settings instead of competing with the primary loop.
 > affordance, rendered only when the updater reports one. The public build uses Sparkle (EdDSA-verified);
 > a build with no injected updater shows neither.
 
-**Spoken Updates** is shown only while the Coding agent feature is on. Its checkmark is the **Read updates
+**Read Agent Replies Aloud** is shown only while the Coding agent feature is on. Its checkmark is the **Read replies
 aloud** switch (§7 Coding agent), with the same effects: off stops playback and drops waiting and in-progress
-updates, on keeps the configuration and replays nothing. It needs no AI service, since notices are spoken
+spoken replies, on keeps the configuration and replays nothing. It needs no AI service, since notices are spoken
 without one.
 
 **About & Notices…** names the licenses for bundled libraries and runtime-downloaded models, including
@@ -1618,13 +1618,15 @@ the current one is marked Current. The guidance names only what can be said. The
 while connector setup is unavailable, so a connected conversation never disappears behind installation
 status or a collapsed disclosure.
 
-**Spoken updates** sits between the conversations and connector setup, and its everyday view is three rows
-and one disclosure. **Read updates aloud** is its own switch, off by default, with "Skipped when the
-conversation is already in front of you." as the row's always-visible caption. It speaks two kinds of update
-for a turn the user's dictation started: a summary when the turn finishes, and a notice when it needs
-attention (below). Turning it off stops playback, cancels any summary being made, and drops updates still
-waiting, while the chosen service, speaker and instruction are kept; turning it back on applies to the next
-update and replays nothing. The **Spoken Updates** item in the menu bar menu (§6) is the same switch. The rest
+**Spoken replies** sits between the conversations and connector setup, and its everyday view is three rows
+and one disclosure. **Read replies aloud** is its own switch, off by default, with "Hear replies to messages
+you dictate, and know when the agent needs you." as the row's always-visible caption. Its help explains
+that replies are skipped while the conversation is in front, how short replies and longer summaries differ,
+and that it also announces approval requests and disconnections. It reads a reply or summary when a turn
+the user's dictation started finishes, and a notice when it needs attention (below). Turning it off stops
+playback, cancels any summary being made, and drops spoken replies still waiting, while the chosen service,
+speaker and instruction are kept; turning it back on applies to the next reply and replays nothing.
+The **Read Agent Replies Aloud** item in the menu bar menu (§6) is the same switch. The rest
 of the section shows only while it is on.
 
 A notice is a fixed sentence after the conversation's name, in the session list's own words: "Waiting for
@@ -1792,7 +1794,7 @@ changes the current recipient or sends anything.
 
 **Disconnect** takes effect at once without confirmation: the conversation leaves the recipients and the
 recording HUD's numbered list, stops being the current recipient, and its held hand-offs and waiting spoken
-updates are dropped; work the agent already accepted may finish. It then appears under a **Disconnected
+replies are dropped; work the agent already accepted may finish. It then appears under a **Disconnected
 conversations** `DisclosureSection`, shown only when needed, which says once "These conversations stay
 disconnected when reopened. New conversations connect normally." Each row has its name, folder and
 **Reconnect**, which takes effect at once without a reload, or opens the consent sheet when the setup was

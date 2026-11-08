@@ -91,7 +91,7 @@ every rule above applies to it, with these sharpenings:
   dropped), in the connector immediately before it submits (a submission held for the keyboard is refused
   once the conversation goes quiet), in the hub before every hand-off and after every wait, and in the take
   before any rewrite. Saved choices that cannot be read admit no conversation; a disconnection that cannot
-  be saved still holds for the session and says so. Uninstalling a setup silences spoken updates for its
+  be saved still holds for the session and says so. Uninstalling a setup silences spoken replies for its
   conversations exactly as Disconnect does.
 - **A disconnected conversation keeps its name.** The directory names connected and disconnected
   conversations together (`AgentDirectory.update(excluded:)`), so disconnecting never renames a

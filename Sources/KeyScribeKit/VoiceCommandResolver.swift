@@ -187,7 +187,7 @@ public enum VoiceCommandAction: Equatable, Sendable {
         case .sidebarItem(let item):
             return "Opens \u{201C}\(item.name)\u{201D} in the sidebar of \(appName(item.bundleId) ?? item.bundleId)."
         case .goBack: return "Returns to the window or app you were in before your last command."
-        case .repeatSummary: return "Replays the last spoken update."
+        case .repeatSummary: return "Replays the last spoken reply."
         case .place(_, .app(let bundleId)):
             return "Brings \(appName(bundleId) ?? bundleId) to the front\(opening)."
         case .place(_, .tab(let tab)):

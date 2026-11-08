@@ -227,8 +227,8 @@ These also work without saving anything:
 - **“go back”** returns to the window you were using before your last switch by voice, even in the
   same app. Say it again to switch back. It never starts an app that has since quit. Running an action
   does not change that destination.
-- **“repeat that”** or **“say that again”** replays the last spoken update from a coding agent (see
-  [Can KeyScribe tell me when an agent finishes](#can-keyscribe-tell-me-when-an-agent-finishes-without-reading-the-whole-reply)).
+- **“repeat that”** or **“say that again”** replays the last spoken reply from a coding agent (see
+  [Can KeyScribe read an agent's reply aloud?](#can-keyscribe-read-an-agents-reply-aloud)).
 
 Commands never type your words. An unrecognized command shows an explanation and runs nothing, and a
 command that matches more than one saved command, app, or window asks which one (below). **Preview a command** previews
@@ -470,7 +470,7 @@ through an unusual wrapper or hosted inside another program.
 
 ### How do I stop one conversation from receiving what I say?
 
-Choose **Disconnect** on its row. It stops receiving dictation and spoken updates at once and stays
+Choose **Disconnect** on its row. It stops receiving dictation and spoken replies at once and stays
 disconnected when you reopen or resume it; a new conversation connects normally. Work the agent already
 accepted may finish. **Disconnected conversations** lists it with **Reconnect**, which takes effect without a
 reload. Your disconnections are saved with your conversation names; if that file cannot be read, no
@@ -505,10 +505,11 @@ Yes, in each folder you connected. When KeyScribe starts after an update, it upd
 never in a folder you did not connect or where you turned the connector off in the agent. Open conversations
 keep the version they loaded, which keeps working, until you reload them; their row says so.
 
-### Can KeyScribe tell me when an agent finishes, without reading the whole reply?
+### Can KeyScribe read an agent's reply aloud?
 
-Yes. In **Settings ▸ Modes ▸ Coding agent ▸ Spoken updates**, turn on **Read updates aloud**. When a
-conversation you spoke to is waiting for your approval or an answer, KeyScribe says its name and "Waiting for
+Yes. In **Settings ▸ Modes ▸ Coding agent ▸ Spoken replies**, turn on **Read replies aloud**. For messages
+you dictate, KeyScribe reads short replies and can summarize longer ones. It also tells you when a
+conversation you spoke to is waiting for your approval or an answer: KeyScribe says its name and "Waiting for
 approval." or "Waiting for an answer."; if its connector goes away before it finishes, you hear
 "Disconnected before it finished." These notices need no AI service, and one that is
 no longer true by the time it would play is dropped. Claude Code reports approvals and questions. Pi reports
@@ -532,7 +533,7 @@ to stop it and drop any summaries still waiting; summaries stay on for the next 
 audible, Esc goes to KeyScribe instead of the app you're in, and reaches your app again the moment it stops. If
 another app already holds Esc, the panel says only "Speaking" and the stop button is the way to stop it.
 Starting a dictation also stops it, and waiting summaries play once the dictation's own panel has gone. The
-**Spoken Updates** item in the menu bar menu turns the feature off and on. Only instructions you dictated are
+**Read Agent Replies Aloud** item in the menu bar menu turns the feature off and on. Only instructions you dictated are
 spoken about. To hear the last one again, say **"repeat that"** or **"say that
 again"** as the whole dictation, with either the Coding agent or the Voice Commands shortcut; with the Coding
 agent shortcut, a longer dictation that starts that way is sent to the agent as usual. A conversation that is in front of you when it finishes is
@@ -544,7 +545,7 @@ KeyScribe does not save replies or summaries. A local service such as oMLX keeps
 
 Everything is a plain file under `~/Library/Application Support/KeyScribe/` — TOML config, JSONL
 history (one file per day), and downloaded model weights under `models/`. You can inspect, back up,
-or delete any of it. Removing that folder resets KeyScribe. The spoken updates voice also keeps pronunciation
+or delete any of it. Removing that folder resets KeyScribe. The spoken replies voice also keeps pronunciation
 files in `~/.cache/fluidaudio/Models/kokoro`, a folder other apps may share, so removing KeyScribe's folder
 leaves them.
 

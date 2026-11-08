@@ -42,7 +42,7 @@ the request and are restored after when they are found.
 - **Exactly one STT engine is active at a time** — chosen globally in settings and used
   everywhere. (Multiple named *LLMs* are allowed; STT is singular.)
 - **The only thing that may leave the machine is an explicit, user-keyed (BYOK) LLM call** — a mode's
-  rewrite, or the Coding agent spoken updates' summary of an agent reply or description of a prompt it waits on — each only after redaction has
+  rewrite, or Spoken replies' summary of an agent reply or description of a prompt it waits on — each only after redaction has
   tokenized sensitive spans out of the payload, and each only to a connection the user chose for it.
 - **Dictation is batch (commit-on-release) and inserts atomically** — one undo (⌘Z) removes
   the whole dictation.

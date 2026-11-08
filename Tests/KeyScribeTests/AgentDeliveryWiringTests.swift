@@ -1015,7 +1015,7 @@ struct AgentDeliveryWiringTests {
     @Test(arguments: ["Repeat that.", "say that again"])
     func repeatThatOnTheCodingAgentTriggerReplaysLocallyAndSendsNothing(text: String) async {
         let runner = BackRunner()
-        runner.outcome = .done(summary: "docs", command: "Replays the last spoken update.")
+        runner.outcome = .done(summary: "docs", command: "Replays the last spoken reply.")
         let rig = await rig(text, current: "claude:s1", voiceCommands: runner)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
