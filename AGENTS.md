@@ -137,7 +137,8 @@ are the ones that must never break; the guide explains why and what else applies
   - An unresolved target or recipient asks; it never falls through to the current or first one. A tie
     takes a predictable order (a recipient tie, the first name alphabetically) and asks only when no such
     order exists or a wrong guess would run the wrong action (different apps, places, or windows, or tabs
-    in different browsers, tied for a switch are offered as a choice).
+    in different browsers, tied for a switch are offered as a choice). A place label several Coding agent
+    conversations share asks rather than taking the first.
   - Previews and uniqueness checks call the same matching function execution uses.
 - **Feature flags** → `docs/development/areas/feature-flags.md`.
   - Flags are `static let`s on `Feature`, opt-in only, read through `settings.features.isEnabled`.

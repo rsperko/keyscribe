@@ -21,6 +21,17 @@ final class CodingAgentsSettingsModel: ObservableObject {
         var olderConnector = false
         var startedAt: Date?
         var readAloud: ReadAloud?
+        var place: AgentPlaceName?
+        var renamed = false
+        var surface: String?
+
+        var location: String? {
+            guard let place else { return terminal }
+            let within = "\(place.level.rawValue) \(place.label)"
+            guard let terminal else { return "\(place.surface) \(within)" }
+            if terminal.hasSuffix(place.surface) { return "\(terminal) \(within)" }
+            return "\(terminal) \u{00B7} \(place.surface) \(within)"
+        }
     }
 
     enum ReadAloud: Equatable {
@@ -81,6 +92,8 @@ final class CodingAgentsSettingsModel: ObservableObject {
     var onRename: ((String, String) throws -> Void)?
     var onReloadNames: (() -> Void)?
     var renameCheck: ((String, String) -> AgentHandles.RenameError?)?
+    var defaultName: ((String) -> AgentDirectory.DefaultName?)?
+    var onUseDefaultName: ((String) throws -> Void)?
     var onRetire: ((String) -> Void)? {
         didSet { for connector in connectors { connector.onRetire = onRetire } }
     }
@@ -194,7 +207,9 @@ final class CodingAgentsSettingsModel: ObservableObject {
                 current: conversation.id == current, agent: conversation.agent, terminal: terminals[conversation.pid] ?? nil,
                 title: conversation.title, setup: conversation.setup, key: Self.key(pid: conversation.pid, milliseconds: conversation.startedAt.map { Int(($0.timeIntervalSince1970 * 1000).rounded()) }),
                 lastSeen: lastSeen, olderConnector: runsOlderConnector(conversation, loadedVersions: loadedVersions), startedAt: conversation.startedAt,
-                readAloud: readAloud.contains(conversation.id) ? .thisReply : readNextAloud.contains(conversation.id) ? .nextReply : nil)
+                readAloud: readAloud.contains(conversation.id) ? .thisReply : readNextAloud.contains(conversation.id) ? .nextReply : nil,
+                place: conversation.placeName, renamed: conversation.nameSource == .chosen,
+                surface: conversation.placeSurface)
         }
         next += candidates.map { candidate in
             Row(
@@ -208,7 +223,8 @@ final class CodingAgentsSettingsModel: ObservableObject {
             Row(
                 id: conversation.id, number: 0, name: conversation.handle, folder: conversation.cwd, state: "Disconnected", connected: false,
                 current: false, agent: conversation.agent, terminal: terminals[conversation.pid] ?? nil, title: conversation.title,
-                setup: conversation.setup, key: conversation.id)
+                setup: conversation.setup, key: conversation.id, place: conversation.placeName,
+                renamed: conversation.nameSource == .chosen, surface: conversation.placeSurface)
         }
         if away != disconnectedRows { disconnectedRows = away }
         for connector in connectors {
@@ -387,6 +403,34 @@ final class CodingAgentsSettingsModel: ObservableObject {
         let others = rows.filter { $0.id != id }.map(\.name)
         guard let short = AgentAddress.shorterSpokenName(for: normalized, among: others + [normalized]) else { return full }
         return "\(full) \u{201C}\(short), \u{2026}\u{201D} also works."
+    }
+
+    func defaultNameNote(_ row: Row) -> String? {
+        guard let preview = defaultName?(row.id) else { return nil }
+        let from = switch preview.source {
+        case .place: preview.place.map { "from its \($0.surface) \($0.level.rawValue)" } ?? "from its folder"
+        case .agent: "from the agent\u{2019}s own name for it"
+        case .folder, .chosen: "from its folder"
+        }
+        return row.renamed ? "Default name: \(preview.name), \(from)." : "This name comes \(from)."
+    }
+
+    @discardableResult
+    func useDefaultName(_ id: String) -> Bool {
+        renameDetails = nil
+        guard let onUseDefaultName else {
+            renameProblem = "The agent connection is unavailable. Try again when it reconnects."
+            return false
+        }
+        do {
+            try onUseDefaultName(id)
+            renameProblem = nil
+            return true
+        } catch {
+            renameProblem = "Could not save this change. Your current name is unchanged."
+            renameDetails = error.localizedDescription
+            return false
+        }
     }
 
     static func problem(_ error: AgentHandles.RenameError, name: String) -> String {

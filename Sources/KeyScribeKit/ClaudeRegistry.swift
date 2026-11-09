@@ -81,6 +81,7 @@ public struct ClaudeRegistryEntry: Equatable, Sendable {
 extension ClaudeRegistryEntry {
     public var session: AgentSession {
         AgentSession(agent: AgentKind.claude.id, id: sessionId, pid: pid, cwd: cwd, explicitName: explicitName, state: liveState, startedAt: startedAt,
+            title: AgentTitle(generatedTitle: nameSource == "auto" ? name : nil),
             setup: configDir)
     }
 }

@@ -190,7 +190,7 @@ struct AgentDeliveryWiringTests {
         historyEnabled: Bool = true, receiptTimeout: Duration = .seconds(8),
         front: FrontWindow = FrontWindow(TargetSnapshot(bundleId: "test.bundle")), sessionInFront: Front = Front(),
         glance: (any AgentFronting)? = nil, engine: (any SpeechEngine)? = nil, frontGrace: Duration = .seconds(1),
-        maxRecordingSeconds: Double = RecordingLimit.backstopSeconds
+        maxRecordingSeconds: Double = RecordingLimit.backstopSeconds, places: (any AgentPlaceReading)? = nil
     ) async -> Rig {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-agent-\(UUID().uuidString)", isDirectory: true)
@@ -222,7 +222,8 @@ struct AgentDeliveryWiringTests {
             try? Data(namesFile.utf8).write(to: agentsDir.appendingPathComponent(AgentNameStore.fileName))
         }
         let hub = AgentHub(transport: transport, scan: { entries() }, names: AgentNameStore(directory: agentsDir), focus: focus,
-                           front: sessionInFront, glance: glance, receiptTimeout: receiptTimeout, scanDeadline: .seconds(30))
+                           front: sessionInFront, glance: glance, receiptTimeout: receiptTimeout, scanDeadline: .seconds(30),
+                           places: places)
         transport.hub = hub
         await hub.rescan()
         if let current { hub.makeCurrent(current) }
@@ -267,6 +268,107 @@ struct AgentDeliveryWiringTests {
 
     private func rosters(_ rig: Rig) -> [AgentRoster?] {
         rig.hud.states.compactMap { if case .recording(_, _, _, _, let agents) = $0 { agents } else { nil } }
+    }
+
+    @Test func aPaneRenamedJustBeforeRecordingIsReachedByItsNewNameOnceTheReadLandsDuringTheTake() async {
+        let reader = AgentPlaceTrackerTests.Reader()
+        let rig = await rig("architect, run the tests.", current: "claude:s2", places: reader)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        let pane = "/s#pane:p1"
+        reader.answers = ["claude:s1": .found(AgentPlace(
+            surface: "herdr", labels: [.init(text: "architect", level: .pane, container: pane)], containers: [pane]))]
+        rig.controller.setNextModeOverride(id: Mode.codingAgentId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
+        #expect(rig.texts == ["run the tests."])
+        #expect(rosters(rig).compactMap { $0?.rows.map(\.name) }.allSatisfy { $0 == ["keyscribe blue", "keyscribe"] })
+    }
+
+    final class SlowReader: AgentPlaceReading, @unchecked Sendable {
+        private let lock = NSLock()
+        private var _answers: [String: AgentPlaceAnswer] = [:]
+        private var _delay: TimeInterval = 0
+        let release = DispatchSemaphore(value: 0)
+        private var _blocking = false
+        var answers: [String: AgentPlaceAnswer] {
+            get { lock.withLock { _answers } }
+            set { lock.withLock { _answers = newValue } }
+        }
+        var delay: TimeInterval {
+            get { lock.withLock { _delay } }
+            set { lock.withLock { _delay = newValue } }
+        }
+        var blocking: Bool {
+            get { lock.withLock { _blocking } }
+            set { lock.withLock { _blocking = newValue } }
+        }
+        func read(_ queries: [AgentPlaceQuery]) -> [String: AgentPlaceAnswer] {
+            if blocking { _ = release.wait(timeout: .now() + 5) }
+            if delay > 0 { Thread.sleep(forTimeInterval: delay) }
+            let known = answers
+            return Dictionary(uniqueKeysWithValues: queries.map { ($0.id, known[$0.id] ?? .absent) })
+        }
+    }
+
+    private func architect() -> [String: AgentPlaceAnswer] {
+        let pane = "/s#pane:p1"
+        return ["claude:s1": .found(AgentPlace(
+            surface: "herdr", labels: [.init(text: "architect", level: .pane, container: pane)], containers: [pane]))]
+    }
+
+    @Test func aTakeWaitingOnALabelReadThatDoesNotFinishIsHeldInsteadOfGoingToTheCurrentConversation() async {
+        let reader = SlowReader()
+        let rig = await rig("architect, run the tests.", current: "claude:s2", places: reader)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        rig.controller.placeNamesGrace = .milliseconds(50)
+        reader.answers = architect()
+        reader.blocking = true
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.captured.insertedText == nil)
+        reader.blocking = false
+        reader.release.signal()
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+    }
+
+    @Test func aTakeWhoseLabelReadFailedIsHeldInsteadOfGoingToTheCurrentConversation() async {
+        let reader = SlowReader()
+        let rig = await rig("architect, run the tests.", current: "claude:s2", places: reader)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        reader.answers = ["claude:s1": .unknown]
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.captured.insertedText == nil)
+    }
+
+    @Test func aTakeNamingAKnownConversationIsSentEvenWhileAnotherConversationsLabelIsUnchecked() async {
+        let reader = SlowReader()
+        let rig = await rig("Tell keyscribe blue to run the tests.", current: "claude:s1", places: reader)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        reader.answers = ["claude:s1": .unknown]
+        await take(rig)
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
+    }
+
+    @Test func aTakeWaitsBrieflyForALabelReadStillRunningAndReachesTheRenamedPane() async {
+        let reader = SlowReader()
+        let rig = await rig("architect, run the tests.", current: "claude:s2", places: reader)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        rig.controller.placeNamesGrace = .seconds(3)
+        reader.answers = architect()
+        reader.delay = 0.3
+        await take(rig)
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
+        #expect(rig.texts == ["run the tests."])
     }
 
     @Test func whileRecordingTheHUDListsTheRecipientFirstThenTheOtherSessions() async {

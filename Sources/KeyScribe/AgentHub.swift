@@ -103,6 +103,7 @@ final class AgentHub {
         focus: AgentTerminalFocusing? = nil, front: AgentFronting? = nil, glance: AgentFronting? = nil,
         receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30), disconnectGrace: Duration = AgentHub.defaultDisconnectGrace,
         scanDeadline: Duration = AgentHub.defaultScanDeadline, exclusions: AgentExclusions = AgentExclusions(nil),
+        places: (any AgentPlaceReading)? = nil,
         now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString }
     ) {
         self.exclusions = exclusions
@@ -119,6 +120,60 @@ final class AgentHub {
         self.now = now
         self.makeId = makeId
         adopt(names?.load() ?? .names([:]))
+        placeTracker = places.map { reader in
+            AgentPlaceTracker(reader: reader, now: now) { [weak self] in self?.placeQueries ?? [] }
+        }
+        placeTracker?.onChange = { [weak self] in self?.refresh() }
+    }
+
+    private(set) var placeTracker: AgentPlaceTracker?
+
+    private static func isGenerated(_ reported: String?, _ title: AgentTitle) -> Bool {
+        guard let reported, let generated = title.generatedTitle, title.explicitName == nil else { return false }
+        return AgentHandles.matchKey(reported) == AgentHandles.matchKey(generated)
+    }
+
+    private var placeQueries: [AgentPlaceQuery] {
+        (directory.conversations + directory.disconnected).compactMap { conversation in
+            AgentSessionID.split(conversation.id).map {
+                AgentPlaceQuery(id: conversation.id, agent: $0.agent, native: $0.native, pid: conversation.pid)
+            }
+        }
+    }
+
+    func placesUnchecked(_ ids: [String]) -> Bool {
+        placeTracker.map { !$0.unchecked(ids).isEmpty } ?? false
+    }
+
+    func readPlaces() {
+        placeTracker?.request()
+    }
+
+    func tickPlaces() {
+        placeTracker?.tick()
+    }
+
+    var sharedNames: [String: AgentRecipient.SharedName] {
+        guard namesProblem == nil else { return [:] }
+        return directory.sharedPlaceNames
+    }
+
+    func defaultName(for id: String) -> AgentDirectory.DefaultName? {
+        directory.defaultName(for: id)
+    }
+
+    func useDefaultName(_ id: String) throws {
+        guard namesProblem == nil else { throw NamesUnavailable() }
+        guard directory.chosenNames[id] != nil else { return }
+        var restored = directory
+        restored.useDefaultName(id)
+        try nameStore?.save(restored.chosenNames, remembered: restored.remembered, excluded: exclusions.excluded)
+        savedRemembered = restored.remembered
+        namesNotSaved = nil
+        directory = restored
+        refresh()
+        sendLabels()
+        onChange?()
     }
 
     struct NamesUnavailable: LocalizedError {
@@ -414,6 +469,7 @@ final class AgentHub {
         stopped = true
         scanTask?.cancel()
         scanTask = nil
+        placeTracker?.stop()
         onChange = nil
         onNotice = nil
         onForget = nil
@@ -468,7 +524,7 @@ final class AgentHub {
                 }
                 registryNames[id] = .some(entry.explicitName)
                 let native: String?
-                if let reported = connectorNames[id] {
+                if let reported = connectorNames[id], !Self.isGenerated(reported, entry.title) {
                     native = reported
                 } else {
                     native = entry.explicitName ?? entry.title.explicitName
@@ -480,12 +536,18 @@ final class AgentHub {
         }
         let excluded = Set(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }.filter(exclusions.excludes))
         let live = Set(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }.filter { !excluded.contains($0) && transport.isLive(session: $0) })
-        directory.update(entries: entries, live: live, titles: shown, nativeNames: nativeNames, running: stillRunning, excluded: excluded)
+        directory.update(
+            entries: entries, live: live, titles: shown, nativeNames: nativeNames, running: stillRunning, excluded: excluded,
+            places: placeTracker?.places ?? [:],
+            unplaced: placeTracker.map { tracker in
+                tracker.unchecked(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }).subtracting(tracker.places.keys)
+            } ?? [])
         let reported = namesNotSaved
         rememberNames()
         if let current, handle(of: current) == nil { self.current = nil }
         lastUsed = lastUsed.filter { handle(of: $0.key) != nil }
         let listed = Set((directory.conversations + directory.disconnected).map(\.id))
+        placeTracker?.notice(listed)
         let ended = connectorStateSessions.filter { !listed.contains($0) && !transport.isLive(session: $0) }
         forgetConnectorState(keepingEnvironments: { !ended.contains($0) }) { !ended.contains($0) && !exclusions.excludes($0) }
         installations = installations.filter { !ended.contains($0.key) }
@@ -665,6 +727,7 @@ final class AgentHub {
             }
             connectorNamesAt[hello.session] = now()
             refresh(nameReportedFor: hello.session)
+            readPlaces()
             Task { [weak self] in await self?.rescan(rereadingTitles: true) }
         case .title(let session, let text):
             connectorNames[session] = .some(text.isEmpty ? nil : text)
@@ -963,12 +1026,15 @@ final class AgentRuntime {
             transport: server, discovery: discovery,
             names: AgentNameStore(directory: directory, legacyAgent: legacyAgent),
             focus: AgentTerminalFocus(connector: { session in await box.hub?.focusInPlace(session) ?? .notFound }),
-            front: AgentFront(), glance: AgentFront.confirmingWithoutAsking, exclusions: exclusions)
+            front: AgentFront(), glance: AgentFront.confirmingWithoutAsking, exclusions: exclusions, places: HerdrPlaceReader())
         box.hub = hub
         try server.start()
         Task { @MainActor [weak hub] in await hub?.rescan() }
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak hub] _ in
-            Task { @MainActor in await hub?.rescan(rereadingTitles: false) }
+            Task { @MainActor in
+                hub?.tickPlaces()
+                await hub?.rescan(rereadingTitles: false)
+            }
         }
     }
 

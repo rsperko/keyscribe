@@ -358,6 +358,8 @@ enum AccessibilityID {
             static let renameName = "mode.codingAgents.renameName"
             static let renameSave = "mode.codingAgents.renameSave"
             static let renameCancel = "mode.codingAgents.renameCancel"
+            static let defaultName = "mode.codingAgents.defaultName"
+            static let useDefaultName = "mode.codingAgents.useDefaultName"
             static let spokenResultEnabled = "mode.codingAgents.spokenResultEnabled"
             static let spokenResultService = "mode.codingAgents.spokenResultService"
             static let spokenResultOpenAIServices = "mode.codingAgents.spokenResultOpenAIServices"

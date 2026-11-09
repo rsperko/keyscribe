@@ -783,6 +783,53 @@ struct CodingAgentsSettingsModelTests {
         model.rename("a", to: "session 2")
         #expect(model.renameProblem == "\u{201C}Session\u{201D} followed by a number is how you say a row, so it cannot be a name.")
     }
+    @Test func aRowNamesThePlaceItsNameCameFromWithoutRepeatingTheTerminal() async {
+        let terminals = Terminals()
+        terminals.byPid[1] = "Ghostty \u{00B7} herdr"
+        terminals.byPid[2] = "Ghostty"
+        let (model, _, _) = makeModel(terminals: terminals)
+        let cos = AgentPlaceName(surface: "herdr", level: .workspace, label: "Cos")
+        model.show([
+            .init(id: "a", agent: "claude", pid: 1, cwd: "/src/home", handle: "cos claude", state: .idle, connectorLive: true,
+                  nameSource: .place, placeName: cos, placeSurface: "herdr"),
+            .init(id: "b", agent: "claude", pid: 2, cwd: "/src/home", handle: "cos pi", state: .idle, connectorLive: true,
+                  nameSource: .place, placeName: cos, placeSurface: "herdr"),
+            .init(id: "c", agent: "claude", pid: 3, cwd: "/src/api", handle: "api", state: .idle, connectorLive: true, placeSurface: "herdr"),
+        ], current: nil)
+        await until { model.rows.filter { $0.id != "c" }.allSatisfy { $0.terminal != nil } }
+        let rows = Dictionary(uniqueKeysWithValues: model.rows.map { ($0.id, $0) })
+        #expect(rows["a"]?.location == "Ghostty \u{00B7} herdr workspace Cos")
+        #expect(rows["b"]?.location == "Ghostty \u{00B7} herdr workspace Cos")
+        #expect(rows["c"]?.location == nil)
+        #expect(rows["c"]?.surface == "herdr")
+    }
+
+    @Test func theRenameSheetExplainsWhereTheNameComesFromAndTheDefaultBehindAnOverride() {
+        let (model, _, _) = makeModel()
+        let row = CodingAgentsSettingsModel.Row(
+            id: "a", number: 1, name: "cos claude", folder: "/src/home", state: "Ready", connected: true, current: false, agent: "claude")
+        var renamed = row
+        renamed.renamed = true
+        model.defaultName = { _ in
+            AgentDirectory.DefaultName(
+                name: "cos claude", source: .place, place: AgentPlaceName(surface: "herdr", level: .workspace, label: "cos"))
+        }
+        #expect(model.defaultNameNote(row) == "This name comes from its herdr workspace.")
+        #expect(model.defaultNameNote(renamed) == "Default name: cos claude, from its herdr workspace.")
+        model.defaultName = { _ in AgentDirectory.DefaultName(name: "home", source: .folder, place: nil) }
+        #expect(model.defaultNameNote(renamed) == "Default name: home, from its folder.")
+    }
+
+    @Test func useDefaultNameReportsAFailedSaveAndKeepsTheSheetOpen() {
+        let (model, _, _) = makeModel()
+        model.onUseDefaultName = { _ in throw NSError(domain: "review", code: 1, userInfo: [NSLocalizedDescriptionKey: "disk unavailable"]) }
+        #expect(!model.useDefaultName("a"))
+        #expect(model.renameProblem == "Could not save this change. Your current name is unchanged.")
+        #expect(model.renameDetails == "disk unavailable")
+        model.onUseDefaultName = { _ in }
+        #expect(model.useDefaultName("a"))
+        #expect(model.renameProblem == nil)
+    }
 }
 
 struct ClaudeCLITests {

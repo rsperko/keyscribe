@@ -476,7 +476,20 @@ talking to is renamed; the panel shows the new name, and you say that name from 
 to four words, and it can't be one another conversation already has. Say the name on its own: if anything
 follows it, nothing is renamed or sent, and the panel says why. You can also choose **Rename…** beside a conversation
 in **Settings ▸ Modes ▸ Coding agent ▸ Conversations**. Renaming only changes the name you say to KeyScribe;
-the agent's own title for the conversation stays as it was.
+the agent's own title for the conversation stays as it was. **Use Default Name** in the same sheet goes back
+to the name KeyScribe would choose on its own.
+
+A conversation you named in the agent itself (`/rename` in Claude Code, `/name` in Pi) is called by that
+name. Otherwise, if it runs in herdr, it is called by the name you gave its pane, else its tab, else its
+workspace; otherwise by its project folder. A title the agent made up is shown under the name and never
+becomes something you have to say. When one workspace holds more than one conversation, each is called by
+the workspace name and its agent, such as “cos claude” and “cos pi”, and saying just “cos” asks which one
+you meant. A conversation keeps its longer name after the other one closes, so what you learned to say
+keeps working. Name the panes in herdr to give each its own name. A new conversation started in a named pane
+gets that pane's name once the old one has closed. Renaming a pane or workspace takes effect within a few
+seconds. If you say the new name while KeyScribe is still reading it, it waits a moment; if the read takes
+longer or fails, a message that doesn't start with a name it knows is not sent, and it asks you to say it
+again.
 
 ### How do I ask what a conversation needs?
 

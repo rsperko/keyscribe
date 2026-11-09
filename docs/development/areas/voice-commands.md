@@ -31,7 +31,8 @@ review keeps finding the same few of them.
   and apps reorder between resolution and execution.
 - **An unresolved target holds and asks; it never falls through to the current, first, or default
   target.** A tie is different: asking interrupts, so a tie takes a predictable order (a Coding agent
-  recipient tie goes to the first name alphabetically, a sidebar tie to the first in sidebar order) and
+  recipient tie goes to the first name alphabetically unless the name is a place label several
+  conversations share, a sidebar tie to the first in sidebar order) and
   asks only when no such order exists or a wrong guess would run the wrong action: different apps,
   places, or windows, or tabs in different browsers, tied for a switch are offered as a choice (`ui_design.md`, *Voice command
   choice*; `config_schema.md` has the full order).
@@ -100,7 +101,39 @@ every rule above applies to it, with these sharpenings:
   conversation and no other conversation takes its name.
 - **A spoken recipient never falls through to the current recipient.** An unknown one holds and asks,
   like any unresolved target; one that fits several names goes to the first of them alphabetically
-  (`AgentRecipient.resolve`).
+  (`AgentRecipient.resolve`), except a place label several conversations share
+  (`AgentDirectory.sharedPlaceNames`), which asks. The shared labels are frozen with the take's names and
+  passed to both the parse (`AgentRecipient.spokenNames`) and the resolve, for messages, open, and
+  questions alike, so a bare label said without “tell” asks too instead of becoming a message. Names a
+  place read produced during the recording are added for the same frozen conversations only
+  (`AgentRecipient.addingLate`): they never replace a frozen name, add a conversation, or change the frozen
+  recipient and rows. Whether a place label is qualified is decided per spoken label, across every place
+  that has it, not per container. A qualified place name stays once given (`cos claude` keeps its
+  qualifier after its sibling closes, and across an app restart through its remembered name), because the
+  user may have learned it and the words after a name are the message.
+- **A conversation's name comes from the most specific name the user set.** The order is a KeyScribe
+  name, the agent's own user-set name, the user's label for its place (`AgentPlace`, read for herdr by
+  `HerdrPlaces` and `HerdrPlaceReader`: pane, then tab, then workspace), then the folder. A label that
+  cannot be said falls through to the next one. A place label is joined to its conversation by the
+  session herdr reports for the pane, and only for a pane where herdr reports no session, by the pane id in
+  the agent's environment; a pane id is only meaningful with its server's socket, so every place is keyed
+  by socket. The environment's pane id is resolved through herdr's own `pane current` with that id as the
+  caller's pane, because herdr gives a moved pane a new id and resolves the old one only for its caller.
+  Labels are read off the main actor, by one coalesced read per poll for every conversation
+  (`AgentPlaceTracker`), each command under a timeout, never on the 1 s registry tick's critical path and
+  never awaited by the agent. Whether a conversation's place was checked is tracked per conversation
+  (`AgentPlaceTracker.checked`): found or absent checks it, unresolved unchecks it, and a conversation
+  never read is unchecked. An unchecked conversation with no cached place keeps its last name
+  (`AgentDirectory.update(unplaced:)`), so a failed first read after launch keeps remembered names. A take
+  waits for a read already running only when it is resolved, up to `DictationController.placeNamesGrace`;
+  if a read is still running then, or any listed conversation is unchecked, a take that would go to the
+  default recipient is held, because its leading words may be a name a read did not deliver. A lookup is found, absent, or unresolved
+  (`HerdrPlaces.Association`): two panes claiming one session, a pane claimed by another session, or an
+  unreadable listing or environment is unresolved and keeps the labels last read; only a good listing with
+  no pane for the session, or herdr reporting the pane gone, removes them. Unreadable never means unnamed.
+- **A title the agent generated never becomes a name.** An adapter reports what it knows to be generated as
+  `AgentTitle.generatedTitle`, and a connector-reported name equal to it is ignored for naming
+  (`AgentHub.isGenerated`).
 - **A spoken recipient is matched as heard first, then as the mode's replacements and dictionary read
   it.** The reading only picks the name (`AgentAddress.parse`'s `read`, built by
   `ResolvedConfig.agentAddressReader`); the message after it, near misses, and ties come from the words

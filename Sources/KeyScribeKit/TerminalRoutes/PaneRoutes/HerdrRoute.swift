@@ -1,10 +1,10 @@
 import Foundation
 
 struct HerdrRoute: PaneRoute {
-    static let socketKey = "HERDR_SOCKET_PATH"
-    static let paneKey = "HERDR_PANE_ID"
+    static let socketKey = HerdrPlaces.socketKey
+    static let paneKey = HerdrPlaces.paneKey
     let name = "herdr"
-    let processName = "herdr"
+    let processName = HerdrPlaces.processName
     let environmentKeys = [socketKey, paneKey]
 
     func open(_ server: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> Opening? {

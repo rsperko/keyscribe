@@ -70,7 +70,8 @@ final class ClaudeDiscovery: AgentDiscovery {
             let sessions = entries.map { entry in
                 var session = entry.session
                 if let recorded = titles?.titles(for: entry, rereading: rereadingTitles) {
-                    session.title = AgentTitle(explicitName: recorded.explicitName, generatedTitle: recorded.generatedTitle)
+                    session.title = AgentTitle(
+                        explicitName: recorded.explicitName, generatedTitle: recorded.generatedTitle ?? session.title.generatedTitle)
                 }
                 return session
             }
@@ -97,13 +98,14 @@ extension AgentHub {
         focus: AgentTerminalFocusing? = nil, front: AgentFronting? = nil, glance: AgentFronting? = nil, transcriptTitles: ClaudeTranscriptTitles? = nil,
         receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30),
         disconnectGrace: Duration = AgentHub.defaultDisconnectGrace, scanDeadline: Duration = AgentHub.defaultScanDeadline,
+        places: (any AgentPlaceReading)? = nil,
         now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString },
         stillRunning: @escaping (RememberedName) -> Bool = ClaudeRegistryScanner.stillRunning
     ) {
         self.init(
             transport: transport, discovery: [ClaudeDiscovery(scan: scan, titles: transcriptTitles, stillRunning: stillRunning)],
             names: names, focus: focus, front: front, glance: glance, receiptTimeout: receiptTimeout, handOffLimit: handOffLimit,
-            disconnectGrace: disconnectGrace, scanDeadline: scanDeadline, now: now, makeId: makeId)
+            disconnectGrace: disconnectGrace, scanDeadline: scanDeadline, places: places, now: now, makeId: makeId)
     }
 }
 

@@ -90,8 +90,8 @@ struct CodingAgentRecipientSection: View {
                 }
                 directory(row)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                if let terminal = row.terminal {
-                    Text(terminal).lineLimit(1).truncationMode(.middle).help(terminal)
+                if let location = row.location {
+                    Text(location).lineLimit(1).truncationMode(.middle).help(location)
                         .layoutPriority(1)
                 }
             }
@@ -117,7 +117,7 @@ struct CodingAgentRecipientSection: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            [row.name, row.state, row.folder, row.terminal, model.recognitionContext(for: row), row.readAloud?.note]
+            [row.name, row.state, row.folder, row.location, model.recognitionContext(for: row), row.readAloud?.note]
                 .compactMap { $0 }.joined(separator: ", "))
         .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.conversation)
     }
@@ -326,7 +326,23 @@ private struct ConversationNameEditor: View {
             }
             .formStyle(.grouped)
             .frame(height: model.renameDetails == nil ? 130 : showingFailureDetails ? 260 : 190)
+            VStack(alignment: .leading, spacing: 4) {
+                if let note = model.defaultNameNote(row) {
+                    Text(note).accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.defaultName)
+                }
+                if let surface = row.surface {
+                    Text("This name follows this conversation, including when you resume it. To name future conversations in this pane, rename the pane in \(surface).")
+                }
+            }
+            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack {
+                if row.renamed {
+                    Button("Use Default Name") {
+                        if model.useDefaultName(row.id) { onDone() }
+                    }
+                    .disabled(model.namesProblem != nil)
+                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.useDefaultName)
+                }
                 Spacer()
                 Button("Cancel", role: .cancel, action: onDone)
                     .keyboardShortcut(.cancelAction)

@@ -292,10 +292,47 @@ it reports that the command did not run.
 
 **Coding agent session list.** A recording in the Coding agent mode lists the open sessions so the user
 can address one. Its displayed and spoken name is the user's KeyScribe override, else the agent's explicit
-conversation name, else a name generated from the project folder. Names use the same normalization as
-Rename. Duplicate names gain a distinguishing word; an arriving native name never steals an existing
-handle. Native names that cannot be addressed under the reserved row grammar fall back to the project.
-A native rename updates an unaliased conversation for the next take; a KeyScribe override keeps winning.
+conversation name, else the name the user gave the place it runs in (a herdr pane, else its tab, else its
+workspace), else a name generated from the project folder. A deliberate name for one conversation beats a
+place that can hold several. Names use the same normalization as Rename. Duplicate names gain a
+distinguishing word; an arriving native name never steals an existing handle. Native names and place
+labels that cannot be addressed under the reserved row grammar fall through to the next source (a pane to
+its tab, then its workspace) before the project. A native rename or a renamed place updates an unaliased
+conversation for the next take; a KeyScribe override keeps winning. A tab still on its default number and
+a pane never renamed give no name.
+
+A tab or workspace label that covers several conversations names each of them by the label and its agent
+(workspace `cos` holding a Claude and a Pi conversation gives `cos claude` and `cos pi`), and two of the
+same agent then gain a distinguishing word. A conversation whose pane has its own label still counts, so
+workspace `cos` with a pane named `pi` and one unnamed Claude pane gives `pi` and `cos claude`. Said bare,
+such a label never picks one: “tell cos to run the tests” and “cos, run the tests” are held and ask
+“Not sent: “cos” could be “cos claude” or “cos pi””, adding “Name the panes in herdr to tell them apart.”
+when only a distinguishing word separates them. This holds for messages, open, and questions alike. Two
+places with the same label, even on separate herdr servers, are one spoken label listing all of their
+conversations, and so are two separate places with the same label, each holding one conversation (two
+workspaces named `cos` give `cos claude` and `cos pi`, or a distinguishing word for the same agent). A lone
+conversation under the label is just `cos`; when a second conversation opens there,
+it becomes `cos claude` for the next take, and it keeps that name after the other closes, so the full name
+the user learned keeps working (words after a name are the message, so “tell cos claude …” would otherwise
+send “claude …”). The qualified name also survives restarting the app while the conversation runs. With
+only that conversation left, the bare label reaches it. A new conversation that
+opens alone under the label is `cos`. A disconnected conversation still counts.
+
+Place labels are read in the background, every few seconds while a conversation runs in a named place and
+less often otherwise, again when a conversation connects, and when a recording starts. A take resolves
+against the names frozen when its recording started, plus any new name a read during the recording gave
+one of those same conversations: the recipient chosen at the start and the row numbers never change, and
+a new name never takes a frozen one or adds a conversation. When the take is resolved while a read is
+still running, it waits for that read up to a second. A take that would go to the current conversation
+is held, “Not sent: couldn’t check conversation names yet. Say it again, or start with a name or session
+number.”, if the read still has not finished or the last read could not check where one of the listed
+conversations runs, because its first words may be a name that read did not deliver; a take that named a
+known conversation goes ahead. So a pane renamed just before recording is reached by its new name. A failed read keeps the names last
+shown, and so does a read that cannot tell which pane holds the conversation, for that conversation alone;
+only a read that shows the label gone, or herdr reporting the pane closed, changes the name. After a
+restart, a conversation keeps its remembered name until its place has been checked. A new conversation in the same pane gets
+the pane's name once the old one has closed, and nothing else of the old conversation: its held messages,
+spoken replies, disconnection and current-recipient status stay with the old one.
 Automatically generated titles never rename the destination. For Claude Code, custom names are kept
 separate from generated titles, and a fresh registry rename can supersede the last connector report. For
 Pi, the name is the session name its user set (`/name`), as the connector reports it.
@@ -346,7 +383,8 @@ An address that matched is always removed from the message, and a name that was 
 for a longer one it sounds like: “tell keyscribe glue the adapters together” sends “glue the adapters
 together” to keyscribe even when keyscribe blue is current. Short words are left alone without
 “tell”, so “build the project” beside a conversation named `builds` is still a message. Words that fit several conversations at the winning address length and match tier go to the
-first conversation alphabetically by its displayed name, whatever order the session list shows. The
+first conversation alphabetically by its displayed name, whatever order the session list shows, except a
+place label shared by several conversations, which asks (above). The
 current recipient does not override that order. A whole-name match wins over a looser match at the same
 address length. The receipt names the selected conversation, which becomes current; no choice is required
 for an accepted tie. A first match that is no longer available is held, never replaced by the next one. The list is not a question: a take that does not start with a name or
@@ -1902,7 +1940,9 @@ name. A row whose setup has no connector offers
 **Connect…**. A row whose setup has a connector but which has not connected says "Connector installed. Run
 /reload in this conversation." with the command as a `CopyableValue`, **Show Conversation** (which only brings
 it forward and never types) when it can be located, and **Try Again**; the app never infers a reload is needed
-from process age or a missing hello. A connected row offers **Rename…** and **Disconnect**. Connecting never
+from process age or a missing hello. A row's terminal line names the place its conversation runs in
+when it has a label ("Ghostty · herdr workspace cos", naming the multiplexer once), so a name that came from the place matches
+it, and a name that won over the place still shows where it runs. A connected row offers **Rename…** and **Disconnect**. Connecting never
 changes the current recipient or sends anything.
 
 **Disconnect** takes effect at once without confirmation: the conversation leaves the recipients and the
@@ -1934,7 +1974,14 @@ conversation title and abbreviated directory provide recognition context above t
 text available on hover and selectable for copying. Empty,
 reserved and already-used names are explained beside the field before submission. A save failure
 keeps the sheet and draft open for correction or retry, with the diagnostic reason under Technical
-details; Cancel makes no change. Renaming changes the
+details; Cancel makes no change. Under the field a quiet line says where the name comes from (“This name
+comes from its herdr workspace.”); when the conversation has a KeyScribe name, it names the name it would
+have without one, with any distinguishing word it would need (“Default name: cos claude, from its herdr
+workspace.”). When the conversation has a KeyScribe name, **Use Default
+Name** leads the action row: it drops that name, saved first, and closes the sheet; a save failure keeps
+the name and the sheet open with the same explanation as a failed rename. When the conversation runs in a
+herdr pane, labelled or not, the sheet adds “This name follows this conversation, including when you resume it. To name
+future conversations in this pane, rename the pane in herdr.” Renaming changes the
 name used in KeyScribe and leaves Claude Code's own title alone. A chosen name stays with its session
 across restarts of either app and is held for it while it is closed. A name KeyScribe gave a session
 stays with it across KeyScribe restarts while that session keeps running, and is free once it closes. If those names

@@ -731,6 +731,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 settingsController.codingAgents.onRename = { [weak hub = runtime.hub] in try hub?.rename($0, to: $1) }
                 settingsController.codingAgents.onReloadNames = { [weak hub = runtime.hub] in hub?.reloadNames() }
                 settingsController.codingAgents.renameCheck = { [weak hub = runtime.hub] in hub?.renameProblem($0, to: $1) }
+                settingsController.codingAgents.defaultName = { [weak hub = runtime.hub] in hub?.defaultName(for: $0) }
+                settingsController.codingAgents.onUseDefaultName = { [weak hub = runtime.hub] in try hub?.useDefaultName($0) }
                 settingsController.codingAgents.onRetire = { [weak runtime] in runtime?.retire(installation: $0) }
                 settingsController.codingAgents.onDisconnect = { [weak hub = runtime.hub] in hub?.disconnect($0) }
                 settingsController.codingAgents.onReconnect = { [weak hub = runtime.hub] in hub?.reconnect($0) }
@@ -780,6 +782,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsController.codingAgents.onRename = nil
             settingsController.codingAgents.onReloadNames = nil
             settingsController.codingAgents.renameCheck = nil
+            settingsController.codingAgents.defaultName = nil
+            settingsController.codingAgents.onUseDefaultName = nil
             settingsController.codingAgents.onRetire = nil
             settingsController.codingAgents.onDisconnect = nil
             settingsController.codingAgents.onReconnect = nil

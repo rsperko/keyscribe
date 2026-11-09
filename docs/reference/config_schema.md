@@ -361,8 +361,12 @@ state, and a write to it does not reload configuration.
   records and registry names marked `auto` or `derived` are descriptive text, never addresses.
   An omitted name in a connector hello leaves registry/transcript discovery available; an explicit
   name-cleared event overrides stale metadata. A subsequent registry rename can supersede that report.
+- After the agent's own name comes the label the user gave the conversation's place: a herdr pane's
+  label, else its tab's label when it is not the tab's number, else its workspace's label. A tab or
+  workspace label covering several conversations is followed by each conversation's agent, and a bare
+  label then asks which one. Place labels are not saved; they are read from herdr while the app runs.
 - A native rename updates an unaliased conversation; a KeyScribe override keeps winning until changed
-  in KeyScribe. Duplicate names gain a distinguishing word without taking an existing conversation's
+  in KeyScribe or removed with Use Default Name. Duplicate names gain a distinguishing word without taking an existing conversation's
   handle. A native name that is empty after normalization or uses reserved `session <number>` syntax
   falls back to the folder. Identity, pending delivery and a recording's frozen name table remain bound
   to the original session id.

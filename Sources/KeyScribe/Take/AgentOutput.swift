@@ -166,6 +166,9 @@ final class AgentOutput {
             "did you mean \u{201C}\(name)\u{201D}? Say \u{201C}tell \(name),\u{201D} with a pause, or \u{201C}tell \(name) to \u{2026}\u{201D}"
         case .ambiguousName(let name, let matches):
             "\u{201C}\(name)\u{201D} could be \(Self.either(matches.map { "\u{201C}\($0)\u{201D}" }))"
+        case .sharedName(let name, let matches, let surface):
+            "\u{201C}\(name)\u{201D} could be \(Self.either(matches.map { "\u{201C}\($0)\u{201D}" }))"
+                + (surface.map { ". Name the panes in \($0) to tell them apart." } ?? "")
         }
     }
 

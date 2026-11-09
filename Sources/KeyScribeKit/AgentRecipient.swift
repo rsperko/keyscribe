@@ -12,11 +12,46 @@ public enum AgentRecipient {
         }
     }
 
+    public struct SharedName: Equatable, Sendable {
+        public var names: [String]
+        public var tellApartIn: String?
+
+        public init(names: [String], tellApartIn: String? = nil) {
+            self.names = names
+            self.tellApartIn = tellApartIn
+        }
+    }
+
+    public static func spokenNames(_ names: [String: String], shared: [String: SharedName]) -> [String] {
+        Array(names.keys) + shared.keys.filter { key in !names.keys.contains { AgentHandles.matchKey($0) == AgentHandles.matchKey(key) } }
+    }
+
+    public static func addingLate(
+        _ late: [String: String], sharing lateShared: [String: SharedName], to frozen: [String: String], sharing frozenShared: [String: SharedName]
+    ) -> (names: [String: String], shared: [String: SharedName]) {
+        func taken(_ name: String, _ names: [String: String], _ shared: [String: SharedName]) -> Bool {
+            let key = AgentHandles.matchKey(name)
+            return names.keys.contains { AgentHandles.matchKey($0) == key } || shared.keys.contains { AgentHandles.matchKey($0) == key }
+        }
+        let frozenIds = Set(frozen.values)
+        var names = frozen
+        for (name, id) in late.sorted(by: { $0.key < $1.key }) where frozenIds.contains(id) && !taken(name, names, frozenShared) {
+            names[name] = id
+        }
+        var shared = frozenShared
+        for (label, place) in lateShared.sorted(by: { $0.key < $1.key }) where !taken(label, names, shared) {
+            let members = place.names.filter { member in names.keys.contains { AgentHandles.matchKey($0) == AgentHandles.matchKey(member) } }
+            if members.count == place.names.count { shared[label] = place }
+        }
+        return (names, shared)
+    }
+
     public enum AskReason: Equatable, Sendable {
         case noRecipient
         case noSuchRow(Int)
         case unknownName(String)
         case ambiguousName(String, matches: [String])
+        case sharedName(String, matches: [String], tellApartIn: String?)
         case soundsLike(String, name: String)
         case noBreak(String)
     }
@@ -55,17 +90,26 @@ public enum AgentRecipient {
         }
     }
 
-    public static func resolve(_ address: AgentAddress, frozen: Frozen?, rows: [String], names: [String: String]) -> Resolution {
+    public static func resolve(
+        _ address: AgentAddress, frozen: Frozen?, rows: [String], names: [String: String], shared: [String: SharedName] = [:]
+    ) -> Resolution {
+        func sharedAsk(_ spoken: String, body: String) -> Resolution? {
+            guard id(named: spoken, in: names) == nil,
+                  let place = shared.first(where: { AgentHandles.matchKey($0.key) == AgentHandles.matchKey(spoken) })
+            else { return nil }
+            if place.value.names.count == 1, let only = id(named: place.value.names[0], in: names) { return addressed(only, body: body) }
+            return .ask(body: body, reason: .sharedName(place.key, matches: place.value.names, tellApartIn: place.value.tellApartIn))
+        }
         switch address {
         case .open(.unresolved(let spoken, _)):
             return .ask(body: "", reason: suggestion(for: spoken, among: Array(names.keys)))
         case .open(let target):
-            switch resolve(target, frozen: frozen, rows: rows, names: names) {
+            switch resolve(target, frozen: frozen, rows: rows, names: names, shared: shared) {
             case .select(let id), .open(let id), .deliver(let id, _, _): return .open(id: id)
             case .ask(_, let reason): return .ask(body: "", reason: reason)
             }
         case .unbroken(let target, let unaddressed):
-            switch resolve(target, frozen: frozen, rows: rows, names: names) {
+            switch resolve(target, frozen: frozen, rows: rows, names: names, shared: shared) {
             case .deliver(let id, _, _), .select(let id), .open(let id):
                 if let frozen, frozen.id == id { return .deliver(id: id, body: unaddressed, source: frozen.source) }
                 return .ask(body: unaddressed, reason: .noBreak(said(target)))
@@ -78,6 +122,7 @@ public enum AgentRecipient {
         case .unresolved(let spoken, let body):
             return .ask(body: body, reason: .unknownName(spoken))
         case .ambiguous(let spoken, let matches, let body):
+            if let asked = sharedAsk(spoken, body: body) { return asked }
             guard let first = matches.sorted().first, let id = id(named: first, in: names) else {
                 return .ask(body: body, reason: .ambiguousName(spoken, matches: matches))
             }
@@ -92,6 +137,7 @@ public enum AgentRecipient {
             guard rows.indices.contains(row - 1) else { return .ask(body: body, reason: .noSuchRow(row)) }
             return addressed(rows[row - 1], body: body)
         case .name(let name, let body):
+            if let asked = sharedAsk(name, body: body) { return asked }
             guard let id = id(named: name, in: names) else { return .ask(body: body, reason: .unknownName(name)) }
             return addressed(id, body: body)
         }

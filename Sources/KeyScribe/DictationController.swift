@@ -151,8 +151,16 @@ final class DictationController {
         let current: String?
         var namesAvailable = true
         var disconnected: [String: String] = [:]
+        var shared: [String: AgentRecipient.SharedName] = [:]
+        var late: [String: String] = [:]
+        var lateShared: [String: AgentRecipient.SharedName] = [:]
         var rows: [String] { conversations.map(\.id) }
-        var addressable: [String: String] { names.merging(disconnected) { kept, _ in kept } }
+        private var merged: (names: [String: String], shared: [String: AgentRecipient.SharedName]) {
+            AgentRecipient.addingLate(late, sharing: lateShared, to: names.merging(disconnected) { kept, _ in kept }, sharing: shared)
+        }
+        var addressable: [String: String] { merged.names }
+        var sharedNames: [String: AgentRecipient.SharedName] { merged.shared }
+        var spokenNames: [String] { AgentRecipient.spokenNames(addressable, shared: sharedNames) }
     }
     private var activeStartTrigger: String?
 
@@ -1571,9 +1579,10 @@ final class DictationController {
     private func freezeAgentRecipient() {
         guard let agents, settings.features.isEnabled(.codingAgents) else { return }
         agents.refresh()
+        agents.readPlaces()
         let snapshot = AgentSnapshot(
             names: agents.names, conversations: agents.recordingOrder, current: agents.current,
-            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames)
+            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames, shared: agents.sharedNames)
         session?.agentSnapshot = snapshot
         guard let mode = activeMode, mode.output == .agent else { return }
         session?.agentRecipient = AgentRecipient.initial(
@@ -1582,6 +1591,15 @@ final class DictationController {
     }
 
     var frontReadingGrace: Duration = .seconds(1)
+    var placeNamesGrace: Duration = .seconds(1)
+
+    private func settlePlaceNames(_ agents: AgentHub) async -> Bool {
+        if let reading = agents.placeTracker?.reading {
+            _ = try? await runWithDeadline(seconds: Self.seconds(placeNamesGrace)) { await reading.value }
+        }
+        let ids = (session?.agentSnapshot?.conversations ?? agents.directory.conversations).map(\.id)
+        return agents.placeTracker?.reading == nil && !agents.placesUnchecked(ids)
+    }
 
     private func followAgentInFront(target: Mode.Agent.Target, snapshot: AgentSnapshot, through agents: AgentHub) {
         guard target == .current else { return }
@@ -1624,9 +1642,18 @@ final class DictationController {
             finishNoSpeech()
             return
         }
-        let snapshot = session?.agentSnapshot ?? AgentSnapshot(
-            names: agents.names, conversations: agents.recordingOrder, current: agents.current,
-            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames)
+        let namesSettled = await settlePlaceNames(agents)
+        if Task.isCancelled { return }
+        let snapshot = {
+            var frozen = session?.agentSnapshot ?? AgentSnapshot(
+                names: agents.names, conversations: agents.recordingOrder, current: agents.current,
+                namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames, shared: agents.sharedNames)
+            if frozen.namesAvailable, agents.namesProblem == nil {
+                frozen.late = agents.names.merging(agents.disconnectedNames) { kept, _ in kept }
+                frozen.lateShared = agents.sharedNames
+            }
+            return frozen
+        }()
         func frozenRecipient() -> AgentRecipient.Frozen? {
             session?.agentRecipient ?? AgentRecipient.initial(target: mode.agent.target, current: snapshot.current, names: snapshot.names)
         }
@@ -1650,13 +1677,13 @@ final class DictationController {
             return
         }
         if let query = AgentStatusQuery.parse(
-            routed.transcript, names: Array(snapshot.addressable.keys), namesKnown: snapshot.namesAvailable,
+            routed.transcript, names: snapshot.spokenNames, namesKnown: snapshot.namesAvailable,
             read: plan.agentAddressReader(for: routed.transcript, mode: mode)) {
             await answerStatus(query, recipient: frozenRecipient, through: agents, heard: heard, mode: mode, snapshot: snapshot)
             return
         }
         let address = AgentAddress.parse(
-            routed.transcript, names: Array(snapshot.addressable.keys), namesKnown: snapshot.namesAvailable,
+            routed.transcript, names: snapshot.spokenNames, namesKnown: snapshot.namesAvailable,
             read: plan.agentAddressReader(for: routed.transcript, mode: mode))
         if AgentRecipient.usesDefault(address) {
             await settleAgentInFront()
@@ -1665,11 +1692,16 @@ final class DictationController {
             session?.agentFrontTask?.cancel()
         }
         let frozen = frozenRecipient()
-        let resolution = AgentRecipient.resolve(address, frozen: frozen, rows: snapshot.rows, names: snapshot.addressable)
+        let resolution = AgentRecipient.resolve(address, frozen: frozen, rows: snapshot.rows, names: snapshot.addressable, shared: snapshot.sharedNames)
         let facts = AgentHistoryFacts.facts(
             address: address, resolution: resolution, frozen: frozen, conversations: snapshot.conversations)
         if captureWasLost {
             if case .deliver(_, let body, _) = resolution { finishTruncatedCapture(transcript: body) } else { finishCommandCaptureLost() }
+            return
+        }
+        if !namesSettled, AgentRecipient.usesDefault(address), case .deliver(_, let body, _) = resolution {
+            finishAgent(state: .error(message: "Not sent: couldn\u{2019}t check conversation names yet. Say it again, or start with a name or session number.", action: nil, heard: HeardExcerpt(heard: body)),
+                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, facts: facts)
             return
         }
         if let (id, front, body) = Self.target(of: resolution), snapshot.disconnected.values.contains(id) || agents.isExcluded(id) {
@@ -1842,7 +1874,7 @@ final class DictationController {
         if let address {
             session?.agentFrontTask?.cancel()
             frozen = recipient()
-            resolution = AgentRecipient.resolve(address, frozen: frozen, rows: snapshot.rows, names: snapshot.addressable)
+            resolution = AgentRecipient.resolve(address, frozen: frozen, rows: snapshot.rows, names: snapshot.addressable, shared: snapshot.sharedNames)
         } else {
             await settleAgentInFront()
             if Task.isCancelled { return }
