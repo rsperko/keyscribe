@@ -231,6 +231,41 @@ struct LiveEditsStageTests {
             == "I like dogs scratch that I like fish")
     }
 
+    @Test(arguments: [
+        ("I went to the store to buy milk, scratch that, to the mall", "I went to the mall"),
+        ("Keep this. Meet me at the gym at noon, scratch that, at the park.", "Keep this. Meet me at the park."),
+    ])
+    func aCorrectionAfterScratchThatReplacesOnlyThePartItLinesUpWith(_ text: String, _ expected: String) {
+        #expect(run(text) == expected)
+    }
+
+    @Test(arguments: [
+        ("I have twenty five things, scratch that, six things", "six things"),
+        ("Tell Alice to call Bob, scratch that. Bob will email me.", "Bob will email me."),
+        ("send it to Bob, scratch that, to Alice", "to Alice"),
+        ("I have 3 things, scratch that, 2 things", "2 things"),
+        ("Please ask Alice to call Bob, scratch that. Call Bob yourself.", "Call Bob yourself."),
+    ])
+    func aCorrectionWithoutTwoWordsInARowReplacesTheWholeSentence(_ text: String, _ expected: String) {
+        #expect(run(text) == expected)
+    }
+
+    @Test func aCorrectionSharingNoWordWithTheScratchedTextReplacesTheWholeSentence() {
+        #expect(run("meet at noon, scratch that, let's do lunch") == "let's do lunch")
+    }
+
+    @Test func aRestartSharingOneScatteredWordReplacesTheWholeSentence() {
+        #expect(run("Send the report to Bob, scratch that. Send it to Alice.") == "Send it to Alice.")
+    }
+
+    @Test func aCorrectionEndsAtASpokenCommand() {
+        #expect(run("Draw a new line, scratch that, insert new line done") == "\ndone")
+    }
+
+    @Test func aCorrectionNeverLinesUpWithWordsBeforeTheSentence() {
+        #expect(run("I have two cats. I have, scratch that, dogs") == "I have two cats. dogs")
+    }
+
     @Test func scratchThatTrailingPeriodFires() {
         #expect(run("we went up the hill, scratch that. we went down the hill")
             == "we went down the hill")

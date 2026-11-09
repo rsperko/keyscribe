@@ -17,6 +17,18 @@ private func nonCooperativeBlock(seconds: TimeInterval) async {
     }
 }
 
+// Ends on its own after `atMost`, so a regression that never releases the latch fails the test instead of
+// wedging the suite.
+private func blockUntil(_ latch: Latch, atMost seconds: TimeInterval = 5) async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        Thread.detachNewThread {
+            let giveUp = Date().addingTimeInterval(seconds)
+            while !latch.isSet, Date() < giveUp { Thread.sleep(forTimeInterval: 0.005) }
+            continuation.resume()
+        }
+    }
+}
+
 struct DeadlineTests {
     @Test func returnsResultWhenOperationFinishesInTime() async throws {
         let value = try await runWithDeadline(seconds: 5) { "done" }
@@ -104,30 +116,43 @@ struct SingleFlightDeadlineTests {
     @Test func secondRunWhileFirstIsWedgedThrowsBusy() async {
         let gate = SingleFlightDeadline()
         let concurrent = Counter()
+        let release = Latch()
         async let first: Void = {
             try? await gate.run(seconds: 0.1) {
                 await concurrent.bump()
-                await nonCooperativeBlock(seconds: 0.6)
+                await blockUntil(release)
             }
         }()
-        try? await Task.sleep(for: .seconds(0.2))
+        defer { release.set() }
+        for _ in 0..<500 where await concurrent.value == 0 { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(await concurrent.value == 1)
         await #expect(throws: SingleFlightDeadline.Busy.self) {
             try await gate.run(seconds: 0.1) {
                 await concurrent.bump()
                 return "second"
             }
         }
+        release.set()
         _ = await first
         #expect(await concurrent.value == 1)
     }
 
     @Test func gateReopensAfterOperationSettles() async throws {
         let gate = SingleFlightDeadline()
+        let release = Latch()
+        defer { release.set() }
         await #expect(throws: DeadlineExceeded.self) {
-            try await gate.run(seconds: 0.1) { await nonCooperativeBlock(seconds: 0.4) }
+            try await gate.run(seconds: 0.1) { await blockUntil(release) }
         }
-        try await Task.sleep(for: .seconds(0.6))
-        let value = try await gate.run(seconds: 5) { "ok" }
+        await #expect(throws: SingleFlightDeadline.Busy.self) {
+            try await gate.run(seconds: 5) { "while wedged" }
+        }
+        release.set()
+        var value: String?
+        for _ in 0..<500 where value == nil {
+            value = try? await gate.run(seconds: 5) { "ok" }
+            if value == nil { try await Task.sleep(for: .milliseconds(10)) }
+        }
         #expect(value == "ok")
     }
 

@@ -7,7 +7,8 @@ import Foundation
 // boundary and its own undoable unit.
 //
 // "scratch that" removes the most recent unit and never reaches past a command: it deletes dictated
-// words since the last boundary; if nothing was said and the last unit is a command, it cancels that
+// words since the last boundary, or, when the same sentence goes on after it (the command ends with a comma
+// or no punctuation) with at least two of those words in a row, only from there ("…to the store to buy milk, scratch that, to the mall" → "…to the mall"); if nothing was said and the last unit is a command, it cancels that
 // command; if it is prose (a punctuating STT ended the clause), it removes the one previous clause —
 // back to the nearest terminator/comma/;/: or command boundary. Clause-not-sentence bounds a mis-fire
 // (under-deleting is re-issuable, over-deleting is silent). It only fires at a clause boundary (its
@@ -82,58 +83,50 @@ public struct LiveEditsStage: PipelineStage {
         func resetSegment() { segmentStart = parts.count }
 
         while i < tokens.count {
-            let matched = match(lowered, at: i)
-            if let (action, consumed) = matched, action == .discard,
-               i == 0 || Self.hasBoundaryPunct(tokens[i - 1]), i + consumed >= tokens.count {
-                context.text = ""
-                context.discarded = true
-                return
-            }
-            if let (action, consumed) = matched, action != .discard {
-                let fires: Bool
-                if action == .scratch {
-                    let atUtteranceEnd = i + consumed >= tokens.count
-                    fires = atUtteranceEnd || Self.hasBoundaryPunct(tokens[i + consumed - 1])
+            if let (action, consumed) = firingCommand(tokens, lowered, at: i) {
+                if action == .discard {
+                    context.text = ""
+                    context.discarded = true
+                    return
+                }
+                let control: String?
+                switch action {
+                case .newline: control = Self.newline
+                case .paragraph: control = Self.paragraph
+                case .tab: control = Self.tab
+                case .scratch, .discard: control = nil
+                }
+                if let control {
+                    if !parts.isEmpty { parts[parts.count - 1] = Self.stripTrailingComma(parts[parts.count - 1]) }
+                    parts.append(control)
+                    resetSegment()
+                    absorbLeading = true
                 } else {
-                    fires = true
-                }
-                if fires {
-                    let control: String?
-                    switch action {
-                    case .newline: control = Self.newline
-                    case .paragraph: control = Self.paragraph
-                    case .tab: control = Self.tab
-                    case .scratch, .discard: control = nil
-                    }
-                    if let control {
-                        if !parts.isEmpty { parts[parts.count - 1] = Self.stripTrailingComma(parts[parts.count - 1]) }
-                        parts.append(control)
-                        resetSegment()
-                        absorbLeading = true
-                    } else {
-                        if segmentStart < parts.count {
-                            parts.removeSubrange(segmentStart..<parts.count)
-                        } else if segmentStart > 0 {
-                            let prevIndex = segmentStart - 1
-                            if Self.isCommandPart(parts[prevIndex]) {
-                                parts.remove(at: prevIndex)
-                            } else {
-                                var prevStart = prevIndex
-                                while prevStart > 0 {
-                                    let before = parts[prevStart - 1]
-                                    if Self.isCommandPart(before) { break }
-                                    if Self.hasBoundaryPunct(before) { break }
-                                    prevStart -= 1
-                                }
-                                parts.removeSubrange(prevStart..<segmentStart)
+                    if segmentStart < parts.count {
+                        let restarts = Self.endsWithSentenceTerminator(tokens[i + consumed - 1])
+                        let correction = restarts ? [] : correctionWords(tokens, lowered, from: i + consumed)
+                        let cut = Self.repairStart(parts[segmentStart...], correction) ?? segmentStart
+                        parts.removeSubrange(cut..<parts.count)
+                    } else if segmentStart > 0 {
+                        let prevIndex = segmentStart - 1
+                        if Self.isCommandPart(parts[prevIndex]) {
+                            parts.remove(at: prevIndex)
+                        } else {
+                            var prevStart = prevIndex
+                            while prevStart > 0 {
+                                let before = parts[prevStart - 1]
+                                if Self.isCommandPart(before) { break }
+                                if Self.hasBoundaryPunct(before) { break }
+                                prevStart -= 1
                             }
-                            resetSegment()
+                            parts.removeSubrange(prevStart..<segmentStart)
                         }
-                        absorbLeading = false
+                        resetSegment()
                     }
-                    i += consumed
-                    continue
+                    absorbLeading = false
                 }
+                i += consumed
+                continue
             }
 
             var token = tokens[i]
@@ -174,6 +167,46 @@ public struct LiveEditsStage: PipelineStage {
             if matched { return (phrase.action, j - start) }
         }
         return nil
+    }
+
+    private func firingCommand(_ tokens: [String], _ lowered: [String], at i: Int) -> (Action, Int)? {
+        guard let (action, consumed) = match(lowered, at: i) else { return nil }
+        let atUtteranceEnd = i + consumed >= tokens.count
+        switch action {
+        case .discard:
+            return atUtteranceEnd && (i == 0 || Self.hasBoundaryPunct(tokens[i - 1])) ? (action, consumed) : nil
+        case .scratch:
+            return atUtteranceEnd || Self.hasBoundaryPunct(tokens[i + consumed - 1]) ? (action, consumed) : nil
+        case .newline, .paragraph, .tab:
+            return (action, consumed)
+        }
+    }
+
+    private func correctionWords(_ tokens: [String], _ lowered: [String], from start: Int) -> [String] {
+        var words: [String] = []
+        var j = start
+        while j < tokens.count, firingCommand(tokens, lowered, at: j) == nil, !SentinelText.containsSentinel(tokens[j]) {
+            words.append(Self.comparable(tokens[j]))
+            if Self.endsWithSentenceTerminator(tokens[j]) { break }
+            j += 1
+        }
+        return words.filter { !$0.isEmpty }
+    }
+
+    // Where the scratched words a correction replaces begin: only where the correction starts with at least
+    // two of them in a row (the longest run, the earliest on a tie). Anything less is a restart, nil.
+    private static func repairStart(_ scratched: ArraySlice<String>, _ correction: [String]) -> Int? {
+        let words = scratched.map(comparable)
+        var best: (start: Int, run: Int)?
+        for start in words.indices {
+            let run = zip(words[start...], correction).prefix { !$0.isEmpty && $0 == $1 }.count
+            if run >= 2, run > (best?.run ?? 0) { best = (start, run) }
+        }
+        return best.map { scratched.startIndex + $0.start }
+    }
+
+    private static func comparable(_ token: String) -> String {
+        token.lowercased().trimmingCharacters(in: .punctuationCharacters)
     }
 
     // A token that is nothing but commas — the STT's rendering of a bare pause between words.

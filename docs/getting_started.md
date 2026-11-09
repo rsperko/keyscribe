@@ -145,6 +145,11 @@ first item insert new line second item scratch that revised second item insert n
 With live edits on, KeyScribe inserts line breaks and removes the scratched segment. A common
 mishearing such as `scratch dat` counts as `scratch that`.
 
+When you go on with the same sentence after `scratch that`, without a pause that ends the sentence,
+and repeat at least two of the words you scratched, only the part from there is replaced:
+`meet me at the gym at noon, scratch that, at the park` inserts `meet me at the park`. Otherwise the
+whole sentence so far is removed, so say it again in full: `I have 3 things, scratch that, I have 2 things`.
+
 `never mind` and `start over` throw the dictation away only when they end it as a sentence of their own
 (`I have three things. Never mind.`): nothing is inserted or saved to History, and the HUD says it was
 discarded. In the middle of a sentence (`we need to start over`) they stay text.
