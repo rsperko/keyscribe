@@ -249,7 +249,7 @@ not to its label.
 | Transcribing | “Transcribing” | Mode name | Cancel when safe |
 | Voice command opening an app | Mode name | “Opening [app]…” only while “open” starts an app, then “Looking in [app]…” while its tabs or sidebar fill; “switch to” never starts one, so never shows it | None; shown only once the command is acting, so it is not cancellable and does not take key focus away from the app being opened |
 | Rewriting | “Rewriting with [connection name]” | Boundary badges: `Cloud rewrite`, then `Best-effort redaction` or the exact shared context categories | Insert without rewriting after timeout (the shortcut does the same once it is shown) |
-| Complete | “Inserted” | Mode name | None; dismiss automatically |
+| Complete | “Inserted” | Mode name, followed by “Spoken edits: …” naming the live edits that ran, each once in the order first used with a count when repeated (“Spoken edits: new line ×2, scratch that”), so a user can tell a spoken edit worked; it stays five seconds. A copied completion keeps its explanation first and names the edits after it | None; dismiss automatically |
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
 | Stopped at the limit | “Stopped at the [limit] limit” (e.g. “5-minute”) | “Inserted without rewriting — dictate again to continue” when the mode rewrites, “Inserted — dictate again to continue” when it does not, or the copied explanation | Paste last dictation when copied |
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | A short cause, such as “The model reached its output limit while reasoning.”, or “Rewrite could not be completed” when none was recorded. History keeps the full reason and advice. When copied, the focus-change or Accessibility explanation comes first. Stays five seconds when it carries a reason | AI Service Settings… opens the affected service when the failure names one. Paste last dictation also remains available when copied and Accessibility permits it |
@@ -2012,6 +2012,9 @@ time, so a later rename or reorder does not change them. When an AI rewrite ran,
 rewrite** offers the usual comparison, collapsed, with the final text called **Result**. A message whose
 rewrite fell back or was skipped stays **Local fallback** or **Rewrite skipped** after it is sent. The
 text and Markdown exports carry the same summary and lines, and say why local text was kept.
+
+A dictation in which live edits ran, including a Coding agent message (beside its recipient lines), adds a
+**What happened** row, **Spoken edits**, with the same words as the completion HUD (“new line ×2, scratch that”), so the user can tell afterwards whether a spoken edit fired.
 
 Under the comparison of a dictation (not a command or a Coding agent message), a line names each likely
 mishearing of a dictionary word that applied to it and that no rule or near match already fixes:

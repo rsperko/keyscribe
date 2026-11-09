@@ -74,6 +74,7 @@ enum SourceInvariants {
                 "Sources/KeyScribe/DictationController.swift": 2,
                 "Sources/KeyScribe/Take/AgentOutput.swift": 2,
                 "Sources/KeyScribeKit/AgentHistoryFacts.swift": 1,
+                "Sources/KeyScribeKit/LiveEditsStage.swift": 1,
             ],
             reason: "History shows summary, facts and steps without vetting them, so only reviewed writers fill them, with "
                 + "fixed local strings and names: never an agent reply, a secret, or an environment value."

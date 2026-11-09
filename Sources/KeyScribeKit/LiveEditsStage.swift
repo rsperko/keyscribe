@@ -20,6 +20,28 @@ import Foundation
 // longer. Matching tolerates a trailing terminator/comma on the last word and a pause comma inside or
 // on a neighbouring word ("blah, insert new line, foo" → "blah\nfoo") — commas only, so a sentence
 // period survives ("insert new. Paragraph two"). Verbatim tokenization is later (design.md §4.2).
+public enum SpokenEdit: String, Sendable, Equatable {
+    case newLine = "new line"
+    case newParagraph = "new paragraph"
+    case tab
+    case scratchThat = "scratch that"
+
+    public static func summary(_ edits: [SpokenEdit]) -> String? {
+        var order: [SpokenEdit] = []
+        var counts: [SpokenEdit: Int] = [:]
+        for edit in edits {
+            if counts[edit] == nil { order.append(edit) }
+            counts[edit, default: 0] += 1
+        }
+        guard !order.isEmpty else { return nil }
+        return order.map { counts[$0]! > 1 ? "\($0.rawValue) \u{00D7}\(counts[$0]!)" : $0.rawValue }.joined(separator: ", ")
+    }
+
+    public static func historyFacts(_ summary: String?) -> [HistoryEntry.Fact]? {
+        summary.map { [HistoryEntry.Fact(label: "Spoken edits", value: $0)] }
+    }
+}
+
 public struct LiveEditsStage: PipelineStage {
     public let position = StagePosition.postSTTText
     public let order = StageOrder.liveEdits
@@ -91,10 +113,10 @@ public struct LiveEditsStage: PipelineStage {
                 }
                 let control: String?
                 switch action {
-                case .newline: control = Self.newline
-                case .paragraph: control = Self.paragraph
-                case .tab: control = Self.tab
-                case .scratch, .discard: control = nil
+                case .newline: control = Self.newline; context.spokenEdits.append(.newLine)
+                case .paragraph: control = Self.paragraph; context.spokenEdits.append(.newParagraph)
+                case .tab: control = Self.tab; context.spokenEdits.append(.tab)
+                case .scratch, .discard: control = nil; context.spokenEdits.append(.scratchThat)
                 }
                 if let control {
                     if !parts.isEmpty { parts[parts.count - 1] = Self.stripTrailingComma(parts[parts.count - 1]) }

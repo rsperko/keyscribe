@@ -97,6 +97,7 @@ final class DictationController {
         var stoppedAtLimit = false
         var rewriteSkippedAtLimit = false
         var replacementEffects: [ReplacementEffect] = []
+        var spokenEdits: String?
         var replacementUsageEpoch: Int?
         var modeResolveTask: Task<Void, Never>?
         var snapshotAdoptionTask: Task<Void, Never>?
@@ -1793,7 +1794,8 @@ final class DictationController {
                record: (outcome == .inserted ? .inserted : .failed, reason),
                history: HistoryWrite(
                    heard: heard, transformed: transformed, result: body, insertion: outcome, rewrite: rewrite,
-                   failureReason: reason, summary: summary ?? state.primaryText, facts: facts,
+                   failureReason: reason, summary: summary ?? state.primaryText,
+                   facts: facts + (SpokenEdit.historyFacts(session?.spokenEdits) ?? []),
                    onRecorded: awaited.map { awaited in { [weak self] entry in
                        self?.agentOutput.noteRecorded(entry, request: awaited.request)
                    } }))
@@ -1914,14 +1916,16 @@ final class DictationController {
                 reason: rewrite?.fallbackReason, connectionId: rewrite?.connectionId)
         } else {
             completedState = .complete(
-                outcome: outcome, mode: currentModeName, notice: textLanded ? reasoningNotice(for: rewrite) : nil)
+                outcome: outcome, mode: currentModeName, notice: textLanded ? reasoningNotice(for: rewrite) : nil,
+                spokenEdits: textLanded ? session?.spokenEdits : nil)
         }
         finish(machine: .alreadyTransitioned, cue: endCue,
                state: completedState,
                hideAfter: completedState.hidesAfterSeconds,
                record: (recordOutcome, nil),
                history: HistoryWrite(heard: heard, transformed: transformed, result: transcript,
-                                     insertion: outcome, rewrite: rewrite),
+                                     insertion: outcome, rewrite: rewrite,
+                                     facts: SpokenEdit.historyFacts(session?.spokenEdits)),
                completion: completion)
     }
 
@@ -2058,6 +2062,7 @@ final class DictationController {
         let localStart = DispatchTime.now()
         let take = TakeText(transcript, pipeline: pipeline, trimsTrailingPunctuation: mode?.trimTrailingPunctuation ?? false)
         session?.replacementEffects = take.payload.replacementEffects
+        session?.spokenEdits = SpokenEdit.summary(take.payload.spokenEdits)
         if take.discarded { return (.discard, nil, nil) }
 
         // Whole-utterance replacement: one rule owned the entire utterance, so insert its generated

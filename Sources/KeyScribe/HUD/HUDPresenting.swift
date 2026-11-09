@@ -73,7 +73,7 @@ enum HUDState: Equatable {
     case rewriting(connection: String, mode: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
     case localFallback(outcome: DictationOutcome, mode: String, reason: String? = nil, connectionId: String? = nil)
     case rewriteSkipped(outcome: DictationOutcome, mode: String, seconds: Double)
-    case complete(outcome: DictationOutcome, mode: String, notice: String? = nil)
+    case complete(outcome: DictationOutcome, mode: String, notice: String? = nil, spokenEdits: String? = nil)
     case commandDone(summary: String, detail: String = HUDState.commandDetail)
     case stoppedAtLimit(outcome: DictationOutcome, limit: String, rewriteSkipped: Bool)
     case error(message: String, action: HUDErrorAction?, heard: HeardExcerpt? = nil)
@@ -153,7 +153,7 @@ extension HUDState {
         case .localFallback(let outcome, _, _, _), .rewriteSkipped(let outcome, _, _):
             if case .copied = outcome { return "Copied without rewriting" }
             return "Inserted without rewriting"
-        case .complete(let outcome, _, _):
+        case .complete(let outcome, _, _, _):
             return Self.completePrimary(outcome)
         case .commandDone(let summary, _):
             return summary
@@ -194,17 +194,18 @@ extension HUDState {
             return Self.joined(Self.copiedSecondary(copied), Self.skippedLine(seconds))
         case .rewriteSkipped(_, _, let seconds):
             return Self.skippedLine(seconds)
-        case .complete(.copied(let copied), _, let notice?):
-            return Self.joined(Self.copiedSecondary(copied), Self.noticeLine(notice))
-        case .complete(.copied(let reason), _, _), .localFallback(.copied(let reason), _, _, _),
-             .stoppedAtLimit(.copied(let reason), _, _):
+        case .complete(.copied(let copied), _, let notice, let edits):
+            let line = notice.map { Self.joined(Self.copiedSecondary(copied), Self.noticeLine($0)) } ?? Self.copiedSecondary(copied)
+            return edits.map { Self.joined(line, Self.spokenEditsLine($0)) } ?? line
+        case .localFallback(.copied(let reason), _, _, _), .stoppedAtLimit(.copied(let reason), _, _):
             return Self.copiedSecondary(reason)
         case .stoppedAtLimit(_, _, let rewriteSkipped):
             return rewriteSkipped
                 ? "Inserted without rewriting — dictate again to continue"
                 : "Inserted — dictate again to continue"
-        case .complete(_, let mode, let notice):
-            return notice.map(Self.noticeLine) ?? mode
+        case .complete(_, let mode, let notice, let edits):
+            let line = notice.map(Self.noticeLine) ?? mode
+            return edits.map { Self.joined(line, Self.spokenEditsLine($0)) } ?? line
         case .commandDone(_, let detail):
             return detail
         case .localFallback(_, _, let reason, _):
@@ -244,7 +245,7 @@ extension HUDState {
 
     var offersPasteLast: Bool {
         switch self {
-        case .complete(.copied(let reason), _, _), .localFallback(.copied(let reason), _, _, _),
+        case .complete(.copied(let reason), _, _, _), .localFallback(.copied(let reason), _, _, _),
              .stoppedAtLimit(.copied(let reason), _, _), .rewriteSkipped(.copied(let reason), _, _):
             // A synthetic ⌘V is itself blocked without Accessibility, so don't offer a button that can't
             // work — the text is already on the clipboard for a manual paste.
@@ -301,7 +302,7 @@ extension HUDState {
 
     private var hasLongSecondary: Bool {
         switch self {
-        case .localFallback(_, _, _?, _), .complete(_, _, _?), .rewriteSkipped: true
+        case .localFallback(_, _, _?, _), .complete(_, _, _?, _), .complete(_, _, _, _?), .rewriteSkipped: true
         default: false
         }
     }
@@ -422,6 +423,10 @@ extension HUDState {
         case .choice(_, .listening, _), .choice(_, .working, _): return true
         default: return false
         }
+    }
+
+    private static func spokenEditsLine(_ edits: String) -> String {
+        "Spoken edits: " + edits
     }
 
     private static func noticeLine(_ notice: String) -> String {

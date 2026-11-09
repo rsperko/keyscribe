@@ -141,6 +141,28 @@ struct HUDStateTests {
         #expect(HUDState.complete(outcome: .inserted, mode: "Polish").secondaryText == "Polish")
     }
 
+    @Test func anInsertedCompletionNamesTheSpokenEditsThatRan() {
+        let state = HUDState.complete(outcome: .inserted, mode: "Polish", spokenEdits: "scratch that")
+        #expect(state.secondaryText == "Polish. Spoken edits: scratch that")
+        #expect(state.voiceOverAnnouncement == "Inserted. Polish. Spoken edits: scratch that")
+        let noticed = HUDState.complete(outcome: .inserted, mode: "Polish", notice: "Example didn't accept it.", spokenEdits: "tab")
+        #expect(noticed.secondaryText == "Reasoning setting not applied. Example didn't accept it. Spoken edits: tab")
+    }
+
+    @Test func aSpokenEditConfirmationStaysFiveSeconds() {
+        #expect(HUDState.complete(outcome: .inserted, mode: "Polish", spokenEdits: "new line").hidesAfterSeconds == 5)
+        #expect(HUDState.complete(outcome: .inserted, mode: "Polish").hidesAfterSeconds == 2)
+    }
+
+    @Test func aCopiedCompletionNamesTheSpokenEditsAfterSayingWhereTheTextWent() {
+        let copied = HUDState.complete(outcome: .copied(.focusChanged), mode: "Polish", spokenEdits: "tab")
+        #expect(copied.secondaryText == "Focus changed while \(Branding.appName) was working. Spoken edits: tab")
+        let noticed = HUDState.complete(
+            outcome: .copied(.focusChanged), mode: "Polish", notice: "Example didn't accept it.", spokenEdits: "tab")
+        #expect(noticed.secondaryText?.hasPrefix("Focus changed while \(Branding.appName) was working. Reasoning setting not applied.") == true)
+        #expect(noticed.secondaryText?.hasSuffix("Spoken edits: tab") == true)
+    }
+
     @Test func aCopiedCompletionCarriesTheNoticeAfterSayingWhereTheTextWent() {
         let state = HUDState.complete(outcome: .copied(.focusChanged), mode: "Polish", notice: "Example didn't accept it.")
         #expect(state.secondaryText

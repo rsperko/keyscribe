@@ -420,6 +420,19 @@ struct DictationPipelineWiringTests {
         #expect(out.historyEntry?.transformed == "hello world")
     }
 
+    @Test func theSpokenEditsThatRanAreShownOnCompletionAndKeptInHistory() async {
+        let out = await run(transcript: "first insert new line second", mode: mode(id: "plain", liveEdits: true))
+        #expect(out.lastResult == "first\nsecond")
+        #expect(out.historyEntry?.facts == [HistoryEntry.Fact(label: "Spoken edits", value: "new line")])
+        #expect(out.lastHUD?.secondaryText == "plain. Spoken edits: new line")
+    }
+
+    @Test func aDictationWithoutSpokenEditsRecordsNone() async {
+        let out = await run(transcript: "scratch that lottery ticket", mode: mode(id: "plain", liveEdits: true))
+        #expect(out.historyEntry?.facts == nil)
+        #expect(out.lastHUD?.secondaryText == "plain")
+    }
+
     @Test func transformedRecordsLocalOutputWhenLocalChangedIt() async {
         let m = mode(id: "code", replacements: [ReplacementsSet.Rule(heard: "cat", replace: "dog", regex: false)])
         let out = await run(transcript: "a cat", mode: m)
@@ -842,7 +855,7 @@ struct DictationPipelineWiringTests {
             llmClient: ReasoningReportingLLM(outcome: outcome))
         let notice = outcome.notice(service: "C", model: "m")
         func noticesShown() -> Int {
-            hud.states.filter { if case .complete(.inserted, _, let shown?) = $0 { shown == notice } else { false } }.count
+            hud.states.filter { if case .complete(.inserted, _, let shown?, _) = $0 { shown == notice } else { false } }.count
         }
         for _ in 0..<2 {
             controller.setNextModeOverride(id: "polish")

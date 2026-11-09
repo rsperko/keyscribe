@@ -143,7 +143,10 @@ first item insert new line second item scratch that revised second item insert n
 ```
 
 With live edits on, KeyScribe inserts line breaks and removes the scratched segment. A common
-mishearing such as `scratch dat` counts as `scratch that`.
+mishearing such as `scratch dat` counts as `scratch that`. When a spoken edit runs, the confirmation
+after inserting names it (`Spoken edits: new line, scratch that`), and so does the dictation's entry in
+History. If a phrase you meant as an edit is not named there, it was heard differently or this mode has
+spoken edits turned off.
 
 When you go on with the same sentence after `scratch that`, without a pause that ends the sentence,
 and repeat at least two of the words you scratched, only the part from there is replaced:

@@ -41,7 +41,7 @@ final class HUDChannel {
         }
         guard let prompt = choices.answering ?? choices.pending else { return state }
         switch state {
-        case .hidden, .error, .advisory, .complete(.noSpeech, _, _):
+        case .hidden, .error, .advisory, .complete(.noSpeech, _, _, _):
             return .choice(prompt, status: Self.choiceWaiting(after: state))
         default:
             return state
@@ -52,7 +52,7 @@ final class HUDChannel {
         switch state {
         case .error(let message, let action, _): .waiting(note: message, action: action)
         case .advisory(let message): .waiting(note: message)
-        case .complete(.noSpeech, _, _): .waiting(note: "No speech detected")
+        case .complete(.noSpeech, _, _, _): .waiting(note: "No speech detected")
         case .choice(_, .waiting(let note, let heard, let action), _): .waiting(note: note, heard: heard, action: action)
         default: .waiting(note: nil)
         }

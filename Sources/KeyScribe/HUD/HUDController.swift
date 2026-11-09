@@ -641,7 +641,7 @@ private struct HUDView: View {
         case .processing:
             ProcessingIcon()
         case .complete:
-            if case .complete(let outcome, _, _) = model.shown {
+            if case .complete(let outcome, _, _, _) = model.shown {
                 Image(systemName: outcomeSymbol(outcome))
                     .font(.system(size: outcomeIconSize(outcome), weight: .semibold))
                     .foregroundStyle(outcomeStyle(outcome))

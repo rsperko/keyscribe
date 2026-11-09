@@ -283,8 +283,8 @@ final class AgentBridgeServer: @unchecked Sendable {
         case .typed, .turnStarted, .turnComplete, .undelivered, .title, .waiting:
             break
         }
-        respond(fd, status: 200, body: Data(#"{"ok":true}"#.utf8))
         onEvent(event)
+        respond(fd, status: 200, body: Data(#"{"ok":true}"#.utf8))
     }
 
     private func tick() {
@@ -331,11 +331,11 @@ final class AgentBridgeServer: @unchecked Sendable {
         parked.removeAll { $0.session == hello.session }
         for p in earlier { send([], to: p.fd) }
         if excludes(hello.session) {
-            respond(fd, status: 200, body: Data(#"{"ok":true,"quiet":true}"#.utf8))
             onEvent(.hello(hello.withoutContent))
+            respond(fd, status: 200, body: Data(#"{"ok":true,"quiet":true}"#.utf8))
         } else {
-            respond(fd, status: 200, body: Data(#"{"ok":true}"#.utf8))
             onEvent(.hello(hello))
+            respond(fd, status: 200, body: Data(#"{"ok":true}"#.utf8))
         }
     }
 

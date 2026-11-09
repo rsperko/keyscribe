@@ -42,6 +42,24 @@ struct LiveEditsStageTests {
         #expect(!run(text).lowercased().contains("stratch"))
     }
 
+    @Test func theEditsThatRanAreRecordedInOrder() {
+        var ctx = PipelineContext(text: "first insert new line second, scratch that, third insert new line done")
+        LiveEditsStage().apply(&ctx)
+        #expect(ctx.spokenEdits == [.newLine, .scratchThat, .newLine])
+    }
+
+    @Test func aPhraseThatStaysTextIsNotRecorded() {
+        var ctx = PipelineContext(text: "I told her to scratch that lottery ticket")
+        LiveEditsStage().apply(&ctx)
+        #expect(ctx.spokenEdits.isEmpty)
+    }
+
+    @Test func theSummaryNamesEachEditOnceInFirstOrderWithItsCount() {
+        #expect(SpokenEdit.summary([.newLine, .scratchThat, .newLine]) == "new line \u{00D7}2, scratch that")
+        #expect(SpokenEdit.summary([.newParagraph, .tab]) == "new paragraph, tab")
+        #expect(SpokenEdit.summary([]) == nil)
+    }
+
     @Test func newLineCommand() {
         #expect(run("alpha insert new line beta") == "alpha\nbeta")
     }

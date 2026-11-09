@@ -1255,6 +1255,17 @@ struct AgentDeliveryWiringTests {
         #expect(entry?.steps == nil)
     }
 
+    @Test func historyRecordsTheSpokenEditsInAMessageBesideWhereItWent() async {
+        var mode = agentMode()
+        mode.commands.liveEdits = true
+        let rig = await rig("Run the tests insert new line then lint.", modes: [mode], current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        let entry = await lastHistoryEntry(rig)
+        #expect(fact(entry, "Conversation") == "keyscribe \u{00B7} claude \u{00B7} s1")
+        #expect(fact(entry, "Spoken edits") == "new line")
+    }
+
     @Test func historyRecordsAnOpenAsAnOpenWithNothingSent() async {
         let rig = await rig("Open keyscribe blue.", current: "claude:s1", focus: Focus(.pane(app: "Ghostty", multiplexer: "herdr", uncertain: false)))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }

@@ -45,6 +45,7 @@ public struct PipelineContext: Sendable {
     public var bareSegments: [BareSegment]?
     public var firedReplacements: [ReplacementRule] = []
     public var replacementEffects: [ReplacementEffect] = []
+    public var spokenEdits: [SpokenEdit] = []
     public var discarded = false
     public init(text: String) { self.text = text }
 }
@@ -74,13 +75,16 @@ public struct TokenizedPayload: Sendable {
     public let bareSegments: [BareSegment]?
     public let firedReplacements: [ReplacementRule]
     public let replacementEffects: [ReplacementEffect]
+    public let spokenEdits: [SpokenEdit]
     public let discarded: Bool
 
     init(
         text: String, issuedTokens: [String], bareReplacement: BareReplacement? = nil, bareSegments: [BareSegment]? = nil,
-        firedReplacements: [ReplacementRule] = [], replacementEffects: [ReplacementEffect] = [], discarded: Bool = false
+        firedReplacements: [ReplacementRule] = [], replacementEffects: [ReplacementEffect] = [],
+        spokenEdits: [SpokenEdit] = [], discarded: Bool = false
     ) {
         self.discarded = discarded
+        self.spokenEdits = spokenEdits
         self.text = text
         self.issuedTokens = issuedTokens
         self.bareReplacement = bareReplacement
@@ -117,6 +121,7 @@ public struct Pipeline: Sendable {
             bareSegments: context.bareSegments,
             firedReplacements: context.firedReplacements,
             replacementEffects: context.replacementEffects,
+            spokenEdits: context.spokenEdits,
             discarded: context.discarded)
     }
 
