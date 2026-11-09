@@ -1645,6 +1645,10 @@ final class DictationController {
         default:
             break
         }
+        if let request = AgentRename.request(in: routed.transcript) {
+            await renameFromAgent(request, in: routed.transcript, recipient: frozenRecipient, through: agents, heard: heard, mode: mode, snapshot: snapshot)
+            return
+        }
         let address = AgentAddress.parse(
             routed.transcript, names: Array(snapshot.addressable.keys), namesKnown: snapshot.namesAvailable,
             read: plan.agentAddressReader(for: routed.transcript, mode: mode))
@@ -1720,6 +1724,92 @@ final class DictationController {
         case .deliver(let id, let body, let source): (id, source == .front, body)
         case .select(let id), .open(let id): (id, false, "")
         case .ask: nil
+        }
+    }
+
+    private func renameFromAgent(
+        _ request: Result<Substring, AgentRename.Problem>, in transcript: String, recipient: @escaping () -> AgentRecipient.Frozen?, through agents: AgentHub, heard: String,
+        mode: Mode, snapshot: AgentSnapshot
+    ) async {
+        if captureWasLost {
+            finishCommandCaptureLost()
+            return
+        }
+        func edited(_ text: String) -> TakeText {
+            TakeText(text, pipeline: dictationPipeline(for: mode, willRewrite: false), trimsTrailingPunctuation: false)
+        }
+        let rename: AgentRename
+        switch request {
+        case .failure(let problem):
+            guard !edited(transcript).discarded else {
+                session?.agentFrontTask?.cancel()
+                finishDiscarded()
+                return
+            }
+            rename = .invalid(problem)
+        case .success(let spoken):
+            let edited = edited(String(spoken))
+            session?.spokenEdits = SpokenEdit.summary(edited.payload.spokenEdits)
+            if edited.discarded {
+                session?.agentFrontTask?.cancel()
+                finishDiscarded()
+                return
+            }
+            let name = edited.isBlank ? "" : edited.localText
+            rename = AgentRename.parse(name) ?? AgentRename.name(from: name)
+        }
+        guard case .rename(let spoken) = rename else {
+            session?.agentFrontTask?.cancel()
+            if case .invalid(let problem) = rename {
+                finishAgent(state: .error(message: Self.renameProblem(problem), action: nil, heard: HeardExcerpt(heard: heard)),
+                            outcome: .failed, heard: heard, body: "", transformed: nil, rewrite: nil,
+                            facts: AgentHistoryFacts.rename(frozen: nil, to: nil, conversations: snapshot.conversations))
+            }
+            return
+        }
+        await settleAgentInFront()
+        if Task.isCancelled { return }
+        let name = AgentHandles.normalize(spoken)
+        let frozen = recipient()
+        let facts = AgentHistoryFacts.rename(frozen: frozen, to: name, conversations: snapshot.conversations)
+        func fail(_ message: String, action: HUDErrorAction? = nil) {
+            finishAgent(state: .error(message: message, action: action, heard: HeardExcerpt(heard: heard)),
+                        outcome: .failed, heard: heard, body: "", transformed: nil, rewrite: nil, transitioned: true, facts: facts)
+        }
+        let lease = lease(for: .codingAgents)
+        guard lease.keepActing() else {
+            if machine.isBusy { finish(machine: .cancel, cue: .cancel, state: .hidden) }
+            return
+        }
+        guard let id = frozen?.id else {
+            return fail("Switch to a conversation, then say the rename command again", action: .openCodingAgents(mode.id))
+        }
+        guard let old = agents.handle(of: id) else { return fail("That conversation has ended") }
+        do {
+            try agents.rename(id, to: name)
+        } catch let error as AgentHandles.RenameError {
+            return fail(Self.renameProblem(error, name: name))
+        } catch {
+            return fail("Couldn\u{2019}t save the new name. \(old) is unchanged", action: .openCodingAgents(mode.id))
+        }
+        agents.makeCurrent(id)
+        finishAgent(state: .commandDone(summary: "Renamed \(old) to \(name)", detail: mode.name), outcome: .inserted, heard: heard,
+                    body: "", transformed: nil, rewrite: nil, transitioned: true, hideAfter: 4, facts: facts)
+    }
+
+    private static func renameProblem(_ problem: AgentRename.Problem) -> String {
+        switch problem {
+        case .noName: "Say \u{201C}rename this session to\u{201D} and the new name. Nothing was sent"
+        case .tooLong: "A name can be up to \(AgentRename.nameWords) words. Nothing was sent"
+        case .moreAfterName: "Say only the new name after \u{201C}rename this session to\u{201D}. Nothing was sent"
+        }
+    }
+
+    private static func renameProblem(_ error: AgentHandles.RenameError, name: String) -> String {
+        switch error {
+        case .empty: renameProblem(.noName)
+        case .taken: "Another conversation is already called \u{201C}\(name)\u{201D}"
+        case .reserved: "\u{201C}Session\u{201D} followed by a number is how you say a row, so it cannot be a name"
         }
     }
 

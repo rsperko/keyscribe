@@ -468,6 +468,16 @@ If a conversation is not listed, open **Conversation missing?** below the list: 
 and **Choose Setup Folder…** lets you pick the agent's folder yourself. KeyScribe can miss an agent started
 through an unusual wrapper or hosted inside another program.
 
+### How do I rename a conversation?
+
+In the Coding agent mode, switch to the conversation, then say **“rename this session to”** and the new
+name, such as “rename this session to auth refactor”, as the whole dictation. Only the conversation you are
+talking to is renamed; the panel shows the new name, and you say that name from then on. The name can be up
+to four words, and it can't be one another conversation already has. Say the name on its own: if anything
+follows it, nothing is renamed or sent, and the panel says why. You can also choose **Rename…** beside a conversation
+in **Settings ▸ Modes ▸ Coding agent ▸ Conversations**. Renaming only changes the name you say to KeyScribe;
+the agent's own title for the conversation stays as it was.
+
 ### How do I stop one conversation from receiving what I say?
 
 Choose **Disconnect** on its row. It stops receiving dictation and spoken replies at once and stays

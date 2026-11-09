@@ -11,9 +11,7 @@ public enum AgentHistoryFacts {
         if let closest = spoken.closest { facts.append(.init(label: "Closest name", value: closest)) }
         if let candidates = spoken.candidates { facts.append(.init(label: "Candidates", value: candidates.sorted().joined(separator: ", "))) }
         if let id = resolution.recipient {
-            let conversation = conversations.first { $0.id == id }
-            let described = conversation.map { "\($0.handle) \u{00B7} \($0.agent) \u{00B7} \(AgentSessionID.native(id))" } ?? AgentSessionID.native(id)
-            facts.append(.init(label: "Conversation", value: described))
+            facts.append(.init(label: "Conversation", value: described(id, in: conversations)))
             facts.append(.init(label: "Chosen by", value: chosenBy(resolution, spoken: spoken.how)))
         } else {
             facts.append(.init(label: "Conversation", value: "None resolved"))
@@ -28,6 +26,21 @@ public enum AgentHistoryFacts {
 
     public static func repeatSummary(frozen: AgentRecipient.Frozen?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
         [fact(command: "Repeat that")] + defaultRecipient(frozen, in: conversations)
+    }
+
+    public static func rename(frozen: AgentRecipient.Frozen?, to name: String?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
+        var facts = [fact(command: "Rename")]
+        facts.append(.init(label: "Conversation", value: frozen.map { described($0.id, in: conversations) } ?? "None resolved"))
+        if let name { facts.append(.init(label: "New name", value: name)) }
+        if let frozen {
+            facts.append(.init(label: "Chosen by", value: chosenBy(.deliver(id: frozen.id, body: "", source: frozen.source), spoken: nil)))
+        }
+        return facts
+    }
+
+    private static func described(_ id: String, in conversations: [AgentConversation]) -> String {
+        let conversation = conversations.first { $0.id == id }
+        return conversation.map { "\($0.handle) \u{00B7} \($0.agent) \u{00B7} \(AgentSessionID.native(id))" } ?? AgentSessionID.native(id)
     }
 
     private static func fact(command: String) -> HistoryEntry.Fact {

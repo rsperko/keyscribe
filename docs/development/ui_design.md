@@ -379,7 +379,25 @@ rather than the queue, so a newer result for the same conversation does not repl
 notice is never merged again with notices still waiting. It does not repeat the front check, since the user asked for it.
 The HUD names the conversation (“docs”), or says “Nothing to repeat yet.” or “Spoken replies are off.”;
 History records the command and never the summary. Inside a longer take or after “tell” and a name it is
-message text. With the Coding agent feature off, a remembered conversation is only its app and window. While
+message text. A take that is only “rename this session to” or “rename this conversation to” a new name (“name this
+session …” and “call this conversation …” work too) renames the take's recipient, with the same check
+Settings' Rename uses (`AgentRename.parse`, then `AgentHub.rename`), and sends nothing. The recipient is
+the one an unaddressed take would go to: the conversation in front when it is confirmed, otherwise the
+current one; renaming makes it current. The feature is rechecked right before the name is saved. Only the current conversation can be renamed by voice, because
+long, changing generated names are hard to say right for one in the background: switch to it first. The
+name may run to `AgentRename.nameWords` words and is stored as it will be said (“auth 2” becomes “auth
+two”). Once a take starts with “rename this session”, it is never sent: no name, a longer one, or more words
+after the name's clause ends (“rename this session to docs. Run the tests.”) is held with the reason,
+so an instruction never becomes part of a name. A take without “this session” (“rename this to
+parseConfig”) is a message for the agent, and the command is recognized from the words as heard, so replacements never
+change it. The mode's local text stages (spoken edits, replacements, numbers), without the AI rewrite, then
+run on the words after it before the name is read (`AgentRename.request`, then `AgentRename.name`): “never
+mind” at the end discards the take (nothing in History), and “rename this session to docs, scratch that,
+notes” names it notes. The HUD shows “Renamed keyscribe to auth refactor” long enough to read, so a misheard name is caught
+and fixed by saying it again. A name another conversation holds, or a row name such as “session three”,
+is refused with the reason and nothing changes; with no recipient it says “Switch to a conversation, then
+say the rename command again” with **Open Coding Agent Settings**. History records Rename, the conversation, the new name and how it was chosen. After “tell” and a
+name it is message text. With the Coding agent feature off, a remembered conversation is only its app and window. While
 it looks, the HUD says so (“Opening docs…”). It follows the agent's processes outward and
 selects each layer it passes through: the multiplexer pane showing the agent (herdr or tmux, for example — the
 `PaneRoute`s in `TerminalRoutes`), then the terminal tab and split holding that pane (or holding the agent directly),

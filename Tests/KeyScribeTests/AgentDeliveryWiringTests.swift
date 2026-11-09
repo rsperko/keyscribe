@@ -1028,6 +1028,154 @@ struct AgentDeliveryWiringTests {
         #expect(fact(entry, "Default recipient") == "keyscribe")
     }
 
+    @Test func renamingThisSessionRenamesTheCurrentConversationAndSendsNothing() async {
+        let rig = await rig("Rename this session to Auth Refactor 2.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        let entry = await lastHistoryEntry(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.handle(of: "claude:s1") == "auth refactor two")
+        #expect(rig.hub.handle(of: "claude:s2") == "keyscribe blue")
+        #expect(rig.hub.current == "claude:s1")
+        #expect(rig.hud.states.contains(.commandDone(summary: "Renamed keyscribe to auth refactor two", detail: "Coding agent")))
+        #expect(entry?.outcome == .inserted)
+        #expect(fact(entry, "Command") == "Rename")
+        #expect(fact(entry, "New name") == "auth refactor two")
+        #expect(fact(entry, "Chosen by") == "The current conversation")
+    }
+
+    @Test func renamingThisSessionRenamesTheConversationInFrontAndMakesItCurrent() async {
+        let rig = await inFront("Rename this session to docs")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig, readingTheFront: true)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.handle(of: "claude:s2") == "docs")
+        #expect(rig.hub.handle(of: "claude:s1") == "keyscribe")
+        #expect(rig.hub.current == "claude:s2")
+        #expect(fact(await lastHistoryEntry(rig), "Chosen by") == "The conversation in front")
+    }
+
+    @Test func aRenameIsSavedForTheNextLaunch() async {
+        let rig = await rig("Rename this session to docs", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        let saved = try? String(contentsOf: rig.supportDir.appendingPathComponent("agents").appendingPathComponent(AgentNameStore.fileName), encoding: .utf8)
+        #expect(saved?.contains("docs") == true)
+    }
+
+    @Test(arguments: [
+        ("Rename this session to keyscribe blue", "Another conversation is already called \u{201C}keyscribe blue\u{201D}"),
+        ("Rename this session to session 3", "\u{201C}Session\u{201D} followed by a number is how you say a row, so it cannot be a name"),
+    ])
+    func aRenameThatCannotTakeTheNameKeepsTheOldOne(text: String, message: String) async {
+        let rig = await rig(text, current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        let entry = await lastHistoryEntry(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.handle(of: "claude:s1") == "keyscribe")
+        #expect(rig.hud.states.contains { if case .error(let shown, _, _) = $0 { shown == message } else { false } })
+        #expect(entry?.outcome == .failed)
+        #expect(fact(entry, "Command") == "Rename")
+    }
+
+    @Test func aRenameWithNoCurrentConversationSaysSoAndRenamesNothing() async {
+        let rig = await rig("Rename this session to docs")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.handle(of: "claude:s1") == "keyscribe")
+        #expect(rig.hub.handle(of: "claude:s2") == "keyscribe blue")
+        #expect(rig.hud.states.contains(.error(
+            message: "Switch to a conversation, then say the rename command again", action: .openCodingAgents(Mode.codingAgentId),
+            heard: HeardExcerpt(heard: "Rename this session to docs"))))
+    }
+
+    @Test(arguments: [
+        ("Rename this session to", "Say \u{201C}rename this session to\u{201D} and the new name. Nothing was sent"),
+        ("Rename this session to the one we used for the parser yesterday", "A name can be up to 4 words. Nothing was sent"),
+        ("Rename this session to docs. Run the tests.", "Say only the new name after \u{201C}rename this session to\u{201D}. Nothing was sent"),
+    ])
+    func aRenameWithoutAUsableNameIsHeldAndSendsNothing(text: String, message: String) async {
+        let rig = await rig(text, current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        let entry = await lastHistoryEntry(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.handle(of: "claude:s1") == "keyscribe")
+        #expect(rig.hud.states.contains { if case .error(let shown, _, _) = $0 { shown == message } else { false } })
+        #expect(entry?.outcome == .failed)
+        #expect(fact(entry, "Command") == "Rename")
+    }
+
+    @Test(arguments: ["Rename this session to docs. Never mind.", "Rename this session. Never mind."])
+    func neverMindAfterARenameThrowsTheTakeAway(text: String) async {
+        let rig = await rig(text, current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.handle(of: "claude:s1") == "keyscribe")
+        #expect(rig.hud.states.contains(.advisory(message: DictationController.discardedMessage)))
+        #expect(!rig.hud.states.contains { if case .error = $0 { true } else { false } })
+        #expect(await lastHistoryEntry(rig) == nil)
+    }
+
+    @Test(arguments: [
+        "Rename this session to docs, scratch that, notes.",
+        "Rename this session to docs, scratch that. Rename this session to notes.",
+    ])
+    func scratchThatInsideARenameCorrectsTheName(text: String) async {
+        let rig = await rig(text, current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.handle(of: "claude:s1") == "notes")
+    }
+
+    @Test func replacementsApplyToTheNameButNeverToTheRenameCommand() async {
+        var mode = agentMode()
+        mode.replacements = .init(includeGlobal: false, rules: [
+            .init(heard: "this session", replace: "the session", regex: false),
+            .init(heard: "Keys Crab", replace: "keyscribe", regex: false),
+        ])
+        let rig = await rig("Rename this session to Keys Crab docs", modes: [mode], current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.handle(of: "claude:s1") == "keyscribe docs")
+    }
+
+    @Test func turningCodingAgentsOffWhileFindingTheConversationInFrontRenamesNothing() async {
+        let slow = SlowFront()
+        let rig = await inFront("Rename this session to docs", glance: slow, frontGrace: .seconds(30))
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.controller.setNextModeOverride(id: Mode.codingAgentId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        rig.controller.handleCommit()
+        try? await Task.sleep(for: .milliseconds(150))
+        var settings = rig.controller.settings
+        settings.features.setEnabled(false, for: .codingAgents)
+        rig.controller.updateSettings(settings)
+        slow.release.fire()
+        await rig.controller.dictationTask?.value
+        #expect(rig.hub.handle(of: "claude:s1") == "keyscribe")
+        #expect(rig.hub.handle(of: "claude:s2") == "keyscribe blue")
+        #expect(!rig.controller.isBusy)
+    }
+
+    @Test(arguments: [
+        ("Tell keyscribe rename this session to docs", "rename this session to docs"),
+        ("Rename this to parseConfig", "Rename this to parseConfig"),
+    ])
+    func renameWordsInsideAMessageAreStillAMessage(text: String, sent: String) async {
+        let rig = await rig(text, current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.texts == [sent])
+        #expect(rig.hub.handle(of: "claude:s1") == "keyscribe")
+    }
+
     @Test func goBackWithNothingToReturnToSaysSoAndSendsNothing() async {
         let runner = BackRunner()
         runner.outcome = .failed(message: "Nothing to go back to.")

@@ -29,6 +29,18 @@ struct AgentHistoryFactsTests {
         #expect(list.map(\.value) == ["Repeat that", "docs"])
     }
 
+    @Test func aRenameRecordsTheConversationItsNewNameAndHowItWasChosen() {
+        let list = AgentHistoryFacts.rename(
+            frozen: AgentRecipient.Frozen(id: "s-docs", source: .front), to: "auth refactor", conversations: roster)
+        #expect(list.map(\.label) == ["Command", "Conversation", "New name", "Chosen by"])
+        #expect(list.map(\.value) == [
+            "Rename", "docs \u{00B7} claude \u{00B7} s-docs", "auth refactor", "The conversation in front",
+        ])
+        #expect(AgentHistoryFacts.rename(frozen: nil, to: "x", conversations: roster).map(\.value)
+            == ["Rename", "None resolved", "x"])
+        #expect(AgentHistoryFacts.rename(frozen: nil, to: nil, conversations: roster).map(\.label) == ["Command", "Conversation"])
+    }
+
     @Test func anOpenByNameRecordsTheCommandAddressAndConversation() {
         let recorded = facts(.open(.name("backend", body: "")), .open(id: "s-backend"))
         #expect(recorded["Command"] == "Open")
