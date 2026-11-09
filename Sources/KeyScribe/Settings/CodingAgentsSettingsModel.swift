@@ -20,6 +20,18 @@ final class CodingAgentsSettingsModel: ObservableObject {
         var lastSeen = false
         var olderConnector = false
         var startedAt: Date?
+        var readAloud: ReadAloud?
+    }
+
+    enum ReadAloud: Equatable {
+        case thisReply, nextReply
+
+        var note: String {
+            switch self {
+            case .thisReply: "Reply will be read aloud."
+            case .nextReply: "Next reply will be read aloud."
+            }
+        }
     }
 
     enum RowAction: Equatable {
@@ -45,6 +57,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
     var onDisconnect: ((String) -> Void)?
     var onReconnect: ((String) -> Void)?
     var onShow: ((String) -> Void)?
+    var onCancelReadAloud: ((String) -> Void)?
     var onCheckAgain: (() -> Void)?
     var onRetrySavingExclusions: (() -> Void)?
     @Published private(set) var renameProblem: String?
@@ -119,6 +132,8 @@ final class CodingAgentsSettingsModel: ObservableObject {
         var disconnected: [AgentConversation]
         var loadedVersions: [String: String]
         var lastSeen: Set<String>
+        var readAloud: Set<String>
+        var readNextAloud: Set<String>
     }
     private var shownExtras: Extras?
     let agentsDir: URL
@@ -155,11 +170,12 @@ final class CodingAgentsSettingsModel: ObservableObject {
         _ conversations: [AgentConversation], current: String?, namesProblem: String? = nil, namesNotSaved: String? = nil,
         discoveryProblems: [String: String]? = nil, discoveredSetups: [String: [String]] = [:], candidates: [AgentCandidate] = [],
         disconnected: [AgentConversation] = [], exclusionsNotSaved: String? = nil, loadedVersions: [String: String] = [:],
-        lastSeen: Set<String> = []
+        lastSeen: Set<String> = [], readAloud: Set<String> = [], readNextAloud: Set<String> = []
     ) {
         if exclusionsNotSaved != self.exclusionsNotSaved { self.exclusionsNotSaved = exclusionsNotSaved }
         shownExtras = Extras(
-            setups: discoveredSetups, candidates: candidates, disconnected: disconnected, loadedVersions: loadedVersions, lastSeen: lastSeen)
+            setups: discoveredSetups, candidates: candidates, disconnected: disconnected, loadedVersions: loadedVersions, lastSeen: lastSeen,
+            readAloud: readAloud, readNextAloud: readNextAloud)
         if setupsProblem != setups.problem { setupsProblem = setups.problem }
         if namesProblem != self.namesProblem { self.namesProblem = namesProblem }
         if let discoveryProblems { self.discoveryProblems = discoveryProblems }
@@ -177,7 +193,8 @@ final class CodingAgentsSettingsModel: ObservableObject {
                 connected: conversation.connectorLive,
                 current: conversation.id == current, agent: conversation.agent, terminal: terminals[conversation.pid] ?? nil,
                 title: conversation.title, setup: conversation.setup, key: Self.key(pid: conversation.pid, milliseconds: conversation.startedAt.map { Int(($0.timeIntervalSince1970 * 1000).rounded()) }),
-                lastSeen: lastSeen, olderConnector: runsOlderConnector(conversation, loadedVersions: loadedVersions), startedAt: conversation.startedAt)
+                lastSeen: lastSeen, olderConnector: runsOlderConnector(conversation, loadedVersions: loadedVersions), startedAt: conversation.startedAt,
+                readAloud: readAloud.contains(conversation.id) ? .thisReply : readNextAloud.contains(conversation.id) ? .nextReply : nil)
         }
         next += candidates.map { candidate in
             Row(
@@ -223,7 +240,8 @@ final class CodingAgentsSettingsModel: ObservableObject {
                 self.show(
                     shown.conversations, current: shown.current, namesProblem: self.namesProblem, namesNotSaved: self.namesNotSaved,
                     discoveredSetups: extras.setups, candidates: extras.candidates, disconnected: extras.disconnected,
-                    exclusionsNotSaved: self.exclusionsNotSaved, loadedVersions: extras.loadedVersions, lastSeen: extras.lastSeen)
+                    exclusionsNotSaved: self.exclusionsNotSaved, loadedVersions: extras.loadedVersions, lastSeen: extras.lastSeen,
+                    readAloud: extras.readAloud, readNextAloud: extras.readNextAloud)
             }
         }
     }
@@ -268,6 +286,8 @@ final class CodingAgentsSettingsModel: ObservableObject {
     }
 
     func disconnect(_ row: Row) { onDisconnect?(row.id) }
+
+    func cancelReadAloud(_ row: Row) { onCancelReadAloud?(row.id) }
 
     func reconnect(_ row: Row) {
         if let setup = setup(for: row), let connector = connector(for: row), !(setup.isEnrolled && setup.isInstalled) {

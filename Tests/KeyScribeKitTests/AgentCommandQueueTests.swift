@@ -365,6 +365,19 @@ struct AgentBridgeCodecTests {
         #expect(plain.cwd == nil)
     }
 
+    @Test func aConnectorAsksForTheReplyToBeReadAloudAndReportsItsRunningTurnOnHello() throws {
+        #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"notify","session":"s1","turn":"t4","on":true}"#.utf8))
+            == .notify(session: "s1", turn: "t4", on: true))
+        #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"notify","session":"s1","on":false}"#.utf8))
+            == .notify(session: "s1", turn: "", on: false))
+        #expect(throws: AgentBridgeCodec.CodecError.malformed) { try AgentBridgeCodec.decodeEvent(Data(#"{"op":"notify","session":"s1"}"#.utf8)) }
+        #expect(AgentEvent.notify(session: "s1", turn: "t4", on: true).renamingSession { "pi:" + $0 } == .notify(session: "pi:s1", turn: "t4", on: true))
+        #expect(AgentEvent.notify(session: "pi:s1", turn: "", on: true).session == "pi:s1")
+        let hello = #"{"op":"hello","protocol":3,"agent":"pi","instance":"i1","session":"s1","pid":0,"features":["notify"],"turn":"t4"}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(hello.utf8))
+            == .hello(.init(protocolVersion: 3, agent: "pi", agentVersion: "", instance: "i1", session: "s1", pid: 0, features: ["notify"], turn: "t4")))
+    }
+
     @Test func everyEventNamesTheSessionItConcernsAndRequestEventsNameNone() throws {
         let hello = AgentEvent.hello(.init(protocolVersion: 1, agent: "pi", agentVersion: "", instance: "i1", session: "pi:s1", pid: 0))
         #expect(hello.session == "pi:s1")

@@ -42,7 +42,11 @@ function harness(on: any) {
     statuses.push(e && typeof e === 'object' && 'text' in e ? e.text : e)
     return { value: undefined }
   })
-  on('ui.log', () => ({ value: undefined }))
+  const logs: string[] = []
+  on('ui.log', ($: any, e: any) => {
+    if (!e.to || e.to === 'transcript') logs.push(e.text)
+    return { value: undefined }
+  })
   on('http.fetch', ($: any, e: any) => new Promise((resolve) => {
     const request: Request = {
       path: new URL(e.url).pathname,
@@ -119,7 +123,7 @@ function harness(on: any) {
   const ready = (launch?: string, protocol = 2) => { files['/tmp/ks-ready.json'] = launch === undefined ? undefined : JSON.stringify({ launch, protocol }) }
 
   const releaseSubmits = () => { for (const release of heldSubmits.splice(0)) release() }
-  return { env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
+  return { logs, env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
 }
 
 test('agent hooks return while the bridge never answers, through one sender', async ($, on) => {
@@ -877,7 +881,7 @@ test('a session the module saw start says hello as fresh and idle', async ($, on
   await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await h.settle()
-  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'label', 'readiness'] })
+  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'label', 'readiness', 'notify'] })
 })
 
 test('hello reports the zellij pane its session runs in, which only its own process can read', async ($, on) => {
@@ -1012,4 +1016,101 @@ test('a quiet command stops observing and admit says hello again', async ($, on)
   await h.typed($, 'again')
   await h.answerEvents()
   expect(h.events().some((b) => b.op === 'typed')).toBe(true)
+})
+
+const readAloudTool = 'mcp__keyscribe-connector-test__tell_me_when_done'
+const readAloudCommand = 'keyscribe-connector-test'
+
+async function askedToReadAloud(h: any, call: Promise<any>, answer: string | null) {
+  await h.settle()
+  const notify = h.open('/event').find((r: any) => r.body.op === 'notify')
+  expect(notify).toBeTruthy()
+  if (answer !== null) notify.answer(200, answer)
+  await h.settle()
+  return { body: notify.body, result: await call }
+}
+
+test('hello says the connector can read a reply aloud and names the turn it is running', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  expect(h.events()[0].features).toContain('notify')
+  expect(h.events()[0].turn).toBeUndefined()
+  await $.turn.start({ text: 'work', turnId: 't1' })
+  await h.answerEvents()
+  h.open('/poll')[0].answer(409)
+  await h.settle()
+  const again = h.events().slice(-1)[0]
+  expect(again.op).toBe('hello')
+  expect(again.turn).toBe('t1')
+})
+
+test('the read-aloud tool asks for the running turn and tells the model only what the app answered', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: 'work', turnId: 't1' })
+  await h.answerEvents()
+  const cases: Array<[string | null, RegExp]> = [
+    ['{"ok":true,"spoken":true}', /will read your final reply aloud/],
+    ['{"ok":true,"spoken":false}', /Spoken replies are off/],
+    ['{"ok":true,"quiet":true}', /disconnected/],
+  ]
+  for (const [answer, said] of cases) {
+    const call = $.tool.call({ tool: readAloudTool } as any)
+    const { body, result } = await askedToReadAloud(h, call, answer)
+    expect(body).toMatchObject({ op: 'notify', session: 's1', turn: 't1', on: true })
+    expect(String(result.result)).toMatch(said)
+  }
+})
+
+test('a read-aloud request the app never answers promises nothing', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: 'work', turnId: 't1' })
+  await h.answerEvents()
+  const call = $.tool.call({ tool: readAloudTool } as any)
+  await h.settle()
+  await h.clock.advance(5000)
+  await h.settle()
+  expect(String((await call).result)).toMatch(/didn’t confirm the request/)
+})
+
+test('the command covers the running turn, the next one when idle, and cancels', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  const idle = $.command.run({ command: readAloudCommand, args: '' } as any)
+  const first = await askedToReadAloud(h, idle, '{"ok":true,"spoken":true}')
+  expect(first.body).toMatchObject({ op: 'notify', turn: '', on: true })
+  expect(first.result.text).toBeUndefined()
+  expect(h.logs.slice(-1)[0]).toMatch(/your next reply/)
+
+  await $.turn.start({ text: 'work', turnId: 't2' })
+  await h.answerEvents()
+  const busy = $.command.run({ command: readAloudCommand, args: '' } as any)
+  const second = await askedToReadAloud(h, busy, '{"ok":true,"spoken":true}')
+  expect(second.body).toMatchObject({ op: 'notify', turn: 't2', on: true })
+  expect(h.logs.slice(-1)[0]).toMatch(/the result of this work/)
+
+  const cancel = $.command.run({ command: readAloudCommand, args: 'cancel' } as any)
+  const third = await askedToReadAloud(h, cancel, '{"ok":true,"spoken":true}')
+  expect(third.body).toMatchObject({ op: 'notify', turn: 't2', on: false })
+  expect(h.logs.slice(-1)[0]).toMatch(/won’t read this reply/)
+})
+
+test('a read-aloud request that timed out behind other events is never delivered late', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await h.typed($, 'one')
+  await h.typed($, 'two')
+  await h.typed($, 'three')
+  await h.settle()
+  const call = $.tool.call({ tool: readAloudTool } as any)
+  for (let i = 0; i < 4; i++) {
+    await h.clock.advance(1500)
+    await h.settle()
+    if (h.open('/event').length) h.open('/event')[0].answer(200)
+    await h.settle()
+  }
+  expect(String((await call).result)).toMatch(/didn’t confirm the request/)
+  await h.answerEvents()
+  expect(h.ops()).not.toContain('notify')
 })

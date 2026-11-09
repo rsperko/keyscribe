@@ -55,10 +55,20 @@ public enum SpokenResult {
         let spoken = spoken(summary: RedactionTokenizer.apply(answer, into: Tokenizer()))
         let words = answer.split(whereSeparator: { $0.isWhitespace }).count
         if words <= verbatimWordLimit && !spoken.isEmpty { return .speak(spoken) }
-        return configured ? .summarize(answer) : .speak(finishedBody)
+        return configured ? .summarize(answer) : .speak(repliedBody)
     }
 
-    public static let finishedBody = "Finished."
+    public static let repliedBody = "Replied. Open the conversation for the result."
+    public static let noTextBody = "Finished without a written reply. Open the conversation for the result."
+
+    public static func ending(_ reason: String) -> String? {
+        switch reason {
+        case "answer", "complete", "aborted": nil
+        case "error": "Ended with an error."
+        case "refusal": "Couldn\u{2019}t complete the request."
+        default: repliedBody
+        }
+    }
 
     public static func fits(_ spoken: String) -> Bool {
         spoken.split(whereSeparator: { $0.isWhitespace }).count <= summaryWordLimit

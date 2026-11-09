@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { connector, type Host, type Response } from "../../Sources/KeyScribe/Resources/PiConnector/index.ts"
+import { connector, readAloudToolName, type Host, type Response } from "../../Sources/KeyScribe/Resources/PiConnector/index.ts"
 
 type Request = {
   path: string
@@ -109,7 +109,13 @@ function harness(options: Options = {}) {
     },
   }
 
+  const tools: any[] = []
+  const commands = new Map<string, any>()
+  const notes: string[] = []
+  const commandCtx = { ...ctx, ui: { ...ctx.ui, notify: (text: string) => { notes.push(text) } } }
   const pi = {
+    registerTool: (tool: any) => { tools.push(tool) },
+    registerCommand: (name: string, options: any) => { commands.set(name, options) },
     on: (event: string, handler: (event: any, ctx: any) => unknown) => {
       handlers.set(event, [...(handlers.get(event) ?? []), handler])
       return () => {}
@@ -206,15 +212,19 @@ function harness(options: Options = {}) {
   const readyChecks = () => fileReads.filter((p) => p === "/tmp/ks-ready.json").length
   const submit = (id = "r1", text = "run the tests", extra: Record<string, unknown> = {}) => ({ op: "submit", id, expectedSession: live.session, text, expiresAt: now + 8_000, ...extra })
 
+  const runCommand = (name: string, args: string) => commands.get(name).handler(args, commandCtx)
+  const turn = (n: number) => `${events().find((b) => b.op === "hello").instance}.${n}`
+
   return {
-    requests, sends, statuses, execs, env, files, live, timers, config,
+    requests, sends, statuses, execs, env, files, live, timers, config, tools, commands, notes, runCommand,
+    set autoEvents(value: boolean) { autoEvents = value },
     get now() { return now },
     set now(value: number) { now = value },
     get keyHandler() { return keyHandler },
     set execCode(code: number) { execCode = code },
     set sendFails(value: boolean) { sendFails = value },
     set sendDispatchesInput(value: boolean) { sendDispatchesInput = value },
-    emit, settle, advance, open, events, ops, replies, start, connect, deliver, answerEvents, typed, accepted, finished, key, ready, readyChecks, submit,
+    turn, emit, settle, advance, open, events, ops, replies, start, connect, deliver, answerEvents, typed, accepted, finished, key, ready, readyChecks, submit,
   }
 }
 
@@ -238,7 +248,7 @@ test("a session start says hello with the process, its directory, its name and w
   assert.equal(hello.cwd, "/work")
   assert.equal(hello.session, "s1")
   assert.equal(hello.title, "frontend")
-  assert.deepEqual(hello.features, ["focus", "label", "readiness"])
+  assert.deepEqual(hello.features, ["focus", "label", "readiness", "notify"])
   assert.equal(hello.prompts, 0)
   assert.equal(hello.idle, true)
   assert.equal(hello.gap, false)
@@ -319,7 +329,7 @@ test("dictation is handed to the agent as a follow-up carrying an invisible mark
   const sent = h.replies()
   assert.deepEqual(sent.map((b) => b.op), ["ack", "submitted"])
   assert.equal(sent[1].request, "r1")
-  assert.equal(sent[1].turn, "1")
+  assert.equal(sent[1].turn, h.turn(1))
   assert.ok(h.ops().includes("turnStarted"))
 })
 
@@ -380,7 +390,7 @@ test("an input hook slower than three seconds stops the dictation blocking but s
   assert.deepEqual(h.replies().map((b) => b.op), ["ack", "ack"])
   await arrives(h, h.sends[0].text)
   const sent = h.replies().filter((b) => b.op === "submitted")
-  assert.deepEqual(sent.map((b) => [b.request, b.turn]), [["r1", "1"]])
+  assert.deepEqual(sent.map((b) => [b.request, b.turn]), [["r1", h.turn(1)]])
 })
 
 test("when Pi runs the connector's input hook inside the send itself, the message is still confirmed", async () => {
@@ -577,7 +587,7 @@ test("a run Pi retries before it settles stays one turn, and its recovered answe
   await h.finished()
   assert.deepEqual(h.ops().filter((op) => op === "turnStarted").length, 1)
   assert.deepEqual(h.events().filter((b) => b.op === "turnComplete").map((b) => [b.reason, b.answer]), [["complete", "All green."]])
-  assert.deepEqual(h.replies().filter((b) => b.op === "submitted").map((b) => b.turn), ["1"])
+  assert.deepEqual(h.replies().filter((b) => b.op === "submitted").map((b) => b.turn), [h.turn(1)])
 })
 
 test("a run whose settlement was missed is closed when the user types into an idle Pi, so the session is never stuck busy", async () => {
@@ -592,7 +602,7 @@ test("a run whose settlement was missed is closed when the user types into an id
   h.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "Hi." }] } })
   await h.finished()
   assert.deepEqual(h.events().filter((b) => ["turnStarted", "turnComplete"].includes(b.op)).map((b) => [b.op, b.turn ?? b.reason, b.answer]), [
-    ["turnStarted", "1", undefined], ["turnComplete", "unknown", undefined], ["turnStarted", "2", undefined], ["turnComplete", "complete", "Hi."],
+    ["turnStarted", h.turn(1), undefined], ["turnComplete", "unknown", undefined], ["turnStarted", h.turn(2), undefined], ["turnComplete", "complete", "Hi."],
   ])
 })
 
@@ -1281,4 +1291,106 @@ test("while quiet a hello again carries only who the connector is", async () => 
   assert.equal(again.waiting, undefined)
   assert.equal(again.session, "s1")
   assert.equal(again.installation, "I1")
+})
+
+async function askedToReadAloud(h: any, call: Promise<any>, answer: string | null) {
+  await h.settle()
+  const notify = h.open("/event").find((r: any) => r.body.op === "notify")
+  assert.ok(notify, "no notify was sent")
+  if (answer !== null) notify.answer(200, answer)
+  await h.settle()
+  return { body: notify.body, result: await call }
+}
+
+test("hello names the turn it is running so the app can keep waiting for its reply", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.idle = false
+  h.emit("agent_start")
+  await h.settle()
+  h.open("/poll")[0].answer(409)
+  await h.settle()
+  const again = h.events().filter((b) => b.op === "hello").slice(-1)[0]
+  assert.equal(again.turn, h.turn(1))
+})
+
+test("the read-aloud tool asks for the running turn and tells the model only what the app answered", async () => {
+  const h = harness()
+  await h.connect()
+  h.autoEvents = false
+  h.live.idle = false
+  h.emit("agent_start")
+  await h.settle()
+  await h.answerEvents()
+  assert.equal(h.tools.length, 1)
+  assert.equal(h.tools[0].name, "keyscribe_dev_tell_me_when_done")
+  assert.notEqual(readAloudToolName("keyscribe"), readAloudToolName("keyscribe-dev"))
+  const cases: Array<[string, RegExp]> = [
+    ['{"ok":true,"spoken":true}', /will read your final reply aloud/],
+    ['{"ok":true,"spoken":false}', /Spoken replies are off/],
+    ['{"ok":true,"quiet":true}', /disconnected/],
+  ]
+  for (const [answer, said] of cases) {
+    const { body, result } = await askedToReadAloud(h, h.tools[0].execute("call", {}), answer)
+    assert.deepEqual({ op: body.op, session: body.session, turn: body.turn, on: body.on }, { op: "notify", session: "s1", turn: h.turn(1), on: true })
+    assert.match(result.content[0].text, said)
+  }
+})
+
+test("a read-aloud request the app never answers promises nothing", async () => {
+  const h = harness()
+  await h.connect()
+  h.autoEvents = false
+  const call = h.tools[0].execute("call", {})
+  await h.settle()
+  await h.advance(5_000)
+  assert.match((await call).content[0].text, /didn\u2019t confirm the request/)
+})
+
+test("the command covers the running turn, the next one when idle, and cancels", async () => {
+  const h = harness()
+  await h.connect()
+  h.autoEvents = false
+  const first = await askedToReadAloud(h, h.runCommand("keyscribe-dev", ""), '{"ok":true,"spoken":true}')
+  assert.equal(first.body.turn, "")
+  assert.equal(first.body.on, true)
+  assert.match(h.notes[0], /your next reply/)
+
+  h.live.idle = false
+  h.emit("agent_start")
+  await h.settle()
+  await h.answerEvents()
+  const second = await askedToReadAloud(h, h.runCommand("keyscribe-dev", ""), '{"ok":true,"spoken":true}')
+  assert.equal(second.body.turn, h.turn(1))
+  assert.match(h.notes[1], /the result of this work/)
+
+  const third = await askedToReadAloud(h, h.runCommand("keyscribe-dev", "cancel"), '{"ok":true,"spoken":true}')
+  assert.equal(third.body.on, false)
+  assert.match(h.notes[2], /won\u2019t read this reply/)
+})
+
+test("a reloaded connector numbers its turns apart from the one before, so a request never carries over to other work", async () => {
+  const first = harness()
+  await first.connect()
+  const second = harness()
+  await second.connect()
+  assert.notEqual(first.turn(1), second.turn(1))
+})
+
+test("a read-aloud request that timed out behind other events is never delivered late", async () => {
+  const h = harness()
+  await h.connect()
+  h.autoEvents = false
+  await h.typed("one")
+  await h.typed("two")
+  await h.typed("three")
+  const call = h.tools[0].execute("call", {})
+  for (let i = 0; i < 4; i++) {
+    await h.advance(1500)
+    if (h.open("/event").length) h.open("/event")[0].answer(200)
+    await h.settle()
+  }
+  assert.match((await call).content[0].text, /didn’t confirm the request/)
+  await h.answerEvents()
+  assert.ok(!h.ops().includes("notify"))
 })

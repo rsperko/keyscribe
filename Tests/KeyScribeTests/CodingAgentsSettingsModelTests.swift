@@ -382,6 +382,19 @@ struct CodingAgentsSettingsModelTests {
         #expect(model.consent?.setup === setup(model))
     }
 
+    @Test func aConversationWhoseReplyWillBeReadAloudSaysSoAndCanCancelIt() {
+        let (model, _, dir) = makeModel()
+        var cancelled: [String] = []
+        model.onCancelReadAloud = { cancelled.append($0) }
+        model.show(
+            [conversation("backend", pid: 1, setup: defaultFolder(dir)), conversation("docs", pid: 2, setup: defaultFolder(dir)),
+             conversation("web", pid: 3, setup: defaultFolder(dir))], current: nil,
+            readAloud: ["backend"], readNextAloud: ["web"])
+        #expect(model.rows.map(\.readAloud?.note) == ["Reply will be read aloud.", nil, "Next reply will be read aloud."])
+        model.cancelReadAloud(model.rows[0])
+        #expect(cancelled == ["backend"])
+    }
+
     @Test func reconnectingThroughAnInstallReconnectsOnceTheInstallSucceeds() async throws {
         let (model, _, dir) = makeModel()
         var reconnected: [String] = []

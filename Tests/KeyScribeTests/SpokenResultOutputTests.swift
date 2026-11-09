@@ -391,6 +391,176 @@ struct SpokenResultOutputTests {
         #expect(speech.spoken.map(\.text) == ["docs: Disconnected before it finished."])
     }
 
+    @Test func aReplyAndANoticeTheUserAskedToHearAreReadEvenInFront() async {
+        let (output, speech, _) = make(inFront: { _ in true })
+        output.attention(conversation: "pi:s1", handle: "api", .approval, requested: true)
+        await settled()
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.", requested: true)
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "Docs done.")
+        await settled()
+        speech.finish()
+        #expect(speech.spoken.map(\.text) == ["api: Waiting for approval.", "api: Done."])
+    }
+
+    @Test func aTurnThatEndedWithoutAReplySaysHowItEnded() async {
+        let (output, speech, llm) = make(inFront: { _ in true })
+        output.ended(conversation: "pi:s1", handle: "api", body: "Ended with an error.", requested: true)
+        output.ended(conversation: "pi:s2", handle: "docs", body: "Ended with an error.", requested: false)
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["api: Ended with an error."])
+        #expect(llm.requests.isEmpty)
+    }
+
+    @Test func withdrawingAConversationDropsWhatIsBeingSummarizedOrWaitsButNotWhatIsPlaying() async {
+        let gate = FrontGate()
+        let (output, speech, _) = make(inFront: { $0 == "pi:s3" ? await gate.wait() : false })
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Playing.")
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "Queued.")
+        output.finished(conversation: "pi:s3", handle: "web", answer: "Checking.")
+        await settled()
+        speech.start()
+        output.withdraw(conversation: "pi:s1")
+        output.withdraw(conversation: "pi:s2")
+        output.withdraw(conversation: "pi:s3")
+        gate.open()
+        await settled()
+        #expect(speech.isSpeaking)
+        speech.finish()
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["api: Playing."])
+        #expect(output.queued.isEmpty)
+        #expect(output.pendingSummaries == 0)
+    }
+
+    @Test func withdrawingStopsAReplyHandedToTheVoiceButNotYetAudible() async {
+        let (output, speech, _) = make()
+        var shown: [SpokenResultOutput.Speaking?] = []
+        output.onSpeaking = { shown.append($0) }
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.", requested: true)
+        await settled()
+        #expect(speech.isSpeaking)
+        output.withdraw(conversation: "pi:s1")
+        #expect(!speech.isSpeaking)
+        speech.start()
+        #expect(shown.isEmpty)
+    }
+
+    @Test func aRequestedResultStaysPendingUntilItPlaysAndALaterReplyNeverErasesIt() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, _) = make(silencer: silencer, inFront: { _ in true })
+        var changes = 0
+        output.onPendingChange = { changes += 1 }
+        silencer.recordingStarted()
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Tests failed.", requested: true)
+        #expect(output.pendingRequested == ["pi:s1"])
+        await settled()
+        output.finished(conversation: "pi:s1", handle: "api", answer: "I will inspect the failure.")
+        await settled()
+        #expect(output.pendingRequested == ["pi:s1"])
+        silencer.recordingEnded()
+        #expect(speech.spoken.map(\.text) == ["api: Tests failed."])
+        #expect(output.pendingRequested == ["pi:s1"])
+        speech.start()
+        #expect(output.pendingRequested.isEmpty)
+        #expect(changes == 2)
+    }
+
+    @Test func requestedUnavailableNoticesAreReadSeparatelySoEachCanBeCancelledAlone() async {
+        let silencer = SpeechSilencer()
+        let llm = FakeLLM()
+        llm.reply = ""
+        let (output, speech, _) = make(llm: llm, silencer: silencer)
+        silencer.recordingStarted()
+        output.finished(conversation: "pi:s1", handle: "api", answer: long, requested: true)
+        output.finished(conversation: "pi:s2", handle: "docs", answer: long, requested: true)
+        await settled()
+        silencer.recordingEnded()
+        #expect(speech.spoken.count == 1)
+        #expect(speech.spoken.first?.text.contains("docs") == false)
+        output.withdraw(conversation: "pi:s2")
+        #expect(output.pendingRequested == ["pi:s1"])
+        speech.start()
+        #expect(output.pendingRequested.isEmpty)
+        speech.finish()
+        #expect(speech.spoken.count == 1)
+    }
+
+    @Test func aNoticeCancelledBeforeItPlayedIsReadWhenTheUserAsksAgain() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, _) = make(silencer: silencer)
+        silencer.recordingStarted()
+        output.attention(conversation: "pi:s1", handle: "api", .approval, requested: true)
+        await settled()
+        output.withdraw(conversation: "pi:s1")
+        output.attention(conversation: "pi:s1", handle: "api", .approval, requested: true)
+        await settled()
+        silencer.recordingEnded()
+        #expect(speech.spoken.map(\.text) == ["api: Waiting for approval."])
+    }
+
+    @Test func aNewerRequestedReplyReplacesOneStillBeingPreparedAndStaysPending() async {
+        let (output, speech, _) = make()
+        var shown: [SpokenResultOutput.Speaking?] = []
+        output.onSpeaking = { shown.append($0) }
+        output.finished(conversation: "pi:s1", handle: "api", answer: "First.", requested: true)
+        await settled()
+        #expect(speech.isSpeaking)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Second.", requested: true)
+        #expect(output.pendingRequested == ["pi:s1"])
+        await settled()
+        #expect(output.pendingRequested == ["pi:s1"])
+        speech.start()
+        #expect(shown.map { $0?.text } == ["Second."])
+        #expect(output.pendingRequested.isEmpty)
+    }
+
+    @Test func aRequestedReplyStoppedBeforeItWasHeardStopsBeingPending() async {
+        let (output, speech, _) = make()
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.", requested: true)
+        await settled()
+        #expect(output.pendingRequested == ["pi:s1"])
+        speech.finish()
+        #expect(output.pendingRequested.isEmpty)
+    }
+
+    @Test func aRequestedReplyWithNoTextSaysSoAndAnUnrequestedOneStaysSilent() async {
+        let (output, speech, _) = make(inFront: { _ in false })
+        output.finished(conversation: "pi:s1", handle: "api", answer: "  ", requested: true)
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "")
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["api: \(SpokenResult.noTextBody)"])
+    }
+
+    @Test func aNoticeSkippedInFrontIsReadOnceTheUserAsksAndOneAlreadyQueuedIsNotRepeated() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, _) = make(silencer: silencer, inFront: { $0 == "pi:s1" })
+        silencer.recordingStarted()
+        output.attention(conversation: "pi:s1", handle: "api", .approval)
+        output.attention(conversation: "pi:s2", handle: "docs", .approval)
+        await settled()
+        output.attention(conversation: "pi:s1", handle: "api", .approval, requested: true)
+        output.attention(conversation: "pi:s2", handle: "docs", .approval, requested: true)
+        await settled()
+        silencer.recordingEnded()
+        speech.finish()
+        #expect(speech.spoken.map(\.text) == ["docs: Waiting for approval.", "api: Waiting for approval."])
+    }
+
+    @Test func anAutomaticReplyWaitsBehindARequestedOneAndANewerRequestReplacesIt() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, _) = make(silencer: silencer)
+        silencer.recordingStarted()
+        output.finished(conversation: "pi:s1", handle: "api", answer: "First requested.", requested: true)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Dictated.")
+        await settled()
+        #expect(output.queued.map(\.text) == ["api: First requested.", "api: Dictated."])
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Second requested.", requested: true)
+        await settled()
+        #expect(output.queued.map(\.text) == ["api: Second requested."])
+        silencer.recordingEnded()
+        #expect(speech.spoken.map(\.text) == ["api: Second requested."])
+    }
+
     @Test func aNoticeThatClearsBeforeItPlaysIsWithdrawnAndASummaryWaitingStays() async {
         let silencer = SpeechSilencer()
         let (output, speech, _) = make(silencer: silencer)
@@ -467,7 +637,7 @@ struct SpokenResultOutputTests {
         #expect(off.1.spoken.isEmpty && off.2.requests.isEmpty)
     }
 
-    @Test func withoutAServiceAShortReplyIsReadAsItIsAndALongerOneIsAnnouncedAsFinished() async {
+    @Test func withoutAServiceAShortReplyIsReadAsItIsAndALongerOneSendsTheUserToTheConversation() async {
         let short = make(settings: SpokenResultSettings(enabled: true))
         short.0.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
         await settled()
@@ -475,7 +645,7 @@ struct SpokenResultOutputTests {
         longer.0.finished(conversation: "pi:s1", handle: "api", answer: long)
         await settled()
         #expect(short.1.spoken.map(\.text) == ["api: Done."])
-        #expect(longer.1.spoken.map(\.text) == ["api: Finished."])
+        #expect(longer.1.spoken.map(\.text) == ["api: Replied. Open the conversation for the result."])
         #expect(short.2.requests.isEmpty && longer.2.requests.isEmpty)
     }
 

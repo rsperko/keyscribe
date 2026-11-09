@@ -85,6 +85,7 @@ struct ClaudeConnectorInstallerTests {
         #expect(config["readyPath"] as? String == dir.appendingPathComponent("ready.json").path)
         #expect(config["installation"] as? String == "id-1")
         #expect(config["version"] as? String == ClaudeConnectorFiles.version(for: Self.script))
+        #expect(code.contains("const appLabel = \"\(Branding.appName)\""))
     }
 
     @Test func differentSetupsGetDifferentMarketplaceFolders() {
@@ -228,11 +229,12 @@ struct ClaudeConnectorInstallerTests {
         #expect(Data(bundled.utf8) == (try Data(contentsOf: Self.source)))
     }
 
-    @Test func installWritesThePackagedConnectorChangingOnlyTheInstallationItCameFrom() throws {
+    @Test func installWritesThePackagedConnectorChangingOnlyTheInstallationItCameFromAndTheAppsName() throws {
         let (installer, _, dir) = setup()
         try installer.install(installation: "id-1")
         let installed = try String(contentsOf: market(dir).appendingPathComponent("keyscribe-dev/hooks/register.js"), encoding: .utf8)
         let restored = installed.replacingOccurrences(of: "let loadedFrom = \"id-1\"", with: "let loadedFrom = null")
+            .replacingOccurrences(of: "const appLabel = \"\(Branding.appName)\"", with: "const appLabel = null")
         #expect(restored != installed)
         #expect(Data(restored.utf8) == (try Data(contentsOf: Self.source)))
     }
@@ -268,7 +270,7 @@ struct ClaudeConnectorInstallerTests {
         let source = Self.script
         let reads = try Regex(#"\$\.env\.get\("([A-Z_]+)"\)"#)
         #expect(source.matches(of: reads).compactMap { $0.output[1].substring.map(String.init) } == ["ZELLIJ_PANE_ID", "CMUX_SURFACE_ID"])
-        #expect(source.contains("features: ['focus', 'label', 'readiness']"))
+        #expect(source.contains("const features = ['focus', 'label', 'readiness', 'notify']"))
     }
 
     @Test func thePluginVersionNamesTheConnectorCodeItCarries() throws {

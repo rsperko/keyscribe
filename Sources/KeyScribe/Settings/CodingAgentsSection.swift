@@ -105,9 +105,20 @@ struct CodingAgentRecipientSection: View {
             if row.olderConnector {
                 Text(olderConnectorNote(row)).font(.caption).foregroundStyle(.secondary)
             }
+            if let readAloud = row.readAloud {
+                HStack(spacing: 8) {
+                    Text(readAloud.note).font(.caption).foregroundStyle(.secondary)
+                    Button("Cancel") { model.cancelReadAloud(row) }
+                        .buttonStyle(.link).controlSize(.small).font(.caption)
+                        .accessibilityLabel("Don\u{2019}t read \(row.name)\u{2019}s reply aloud")
+                        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.cancelReadAloud)
+                }
+            }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel([row.name, row.state, row.folder, row.terminal, model.recognitionContext(for: row)].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel(
+            [row.name, row.state, row.folder, row.terminal, model.recognitionContext(for: row), row.readAloud?.note]
+                .compactMap { $0 }.joined(separator: ", "))
         .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.conversation)
     }
 

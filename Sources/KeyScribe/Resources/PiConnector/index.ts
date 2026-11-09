@@ -26,11 +26,14 @@ type Config = {
   installation: string
   version?: string
   plugin?: string
+  appName?: string
   environmentKeys?: string[]
 }
+type ReadAloud = boolean | "quiet" | null
 type Ready = { launch: string; protocol: number }
 type Pending = { id: string; generation: number; text: string; late: boolean; cancel: () => void }
 type Item = {
+  stale?: boolean
   kind: "hello" | "observe" | "reply"
   generation: number
   body: string
@@ -71,7 +74,12 @@ const backoff = [30000, 60000, 120000, 300000]
 const late = { late: true } as const
 const unreachable = { unreachable: true } as const
 const freshReasons = ["startup", "new", "fork"]
-const features = ["focus", "label", "readiness"]
+const features = ["focus", "label", "readiness", "notify"]
+const readAloudTool = "tell_me_when_done"
+
+export function readAloudToolName(plugin: string): string {
+  return `${plugin.replace(/[^A-Za-z0-9]+/g, "_")}_${readAloudTool}`
+}
 
 export function connector(pi: ExtensionAPI, host: Host, settings: Settings): void {
   const instance = Math.random().toString(36).slice(2, 10)
@@ -115,6 +123,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   let cwd = ""
   let stopKeys: (() => void) | null = null
   let polling: Exchange | null = null
+  let offered = false
 
   const outbox: Item[] = []
   let outboxBytes = 0
@@ -132,6 +141,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     if (installation === null) installation = loaded.installation
     config = loaded
     if (loaded.installation !== installation) retire()
+    if (!retired) offerReadAloud()
   }
 
   function terminalPlace(): Record<string, string> | undefined {
@@ -274,7 +284,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   }
 
   function deliverable(item: Item): boolean {
-    if (item.generation !== generation) return false
+    if (item.stale || item.generation !== generation) return false
     if (item.kind === "reply") return item.connection === connection
     if (item.session !== session) return false
     return item.kind === "hello" || helloSession === item.session
@@ -375,7 +385,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
       version: (config as Config).version, agent: "pi", agentVersion: "",
       instance, connection: attempt.connection, session: target, pid: host.pid, cwd,
       features, title: pi.getSessionName() || undefined, prompts, waiting: waiting || undefined,
-      idle: idle(), gap: freshSession !== target,
+      idle: idle(), gap: freshSession !== target, turn: currentTurn || undefined,
       environment: terminalPlace(),
     })
     attempt.result = new Promise<boolean>((resolve) => {
@@ -688,6 +698,83 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     }
   }
 
+  function appName(): string {
+    return (config && config.appName) || "the voice app"
+  }
+
+  function readAloudAnswer(text: string): ReadAloud {
+    try {
+      const answer = JSON.parse(text)
+      return answer.quiet === true ? "quiet" : answer.spoken === true
+    } catch (err) {
+      return null
+    }
+  }
+
+  function askToReadAloud(on: boolean): Promise<ReadAloud> {
+    if (quiet) return Promise.resolve("quiet")
+    if (!session || helloSession !== session || !connection) return Promise.resolve(null)
+    const item: Item = { kind: "observe", session, generation, body: bound({ op: "notify", session, turn: currentTurn || "", on }) }
+    return new Promise((resolve) => {
+      const cancel = host.after(eventDeadline * 2, () => {
+        item.stale = true
+        resolve(null)
+      })
+      const finish = (answer: ReadAloud) => {
+        cancel()
+        resolve(answer)
+      }
+      item.answer = (text) => finish(readAloudAnswer(text))
+      item.done = () => finish(null)
+      enqueue(item)
+    })
+  }
+
+  function toolAnswer(answer: ReadAloud): string {
+    const app = appName()
+    if (answer === true) return `${app} will read your final reply aloud when this turn ends. Say so in one short sentence and continue.`
+    if (answer === false) return `Spoken replies are off in ${app}. Tell the user to turn on Read replies aloud in ${app}\u2019s Coding agent settings and ask again. Nothing will be read.`
+    if (answer === "quiet") return `This conversation is disconnected from ${app}. Tell the user to reconnect it in ${app}\u2019s Coding agent settings. Nothing will be read.`
+    return `${app} didn\u2019t confirm the request, so a spoken reply can\u2019t be promised. Tell the user.`
+  }
+
+  function commandAnswer(cancelling: boolean, answer: ReadAloud, running: boolean): string {
+    const app = appName()
+    if (answer === "quiet") return `This conversation is disconnected from ${app}. Reconnect it in ${app}\u2019s Coding agent settings.`
+    if (answer === null) return cancelling ? `${app} didn\u2019t confirm the cancel.` : `${app} didn\u2019t confirm the request, so a spoken reply isn\u2019t certain.`
+    if (cancelling) return `${app} won\u2019t read this reply aloud.`
+    if (answer === false) return `Spoken replies are off. Turn on Read replies aloud in ${app}\u2019s Coding agent settings.`
+    return running ? `${app} will read the result of this work aloud.` : `${app} will read your next reply aloud.`
+  }
+
+  function offerReadAloud(): void {
+    if (offered || !config || !config.plugin) return
+    offered = true
+    const app = appName()
+    const command = config.plugin
+    pi.registerTool({
+      name: readAloudToolName(command),
+      label: `Tell me when done (${app})`,
+      description: `The user has ${app}, a voice app on this Mac. Call this only when the user explicitly asks ${app}, or asks to hear it out loud, ` +
+        `to report when the current work is done. Call it once, then keep working. When this turn ends, ${app} reads your final reply aloud. ` +
+        `If the work is already finished, answer instead of calling it. Not for a plain "let me know".`,
+      promptSnippet: `Have ${app} read your final reply aloud when the user asks for it`,
+      parameters: { type: "object", properties: {}, additionalProperties: false } as any,
+      async execute() {
+        return { content: [{ type: "text", text: toolAnswer(await askToReadAloud(true)) }], details: undefined }
+      },
+    })
+    pi.registerCommand(command, {
+      description: `Have ${app} read the reply aloud when this work is done, or cancel that`,
+      handler: async (args, context) => {
+        const word = String(args || "").trim().toLowerCase()
+        if (word && word !== "cancel") return context.ui.notify(`Use /${command} to hear the reply aloud, or /${command} cancel.`, "info")
+        const running = currentTurn !== null
+        context.ui.notify(commandAnswer(word === "cancel", await askToReadAloud(word !== "cancel"), running), "info")
+      },
+    })
+  }
+
   pi.on("session_start", (event, context) => {
     if (context.mode !== "tui") return
     adopt(context.sessionManager.getSessionId(), event.reason, context)
@@ -719,7 +806,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     lastFailed = false
     turns += 1
     watchForStaleTurn()
-    currentTurn = String(turns)
+    currentTurn = `${instance}.${turns}`
     observe({ op: "turnStarted", session, turn: currentTurn })
   })
 

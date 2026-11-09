@@ -88,7 +88,7 @@ extension ClaudeRegistryEntry {
 extension AgentKind {
     public static let claude = AgentKind(
         id: "claude", displayName: "Claude Code", connectorName: "Claude Code connector", reloadCommand: "/reload-plugins",
-        connectorFeatures: ["focus", "label", "readiness"])
+        connectorFeatures: ["focus", "label", "readiness", "notify"])
 }
 
 extension AgentDirectory {

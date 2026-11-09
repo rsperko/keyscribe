@@ -1712,10 +1712,29 @@ status or a collapsed disclosure.
 
 **Spoken replies** sits between the conversations and connector setup, and its everyday view is three rows
 and one disclosure. **Read replies aloud** is its own switch, off by default, with "Hear replies to messages
-you dictate, and know when the agent needs you." as the row's always-visible caption. Its help explains
+you dictate or ask the agent to read aloud, and know when it needs you." as the row's always-visible caption. Its help explains
 that replies are skipped while the conversation is in front, how short replies and longer summaries differ,
 and that it also announces approval requests and disconnections. It reads a reply or summary when a turn
-the user's dictation started finishes, and a notice when it needs attention (below). Turning it off stops
+the user's dictation started finishes, or a turn the user asked from inside the agent to hear, and a notice when it
+needs attention (below). A turn that ends with an error is announced as "Ended with an error.", one the agent declines
+as "Couldn’t complete the request.", and one that ends without a reply, or ends while its connector is away, as
+"Replied. Open the conversation for the result." (`SpokenResult.ending`); a turn the user interrupts is not announced.
+
+A request to read a reply aloud comes from the agent's connector: a tool the model calls when the user explicitly asks
+for it, or the connector's own command (`/keyscribe`, `/keyscribe cancel`, named for the connector). It covers the turn
+running, or the next one when the agent is idle, and only that turn. A requested turn that finishes with no text to
+read is announced as "Finished without a written reply. Open the conversation for the result." Asking to hear a turn
+whose wait was skipped because the conversation was in front announces that wait then; one already queued or heard
+is not repeated. The app answers whether spoken replies are on, so
+the agent never claims a request that was not accepted; with the switch off nothing is armed for later. The request
+lives in the hub's memory only; a reconnect that reports the same running turn keeps it, as it keeps a dictated
+turn's, and turning the switch off, disconnecting, or quitting drops it. A reconnect from a new connector instance
+never carries a request over: turn ids are unique to the instance that reported them. While a request stands, and until
+its reply is audible, the conversation's row in the session list shows "Reply will be read aloud." ("Next reply will
+be read aloud." while it waits for the next turn) with a **Cancel** link; cancelling there or with the command drops any
+summary being made, waiting, or handed to the voice but not yet audible, but not audio already playing. A requested
+reply is superseded only by another requested reply from the same conversation, which also stops one handed to the
+voice but not yet audible; a later automatic reply queues behind it. The command's answer is shown to the user, never added to what the model reads. Turning it off stops
 playback, cancels any summary being made, and drops spoken replies still waiting, while the chosen service,
 speaker and instruction are kept; turning it back on applies to the next reply and replays nothing.
 The **Read Agent Replies Aloud** item in the menu bar menu (§6) is the same switch. The rest
@@ -1740,14 +1759,14 @@ prompt's context once its session is no longer live. A Pi prompt shows in the se
 approval was given, the connector or the conversation came back, the turn finished) before it is audible is withdrawn rather than
 played late, even while the voice is still preparing it, and a finished turn's summary replaces it. A new
 notice supersedes an earlier turn's summary still being made for that conversation. A
-Claude Code user dialog, or a turn the user typed rather than dictated, is never announced. Notices share the summaries'
+Claude Code user dialog, or a turn the user typed without asking for it to be read aloud, is never announced. Notices share the summaries'
 queue, in-front skip and speaking panel, and "repeat that" replays them too; a replay the user asked for plays
 even if its state has since ended.
 
 **AI service** picks **None** or one of the saved AI services, used for summaries and for describing a Pi prompt. No
 service is ever chosen for the user. With **None**, a short finished reply is still read as it is, a longer one is
-announced as "Finished.", and a Pi prompt is "Waiting for you."; the row's caption says so ("Longer replies are
-announced as finished. Nothing is sent."). A chosen service that no longer exists is an `IssueText`, and a longer reply
+announced as "Replied. Open the conversation for the result.", and a Pi prompt is "Waiting for you."; the row's caption
+says so. A chosen service that no longer exists is an `IssueText`, and a longer reply
 is then spoken as unavailable. With no saved services, an advisory saying summaries need one and what plays without it,
 and **Open AI Services**, take its place. While a service is chosen, the row's caption
 states the data boundary in one line, naming the service ("Long replies and waiting prompts go to {name}
@@ -1788,16 +1807,18 @@ times out or returns nothing) is spoken as "{name}: The spoken summary is unavai
 Unavailable summaries waiting together are read as one notice naming each conversation ("{name} and {name}:
 The spoken summaries are unavailable.") in the place of the first, ahead of summaries that finished between
 them, so an outage does not repeat the same sentence once per result. A conversation named twice is named once,
-and one whose name is gone is left out of the list. A
+and one whose name is gone is left out of the list. A reply the user asked to hear is never merged:
+its notice is read on its own, so cancelling it stops only that conversation's notice. A
 summary over `SpokenResult.summaryWordLimit` words is asked for once more, shorter, within the same deadline;
 a second overlong one counts as unavailable rather than being cut off, since cutting could drop the failure or
 decision it ends with. One
 summary plays at a time and only the latest waiting one per conversation is kept. Nothing plays while a
 recording is open or the dictation HUD shows: summaries wait and play once it has hidden, and starting a dictation stops playback and any audio
 being prepared; the interrupted summary is not resumed. While a summary is audible, the speaking panel (§5)
-shows it. Only turns the user's own dictation started are spoken; a typed prompt's reply is not. A
-conversation that is in front when its turn finishes is neither summarized nor read: the user is already looking
-at the reply. The check uses the same front reading as voice commands, but reads once: voice commands read twice
+shows it. Only turns the user's own dictation started, or that the user asked to hear, are spoken; another typed prompt's reply is
+not. A conversation that is in front when its turn finishes is neither summarized nor read: the user is already looking
+at the reply. A turn the user asked to hear is the exception, with its notices: the user asked, and may have stepped
+away with the terminal still in front. The check uses the same front reading as voice commands, but reads once: voice commands read twice
 and act only on an unchanged view because they act on another app, while a wrong skip costs one summary, so the
 second read and the window lookup it compares are left out. When what is in front cannot
 be confirmed, the summary plays. This check never asks for Automation access: a terminal whose permission is undecided or

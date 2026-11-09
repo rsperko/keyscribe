@@ -9,8 +9,8 @@ struct SpokenResultSection: View {
     var body: some View {
         Section("Spoken replies") {
             SettingRow(
-                title: "Read replies aloud", result: "Hear replies to messages you dictate, and know when the agent needs you.",
-                help: "For conversations you send messages to by dictation. Replies aren\u{2019}t read while you\u{2019}re viewing the conversation. A short reply is read as it is; a longer one is summarized by the AI service you choose, or announced as finished without one. You also hear when the agent needs approval or disconnects before finishing. When \(Branding.appName) can\u{2019}t confirm the conversation is in front, it reads the reply aloud.")
+                title: "Read replies aloud", result: "Hear replies to messages you dictate or ask the agent to read aloud, and know when it needs you.",
+                help: "For messages you dictate, and for work you type when you ask the agent to have \(Branding.appName) tell you when it\u{2019}s done (or run /\(KeyScribePaths.variant.connectorSlug) in the conversation). Replies to dictation aren\u{2019}t read while you\u{2019}re viewing the conversation. A short reply is read as it is; a longer one is summarized by the AI service you choose, or announced without one. You also hear when the agent needs approval or disconnects before finishing. When \(Branding.appName) can\u{2019}t confirm the conversation is in front, it reads the reply aloud.")
             {
                 Toggle("", isOn: enabled)
                     .labelsHidden().toggleStyle(.switch)
@@ -51,7 +51,7 @@ struct SpokenResultSection: View {
 
     @ViewBuilder private var serviceRows: some View {
         if connections.isEmpty {
-            IssueText("Add an AI service to hear summaries of longer replies and what a waiting prompt asks. Without one, a longer reply is announced as finished.", severity: .advisory)
+            IssueText("Add an AI service to hear summaries of longer replies and what a waiting prompt asks. Without one, a longer reply is announced without a summary.", severity: .advisory)
             HStack {
                 Button("Open AI Services") { model.onOpenAIServices?() }
                     .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenResultOpenAIServices)
@@ -78,13 +78,13 @@ struct SpokenResultSection: View {
     }
 
     private var boundary: String? {
-        guard let chosen else { return missing ? nil : "Longer replies are announced as finished. Nothing is sent." }
+        guard let chosen else { return missing ? nil : "Longer replies are announced without a summary. Nothing is sent." }
         return "Long replies and waiting prompts go to \(chosen.name) after best-effort redaction."
     }
 
     private var serviceHelp: String {
         let name = chosen?.name ?? "the chosen service"
-        return "A longer reply is sent to \(name) to be summarized. When a conversation waits on a prompt its connector describes, the prompt\u{2019}s title, the tool call it seems to be about (such as a command to approve) and the agent\u{2019}s last words are sent to say what it asks. Both go after best-effort redaction, which can miss things in code and command output. A short reply is read as it is, without any service; with None, a longer reply is announced as finished. \(Branding.appName) does not save replies or summaries."
+        return "A longer reply is sent to \(name) to be summarized. When a conversation waits on a prompt its connector describes, the prompt\u{2019}s title, the tool call it seems to be about (such as a command to approve) and the agent\u{2019}s last words are sent to say what it asks. Both go after best-effort redaction, which can miss things in code and command output. A short reply is read as it is, without any service; with None, a longer reply is announced without a summary. \(Branding.appName) does not save replies or summaries."
     }
 
     private var chosen: Connection? { connections.first { $0.id == model.spokenResult.connection } }

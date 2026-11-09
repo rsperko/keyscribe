@@ -24,6 +24,7 @@ final class AgentBridgeServer: @unchecked Sendable {
     private let pollHold: TimeInterval
     private let onEvent: @Sendable (AgentEvent) -> Void
     private let onHello: @Sendable (AgentEvent.Hello, @escaping @Sendable () -> Void) -> Void
+    private let onNotify: @Sendable (AgentEvent, @escaping @Sendable (Bool) -> Void) -> Void
     private let queue = DispatchQueue(label: "com.keyscribe.agent-bridge")
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
@@ -41,9 +42,11 @@ final class AgentBridgeServer: @unchecked Sendable {
         excludes: @escaping @Sendable (_ session: String) -> Bool = { _ in false }, pollHold: TimeInterval = 25,
         activeWindow: TimeInterval = AgentCommandQueue.activeWindow,
         onHello: @escaping @Sendable (AgentEvent.Hello, @escaping @Sendable () -> Void) -> Void = { $1() },
+        onNotify: @escaping @Sendable (AgentEvent, @escaping @Sendable (Bool) -> Void) -> Void = { $1(false) },
         onEvent: @escaping @Sendable (AgentEvent) -> Void
     ) {
         self.onHello = onHello
+        self.onNotify = onNotify
         commands = AgentCommandQueue(activeWindow: activeWindow)
         self.directory = directory
         self.token = token
@@ -280,6 +283,11 @@ final class AgentBridgeServer: @unchecked Sendable {
             if let instance = envelope.instance, let connection = envelope.connection {
                 commands.ack(request, instance: instance, connection: connection)
             }
+        case .notify:
+            onNotify(event) { [weak self] spoken in
+                self?.queue.async { self?.respond(fd, status: 200, body: Data(#"{"ok":true,"spoken":\#(spoken)}"#.utf8)) }
+            }
+            return
         case .typed, .turnStarted, .turnComplete, .undelivered, .title, .waiting:
             break
         }

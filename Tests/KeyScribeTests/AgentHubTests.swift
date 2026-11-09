@@ -451,7 +451,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var seen: [String] = []
-        hub.onAttention = { seen.append("\($0)|\($1)|\($2.map { "\($0)" } ?? "cleared")") }
+        hub.onAttention = { conversation, handle, value, _ in seen.append("\(conversation)|\(handle)|\(value.map { "\($0)" } ?? "cleared")") }
         await dictated(hub, transport)
         registry.set("s1", status: "waiting", waitingFor: "permission prompt")
         await hub.rescan()
@@ -471,7 +471,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var seen: [AgentAttention?] = []
-        hub.onAttention = { seen.append($2) }
+        hub.onAttention = { _, _, value, _ in seen.append(value) }
         registry.set("s1", status: "waiting", waitingFor: "permission prompt")
         await hub.rescan()
         #expect(seen.isEmpty)
@@ -481,7 +481,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var seen: [AgentAttention?] = []
-        hub.onAttention = { seen.append($2) }
+        hub.onAttention = { _, _, value, _ in seen.append(value) }
         await dictated(hub, transport)
         registry.set("s1", status: "waiting", waitingFor: "permission prompt")
         await hub.rescan()
@@ -496,7 +496,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub(disconnectGrace: .seconds(5), clock: clock)
         await connected(hub, transport, registry)
         var seen: [AgentAttention?] = []
-        hub.onAttention = { seen.append($2) }
+        hub.onAttention = { _, _, value, _ in seen.append(value) }
         await dictated(hub, transport)
         transport.live = []
         await hub.rescan()
@@ -517,7 +517,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub(disconnectGrace: .seconds(5), clock: clock)
         await connected(hub, transport, registry)
         var seen: [String] = []
-        hub.onAttention = { seen.append("\($1)|\($2.map { "\($0)" } ?? "cleared")") }
+        hub.onAttention = { _, handle, value, _ in seen.append("\(handle)|\(value.map { "\($0)" } ?? "cleared")") }
         await dictated(hub, transport)
         registry.set("s1", status: "waiting", waitingFor: "permission prompt")
         await hub.rescan()
@@ -539,7 +539,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub(disconnectGrace: .seconds(5), clock: clock)
         await connected(hub, transport, registry)
         var seen: [String] = []
-        hub.onAttention = { seen.append("\($1)|\($2.map { "\($0)" } ?? "cleared")") }
+        hub.onAttention = { _, handle, value, _ in seen.append("\(handle)|\(value.map { "\($0)" } ?? "cleared")") }
         await dictated(hub, transport)
         registry.entries = []
         transport.live = []
@@ -563,7 +563,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var seen: [AgentAttention?] = []
-        hub.onAttention = { seen.append($2) }
+        hub.onAttention = { _, _, value, _ in seen.append(value) }
         await dictated(hub, transport)
         let prompt = AgentPrompt(title: "Allow?", tool: "bash")
         registry.set("s1", status: "waiting", waitingFor: "a dialog")
@@ -580,7 +580,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var seen: [AgentAttention?] = []
-        hub.onAttention = { seen.append($2) }
+        hub.onAttention = { _, _, value, _ in seen.append(value) }
         hub.handle(.waiting(session: "claude:s1", prompt: AgentPrompt(title: "Allow?", detail: "rm -rf build")))
         registry.entries = []
         transport.live = []
@@ -596,7 +596,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var seen: [AgentAttention?] = []
-        hub.onAttention = { seen.append($2) }
+        hub.onAttention = { _, _, value, _ in seen.append(value) }
         await dictated(hub, transport)
         registry.set("s1", status: "waiting", waitingFor: "a dialog")
         await hub.rescan()
@@ -616,8 +616,8 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var reported: [String] = []
-        hub.onResult = { _, _, _ in reported.append("result") }
-        hub.onAttention = { _, _, _ in reported.append("attention") }
+        hub.onResult = { _, _, _, _ in reported.append("result") }
+        hub.onAttention = { _, _, _, _ in reported.append("attention") }
         await dictated(hub, transport)
         hub.stop()
         registry.set("s1", status: "waiting", waitingFor: "permission prompt")
@@ -631,7 +631,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub(disconnectGrace: .seconds(5), clock: clock)
         await connected(hub, transport, registry)
         var seen: [AgentAttention?] = []
-        hub.onAttention = { seen.append($2) }
+        hub.onAttention = { _, _, value, _ in seen.append(value) }
         await dictated(hub, transport)
         transport.live = []
         await hub.rescan()
@@ -647,7 +647,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { results.append("\($0)|\($1)|\($2)") }
+        hub.onResult = { conversation, handle, value, _ in results.append("\(conversation)|\(handle)|\(value)") }
         hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "a typed turn"))
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
@@ -663,7 +663,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { results.append($2) }
+        hub.onResult = { _, _, value, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: "t1"))
@@ -679,7 +679,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { results.append($2) }
+        hub.onResult = { _, _, value, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: "t1"))
@@ -693,7 +693,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { results.append($2) }
+        hub.onResult = { _, _, value, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: "1"))
@@ -708,7 +708,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { results.append($2) }
+        hub.onResult = { _, _, value, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
@@ -724,7 +724,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { results.append($2) }
+        hub.onResult = { _, _, value, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: ""))
@@ -738,7 +738,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { results.append($2) }
+        hub.onResult = { _, _, value, _ in results.append(value) }
         for reason in ["aborted", "error"] {
             async let receipt = hub.deliver("one", to: "claude:s1")
             let before = transport.sent.count
@@ -1300,7 +1300,7 @@ struct AgentHubTests {
         await hub.rescan()
         hub.disconnect("fake:f1")
         var results: [String] = []
-        hub.onResult = { _, _, answer in results.append(answer) }
+        hub.onResult = { _, _, answer, _ in results.append(answer) }
         hub.handle(.turnComplete(session: "fake:f1", reason: "complete", answer: "private"))
         #expect(results.isEmpty)
     }
@@ -1869,5 +1869,246 @@ struct AgentHubTests {
         await hub.rescan()
         #expect(await hub.open("claude:s1") == .none)
         #expect(hub.current == "claude:s1")
+    }
+
+    final class Spoken {
+        var results: [String] = []
+        var endings: [String] = []
+        var withdrawn: [String] = []
+    }
+
+    private func listening(_ hub: AgentHub, speaks: Bool = true) -> Spoken {
+        let spoken = Spoken()
+        hub.speaks = { speaks }
+        hub.onResult = { _, _, answer, requested in spoken.results.append("\(answer)|\(requested)") }
+        hub.onEnded = { _, handle, body, requested in spoken.endings.append("\(handle)|\(body)|\(requested)") }
+        hub.onWithdraw = { spoken.withdrawn.append($0) }
+        return spoken
+    }
+
+    private func reconnected(turn: String?, idle: Bool) -> AgentEvent.Hello {
+        .init(
+            protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0,
+            features: ["readiness", "notify"], idle: idle, gap: true, turn: turn)
+    }
+
+    @Test func aReplyAskedForInTheAgentIsReadAsRequested() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        let spoken = listening(hub)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        #expect(hub.notify(session: "claude:s1", turn: "t1", on: true))
+        #expect(hub.notify(session: "claude:s1", turn: "t1", on: true))
+        #expect(hub.readAloud == ["claude:s1"])
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "a later typed reply"))
+        #expect(spoken.results == ["All green.|true"])
+        #expect(hub.readAloud.isEmpty && hub.readNextAloud.isEmpty)
+    }
+
+    @Test func withSpokenRepliesOffARequestIsRefusedAndNothingIsArmed() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        let spoken = listening(hub, speaks: false)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        #expect(!hub.notify(session: "claude:s1", turn: "t1", on: true))
+        #expect(!hub.notify(session: "claude:s1", turn: "", on: true))
+        #expect(hub.readAloud.isEmpty && hub.readNextAloud.isEmpty)
+        hub.speaks = { true }
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t2"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Next."))
+        #expect(spoken.results.isEmpty)
+    }
+
+    @Test func aRequestWhileIdleCoversTheNextReplyOnly() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        let spoken = listening(hub)
+        #expect(hub.notify(session: "claude:s1", turn: "", on: true))
+        #expect(hub.readNextAloud == ["claude:s1"])
+        #expect(hub.readAloud.isEmpty)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t2"))
+        #expect(hub.readAloud == ["claude:s1"] && hub.readNextAloud.isEmpty)
+        hub.handle(.turnComplete(session: "claude:s1", reason: "complete", answer: "Done."))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t3"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "complete", answer: "Later."))
+        #expect(spoken.results == ["Done.|true"])
+    }
+
+    @Test func aRequestedTurnReportsItsWaitsAsRequested() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        _ = listening(hub)
+        var seen: [String] = []
+        hub.onAttention = { _, _, value, requested in seen.append("\(value.map { "\($0)" } ?? "cleared")|\(requested)") }
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        _ = hub.notify(session: "claude:s1", turn: "t1", on: true)
+        registry.set("s1", status: "waiting", waitingFor: "permission prompt")
+        await hub.rescan()
+        #expect(seen == ["approval|true"])
+    }
+
+    @Test func askingToHearADictatedTurnThatIsAlreadyWaitingReportsTheWaitAgainAsRequested() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        _ = listening(hub)
+        var seen: [String] = []
+        hub.onAttention = { _, _, value, requested in seen.append("\(value.map { "\($0)" } ?? "cleared")|\(requested)") }
+        await dictated(hub, transport)
+        registry.set("s1", status: "waiting", waitingFor: "permission prompt")
+        await hub.rescan()
+        _ = hub.notify(session: "claude:s1", turn: "t1", on: true)
+        _ = hub.notify(session: "claude:s1", turn: "t1", on: true)
+        #expect(seen == ["approval|false", "approval|true"])
+    }
+
+    @Test func aReconnectDuringTheSameTurnKeepsWaitingForItsReply() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        let spoken = listening(hub)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        _ = hub.notify(session: "claude:s1", turn: "t1", on: true)
+        greet(hub, reconnected(turn: "t1", idle: false))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+        #expect(spoken.results == ["All green.|true"])
+    }
+
+    @Test func aDictatedReplySurvivesAReconnectDuringItsTurn() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        let spoken = listening(hub)
+        await dictated(hub, transport)
+        greet(hub, reconnected(turn: "t1", idle: false))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+        #expect(spoken.results == ["All green.|false"])
+    }
+
+    @Test func aTurnThatEndedWhileDisconnectedSendsTheUserToTheConversation() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        let spoken = listening(hub)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        _ = hub.notify(session: "claude:s1", turn: "t1", on: true)
+        greet(hub, reconnected(turn: nil, idle: true))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "late"))
+        #expect(spoken.endings == ["keyscribe|\(SpokenResult.repliedBody)|true"])
+        #expect(spoken.results.isEmpty)
+    }
+
+    @Test func aReconnectWhileIdleKeepsARequestForTheNextReply() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        let spoken = listening(hub)
+        _ = hub.notify(session: "claude:s1", turn: "", on: true)
+        greet(hub, reconnected(turn: nil, idle: true))
+        #expect(spoken.endings.isEmpty)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t2"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "complete", answer: "Done."))
+        #expect(spoken.results == ["Done.|true"])
+    }
+
+    @Test func aReconnectThatReportsAnotherTurnOrNoTurnClearsTheRequest() async {
+        for hello in [reconnected(turn: "t9", idle: false), reconnected(turn: nil, idle: false), ready(idle: false, gap: true)] {
+            let (hub, transport, registry, _) = makeHub()
+            await connected(hub, transport, registry, status: "busy")
+            let spoken = listening(hub)
+            hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+            _ = hub.notify(session: "claude:s1", turn: "t1", on: true)
+            greet(hub, hello)
+            hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+            #expect(spoken.results.isEmpty)
+            #expect(spoken.endings.isEmpty)
+            #expect(hub.readAloud.isEmpty && hub.readNextAloud.isEmpty)
+        }
+    }
+
+    @Test func cancellingWithdrawsThePendingSpeechAndIsNotUndoneByAReconnect() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        let spoken = listening(hub)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        _ = hub.notify(session: "claude:s1", turn: "t1", on: true)
+        _ = hub.notify(session: "claude:s1", turn: "t1", on: false)
+        #expect(spoken.withdrawn == ["claude:s1"])
+        #expect(hub.readAloud.isEmpty && hub.readNextAloud.isEmpty)
+        greet(hub, reconnected(turn: "t1", idle: false))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+        #expect(spoken.results.isEmpty)
+    }
+
+    @Test func cancellingAlsoStopsADictatedReplyAndWhatIsAlreadyBeingSpoken() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        let spoken = listening(hub)
+        await dictated(hub, transport)
+        _ = hub.notify(session: "claude:s1", turn: "t1", on: false)
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+        #expect(spoken.results.isEmpty)
+        _ = hub.notify(session: "claude:s1", turn: "", on: false)
+        #expect(spoken.withdrawn == ["claude:s1", "claude:s1"])
+    }
+
+    @Test func cancellingFromSettingsCoversARequestForTheNextReply() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        let spoken = listening(hub)
+        _ = hub.notify(session: "claude:s1", turn: "", on: true)
+        hub.cancelReadAloud("claude:s1")
+        #expect(hub.readAloud.isEmpty && hub.readNextAloud.isEmpty)
+        #expect(spoken.withdrawn == ["claude:s1"])
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t2"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "complete", answer: "Done."))
+        #expect(spoken.results.isEmpty)
+    }
+
+    @Test func turningSpokenRepliesOffClearsRequestsSoTurningThemBackOnReplaysNothing() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        let spoken = listening(hub)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        _ = hub.notify(session: "claude:s1", turn: "t1", on: true)
+        _ = hub.notify(session: "claude:s2", turn: "", on: true)
+        hub.speechTurnedOff()
+        #expect(hub.readAloud.isEmpty && hub.readNextAloud.isEmpty)
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+        #expect(spoken.results.isEmpty)
+    }
+
+    @Test(arguments: [("error", "Ended with an error."), ("refusal", "Couldn\u{2019}t complete the request."), ("unknown", SpokenResult.repliedBody)])
+    func aRequestedTurnThatEndsWithoutAReplySaysHowItEnded(reason: String, body: String) async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        let spoken = listening(hub)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        _ = hub.notify(session: "claude:s1", turn: "t1", on: true)
+        hub.handle(.turnComplete(session: "claude:s1", reason: reason, answer: ""))
+        #expect(spoken.endings == ["keyscribe|\(body)|true"])
+    }
+
+    @Test func aDictatedTurnThatFailsSaysSoAndAnInterruptedOneStaysSilent() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        let spoken = listening(hub)
+        await dictated(hub, transport, turn: "t1")
+        hub.handle(.turnComplete(session: "claude:s1", reason: "error", answer: ""))
+        await dictated(hub, transport, turn: "t2")
+        hub.handle(.turnComplete(session: "claude:s1", reason: "aborted", answer: ""))
+        #expect(spoken.endings == ["keyscribe|Ended with an error.|false"])
+        #expect(spoken.results.isEmpty)
+    }
+
+    @Test func disconnectingAConversationDropsItsRequest() async {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-ra-\(UUID().uuidString)")
+        let fake = FakeDiscovery()
+        fake.result = .found([Self.fakeSession("f1")])
+        let transport = FakeTransport()
+        transport.live = ["fake:f1"]
+        let hub = AgentHub(transport: transport, discovery: [fake], names: AgentNameStore(directory: dir))
+        await hub.rescan()
+        _ = listening(hub)
+        _ = hub.notify(session: "fake:f1", turn: "", on: true)
+        hub.disconnect("fake:f1")
+        #expect(hub.readAloud.isEmpty && hub.readNextAloud.isEmpty)
     }
 }

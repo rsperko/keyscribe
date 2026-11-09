@@ -38,9 +38,14 @@ final class AgentHub {
     var onNotice: ((AgentReceipt, _ request: String) -> Void)?
     var onForget: ((_ request: String) -> Void)?
     var onChange: (() -> Void)?
-    var onResult: ((_ conversation: String, _ handle: String, _ answer: String) -> Void)?
-    var onAttention: ((_ conversation: String, _ handle: String, _ attention: AgentAttention?) -> Void)?
+    var onResult: ((_ conversation: String, _ handle: String, _ answer: String, _ requested: Bool) -> Void)?
+    var onEnded: ((_ conversation: String, _ handle: String, _ body: String, _ requested: Bool) -> Void)?
+    var onAttention: ((_ conversation: String, _ handle: String, _ attention: AgentAttention?, _ requested: Bool) -> Void)?
+    var onWithdraw: ((_ conversation: String) -> Void)?
+    var speaks: () -> Bool = { false }
     private var awaitingResult: [String: String] = [:]
+    private var requested: Set<String> = []
+    private var nextRequested: Set<String> = []
     private var attention: [String: AgentAttention] = [:]
     private var goneSince: [String: Date] = [:]
     private var awaitedHandles: [String: String] = [:]
@@ -253,7 +258,8 @@ final class AgentHub {
                 settle(request, .notSent(entry.handle, reason: .disconnected))
             }
         }
-        awaitingResult[id] = nil
+        stopAwaiting(id)
+        nextRequested.remove(id)
         waitingPrompts[id] = nil
         lastUsed[id] = nil
         onSilence?(id)
@@ -483,6 +489,7 @@ final class AgentHub {
         let ended = connectorStateSessions.filter { !listed.contains($0) && !transport.isLive(session: $0) }
         forgetConnectorState(keepingEnvironments: { !ended.contains($0) }) { !ended.contains($0) && !exclusions.excludes($0) }
         installations = installations.filter { !ended.contains($0.key) }
+        nextRequested.subtract(ended)
         for session in ended { transport.forget(session: session) }
         sendLabels()
         let idle = Set(directory.conversations.filter { $0.state == .idle }.map(\.id))
@@ -526,7 +533,7 @@ final class AgentHub {
             }
             report(attention: wanted, for: session)
             if conversation == nil, wanted == .disconnected {
-                awaitingResult[session] = nil
+                stopAwaiting(session)
                 attention[session] = nil
                 goneSince[session] = nil
                 awaitedHandles[session] = nil
@@ -538,7 +545,7 @@ final class AgentHub {
     private func clearReturned(except tracked: Set<String>) {
         let live = Set(directory.conversations.filter(\.connectorLive).map(\.id))
         for session in live.subtracting(liveSessions).subtracting(tracked) {
-            onAttention?(session, handle(of: session) ?? "", nil)
+            onAttention?(session, handle(of: session) ?? "", nil, false)
         }
         liveSessions = live
         waitingPrompts = waitingPrompts.filter { live.contains($0.key) }
@@ -573,7 +580,7 @@ final class AgentHub {
     private func report(attention wanted: AgentAttention?, for session: String) {
         guard attention[session] != wanted else { return }
         attention[session] = wanted
-        onAttention?(session, handle(of: session) ?? awaitedHandles[session] ?? "", wanted)
+        onAttention?(session, handle(of: session) ?? awaitedHandles[session] ?? "", wanted, requested.contains(session))
     }
 
     private func sendLabels() {
@@ -620,6 +627,8 @@ final class AgentHub {
         guard !retiring.isEmpty else { return }
         let kept = { (session: String) in !retiring.contains(session) }
         awaitingResult = awaitingResult.filter { kept($0.key) }
+        requested = requested.filter(kept)
+        nextRequested = nextRequested.filter(kept)
         waitingPrompts = waitingPrompts.filter { kept($0.key) }
         forgetConnectorState(keeping: kept)
         installations = installations.filter { kept($0.key) }
@@ -641,7 +650,7 @@ final class AgentHub {
         }
         switch event {
         case .hello(let hello):
-            awaitingResult[hello.session] = nil
+            resume(hello)
             features[hello.session] = Set(hello.features)
             installations[hello.session] = hello.installation
             loadedVersions[hello.session] = hello.version
@@ -665,12 +674,17 @@ final class AgentHub {
         case .waiting(let session, let prompt):
             waitingPrompts[session] = prompt
             Task { [weak self] in await self?.rescan(rereadingTitles: false) }
+        case .notify(let session, let turn, let on):
+            _ = notify(session: session, turn: turn, on: on)
         case .focused(let request):
             focusWaiters.removeValue(forKey: request)?.resume(returning: .selected)
         case .ack:
             break
         case .submitted(let request, let turn):
-            if let conversation = requests[request]?.message.conversation, !turn.isEmpty { awaitingResult[conversation] = turn }
+            if let conversation = requests[request]?.message.conversation, !turn.isEmpty, awaitingResult[conversation] != turn {
+                stopAwaiting(conversation)
+                awaitingResult[conversation] = turn
+            }
             settle(request, .sent(requests[request]?.handle ?? ""))
         case .refused(let request, _) where focusWaiters[request] != nil:
             focusWaiters.removeValue(forKey: request)?.resume(returning: .notFound)
@@ -721,20 +735,98 @@ final class AgentHub {
             outbox.noteTyped(conversation: session)
             if handle(of: session) != nil { makeCurrent(session) }
         case .turnStarted(let session, let turn):
-            if let awaited = awaitingResult[session], awaited != turn { awaitingResult[session] = nil }
+            if let awaited = awaitingResult[session], awaited != turn { stopAwaiting(session) }
+            if nextRequested.remove(session) != nil { waitForReply(turn, of: session, requested: true) }
             handingOff[session] = nil
             running[session] = now()
         case .turnComplete(let session, let reason, let answer):
             handingOff[session] = nil
             running[session] = nil
-            if awaitingResult.removeValue(forKey: session) != nil, reason == "answer" || reason == "complete" {
-                onResult?(session, handle(of: session) ?? "", answer)
+            if awaitingResult[session] != nil {
+                let wasRequested = requested.contains(session)
+                stopAwaiting(session)
+                if reason == "answer" || reason == "complete" {
+                    onResult?(session, handle(of: session) ?? "", answer, wasRequested)
+                } else if let body = SpokenResult.ending(reason) {
+                    onEnded?(session, handle(of: session) ?? "", body, wasRequested)
+                }
             }
             if reason == "aborted" { outbox.noteInterrupted(conversation: session) }
             refresh()
             Task { [weak self] in await self?.rescan(rereadingTitles: false) }
         }
         reconcileAttention()
+    }
+
+    var readAloud: Set<String> { requested }
+    var readNextAloud: Set<String> { nextRequested }
+
+    func notify(session: String, turn: String, on: Bool) -> Bool {
+        guard !stopped, !exclusions.excludes(session) else { return false }
+        guard on else {
+            cancelReadAloud(session)
+            return speaks()
+        }
+        guard speaks() else { return false }
+        let wasRequested = requested.contains(session)
+        if turn.isEmpty {
+            nextRequested.insert(session)
+        } else {
+            waitForReply(turn, of: session, requested: true)
+        }
+        if !wasRequested, requested.contains(session), let current = attention[session] {
+            onAttention?(session, handle(of: session) ?? awaitedHandles[session] ?? "", current, true)
+        }
+        reconcileAttention()
+        onChange?()
+        return true
+    }
+
+    func cancelReadAloud(_ id: String) {
+        nextRequested.remove(id)
+        stopAwaiting(id)
+        onWithdraw?(id)
+        reconcileAttention()
+        onChange?()
+    }
+
+    func speechTurnedOff() {
+        guard !requested.isEmpty || !nextRequested.isEmpty else { return }
+        for session in requested { stopAwaiting(session) }
+        nextRequested = []
+        reconcileAttention()
+        onChange?()
+    }
+
+    private func waitForReply(_ turn: String, of session: String, requested isRequested: Bool) {
+        if awaitingResult[session] != turn { stopAwaiting(session) }
+        awaitingResult[session] = turn
+        if isRequested { requested.insert(session) }
+    }
+
+    private func stopAwaiting(_ session: String) {
+        awaitingResult[session] = nil
+        if requested.remove(session) != nil { onChange?() }
+    }
+
+    private func resume(_ hello: AgentEvent.Hello) {
+        let session = hello.session
+        let running = hello.reportsTurn ? hello.turn ?? "" : ""
+        if let awaited = awaitingResult[session], awaited != running {
+            let wasRequested = requested.contains(session)
+            stopAwaiting(session)
+            if hello.reportsTurn, running.isEmpty, hello.knownIdle {
+                onEnded?(session, handle(of: session) ?? "", SpokenResult.repliedBody, wasRequested)
+            }
+        }
+        guard nextRequested.contains(session) else { return }
+        if !running.isEmpty {
+            nextRequested.remove(session)
+            waitForReply(running, of: session, requested: true)
+        } else if !hello.reportsTurn || !hello.knownIdle {
+            nextRequested.remove(session)
+            onChange?()
+        }
     }
 
     private func state(of id: String) -> AgentLiveState? {
@@ -856,6 +948,12 @@ final class AgentRuntime {
                 Task { @MainActor in
                     box.hub?.prepare(for: hello)
                     done()
+                }
+            },
+            onNotify: { event, answer in
+                Task { @MainActor in
+                    guard case .notify(let session, let turn, let on) = event else { return answer(false) }
+                    answer(box.hub?.notify(session: session, turn: turn, on: on) ?? false)
                 }
             }
         ) { event in

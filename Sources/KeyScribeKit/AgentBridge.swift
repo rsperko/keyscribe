@@ -57,12 +57,14 @@ public enum AgentEvent: Equatable, Sendable {
         public var waiting: AgentPrompt?
         public var version: String?
         public var quiet: Bool
+        public var turn: String?
         public init(
             protocolVersion: Int, agent: String, agentVersion: String, instance: String, session: String, pid: Int,
             features: [String] = [], title: String? = nil, prompts: Int? = nil, idle: Bool? = nil, gap: Bool? = nil,
             connection: String? = nil, installation: String? = nil, environment: [String: String] = [:], cwd: String? = nil,
-            waiting: AgentPrompt? = nil, version: String? = nil, quiet: Bool = false
+            waiting: AgentPrompt? = nil, version: String? = nil, quiet: Bool = false, turn: String? = nil
         ) {
+            self.turn = turn
             self.version = version
             self.quiet = quiet
             self.waiting = waiting
@@ -95,6 +97,7 @@ public enum AgentEvent: Equatable, Sendable {
     case focused(request: String)
     case title(session: String, text: String)
     case waiting(session: String, prompt: AgentPrompt?)
+    case notify(session: String, turn: String, on: Bool)
 }
 
 extension AgentEvent {
@@ -102,7 +105,7 @@ extension AgentEvent {
         switch self {
         case .hello(let hello): hello.session
         case .typed(let session, _), .turnStarted(let session, _), .turnComplete(let session, _, _), .title(let session, _),
-             .waiting(let session, _): session
+             .waiting(let session, _), .notify(let session, _, _): session
         case .ack, .submitted, .refused, .undelivered, .focused: nil
         }
     }
@@ -117,6 +120,7 @@ extension AgentEvent {
         case .turnComplete(let session, let reason, let answer): return .turnComplete(session: rename(session), reason: reason, answer: answer)
         case .title(let session, let text): return .title(session: rename(session), text: text)
         case .waiting(let session, let prompt): return .waiting(session: rename(session), prompt: prompt)
+        case .notify(let session, let turn, let on): return .notify(session: rename(session), turn: turn, on: on)
         case .ack, .submitted, .refused, .undelivered, .focused: return self
         }
     }
@@ -142,6 +146,7 @@ extension AgentEvent.Hello {
         stripped.prompts = nil
         stripped.waiting = nil
         stripped.environment = [:]
+        stripped.turn = nil
         stripped.quiet = true
         return stripped
     }
@@ -149,6 +154,7 @@ extension AgentEvent.Hello {
 
 extension AgentEvent.Hello {
     public var knownIdle: Bool { features.contains("readiness") && idle == true }
+    public var reportsTurn: Bool { features.contains("notify") }
     public var resumesAfterGap: Bool { !features.contains("readiness") || gap != false }
 }
 
@@ -195,6 +201,7 @@ public enum AgentBridgeCodec {
         var cwd: String?
         var waiting: AgentPrompt?
         var version: String?
+        var on: Bool?
     }
 
     public static func encode(_ commands: [AgentCommand]) throws -> Data {
@@ -223,7 +230,8 @@ public enum AgentBridgeCodec {
             return .hello(.init(
                 protocolVersion: p, agent: agent, agentVersion: w.agentVersion ?? "", instance: instance, session: session, pid: pid,
                 features: w.features ?? [], title: w.title, prompts: w.prompts, idle: w.idle, gap: w.gap, connection: w.connection,
-                installation: w.installation, environment: w.environment ?? [:], cwd: w.cwd, waiting: w.waiting, version: w.version))
+                installation: w.installation, environment: w.environment ?? [:], cwd: w.cwd, waiting: w.waiting, version: w.version,
+                turn: w.turn))
         case "ack":
             return .ack(request: try required(w.request))
         case "submitted":
@@ -240,6 +248,9 @@ public enum AgentBridgeCodec {
             return .turnStarted(session: try required(w.session), turn: try required(w.turn))
         case "waiting":
             return .waiting(session: try required(w.session), prompt: w.waiting)
+        case "notify":
+            guard let on = w.on else { throw CodecError.malformed }
+            return .notify(session: try required(w.session), turn: w.turn ?? "", on: on)
         case "turnComplete":
             return .turnComplete(session: try required(w.session), reason: w.reason ?? "", answer: w.answer ?? "")
         default:

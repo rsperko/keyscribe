@@ -20,7 +20,8 @@ before you edit code in its area.
 - **The only outbound network calls that carry content are explicit BYOK LLM calls**, each over a redacted
   payload and each to a connection the user chose for that purpose: a mode's rewrite of the transcript, and,
   when the user turns on the Coding agent spoken updates and chooses a service, the summary of an agent's final reply to the user's
-  own dictation and the description of a prompt that turn waits on, from the prompt's title, the tool call it seems to
+  own dictation, or to a turn the user asked from inside the agent to hear read aloud, and the description of a prompt
+  that turn waits on, from the prompt's title, the tool call it seems to
   be about, and the agent's last words (`SpokenResultOutput`). One content-free exception: when the **Phase-A resolved mode is wired to a BYOK
   connection** — and only after the secure-aware snapshot has confirmed the field is not a password
   field — a **bodyless, auth-less HEAD preconnect** to that connection's host may fire during recording

@@ -47,7 +47,7 @@ final class PiDiscovery: AgentDiscovery {
             resolve(session)
         case .title(let session, let text):
             sessions[session]?.explicitName = Self.name(text)
-        case .typed, .ack, .submitted, .refused, .undelivered, .focused:
+        case .typed, .ack, .submitted, .refused, .undelivered, .focused, .notify:
             break
         }
     }

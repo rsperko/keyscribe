@@ -8,10 +8,25 @@ struct SpokenResultTests {
         #expect(SpokenResult.plan(answer: "  \n", configured: false) == .nothing)
     }
 
-    @Test func withoutAServiceAShortReplyIsSpokenAsItIsAndALongerOneIsAnnouncedAsFinished() {
+    @Test func withoutAServiceAShortReplyIsSpokenAsItIsAndALongerOneSendsTheUserToTheConversation() {
         #expect(SpokenResult.plan(answer: "Done. `make test` passes.", configured: false) == .speak("Done. make test passes."))
         let long = Array(repeating: "word", count: SpokenResult.verbatimWordLimit + 1).joined(separator: " ")
-        #expect(SpokenResult.plan(answer: long, configured: false) == .speak("Finished."))
+        #expect(SpokenResult.plan(answer: long, configured: false) == .speak("Replied. Open the conversation for the result."))
+    }
+
+    @Test(arguments: [
+        ("error", "Ended with an error."),
+        ("refusal", "Couldn\u{2019}t complete the request."),
+        ("unknown", "Replied. Open the conversation for the result."),
+        ("max_turns", "Replied. Open the conversation for the result."),
+    ])
+    func aTurnThatEndedWithoutAReplySaysHowItEnded(reason: String, body: String) {
+        #expect(SpokenResult.ending(reason) == body)
+    }
+
+    @Test(arguments: ["answer", "complete", "aborted"])
+    func aReplyOrAnInterruptionHasNoEndingNotice(reason: String) {
+        #expect(SpokenResult.ending(reason) == nil)
     }
 
     @Test func aShortReplyIsSpokenAsItIsAndALongerOneIsSummarized() {

@@ -60,7 +60,9 @@ every rule above applies to it, with these sharpenings:
   several places counts as focused when every view that could be in front shows it; when the front
   view could belong to another session, the answer is unknown, never a guess.
 - **Minimal agent impact is a release requirement** (`docs/development/principles.md` §10).
-  Observation hooks never await bridge work or perform I/O. They preserve downstream results,
+  Observation hooks never await bridge work or perform I/O. The one wait is a request the user or the model makes
+  explicitly (the read-aloud tool and command): it waits for the app's answer within a bounded deadline, never for
+  the turn or for speech, and a timeout promises nothing. They preserve downstream results,
   errors, cancellation, and other extensions' UI; connector failures must not interrupt agent work.
 - **Bound background work across failures and reconnects.** A timed-out request still counts as
   outstanding until it settles. Idle checks, retries, queues, timers, and stored receipts must not
@@ -69,7 +71,7 @@ every rule above applies to it, with these sharpenings:
   expiry, and cancellation immediately before acting. Reconnection holds stale dictation for
   review; it never grants old queued commands permission to run again.
 - **Reply text is in memory only.** A turn's final reply crosses the bridge bounded, for the spoken result of a
-  turn the user's dictation started; it is never written to History or logs, and the only place it may go is
+  turn the user's dictation started or that the user asked from inside the agent to hear; it is never written to History or logs, and the only place it may go is
   the AI service the user chose for summaries, after redaction.
 - **A Coding agent take is delivered whatever field has focus, a password field included.** The text goes
   to the agent the user addressed, not into the field, so the secure-field policy that keeps a dictation

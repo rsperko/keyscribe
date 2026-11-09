@@ -12,6 +12,7 @@ final class SpokenResultOutput {
         var notice = false
         var replayed = false
         var standalone = false
+        var requested = false
         var text: String { standalone ? body : SpokenResult.prefaced(body, name: name) }
     }
 
@@ -46,7 +47,13 @@ final class SpokenResultOutput {
     private var answering: (item: Queued, stillTrue: () -> Bool)?
     private var playingCheck: (() -> Bool)?
     private var announced = false
+    private var playingRequested: Set<String> = []
+    private var noticed: [String: AgentAttention] = [:]
+    private(set) var pendingRequested: Set<String> = [] {
+        didSet { if pendingRequested != oldValue { onPendingChange?() } }
+    }
     var onSpeaking: ((Speaking?) -> Void)?
+    var onPendingChange: (() -> Void)?
     var pendingSummaries: Int { generating.count }
 
     init(
@@ -86,6 +93,9 @@ final class SpokenResultOutput {
         for task in checkingNotice.values { task.cancel() }
         checkingNotice = [:]
         queued = []
+        pendingRequested = []
+        playingRequested = []
+        noticed = [:]
         replay = nil
         answering = nil
         playing = nil
@@ -98,6 +108,9 @@ final class SpokenResultOutput {
 
     func forget(conversation: String) {
         generating.removeValue(forKey: conversation)?.cancel()
+        generating.removeValue(forKey: Self.requestedKey(conversation))?.cancel()
+        pendingRequested.remove(conversation)
+        noticed[conversation] = nil
         checkingNotice.removeValue(forKey: conversation)?.cancel()
         queued.removeAll { $0.conversation == conversation }
         if replay?.conversation == conversation { replay = nil }
@@ -113,20 +126,58 @@ final class SpokenResultOutput {
         playNext()
     }
 
-    func finished(conversation: String, handle: String, answer: String) {
+    func withdraw(conversation: String) {
+        generating.removeValue(forKey: conversation)?.cancel()
+        generating.removeValue(forKey: Self.requestedKey(conversation))?.cancel()
+        checkingNotice.removeValue(forKey: conversation)?.cancel()
+        queued.removeAll { $0.conversation == conversation }
+        noticed[conversation] = nil
+        pendingRequested.remove(conversation)
+        guard let playing, playing.conversation == conversation, !playing.replayed, !announced else { return }
+        self.playing = nil
+        speech.stop()
+        playNext()
+    }
+
+    private static func requestedKey(_ conversation: String) -> String { conversation + "\u{1F}requested" }
+
+    private func supersede(_ conversation: String, requested: Bool) {
+        generating.removeValue(forKey: conversation)?.cancel()
+        if requested { generating.removeValue(forKey: Self.requestedKey(conversation))?.cancel() }
+        queued.removeAll { $0.conversation == conversation && (requested || !$0.requested) }
+        guard let playing, playing.conversation == conversation, !playing.replayed, !announced,
+              requested || !playing.requested else { return }
+        self.playing = nil
+        playingRequested = []
+        speech.stop()
+        playNext()
+    }
+
+    func finished(conversation: String, handle: String, answer: String, requested: Bool = false) {
         let settings = settings()
         guard settings.enabled else { return }
-        let usable = connection(settings.connection).flatMap { permits($0) ? $0 : nil }
         let plan = SpokenResult.plan(answer: answer, configured: !settings.connection.isEmpty)
+        announce(conversation: conversation, handle: handle, plan == .nothing && requested ? .speak(SpokenResult.noTextBody) : plan, requested: requested)
+    }
+
+    func ended(conversation: String, handle: String, body: String, requested: Bool) {
+        guard settings().enabled else { return }
+        announce(conversation: conversation, handle: handle, .speak(body), requested: requested)
+    }
+
+    private func announce(conversation: String, handle: String, _ plan: SpokenResult.Plan, requested: Bool) {
+        let settings = settings()
+        let usable = connection(settings.connection).flatMap { permits($0) ? $0 : nil }
         if plan == .nothing { return }
-        generating.removeValue(forKey: conversation)?.cancel()
-        queued.removeAll { $0.conversation == conversation }
+        supersede(conversation, requested: requested)
+        if requested { pendingRequested.insert(conversation) }
+        let key = requested ? Self.requestedKey(conversation) : conversation
         let inFront = inFront
-        generating[conversation] = Task { [weak self] in
-            let shown = await inFront(conversation)
+        generating[key] = Task { [weak self] in
+            let shown = requested ? false : await inFront(conversation)
             guard !Task.isCancelled, let self else { return }
             guard !shown else {
-                self.generating.removeValue(forKey: conversation)
+                self.generating.removeValue(forKey: key)
                 return
             }
             var text = ""
@@ -139,10 +190,10 @@ final class SpokenResultOutput {
                 text = await self.summary(of: request, connection: usable, handle: handle, deadline: self.deadlineSeconds)
             }
             guard !Task.isCancelled, self.settings().enabled else { return }
-            self.generating.removeValue(forKey: conversation)
+            self.generating.removeValue(forKey: key)
             self.enqueue(text.isEmpty
-                ? Queued(conversation: conversation, name: handle, body: SpokenResult.unavailableBody, unavailable: true)
-                : Queued(conversation: conversation, name: handle, body: text))
+                ? Queued(conversation: conversation, name: handle, body: SpokenResult.unavailableBody, unavailable: true, requested: requested)
+                : Queued(conversation: conversation, name: handle, body: text, requested: requested))
         }
     }
 
@@ -165,7 +216,9 @@ final class SpokenResultOutput {
         }
     }
 
-    func attention(conversation: String, handle: String, _ attention: AgentAttention?) {
+    func attention(conversation: String, handle: String, _ attention: AgentAttention?, requested: Bool = false) {
+        if let attention, noticed[conversation] == attention { return }
+        noticed[conversation] = nil
         checkingNotice.removeValue(forKey: conversation)?.cancel()
         queued.removeAll { $0.conversation == conversation && $0.notice }
         if let playing, playing.conversation == conversation, playing.notice, !playing.replayed, !announced {
@@ -177,7 +230,7 @@ final class SpokenResultOutput {
         generating.removeValue(forKey: conversation)?.cancel()
         let inFront = inFront
         checkingNotice[conversation] = Task { [weak self] in
-            let shown = await inFront(conversation)
+            let shown = requested ? false : await inFront(conversation)
             guard !Task.isCancelled, let self else { return }
             guard !shown, self.settings().enabled else {
                 self.checkingNotice.removeValue(forKey: conversation)
@@ -188,6 +241,7 @@ final class SpokenResultOutput {
             guard !Task.isCancelled else { return }
             self.checkingNotice.removeValue(forKey: conversation)
             guard self.settings().enabled else { return }
+            self.noticed[conversation] = attention
             self.enqueue(Queued(conversation: conversation, name: handle, body: body, notice: true))
         }
     }
@@ -226,7 +280,7 @@ final class SpokenResultOutput {
     }
 
     private func enqueue(_ item: Queued) {
-        queued.removeAll { $0.conversation == item.conversation }
+        queued.removeAll { $0.conversation == item.conversation && (item.requested || !$0.requested) }
         queued.append(item)
         playNext()
     }
@@ -238,6 +292,8 @@ final class SpokenResultOutput {
             guard check() else { return speech.stop() }
         }
         announced = true
+        pendingRequested.subtract(playingRequested)
+        playingRequested = []
         heard = playing
         onSpeaking?(Speaking(name: playing.name, text: playing.body))
     }
@@ -245,6 +301,8 @@ final class SpokenResultOutput {
     private func ended() {
         playing = nil
         playingCheck = nil
+        pendingRequested.subtract(playingRequested)
+        playingRequested = []
         if announced {
             announced = false
             onSpeaking?(nil)
@@ -255,6 +313,7 @@ final class SpokenResultOutput {
     private func playNext() {
         guard settings().enabled else {
             queued = []
+            pendingRequested = []
             replay = nil
             answering = nil
             return
@@ -273,18 +332,24 @@ final class SpokenResultOutput {
         }
         guard !queued.isEmpty else { return }
         var next = queued.removeFirst()
-        if next.unavailable {
-            let notice = SpokenResult.unavailable(names: [next.name] + queued.filter(\.unavailable).map(\.name))
-            queued.removeAll(where: \.unavailable)
+        if next.unavailable && !next.requested {
+            let merged = queued.filter { $0.unavailable && !$0.requested }
+            let notice = SpokenResult.unavailable(names: [next.name] + merged.map(\.name))
+            queued.removeAll { $0.unavailable && !$0.requested }
             next = Queued(conversation: next.conversation, name: notice.name, body: notice.body, unavailable: true)
         }
-        play(next)
+        play(next, requested: next.requested ? [next.conversation] : [])
     }
 
-    private func play(_ item: Queued, while stillTrue: (() -> Bool)? = nil) {
+    private func play(_ item: Queued, while stillTrue: (() -> Bool)? = nil, requested: Set<String> = []) {
         playing = item
         playingCheck = stillTrue
+        playingRequested = requested
         silencer.speak(item.text, voice: settings().voice, with: speech)
-        if !speech.isSpeaking { playing = nil }
+        if !speech.isSpeaking {
+            playing = nil
+            pendingRequested.subtract(playingRequested)
+            playingRequested = []
+        }
     }
 }

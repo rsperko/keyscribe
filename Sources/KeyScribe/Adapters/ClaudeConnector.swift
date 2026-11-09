@@ -178,6 +178,11 @@ enum ClaudeConnectorFiles {
 
     static func installedScript(_ script: String, installation: String) -> String {
         script.replacingOccurrences(of: "let loadedFrom = null", with: "let loadedFrom = \"\(installation)\"")
+            .replacingOccurrences(of: "const appLabel = null", with: "const appLabel = \(literal(Branding.appName))")
+    }
+
+    private static func literal(_ text: String) -> String {
+        (try? JSONSerialization.data(withJSONObject: text, options: .fragmentsAllowed)).map { String(decoding: $0, as: UTF8.self) } ?? "null"
     }
 
     static let hooksJSON = json(["description": "Voice connector", "modules": ["./register.js"]])

@@ -137,7 +137,7 @@ enum PiConnectorFiles {
     static func configJSON(socketPath: String, tokenPath: String, readyPath: String, installation: String, plugin: String, version: String) -> String {
         ConnectorResources.json([
             "protocol": AgentBridgeCodec.protocolVersion, "socketPath": socketPath, "tokenPath": tokenPath, "readyPath": readyPath,
-            "installation": installation, "plugin": plugin, "version": version,
+            "installation": installation, "plugin": plugin, "version": version, "appName": Branding.appName,
             "environmentKeys": TerminalRoutes.environmentKeys.sorted(),
         ])
     }

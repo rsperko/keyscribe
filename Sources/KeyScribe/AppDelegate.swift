@@ -736,6 +736,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 settingsController.codingAgents.onReconnect = { [weak hub = runtime.hub] in hub?.reconnect($0) }
                 settingsController.codingAgents.onRetrySavingExclusions = { [weak hub = runtime.hub] in hub?.retrySavingExclusions() }
                 settingsController.codingAgents.onShow = { [weak hub = runtime.hub] id in Task { _ = await hub?.open(id, makingCurrent: false) } }
+                settingsController.codingAgents.onCancelReadAloud = { [weak hub = runtime.hub] in hub?.cancelReadAloud($0) }
                 settingsController.codingAgents.onCheckAgain = { [weak hub = runtime.hub] in Task { await hub?.rescan(rereadingTitles: true) } }
                 showCodingAgents(runtime.hub)
                 let spoken = SpokenResultOutput(
@@ -747,10 +748,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                         guard let candidates = hub?.frontCandidates else { return false }
                         return await AgentFront.withoutAsking.shown(among: candidates) { _ in }?.id == id
                     })
-                runtime.hub.onResult = { [weak spoken] in spoken?.finished(conversation: $0, handle: $1, answer: $2) }
-                runtime.hub.onAttention = { [weak spoken] in spoken?.attention(conversation: $0, handle: $1, $2) }
+                runtime.hub.onResult = { [weak spoken] in spoken?.finished(conversation: $0, handle: $1, answer: $2, requested: $3) }
+                runtime.hub.onEnded = { [weak spoken] in spoken?.ended(conversation: $0, handle: $1, body: $2, requested: $3) }
+                runtime.hub.onAttention = { [weak spoken] in spoken?.attention(conversation: $0, handle: $1, $2, requested: $3) }
+                runtime.hub.onWithdraw = { [weak spoken] in spoken?.withdraw(conversation: $0) }
+                runtime.hub.speaks = { [weak self] in self?.settings.codingAgents.spokenResult.enabled ?? false }
                 runtime.hub.onSilence = { [weak spoken] in spoken?.forget(conversation: $0) }
                 spoken.onSpeaking = { [weak self] name in self?.showSpeaking(name) }
+                spoken.onPendingChange = { [weak self, weak hub = runtime.hub] in
+                    guard let hub else { return }
+                    self?.showCodingAgents(hub)
+                }
                 speakingHUD.onStop = { [weak spoken] in spoken?.stop() }
                 spokenResult = spoken
                 controller.spokenUpdates = spoken
@@ -777,6 +785,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsController.codingAgents.onReconnect = nil
             settingsController.codingAgents.onRetrySavingExclusions = nil
             settingsController.codingAgents.onShow = nil
+            settingsController.codingAgents.onCancelReadAloud = nil
             settingsController.codingAgents.onCheckAgain = nil
             settingsController.codingAgents.show([], current: nil)
         }
@@ -788,7 +797,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             hub.directory.conversations, current: hub.current, namesProblem: hub.namesProblem, namesNotSaved: hub.namesNotSaved,
             discoveryProblems: hub.discoveryProblems, discoveredSetups: hub.discoveredSetupsByAgent, candidates: hub.candidates,
             disconnected: hub.disconnected, exclusionsNotSaved: hub.exclusionsNotSaved, loadedVersions: hub.loadedVersions,
-            lastSeen: hub.lastSeen)
+            lastSeen: hub.lastSeen, readAloud: hub.readAloud.union(spokenResult?.pendingRequested ?? []), readNextAloud: hub.readNextAloud)
         if hadError != settingsController.codingAgents.hasError { settingsController.refreshProblems() }
     }
 
@@ -830,6 +839,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         settings = updated
         spokenResult?.settingsChanged()
+        if !updated.codingAgents.spokenResult.enabled { agentRuntime?.hub.speechTurnedOff() }
         if updated.history != previousHistory {
             history?.applyRetention(retentionDays: updated.history.retentionDays)
             excludeHistoryFromBackups(updated.history)

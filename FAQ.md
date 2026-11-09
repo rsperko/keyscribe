@@ -544,9 +544,12 @@ about (such as the command to approve, or a question and its options), and the a
 asked. Which tool call a prompt is about is a best guess. Without a service you hear "Waiting for you." For summaries, also choose one of your saved AI services. When a conversation you spoke to finishes, KeyScribe says the conversation's
 name and a short summary of the agent's final reply: a longer reply goes to that service, after its
 best-effort redaction, to be summarized; a reply of a few words is read as it is without any service. With
-**AI service** set to **None**, a longer reply is announced as finished and nothing is sent. If the
+**AI service** set to **None**, a longer reply is announced as "Replied. Open the conversation for the result." and
+nothing is sent. A reply you asked to hear that has no written text is announced as "Finished without a
+written reply. Open the conversation for the result." A turn that ends with an error is announced as "Ended with an error."; one you interrupt
+yourself is not announced. If the
 summary can't be made, you hear that it is unavailable rather than a guess; several waiting at once are
-read as one notice that names each conversation. For a natural voice, choose
+read as one notice that names each conversation, except replies you asked to hear, which are each read on their own. For a natural voice, choose
 **Download** beside **Voice**: it is a one-time download that runs on your Mac, and you can pick the speaker.
 Its speakers are English only. Until it is downloaded the macOS voice reads summaries, and **Preview Voice**
 lets you hear it first. The instruction the service gets is under **Advanced**, with **Reset to
@@ -558,13 +561,35 @@ to stop it and drop any summaries still waiting; summaries stay on for the next 
 audible, Esc goes to KeyScribe instead of the app you're in, and reaches your app again the moment it stops. If
 another app already holds Esc, the panel says only "Speaking" and the stop button is the way to stop it.
 Starting a dictation also stops it, and waiting summaries play once the dictation's own panel has gone. The
-**Read Agent Replies Aloud** item in the menu bar menu turns the feature off and on. Only instructions you dictated are
-spoken about. To hear the last one again, say **"repeat that"** or **"say that
+**Read Agent Replies Aloud** item in the menu bar menu turns the feature off and on. Only instructions you dictated, and
+work you asked the agent to have KeyScribe read aloud (below), are spoken about. To hear the last one again, say **"repeat that"** or **"say that
 again"** as the whole dictation, with either the Coding agent or the Voice Commands shortcut; with the Coding
 agent shortcut, a longer dictation that starts that way is sent to the agent as usual. A conversation that is in front of you when it finishes is
-skipped, since you can already see its reply. If KeyScribe can't tell what is in front, for example because
+skipped, since you can already see its reply, unless you asked for that reply to be read aloud. If KeyScribe can't tell what is in front, for example because
 your terminal hasn't been given Automation access for voice commands yet, the summary still plays.
 KeyScribe does not save replies or summaries. A local service such as oMLX keeps the reply on your Mac.
+
+### Can I type to the agent and still hear when it's done?
+
+Yes, with **Read replies aloud** on. Ask the agent in your own words, for example "fix the tests, and have
+KeyScribe tell me when you're done", or "read your reply aloud when you finish". The agent tells KeyScribe, says
+whether KeyScribe accepted, and keeps working. When that reply ends you hear the conversation's name and its reply
+or a summary, the same as for a message you dictated, and you hear if it stops for your approval or an answer
+along the way, even while the conversation is in front of you. It covers that one reply only. The agent only does
+this when you mention KeyScribe or hearing it out loud; a plain "let me know" stays in writing.
+
+A message you type while the agent is already working may only reach it once that work ends. To ask from the
+start, or while it works, run **/keyscribe** in the conversation: it covers the work running now, or your next
+reply when the agent is idle. **/keyscribe cancel** takes it back, including a reply to a message you dictated and
+one still being summarized or waiting to play; a reply you can already hear stops with Esc. Until you hear it, Settings
+shows "Reply will be read aloud." (or "Next reply will be read aloud.") on that conversation's row, with **Cancel**.
+In Claude Code the command runs while the agent works, and what it says is shown to you, not to the agent. A reply
+you asked for is never dropped in favor of a later reply from the same conversation.
+
+A request is kept in memory only: quitting KeyScribe, turning **Read replies aloud** off or disconnecting the
+conversation drops it, and so does reloading the agent's plugins or extensions, for example after updating the
+connector; ask again after reloading. If the connection drops and the reply ends before it comes back, you hear "Replied. Open
+the conversation for the result." With spoken replies off, the agent says so and nothing is set to play later.
 
 ### Where are my settings and history stored?
 

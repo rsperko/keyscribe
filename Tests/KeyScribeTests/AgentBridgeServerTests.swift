@@ -25,7 +25,8 @@ struct AgentBridgeServerTests {
     private func makeServer(
         pollHold: TimeInterval = 2, activeWindow: TimeInterval = 0.5, installation: Installation = Installation(),
         installationFor: (@Sendable (String) -> String?)? = nil, excludes: @escaping @Sendable (String) -> Bool = { _ in false },
-        onHello: @escaping @Sendable (AgentEvent.Hello, @escaping @Sendable () -> Void) -> Void = { $1() }
+        onHello: @escaping @Sendable (AgentEvent.Hello, @escaping @Sendable () -> Void) -> Void = { $1() },
+        onNotify: @escaping @Sendable (AgentEvent, @escaping @Sendable (Bool) -> Void) -> Void = { $1(false) }
     ) throws -> (AgentBridgeServer, Events, URL) {
         let dir = URL(fileURLWithPath: "/tmp/ks-bridge-\(UUID().uuidString.prefix(8))", isDirectory: true)
         let events = Events()
@@ -33,7 +34,7 @@ struct AgentBridgeServerTests {
             directory: dir, token: "secret",
             admits: { agent, offered in offered != nil && offered == (installationFor.map { $0(agent) } ?? installation.current) },
             excludes: excludes, pollHold: pollHold,
-            activeWindow: activeWindow, onHello: onHello
+            activeWindow: activeWindow, onHello: onHello, onNotify: onNotify
         ) {
             events.append($0)
         }
@@ -268,6 +269,35 @@ struct AgentBridgeServerTests {
         try hello(dir)
         #expect(events.all.first.map { if case .hello = $0 { true } else { false } } == true)
         #expect(server.isLive(session: "claude:s1"))
+    }
+
+    @Test func aRequestToReadTheReplyAloudIsAnsweredWithWhetherSpokenRepliesAreOn() throws {
+        let asked = Events()
+        let (server, events, dir) = try makeServer(onNotify: { event, answer in
+            asked.append(event)
+            answer(true)
+        })
+        defer { server.stop() }
+        try hello(dir)
+        let (status, body) = try request(dir, path: "/event", body: #"{"op":"notify","session":"s1","turn":"t1","on":true,"instance":"i1","connection":"i1"}"#)
+        #expect(status == 200)
+        #expect(body.contains(#""spoken":true"#))
+        #expect(asked.all == [.notify(session: "claude:s1", turn: "t1", on: true)])
+        #expect(!events.all.contains { if case .notify = $0 { true } else { false } })
+    }
+
+    @Test func aRequestFromADisconnectedConversationIsAnsweredQuietly() throws {
+        let asked = Events()
+        let (server, _, dir) = try makeServer(excludes: { $0 == "claude:s1" }, onNotify: { event, answer in
+            asked.append(event)
+            answer(true)
+        })
+        defer { server.stop() }
+        try hello(dir)
+        let (status, body) = try request(dir, path: "/event", body: #"{"op":"notify","session":"s1","turn":"t1","on":true,"instance":"i1","connection":"i1"}"#)
+        #expect(status == 200)
+        #expect(body.contains(#""quiet":true"#))
+        #expect(asked.all.isEmpty)
     }
 
     @Test func aQueuedCommandIsReturnedByThePoll() throws {

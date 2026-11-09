@@ -11,6 +11,8 @@ const backoff = [30000, 60000, 120000, 300000]
 const late = { late: true }
 const unreachable = { unreachable: true }
 const freshSources = ['startup', 'clear', 'fork']
+const features = ['focus', 'label', 'readiness', 'notify']
+const readAloudTool = 'tell_me_when_done'
 
 let config = null
 let token = ''
@@ -37,6 +39,7 @@ let nudge = null
 let connection = null
 const admitted = new Set()
 let loadedFrom = null
+const appLabel = null
 let retired = false
 let quiet = false
 
@@ -201,7 +204,7 @@ function reply($, gen, event) {
 }
 
 function deliverable(item) {
-  if (item.generation !== generation) return false
+  if (item.stale || item.generation !== generation) return false
   if (item.kind === 'reply') return item.connection === connection
   if (item.session !== session) return false
   return item.kind === 'hello' || helloSession === item.session
@@ -289,12 +292,12 @@ function sayHello($, target, attemptLaunch) {
   const render = () => JSON.stringify(quiet ? {
     op: 'hello', protocol: config.protocol, installation: config.installation, version: config.version, agent: 'claude', agentVersion: '',
     instance, connection: attempt.connection, session: target, pid: 0,
-    features: ['focus', 'label', 'readiness'], idle: turnKnown && currentTurn === null, gap: freshSession !== target,
+    features, idle: turnKnown && currentTurn === null, gap: freshSession !== target,
   } : {
     op: 'hello', protocol: config.protocol, installation: config.installation, version: config.version, agent: 'claude', agentVersion: '',
     instance, connection: attempt.connection, session: target, pid: 0,
-    features: ['focus', 'label', 'readiness'], title: (titleSession === target && lastTitle) || undefined, prompts,
-    idle: turnKnown && currentTurn === null, gap: freshSession !== target,
+    features, title: (titleSession === target && lastTitle) || undefined, prompts,
+    idle: turnKnown && currentTurn === null, gap: freshSession !== target, turn: currentTurn || undefined,
     environment: place && Object.keys(place).length ? place : undefined,
   })
   attempt.result = new Promise((resolve) => {
@@ -592,6 +595,87 @@ async function pollLoop($) {
   }
 }
 
+function readAloudAnswer(text) {
+  try {
+    const answer = JSON.parse(text)
+    return answer.quiet === true ? 'quiet' : answer.spoken === true
+  } catch (err) {
+    return null
+  }
+}
+
+async function askToReadAloud($, on) {
+  if (quiet) return 'quiet'
+  if (!session || helloSession !== session || !connection) return null
+  const turn = currentTurn || ''
+  const item = { kind: 'observe', session, generation, body: bound({ op: 'notify', session, turn, on }) }
+  const answered = new Promise((resolve) => {
+    item.answer = (text) => resolve(readAloudAnswer(text))
+    item.done = () => resolve(null)
+  })
+  enqueue($, item)
+  const answer = await within($, answered, eventDeadline * 2)
+  if (answer !== late) return answer
+  item.stale = true
+  return null
+}
+
+function appName() {
+  return appLabel || 'the voice app'
+}
+
+function toolDescription() {
+  const app = appName()
+  return 'The user has ' + app + ', a voice app on this Mac. Call this only when the user explicitly asks ' + app +
+    ', or asks to hear it out loud, to report when the current work is done. Call it once, then keep working. When this turn ends, ' +
+    app + ' reads your final reply aloud. If the work is already finished, answer instead of calling it. Not for a plain "let me know".'
+}
+
+function toolAnswer(answer) {
+  const app = appName()
+  if (answer === true) return app + ' will read your final reply aloud when this turn ends. Say so in one short sentence and continue.'
+  if (answer === false) {
+    return 'Spoken replies are off in ' + app + '. Tell the user to turn on Read replies aloud in ' + app +
+      '\u2019s Coding agent settings and ask again. Nothing will be read.'
+  }
+  if (answer === 'quiet') {
+    return 'This conversation is disconnected from ' + app + '. Tell the user to reconnect it in ' + app +
+      '\u2019s Coding agent settings. Nothing will be read.'
+  }
+  return app + ' didn\u2019t confirm the request, so a spoken reply can\u2019t be promised. Tell the user.'
+}
+
+function commandAnswer(args, answer, running) {
+  const app = appName()
+  const cancelling = args === 'cancel'
+  if (answer === 'quiet') return 'This conversation is disconnected from ' + app + '. Reconnect it in ' + app + '\u2019s Coding agent settings.'
+  if (answer === null) {
+    return cancelling ? app + ' didn\u2019t confirm the cancel.' : app + ' didn\u2019t confirm the request, so a spoken reply isn\u2019t certain.'
+  }
+  if (cancelling) return app + ' won\u2019t read this reply aloud.'
+  if (answer === false) return 'Spoken replies are off. Turn on Read replies aloud in ' + app + '\u2019s Coding agent settings.'
+  return running ? app + ' will read the result of this work aloud.' : app + ' will read your next reply aloud.'
+}
+
+async function offerReadAloud($) {
+  try {
+    await $.tool.register({
+      name: readAloudTool, description: toolDescription(), isDeferred: false,
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    })
+  } catch (err) {
+    quietly($.ui.log('voice connector could not add its tool: ' + String(err), { to: 'debug' }))
+  }
+  try {
+    await $.command.register({
+      name: $.plugin.name, immediate: true, argumentHint: '[cancel]',
+      description: 'Have ' + appName() + ' read the reply aloud when this work is done, or cancel that.',
+    })
+  } catch (err) {
+    quietly($.ui.log('voice connector could not add its command: ' + String(err), { to: 'debug' }))
+  }
+}
+
 const userOrigins = ['composer', 'bridge', 'slack-ping', 'unclassified']
 
 function typedByUser(e) {
@@ -600,6 +684,7 @@ function typedByUser(e) {
 
 export function register(on) {
   on('session.start', async ($, e, next) => {
+    await offerReadAloud($)
     const started = await next(e)
     if (!looping) {
       looping = true
@@ -607,6 +692,22 @@ export function register(on) {
       quietly(pollLoop($))
     }
     return started
+  })
+
+  on('tool.call', { tool: /__tell_me_when_done$/ }, async ($, e, next) => {
+    if (e.tool !== 'mcp__' + $.plugin.name + '__' + readAloudTool) return next(e)
+    return { result: toolAnswer(await askToReadAloud($, true)) }
+  })
+
+  on('command.run', async ($, e, next) => {
+    if (e.command !== $.plugin.name) return next(e)
+    const args = String(e.args || '').trim().toLowerCase()
+    const running = currentTurn !== null
+    const said = args && args !== 'cancel'
+      ? 'Use /' + e.command + ' to hear the reply aloud, or /' + e.command + ' cancel.'
+      : commandAnswer(args, await askToReadAloud($, args !== 'cancel'), running)
+    quietly($.ui.log(said))
+    return {}
   })
 
   on('session.end', ($, e, next) => {

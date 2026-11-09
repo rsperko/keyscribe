@@ -51,9 +51,9 @@ LLM calls** to a service you configured, and both off unless you turn them on:
   to a thousand characters of arguments, such as the command it asks you to approve), and the agent's last
   words before it asked are sent to the service you chose, after best-effort redaction, to say in a sentence
   what it asks. Which tool call a prompt belongs to is a best guess, so another tool's arguments can be sent. When an agent finishes an instruction you
-  dictated, a longer final reply is sent to the service you chose under Spoken replies, only to be
-  summarized into a sentence or two to read aloud; a short reply is read without it, a longer one is only announced
-  as finished when no service is chosen, and nothing is sent for a
+  dictated, or work you asked it to have KeyScribe read aloud, a longer final reply is sent to the service you chose
+  under Spoken replies, only to be summarized into a sentence or two to read aloud; a short reply is read without it,
+  a longer one is only announced when no service is chosen, and nothing is sent for a dictated reply's
   conversation KeyScribe can confirm is in front of you when it finishes. When it can't confirm that, such as
   in a terminal it can't read, the reply is sent as usual. Agent replies often contain code and command output, and the
   redaction described below is tuned to dictated speech, so it catches less there. Choose a local service
@@ -214,7 +214,7 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
   conversation's terminal forward, KeyScribe reads a few terminal and multiplexer variables (such as a
   pane id) from the environment of the processes that hold it; the rest of their environment is ignored.
   If you turn on **Read replies aloud** and choose an AI service for it, a longer final reply to an
-  instruction you dictated is sent to that service, after best-effort redaction, only to be summarized
+  instruction you dictated, or to work you asked the agent to have KeyScribe read aloud, is sent to that service, after best-effort redaction, only to be summarized
   into a sentence or two; a reply of a few words is read as it is without any service. KeyScribe keeps
   the reply and the summary in memory only and never writes them to History or logs; what the service
   you chose keeps is up to that service.

@@ -303,8 +303,12 @@ a hello on any other protocol is refused with `426` and is never registered or s
   with reason `unknown` and no answer.
 - **A completed turn carries the agent's final reply** in `answer`: the last assistant text of the turn, without
   thinking or tool calls, bounded by each connector to its opening and its ending. KeyScribe keeps it in
-  memory only, for the spoken result of a turn its own dictation started, and never writes it to History or
-  logs. A turn that was stopped or failed carries no spoken result.
+  memory only, for the spoken result of a turn its own dictation started or that the user asked to hear, and never
+  writes it to History or logs. A turn that was stopped or failed carries no answer.
+- **A connector can ask for a turn's reply to be read aloud** with `notify` (`session`, `turn`, `on`): `turn` names
+  the running turn, or is empty for the next one, and `on: false` cancels. The bridge answers `spoken`, whether spoken
+  replies are on, or `quiet` for a disconnected conversation. A connector that sends it says so with the `notify`
+  feature on its hello, and that hello also names the turn it is running in `turn`.
 - **The session id comes from Claude Code's session lifecycle.** When a session ends or is replaced
   (`/clear`, `/resume`, `/branch`), queued events for the old one are dropped and its commands refused, and
   the connector says hello for the new id before sending anything else.
@@ -1422,7 +1426,7 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
                                                  #   connection is set
 # connection = "omlx"                            # id of the AI service that summarizes a finished reply
                                                  #   and describes a Pi prompt; absent or "" = None:
-                                                 #   a longer reply is announced as finished, and
+                                                 #   a longer reply is announced without a summary, and
                                                  #   notices still play as fixed sentences
 # prompt = "…"                                   # the summary instruction; absent = the built-in default
                                                  #   (SpokenResultSettings.defaultPrompt)
@@ -1436,15 +1440,17 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 > recognized secrets hidden, without any service call; a reply with nothing left to read, such as one that is
 > only a table, is summarized instead; a longer one is sent to the chosen service, bounded to its opening and ending within
 > `SpokenResult.inputCharacterLimit` characters and after best-effort redaction. With no `connection`, a reply that
-> would be summarized is spoken as the conversation's name followed by "Finished." without any service call; a
+> would be summarized is spoken as the conversation's name followed by "Replied. Open the conversation for the result."
+> without any service call; a
 > `connection` that names no saved service speaks it as unavailable. A redacted span is never
 > restored into speech: the summary says "a hidden value" in its place. Every result starts with the name of
 > the conversation that produced it, and a summary that fails, times out or comes back empty is spoken as that
 > name followed by "The spoken summary is unavailable." Unavailable summaries waiting together are spoken as one
 > notice naming each conversation, followed by "The spoken summaries are unavailable." A summary longer than
 > `SpokenResult.summaryWordLimit` words is requested once more, shorter; a second overlong one is unavailable. Turning `enabled` off keeps `connection`, `prompt` and
-> `voice`. Only turns the user's own dictation started are spoken, and a conversation confirmed in front when
-> its turn finishes is skipped without a service call. With `enabled` on, a dictated turn that starts waiting for
+> `voice`. Only turns the user's own dictation started, or that the user asked from inside the agent to hear, are spoken,
+> and a conversation confirmed in front when its turn finishes is skipped without a service call unless the user asked
+> to hear it. With `enabled` on, a dictated turn that starts waiting for
 > approval or an answer, or whose connector stays gone mid-turn, is announced with a fixed notice whether or not
 > `connection` is set; notices never call a service. Nothing is stored.
 
