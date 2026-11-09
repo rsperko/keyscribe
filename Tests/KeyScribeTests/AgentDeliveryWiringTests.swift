@@ -32,6 +32,7 @@ struct AgentDeliveryWiringTests {
         var confirms = true
         var uncertainThenConfirmed = false
         var live = true
+        var unreachable: Set<String> = []
         weak var hub: AgentHub?
         func enqueue(_ command: AgentCommand, for session: String) {
             sent.append((command, session))
@@ -45,7 +46,7 @@ struct AgentDeliveryWiringTests {
             guard confirms else { return }
             Task { @MainActor [weak hub] in hub?.handle(.submitted(request: command.id, turn: "")) }
         }
-        func isLive(session: String) -> Bool { live }
+        func isLive(session: String) -> Bool { live && !unreachable.contains(session) }
         func forget(session: String) {}
         func withdraw(_ id: String) -> Bool { false }
     }
@@ -289,6 +290,28 @@ struct AgentDeliveryWiringTests {
         #expect(rosters(rig).compactMap { $0?.rows.map(\.name) }.allSatisfy { $0 == ["keyscribe blue", "keyscribe"] })
     }
 
+    @Test func aRetryUsesTheNameAPaneTookDuringTheTakeNotTheOneItLeft() async {
+        let reader = AgentPlaceTrackerTests.Reader()
+        let rig = await rig("Tell frontend to run the tests.", current: "claude:s1", places: reader)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        let pane = "/s#pane:p1"
+        reader.answers = ["claude:s1": .found(AgentPlace(
+            surface: "herdr", labels: [.init(text: "zeta", level: .pane, container: pane)], containers: [pane]))]
+        rig.controller.setNextModeOverride(id: Mode.codingAgentId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hud.states.contains {
+            if case .error(let message, _, _) = $0 {
+                message == "Not sent: no conversation named \u{201C}frontend\u{201D}. Try \u{201C}tell zeta, \u{2026}\u{201D}"
+            } else { false }
+        })
+    }
+
     final class SlowReader: AgentPlaceReading, @unchecked Sendable {
         private let lock = NSLock()
         private var _answers: [String: AgentPlaceAnswer] = [:]
@@ -476,7 +499,7 @@ struct AgentDeliveryWiringTests {
         #expect(rig.sent.isEmpty)
         #expect(focus.sessions.isEmpty)
         #expect(rig.hub.current == "claude:s1")
-        #expect(rig.hud.states.contains { if case .error(let message, _, _) = $0 { message == "No conversation named \u{201C}two\u{201D}" } else { false } })
+        #expect(rig.hud.states.contains { if case .error(let message, _, _) = $0 { message == "No conversation named \u{201C}two\u{201D}. Try \u{201C}open keyscribe\u{201D}" } else { false } })
     }
 
     @Test func sessionBeforeANameAddressesThatConversation() async {
@@ -1548,11 +1571,11 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test(arguments: [
-        ("Open frontend.", "No conversation named \u{201C}frontend\u{201D}"),
-        ("Go to key scrub", "\u{201C}key scrub\u{201D} sounded like \u{201C}keyscribe\u{201D}"),
-        ("Go to session keyscribe review", "No conversation named \u{201C}keyscribe review\u{201D}"),
+        ("Open frontend.", "No conversation named \u{201C}frontend\u{201D}. Try \u{201C}open keyscribe\u{201D}", "No conversation named \u{201C}frontend\u{201D}"),
+        ("Go to key scrub", "\u{201C}key scrub\u{201D} sounded like \u{201C}keyscribe\u{201D}", "\u{201C}key scrub\u{201D} sounded like \u{201C}keyscribe\u{201D}"),
+        ("Go to session keyscribe review", "No conversation named \u{201C}keyscribe review\u{201D}. Try \u{201C}open keyscribe\u{201D}", "No conversation named \u{201C}keyscribe review\u{201D}"),
     ])
-    func anOpenVerbWithAFewWordsNamingNothingIsHeldAndNeverSent(text: String, line: String) async {
+    func anOpenVerbWithAFewWordsNamingNothingIsHeldAndNeverSent(text: String, line: String, recorded: String) async {
         let focus = Focus()
         let rig = await rig(text, current: "claude:s1", focus: focus)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
@@ -1562,7 +1585,21 @@ struct AgentDeliveryWiringTests {
         #expect(focus.sessions.isEmpty)
         #expect(rig.hub.current == "claude:s1")
         #expect(rig.hud.states.contains { if case .error(let message, _, _) = $0 { message == line } else { false } })
-        #expect(entry?.summary == line)
+        #expect(entry?.summary == recorded)
+    }
+
+    @Test func anUnknownNameOffersOneRetryWithTheHighlightedConversationAndOpensItsSettings() async {
+        let rig = await rig("Tell frontend to run the tests.", current: "claude:s2")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        let entry = await lastHistoryEntry(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hud.states.contains {
+            if case .error(let message, .openCodingAgents?, _) = $0 {
+                message == "Not sent: no conversation named \u{201C}frontend\u{201D}. Try \u{201C}tell keyscribe blue, \u{2026}\u{201D}"
+            } else { false }
+        })
+        #expect(entry?.failureReason == "Not sent: no conversation named \u{201C}frontend\u{201D}")
     }
 
     @Test func aQueuedMessageUpdatesItsOwnEntryWhenItIsSentLater() async {
@@ -1929,6 +1966,53 @@ struct AgentDeliveryWiringTests {
         #expect(!rig.controller.isBusy)
     }
 
+    @Test func aMessageRetryNamesAConversationThatCanReceiveItRatherThanTheHighlightedOneWithoutItsConnector() async {
+        let rig = await rig("Tell frontend to run the tests.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.transport.unreachable = ["claude:s1"]
+        rig.hub.refresh()
+        await take(rig)
+        #expect(rig.hud.states.contains {
+            if case .error(let message, .openCodingAgents?, _) = $0 {
+                message == "Not sent: no conversation named \u{201C}frontend\u{201D}. Try \u{201C}tell keyscribe blue, \u{2026}\u{201D}"
+            } else { false }
+        })
+    }
+
+    @Test func noConversationThatCanReceiveAMessageLeavesOnlyTheProblemAndTheSettingsButton() async {
+        let rig = await rig("Tell frontend to run the tests.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.transport.live = false
+        rig.hub.refresh()
+        await take(rig)
+        #expect(rig.hud.states.contains {
+            if case .error("Not sent: no conversation named \u{201C}frontend\u{201D}", .openCodingAgents?, _) = $0 { true } else { false }
+        })
+    }
+
+    @Test func anOpenRetryStillNamesAConversationWithoutItsConnector() async {
+        let rig = await rig("Open frontend.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.transport.live = false
+        rig.hub.refresh()
+        await take(rig)
+        #expect(rig.hud.states.contains {
+            if case .error("No conversation named \u{201C}frontend\u{201D}. Try \u{201C}open keyscribe\u{201D}", .openCodingAgents?, _) = $0 { true } else { false }
+        })
+    }
+
+    @Test func aDisconnectedConversationIsNeverOfferedAsTheRetry() async {
+        let rig = await rig("Tell frontend to run the tests.")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.hub.disconnect("claude:s1")
+        await take(rig)
+        #expect(rig.hud.states.contains {
+            if case .error(let message, _, _) = $0 {
+                message == "Not sent: no conversation named \u{201C}frontend\u{201D}. Try \u{201C}tell keyscribe blue, \u{2026}\u{201D}"
+            } else { false }
+        })
+    }
+
     @Test func aDisconnectedConversationIsReportedAsDisconnectedNotEnded() async {
         let rig = await rig("What is keyscribe blue waiting for?", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
@@ -2047,6 +2131,7 @@ struct AgentDeliveryWiringTests {
     @Test(arguments: [
         ("Tell keyscribe what it is waiting for", "what it is waiting for"),
         ("What is the build waiting for?", "What is the build waiting for?"),
+        ("What is frontend waiting for?", "What is frontend waiting for?"),
         ("Ask keyscribe what it needs, then review the changes.", "what it needs, then review the changes."),
     ])
     func aQuestionThatIsNotAStatusCheckIsSentAsAMessage(text: String, sent: String) async {

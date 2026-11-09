@@ -1744,9 +1744,12 @@ final class DictationController {
                         hideAfter: state.errorAction != nil ? 8 : state.indicator == .advisory ? 5 : 2,
                         summary: result.historySummary(handle: handle, agent: agents.kind(of: id)), facts: facts)
         case .ask(let body, let reason):
-            let line = if case .open = address { AgentOutput.openAskLine(reason) } else { AgentOutput.askLine(reason) }
-            finishAgent(state: .error(message: line, action: nil, heard: HeardExcerpt(heard: body)),
-                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, facts: facts)
+            let retry: AgentOutput.Retry = if case .open = address { .open } else { .tell }
+            let line = retry == .open ? AgentOutput.openAskLine : AgentOutput.askLine
+            let shown = line(reason, retry, reachable(snapshot, agents, for: retry), frozen?.id)
+            finishAgent(state: .error(message: shown, action: Self.askAction(reason, mode: mode), heard: HeardExcerpt(heard: body)),
+                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil,
+                        recorded: line(reason, nil, [:], nil), facts: facts)
         case .deliver(let id, let body, _):
             session?.agentDestination = id
             session?.agentFacts = facts
@@ -2011,10 +2014,22 @@ final class DictationController {
                     facts: facts, awaitingReceipt: (request, receipt))
     }
 
+    private func reachable(_ snapshot: AgentSnapshot, _ agents: AgentHub, for retry: AgentOutput.Retry) -> [String: String] {
+        let frozen = Set(snapshot.addressable.values)
+        let listed = agents.recordingOrder.filter { retry == .open || AgentRoster.isAvailable($0) }.map(\.id)
+        return agents.names.filter {
+            frozen.contains($0.value) && listed.contains($0.value) && !snapshot.disconnected.values.contains($0.value) && !agents.isExcluded($0.value)
+        }
+    }
+
+    private static func askAction(_ reason: AgentRecipient.AskReason, mode: Mode) -> HUDErrorAction? {
+        if case .unknownName = reason { .openCodingAgents(mode.id) } else { nil }
+    }
+
     private func finishAgent(
         state: HUDState, outcome: DictationOutcome, heard: String, body: String, transformed: String?,
         rewrite: RewriteDetails?, transitioned: Bool = false, hideAfter: Double? = nil, summary: String? = nil,
-        facts: [HistoryEntry.Fact], awaitingReceipt awaited: (request: String, receipt: AgentReceipt)? = nil
+        recorded: String? = nil, facts: [HistoryEntry.Fact], awaitingReceipt awaited: (request: String, receipt: AgentReceipt)? = nil
     ) {
         if !transitioned {
             if !body.isEmpty { lastResult = body }
@@ -2022,13 +2037,13 @@ final class DictationController {
         }
         machine.finish(outcome)
         building.fingerprints[.final] = .of(body)
-        let reason = outcome == .inserted ? nil : state.primaryText
+        let reason = outcome == .inserted ? nil : recorded ?? state.primaryText
         finish(machine: .alreadyTransitioned, cue: outcome == .inserted ? .success : .error, state: state,
                hideAfter: hideAfter ?? (outcome == .inserted ? 2 : 6),
                record: (outcome == .inserted ? .inserted : .failed, reason),
                history: HistoryWrite(
                    heard: heard, transformed: transformed, result: body, insertion: outcome, rewrite: rewrite,
-                   failureReason: reason, summary: summary ?? state.primaryText,
+                   failureReason: reason, summary: summary ?? recorded ?? state.primaryText,
                    facts: facts + (SpokenEdit.historyFacts(session?.spokenEdits) ?? []),
                    onRecorded: awaited.map { awaited in { [weak self] entry in
                        self?.agentOutput.noteRecorded(entry, request: awaited.request)

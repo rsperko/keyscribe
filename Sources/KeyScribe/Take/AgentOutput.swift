@@ -147,13 +147,34 @@ final class AgentOutput {
         return items.dropLast().joined(separator: ", ") + " or " + last
     }
 
-    static func openAskLine(_ reason: AgentRecipient.AskReason) -> String {
-        let problem = askProblem(reason)
+    enum Retry {
+        case tell, open
+
+        func phrase(_ name: String) -> String {
+            switch self {
+            case .tell: "tell \(name), \u{2026}"
+            case .open: "open \(name)"
+            }
+        }
+    }
+
+    static func openAskLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:], current: String? = nil) -> String {
+        let problem = askProblem(reason) + retryHint(reason, retry: retry, names: names, current: current)
         return problem.prefix(1).uppercased() + problem.dropFirst()
     }
 
-    static func askLine(_ reason: AgentRecipient.AskReason) -> String {
-        "Not sent: " + askProblem(reason)
+    static func askLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:], current: String? = nil) -> String {
+        "Not sent: " + askProblem(reason) + retryHint(reason, retry: retry, names: names, current: current)
+    }
+
+    static func example(names: [String: String], current: String?) -> String? {
+        let ordered = names.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+        return ordered.first { names[$0] == current } ?? ordered.first
+    }
+
+    private static func retryHint(_ reason: AgentRecipient.AskReason, retry: Retry?, names: [String: String], current: String?) -> String {
+        guard case .unknownName = reason, let retry, let name = example(names: names, current: current) else { return "" }
+        return ". Try \u{201C}\(retry.phrase(name))\u{201D}"
     }
 
     private static func askProblem(_ reason: AgentRecipient.AskReason) -> String {

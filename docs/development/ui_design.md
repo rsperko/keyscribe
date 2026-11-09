@@ -365,6 +365,19 @@ misheard word sounds like the highlighted recipient itself, it is sent there, si
 Without “tell” the whole take is sent, misheard word included; after “tell” the misheard address is removed
 like any other. Otherwise the HUD says which name it sounded like.
 
+When the name matches no conversation at all (“No conversation named “architect””), the HUD adds one retry
+it would accept: “Try “tell keyscribe, …”” for a message, “Try “open keyscribe”” after a bring-forward word.
+It names the highlighted conversation when that one qualifies, otherwise the first that does alphabetically. A
+message retry offers only a conversation that can take a message now (its connector is live); an open retry
+offers any conversation still running, since bringing a terminal forward needs no connector. Disconnected
+conversations are never offered, and when none qualifies the line ends at the problem. A conversation is
+offered under its current name, so a pane renamed during the take is offered by its new label, never the one
+it left. Its Open Coding Agent
+Settings button shows every name and renames a conversation; the spoken rename is not offered here, because
+a mode with a fixed recipient renames that recipient, not the conversation in front. History records only
+“No conversation named “architect””, since the names offered change as conversations come and go. A status
+question about an unknown name never reaches this line: it is a message (see below).
+
 “Ask” works like “tell” for a conversation's name or number (“ask docs to review the changes”, “ask session
 two whether it is done”), and a name one sound away is held the same way. Anything else after “ask” is an
 instruction for the highlighted recipient, so “ask clarifying questions first” and “ask me before you push”
