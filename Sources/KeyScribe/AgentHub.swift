@@ -19,7 +19,7 @@ enum AgentReceipt: Equatable {
     enum NotSentReason: Equatable { case conversationEnded, connectorNotRunning, conversationChanged, stopped, expired, disconnected, refused(String) }
 
     case sent(String)
-    case queued(String)
+    case queued(String, waitingOn: AgentDeliveryDecision.QueueReason = .working)
     case kept(String, reason: KeptReason)
     case notSent(String?, reason: NotSentReason)
     case uncertain(String)
@@ -231,6 +231,8 @@ final class AgentHub {
     }
 
     func isExcluded(_ id: String) -> Bool { exclusions.excludes(id) }
+
+    func waitingPrompt(of id: String) -> AgentPrompt? { waitingPrompts[id] }
 
     var disconnectedNames: [String: String] {
         guard namesProblem == nil else { return [:] }
@@ -598,8 +600,8 @@ final class AgentHub {
                 waiters[message.id] = continuation
                 handOff(message, handle: handle)
             }
-        case .queue:
-            return .queued(handle)
+        case .queue(let reason):
+            return .queued(handle, waitingOn: reason)
         case .needsReview(let reason):
             return .kept(handle, reason: Self.kept(reason))
         case .disconnected:

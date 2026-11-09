@@ -162,6 +162,8 @@ final class AgentOutput {
         case .noSuchRow(let row): "there is no session \(row)"
         case .unknownName(let name): "no conversation named \u{201C}\(name)\u{201D}"
         case .soundsLike(let spoken, let name): "\u{201C}\(spoken)\u{201D} sounded like \u{201C}\(name)\u{201D}"
+        case .noBreak(let name):
+            "did you mean \u{201C}\(name)\u{201D}? Say \u{201C}tell \(name),\u{201D} with a pause, or \u{201C}tell \(name) to \u{2026}\u{201D}"
         case .ambiguousName(let name, let matches):
             "\u{201C}\(name)\u{201D} could be \(Self.either(matches.map { "\u{201C}\($0)\u{201D}" }))"
         }
@@ -171,8 +173,15 @@ final class AgentOutput {
         switch receipt {
         case .sent(let handle):
             return .commandDone(summary: "Sent to \(handle)", detail: mode)
-        case .queued(let handle):
-            return .commandDone(summary: "Queued for \(handle)", detail: "Sends when it finishes")
+        case .queued(let handle, let reason):
+            let respond = " Say \u{201C}open \(handle)\u{201D} to respond; this message stays queued"
+            let detail = switch reason {
+            case .working: "Sends when it finishes"
+            case .approval: "Waiting for approval." + respond
+            case .question: "Waiting for an answer." + respond
+            case .userDialog: "Dialog open." + respond
+            }
+            return .commandDone(summary: "Queued for \(handle)", detail: detail)
         case .kept(let handle, let reason):
             let why = switch reason {
             case .typedSince: "you sent it a message since"

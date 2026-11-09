@@ -305,7 +305,7 @@ show it labels its own session with the same name (the name in quotes on the age
 connector's name, which Claude Code adds and the Pi connector writes itself), so the
 terminal on screen can be matched to its row; the label is display only and never renames the agent's
 conversation. The user can address a session by starting the take with its name or its number (“docs, run the tests”, “session two …”);
-a leading “tell” is optional, and “session” may come before a name as it does before a number (“session docs,
+a leading “tell” (or “please tell”) is optional, and “session” may come before a name as it does before a number (“session docs,
 run the tests”, “open session docs”) — a sentence about sessions, such as “Session timeout is too short”, is
 still a message, and a conversation whose own name starts with “session” matches whole first. A row number always needs “session”, and “session two” is always row two,
 even beside a conversation named two. A name made only of number words — the words a row number accepts,
@@ -327,6 +327,20 @@ row) and a long word one sound away from a name (“keyscrib …”). One except
 misheard word sounds like the highlighted recipient itself, it is sent there, since both readings agree.
 Without “tell” the whole take is sent, misheard word included; after “tell” the misheard address is removed
 like any other. Otherwise the HUD says which name it sounded like.
+
+“Ask” works like “tell” for a conversation's name or number (“ask docs to review the changes”, “ask session
+two whether it is done”), and a name one sound away is held the same way. Anything else after “ask” is an
+instruction for the highlighted recipient, so “ask clarifying questions first” and “ask me before you push”
+are messages, not addresses. After “tell” or “ask”, one “the” may come before the name (“ask the docs what
+changed”) when the name is followed by a break: the end of the take, a comma or colon, or a word that starts
+what is said to it (`AgentAddress` lists them, such as “to”, “that”, “whether” and “what”). Without a break
+(“tell the docs run the tests”, “tell the session two run the tests”, “tell the backend team the API
+changed”) it is unclear whether the name was meant, so the take is held and never sent to another
+conversation: “Not sent: did you mean “docs”? Say “tell docs,” with a pause, or “tell docs to …””. When that
+conversation is already the recipient, the whole take is sent to it as said. Words after “the” that name no
+conversation (“tell the users that the API changed”) are the message for the highlighted recipient. A
+conversation whose own name starts with “the”, or with an opening word such as “so” or “okay”
+(“so long”), matches whole first.
 
 An address that matched is always removed from the message, and a name that was said whole is never traded
 for a longer one it sounds like: “tell keyscribe glue the adapters together” sends “glue the adapters
@@ -397,7 +411,47 @@ notes” names it notes. The HUD shows “Renamed keyscribe to auth refactor” 
 and fixed by saying it again. A name another conversation holds, or a row name such as “session three”,
 is refused with the reason and nothing changes; with no recipient it says “Switch to a conversation, then
 say the rename command again” with **Open Coding Agent Settings**. History records Rename, the conversation, the new name and how it was chosen. After “tell” and a
-name it is message text. With the Coding agent feature off, a remembered conversation is only its app and window. While
+name it is message text.
+
+A take that is only a question about what a conversation is waiting for is answered by KeyScribe and sends
+nothing (`AgentStatusQuery`): “what is docs waiting for”, “what does docs need from me”, “ask the docs what
+it is waiting for”, “is docs waiting for me”, and the same without a name (“what are you waiting for”), which
+asks about the take's recipient. “Blocked on”, “stuck on”, “why is docs waiting” (or stuck), “what is
+blocking docs” and “does docs need anything” ask the same thing, and hold with more words after them like the
+other forms. Contractions, closing punctuation, an
+opening “please”, “hey”, “so” or “okay” (also skipped before “tell”, “ask” or a conversation's name, so
+“hey docs, run the tests” addresses docs), “currently”, “still”, and a
+closing “now” or “right now” are fine. More words after a question about a named conversation (“what does
+docs need from me to continue”, or a second question after it) hold the take, since sending it would put a
+question about docs to another conversation: “Nothing was sent. Say “what is docs waiting for?” to check on
+it, or start with “tell docs” to send a message”. A longer question about “you” (“what are you waiting for before
+merging”) and one after “ask” and a name (“ask docs what it needs, then review the changes”) are messages to
+that conversation, and “what is the build waiting for” names no conversation, so it is a message. “Tell docs …”
+is always sent, which is how to ask the agent itself. The name must be a conversation's name or number; one
+that sounds like a name is held. The answer says only what is reported,
+in this order: the prompt's own question when it is short (“docs asks: keep the schema or add a migration?”),
+read with the same redaction as a spoken reply, else a description from the chosen summary service (the HUD
+says “Checking docs…” while it waits), else the state (“docs is waiting for approval”). The HUD adds “Say
+“open docs” to see it”; speech leaves it out. A working conversation is “docs is working. No request for your
+input is currently reported.”, an idle one “docs is ready for another message.”, and one that is not
+connected is reported as last seen. So is one whose state was carried over because its agent's session list
+could not be read: “docs was last seen waiting for approval. I couldn’t check its current status.” A description is used only while the prompt it describes is still the one
+pending; if the prompt or state changed meanwhile, the answer is rebuilt from what is pending now. The answer
+shows in the HUD, and is read aloud when spoken replies are on, even with the conversation in front; speech
+that has to wait (for the dictation HUD, or while its audio is prepared) is dropped if what it reports
+stopped being true, its state, prompt, connection or freshness, while “repeat that” still replays it as heard.
+An answer replaces a notice about the same conversation that is still waiting to play or being described, so
+the same news is not heard twice; finished replies stay queued. A conversation the user disconnected is reported as disconnected, with
+**Open Coding Agent Settings**. “Who needs me”, “who's waiting for me”, “who is blocked” (or stuck),
+“is anyone waiting for me”, “what is everyone waiting for” and “which conversations are waiting” count the conversations waiting for input, typed turns and conversations without a connector included, and
+name them in recording order; a state carried over from an earlier check is not counted. When some agents
+could not be checked, a state is carried over, or a conversation without a connector could be waiting without
+reporting it, the answer adds “I couldn’t check every conversation.”, and with none to name it says “No
+confirmed requests for your input.” instead of “No conversation needs you.”. Spoken, it is dropped if the
+names or that completeness changed while it waited. Checking never changes the recipient. History records the
+command and the conversation, never the answer.
+
+With the Coding agent feature off, a remembered conversation is only its app and window. While
 it looks, the HUD says so (“Opening docs…”). It follows the agent's processes outward and
 selects each layer it passes through: the multiplexer pane showing the agent (herdr or tmux, for example — the
 `PaneRoute`s in `TerminalRoutes`), then the terminal tab and split holding that pane (or holding the agent directly),
@@ -481,6 +535,9 @@ sits, VoiceOver reaches the header first. Ordinary dictation never shows the lis
 
 **Coding agent delivery.** A take is sent only to a conversation that is ready for it. While a turn is
 running, the take waits and is sent when the turn finishes (“Queued for docs”, “Sends when it finishes”).
+When the conversation is waiting on the user instead (an approval, a question, or a dialog), the take still
+waits for the turn, and the receipt says what it waits on, how to respond, and what happens to the message
+(“Waiting for approval. Say “open docs” to respond; this message stays queued”).
 A take that would no longer fit what is on screen is not sent, and never sends later on its own: for
 example, the user sent that conversation a message after the take was decided, its question was answered,
 or its prompt box holds a message the user has not sent. The HUD says so and why (“Not sent to docs: it has

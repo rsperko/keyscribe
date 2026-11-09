@@ -235,7 +235,6 @@ struct AgentAddressTests {
         "Run the tests in keyscribe.",
         "Tell me why keyscribe fails.",
         "Tell them to wait for the build.",
-        "Tell the backend team the API changed.",
         "Tell everyone about the outage.",
         "Explain why \u{201C}tell keyscribe to run tests\u{201D} is ambiguous.",
     ])
@@ -474,6 +473,97 @@ struct AgentAddressTests {
     @Test func aCorrectedNameFollowedByAnotherDistinguishingWordStillAsks() {
         #expect(AgentAddress.parse("Go to Arsperco Purple.", names: readable, read: Self.reading)
             == .open(.unresolved(spoken: "arsperco purple", body: "")))
+    }
+
+    @Test(arguments: [
+        ("Ask backend to review the changes.", AgentAddress.name("backend", body: "to review the changes.")),
+        ("ask backend whether the migration is needed", .name("backend", body: "whether the migration is needed")),
+        ("Please ask keyscribe blue to run the tests", .name("keyscribe blue", body: "to run the tests")),
+        ("Ask session two to rerun the tests.", .row(2, body: "to rerun the tests.")),
+        ("Ask backend: what changed?", .name("backend", body: "what changed?")),
+        ("ask backund to review", .nearMiss(spoken: "backund", name: "backend", body: "to review", unaddressed: nil)),
+        ("Ask backend.", .name("backend", body: "")),
+        ("So tell backend to continue.", .name("backend", body: "to continue.")),
+        ("Okay, ask backend to review it", .name("backend", body: "to review it")),
+        ("Hey please tell session two to stop", .row(2, body: "to stop")),
+    ])
+    func askAddressesALiveNameOrRow(text: String, address: AgentAddress) {
+        #expect(AgentAddress.parse(text, names: names) == address)
+    }
+
+    @Test(arguments: [
+        ("Hey backend, run the tests.", AgentAddress.name("backend", body: "run the tests.")),
+        ("okay backend run the tests", .name("backend", body: "run the tests")),
+        ("So session two, check the build", .row(2, body: "check the build")),
+        ("Okay, open backend.", .open(.name("backend", body: ""))),
+    ])
+    func anOpenerBeforeABareAddressIsSkipped(text: String, address: AgentAddress) {
+        #expect(AgentAddress.parse(text, names: names) == address)
+    }
+
+    @Test func aNameThatStartsWithAnOpenerIsMatchedWholeFirst() {
+        let names = ["so long", "long", "backend"]
+        #expect(AgentAddress.parse("so long, run the tests", names: names) == .name("so long", body: "run the tests"))
+        #expect(AgentAddress.parse("So backend is failing", names: names) == .name("backend", body: "is failing"))
+        #expect(AgentAddress.parse("Okay long, run the tests", names: names) == .name("long", body: "run the tests"))
+    }
+
+    @Test(arguments: ["So the tests are failing.", "Okay, run the tests.", "Hey, what changed?", "okay"])
+    func anOpenerBeforeAnythingElseLeavesTheMessageWhole(text: String) {
+        #expect(AgentAddress.parse(text, names: names) == .none(body: text))
+    }
+
+    @Test(arguments: [
+        "Ask clarifying questions before you start.",
+        "ask questions if anything is unclear",
+        "Ask users for feedback on the design.",
+        "ask again if it fails",
+        "Ask yourself whether the cache is needed.",
+        "ask me before you push",
+        "So the tests are failing.",
+        "Okay, tell me why it failed.",
+        "Ask for confirmation before deleting anything.",
+        "Ask the user whether to keep the schema.",
+        "Ask",
+    ])
+    func askBeforeAnythingButALiveNameIsTheMessage(text: String) {
+        #expect(AgentAddress.parse(text, names: names) == .none(body: text))
+    }
+
+    @Test(arguments: [
+        ("Tell the backend to review the changes.", AgentAddress.name("backend", body: "to review the changes.")),
+        ("ask the backend what it is doing", .name("backend", body: "what it is doing")),
+        ("Ask the backend, what changed?", .name("backend", body: "what changed?")),
+        ("Tell the backend.", .name("backend", body: "")),
+        ("tell the session manager that the build is green", .name("session manager", body: "that the build is green")),
+        ("Ask the backund whether it is done", .nearMiss(spoken: "backund", name: "backend", body: "whether it is done", unaddressed: nil)),
+        ("Please ask the session two to stop", .row(2, body: "to stop")),
+    ])
+    func theAfterTellOrAskIsSkippedWhenANameFollowsWithABreak(text: String, address: AgentAddress) {
+        #expect(AgentAddress.parse(text, names: names) == address)
+    }
+
+    @Test(arguments: [
+        ("Tell the backend team the API changed.", AgentAddress.name("backend", body: "team the API changed.")),
+        ("Ask the backend team for the logs.", .name("backend", body: "team for the logs.")),
+        ("tell the backend run the tests", .name("backend", body: "run the tests")),
+        ("Tell the session two run the tests", .row(2, body: "run the tests")),
+        ("tell the backund run the tests", .nearMiss(spoken: "backund", name: "backend", body: "run the tests", unaddressed: nil)),
+    ])
+    func theBeforeAnAddressWithoutABreakIsHeldNeverSentElsewhere(text: String, inner: AgentAddress) {
+        #expect(AgentAddress.parse(text, names: names) == .unbroken(inner, unaddressed: text))
+    }
+
+    @Test(arguments: ["Tell the users that the API changed.", "ask the team whether it is done"])
+    func theBeforeWordsThatNameNoConversationIsTheMessage(text: String) {
+        #expect(AgentAddress.parse(text, names: names) == .none(body: text))
+    }
+
+    @Test func aNameThatStartsWithTheIsMatchedWhole() {
+        let names = ["big one", "the big one", "architect"]
+        #expect(AgentAddress.parse("Tell the big one to stop", names: names) == .name("the big one", body: "to stop"))
+        #expect(AgentAddress.parse("ask the big one what it needs", names: names) == .name("the big one", body: "what it needs"))
+        #expect(AgentAddress.parse("Tell the architect to stop", names: names) == .name("architect", body: "to stop"))
     }
 }
 

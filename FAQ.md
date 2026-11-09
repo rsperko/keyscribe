@@ -478,6 +478,21 @@ follows it, nothing is renamed or sent, and the panel says why. You can also cho
 in **Settings ▸ Modes ▸ Coding agent ▸ Conversations**. Renaming only changes the name you say to KeyScribe;
 the agent's own title for the conversation stays as it was.
 
+### How do I ask what a conversation needs?
+
+In the Coding agent mode, ask as the whole dictation: **“what is docs waiting for?”**, **“what does docs
+need from me?”**, **“ask the docs what it is waiting for”**, or **“what are you waiting for?”** for the
+conversation you are talking to. KeyScribe answers from what the agent reports and sends nothing: the
+question it is asking when it is short, else a description (with an AI service chosen under Spoken replies),
+else that it is waiting for approval or an answer, with “open docs” to bring it forward. When nothing is
+pending, the same question tells you whether it is working or ready for another message. Ask only the
+question: “what does docs need from me to continue” sends nothing, and the panel says what to say instead.
+After “ask” and a name, more words make it a message to that conversation instead, so “ask docs what it
+needs, then review the changes” is sent to docs. **“Who needs me?”** names every
+conversation waiting for you. The answer is shown, and read aloud when Read replies aloud is on. To put the question to the
+agent itself, start with **“tell”**: “tell docs what you still need”. “Ask docs to review the changes” sends
+that instruction to docs, while “ask clarifying questions first” goes to the conversation you are talking to.
+
 ### How do I stop one conversation from receiving what I say?
 
 Choose **Disconnect** on its row. It stops receiving dictation and spoken replies at once and stays

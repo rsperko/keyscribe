@@ -98,10 +98,15 @@ final class CodingAgentsSettingsModel: ObservableObject {
         if example.current {
             guard example.connected else { return "\(example.name) is current but not connected. Connect it before speaking, or start with another conversation\u{2019}s name." }
             return "Instructions go here unless another conversation is in front of you. Start with another conversation\u{2019}s name to switch."
+                + Self.checking("what are you waiting for?")
         }
         guard example.connected else { return "Choose Connect\u{2026} on a conversation to send it instructions." }
         let start = shortcut.map { "Use \($0)" } ?? "Start recording"
-        return "\(start) and say \u{201C}\(example.name), run the unit tests.\u{201D}"
+        return "\(start) and say \u{201C}\(example.name), run the unit tests.\u{201D}" + Self.checking("what is \(example.name) waiting for?")
+    }
+
+    private static func checking(_ question: String) -> String {
+        " Say \u{201C}\(question)\u{201D} to check on it without sending anything."
     }
 
     private let describeTerminal: @Sendable (Int) -> String?

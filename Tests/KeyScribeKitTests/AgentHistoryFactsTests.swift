@@ -41,6 +41,19 @@ struct AgentHistoryFactsTests {
         #expect(AgentHistoryFacts.rename(frozen: nil, to: nil, conversations: roster).map(\.label) == ["Command", "Conversation"])
     }
 
+    @Test func aStatusCheckRecordsTheConversationAndHowItWasChosenButNoAnswer() {
+        let named = AgentHistoryFacts.status(
+            address: .name("backend", body: ""), resolution: .select(id: "s-backend"), frozen: nil, conversations: roster)
+        #expect(named.map(\.label) == ["Command", "Spoken address", "Conversation", "Chosen by"])
+        #expect(named.map(\.value) == ["Check status", "backend", "backend \u{00B7} claude \u{00B7} s-backend", "Its name"])
+        let current = AgentRecipient.Frozen(id: "s-docs", source: .current)
+        let unnamed = AgentHistoryFacts.status(
+            address: nil, resolution: .deliver(id: "s-docs", body: "", source: .current), frozen: current, conversations: roster)
+        #expect(unnamed.first?.value == "Check status")
+        #expect(unnamed.first { $0.label == "Chosen by" }?.value == "The current conversation")
+        #expect(AgentHistoryFacts.whoNeedsMe().map(\.value) == ["Who needs me"])
+    }
+
     @Test func anOpenByNameRecordsTheCommandAddressAndConversation() {
         let recorded = facts(.open(.name("backend", body: "")), .open(id: "s-backend"))
         #expect(recorded["Command"] == "Open")

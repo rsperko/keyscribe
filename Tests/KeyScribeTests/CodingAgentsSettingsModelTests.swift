@@ -555,8 +555,16 @@ struct CodingAgentsSettingsModelTests {
     @Test func firstInstructionGuidanceUsesTheConfiguredShortcutWithoutInventingOne() {
         let (model, _, _) = makeModel()
         model.show([conversation("backend", pid: 1)], current: nil)
-        #expect(model.recipientGuidance(shortcut: "Fn (Globe)") == "Use Fn (Globe) and say \u{201C}backend, run the unit tests.\u{201D}")
-        #expect(model.recipientGuidance(shortcut: nil) == "Start recording and say \u{201C}backend, run the unit tests.\u{201D}")
+        #expect(model.recipientGuidance(shortcut: "Fn (Globe)").hasPrefix("Use Fn (Globe) and say \u{201C}backend, run the unit tests.\u{201D}"))
+        #expect(model.recipientGuidance(shortcut: nil).hasPrefix("Start recording and say \u{201C}backend, run the unit tests.\u{201D}"))
+    }
+
+    @Test func guidanceShowsHowToCheckOnAConversationWithoutSendingAnything() {
+        let (model, _, _) = makeModel()
+        model.show([conversation("backend", pid: 1)], current: nil)
+        #expect(model.recipientGuidance().hasSuffix(" Say \u{201C}what is backend waiting for?\u{201D} to check on it without sending anything."))
+        model.show([conversation("backend", pid: 1)], current: "backend")
+        #expect(model.recipientGuidance().hasSuffix(" Say \u{201C}what are you waiting for?\u{201D} to check on it without sending anything."))
     }
 
     @Test func agentTypesAreShownOnlyWhenTheConversationListIsMixed() {

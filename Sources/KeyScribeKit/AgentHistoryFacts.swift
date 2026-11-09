@@ -38,6 +38,17 @@ public enum AgentHistoryFacts {
         return facts
     }
 
+    public static func status(
+        address: AgentAddress?, resolution: AgentRecipient.Resolution, frozen: AgentRecipient.Frozen?, conversations: [AgentConversation]
+    ) -> [HistoryEntry.Fact] {
+        let recorded = facts(address: address ?? .none(body: ""), resolution: resolution, frozen: frozen, conversations: conversations)
+        return [fact(command: "Check status")] + recorded.dropFirst().filter { $0.label != "Default recipient" }
+    }
+
+    public static func whoNeedsMe() -> [HistoryEntry.Fact] {
+        [fact(command: "Who needs me")]
+    }
+
     private static func described(_ id: String, in conversations: [AgentConversation]) -> String {
         let conversation = conversations.first { $0.id == id }
         return conversation.map { "\($0.handle) \u{00B7} \($0.agent) \u{00B7} \(AgentSessionID.native(id))" } ?? AgentSessionID.native(id)
@@ -68,7 +79,7 @@ public enum AgentHistoryFacts {
 
     private static func spokenAddress(_ address: AgentAddress) -> Spoken {
         switch address {
-        case .open(let inner): spokenAddress(inner)
+        case .open(let inner), .unbroken(let inner, _): spokenAddress(inner)
         case .name(let name, _): Spoken(said: name, how: "Its name")
         case .row(let row, _): Spoken(said: "Session \(row)", how: "Its session number")
         case .unresolved(let spoken, _): Spoken(said: spoken)
@@ -91,7 +102,7 @@ public enum AgentHistoryFacts {
 }
 
 extension AgentRecipient.Resolution {
-    var recipient: String? {
+    public var recipient: String? {
         switch self {
         case .deliver(let id, _, _), .select(let id), .open(let id): id
         case .ask: nil

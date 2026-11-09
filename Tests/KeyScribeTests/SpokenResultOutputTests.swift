@@ -218,6 +218,100 @@ struct SpokenResultOutputTests {
         #expect(speech.spoken.count == 1)
     }
 
+    @Test func anAnswerTheUserAskedForPlaysNextEvenInFrontAndWithoutTheService() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, llm) = make(settings: SpokenResultSettings(enabled: true), silencer: silencer, inFront: { _ in true })
+        silencer.recordingStarted()
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "Docs done.")
+        #expect(output.answer(conversation: "pi:s1", handle: "api", "api is working.", whileTrue: { true }))
+        silencer.recordingEnded()
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["api is working."])
+        #expect(llm.requests.isEmpty)
+        speech.start()
+        #expect(output.repeatLast() == .repeating("api"))
+    }
+
+    @Test func anAnswerIsNotSpokenWhileSpokenRepliesAreOff() async {
+        let (output, speech, _) = make(settings: SpokenResultSettings(enabled: false, connection: "omlx"))
+        #expect(!output.answer(conversation: "pi:s1", handle: "api", "api is working.", whileTrue: { true }))
+        await settled()
+        #expect(speech.spoken.isEmpty)
+    }
+
+    @Test func anAnswerThatStoppedBeingTrueWhileItWaitedIsDroppedButRepeatThatStillReplaysIt() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, _) = make(settings: SpokenResultSettings(enabled: true), silencer: silencer)
+        var stillWaiting = true
+        silencer.recordingStarted()
+        #expect(output.answer(conversation: "pi:s1", handle: "api", "api is waiting for approval.", whileTrue: { stillWaiting }))
+        stillWaiting = false
+        silencer.recordingEnded()
+        await settled()
+        #expect(speech.spoken.isEmpty)
+        #expect(output.answer(conversation: "pi:s1", handle: "api", "api is working.", whileTrue: { stillWaiting }))
+        stillWaiting = true
+        #expect(output.answer(conversation: "pi:s1", handle: "api", "api is ready.", whileTrue: { stillWaiting }))
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["api is ready."])
+        speech.start()
+        speech.finish()
+        stillWaiting = false
+        #expect(output.repeatLast() == .repeating("api"))
+        #expect(speech.spoken.map(\.text) == ["api is ready.", "api is ready."])
+    }
+
+    @Test func anAnswerThatStopsBeingTrueWhileItsAudioIsPreparedIsStoppedAndNotHeard() async {
+        let (output, speech, _) = make(settings: SpokenResultSettings(enabled: true))
+        var stillTrue = true
+        #expect(output.answer(conversation: "pi:s1", handle: "api", "api is ready.", whileTrue: { stillTrue }))
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["api is ready."])
+        stillTrue = false
+        let stops = speech.stops
+        speech.start()
+        #expect(speech.stops == stops + 1)
+        #expect(!speech.isSpeaking)
+        #expect(output.repeatLast() == .nothingHeard)
+    }
+
+    @Test func anAnswerReplacesAPendingNoticeForItsConversationButKeepsOtherReplies() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, llm) = make(silencer: silencer)
+        llm.holds = true
+        silencer.recordingStarted()
+        output.attention(conversation: "pi:s1", handle: "api", .approval)
+        output.attention(conversation: "pi:s3", handle: "web", .waiting(AgentPrompt(kind: "confirm", tool: "bash")))
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "Docs done.")
+        await settled()
+        #expect(output.answer(conversation: "pi:s1", handle: "api", "api is waiting for approval.", whileTrue: { true }))
+        #expect(output.answer(conversation: "pi:s3", handle: "web", "web has a dialog open.", whileTrue: { true }))
+        llm.release()
+        silencer.recordingEnded()
+        await settled()
+        speech.start()
+        speech.finish()
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["web has a dialog open.", "docs: Docs done."])
+    }
+
+    @Test func aDescriptionThatCannotTellWhatIsAskedIsNone() async {
+        let (output, _, llm) = make()
+        llm.reply = SpokenResult.notice(.waiting(AgentPrompt()))
+        #expect(await output.describe(AgentPrompt(kind: "custom", tool: "bash"), handle: "api") == nil)
+    }
+
+    @Test func aWaitingPromptIsDescribedOnlyThroughTheChosenService() async {
+        let prompt = AgentPrompt(kind: "confirm", tool: "bash", detail: "git push origin main")
+        let (output, _, llm) = make()
+        llm.reply = "Asks whether to allow pushing to main."
+        #expect(await output.describe(prompt, handle: "api") == "Asks whether to allow pushing to main.")
+        #expect(llm.requests.count == 1)
+        let (unset, _, unsetLLM) = make(settings: SpokenResultSettings(enabled: true))
+        #expect(await unset.describe(prompt, handle: "api") == nil)
+        #expect(unsetLLM.requests.isEmpty)
+    }
+
     @Test func aNoticeIsSpokenWithTheSwitchAloneAndNeverAsksTheService() async {
         let (output, speech, llm) = make(settings: SpokenResultSettings(enabled: true))
         output.attention(conversation: "pi:s1", handle: "api", .approval)

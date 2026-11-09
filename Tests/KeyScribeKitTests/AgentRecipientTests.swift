@@ -206,4 +206,18 @@ struct AgentRecipientTests {
         #expect(resolve("Run the unit tests.").makesCurrent == nil)
         #expect(resolve("Tell backend, run the tests.").makesCurrent == "c")
     }
+
+    @Test func anAddressWithoutABreakAfterTheIsHeldUnlessItIsAlreadyTheRecipient() {
+        let said = "tell the backend run the tests"
+        let address = AgentAddress.unbroken(.name("backend", body: "run the tests"), unaddressed: said)
+        #expect(AgentRecipient.resolve(address, frozen: .init(id: "a", source: .current), rows: ["a", "b", "c"], names: names)
+            == .ask(body: said, reason: .noBreak("backend")))
+        #expect(AgentRecipient.resolve(address, frozen: .init(id: "c", source: .current), rows: ["a", "b", "c"], names: names)
+            == .deliver(id: "c", body: said, source: .current))
+        let row = AgentAddress.unbroken(.row(2, body: "run the tests"), unaddressed: said)
+        #expect(AgentRecipient.resolve(row, frozen: .init(id: "a", source: .current), rows: ["a", "b", "c"], names: names)
+            == .ask(body: said, reason: .noBreak("session 2")))
+        #expect(AgentRecipient.resolve(row, frozen: nil, rows: ["a"], names: names) == .ask(body: said, reason: .noSuchRow(2)))
+        #expect(AgentRecipient.usesDefault(address))
+    }
 }

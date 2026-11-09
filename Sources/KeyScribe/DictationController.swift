@@ -1649,6 +1649,12 @@ final class DictationController {
             await renameFromAgent(request, in: routed.transcript, recipient: frozenRecipient, through: agents, heard: heard, mode: mode, snapshot: snapshot)
             return
         }
+        if let query = AgentStatusQuery.parse(
+            routed.transcript, names: Array(snapshot.addressable.keys), namesKnown: snapshot.namesAvailable,
+            read: plan.agentAddressReader(for: routed.transcript, mode: mode)) {
+            await answerStatus(query, recipient: frozenRecipient, through: agents, heard: heard, mode: mode, snapshot: snapshot)
+            return
+        }
         let address = AgentAddress.parse(
             routed.transcript, names: Array(snapshot.addressable.keys), namesKnown: snapshot.namesAvailable,
             read: plan.agentAddressReader(for: routed.transcript, mode: mode))
@@ -1795,6 +1801,112 @@ final class DictationController {
         agents.makeCurrent(id)
         finishAgent(state: .commandDone(summary: "Renamed \(old) to \(name)", detail: mode.name), outcome: .inserted, heard: heard,
                     body: "", transformed: nil, rewrite: nil, transitioned: true, hideAfter: 4, facts: facts)
+    }
+
+    private func answerStatus(
+        _ query: AgentStatusQuery, recipient: () -> AgentRecipient.Frozen?, through agents: AgentHub, heard: String, mode: Mode,
+        snapshot: AgentSnapshot
+    ) async {
+        if captureWasLost {
+            session?.agentFrontTask?.cancel()
+            finishCommandCaptureLost()
+            return
+        }
+        func stopQuietly() {
+            if machine.isBusy { finish(machine: .cancel, cue: .cancel, state: .hidden) }
+        }
+        let address: AgentAddress?
+        switch query {
+        case .whoNeedsMe:
+            session?.agentFrontTask?.cancel()
+            guard lease(for: .codingAgents).keepActing() else { return stopQuietly() }
+            func report() -> (names: [String], complete: Bool) {
+                let stale = agents.lastSeen
+                let listed = agents.recordingOrder.filter { !agents.isExcluded($0.id) }
+                let names = listed.filter { !stale.contains($0.id) && AgentRoster.isWaitingForInput($0) }.map(\.handle)
+                let complete = agents.discoveryProblems.isEmpty
+                    && listed.allSatisfy { !stale.contains($0.id) && ($0.connectorLive || AgentRoster.isWaitingForInput($0)) }
+                return (names, complete)
+            }
+            let reported = report()
+            let line = AgentStatusAnswer.whoNeedsMe(reported.names, complete: reported.complete)
+            return answered(line, shown: line, conversation: "", handle: "Who needs me", summary: "Who needs me", heard: heard,
+                            facts: AgentHistoryFacts.whoNeedsMe(), whileTrue: { report() == reported })
+        case .moreThanAQuestion(let named):
+            address = named
+        case .waiting(let named):
+            address = named
+        }
+        let frozen: AgentRecipient.Frozen?
+        let resolution: AgentRecipient.Resolution
+        if let address {
+            session?.agentFrontTask?.cancel()
+            frozen = recipient()
+            resolution = AgentRecipient.resolve(address, frozen: frozen, rows: snapshot.rows, names: snapshot.addressable)
+        } else {
+            await settleAgentInFront()
+            if Task.isCancelled { return }
+            frozen = recipient()
+            resolution = frozen.map { .deliver(id: $0.id, body: "", source: $0.source) } ?? .ask(body: "", reason: .noRecipient)
+        }
+        let facts = AgentHistoryFacts.status(address: address, resolution: resolution, frozen: frozen, conversations: snapshot.conversations)
+        func fail(_ message: String, action: HUDErrorAction? = nil) {
+            finishAgent(state: .error(message: message, action: action, heard: HeardExcerpt(heard: heard)),
+                        outcome: .failed, heard: heard, body: "", transformed: nil, rewrite: nil, transitioned: true, facts: facts)
+        }
+        let lease = lease(for: .codingAgents)
+        guard lease.keepActing() else { return stopQuietly() }
+        guard let id = resolution.recipient else {
+            if case .ask(_, let reason) = resolution, reason != .noRecipient { return fail(AgentOutput.openAskLine(reason)) }
+            return fail("Say the name of the conversation to check on", action: .openCodingAgents(mode.id))
+        }
+        let name = agents.handle(of: id) ?? snapshot.disconnected.first { $0.value == id }?.key ?? "That conversation"
+        if case .moreThanAQuestion = query {
+            return fail(
+                "Nothing was sent. Say \u{201C}what is \(name) waiting for?\u{201D} to check on it, or start with \u{201C}tell \(name)\u{201D} to send a message")
+        }
+        if snapshot.disconnected.values.contains(id) || agents.isExcluded(id) {
+            return fail("\(name) is disconnected", action: .openCodingAgents(mode.id))
+        }
+        func observed() -> (conversation: AgentConversation, prompt: AgentPrompt?)? {
+            guard let conversation = agents.directory.conversations.first(where: { $0.id == id }) else { return nil }
+            return (conversation, AgentRoster.isWaitingForInput(conversation) ? agents.waitingPrompt(of: id) : nil)
+        }
+        guard let before = observed() else { return fail("That conversation has ended") }
+        var description: String?
+        if let prompt = before.prompt, AgentStatusAnswer.question(in: prompt) == nil, let spoken = spokenUpdates {
+            hud.present(.transcribing(mode: mode.name, status: "Checking \(before.conversation.handle)\u{2026}"))
+            description = await spoken.describe(prompt, handle: before.conversation.handle)
+            if Task.isCancelled { return }
+            guard lease.keepActing() else { return stopQuietly() }
+        }
+        guard let now = observed() else { return fail("That conversation has ended") }
+        if now.prompt != before.prompt || now.conversation.state != before.conversation.state { description = nil }
+        let handle = now.conversation.handle
+        let connected = now.conversation.connectorLive
+        let current = !agents.lastSeen.contains(id)
+        let line = AgentStatusAnswer.waiting(
+            handle: handle, state: now.conversation.state, connected: connected, current: current, prompt: now.prompt,
+            description: description)
+        let shown = [line, AgentStatusAnswer.hint(handle: handle, state: now.conversation.state, connected: connected, current: current)]
+            .compactMap { $0 }.joined(separator: " ")
+        answered(line, shown: shown, conversation: id, handle: handle, summary: "Checked \(handle)", heard: heard, facts: facts,
+                 whileTrue: {
+                     observed().map {
+                         $0.prompt == now.prompt && $0.conversation.state == now.conversation.state && $0.conversation.connectorLive == connected
+                             && agents.lastSeen.contains(id) != current
+                     } ?? false
+                 })
+    }
+
+    private func answered(
+        _ line: String, shown: String, conversation: String, handle: String, summary: String, heard: String, facts: [HistoryEntry.Fact],
+        whileTrue stillTrue: @escaping () -> Bool
+    ) {
+        let enabled = { [weak self] in self?.settings.features.isEnabled(.codingAgents) == true }
+        _ = spokenUpdates?.answer(conversation: conversation, handle: handle, line, whileTrue: { enabled() && stillTrue() })
+        finishAgent(state: .advisory(message: shown), outcome: .inserted, heard: heard, body: "", transformed: nil, rewrite: nil,
+                    transitioned: true, hideAfter: 8, summary: summary, facts: facts)
     }
 
     private static func renameProblem(_ problem: AgentRename.Problem) -> String {

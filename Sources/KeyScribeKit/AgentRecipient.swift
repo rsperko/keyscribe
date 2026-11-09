@@ -18,6 +18,7 @@ public enum AgentRecipient {
         case unknownName(String)
         case ambiguousName(String, matches: [String])
         case soundsLike(String, name: String)
+        case noBreak(String)
     }
 
     public enum Resolution: Equatable, Sendable {
@@ -49,6 +50,7 @@ public enum AgentRecipient {
         switch address {
         case .none, .nearMiss: true
         case .open(let target): usesDefault(target)
+        case .unbroken: true
         case .name, .row, .unresolved, .ambiguous: false
         }
     }
@@ -61,6 +63,14 @@ public enum AgentRecipient {
             switch resolve(target, frozen: frozen, rows: rows, names: names) {
             case .select(let id), .open(let id), .deliver(let id, _, _): return .open(id: id)
             case .ask(_, let reason): return .ask(body: "", reason: reason)
+            }
+        case .unbroken(let target, let unaddressed):
+            switch resolve(target, frozen: frozen, rows: rows, names: names) {
+            case .deliver(let id, _, _), .select(let id), .open(let id):
+                if let frozen, frozen.id == id { return .deliver(id: id, body: unaddressed, source: frozen.source) }
+                return .ask(body: unaddressed, reason: .noBreak(said(target)))
+            case .ask(_, let reason):
+                return .ask(body: unaddressed, reason: reason)
             }
         case .none(let body):
             guard let frozen else { return .ask(body: body, reason: .noRecipient) }
@@ -84,6 +94,17 @@ public enum AgentRecipient {
         case .name(let name, let body):
             guard let id = id(named: name, in: names) else { return .ask(body: body, reason: .unknownName(name)) }
             return addressed(id, body: body)
+        }
+    }
+
+    private static func said(_ address: AgentAddress) -> String {
+        switch address {
+        case .name(let name, _), .nearMiss(_, let name, _, _): name
+        case .row(let row, _): "session \(row)"
+        case .ambiguous(_, let matches, _): matches.sorted().first ?? ""
+        case .unresolved(let spoken, _): spoken
+        case .open(let inner), .unbroken(let inner, _): said(inner)
+        case .none: ""
         }
     }
 

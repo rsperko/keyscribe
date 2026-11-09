@@ -83,6 +83,7 @@ public enum AgentAddress: Equatable, Sendable {
     case nearMiss(spoken: String, name: String, body: String, unaddressed: String?)
     case none(body: String)
     indirect case open(AgentAddress)
+    indirect case unbroken(AgentAddress, unaddressed: String)
 
     private static let notAnAddress: Set<String> = [
         "me", "us", "him", "her", "them", "it", "you", "everyone", "everybody", "someone", "somebody", "people",
@@ -107,39 +108,59 @@ public enum AgentAddress: Equatable, Sendable {
     }
 
     private static func parse(
-        _ text: String, names: [String], namesKnown: Bool, read: ((String) -> String)?, explicit: Bool, assumeTold: Bool
+        _ text: String, names: [String], namesKnown: Bool, read: ((String) -> String)?, explicit: Bool, assumeTold: Bool,
+        skipsOpeners: Bool = true
     ) -> AgentAddress {
         let tokens = words(in: text)
         let bare = tokens.map { AgentHandles.normalize(String(text[$0])) }
         func body(after count: Int) -> String { rest(of: text, after: tokens[count - 1]) }
-        guard let first = bare.first else { return .none(body: text) }
+        guard !bare.isEmpty else { return .none(body: text) }
 
         if !assumeTold, let opened = opening(tokens, bare: bare, in: text, names: names, namesKnown: namesKnown, read: read) {
             return .open(opened)
         }
 
-        let told = assumeTold ? 0 : first == "please" && bare.count > 1 && bare[1] == "tell" ? 2 : first == "tell" ? 1 : nil
-        let start = told ?? 0
-        guard start < tokens.count else { return .none(body: text) }
-        let available = tokens.count - start
-        func spoken(_ length: Int) -> String { bare[start..<(start + length)].joined(separator: " ") }
-        func unresolved(_ length: Int) -> AgentAddress { .unresolved(spoken: spoken(length), body: body(after: start + length)) }
+        if !assumeTold, let verb = addressVerb(bare) {
+            guard verb.count < tokens.count else { return .none(body: text) }
+            let target = body(after: verb.count)
+            let addressed = namesKnown && bare[verb.count] == "the"
+                ? article(target, said: text, names: names, namesKnown: namesKnown, read: read, explicit: explicit)
+                : parse(target, names: names, namesKnown: namesKnown, read: read, explicit: explicit, assumeTold: true)
+            switch addressed {
+            case .name, .row, .ambiguous, .nearMiss, .unbroken: return addressed
+            case .unresolved where !verb.soft: return addressed
+            default: return .none(body: text)
+            }
+        }
+        let opened = bare.prefix { openers.contains($0) }.count
+        if !assumeTold, skipsOpeners, opened > 0, opened < tokens.count {
+            let whole = parse(text, names: names, namesKnown: namesKnown, read: read, explicit: explicit, assumeTold: false, skipsOpeners: false)
+            if case .none = whole {} else { return whole }
+            switch parse(body(after: opened), names: names, namesKnown: namesKnown, read: read, explicit: explicit, assumeTold: false) {
+            case .none: return .none(body: text)
+            case .nearMiss(let spoken, let name, let body, _): return .nearMiss(spoken: spoken, name: name, body: body, unaddressed: text)
+            case let address: return address
+            }
+        }
+        let available = tokens.count
+        func spoken(_ length: Int) -> String { bare[0..<length].joined(separator: " ") }
+        func unresolved(_ length: Int) -> AgentAddress { .unresolved(spoken: spoken(length), body: body(after: length)) }
 
-        if bare[start] == "session", available > 1 {
-            let said = bare[start + 1]
-            if let row = Int(said) ?? rowWords.firstIndex(of: said).map({ $0 + 1 }) { return .row(row, body: body(after: start + 2)) }
+        if bare[0] == "session", available > 1 {
+            let said = bare[1]
+            if let row = Int(said) ?? rowWords.firstIndex(of: said).map({ $0 + 1 }) { return .row(row, body: body(after: 2)) }
             if soundsLikeARow.contains(said) { return unresolved(2) }
         }
 
         let normalized = Array(Set(names.map(AgentHandles.normalize))).sorted()
-            .filter { told != nil || explicit || !isNumberLike($0) }
-        let span = (0..<available).first { endsAddress(String(text[tokens[start + $0]])) }.map { $0 + 1 } ?? available
+            .filter { assumeTold || explicit || !isNumberLike($0) }
+        let span = (0..<available).first { endsAddress(String(text[tokens[$0]])) }.map { $0 + 1 } ?? available
         let longestName = normalized.map { $0.split(separator: " ").count }.max() ?? 0
         let lengths = Array(1...min(longestName + 1, span))
         func readName() -> SpokenNameMatch.Leading? {
             guard let read, longestName > 0 else { return nil }
             func reading(_ length: Int) -> String {
-                AgentHandles.matchKey(read(String(text[tokens[start].lowerBound..<tokens[start + length - 1].upperBound])))
+                AgentHandles.matchKey(read(String(text[tokens[0].lowerBound..<tokens[length - 1].upperBound])))
             }
             for longest in stride(from: min(2 * longestName + 1, span), through: 1, by: -1) {
                 let said = reading(longest)
@@ -154,25 +175,25 @@ public enum AgentAddress: Equatable, Sendable {
             return nil
         }
         let found = SpokenNameMatch.leading(
-            Array(bare[start...]), names: normalized, limit: span,
-            minimumWords: { told != nil || $0 == .exact ? 1 : 2 }) ?? readName()
-        if bare[start] == "session", span > 1, found.map({ $0.length == 1 }) ?? true {
+            Array(bare[...]), names: normalized, limit: span,
+            minimumWords: { assumeTold || $0 == .exact ? 1 : 2 }) ?? readName()
+        if bare[0] == "session", span > 1, found.map({ $0.length == 1 }) ?? true {
             let named = parse(
-                body(after: start + 1), names: names, namesKnown: namesKnown, read: read, explicit: explicit, assumeTold: told != nil)
+                body(after: 1), names: names, namesKnown: namesKnown, read: read, explicit: explicit, assumeTold: assumeTold)
             if case .none = named {} else { return named }
         }
         func nearName(_ length: Int) -> String? {
             let said = AgentHandles.matchKey(spoken(length))
-            guard found == nil, told != nil || said.count >= minimumUntoldNearMiss else { return nil }
+            guard found == nil, assumeTold || said.count >= minimumUntoldNearMiss else { return nil }
             return normalized.first { soundsAlike(said, AgentHandles.matchKey($0)) }
         }
         if let near = lengths.last(where: { nearName($0) != nil }), let name = nearName(near) {
-            return .nearMiss(spoken: spoken(near), name: name, body: body(after: start + near), unaddressed: told == nil ? text : nil)
+            return .nearMiss(spoken: spoken(near), name: name, body: body(after: near), unaddressed: !assumeTold ? text : nil)
         }
-        guard told != nil || found != nil else { return .none(body: text) }
+        guard assumeTold || found != nil else { return .none(body: text) }
         if let found {
-            let next = start + found.length
-            if next < tokens.count, next - start < span, AgentHandles.distinguishingWords.contains(bare[next]) {
+            let next = found.length
+            if next < tokens.count, next < span, AgentHandles.distinguishingWords.contains(bare[next]) {
                 return unresolved(found.length + 1)
             }
             guard found.names.count == 1 else {
@@ -180,11 +201,67 @@ public enum AgentAddress: Equatable, Sendable {
             }
             return .name(found.names[0], body: body(after: next))
         }
-        if namesKnown, notAnAddress.contains(bare[start]) { return .none(body: text) }
+        if namesKnown, notAnAddress.contains(bare[0]) { return .none(body: text) }
         let candidates = 1...min(4, available)
-        let beforeTo = candidates.first { start + $0 < tokens.count && bare[start + $0] == "to" }
-        let marked = candidates.first { endsAddress(String(text[tokens[start + $0 - 1]])) }
+        let beforeTo = candidates.first { $0 < tokens.count && bare[$0] == "to" }
+        let marked = candidates.first { endsAddress(String(text[tokens[$0 - 1]])) }
         return unresolved([beforeTo, marked].compactMap { $0 }.min() ?? 1)
+    }
+
+    public static func spokenName(
+        _ spoken: String, names: [String], namesKnown: Bool = true, read: ((String) -> String)? = nil
+    ) -> AgentAddress {
+        let addressed = namesKnown && words(in: spoken).first.map({ AgentHandles.normalize(String(spoken[$0])) }) == "the"
+            ? article(spoken, said: spoken, names: names, namesKnown: namesKnown, read: read, explicit: false)
+            : parse(spoken, names: names, namesKnown: namesKnown, read: read, explicit: false, assumeTold: true)
+        switch addressed {
+        case .name(_, ""), .row(_, ""), .ambiguous(_, _, ""), .nearMiss(_, _, "", _): return addressed
+        default: return .none(body: spoken)
+        }
+    }
+
+    private static let openers: Set<String> = ["please", "hey", "so", "okay", "ok"]
+
+    private static func addressVerb(_ bare: [String]) -> (count: Int, soft: Bool)? {
+        let polite = bare.prefix { openers.contains($0) }.count
+        guard bare.count > polite else { return nil }
+        switch bare[polite] {
+        case "tell": return (polite + 1, false)
+        case "ask": return (polite + 1, true)
+        default: return nil
+        }
+    }
+
+    private static let breakWords: Set<String> = [
+        "to", "that", "about", "whether", "if", "what", "why", "how", "when", "where", "which", "who", "for", "not", "please",
+    ]
+
+    private static func article(
+        _ text: String, said: String, names: [String], namesKnown: Bool, read: ((String) -> String)?, explicit: Bool
+    ) -> AgentAddress {
+        let withArticle = parse(text, names: names, namesKnown: namesKnown, read: read, explicit: explicit, assumeTold: true)
+        switch withArticle {
+        case .name(_, let body), .ambiguous(_, _, let body):
+            if words(in: text).count - words(in: body).count > 1 { return withArticle }
+        default: break
+        }
+        guard let the = words(in: text).first else { return .none(body: said) }
+        let named = rest(of: text, after: the)
+        let inner = parse(named, names: names, namesKnown: namesKnown, read: read, explicit: explicit, assumeTold: true)
+        switch inner {
+        case .name(_, let body), .row(_, let body), .ambiguous(_, _, let body), .nearMiss(_, _, let body, _):
+            return breaks(before: body, in: named) ? inner : .unbroken(inner, unaddressed: said)
+        default:
+            return .none(body: said)
+        }
+    }
+
+    private static func breaks(before body: String, in text: String) -> Bool {
+        guard !body.isEmpty else { return true }
+        let address = text.dropLast(body.count).trimmingCharacters(in: .whitespaces)
+        if address.hasSuffix(",") || address.hasSuffix(":") { return true }
+        let first = words(in: body).first.map { AgentHandles.normalize(String(body[$0])) }
+        return first.map(breakWords.contains) ?? true
     }
 
     private static func opening(

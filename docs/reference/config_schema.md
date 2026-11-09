@@ -367,7 +367,8 @@ state, and a write to it does not reload configuration.
 - An absent file means no chosen names. A file that cannot be read, is malformed, or was written by a
   newer version is **left as it is**, never moved aside or overwritten: until it loads, a take starting
   with "tell" reaches a conversation only through a row number, never the current recipient (unaddressed
-  takes, including one that starts with a name but no "tell", still go to the current recipient), Rename is unavailable, and the
+  takes, including one that starts with a name but no "tell" and one that starts with "ask" and no row number, still go to
+  the current recipient), Rename is unavailable, and the
   Coding agent page says why, with **Try Again**. This differs from `usage/` on purpose — starting fresh
   there costs counts, while starting fresh here could hand a familiar name to a different conversation.
 - Session ids and names are kept whether or not History is on, until the file is deleted. No message

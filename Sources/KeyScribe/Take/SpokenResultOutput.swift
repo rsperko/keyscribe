@@ -11,7 +11,8 @@ final class SpokenResultOutput {
         var unavailable = false
         var notice = false
         var replayed = false
-        var text: String { SpokenResult.prefaced(body, name: name) }
+        var standalone = false
+        var text: String { standalone ? body : SpokenResult.prefaced(body, name: name) }
     }
 
     struct Speaking: Equatable {
@@ -42,6 +43,8 @@ final class SpokenResultOutput {
     private var playing: Queued?
     private var heard: Queued?
     private var replay: Queued?
+    private var answering: (item: Queued, stillTrue: () -> Bool)?
+    private var playingCheck: (() -> Bool)?
     private var announced = false
     var onSpeaking: ((Speaking?) -> Void)?
     var pendingSummaries: Int { generating.count }
@@ -84,6 +87,7 @@ final class SpokenResultOutput {
         checkingNotice = [:]
         queued = []
         replay = nil
+        answering = nil
         playing = nil
         speech.stop()
         if announced {
@@ -97,6 +101,7 @@ final class SpokenResultOutput {
         checkingNotice.removeValue(forKey: conversation)?.cancel()
         queued.removeAll { $0.conversation == conversation }
         if replay?.conversation == conversation { replay = nil }
+        if answering?.item.conversation == conversation { answering = nil }
         if heard?.conversation == conversation { heard = nil }
         guard let playing, playing.conversation == conversation else { return }
         self.playing = nil
@@ -187,6 +192,22 @@ final class SpokenResultOutput {
         }
     }
 
+    func describe(_ prompt: AgentPrompt, handle: String) async -> String? {
+        let described = await description(of: prompt, handle: handle)
+        return described == SpokenResult.notice(.waiting(prompt)) ? nil : described
+    }
+
+    func answer(conversation: String, handle: String, _ text: String, whileTrue stillTrue: @escaping () -> Bool) -> Bool {
+        guard settings().enabled else { return false }
+        if !conversation.isEmpty {
+            checkingNotice.removeValue(forKey: conversation)?.cancel()
+            queued.removeAll { $0.conversation == conversation && $0.notice }
+        }
+        answering = (Queued(conversation: conversation, name: handle, body: text, notice: true, standalone: true), stillTrue)
+        playNext()
+        return true
+    }
+
     private func description(of prompt: AgentPrompt, handle: String) async -> String? {
         let settings = settings()
         guard settings.isOn, let connection = connection(settings.connection), permits(connection),
@@ -212,6 +233,10 @@ final class SpokenResultOutput {
 
     private func started() {
         guard let playing, !announced else { return }
+        if let check = playingCheck {
+            playingCheck = nil
+            guard check() else { return speech.stop() }
+        }
         announced = true
         heard = playing
         onSpeaking?(Speaking(name: playing.name, text: playing.body))
@@ -219,6 +244,7 @@ final class SpokenResultOutput {
 
     private func ended() {
         playing = nil
+        playingCheck = nil
         if announced {
             announced = false
             onSpeaking?(nil)
@@ -230,9 +256,15 @@ final class SpokenResultOutput {
         guard settings().enabled else {
             queued = []
             replay = nil
+            answering = nil
             return
         }
         guard playing == nil, silencer.isAvailable(for: speech), !speech.isSpeaking else { return }
+        if let answering {
+            self.answering = nil
+            guard answering.stillTrue() else { return playNext() }
+            return play(answering.item, while: answering.stillTrue)
+        }
         if let replay {
             self.replay = nil
             var replayed = replay
@@ -249,8 +281,9 @@ final class SpokenResultOutput {
         play(next)
     }
 
-    private func play(_ item: Queued) {
+    private func play(_ item: Queued, while stillTrue: (() -> Bool)? = nil) {
         playing = item
+        playingCheck = stillTrue
         silencer.speak(item.text, voice: settings().voice, with: speech)
         if !speech.isSpeaking { playing = nil }
     }
