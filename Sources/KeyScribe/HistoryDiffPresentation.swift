@@ -283,7 +283,7 @@ struct SelectableComparisonText: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(onSelect: onSelect) }
 
-    func makeNSView(context: Context) -> NSScrollView {
+    func makeNSView(context: Context) -> FittedTextScrollView {
         let textView = NSTextView()
         textView.isEditable = false
         textView.isSelectable = true
@@ -293,8 +293,8 @@ struct SelectableComparisonText: NSViewRepresentable {
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.lineFragmentPadding = 0
         textView.isHorizontallyResizable = false
-        textView.isVerticallyResizable = true
-        let scroll = NSScrollView()
+        textView.isVerticallyResizable = false
+        let scroll = FittedTextScrollView()
         scroll.documentView = textView
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
@@ -302,17 +302,12 @@ struct SelectableComparisonText: NSViewRepresentable {
         return scroll
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView scroll: NSScrollView, context: Context) -> CGSize? {
-        guard let width = proposal.width, let textView = scroll.documentView as? NSTextView,
-              let container = textView.textContainer, let layout = textView.layoutManager
-        else { return nil }
-        let inset = textView.textContainerInset
-        container.containerSize = NSSize(width: max(0, width - inset.width * 2), height: .greatestFiniteMagnitude)
-        layout.ensureLayout(for: container)
-        return CGSize(width: width, height: ceil(layout.usedRect(for: container).height + inset.height * 2))
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView scroll: FittedTextScrollView, context: Context) -> CGSize? {
+        guard let width = proposal.width, let textView = scroll.documentView as? NSTextView else { return nil }
+        return CGSize(width: width, height: FittedTextScrollView.height(of: textView, width: width))
     }
 
-    func updateNSView(_ scroll: NSScrollView, context: Context) {
+    func updateNSView(_ scroll: FittedTextScrollView, context: Context) {
         context.coordinator.onSelect = onSelect
         guard let textView = scroll.documentView as? NSTextView else { return }
         // Rebuild only when spans actually change: rebuilding every render collapsed the user's selection
@@ -325,6 +320,7 @@ struct SelectableComparisonText: NSViewRepresentable {
         let attributed = rendered.attributed
         let selected = textView.selectedRange()
         textView.textStorage?.setAttributedString(attributed)
+        scroll.needsLayout = true
         context.coordinator.renderedSpans = spans
         context.coordinator.presentation = rendered
         if previousString == attributed.string,
@@ -346,5 +342,27 @@ struct SelectableComparisonText: NSViewRepresentable {
             guard let textView = notification.object as? NSTextView else { return }
             onSelect(presentation?.originalText(for: textView.selectedRange()) ?? "")
         }
+    }
+}
+
+final class FittedTextScrollView: NSScrollView {
+    override func layout() {
+        super.layout()
+        guard let textView = documentView as? NSTextView else { return }
+        let width = contentSize.width
+        let size = NSSize(width: width, height: max(contentSize.height, Self.height(of: textView, width: width)))
+        if textView.frame.size != size { textView.setFrameSize(size) }
+    }
+
+    static func height(of textView: NSTextView, width: CGFloat) -> CGFloat {
+        let inset = textView.textContainerInset
+        let storage = NSTextStorage(attributedString: textView.attributedString())
+        let container = NSTextContainer(size: NSSize(width: max(0, width - inset.width * 2), height: .greatestFiniteMagnitude))
+        container.lineFragmentPadding = textView.textContainer?.lineFragmentPadding ?? 0
+        let layout = NSLayoutManager()
+        layout.addTextContainer(container)
+        storage.addLayoutManager(layout)
+        layout.ensureLayout(for: container)
+        return ceil(layout.usedRect(for: container).height + inset.height * 2)
     }
 }
