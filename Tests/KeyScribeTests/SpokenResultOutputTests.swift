@@ -20,6 +20,7 @@ struct SpokenResultOutputTests {
             if fails { throw URLError(.notConnectedToInternet) }
             return lock.withLock { replies.isEmpty ? reply : replies.removeFirst() }
         }
+        var holding: Bool { lock.withLock { held != nil } }
         func release() {
             let continuation = lock.withLock { () -> CheckedContinuation<Void, Never>? in
                 let pending = held
@@ -473,7 +474,8 @@ struct SpokenResultOutputTests {
         silencer.recordingStarted()
         output.finished(conversation: "pi:s1", handle: "api", answer: long, requested: true)
         output.finished(conversation: "pi:s2", handle: "docs", answer: long, requested: true)
-        await settled()
+        for _ in 0..<500 where output.queued.count < 2 { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(output.queued.count == 2)
         silencer.recordingEnded()
         #expect(speech.spoken.count == 1)
         #expect(speech.spoken.first?.text.contains("docs") == false)
@@ -483,6 +485,23 @@ struct SpokenResultOutputTests {
         #expect(output.pendingRequested.isEmpty)
         speech.finish()
         #expect(speech.spoken.count == 1)
+    }
+
+    @Test func repliesReadyOutOfOrderAreStillReadInTheOrderTheyWereAskedFor() async {
+        let silencer = SpeechSilencer()
+        let llm = FakeLLM()
+        llm.holds = true
+        let (output, speech, _) = make(llm: llm, silencer: silencer)
+        silencer.recordingStarted()
+        output.finished(conversation: "pi:s1", handle: "api", answer: long, requested: true)
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "Done.", requested: true)
+        for _ in 0..<1000 where output.queued.count < 1 || !llm.holding { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(output.queued.map(\.conversation) == ["pi:s2"])
+        llm.release()
+        for _ in 0..<1000 where output.queued.count < 2 { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(output.queued.map(\.conversation) == ["pi:s1", "pi:s2"])
+        silencer.recordingEnded()
+        #expect(speech.spoken.first?.text.hasPrefix("api") == true)
     }
 
     @Test func aNoticeCancelledBeforeItPlayedIsReadWhenTheUserAsksAgain() async {

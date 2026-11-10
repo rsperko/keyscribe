@@ -13,6 +13,7 @@ final class SpokenResultOutput {
         var replayed = false
         var standalone = false
         var requested = false
+        var order: Int?
         var text: String { standalone ? body : SpokenResult.prefaced(body, name: name) }
     }
 
@@ -38,6 +39,7 @@ final class SpokenResultOutput {
     private let warm: () -> Void
     private let inFront: @MainActor (String) async -> Bool
     private var wasOn = false
+    private var nextOrder = 0
     private(set) var queued: [Queued] = []
     private var generating: [String: Task<Void, Never>] = [:]
     private var checkingNotice: [String: Task<Void, Never>] = [:]
@@ -173,6 +175,8 @@ final class SpokenResultOutput {
         if requested { pendingRequested.insert(conversation) }
         let key = requested ? Self.requestedKey(conversation) : conversation
         let inFront = inFront
+        let order = nextOrder
+        nextOrder += 1
         generating[key] = Task { [weak self] in
             let shown = requested ? false : await inFront(conversation)
             guard !Task.isCancelled, let self else { return }
@@ -192,8 +196,8 @@ final class SpokenResultOutput {
             guard !Task.isCancelled, self.settings().enabled else { return }
             self.generating.removeValue(forKey: key)
             self.enqueue(text.isEmpty
-                ? Queued(conversation: conversation, name: handle, body: SpokenResult.unavailableBody, unavailable: true, requested: requested)
-                : Queued(conversation: conversation, name: handle, body: text, requested: requested))
+                ? Queued(conversation: conversation, name: handle, body: SpokenResult.unavailableBody, unavailable: true, requested: requested, order: order)
+                : Queued(conversation: conversation, name: handle, body: text, requested: requested, order: order))
         }
     }
 
@@ -280,8 +284,14 @@ final class SpokenResultOutput {
     }
 
     private func enqueue(_ item: Queued) {
+        var item = item
+        if item.order == nil {
+            item.order = nextOrder
+            nextOrder += 1
+        }
+        let order = item.order ?? 0
         queued.removeAll { $0.conversation == item.conversation && (item.requested || !$0.requested) }
-        queued.append(item)
+        queued.insert(item, at: queued.firstIndex { ($0.order ?? 0) > order } ?? queued.endIndex)
         playNext()
     }
 

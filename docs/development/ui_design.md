@@ -1767,7 +1767,8 @@ you dictate or ask the agent to read aloud, and know when it needs you." as the 
 that replies are skipped while the conversation is in front, how short replies and longer summaries differ,
 and that it also announces approval requests and disconnections. It reads a reply or summary when a turn
 the user's dictation started finishes, or a turn the user asked from inside the agent to hear, and a notice when it
-needs attention (below). A turn that ends with an error is announced as "Ended with an error.", one the agent declines
+needs attention (below). Replies waiting together are read in the order the turns were asked for, not the
+order their summaries finish. A turn that ends with an error is announced as "Ended with an error.", one the agent declines
 as "Couldn’t complete the request.", and one that ends without a reply, or ends while its connector is away, as
 "Replied. Open the conversation for the result." (`SpokenResult.ending`); a turn the user interrupts is not announced.
 
