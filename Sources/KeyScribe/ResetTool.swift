@@ -48,6 +48,7 @@ struct ResetTool {
         var actions = wipeAll()
         actions += eraseCaptureArchive()
         actions += eraseInterruptedRecordings()
+        actions += eraseAgentClipboard()
         try? fileManager.removeItem(at: modelLoadDiagFile)
         actions += eraseKeychain()
         return actions
@@ -66,6 +67,14 @@ struct ResetTool {
         let count = CaptureLeftovers.sweep(in: temporaryDir, isAlive: isProcessAlive)
         guard count > 0 else { return [] }
         return ["Erased \(count) recording\(count == 1 ? "" : "s") left behind by an interrupted dictation."]
+    }
+
+    private func eraseAgentClipboard() -> [String] {
+        let folder = AgentClipboard.folder(in: temporaryDir)
+        let contents = (try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        try? fileManager.removeItem(at: folder)
+        guard !contents.isEmpty else { return [] }
+        return ["Erased \(contents.count) clipboard file\(contents.count == 1 ? "" : "s") saved for coding agents."]
     }
 
     private static func eraseKeychainKeys() -> [String] {

@@ -12,6 +12,7 @@ export type Host = {
   now: () => number
   env: (name: string) => string | undefined
   read: (path: string) => Promise<string>
+  readBase64: (path: string) => Promise<string>
   after: (ms: number, fn: () => void) => () => void
   exec: (command: string, args: string[], timeoutMs: number) => Promise<{ code: number }>
   post: (socketPath: string, path: string, body: string, token: string) => Exchange
@@ -51,6 +52,7 @@ type Command = {
   expectedPrompts?: number
   text?: string
   expiresAt?: number
+  images?: string[]
 }
 
 const queueLimit = 64
@@ -74,7 +76,8 @@ const backoff = [30000, 60000, 120000, 300000]
 const late = { late: true } as const
 const unreachable = { unreachable: true } as const
 const freshReasons = ["startup", "new", "fork"]
-const features = ["focus", "label", "readiness", "notify"]
+const features = ["focus", "label", "readiness", "notify", "images"]
+
 const readAloudTool = "tell_me_when_done"
 
 export function readAloudToolName(plugin: string): string {
@@ -521,6 +524,18 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     return new Promise((resolve) => { host.after(ms, resolve) })
   }
 
+  async function images(paths: string[] | undefined): Promise<Array<{ type: "image"; data: string; mimeType: string }>> {
+    const read = await Promise.all((paths || []).map(async (path) => {
+      if (!path.toLowerCase().endsWith(".png")) return null
+      try {
+        return { type: "image" as const, data: await host.readBase64(path), mimeType: "image/png" }
+      } catch {
+        return null
+      }
+    }))
+    return read.filter((image) => image !== null)
+  }
+
   async function submit(cmd: Command, gen: number): Promise<void> {
     const expected = cmd.expectedSession
     const hold = (): string | null => {
@@ -533,6 +548,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
       if (ctx && ctx.ui.getEditorText().trim()) return "draft"
       return null
     }
+    const attached = await images(cmd.images)
     const held = hold()
     if (held) return refuse(gen, cmd.id, held)
     const limit = host.now() + keystrokeHoldLimit
@@ -547,7 +563,16 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     while (pending.length >= lateLimit) pending.shift()!.cancel()
     pending.push(item)
     try {
-      pi.sendUserMessage(text, { deliverAs: "followUp" })
+      const sent: unknown = pi.sendUserMessage(attached.length ? [{ type: "text", text }, ...attached] : text, { deliverAs: "followUp" })
+      if (sent && typeof (sent as Promise<void>).then === "function") {
+        (sent as Promise<void>).then(undefined, (err: unknown) => {
+          const index = pending.indexOf(item)
+          if (index < 0) return
+          pending.splice(index, 1)
+          item.cancel()
+          refuse(gen, cmd.id, String((err && (err as Error).message) || err).slice(0, 500))
+        })
+      }
     } catch (err) {
       pending.splice(pending.indexOf(item), 1)
       return refuse(gen, cmd.id, String((err && (err as Error).message) || err).slice(0, 500))
@@ -936,6 +961,7 @@ export function nodeHost(pi: ExtensionAPI): Host {
     now: () => Date.now(),
     env: (name) => process.env[name],
     read: (path) => readFile(path, "utf8"),
+    readBase64: (path) => readFile(path, "base64"),
     after: (ms, fn) => {
       const timer = setTimeout(fn, ms)
       if (typeof timer.unref === "function") timer.unref()

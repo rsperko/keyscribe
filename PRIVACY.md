@@ -227,6 +227,13 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
 You can inspect, back up, or delete any of it with the Finder or a text editor. Deleting the history
 files removes that history; removing the application support folder resets KeyScribe.
 
+When you say “insert clipboard contents” in a Coding agent message and the clipboard holds an image or a PDF,
+KeyScribe saves it to a file in your Mac's temporary folder so the agent can open it. Once the file is a day
+old, KeyScribe deletes it within the hour while it is running, or the next time it starts. The message names
+that file; Pi also receives the image with the message. Like anything you send an agent, the agent may pass
+it to its own AI service. History and Paste last dictation keep the message as sent, so they keep the
+file's path, not the image.
+
 While you dictate, the recording is written to a temporary file and deleted once it is transcribed. If
 KeyScribe quits in the middle of a dictation, it deletes the leftover recording the next time it starts,
 or within a few minutes of starting for a recording left by an older version.

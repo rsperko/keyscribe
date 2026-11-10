@@ -39,8 +39,14 @@ public struct TokenizingStage: PipelineStage {
     // verbatim span swallows a clipboard phrase before it can fire. `read` is lazy — invoked only when the
     // command survives to this stage, so an ordinary dictation never reads the host's clipboard.
     public static func clipboard(read: @escaping @Sendable () -> String?, tokenizer: Tokenizer = Tokenizer()) -> TokenizingStage {
+        clipboard(clip: { read().map { ClipboardTokenizer.Clip(text: $0) } }, tokenizer: tokenizer)
+    }
+
+    public static func clipboard(
+        clip read: @escaping @Sendable () -> ClipboardTokenizer.Clip?, tokenizer: Tokenizer = Tokenizer()
+    ) -> TokenizingStage {
         TokenizingStage(position: .verbatimMark, order: 1, tokenizer: tokenizer) {
-            ClipboardTokenizer.apply($0, clipboard: read, into: $1)
+            ClipboardTokenizer.apply($0, clip: read, into: $1)
         }
     }
 }

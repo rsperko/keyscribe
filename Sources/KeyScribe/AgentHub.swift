@@ -681,13 +681,13 @@ final class AgentHub {
         }
     }
 
-    func deliver(_ text: String, to id: String, request: String? = nil) async -> AgentReceipt {
+    func deliver(_ text: String, to id: String, request: String? = nil, images: [String] = []) async -> AgentReceipt {
         if exclusions.excludes(id) { return .notSent(disconnected.first { $0.id == id }?.handle, reason: .disconnected) }
         guard let conversation = directory.conversations.first(where: { $0.id == id }) else {
             return .notSent(nil, reason: .conversationEnded)
         }
         lastUsed[id] = now()
-        let message = AgentOutbox.Message(id: request ?? makeId(), conversation: id, text: text)
+        let message = AgentOutbox.Message(id: request ?? makeId(), conversation: id, text: text, images: images)
         let handle = conversation.handle
         switch outbox.send(message, state: state(of: id)) {
         case .handOff:
@@ -957,7 +957,8 @@ final class AgentHub {
         transport.enqueue(
             .submit(
                 id: message.id, expectedSession: message.conversation, text: message.text,
-                expectedPrompts: prompts[message.conversation], expiresAt: deadline(after: receiptTimeout)),
+                expectedPrompts: prompts[message.conversation], expiresAt: deadline(after: receiptTimeout),
+                images: takesImages(message.conversation) ? message.images : []),
             for: message.conversation)
         let timeout = receiptTimeout
         Task { [weak self] in
@@ -1031,6 +1032,8 @@ final class AgentHub {
     }
 
     func typedCount(_ session: String) -> Int { typedCounts[session] ?? 0 }
+
+    func takesImages(_ session: String) -> Bool { features[session]?.contains("images") == true }
 
     static func filled(handle: String, features: Set<String>?) -> AgentReceipt {
         features?.contains("fill") == true ? .kept(handle, reason: .inPromptBox) : .notSent(handle, reason: .stopped)

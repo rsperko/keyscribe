@@ -7,7 +7,7 @@ struct PiAgentTests {
         #expect(AgentKind.pi.id == "pi")
         #expect(AgentKind.pi.displayName == "Pi")
         #expect(AgentKind.pi.reloadCommand == "/reload")
-        #expect(AgentKind.pi.connectorFeatures == ["focus", "label", "readiness", "notify"])
+        #expect(AgentKind.pi.connectorFeatures == ["focus", "label", "readiness", "notify", "images"])
         #expect(AgentKind.pi != AgentKind.claude)
     }
 

@@ -34,11 +34,11 @@ final class AgentOutput {
     }
 
     func deliver(
-        _ text: String, to id: String, via agents: AgentHub
+        _ text: String, to id: String, via agents: AgentHub, images: [String] = []
     ) async -> (request: String, receipt: AgentReceipt) {
         let request = UUID().uuidString
         awaited[request] = AwaitedReceipt()
-        return (request, await agents.deliver(text, to: id, request: request))
+        return (request, await agents.deliver(text, to: id, request: request, images: images))
     }
 
     func noteRecorded(_ entry: HistoryEntry, request: String) {
@@ -276,10 +276,31 @@ final class AgentOutput {
         }
     }
 
-    static func receiptState(_ receipt: AgentReceipt, mode: String, heard: String, settingsMode: String? = nil) -> HUDState {
+    struct ClipboardNote: Equatable {
+        var images = 0
+        var files = 0
+        var attached = false
+        var missed = false
+
+        static let missedLine = "the clipboard had nothing to insert, so \u{201C}insert clipboard contents\u{201D} went as words"
+
+        var suffix: String {
+            guard images + files > 0 else { return "" }
+            if attached && files == 0 { return " with \(Self.count(images, "image"))" }
+            let items = [images > 0 ? Self.count(images, "image") : nil, files > 0 ? Self.count(files, "file") : nil].compactMap { $0 }
+            return " with the path\(images + files == 1 ? "" : "s") to \(items.joined(separator: " and "))"
+        }
+
+        private static func count(_ n: Int, _ noun: String) -> String { "\(n) \(noun)\(n == 1 ? "" : "s")" }
+    }
+
+    static func receiptState(
+        _ receipt: AgentReceipt, mode: String, heard: String, settingsMode: String? = nil, clipboard: ClipboardNote = ClipboardNote()
+    ) -> HUDState {
         switch receipt {
         case .sent(let handle):
-            return .commandDone(summary: "Sent to \(handle)", detail: mode)
+            if clipboard.missed { return .advisory(message: "Sent to \(handle), but \(ClipboardNote.missedLine)") }
+            return .commandDone(summary: "Sent to \(handle)\(clipboard.suffix)", detail: mode)
         case .queued(let handle, let reason):
             let respond = " Say \u{201C}open \(handle)\u{201D} to respond; this message stays queued"
             let detail = switch reason {
@@ -288,7 +309,8 @@ final class AgentOutput {
             case .question: "Waiting for an answer." + respond
             case .userDialog: "Dialog open." + respond
             }
-            return .commandDone(summary: "Queued for \(handle)", detail: detail)
+            let missed = clipboard.missed ? ". T" + ClipboardNote.missedLine.dropFirst() : ""
+            return .commandDone(summary: "Queued for \(handle)\(clipboard.suffix)", detail: detail + missed)
         case .kept(let handle, let reason):
             let why = switch reason {
             case .typedSince: "you sent it a message since"

@@ -87,6 +87,9 @@ Handy when you want a polished, rewritten sentence *around* a value that must st
 `insert clipboard as code` instead to put the clipboard in a Markdown code fence, such as an error
 message for a coding agent.
 
+In the Coding agent mode you can also copy a screenshot or a file and say `insert clipboard contents`:
+the agent gets the file's path, and an image or PDF is saved to a file first so the agent can open it.
+
 ## Keep words literal when they sound like commands
 
 If the words you want to dictate sound like edit commands — "new line," "scratch that" — wrap them in

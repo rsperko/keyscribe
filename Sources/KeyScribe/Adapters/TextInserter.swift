@@ -115,11 +115,13 @@ enum TextInserter {
     static func currentClipboardText(on pb: NSPasteboard) -> String? {
         drainPendingRestoreNow()
         if let s = pb.string(forType: .string), !s.isEmpty { return s }
-        if let attributed = pb.readObjects(forClasses: [NSAttributedString.self], options: nil)?.first
-            as? NSAttributedString, !attributed.string.isEmpty {
-            return attributed.string
-        }
-        return nil
+        return attributedText(on: pb)
+    }
+
+    static func attributedText(on pb: NSPasteboard) -> String? {
+        guard let attributed = pb.readObjects(forClasses: [NSAttributedString.self], options: nil)?.first as? NSAttributedString,
+              !attributed.string.isEmpty else { return nil }
+        return attributed.string
     }
 
     // Consulted immediately before each irreversible event — the ⌘V post and every typed character — since

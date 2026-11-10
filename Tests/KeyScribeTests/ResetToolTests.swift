@@ -117,6 +117,20 @@ struct ResetToolTests {
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
     }
 
+    @Test func eraseAllRemovesClipboardFilesSavedForCodingAgents() throws {
+        let dir = try makeSupportDir()
+        let tool = isolatedTool(dir, ephemeralDefaults())
+        defer { for url in [dir, tool.temporaryDir] { try? FileManager.default.removeItem(at: url) } }
+        let saved = AgentClipboard.folder(in: tool.temporaryDir)
+        try FileManager.default.createDirectory(at: saved, withIntermediateDirectories: true)
+        try Data("png".utf8).write(to: saved.appendingPathComponent("clipboard-1-a.png"))
+
+        let actions = tool.run(.eraseAll)
+
+        #expect(!FileManager.default.fileExists(atPath: saved.path))
+        #expect(actions.contains { $0.contains("1 clipboard file") })
+    }
+
     @Test func eraseAllRemovesRetainedCaptureRecordings() throws {
         let dir = try makeSupportDir()
         let captures = dir.deletingLastPathComponent()

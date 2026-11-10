@@ -7,6 +7,21 @@ private func tokenize(_ text: String, clipboard: String?) -> (out: String, tok: 
 }
 
 struct ClipboardTokenizerTests {
+    @Test func aQuoteOrBackslashInAQuotedPathIsEscaped() {
+        #expect(ClipboardTokenizer.Clip.files(["/tmp/say \"hi\" \\ there.png"]).text == "\"/tmp/say \\\"hi\\\" \\\\ there.png\"")
+        #expect(ClipboardTokenizer.Clip.files(["/tmp/no\"space.png"]).text == "/tmp/no\"space.png")
+    }
+
+    @Test func copiedFilesAreNamedByTheirPathsInlineEvenAsCode() {
+        let files = ClipboardTokenizer.Clip.files(["/tmp/shot.png", "/Users/me/My Notes.pdf"])
+        #expect(files.text == "/tmp/shot.png \"/Users/me/My Notes.pdf\"")
+        for phrase in ["insert clipboard contents", "insert clipboard as code"] {
+            let t = Tokenizer()
+            let out = ClipboardTokenizer.apply("look at \(phrase) please", clip: { files }, into: t)
+            #expect(t.restore(out) == "look at /tmp/shot.png \"/Users/me/My Notes.pdf\" please")
+        }
+    }
+
     @Test func asCodeMidSentenceFencesTheClipboardOnItsOwnLines() {
         let (out, t) = tokenize("this fails with this error: insert clipboard as code. Please fix it.", clipboard: "boom\n  at main\n")
         #expect(out == "this fails with this error: ⟦SN:CLIP:1⟧. Please fix it.")

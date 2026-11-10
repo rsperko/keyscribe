@@ -41,6 +41,7 @@ struct VoiceCommandChoiceWiringTests {
     private final class HUDSpy: HUDPresenting {
         private(set) var states: [HUDState] = []
         var last: HUDState? { states.last }
+        var lastShown: HUDState? { states.last { $0 != .hidden } }
         func render(_ state: HUDState) { states.append(state) }
     }
 
@@ -218,7 +219,7 @@ struct VoiceCommandChoiceWiringTests {
             return true
         })
         #expect(h.system.openedURLs.map(\.0) == ["https://inbox.example.org/"])
-        #expect(h.hud.last == .commandDone(summary: "Work Mail"))
+        #expect(h.hud.lastShown == .commandDone(summary: "Work Mail"))
         #expect(h.prompt == nil)
     }
 
@@ -588,7 +589,7 @@ struct VoiceCommandChoiceWiringTests {
         h.controller.chooseVoiceCommand(choice: prompt.id, candidate: prompt.rows[1].identity)
         try await h.settle()
         #expect(h.system.openedURLs.map(\.0) == ["https://inbox.example.org/"])
-        #expect(h.hud.last == .commandDone(summary: "Work Mail"))
+        #expect(h.hud.lastShown == .commandDone(summary: "Work Mail"))
         let entries = h.history.entries()
         #expect(entries.count == 1)
         let entry = try #require(entries.first)
@@ -610,7 +611,7 @@ struct VoiceCommandChoiceWiringTests {
         await h.controller.dictationTask?.value
         try await h.settle()
         #expect(h.system.openedURLs.map(\.0) == ["https://mail.example.net/"])
-        #expect(h.hud.last == .commandDone(summary: "Personal Mail"))
+        #expect(h.hud.lastShown == .commandDone(summary: "Personal Mail"))
     }
 
     private let channel = VoiceCommandScript(name: "Channel", run: ["/bin/channel", "{text}"])
@@ -632,7 +633,7 @@ struct VoiceCommandChoiceWiringTests {
         await h.dictate("two")
         #expect(h.system.scriptChoices == [nil, "C2"])
         #expect(h.system.scriptRuns.map(\.arguments) == [["gen"], ["gen"]])
-        #expect(h.hud.last == .commandDone(summary: "Opened #random", detail: "Channel"))
+        #expect(h.hud.lastShown == .commandDone(summary: "Opened #random", detail: "Channel"))
         #expect(h.history.entries().first?.reported == "Opened #random")
     }
 

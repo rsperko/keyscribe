@@ -207,6 +207,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             try? await Task.sleep(for: .seconds(CaptureLeftovers.legacyMinimumAge))
             CaptureLeftovers.sweep()
         }
+        Task.detached(priority: .utility) {
+            while !Task.isCancelled {
+                AgentClipboard.removeExpired(in: AgentClipboard.defaultFolder)
+                try? await Task.sleep(for: AgentClipboard.pruneEvery)
+            }
+        }
         // Before the controller exists, so the first dictation already archives.
         CaptureArchive.publish(settings.audio)
         CaptureArchive.applyRetention()

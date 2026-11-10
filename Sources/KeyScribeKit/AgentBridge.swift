@@ -1,7 +1,7 @@
 import Foundation
 
 public enum AgentCommand: Equatable, Sendable {
-    case submit(id: String, expectedSession: String, text: String, expectedPrompts: Int? = nil, expiresAt: Date)
+    case submit(id: String, expectedSession: String, text: String, expectedPrompts: Int? = nil, expiresAt: Date, images: [String] = [])
     case status(id: String, expectedSession: String, text: String)
     case focus(id: String, expectedSession: String, expiresAt: Date)
     case quiet(id: String, expectedSession: String)
@@ -9,14 +9,14 @@ public enum AgentCommand: Equatable, Sendable {
 
     public var id: String {
         switch self {
-        case .submit(let id, _, _, _, _), .status(let id, _, _): id
+        case .submit(let id, _, _, _, _, _), .status(let id, _, _): id
         case .focus(let id, _, _), .quiet(let id, _), .admit(let id, _): id
         }
     }
 
     public var expiresAt: Date? {
         switch self {
-        case .focus(_, _, let expiresAt), .submit(_, _, _, _, let expiresAt): expiresAt
+        case .focus(_, _, let expiresAt), .submit(_, _, _, _, let expiresAt, _): expiresAt
         case .status, .quiet, .admit: nil
         }
     }
@@ -129,8 +129,8 @@ extension AgentEvent {
 extension AgentCommand {
     public func renamingSession(_ rename: (String) -> String) -> AgentCommand {
         switch self {
-        case .submit(let id, let s, let text, let prompts, let expiresAt):
-            .submit(id: id, expectedSession: rename(s), text: text, expectedPrompts: prompts, expiresAt: expiresAt)
+        case .submit(let id, let s, let text, let prompts, let expiresAt, let images):
+            .submit(id: id, expectedSession: rename(s), text: text, expectedPrompts: prompts, expiresAt: expiresAt, images: images)
         case .status(let id, let s, let text): .status(id: id, expectedSession: rename(s), text: text)
         case .focus(let id, let s, let expiresAt): .focus(id: id, expectedSession: rename(s), expiresAt: expiresAt)
         case .quiet(let id, let s): .quiet(id: id, expectedSession: rename(s))
@@ -202,6 +202,7 @@ public enum AgentBridgeCodec {
         var waiting: AgentPrompt?
         var version: String?
         var on: Bool?
+        var images: [String]?
     }
 
     public static func encode(_ commands: [AgentCommand]) throws -> Data {
@@ -265,8 +266,9 @@ public enum AgentBridgeCodec {
 
     private static func wire(_ c: AgentCommand) -> Wire {
         switch c {
-        case .submit(let id, let s, let t, let prompts, let expiresAt):
-            Wire(op: "submit", id: id, expectedSession: s, text: t, expiresAt: milliseconds(expiresAt), expectedPrompts: prompts)
+        case .submit(let id, let s, let t, let prompts, let expiresAt, let images):
+            Wire(op: "submit", id: id, expectedSession: s, text: t, expiresAt: milliseconds(expiresAt), expectedPrompts: prompts,
+                 images: images.isEmpty ? nil : images)
         case .status(let id, let s, let t): Wire(op: "status", id: id, expectedSession: s, text: t)
         case .focus(let id, let s, let expiresAt):
             Wire(op: "focus", id: id, expectedSession: s, expiresAt: milliseconds(expiresAt))
@@ -289,7 +291,8 @@ public enum AgentBridgeCodec {
         switch w.op {
         case "submit":
             return .submit(
-                id: id, expectedSession: s, text: try required(w.text), expectedPrompts: w.expectedPrompts, expiresAt: try date(w.expiresAt))
+                id: id, expectedSession: s, text: try required(w.text), expectedPrompts: w.expectedPrompts, expiresAt: try date(w.expiresAt),
+                images: w.images ?? [])
         case "status": return .status(id: id, expectedSession: s, text: try required(w.text))
         case "focus": return .focus(id: id, expectedSession: s, expiresAt: try date(w.expiresAt))
         case "quiet": return .quiet(id: id, expectedSession: s)

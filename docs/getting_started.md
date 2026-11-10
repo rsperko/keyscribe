@@ -180,10 +180,26 @@ point. Two guarantees:
 If the clipboard has no text — for example you copied an image or files — nothing is pasted and the
 words "insert clipboard contents" are left in place so you can see it and fix it.
 
+In the Coding agent mode, the clipboard can hold more than text:
+
+- **Copied files** (from the Finder, for example) are inserted as their full paths, so the agent can
+  open them.
+- **A copied image or PDF**, such as a screenshot, is saved as a file and inserted as its path. Claude
+  Code opens it from there. Pi also receives the image itself along with your message. The saved file
+  stays in your Mac's temporary folder for about a day, so ask about it while it is fresh. History keeps
+  the path, which points to nothing once the file is gone. The message's confirmation says whether the
+  image went with it or only its path did.
+
+If the clipboard is empty or holds nothing that can be inserted, the words "insert clipboard contents" go
+to the agent as you said them, and the confirmation says so.
+
+Copied text is inserted exactly as it is anywhere else.
+
 Say `insert clipboard as code` (or `insert clipboard as a code block`) to insert the clipboard inside a
 Markdown code fence on lines of its own, for example after "this fails with this error:". The same
 guarantees apply. The fence is longer than any run of backticks in what you copied, so a fence inside
-the clipboard cannot end the block early.
+the clipboard cannot end the block early. Paths to copied files or a saved image are inserted as they
+are, never in a code fence.
 
 To control this per mode, open Settings > Modes, choose a mode, and toggle **Turn spoken commands into
 edits**.

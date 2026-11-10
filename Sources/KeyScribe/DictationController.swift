@@ -31,6 +31,7 @@ final class DictationController {
     private let submitKey: (Mode.Submit) async -> Void
     private let captureSelection: (ClipboardKeystroke) async -> String?
     private let clipboard: @MainActor () -> String?
+    private let agentClipboard: AgentClipboard
     private let pressSnapshot: @MainActor () -> TargetSnapshot
     private let shouldAdoptFullSnapshot: Bool
     private let snapshotAsync: @MainActor () async -> TargetSnapshot
@@ -297,6 +298,7 @@ final class DictationController {
         submitKey: @escaping (Mode.Submit) async -> Void = TextInserter.submit,
         captureSelection: @escaping (ClipboardKeystroke) async -> String? = { await TextInserter.captureSelection(keystroke: $0) },
         clipboard: @escaping @MainActor () -> String? = TextInserter.currentClipboardText,
+        agentClipboard: AgentClipboard = AgentClipboard(),
         pressSnapshot: (@MainActor () -> TargetSnapshot)? = nil,
         snapshot: @escaping @MainActor () -> TargetSnapshot = { ContextProbe.snapshot() },
         snapshotAsync: (@MainActor () async -> TargetSnapshot)? = nil,
@@ -336,6 +338,7 @@ final class DictationController {
         self.submitKey = submitKey
         self.captureSelection = captureSelection
         self.clipboard = clipboard
+        self.agentClipboard = agentClipboard
         self.pressSnapshot = pressSnapshot ?? snapshot
         self.shouldAdoptFullSnapshot = pressSnapshot != nil
         self.snapshotAsync = snapshotAsync ?? { snapshot() }
@@ -2021,12 +2024,14 @@ final class DictationController {
         guard lease.keepActing() else { return }
         lastResult = text
         hud.present(.transcribing(mode: mode.name, status: "Sending to \(agents.handle(of: id) ?? "it")"))
-        var (request, receipt) = await agentOutput.deliver(text, to: id, via: agents)
+        let clipboard = agentClipboard.note(for: text, attached: agents.takesImages(id))
+        var (request, receipt) = await agentOutput.deliver(text, to: id, via: agents, images: agentClipboard.images(in: text))
         if case .kept(let handle, .inPromptBox) = receipt,
            let sent = await sendFromPromptBox(id, handle: handle, through: agents, lease: lease, request: request) {
             receipt = sent
         }
-        finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id), outcome: AgentOutput.dictationOutcome(receipt),
+        finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id, clipboard: clipboard),
+                    outcome: AgentOutput.dictationOutcome(receipt),
                     heard: heard, body: text, transformed: transformed, rewrite: rewrite, transitioned: true,
                     facts: facts, awaitingReceipt: (request, receipt))
         speakRefusal(receipt, conversation: id)
@@ -2575,10 +2580,16 @@ final class DictationController {
         let text = plan.postSTTTextStages(for: mode)
         logDroppedReturnMarkerRules(in: text, mode: mode)
         // The read is main-actor (NSPasteboard); this pipeline's forward pass runs on the main actor.
+        let redaction = (mode?.commands.privacy ?? false) && willRewrite
+        if mode?.output == .agent {
+            agentClipboard.beginTake()
+            return TakeStages.dictation(
+                text: text, clip: { [agentClipboard] in MainActor.assumeIsolated { agentClipboard.read() } }, redaction: redaction)
+        }
         return TakeStages.dictation(
             text: text,
             clipboard: { [clipboard] in MainActor.assumeIsolated { clipboard() } },
-            redaction: (mode?.commands.privacy ?? false) && willRewrite)
+            redaction: redaction)
     }
 
     // A replacement rule with an unescaped mid-template `<CR>` is invalid config and ReplacementsStage silently

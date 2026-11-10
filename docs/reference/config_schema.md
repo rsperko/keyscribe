@@ -1555,6 +1555,11 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
   the LLM. Dictation only (not edit-in-place). Empty/absent clipboard leaves the phrase as text.
   "insert clipboard as code" (`ClipboardTokenizer.codePhrases`) inserts the same value inside a Markdown
   fence on lines of its own, with a fence longer than any backtick run in the clipboard.
+  In the Coding agent mode (`AgentClipboard`), copied files are inserted as their paths, and an image
+  (saved as PNG) or a PDF is written to a `clipboard-for-agents` folder in the temporary directory, kept
+  for a day (pruned at launch, hourly, and on each save), and inserted as its path; neither form is
+  fenced. A connector that announces the `images` feature also receives each saved image's path in the
+  `submit` command's `images`, and attaches the image to the message.
 - **`include_global` is per-set** — dictionary and replacements each carry their own flag.
 - **Key descriptor format** — lowercase tokens joined by `+`, and the token list decides the shape:
   **every token a modifier and no base key → a modifier-only trigger** (the set is held with no key

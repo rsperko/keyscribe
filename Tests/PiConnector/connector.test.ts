@@ -32,6 +32,7 @@ function harness(options: Options = {}) {
     "/tmp/ks-ready.json": JSON.stringify({ launch: "L1", protocol: 2 }),
   }
   const fileReads: string[] = []
+  const images: Record<string, string> = {}
   const timers: Array<{ at: number; fn: () => void; id: number }> = []
   let timerId = 0
   let now = options.now ?? 1_000_000
@@ -39,6 +40,7 @@ function harness(options: Options = {}) {
   let keyHandler: ((data: string) => unknown) | null = null
   let execCode = 0
   let sendFails = false
+  let sendRejects: string | null = null
   let sendDispatchesInput = false
   let autoEvents = false
 
@@ -51,6 +53,12 @@ function harness(options: Options = {}) {
       const text = files[path]
       if (text === undefined) throw new Error("ENOENT")
       return text
+    },
+    readBase64: async (path) => {
+      fileReads.push(path)
+      const data = images[path]
+      if (data === undefined) throw new Error("ENOENT")
+      return data
     },
     after: (ms, fn) => {
       const id = ++timerId
@@ -120,10 +128,13 @@ function harness(options: Options = {}) {
       handlers.set(event, [...(handlers.get(event) ?? []), handler])
       return () => {}
     },
-    sendUserMessage: (text: string, sendOptions: any) => {
+    sendUserMessage: (content: any, sendOptions: any) => {
       if (sendFails) throw new Error("agent is busy")
-      sends.push({ text, options: sendOptions })
+      const text = typeof content === "string" ? content : content.filter((part: any) => part.type === "text").map((part: any) => part.text).join("\n")
+      sends.push({ text, content, options: sendOptions })
       if (sendDispatchesInput) emit("input", { text, source: "extension" })
+      if (sendRejects !== null) return Promise.reject(new Error(sendRejects))
+      return Promise.resolve()
     },
     getSessionName: () => live.name,
     exec: async () => ({ code: 0 }),
@@ -216,13 +227,14 @@ function harness(options: Options = {}) {
   const turn = (n: number) => `${events().find((b) => b.op === "hello").instance}.${n}`
 
   return {
-    requests, sends, statuses, execs, env, files, live, timers, config, tools, commands, notes, runCommand,
+    requests, sends, statuses, execs, env, files, images, live, timers, config, tools, commands, notes, runCommand,
     set autoEvents(value: boolean) { autoEvents = value },
     get now() { return now },
     set now(value: number) { now = value },
     get keyHandler() { return keyHandler },
     set execCode(code: number) { execCode = code },
     set sendFails(value: boolean) { sendFails = value },
+    set sendRejects(value: string | null) { sendRejects = value },
     set sendDispatchesInput(value: boolean) { sendDispatchesInput = value },
     turn, emit, settle, advance, open, events, ops, replies, start, connect, deliver, answerEvents, typed, accepted, finished, key, ready, readyChecks, submit,
   }
@@ -248,7 +260,7 @@ test("a session start says hello with the process, its directory, its name and w
   assert.equal(hello.cwd, "/work")
   assert.equal(hello.session, "s1")
   assert.equal(hello.title, "frontend")
-  assert.deepEqual(hello.features, ["focus", "label", "readiness", "notify"])
+  assert.deepEqual(hello.features, ["focus", "label", "readiness", "notify", "images"])
   assert.equal(hello.prompts, 0)
   assert.equal(hello.idle, true)
   assert.equal(hello.gap, false)
@@ -331,6 +343,52 @@ test("dictation is handed to the agent as a follow-up carrying an invisible mark
   assert.equal(sent[1].request, "r1")
   assert.equal(sent[1].turn, h.turn(1))
   assert.ok(h.ops().includes("turnStarted"))
+})
+
+test("a clipboard image goes to Pi with the words that name its file, and is confirmed like any dictation", async () => {
+  const h = harness()
+  await h.connect()
+  h.images["/clip/shot.png"] = "UE5H"
+  h.images["/clip/other.PNG"] = "SlBH"
+  await h.deliver([h.submit("r1", "look at /clip/shot.png and /clip/other.PNG", { images: ["/clip/shot.png", "/clip/other.PNG"] })])
+  assert.equal(h.sends.length, 1)
+  const [words, ...attached] = h.sends[0].content
+  assert.equal(words.type, "text")
+  assert.ok(words.text.startsWith("look at /clip/shot.png and /clip/other.PNG"))
+  assert.deepEqual(attached, [
+    { type: "image", data: "UE5H", mimeType: "image/png" },
+    { type: "image", data: "SlBH", mimeType: "image/png" },
+  ])
+  await h.accepted()
+  assert.deepEqual(h.replies().map((b) => b.op), ["ack", "submitted"])
+})
+
+test("an image that cannot be read, or is not an image Pi takes, leaves only the words naming its file", async () => {
+  const h = harness()
+  await h.connect()
+  h.images["/clip/notes.pdf"] = "JVBE"
+  h.images["/clip/photo.jpg"] = "SlBH"
+  await h.deliver([h.submit("r1", "read /clip/gone.png and /clip/notes.pdf", { images: ["/clip/gone.png", "/clip/notes.pdf", "/clip/photo.jpg"] })])
+  assert.equal(h.sends.length, 1)
+  assert.equal(typeof h.sends[0].content, "string")
+  assert.ok(h.sends[0].text.startsWith("read /clip/gone.png and /clip/notes.pdf"))
+  await h.accepted()
+  assert.deepEqual(h.replies().map((b) => b.op), ["ack", "submitted"])
+})
+
+test("a send Pi rejects later is refused with its reason, and the next send still goes through", async () => {
+  const h = harness()
+  await h.connect()
+  h.sendRejects = "image could not be processed"
+  await h.deliver([h.submit("r1", "look at this")])
+  const refused = h.replies().find((b) => b.op === "refused")
+  assert.ok(refused, "no refusal")
+  assert.equal(refused.request, "r1")
+  assert.match(refused.reason, /image could not be processed/)
+  h.sendRejects = null
+  await h.deliver([h.submit("r2", "and this")])
+  await h.accepted()
+  assert.deepEqual(h.replies().filter((b) => b.request === "r2").map((b) => b.op), ["ack", "submitted"])
 })
 
 test("every submission carries a different mark, and another instance on the same clock never repeats one, even when the clock runs backwards", async () => {

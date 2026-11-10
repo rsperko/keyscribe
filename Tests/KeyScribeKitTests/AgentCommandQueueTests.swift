@@ -401,6 +401,17 @@ struct AgentBridgeCodecTests {
         #expect(!String(decoding: unfenced, as: UTF8.self).contains("expectedPrompts"))
     }
 
+    @Test func aSubmitCarriesTheImagesItNamesOnlyWhenThereAreSome() throws {
+        let attached: [AgentCommand] = [.submit(id: "r1", expectedSession: "s1", text: "see /tmp/a.png", expiresAt: .distantFuture, images: ["/tmp/a.png"])]
+        let data = try AgentBridgeCodec.encode(attached)
+        #expect(String(decoding: data, as: UTF8.self).contains(#""images":["\/tmp\/a.png"]"#) || String(decoding: data, as: UTF8.self).contains(#""images":["/tmp/a.png"]"#))
+        #expect(try AgentBridgeCodec.decodeCommands(data) == attached)
+        let plain = try AgentBridgeCodec.encode([.submit(id: "r1", expectedSession: "s1", text: "x", expiresAt: .distantFuture)])
+        #expect(!String(decoding: plain, as: UTF8.self).contains("images"))
+        let renamed = attached[0].renamingSession { "pi:" + $0 }
+        #expect(renamed == .submit(id: "r1", expectedSession: "pi:s1", text: "see /tmp/a.png", expiresAt: .distantFuture, images: ["/tmp/a.png"]))
+    }
+
     @Test func aSubmitWithoutADeadlineIsMalformed() {
         let undated = #"[{"op":"submit","id":"r1","expectedSession":"s1","text":"x"}]"#
         #expect(throws: (any Error).self) { try AgentBridgeCodec.decodeCommands(Data(undated.utf8)) }

@@ -674,6 +674,20 @@ it (the first two, then how many more), in place of the retry example (“… Pi
 connected. Coding agent settings shows how to connect it”). It never connects, reloads or enrolls anything, and never sends to it.
 What was said is kept for Paste last dictation, and connecting the conversation never sends it.
 
+**The clipboard in a Coding agent message.** “Insert clipboard contents” and “insert clipboard as code” work
+in a Coding agent message as they do in any dictation when the clipboard holds text. When it holds copied
+files, the message gets their full paths; when it holds an image or a PDF, the app saves it as a file in the
+temporary folder and the message gets that path. A saved file is deleted once it is a day old: by an hourly
+check while the app runs, at launch, and on the next save. History keeps the message as sent, path
+included. Paths are never put in a code block. Pi also receives the image itself with the message; Claude
+Code opens the file from its path. Saying the phrase again before copying anything new reuses the file
+already saved. When the clipboard's text is only a web address and it also holds an image, as a browser's
+Copy Image can leave it, the image is used. The HUD says what went: “Sent to docs with 1 image” when the
+image itself went with the message, “Sent to docs with the path to 1 image” (or “1 file” for a PDF) when only
+its path did, and the same after “Queued for docs”. When the clipboard had nothing to insert, the message is
+still sent with the spoken words in it, and the HUD says so as an advisory (“Sent to docs, but the clipboard
+had nothing to insert, so “insert clipboard contents” went as words”).
+
 **Voice command choice.** The list interrupts the user, so it is used sparingly (`principles.md` §4,
 “Asking is a last resort”): navigation settles ties it can order by itself, and the list appears only when
 no predictable default exists or a wrong guess would run the wrong action. When a command matches more than

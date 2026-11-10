@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 @testable import KeyScribeApp
@@ -193,7 +194,7 @@ struct AgentDeliveryWiringTests {
 
         var sent: [(AgentCommand, String)] { transport.sent }
         var texts: [String] {
-            sent.compactMap { if case .submit(_, _, let text, _, _) = $0.0 { text } else { nil } }
+            sent.compactMap { if case .submit(_, _, let text, _, _, _) = $0.0 { text } else { nil } }
         }
     }
 
@@ -212,7 +213,7 @@ struct AgentDeliveryWiringTests {
         front: FrontWindow = FrontWindow(TargetSnapshot(bundleId: "test.bundle")), sessionInFront: Front = Front(),
         glance: (any AgentFronting)? = nil, engine: (any SpeechEngine)? = nil, frontGrace: Duration = .seconds(1),
         maxRecordingSeconds: Double = RecordingLimit.backstopSeconds, places: (any AgentPlaceReading)? = nil,
-        clipboard: String? = nil, unconnected: [AgentCandidate] = []
+        clipboard: String? = nil, pasteboard: ((NSPasteboard) -> Void)? = nil, unconnected: [AgentCandidate] = []
     ) async -> Rig {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-agent-\(UUID().uuidString)", isDirectory: true)
@@ -270,6 +271,7 @@ struct AgentDeliveryWiringTests {
                 if let session = returns.typedBy { await MainActor.run { returns.hub?.handle(.typed(session: session)) } }
             },
             clipboard: { clipboard },
+            agentClipboard: AgentClipboard(pasteboard: Self.pasteboard(clipboard, pasteboard), folder: supportDir.appendingPathComponent("clipboard"), restorePending: {}),
             snapshot: { front.snapshot },
             micStatus: { .granted },
             accessibilityGranted: { true },
@@ -284,6 +286,69 @@ struct AgentDeliveryWiringTests {
         return Rig(
             controller: controller, hub: hub, transport: transport, hud: hud, captured: captured, history: history,
             supportDir: supportDir, registry: registry, audio: audio, returns: returns)
+    }
+
+    private static func pasteboard(_ text: String?, _ fill: ((NSPasteboard) -> Void)?) -> NSPasteboard {
+        let pasteboard = NSPasteboard.withUniqueName()
+        pasteboard.clearContents()
+        if let text { pasteboard.setString(text, forType: .string) }
+        fill?(pasteboard)
+        return pasteboard
+    }
+
+    private static func png() throws -> Data {
+        let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: 2, pixelsHigh: 2, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+            isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        return try #require(rep.representation(using: .png, properties: [:]))
+    }
+
+    @Test(arguments: [(["images"], "Sent to keyscribe with 1 image"), ([String](), "Sent to keyscribe with the path to 1 image")])
+    func theHUDSaysWhetherTheImageWentWithTheMessage(_ features: [String], _ summary: String) async throws {
+        let png = try Self.png()
+        let rig = await rig("Look at insert clipboard contents", current: "claude:s1", pasteboard: { $0.setData(png, forType: .png) })
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: features)))
+        await take(rig)
+        guard case .submit(let request, _, _, _, _, _) = rig.sent.last?.0 else { Issue.record("nothing handed off"); return }
+        rig.hub.handle(.submitted(request: request, turn: ""))
+        await rig.controller.dictationTask?.value
+        #expect(rig.hud.states.contains(.commandDone(summary: summary, detail: "Coding agent")))
+    }
+
+    @Test func anEmptyClipboardSaysItsWordsWereSentAsSaid() async throws {
+        let rig = await rig("Fix insert clipboard contents", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        guard case .submit(let request, _, let text, _, _, _) = rig.sent.last?.0 else { Issue.record("nothing handed off"); return }
+        #expect(text.lowercased().contains("insert clipboard contents"))
+        rig.hub.handle(.submitted(request: request, turn: ""))
+        await rig.controller.dictationTask?.value
+        #expect(rig.hud.states.contains(.advisory(
+            message: "Sent to keyscribe, but the clipboard had nothing to insert, so \u{201C}insert clipboard contents\u{201D} went as words")))
+    }
+
+    @Test func aCopiedImageReachesTheAgentAsAFileItCanOpen() async throws {
+        let png = try Self.png()
+        let rig = await rig("What is wrong here? Insert clipboard contents.", current: "claude:s1", pasteboard: { $0.setData(png, forType: .png) })
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["images"])))
+        await take(rig)
+        let folder = rig.supportDir.appendingPathComponent("clipboard")
+        let saved = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        #expect(saved.count == 1)
+        let path = folder.appendingPathComponent(try #require(saved.first)).path
+        #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == png)
+        guard case .submit(_, _, let text, _, _, let images) = rig.sent.last?.0 else { Issue.record("nothing handed off"); return }
+        #expect(text == "What is wrong here \(path)?")
+        #expect(images == [path])
+    }
+
+    @Test func copiedTextStillReachesTheAgentAsText() async throws {
+        let rig = await rig("Use insert clipboard as code", current: "claude:s1", clipboard: "x = 1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.texts.first?.contains("```\nx = 1\n```") == true)
     }
 
     private func take(_ rig: Rig, mode: String = Mode.codingAgentId, readingTheFront: Bool = false) async {
@@ -383,7 +448,7 @@ struct AgentDeliveryWiringTests {
     }
 
     private func submittedRequest(_ rig: Rig) -> String? {
-        rig.sent.compactMap { if case .submit(let id, _, _, _, _) = $0.0 { id } else { nil } }.first
+        rig.sent.compactMap { if case .submit(let id, _, _, _, _, _) = $0.0 { id } else { nil } }.first
     }
 
     private func heard(_ text: String, connection: String? = nil, origin: String?) -> SpokenResultOutput.Heard {
@@ -1978,7 +2043,7 @@ struct AgentDeliveryWiringTests {
         #expect(uncertain?.summary == "May not have reached keyscribe: check its terminal")
         #expect(uncertain?.outcome == .failed)
 
-        guard case .submit(let request, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
         rig.hub.handle(.submitted(request: request, turn: ""))
         for _ in 0..<200 where rig.history.entries().first?.summary != "Sent to keyscribe" {
             try? await Task.sleep(for: .milliseconds(5))
@@ -1996,7 +2061,7 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.transport.confirms = false
         await take(rig)
-        guard case .submit(let request, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
         rig.controller.forgetAgentReceipt(request: request)
         rig.controller.showAgentNotice(.sent("keyscribe"), request: request)
         try? await Task.sleep(for: .milliseconds(50))
@@ -2082,7 +2147,7 @@ struct AgentDeliveryWiringTests {
         rig.transport.confirms = false
         await take(rig)
         let uncertain = await lastHistoryEntry(rig)
-        guard case .submit(let request, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
 
         rig.controller.agents = nil
         rig.controller.showAgentNotice(.sent("keyscribe"), request: request)
@@ -2141,7 +2206,7 @@ struct AgentDeliveryWiringTests {
         rig.registry.firstStatus = "idle"
         rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
         await rig.hub.rescan()
-        guard case .submit(let request, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
         rig.hub.handle(.refused(request: request, reason: "busy elsewhere"))
         for _ in 0..<200 where rig.history.entries().first?.outcome != .failed {
             try? await Task.sleep(for: .milliseconds(5))
@@ -2243,7 +2308,7 @@ struct AgentDeliveryWiringTests {
         rig.registry.firstStatus = "idle"
         rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
         await rig.hub.rescan()
-        guard case .submit(let request, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
         rig.hub.handle(.refused(request: request, reason: "draft"))
         for _ in 0..<200 where rig.history.entries().first?.outcome != .failed {
             try? await Task.sleep(for: .milliseconds(5))
@@ -2310,6 +2375,22 @@ struct AgentDeliveryWiringTests {
     ])
     func aKeptTakeSaysWhyWithoutPromisingToSendLater(reason: AgentReceipt.KeptReason, message: String) {
         #expect(AgentOutput.receiptState(.kept("docs", reason: reason), mode: "Agent", heard: "") == .advisory(message: message))
+    }
+
+    @Test func aSentOrQueuedTakeSaysWhatTheClipboardAdded() {
+        let image = AgentOutput.ClipboardNote(images: 1, files: 0, attached: true)
+        #expect(AgentOutput.receiptState(.sent("docs"), mode: "Agent", heard: "", clipboard: image)
+            == .commandDone(summary: "Sent to docs with 1 image", detail: "Agent"))
+        #expect(AgentOutput.receiptState(.queued("docs", waitingOn: .working), mode: "Agent", heard: "", clipboard: image)
+            == .commandDone(summary: "Queued for docs with 1 image", detail: "Sends when it finishes"))
+        let paths = AgentOutput.ClipboardNote(images: 2, files: 1, attached: false)
+        #expect(AgentOutput.receiptState(.sent("docs"), mode: "Agent", heard: "", clipboard: paths)
+            == .commandDone(summary: "Sent to docs with the paths to 2 images and 1 file", detail: "Agent"))
+        let pdf = AgentOutput.ClipboardNote(images: 0, files: 1, attached: true)
+        #expect(AgentOutput.receiptState(.sent("docs"), mode: "Agent", heard: "", clipboard: pdf)
+            == .commandDone(summary: "Sent to docs with the path to 1 file", detail: "Agent"))
+        #expect(AgentOutput.receiptState(.queued("docs", waitingOn: .working), mode: "Agent", heard: "", clipboard: .init(missed: true))
+            == .commandDone(summary: "Queued for docs", detail: "Sends when it finishes. The clipboard had nothing to insert, so \u{201C}insert clipboard contents\u{201D} went as words"))
     }
 
     @Test(arguments: [

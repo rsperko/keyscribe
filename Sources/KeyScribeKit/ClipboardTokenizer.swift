@@ -23,11 +23,35 @@ public enum ClipboardTokenizer {
         return re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
 
+    public struct Clip: Equatable, Sendable {
+        public var text: String
+        public var isFiles: Bool
+
+        public init(text: String, isFiles: Bool = false) {
+            self.text = text
+            self.isFiles = isFiles
+        }
+
+        public static func files(_ paths: [String]) -> Clip {
+            let named = paths.map { path in
+                guard path.contains(where: \.isWhitespace) else { return path }
+                let escaped = path.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+                return "\"\(escaped)\""
+            }
+            return Clip(text: named.joined(separator: " "), isFiles: true)
+        }
+    }
+
     public static func apply(_ text: String, clipboard: () -> String?, into tokenizer: Tokenizer) -> String {
-        guard mentions(text), let clip = clipboard(), !clip.isEmpty else { return text }
+        apply(text, clip: { clipboard().map { Clip(text: $0) } }, into: tokenizer)
+    }
+
+    public static func apply(_ text: String, clip read: () -> Clip?, into tokenizer: Tokenizer) -> String {
+        guard mentions(text), let clip = read(), !clip.text.isEmpty else { return text }
         // The code phrases first: each plain phrase is a prefix of a code one.
-        let fenced = splice(text, codePhrases, value: fence(clip), block: true, into: tokenizer)
-        return splice(fenced, defaultPhrases, value: clip, block: false, into: tokenizer)
+        let code = clip.isFiles ? clip.text : fence(clip.text)
+        let fenced = splice(text, codePhrases, value: code, block: !clip.isFiles, into: tokenizer)
+        return splice(fenced, defaultPhrases, value: clip.text, block: false, into: tokenizer)
     }
 
     // A fence longer than any run of backticks in the clipboard, so a fence inside it cannot close the block.

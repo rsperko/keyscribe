@@ -5,11 +5,13 @@ public struct AgentOutbox: Sendable {
         public let id: String
         public let conversation: String
         public let text: String
+        public let images: [String]
 
-        public init(id: String, conversation: String, text: String) {
+        public init(id: String, conversation: String, text: String, images: [String] = []) {
             self.id = id
             self.conversation = conversation
             self.text = text
+            self.images = images
         }
     }
 

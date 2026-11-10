@@ -97,6 +97,20 @@ struct AgentHubTests {
         _ = await receipt
     }
 
+    @Test(arguments: [(["images"], ["/tmp/a.png"]), ([String](), [String]())])
+    func imagesGoOnlyToAConnectorThatSaidItTakesThem(_ features: [String], _ expected: [String]) async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: features)))
+
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("see /tmp/a.png", to: "claude:s1", images: ["/tmp/a.png"])
+        await untilSent(transport, sentBefore + 1)
+        #expect(transport.sent.last.map(\.0) == .submit(id: "r1", expectedSession: "claude:s1", text: "see /tmp/a.png", expiresAt: Self.deadline, images: expected))
+        hub.handle(.submitted(request: "r1", turn: ""))
+        _ = await receipt
+    }
+
     @Test func aSubmitRefusedBecauseTheUserTypedIsKeptForReview() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
@@ -469,7 +483,7 @@ struct AgentHubTests {
         let sentBefore = transport.sent.count
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
-        if case .submit(let id, _, _, _, _) = transport.sent.last?.0 { hub.handle(.submitted(request: id, turn: turn)) }
+        if case .submit(let id, _, _, _, _, _) = transport.sent.last?.0 { hub.handle(.submitted(request: id, turn: turn)) }
         _ = await receipt
         hub.handle(.turnStarted(session: "claude:s1", turn: turn))
     }
@@ -635,7 +649,7 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
-        if case .submit(let id, _, _, _, _) = transport.sent.last?.0 { hub.handle(.refused(request: id, reason: "stopped")) }
+        if case .submit(let id, _, _, _, _, _) = transport.sent.last?.0 { hub.handle(.refused(request: id, reason: "stopped")) }
         #expect(await receipt == .notSent("keyscribe", reason: .stopped))
     }
 

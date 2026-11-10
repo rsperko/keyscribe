@@ -17,10 +17,17 @@ public enum TakeStages {
     public static func dictation(
         text: [any PipelineStage], clipboard: (@Sendable () -> String?)?, redaction: Bool
     ) -> Pipeline {
+        guard let clipboard else { return dictation(text: text, clip: nil, redaction: redaction) }
+        return dictation(text: text, clip: { @Sendable in clipboard().map { ClipboardTokenizer.Clip(text: $0) } }, redaction: redaction)
+    }
+
+    public static func dictation(
+        text: [any PipelineStage], clip: (@Sendable () -> ClipboardTokenizer.Clip?)?, redaction: Bool
+    ) -> Pipeline {
         var stages = text
         if text.contains(where: { $0 is LiveEditsStage }) {
             stages.append(TokenizingStage.verbatim())
-            if let clipboard { stages.append(TokenizingStage.clipboard(read: clipboard)) }
+            if let clip { stages.append(TokenizingStage.clipboard(clip: clip)) }
         }
         if redaction { stages.append(TokenizingStage.redaction()) }
         return Pipeline(stages)
