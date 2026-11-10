@@ -73,6 +73,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let pasteLastItem = NSMenuItem(title: "Paste Last Dictation", action: nil, keyEquivalent: "")
     private let addVocabularyItem = NSMenuItem(title: "Add to Vocabulary…", action: nil, keyEquivalent: "")
     private let spokenUpdatesItem = NSMenuItem(title: "Read Agent Replies Aloud", action: nil, keyEquivalent: "")
+    private let lastReplyItem = NSMenuItem(title: "Last Reply in History\u{2026}", action: nil, keyEquivalent: "")
     private let speechModelsMenu = NSMenu()
     private let modesMenu = NSMenu()
 
@@ -121,6 +122,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var onPasteLast: (() -> Void)?
     var onToggleSpokenUpdates: (() -> Void)?
     var onOpenHistory: (() -> Void)?
+    var onOpenLastReply: (() -> Void)?
     var onOpenSettings: (() -> Void)?
     var onOpenSpeechModels: (() -> Void)?
     var onOpenModes: (() -> Void)?
@@ -182,6 +184,11 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         spokenUpdatesItem.isHidden = true
         menu.addItem(spokenUpdatesItem)
 
+        lastReplyItem.target = self
+        lastReplyItem.action = #selector(openLastReply)
+        lastReplyItem.isHidden = true
+        menu.addItem(lastReplyItem)
+
         menu.addItem(.separator())
         addVocabularyItem.target = self
         addVocabularyItem.action = #selector(addVocabulary)
@@ -223,6 +230,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var mainMenu: NSMenu? { appMenu }
     var pasteLastMenuItem: NSMenuItem { pasteLastItem }
     var spokenUpdatesMenuItem: NSMenuItem { spokenUpdatesItem }
+    var lastReplyMenuItem: NSMenuItem { lastReplyItem }
+
+    func setLastReply(available: Bool) { lastReplyItem.isHidden = !available }
     var modeMenuItems: [NSMenuItem] { modesMenu.items }
 
     func menuWillOpen(_ menu: NSMenu) { onMenuWillOpen?() }
@@ -398,6 +408,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func pasteLast() { onPasteLast?() }
     @objc private func toggleSpokenUpdates() { onToggleSpokenUpdates?() }
     @objc private func openHistory() { onOpenHistory?() }
+    @objc private func openLastReply() { onOpenLastReply?() }
     @objc private func openSettings() { onOpenSettings?() }
     @objc private func openSpeechModels() { onOpenSpeechModels?() }
     @objc private func openModes() { onOpenModes?() }

@@ -47,4 +47,16 @@ struct TakeReporterTests {
         #expect(!reporter.keepsHistory)
         #expect(!reporter.append(entry("one"), retentionDays: 7, confirm: true))
     }
+
+    @Test func anUpdateWithHistoryOffAnswersThatNothingChanged() {
+        let reporter = TakeReporter(history: nil, replacementUsage: nil)
+        var answers: [Bool] = []
+        reporter.update(id: "e1", near: Date(), { $0 }, then: { answers.append($0) })
+        #expect(answers == [false])
+    }
+
+    @Test func everyRetentionChoiceOutlastsHeldSpokenAudio() throws {
+        let shortest = try #require(HistoryRetentionChoice.presets.map(\.days).min())
+        #expect(TimeInterval(shortest) * 24 * 60 * 60 > SpokenAttemptLog.keptFor)
+    }
 }

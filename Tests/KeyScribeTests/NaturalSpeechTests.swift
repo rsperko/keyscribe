@@ -9,6 +9,7 @@ struct NaturalSpeechTests {
         var onFinished: (() -> Void)?
         var played: [Data] = []
         var isPlaying = false
+        var lastPlaybackFailed = false
         var accepts = true
         func play(_ audio: Data) -> Bool {
             guard accepts else { return false }
@@ -33,9 +34,19 @@ struct NaturalSpeechTests {
             set { lock.withLock { holding = newValue } }
         }
         var fails = false
+        var error: (any Error)?
+        var exclusive = false
+        private var running = 0
         var calls: [(text: String, voice: String)] { lock.withLock { _calls } }
-        func run(_ text: String, _ voice: String) async throws -> Data {
-            lock.withLock { _calls.append((text, voice)) }
+        func run(_ text: String, _ voice: String) async throws -> SpokenAudio {
+            let busy = lock.withLock { () -> Bool in
+                if exclusive && running > 0 { return true }
+                running += 1
+                _calls.append((text, voice))
+                return false
+            }
+            if busy { throw WorkBusy() }
+            defer { lock.withLock { running -= 1 } }
             await withCheckedContinuation { continuation in
                 let waits = lock.withLock { () -> Bool in
                     if holding { held.append(continuation) }
@@ -43,8 +54,9 @@ struct NaturalSpeechTests {
                 }
                 if !waits { continuation.resume() }
             }
+            if let error { throw error }
             if fails { throw CocoaError(.fileReadCorruptFile) }
-            return Data(text.utf8)
+            return SpokenAudio(wav: Data(text.utf8))
         }
         func release() {
             let pending = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
@@ -65,15 +77,17 @@ struct NaturalSpeechTests {
     }
 
     private func make(
-        ready: Bool = true, synth: Synth = Synth(), outcome: @escaping (Bool) -> Void = { _ in },
+        ready: Bool = true, synth: Synth = Synth(), outcome: @escaping (Bool, String?, String?) -> Void = { _, _, _ in },
         fallbackLimit: @escaping (String) -> Duration = NaturalSpeech.fallbackLimit,
-        synthesisLimit: @escaping (String) -> Duration = NaturalSpeech.fallbackLimit
+        synthesisLimit: @escaping (String) -> Duration = NaturalSpeech.fallbackLimit, attempts: SpokenAttempts? = nil,
+        busyWait: Duration = NaturalSpeech.busyWait
     ) -> (NaturalSpeech, FakePlayer, SpokenResultOutputTests.FakeSpeech, Synth) {
         let player = FakePlayer()
         let fallback = SpokenResultOutputTests.FakeSpeech()
         let speech = NaturalSpeech(
             ready: { ready }, synthesize: { try await synth.run($0, $1) }, player: player, fallback: fallback, outcome: outcome,
-            fallbackLimit: fallbackLimit, synthesisLimit: synthesisLimit)
+            fallbackLimit: fallbackLimit, synthesisLimit: synthesisLimit, attempts: attempts, busyWait: busyWait,
+            details: { natural in natural ? [.init(label: "Output", value: "USB DAC, 48000 Hz")] : [] })
         return (speech, player, fallback, synth)
     }
 
@@ -177,7 +191,7 @@ struct NaturalSpeechTests {
     @Test func aReadyVoiceThatFallsBackSaysSoAndOneThatPlaysSaysItPlayed() async {
         let synth = Synth()
         var outcomes: [Bool] = []
-        let (speech, _, _, _) = make(synth: synth, outcome: { outcomes.append($0) })
+        let (speech, _, _, _) = make(synth: synth, outcome: { natural, _, _ in outcomes.append(natural) })
         speech.speak("One.", voice: nil)
         await until { outcomes == [true] }
         synth.fails = true
@@ -188,7 +202,7 @@ struct NaturalSpeechTests {
 
     @Test func aVoiceNotYetInstalledReportsNoFallback() async {
         var outcomes: [Bool] = []
-        let (speech, _, _, _) = make(ready: false, outcome: { outcomes.append($0) })
+        let (speech, _, _, _) = make(ready: false, outcome: { natural, _, _ in outcomes.append(natural) })
         speech.speak("Done.", voice: nil)
         await settled()
         #expect(outcomes.isEmpty)
@@ -268,7 +282,7 @@ struct NaturalSpeechTests {
         synth.holds = true
         var outcomes: [Bool] = []
         let (speech, player, fallback, _) = make(
-            synth: synth, outcome: { outcomes.append($0) }, synthesisLimit: { _ in .milliseconds(30) })
+            synth: synth, outcome: { natural, _, _ in outcomes.append(natural) }, synthesisLimit: { _ in .milliseconds(30) })
         speech.speak("Done.", voice: nil)
         for _ in 0..<200 where fallback.spoken.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
         #expect(fallback.spoken.map(\.text) == ["Done."])
@@ -352,6 +366,145 @@ struct NaturalSpeechTests {
         speech.stop()
         #expect(finished == 1)
     }
+
+    private func recorded(_ speech: NaturalSpeech, in attempts: SpokenAttempts) -> SpokenAttempt? {
+        speech.attempt.flatMap { attempts.attempt($0) }
+    }
+
+    @Test func aPlayedReplyIsKeptWithTheExactAudioItPlayedUntilItFinishes() async throws {
+        let attempts = SpokenAttempts()
+        let (speech, player, _, _) = make(attempts: attempts)
+        speech.speak("Build passed.", voice: "bf_emma")
+        await until { player.isPlaying }
+        let playing = try #require(recorded(speech, in: attempts))
+        #expect(playing.text == "Build passed.")
+        #expect(playing.voice == "bf_emma")
+        #expect(playing.audio == player.played.last)
+        #expect(playing.reader == .natural)
+        #expect(playing.playback == .playing)
+        #expect(playing.details == [.init(label: "Output", value: "USB DAC, 48000 Hz")])
+        attempts.awaitLink(speech.attempt)
+        player.finish()
+        #expect(recorded(speech, in: attempts)?.playback == .finished)
+    }
+
+    @Test func unusableAudioIsReadByTheMacOSVoiceAndKeptWithTheReason() async throws {
+        let attempts = SpokenAttempts()
+        let synth = Synth()
+        synth.error = SpokenAudio.Unusable(problem: .silent, audio: SpokenAudio(wav: Data("quiet".utf8)))
+        var outcomes: [Bool] = []
+        let (speech, player, fallback, _) = make(synth: synth, outcome: { natural, _, _ in outcomes.append(natural) }, attempts: attempts)
+        speech.speak("Done.", voice: nil)
+        await until { fallback.spoken.map(\.text) == ["Done."] }
+        #expect(player.played.isEmpty)
+        #expect(outcomes == [false])
+        let attempt = try #require(recorded(speech, in: attempts))
+        #expect(attempt.reader == .macOS)
+        #expect(attempt.macOSReason == "the natural voice made silent audio")
+        #expect(speech.macOSReason == "the natural voice made silent audio")
+        #expect(attempt.audio == Data("quiet".utf8))
+        fallback.start()
+        attempts.awaitLink(speech.attempt)
+        #expect(recorded(speech, in: attempts)?.playback == .playing)
+        fallback.finish()
+        #expect(recorded(speech, in: attempts)?.playback == .finished)
+    }
+
+    @Test func aVoiceStillBusyWithAnEarlierReplySaysSo() async {
+        let attempts = SpokenAttempts()
+        let synth = Synth()
+        synth.error = WorkBusy()
+        let (speech, _, fallback, _) = make(synth: synth, attempts: attempts, busyWait: .milliseconds(30))
+        speech.speak("Done.", voice: nil)
+        await until { !fallback.spoken.isEmpty }
+        #expect(recorded(speech, in: attempts)?.macOSReason == "the natural voice was still busy with earlier audio")
+    }
+
+    @Test func aVoiceNotInstalledIsReadByTheMacOSVoiceAndSaysWhy() {
+        let attempts = SpokenAttempts()
+        let (speech, _, _, _) = make(ready: false, attempts: attempts)
+        speech.speak("Done.", voice: nil)
+        #expect(recorded(speech, in: attempts)?.reader == .macOS)
+        #expect(recorded(speech, in: attempts)?.macOSReason == "the natural voice isn\u{2019}t installed")
+        #expect(recorded(speech, in: attempts)?.details.isEmpty == true)
+    }
+
+    @Test func anAttemptNothingSavesIsDroppedOnceItsPlaybackEnds() async {
+        let attempts = SpokenAttempts()
+        let (speech, player, _, _) = make(attempts: attempts)
+        speech.speak("Repeat of an earlier reply.", voice: nil)
+        await until { player.isPlaying }
+        let replay = speech.attempt
+        player.finish()
+        #expect(replay.flatMap { attempts.attempt($0) } == nil)
+        speech.speak("Stopped before it played.", voice: nil)
+        let stopped = speech.attempt
+        speech.stop()
+        #expect(stopped.flatMap { attempts.attempt($0) } == nil)
+    }
+
+    @Test func stoppingAReplyMidwayRecordsItAsInterruptedAndAFailedDecodeAsFailed() async {
+        let attempts = SpokenAttempts()
+        let (speech, player, _, _) = make(attempts: attempts)
+        speech.speak("One.", voice: nil)
+        await until { player.isPlaying }
+        let first = speech.attempt
+        attempts.awaitLink(first)
+        speech.stop()
+        #expect(first.flatMap { attempts.attempt($0) }?.playback == .interrupted)
+        speech.speak("Two.", voice: nil)
+        await until { player.isPlaying }
+        attempts.awaitLink(speech.attempt)
+        player.lastPlaybackFailed = true
+        player.finish()
+        #expect(recorded(speech, in: attempts)?.playback == .failed)
+    }
+
+    @Test func aReplyRightAfterAStopWaitsForTheStoppedOneToSettleAndUsesTheNaturalVoice() async {
+        let synth = Synth()
+        synth.exclusive = true
+        synth.holds = true
+        let (speech, player, fallback, _) = make(synth: synth)
+        speech.speak("One.", voice: nil)
+        await until { synth.calls.count == 1 }
+        speech.stop()
+        synth.holds = false
+        speech.speak("Two.", voice: nil)
+        try? await Task.sleep(for: .milliseconds(60))
+        synth.release()
+        await until { player.played == [Data("Two.".utf8)] }
+        #expect(player.played == [Data("Two.".utf8)])
+        #expect(fallback.spoken.isEmpty)
+    }
+
+    @Test func aVoiceBusyPastItsWaitGoesToTheMacOSVoice() async {
+        let attempts = SpokenAttempts()
+        let synth = Synth()
+        synth.exclusive = true
+        synth.holds = true
+        let (speech, _, fallback, _) = make(synth: synth, attempts: attempts, busyWait: .milliseconds(40))
+        speech.speak("One.", voice: nil)
+        await until { synth.calls.count == 1 }
+        speech.stop()
+        speech.speak("Two.", voice: nil)
+        await until { !fallback.spoken.isEmpty }
+        #expect(fallback.spoken.map(\.text) == ["Two."])
+        #expect(recorded(speech, in: attempts)?.macOSReason == "the natural voice was still busy with earlier audio")
+        synth.release()
+    }
+
+    @Test func aReplyMadeWhileAnEarlierOneIsStillFinishingIsNoted() async {
+        let attempts = SpokenAttempts()
+        let synth = Synth()
+        synth.holds = true
+        let (speech, _, fallback, _) = make(synth: synth, synthesisLimit: { _ in .milliseconds(20) }, attempts: attempts)
+        speech.speak("One.", voice: nil)
+        await until { !fallback.spoken.isEmpty }
+        #expect(recorded(speech, in: attempts)?.macOSReason == "the natural voice took too long")
+        speech.speak("Two.", voice: nil)
+        #expect(recorded(speech, in: attempts)?.notes == ["Started while an earlier synthesis was still finishing."])
+        synth.release()
+    }
 }
 
 @MainActor
@@ -378,6 +531,7 @@ struct WAVPlayerTests {
         player.audioPlayerDecodeErrorDidOccur(current, error: CocoaError(.fileReadCorruptFile))
         for _ in 0..<50 { await Task.yield() }
         #expect(finished == 1)
+        #expect(player.lastPlaybackFailed)
         #expect(!player.isPlaying)
         player.stop()
     }

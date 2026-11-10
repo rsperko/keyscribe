@@ -118,9 +118,13 @@
   agent. These fields hold fixed local wording and names, never an agent's reply, a credential, or an
   environment value, and they follow the same History setting and per-mode exclusion as everything else.
   The optional `spoken_reply` is what a Coding agent spoken reply read aloud, written once it became audible:
-  `{at, conversation, text, connection}`, where `text` is the line exactly as heard (a reply, a summary, or how
-  a turn ended; a notice is never written), and `connection` names the service that wrote the
-  line, absent when it was read as written. A reply to a dictated message is added in place, by `id`, to that
+  `{at, conversation, text, connection, voice, reason}`, where `text` is the line exactly as heard (a reply, a summary, or how
+  a turn ended; a notice is never written), `connection` names the service that wrote the
+  line, absent when it was read as written, and `voice` is which voice was speaking when the line became audible:
+  `"natural"` (the downloaded voice) or `"macos"` (the macOS voice), absent in entries written before it existed.
+  These are identifiers, never display copy (`SpokenAttempt.Reader`); History maps them to its own words.
+  `reason`, present only with `"macos"`, is fixed local wording saying why the natural voice did not read it
+  ("the natural voice took too long"); it never holds reply text. A reply to a dictated message is added in place, by `id`, to that
   take's entry, and only when the take was kept. A reply asked for from inside the agent is an entry of its own
   under the Coding agent mode's name, with `outcome = "command"`, empty `heard` and `result`, and `summary`
   `Reply from <name>`; it is written only when History is on and the Coding agent mode is not excluded from

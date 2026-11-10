@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 import KeyScribeKit
 
 enum DiagnosticsCollector {
@@ -8,7 +9,7 @@ enum DiagnosticsCollector {
         let settings = loadSettings()
         let modeLoad = ModeStore.load(in: KeyScribePaths.modesDir, previous: [])
 
-        return DiagnosticsReport(
+        var report = DiagnosticsReport(
             build: buildInfo(),
             permissions: permissionState(),
             speech: speechState(settings: settings),
@@ -20,7 +21,11 @@ enum DiagnosticsCollector {
             modelLoadFailures: modelLoadFailures(),
             configErrors: configErrors(settings: settings, modeFailures: modeLoad.failures),
             enabledFeatures: enabledFeatures(settings: settings))
+        report.spokenReplies = spokenReplies.withLock { $0 }
+        return report
     }
+
+    static let spokenReplies = Mutex<[String]>([])
 
     private static func loadSettings() -> Settings? {
         let file = KeyScribePaths.supportDir.appendingPathComponent(SettingsStore.fileName)

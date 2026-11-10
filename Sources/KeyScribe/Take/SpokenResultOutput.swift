@@ -27,6 +27,9 @@ final class SpokenResultOutput {
         let text: String
         let connection: String?
         let origin: String?
+        var attempt: String? = nil
+        var reader: SpokenAttempt.Reader? = nil
+        var reason: String? = nil
     }
 
     enum Unread: Equatable {
@@ -353,7 +356,8 @@ final class SpokenResultOutput {
             for origin in origins {
                 onHeard?(Heard(
                     conversation: playing.conversation, name: playing.name, text: playing.text,
-                    connection: playing.connection, origin: origin))
+                    connection: playing.connection, origin: origin, attempt: speech.attempt, reader: speech.reader,
+                    reason: speech.reader == .macOS ? speech.macOSReason : nil))
             }
         }
     }

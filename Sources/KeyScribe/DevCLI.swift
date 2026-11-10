@@ -72,6 +72,18 @@ public enum DevCLI {
                 --wav-only              Hand the gate no samples, as a WAV-only engine does.
                 --cold                  Skip the model prewarm, so the first clip pays the load.
                 --deadline <s>          Override the gate's time limit, to time a clip past it.
+              --voice-sweep <file>    Synthesize each line of <file> with the installed natural voice, write every take
+                                      as a WAV plus results.jsonl (length, level, rejected-audio checks, stage timings,
+                                      and each take's similarity to the line's first take), then exit. Plays nothing.
+                                      For comparing repeat takes and compute routes; similarity only points at takes
+                                      to listen to. Keep private text out of committed files.
+                --out <dir>             Where to write the takes (default: a new folder in the temporary directory).
+                --takes <n>             Takes per line (default 2).
+                --route <r>             default, gpu or cpu: where the noise and tail stages run (default: this OS's).
+                --voice <id>            Speaker (default: the recommended one).
+                --stop-first            Before each line, start it and cancel after --stop-after ms, then go at once.
+                --stop-after <ms>       Default 150.
+                --overlap               Make each line's takes at the same time on one loaded voice.
               --samples-parity <dir>  Verify the in-memory samples transcription path matches the WAV path for
                                       every installed sample-capable engine over the *.wav files in <dir> (P2-1).
                                       Exits non-zero on any mismatch. Honors --engines.
@@ -338,6 +350,37 @@ public enum DevCLI {
             Task.detached {
                 let passed = await AliasDiscoveryRunner.run(path: path, only: only, cohorts: cohorts, threshold: threshold)
                 ok.store(passed, ordering: .relaxed)
+                done.signal()
+            }
+            done.wait()
+            exit(ok.load(ordering: .relaxed) ? 0 : 1)
+        }
+
+        if let i = CommandLine.arguments.firstIndex(of: "--voice-sweep"), i + 1 < CommandLine.arguments.count {
+            let args = CommandLine.arguments
+            func value(_ flag: String) -> String? {
+                args.firstIndex(of: flag).flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+            }
+            guard let text = try? String(contentsOfFile: args[i + 1], encoding: .utf8) else {
+                print("Could not read \(args[i + 1]).")
+                exit(1)
+            }
+            var options = VoiceSweep.Options(
+                lines: text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty },
+                output: value("--out").map { URL(fileURLWithPath: $0) }
+                    ?? FileManager.default.temporaryDirectory.appendingPathComponent("voice-sweep-\(UUID().uuidString.prefix(8))"))
+            options.takes = value("--takes").flatMap { Int($0) } ?? options.takes
+            options.route = value("--route") ?? options.route
+            options.voice = value("--voice") ?? options.voice
+            options.stopFirst = args.contains("--stop-first")
+            options.stopAfter = value("--stop-after").flatMap { Int($0) }.map { .milliseconds($0) } ?? options.stopAfter
+            options.overlap = args.contains("--overlap")
+            DependencyLogging.configure()
+            let done = DispatchSemaphore(value: 0)
+            let ok = Atomic<Bool>(true)
+            let sweep = options
+            Task.detached {
+                ok.store(await VoiceSweep.run(sweep), ordering: .relaxed)
                 done.signal()
             }
             done.wait()

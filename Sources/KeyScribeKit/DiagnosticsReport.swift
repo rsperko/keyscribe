@@ -123,6 +123,7 @@ public struct DiagnosticsReport: Sendable {
     public var modelLoadFailures: [String]
     public var configErrors: [String]
     public var enabledFeatures: [String]
+    public var spokenReplies: [String] = []
 
     public init(
         build: Build, permissions: PermissionState, speech: Speech,
@@ -175,6 +176,11 @@ public struct DiagnosticsReport: Sendable {
             out.append("")
             out.append("Model load failures (most recent last)")
             out.append(contentsOf: modelLoadFailures.map { "  \($0)" })
+        }
+        if !spokenReplies.isEmpty {
+            out.append("")
+            out.append("Recent spoken replies, held in memory (no text)")
+            out.append(contentsOf: spokenReplies.map { "  \($0)" })
         }
         if !configErrors.isEmpty {
             out.append("")
@@ -270,5 +276,6 @@ public struct DiagnosticsReport: Sendable {
     static let privacyNote = """
         This report contains no transcript text, no clipboard contents, and no API keys.
         Dictation rows carry only mode, engine, microphone, outcome, and connection/model names.
+        Spoken reply rows carry only which voice read it, why, how it played, the voice route, and the output device.
         """
 }

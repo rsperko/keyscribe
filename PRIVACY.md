@@ -221,7 +221,12 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
   is up to that service. What KeyScribe actually reads aloud as a reply or a summary is saved in
   History exactly as you heard it, with the service that summarized it, when History is on and the Coding
   agent mode is not left out of History. A reply to an instruction you dictated is saved with that
-  dictation, and only when the dictation itself was saved. A spoken reply can include text from the
+  dictation, and only when the dictation itself was saved. While KeyScribe is running it also holds, in memory
+  only, the audio the natural voice generated for each reply History saved, so you can play it again or save it to
+  report a reply that sounded wrong. Audio for anything History did not save (a repeat, a notice, a preview) is
+  dropped when it stops playing. Saved replies' audio is dropped at once when you delete that History entry or quit,
+  and otherwise an hour after the reply, including when History's own retention removes the entry; it is written to
+  disk only where you choose with **Save Generated Audio…** in History. A spoken reply can include text from the
   agent's output, such as a path or a command's result, as plain text. It is never written to logs.
 
 You can inspect, back up, or delete any of it with the Finder or a text editor. Deleting the history

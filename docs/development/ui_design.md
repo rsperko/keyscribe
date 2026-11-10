@@ -863,6 +863,7 @@ Next Dictation ▸
 
 Paste Last Dictation
 Read Agent Replies Aloud ✓
+Last Reply in History…
 
 ────────────────
 Add to Vocabulary…
@@ -920,6 +921,10 @@ so they sit together above Settings instead of competing with the primary loop.
 aloud** switch (§7 Coding agent), with the same effects: off stops playback and drops waiting and in-progress
 spoken replies, on keeps the configuration and replays nothing. It needs no AI service, since notices are spoken
 without one.
+
+**Last Reply in History…** appears once a spoken reply has been saved to History in this session, and opens History
+with that entry selected (§8), where its audio can be played again or saved while it is still held. Deleting that
+entry hides the item; if History cannot find the entry, the status line says "That reply is no longer in History."
 
 **About & Notices…** names the licenses for bundled libraries and runtime-downloaded models, including
 the Silero VAD support model and production-only Sparkle binary. The app bundle carries the GPLv3
@@ -1928,7 +1933,15 @@ marked "(Recommended)"; only English speakers the voice's authors grade C+ or be
 downloaded with the voice. A voice that makes no sound, whose files went missing (found at launch or when a
 result fails to speak), or whose delete removed only some files reads "Needs attention" with an `IssueText`
 and **Reinstall voice** in the row. When an installed voice fails to read a summary and the macOS voice reads
-it instead, an advisory under the row says so until the natural voice plays again. A macOS voice that is cancelled, or
+it instead, an advisory under the row says so, with the reason ("The macOS voice read the last spoken update because the
+natural voice took too long."), until the natural voice plays again. It covers replies, notices and repeats; a
+**Show in History** link appears only once History has saved the very reply it describes, and opens that entry. A
+**Preview Voice** that falls back says so on its own line ("The preview used the macOS voice because …") and never
+changes that advisory. That includes audio the voice made that is
+unusable (invalid samples, none, or no audible level): it never plays, and the reason names what was wrong with it,
+never that garbled speech was detected. A reply or a preview that arrives while
+earlier audio is still being made, for example just after a stop, waits up to two seconds for it before the macOS
+voice reads it instead. A macOS voice that is cancelled, or
 never finishes, ends playback; one that never reports finishing is ended after `NaturalSpeech.fallbackLimit`,
 which grows with the text, so the speaking panel and its Escape are never held. An installed voice still
 preparing its audio after that same limit hands the text to the macOS voice, and new speech skips the natural voice
@@ -2277,6 +2290,23 @@ offered for corrections, since it is the agent's words, not the user's. Search f
 the diagnostics report leave it out, and its export has no Result line. Its action bar offers **Copy Reply** in
 place of Copy Result and has no Copy Report. A dictation with a reply joined to it offers **Copy Reply** beside
 Copy Result, and its **Copy Report** says it includes what was read aloud.
+
+The **Read aloud** section also says which voice read the line (**Read by**: Natural voice or macOS voice) and
+why the macOS voice read it (**Why**), both kept with the entry, and, while its spoken audio is held, its playback (**Playback**: Not started,
+Playing, Played to the end, Stopped before the end, or Failed). **Read with macOS Voice** reads the line again with the macOS voice
+for as long as the entry exists; while the user is dictating it reads nothing and the status line says why. Whichever
+of Read and Play is speaking turns into **Stop**; choosing another entry or closing History stops it. **Play Generated Audio** and **Save Generated Audio…** appear only while the audio is held. Play plays the exact
+audio the app generated for that reply, which for a reply the macOS voice read is the natural voice's rejected take
+(the caption says so), through the same rules as any speech (dictation stops it; while dictating it plays nothing and the
+status line says why), and records nothing. It is disabled while that reply is still being read aloud, and a player
+that refuses the audio says "Couldn't play the generated audio." rather than showing Stop.
+Save asks for a folder, then writes the audio and a report (the text read, the voice and its details, how playback
+ended) there as two files named for when the reply was read, in local time, numbering the name ("… 2") rather than
+replacing a file already there; if either write fails it removes what it wrote, so a retry starts clean. It then
+selects the audio in Finder, says so in the status line, and sends nothing anywhere. A caption under the
+buttons says the audio is kept for an hour while the app is running; once it is gone, a reply the natural voice
+read says "The original audio is no longer available." and the save action is not offered, since making the
+audio again would not be the audio that played.
 
 A dictation in which live edits ran, including a Coding agent message (beside its recipient lines), adds a
 **What happened** row, **Spoken edits**, with the same words as the completion HUD (“new line ×2, scratch that”), so the user can tell afterwards whether a spoken edit fired.

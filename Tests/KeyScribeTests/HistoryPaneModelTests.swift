@@ -441,6 +441,204 @@ struct HistoryPaneModelTests {
         #expect(copied == "docs: Done.")
     }
 
+    private func spokenReply() -> HistoryEntry {
+        AgentHistoryFacts.spokenReplyEntry(
+            id: "r1", mode: "Coding agent",
+            reply: .init(at: Date(timeIntervalSince1970: 1_700_000_000), conversation: "docs", text: "docs: Done.", voice: "natural"))
+    }
+
+    @Test func aReplyCanBeReadAgainWithTheMacOSVoiceAndStopped() async throws {
+        let model = try await selectingOnly(spokenReply(), corrections: Corrections())
+        var read: [String] = []
+        var ended: (() -> Void)?
+        var stops = 0
+        model.readWithMacOSVoice = { text, onEnd in read.append(text); ended = onEnd; return .started }
+        model.stopHistorySpeech = { stops += 1 }
+        model.readReplyWithMacOSVoice()
+        #expect(read == ["docs: Done."])
+        #expect(model.speaking == .macOSVoice)
+        #expect(model.statusMessage == nil)
+        ended?()
+        #expect(model.speaking == nil)
+        model.readReplyWithMacOSVoice()
+        model.stopSpeaking()
+        #expect(stops == 1)
+        #expect(model.speaking == nil)
+    }
+
+    @Test func nothingPlaysWhileDictatingAndTheStatusSaysWhy() async throws {
+        let model = try await selectingOnly(spokenReply(), corrections: Corrections())
+        model.readWithMacOSVoice = { _, _ in .dictating }
+        model.readReplyWithMacOSVoice()
+        #expect(model.speaking == nil)
+        #expect(model.statusMessage?.contains("while you\u{2019}re dictating") == true)
+    }
+
+    private func holding(_ playback: SpokenAttempt.Playback = .finished) -> SpokenAttempt {
+        var attempt = SpokenAttempt(id: "a1", at: Date(), text: "docs: Done.", voice: "af_heart")
+        attempt.audio = Data("RIFF-original".utf8)
+        attempt.playback = playback
+        return attempt
+    }
+
+    @Test func theHeldAudioCanBePlayedAgainAndStopped() async throws {
+        let model = try await selectingOnly(spokenReply(), corrections: Corrections())
+        let attempt = holding()
+        model.spokenAudio = { _ in attempt }
+        var played: [Data] = []
+        var ended: (() -> Void)?
+        var stops = 0
+        model.playHeldAudio = { data, onEnd in played.append(data); ended = onEnd; return .started }
+        model.stopHistorySpeech = { stops += 1 }
+        model.playSpokenAudio()
+        #expect(played == [Data("RIFF-original".utf8)])
+        #expect(model.speaking == .audio)
+        ended?()
+        #expect(model.speaking == nil)
+        model.playSpokenAudio()
+        model.stopSpeaking()
+        #expect(stops == 1)
+        #expect(model.speaking == nil)
+        #expect(model.spokenAudio?("r1")?.playback == .finished)
+    }
+
+    @Test func aPlayerThatRefusesLeavesNoStopButtonAndSaysSo() async throws {
+        let model = try await selectingOnly(spokenReply(), corrections: Corrections())
+        model.spokenAudio = { _ in self.holding() }
+        model.playHeldAudio = { _, onEnd in onEnd(); return .failed }
+        model.playSpokenAudio()
+        #expect(model.speaking == nil)
+        #expect(model.statusMessage == "Couldn\u{2019}t play the generated audio.")
+    }
+
+    @Test func theHeldAudioCannotBePlayedWhileTheReplyIsStillBeingReadAloud() async throws {
+        let model = try await selectingOnly(spokenReply(), corrections: Corrections())
+        model.spokenAudio = { _ in self.holding(.playing) }
+        #expect(!model.canPlaySpokenAudio)
+        model.spokenAudio = { _ in self.holding(.finished) }
+        #expect(model.canPlaySpokenAudio)
+    }
+
+    @Test func closingHistoryStopsWhatItIsPlaying() async throws {
+        let model = try await selectingOnly(spokenReply(), corrections: Corrections())
+        model.spokenAudio = { _ in self.holding() }
+        var stops = 0
+        model.playHeldAudio = { _, _ in .started }
+        model.stopHistorySpeech = { stops += 1 }
+        model.playSpokenAudio()
+        model.releaseForClose()
+        #expect(stops == 1)
+        #expect(model.speaking == nil)
+    }
+
+    @Test func anEntryNoLongerInHistoryIsNotWaitedForAndTheUserIsTold() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var kept = entry("kept dictation")
+        kept.id = "kept"
+        try store.append(kept, today: "2026-07-10")
+        let model = model(store)
+        model.show(entry: "deleted")
+        for _ in 0..<80 where model.statusMessage == nil { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(model.statusMessage == "That reply is no longer in History.")
+        model.reload()
+        for _ in 0..<20 { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(model.selected?.id == "kept")
+    }
+
+    @Test func historyOpensAtAChosenEntry() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var older = spokenReply()
+        older.id = "older"
+        older.timestamp = Date(timeIntervalSince1970: 1_600_000_000)
+        try store.append(older, today: "2026-07-09")
+        var newer = entry("newest dictation")
+        newer.id = "newer"
+        try store.append(newer, today: "2026-07-10")
+        let model = model(store)
+        model.show(entry: "older")
+        for _ in 0..<80 where model.selected?.id != "older" { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(model.selected?.id == "older")
+    }
+
+    @Test func savingSpokenAudioWritesTheOriginalAudioAndAReportWhereTheUserChose() async throws {
+        let model = try await selectingOnly(spokenReply(), corrections: Corrections())
+        var attempt = SpokenAttempt(id: "a1", at: Date(timeIntervalSince1970: 1_700_000_000), text: "docs: Done.", voice: "af_heart")
+        attempt.audio = Data("RIFF-original".utf8)
+        attempt.reader = .natural
+        var asked: [String] = []
+        model.spokenAudio = { $0 == "r1" ? attempt : nil }
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent("spoken-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: destination) }
+        var revealed: [URL] = []
+        model.chooseSpokenAudioFolder = { asked.append("asked"); return destination }
+        model.revealInFinder = { revealed.append($0) }
+        let local = DateFormatter()
+        local.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        let name = "Spoken reply \(local.string(from: attempt.at))"
+        #expect(model.selectedSpokenAudio?.id == "a1")
+        model.saveSpokenAudio()
+        #expect(asked.count == 1)
+        let files = try FileManager.default.contentsOfDirectory(atPath: destination.path).sorted()
+        #expect(files == ["\(name) report.txt", "\(name).wav"])
+        let wav = destination.appendingPathComponent("\(name).wav")
+        #expect(try Data(contentsOf: wav) == Data("RIFF-original".utf8))
+        let report = try String(contentsOf: destination.appendingPathComponent("\(name) report.txt"), encoding: .utf8)
+        #expect(report.contains("Text read: docs: Done."))
+        #expect(revealed.map(\.lastPathComponent) == ["\(name).wav"])
+        model.saveSpokenAudio()
+        #expect(revealed.map(\.lastPathComponent) == ["\(name).wav", "\(name) 2.wav"])
+        #expect(FileManager.default.fileExists(atPath: destination.appendingPathComponent("\(name) 2 report.txt").path))
+    }
+
+    @Test func aSaveThatFailsHalfwayLeavesNothingBehindAndCanBeRetried() async throws {
+        let model = try await selectingOnly(spokenReply(), corrections: Corrections())
+        var attempt = SpokenAttempt(id: "a1", at: Date(timeIntervalSince1970: 1_700_000_000), text: "docs: Done.", voice: "af_heart")
+        attempt.audio = Data("RIFF".utf8)
+        model.spokenAudio = { _ in attempt }
+        let destination = FileManager.default.temporaryDirectory.appendingPathComponent("spoken-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: destination) }
+        model.chooseSpokenAudioFolder = { destination }
+        model.revealInFinder = { _ in }
+        model.writeFile = { data, url in
+            if url.lastPathComponent.hasSuffix("report.txt") { throw CocoaError(.fileWriteOutOfSpace) }
+            try data.write(to: url, options: .withoutOverwriting)
+        }
+        model.saveSpokenAudio()
+        #expect(try FileManager.default.contentsOfDirectory(atPath: destination.path).isEmpty)
+        #expect(model.statusMessage == "Couldn\u{2019}t save the generated audio.")
+        model.writeFile = { try $0.write(to: $1, options: .withoutOverwriting) }
+        model.saveSpokenAudio()
+        #expect(try FileManager.default.contentsOfDirectory(atPath: destination.path).count == 2)
+    }
+
+    @Test func noSpokenAudioIsOfferedOnceItIsGone() async throws {
+        let model = try await selectingOnly(spokenReply(), corrections: Corrections())
+        model.spokenAudio = { _ in nil }
+        #expect(model.selectedSpokenAudio == nil)
+        var withoutAudio = SpokenAttempt(id: "a1", at: Date(), text: "docs: Done.", voice: "af_heart")
+        withoutAudio.reader = .macOS
+        model.spokenAudio = { _ in withoutAudio }
+        #expect(model.selectedSpokenAudio == nil)
+    }
+
+    @Test func deletingAReplyForgetsItsSpokenAudio() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try store.append(spokenReply())
+        let model = model(store)
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.selection = model.groups.first?.rows.first?.id
+        var forgotten: [[String]] = []
+        model.forgetSpokenAudio = { forgotten.append($0) }
+        model.deleteSelected()
+        #expect(forgotten == [["r1"]])
+    }
+
     @Test func correctionsFromACommandGoToTheVoiceCommandsVocabulary() async throws {
         var command = entry("~/bin/deploy prod")
         command.outcome = .command

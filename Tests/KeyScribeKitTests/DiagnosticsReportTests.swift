@@ -58,6 +58,15 @@ private func report(
 }
 
 @Suite struct DiagnosticsReportTests {
+    @Test func recentSpokenRepliesAreListedOnlyWhenThereAreAny() {
+        var withReplies = report()
+        withReplies.spokenReplies = ["2026-11-10T19:34:05Z  read-by=natural  playback=finished"]
+        let rendered = withReplies.render()
+        #expect(rendered.contains("Recent spoken replies, held in memory"))
+        #expect(rendered.contains("  2026-11-10T19:34:05Z  read-by=natural  playback=finished"))
+        #expect(!report().render().contains("Recent spoken replies"))
+    }
+
     @Test func dictationLineCarriesNoTranscriptContent() {
         let line = DiagnosticsReport.DictationLine(contentBearingEntry())
         let mirrored = String(describing: Mirror(reflecting: line).children.map { "\($0.value)" })

@@ -119,6 +119,9 @@ final class DictationController {
     }
     private var session: DictationSession?
     weak var spokenUpdates: SpokenResultOutput?
+    var spokenAttempts: SpokenAttempts?
+    private(set) var lastSpokenReplyEntry: String?
+    var onSpokenReplyRecorded: ((_ attempt: String?, _ entry: String) -> Void)?
     var agents: AgentHub? {
         didSet {
             if agents !== oldValue { agentOutput.forgetReceipts() }
@@ -2119,11 +2122,24 @@ final class DictationController {
     }
 
     func recordSpokenReply(_ heard: SpokenResultOutput.Heard) {
-        agentOutput.recordSpokenReply(heard) {
+        spokenAttempts?.awaitLink(heard.attempt)
+        agentOutput.recordSpokenReply(heard, alone: {
             let mode = config.modes.first { $0.id == Mode.codingAgentId }
             guard !(mode?.excludeFromHistory ?? false) else { return nil }
             return (mode?.name ?? Mode.codingAgent.name, settings.history.retentionDays)
-        }
+        }, then: { [weak self] entry in
+            guard let self else { return }
+            self.spokenAttempts?.link(heard.attempt, to: entry)
+            guard let entry else { return }
+            self.lastSpokenReplyEntry = entry
+            self.onSpokenReplyRecorded?(heard.attempt, entry)
+        })
+    }
+
+    func forgetSpokenReplies(_ entries: [String]) -> Bool {
+        guard let last = lastSpokenReplyEntry, entries.contains(last) else { return false }
+        lastSpokenReplyEntry = nil
+        return true
     }
 
     func recordUnreadReply(_ unread: SpokenResultOutput.Unread, origin: String) {

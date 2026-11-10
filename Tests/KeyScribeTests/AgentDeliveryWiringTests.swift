@@ -486,6 +486,79 @@ struct AgentDeliveryWiringTests {
         #expect(entry?.spokenReply?.conversation == "keyscribe")
     }
 
+    @Test func aReplyReadAloudKeepsItsSpokenAudioWithItsEntryAndSaysWhichVoiceReadIt() async throws {
+        let rig = await rig("Run the tests.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        let attempts = SpokenAttempts()
+        rig.controller.spokenAttempts = attempts
+        await take(rig)
+        _ = await entries(rig, count: 1)
+        let attempt = attempts.begin(text: "keyscribe: The tests pass.", voice: "af_heart")
+        _ = attempts.begin(text: "a later preview", voice: "af_heart")
+        let original = attempts.begin(text: "keyscribe: The tests pass.", voice: "af_heart")
+        var spoken = heard("keyscribe: The tests pass.", origin: submittedRequest(rig))
+        spoken.attempt = original
+        spoken.reader = .macOS
+        spoken.reason = "the natural voice made silent audio"
+        var recorded: [(String?, String)] = []
+        rig.controller.onSpokenReplyRecorded = { recorded.append(($0, $1)) }
+        rig.controller.recordSpokenReply(spoken)
+        attempts.ended(original)
+        let entry = try #require(await replied(rig))
+        for _ in 0..<200 where recorded.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        #expect(recorded.map(\.0) == [original])
+        #expect(recorded.map(\.1) == [entry.id])
+        #expect(entry.spokenReply?.voice == "macos")
+        #expect(entry.spokenReply?.reason == "the natural voice made silent audio")
+        #expect(rig.controller.lastSpokenReplyEntry == entry.id)
+        #expect(!rig.controller.forgetSpokenReplies(["another"]))
+        #expect(rig.controller.forgetSpokenReplies([try #require(entry.id)]))
+        #expect(rig.controller.lastSpokenReplyEntry == nil)
+        _ = attempts.begin(text: "keyscribe: The tests pass.", voice: "af_heart")
+        #expect(attempts.attempt(forEntry: try #require(entry.id))?.id == original)
+        #expect(attempts.attempt(attempt) == nil)
+        attempts.forget(entries: [try #require(entry.id)])
+        #expect(attempts.attempt(original) == nil)
+    }
+
+    @Test func aReplyHistoryLeavesOutKeepsNoSpokenAudio() async {
+        var excluded = agentMode()
+        excluded.excludeFromHistory = true
+        let rig = await rig("Run the tests.", modes: [excluded], current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        let attempts = SpokenAttempts()
+        rig.controller.spokenAttempts = attempts
+        var spoken = heard("keyscribe: Done.", origin: nil)
+        spoken.attempt = attempts.begin(text: "keyscribe: Done.", voice: "af_heart")
+        rig.controller.recordSpokenReply(spoken)
+        attempts.ended(spoken.attempt)
+        #expect(attempts.attempt(spoken.attempt ?? "") == nil)
+    }
+
+    @Test func aReplyWhoseTakeWasDeletedBeforeItPlayedIsNotOfferedAndKeepsNoAudio() async throws {
+        let rig = await rig("Run the tests.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        let attempts = SpokenAttempts()
+        rig.controller.spokenAttempts = attempts
+        await take(rig)
+        let taken = try #require(await entries(rig, count: 1).first)
+        rig.history.delete(taken)
+        var recorded = 0
+        rig.controller.onSpokenReplyRecorded = { _, _ in recorded += 1 }
+        var spoken = heard("keyscribe: The tests pass.", origin: submittedRequest(rig))
+        spoken.attempt = attempts.begin(text: "keyscribe: The tests pass.", voice: "af_heart")
+        rig.controller.recordSpokenReply(spoken)
+        attempts.ended(spoken.attempt)
+        #expect(attempts.attempt(spoken.attempt ?? "") != nil)
+        for _ in 0..<200 where attempts.attempt(spoken.attempt ?? "") != nil {
+            try? await Task.sleep(for: .milliseconds(5))
+            rig.controller.waitForHistoryWrites()
+        }
+        #expect(attempts.attempt(spoken.attempt ?? "") == nil)
+        #expect(rig.controller.lastSpokenReplyEntry == nil)
+        #expect(recorded == 0)
+    }
+
     @Test func aReplyNotReadBecauseItsConversationWasInFrontSaysSoInItsTake() async {
         let rig = await rig("Run the tests.", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }

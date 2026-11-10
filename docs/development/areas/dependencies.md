@@ -76,6 +76,17 @@ cannot tell us these at runtime, so a bump re-checks them by hand:
   that process-wide state too, to the same values the app uses. On a bump, grep its error- and fault-level log calls for
   interpolated text (the input, a word, a transcript); one that appears breaks the no-content-logging
   rule and needs a stricter floor.
+- **That repeat takes still match, on each route.** `KeyScribe --voice-sweep <lines.txt>` makes every line
+  several times and reports each take's similarity to the first, with `--route gpu|cpu` choosing where
+  FluidAudio's noise and tail stages run (its default depends on the OS: `KokoroVoice.route` names the one in
+  use, and the spoken-audio report records it), `--overlap` and `--stop-first` for the concurrency windows.
+  Each take after the first also reports whether its samples are identical to the first take's. As measured
+  2026-11-10 on macOS 27 (Apple silicon), over two short sentences, repeat takes were sample-for-sample identical on
+  both routes, including takes made at the same time (`--overlap`); takes after a stop matched to a similarity
+  rounded to 1.000, measured before identity was reported. That says nothing about
+  macOS 26.x, where the default route differs and the CoreML compiler is different: a garbled reply reported there
+  needs the sweep run on that OS, with `--route gpu`, before anything is concluded. Keep private reply text out of
+  committed files. A route change ships only after a sweep and a soak on the OS it targets.
 - **That loading an installed voice still downloads nothing.** `KokoroVoice.isIntact` keeps a missing file
   from being fetched, but loading also runs FluidAudio's cache migration, which re-downloads any model bundle
   its compatibility check rejects. A bump that changes that check turns into a silent download at launch,

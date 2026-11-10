@@ -117,8 +117,18 @@ private struct SpokenVoiceRows: View {
         voiceRow
         if let error = voice.error {
             IssueText(error, severity: voice.status == .needsAttention ? .failure : .advisory)
-        } else if voice.status == .ready, voice.fellBack {
-            IssueText("The natural voice couldn\u{2019}t read the last reply, so the macOS voice read it.", severity: .advisory)
+        } else if voice.status == .ready, let reason = voice.fallbackReason {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                IssueText("The macOS voice read the last spoken update because \(reason).", severity: .advisory)
+                if let entry = voice.fallbackEntry, let show = voice.showEntry {
+                    Button("Show in History") { show(entry) }
+                        .buttonStyle(.link)
+                        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenVoiceShowInHistory)
+                }
+            }
+        }
+        if voice.status == .ready, let reason = voice.previewFallbackReason {
+            IssueText("The preview used the macOS voice because \(reason).", severity: .advisory)
         }
     }
 
@@ -184,7 +194,7 @@ private struct SpokenVoiceRows: View {
     }
 
     private func makePreview() -> NaturalSpeech {
-        let speech = SpeechSilencer.shared.registered(voice.makeSpeech())
+        let speech = SpeechSilencer.shared.registered(voice.makeSpeech(preview: true))
         speech.onFinished = { [weak speech] in
             guard let speech else { return }
             SpeechSilencer.shared.released(speech)

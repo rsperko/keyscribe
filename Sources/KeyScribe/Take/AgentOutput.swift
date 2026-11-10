@@ -49,24 +49,27 @@ final class AgentOutput {
     }
 
     func recordSpokenReply(
-        _ heard: SpokenResultOutput.Heard, at now: Date = Date(), alone: () -> (mode: String, retentionDays: Int)?
+        _ heard: SpokenResultOutput.Heard, at now: Date = Date(), alone: () -> (mode: String, retentionDays: Int)?,
+        then saved: @escaping @MainActor (_ entry: String?) -> Void = { _ in }
     ) {
-        guard keepsHistory(), reporter.keepsHistory else { return }
+        guard keepsHistory(), reporter.keepsHistory else { return saved(nil) }
         let reply = HistoryEntry.SpokenReply(
-            at: now, conversation: heard.name, text: heard.text, connection: heard.connection)
+            at: now, conversation: heard.name, text: heard.text, connection: heard.connection, voice: heard.reader?.rawValue,
+            reason: heard.reason)
         if let origin = heard.origin {
-            guard let take = recordedTakes.last(where: { $0.request == origin }) else { return }
+            guard let take = recordedTakes.last(where: { $0.request == origin }) else { return saved(nil) }
             reporter.update(id: take.id, near: take.at, { current in
                 var next = current
                 next.spokenReply = reply
                 return next
-            }, then: { _ in })
+            }, then: { saved($0 ? take.id : nil) })
             return
         }
-        guard let alone = alone() else { return }
+        guard let alone = alone() else { return saved(nil) }
+        let id = UUID().uuidString
         reporter.append(
-            AgentHistoryFacts.spokenReplyEntry(id: UUID().uuidString, mode: alone.mode, reply: reply),
-            retentionDays: alone.retentionDays, confirm: false)
+            AgentHistoryFacts.spokenReplyEntry(id: id, mode: alone.mode, reply: reply),
+            retentionDays: alone.retentionDays, then: { saved($0 ? id : nil) })
     }
 
     func recordUnreadReply(_ unread: SpokenResultOutput.Unread, origin: String, at now: Date = Date()) {

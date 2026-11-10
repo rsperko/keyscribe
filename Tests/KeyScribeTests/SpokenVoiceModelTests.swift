@@ -30,6 +30,7 @@ struct SpokenVoiceModelTests {
             get { lock.withLock { _intactChecks += 1; return _intact } }
             set { lock.withLock { _intact = newValue } }
         }
+        var synthesisBusy = false
         var synthesisFails: Bool {
             get { lock.withLock { _synthesisFails } }
             set { lock.withLock { _synthesisFails = newValue } }
@@ -54,9 +55,10 @@ struct SpokenVoiceModelTests {
             lock.withLock { _installed = false }
         }
 
-        func synthesize(_ text: String, voice: String) async throws -> Data {
+        func synthesize(_ text: String, voice: String) async throws -> SpokenAudio {
+            if synthesisBusy { throw WorkBusy() }
             if synthesisFails { throw CocoaError(.fileReadNoSuchFile) }
-            return Data(text.utf8)
+            return SpokenAudio(wav: Data(text.utf8))
         }
 
         func release() {
@@ -122,10 +124,12 @@ struct SpokenVoiceModelTests {
         await settled()
         #expect(model.status == .ready)
         #expect(model.fellBack)
+        #expect(model.fallbackReason == "the natural voice failed")
         installer.synthesisFails = false
         speech.speak("All done.", voice: nil)
         await settled()
         #expect(!model.fellBack)
+        #expect(model.fallbackReason == nil)
     }
 
     @Test func aDownloadReportsProgressThenTestsTheVoiceAndMarksItReady() async {
@@ -246,5 +250,51 @@ struct SpokenVoiceModelTests {
         model.confirmDelete()
         #expect(!player.isPlaying)
         #expect(!speech.isSpeaking)
+    }
+
+    @Test func aVoiceBusyWithEarlierAudioIsNotCheckedForMissingFiles() async {
+        let installer = FakeInstaller(installed: true)
+        installer.synthesisBusy = true
+        let model = SpokenVoiceModel(installer: installer)
+        let before = installer.intactChecks
+        let fallback = SpokenResultOutputTests.FakeSpeech()
+        let speech = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: fallback)
+        speech.speak("Done.", voice: nil)
+        for _ in 0..<400 where fallback.spoken.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(fallback.spoken.map(\.text) == ["Done."])
+        #expect(installer.intactChecks == before)
+    }
+
+    @Test func aPreviewThatFallsBackSaysSoOnItsOwnAndLeavesTheReplyAdvisoryAlone() async {
+        let installer = FakeInstaller(installed: true)
+        let model = SpokenVoiceModel(installer: installer)
+        let preview = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), preview: true)
+        installer.synthesisFails = true
+        preview.speak("Sample.", voice: nil)
+        await settled()
+        #expect(model.previewFallbackReason == "the natural voice failed")
+        #expect(model.fallbackReason == nil)
+        installer.synthesisFails = false
+        preview.speak("Sample.", voice: nil)
+        await settled()
+        #expect(model.previewFallbackReason == nil)
+    }
+
+    @Test func theReplyAdvisoryLinksOnlyToTheEntryOfTheAttemptItDescribes() async {
+        let installer = FakeInstaller(installed: true)
+        let model = SpokenVoiceModel(installer: installer)
+        let attempts = SpokenAttempts()
+        let speech = model.makeSpeech(player: NaturalSpeechTests.FakePlayer(), fallback: SpokenResultOutputTests.FakeSpeech(), attempts: attempts)
+        installer.synthesisFails = true
+        speech.speak("docs: Done.", voice: nil)
+        await settled()
+        let failed = speech.attempt
+        model.replySaved(attempt: "another attempt", entry: "unrelated")
+        #expect(model.fallbackEntry == nil)
+        model.replySaved(attempt: failed, entry: "e1")
+        #expect(model.fallbackEntry == "e1")
+        speech.speak("a notice", voice: nil)
+        await settled()
+        #expect(model.fallbackEntry == nil)
     }
 }

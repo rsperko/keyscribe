@@ -8,7 +8,7 @@ protocol VoiceInstalling: AnyObject, Sendable {
     func verify() async -> Bool
     func setInstalled(_ installed: Bool) throws
     func remove() async throws
-    func synthesize(_ text: String, voice: String) async throws -> Data
+    func synthesize(_ text: String, voice: String) async throws -> SpokenAudio
 }
 
 @MainActor
@@ -27,7 +27,17 @@ final class SpokenVoiceModel: ObservableObject {
     @Published private(set) var status: Status
     @Published private(set) var error: String?
     @Published var pendingDelete = false
-    @Published private(set) var fellBack = false
+    @Published private(set) var fallbackReason: String?
+    @Published private(set) var fallbackEntry: String?
+    @Published private(set) var previewFallbackReason: String?
+    private var fallbackAttempt: String?
+    var fellBack: Bool { fallbackReason != nil }
+    var showEntry: ((String) -> Void)?
+
+    func replySaved(attempt: String?, entry: String) {
+        guard let attempt, attempt == fallbackAttempt else { return }
+        fallbackEntry = entry
+    }
     private let installer: any VoiceInstalling
     private var speakers: [WeakSpeech] = []
 
@@ -56,7 +66,10 @@ final class SpokenVoiceModel: ObservableObject {
 
     var isReady: Bool { status == .ready }
 
-    func makeSpeech(player: any AudioPlaying = WAVPlayer(), fallback: any SpeechSynthesizing = SystemSpeech()) -> NaturalSpeech {
+    func makeSpeech(
+        player: any AudioPlaying = WAVPlayer(), fallback: any SpeechSynthesizing = SystemSpeech(), attempts: SpokenAttempts? = nil,
+        preview: Bool = false
+    ) -> NaturalSpeech {
         let installer = installer
         let speech = NaturalSpeech(
             ready: { [weak self] in self?.isReady ?? false },
@@ -64,19 +77,20 @@ final class SpokenVoiceModel: ObservableObject {
                 do {
                     return try await installer.synthesize(text, voice: voice)
                 } catch {
-                    await MainActor.run { self?.resultFailed() }
+                    if !(error is WorkBusy) { await MainActor.run { self?.resultFailed() } }
                     throw error
                 }
             },
             player: player, fallback: fallback,
-            outcome: { [weak self] natural in
+            outcome: { [weak self] natural, reason, attempt in
                 guard let self else { return }
-                if natural {
-                    self.fellBack = false
-                } else if self.status == .ready {
-                    self.fellBack = true
-                }
-            })
+                let shown = natural || self.status != .ready ? nil : reason ?? "the natural voice failed"
+                guard !preview else { return self.previewFallbackReason = shown }
+                guard natural || shown != nil else { return }
+                self.fallbackReason = shown
+                self.fallbackAttempt = shown == nil ? nil : attempt
+                self.fallbackEntry = nil
+            }, attempts: attempts)
         speakers = speakers.filter { $0.speech != nil } + [WeakSpeech(speech: speech)]
         return speech
     }

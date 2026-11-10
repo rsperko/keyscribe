@@ -22,6 +22,27 @@ struct HistorySpokenReplyTests {
         #expect(try HistoryEntry(jsonLine: line) == original)
     }
 
+    @Test func theVoiceThatReadAReplySurvivesTheStoreAsAStableIdentifier() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("spoken-voice-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = HistoryStore(supportDir: dir)
+        var saved = entry(reply: .init(
+            at: at, conversation: "docs", text: "docs: Done.", voice: SpokenAttempt.Reader.macOS.rawValue,
+            reason: "the natural voice took too long"))
+        saved.id = "r1"
+        try store.append(saved)
+        let line = try saved.jsonLine()
+        #expect(line.contains("\"voice\":\"macos\""))
+        #expect(store.entries(limit: 1, where: { _ in true }).first?.spokenReply?.voice == "macos")
+        #expect(store.entries(limit: 1, where: { _ in true }).first?.spokenReply?.reason == "the natural voice took too long")
+        #expect(SpokenAttempt.Reader(rawValue: "natural") == .natural)
+    }
+
+    @Test func aSupportReportSaysWhichVoiceReadTheReply() {
+        let spoken = entry(reply: .init(at: at, conversation: "docs", text: "docs: Done.", voice: "natural"))
+        #expect(SupportReport.render(entry: spoken, appName: "KeyScribe", setup: "").contains("\"voice\" : \"natural\""))
+    }
+
     @Test func anEntryWithoutASpokenReplyDecodesToNil() throws {
         let line = try entry(heard: "run the tests", result: "run the tests", reply: nil).jsonLine()
         #expect(!line.contains("spoken_reply"))

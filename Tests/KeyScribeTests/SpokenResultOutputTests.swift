@@ -32,6 +32,9 @@ struct SpokenResultOutputTests {
     }
 
     final class FakeSpeech: SpeechSynthesizing {
+        var attempt: String?
+        var reader: SpokenAttempt.Reader?
+        var macOSReason: String?
         var onStarted: (() -> Void)?
         var onFinished: (() -> Void)?
         var isSpeaking = false
@@ -169,6 +172,20 @@ struct SpokenResultOutputTests {
         #expect(heard() == [.init(conversation: "pi:s1", name: "api", text: "api: Done.", connection: nil, origin: "r1")])
         speech.finish()
         #expect(heard().count == 1)
+    }
+
+    @Test func aReplyIsReportedWithTheAttemptThatSpokeItAndTheVoiceThatReadIt() async {
+        let (output, speech, _) = make()
+        let heard = listening(output)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.", origin: "r1")
+        await settled()
+        speech.attempt = "attempt-1"
+        speech.reader = .macOS
+        speech.macOSReason = "the natural voice took too long"
+        speech.start()
+        #expect(heard().map(\.attempt) == ["attempt-1"])
+        #expect(heard().map(\.reader) == [.macOS])
+        #expect(heard().map(\.reason) == ["the natural voice took too long"])
     }
 
     @Test func aSummaryIsReportedWithTheServiceThatWroteIt() async {

@@ -122,7 +122,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let modes: ModesSettingsModel
     let codingAgents: CodingAgentsSettingsModel
     private let aiServices: AIServiceSettingsModel
-    private let history: HistoryPaneModel
+    let history: HistoryPaneModel
     var rewriteAgain: ((HistoryEntry) async -> DictationController.RewriteAgain)? {
         didSet { history.rewriteAgain = rewriteAgain }
     }

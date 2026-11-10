@@ -251,3 +251,23 @@ struct SpeakingHUDPlacementTests {
         #expect(!fits.captionScrolls)
     }
 }
+
+@MainActor
+struct LastReplyMenuTests {
+    @Test func theLastReplyItemAppearsOnceAReplyIsInHistoryAndOpensIt() throws {
+        let menu = MenuBarController()
+        menu.install()
+        let item = menu.lastReplyMenuItem
+        #expect(item.title == "Last Reply in History\u{2026}")
+        #expect(item.isHidden)
+        menu.setLastReply(available: true)
+        #expect(!item.isHidden)
+        var opened = 0
+        menu.onOpenLastReply = { opened += 1 }
+        let action = try #require(item.action)
+        NSApp.sendAction(action, to: item.target, from: item)
+        #expect(opened == 1)
+        menu.setLastReply(available: false)
+        #expect(item.isHidden)
+    }
+}

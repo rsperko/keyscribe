@@ -592,6 +592,12 @@ again"** as the whole dictation, with either the Coding agent or the Voice Comma
 agent shortcut, a longer dictation that starts that way is sent to the agent as usual. A conversation that is in front of you when it finishes is
 skipped, since you can already see its reply, unless you asked for that reply to be read aloud. If KeyScribe can't tell what is in front, for example because
 your terminal hasn't been given Automation access for voice commands yet, the summary still plays.
+If a reply sounded wrong, choose **Last Reply in History…** in the menu bar menu. **Play Generated Audio** plays the
+audio KeyScribe generated for it, **Read with macOS Voice** reads it with the macOS voice, and **Save Generated
+Audio…** saves that audio and a report about it into a folder you choose, for a bug report. If the macOS voice read
+the reply because the natural voice's audio was rejected, the audio you can play is that rejected take, not what you
+heard. That audio is kept
+in memory for an hour while KeyScribe is running, only for replies History saved.
 KeyScribe does not save replies or summaries. A local service such as oMLX keeps the reply on your Mac.
 
 ### Can I type to the agent and still hear when it's done?

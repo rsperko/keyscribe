@@ -78,6 +78,30 @@ every rule above applies to it, with these sharpenings:
   (`HistoryEntry.spokenReply`), never in `heard`, `transformed` or `result`, so nothing that learns from the user's
   speech reads it. It joins the dictation that asked for it only when that dictation was kept, and otherwise stands
   alone only under the Coding agent mode's History choice. It is still never logged.
+- **Spoken audio is in memory only, and follows History.** Each reply the natural voice makes is one
+  `SpokenAttempt` in `SpokenAttempts`: the text sent to the voice, the exact WAV handed to the player, the voice's
+  details, and how playback ended. `DictationController.recordSpokenReply` holds the attempt while its History write
+  runs and links it only once the write reports success, which is also when "Last Reply in History…" moves to it; a
+  failed write or a take deleted meanwhile links nothing. An attempt no entry holds is dropped when its playback
+  ends, so repeats, notices and previews keep nothing past it. `SpokenAttempts` removes every attempt an hour after
+  it began on a timer, not on the next lookup, and that is why retention pruning needs no link cleanup: retention
+  drops only whole days, the shortest choice outlasts the hour (pinned by
+  `TakeReporterTests.everyRetentionChoiceOutlastsHeldSpokenAudio`), and even a hand-set shorter value is bounded by
+  the same timer, and `SpokenAttemptLog` also bounds count and bytes; deleting the
+  entry or quitting drops it at once. Nothing reaches disk unless the user chooses **Save Generated Audio…**, which
+  exports the held bytes and never makes the audio again; **Play Generated Audio** plays those same bytes through `HeldAudioSpeech` and the
+  silencer, and records nothing. `HistorySpeech` switches between it and the macOS voice inside the silencer's
+  claim, so a reply queued behind it stays queued instead of starting and being cut off. The diagnostics report lists the recent attempts' metadata without their text
+  (`SpokenAttempt.diagnosticLine`). Why the macOS voice read a reply is fixed wording, so it is kept with the entry
+  (`spoken_reply.reason`); the audio is not. Attempt text, phonemes and normalized text are content: never log them.
+- **One synthesis at a time on the natural voice.** `KokoroVoice` admits replies, previews and the install check
+  through one `InFlightWork.runAlone` gate, held until the work truly returns, not when it is cancelled or times
+  out. Anything that finds it busy (a reply right after a stop, or a preview) waits up to `NaturalSpeech.busyWait`
+  for the earlier work to settle, inside its own deadline, and only then goes to the macOS voice; the cap on
+  unfinished syntheses keeps a wedged one from making every later reply wait. Removal closes admission, including
+  warming, before it waits. The output device is read off the main actor and only when the natural voice made audio. Audio with invalid samples, none, or no audible level (`SpokenAudioCheck`) never
+  plays. The check cannot tell intelligible speech from right-length noise, so never word a fallback as having
+  detected garbling.
 - **Clipboard files reach an agent by path.** In a Coding agent take, copied files become their paths, and an
   image or PDF is saved under `AgentClipboard.defaultFolder` and becomes its path. Files older than
   `AgentClipboard.keptFor` are pruned at launch, every `AgentClipboard.pruneEvery`, and on each save. A saved

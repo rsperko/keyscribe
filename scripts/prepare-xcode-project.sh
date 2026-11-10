@@ -12,6 +12,9 @@
 # packages' pins). Every pin in upstream's Package.resolved must appear in that lockfile at the same
 # revision, or this fails naming the first one that differs, before anything is generated.
 #
+# The stamped FluidAudio revision is read from upstream's Package.resolved even when a lockfile is passed: the
+# pin check below makes the two agree, so reading upstream's keeps one source for it.
+#
 # Frozen resolution alone is not the guard: `-disableAutomaticPackageResolution` rejects a lockfile that
 # violates the manifest but silently keeps one that merely drifted inside a version range. Copying the
 # lockfile in before every build is what keeps the Xcode graph identical to `swift build`'s.
@@ -107,7 +110,8 @@ BUILD_VERSION="${KEYSCRIBE_BUILD:-$(git rev-list --count HEAD 2>/dev/null || tru
 [ -z "$BUILD_VERSION" ] && BUILD_VERSION="1"
 SCM_REVISION="${KEYSCRIBE_SCM_REVISION:-$(git rev-parse HEAD 2>/dev/null || true)}"
 [ -z "$SCM_REVISION" ] && SCM_REVISION="unknown"
-log "== version $SHORT_VERSION (build $BUILD_VERSION), scm $SCM_REVISION =="
+FLUIDAUDIO_REVISION="$(python3 -c 'import json,sys; pins={p["identity"]: p["state"].get("revision", "") for p in json.load(open(sys.argv[1]))["pins"]}; print(pins.get("fluidaudio") or "unknown")' "$ROOT/Package.resolved" 2>/dev/null || echo unknown)"
+log "== version $SHORT_VERSION (build $BUILD_VERSION), scm $SCM_REVISION, FluidAudio $FLUIDAUDIO_REVISION =="
 
-printf 'MARKETING_VERSION=%s\nCURRENT_PROJECT_VERSION=%s\nKEYSCRIBE_SCM_REVISION=%s\n' \
-  "$SHORT_VERSION" "$BUILD_VERSION" "$SCM_REVISION"
+printf 'MARKETING_VERSION=%s\nCURRENT_PROJECT_VERSION=%s\nKEYSCRIBE_SCM_REVISION=%s\nKEYSCRIBE_FLUIDAUDIO_REVISION=%s\n' \
+  "$SHORT_VERSION" "$BUILD_VERSION" "$SCM_REVISION" "$FLUIDAUDIO_REVISION"

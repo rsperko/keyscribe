@@ -1,3 +1,4 @@
+import CoreML
 import FluidAudio
 import Foundation
 import KeyScribeKit
@@ -9,8 +10,51 @@ enum DependencyLogging {
     }
 }
 
+struct SpokenAudio: Sendable, Equatable {
+    struct Unusable: Error {
+        let problem: SpokenAudioCheck.Problem
+        let audio: SpokenAudio?
+    }
+
+    var wav: Data
+    var synthesis: SpokenAttempt.Synthesis?
+
+    static func made(from result: KokoroAneSynthesisResult) throws -> SpokenAudio {
+        let problem = SpokenAudioCheck.problem(in: result.samples)
+        if problem == .invalidSamples || problem == .empty { throw Unusable(problem: problem ?? .empty, audio: nil) }
+        let timings = result.timings
+        let stages: [(String, Double)] = [
+            ("albert", timings.albert), ("postAlbert", timings.postAlbert), ("alignment", timings.alignment),
+            ("prosody", timings.prosody), ("noise", timings.noise), ("vocoder", timings.vocoder), ("tail", timings.tail),
+        ]
+        let audio = SpokenAudio(
+            wav: try AudioWAV.data(from: result.samples, sampleRate: Double(result.sampleRate), normalize: false),
+            synthesis: SpokenAttempt.Synthesis(
+                normalizedText: result.normalizedText, phonemes: result.phonemes, predictedDurations: result.predictedDurations,
+                stageMilliseconds: stages.map { .init(label: $0.0, value: String(format: "%.1f", $0.1)) },
+                sampleRate: result.sampleRate, measurements: SpokenAudioCheck.measure(result.samples, sampleRate: result.sampleRate)))
+        if let problem { throw Unusable(problem: problem, audio: audio) }
+        return audio
+    }
+}
+
 actor KokoroVoice: VoiceInstalling {
     struct NotInstalled: Error {}
+
+    nonisolated static var route: String { route(KokoroAneComputeUnits.default) }
+
+    nonisolated static func route(_ units: KokoroAneComputeUnits) -> String {
+        func place(_ unit: MLComputeUnits) -> String {
+            switch unit {
+            case .cpuOnly: "CPU"
+            case .cpuAndGPU: "CPU and GPU"
+            case .cpuAndNeuralEngine: "CPU and Neural Engine"
+            case .all: "any"
+            @unknown default: "unknown (\(unit.rawValue))"
+            }
+        }
+        return "vocoder on \(place(units.vocoder)), noise on \(place(units.noise)), tail on \(place(units.tail))"
+    }
 
     static let shared = KokoroVoice(
         directory: KeyScribePaths.modelsDir.appendingPathComponent("kokoro-voice", isDirectory: true),
@@ -24,7 +68,8 @@ actor KokoroVoice: VoiceInstalling {
     private nonisolated let pronunciationDirectory: @Sendable () -> URL?
     private nonisolated var marker: URL { directory.appendingPathComponent(".installed") }
     private var loading: Task<KokoroAneManager, any Error>?
-    private let speaking = InFlightWork<Data>()
+    private let speaking = InFlightWork<KokoroAneSynthesisResult>()
+    private var removing = false
 
     init(directory: URL, pronunciationDirectory: @escaping @Sendable () -> URL?) {
         self.directory = directory
@@ -45,6 +90,7 @@ actor KokoroVoice: VoiceInstalling {
     }
 
     func download(progress: @escaping @Sendable (ModelLoadProgress) -> Void) async throws {
+        removing = false
         KeyScribePaths.ensureModelsDir()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let phase = "Downloading voice\u{2026}"
@@ -64,9 +110,12 @@ actor KokoroVoice: VoiceInstalling {
     }
 
     func verify() async -> Bool {
-        guard let result = try? await loaded().synthesizeDetailed(text: SpokenVoices.sample, voice: SpokenVoices.recommended)
+        guard !removing,
+              let result = try? await speaking.runAlone(waitingUpTo: .seconds(30), {
+                  try await self.loaded().synthesizeDetailed(text: SpokenVoices.sample, voice: SpokenVoices.recommended)
+              })
         else { return false }
-        return result.samples.count > result.sampleRate / 2 && (result.samples.map(abs).max() ?? 0) > 0.01
+        return result.samples.count > result.sampleRate / 2 && SpokenAudioCheck.problem(in: result.samples) == nil
     }
 
     nonisolated func setInstalled(_ installed: Bool) throws {
@@ -78,6 +127,7 @@ actor KokoroVoice: VoiceInstalling {
     }
 
     func remove() async throws {
+        removing = true
         await speaking.cancelAndWait()
         let pending = loading
         loading = nil
@@ -88,13 +138,16 @@ actor KokoroVoice: VoiceInstalling {
     }
 
     func warm() async {
-        guard isInstalled, isIntact else { return }
+        guard !removing, isInstalled, isIntact else { return }
         _ = try? await loaded()
     }
 
-    func synthesize(_ text: String, voice: String) async throws -> Data {
-        guard isInstalled, isIntact else { throw NotInstalled() }
-        return try await speaking.run { try await self.loaded().synthesize(text: text, voice: voice) }
+    func synthesize(_ text: String, voice: String) async throws -> SpokenAudio {
+        guard !removing, isInstalled, isIntact else { throw NotInstalled() }
+        let result = try await speaking.runAlone {
+            try await self.loaded().synthesizeDetailed(text: text, voice: voice)
+        }
+        return try SpokenAudio.made(from: result)
     }
 
     private func loaded() async throws -> KokoroAneManager {

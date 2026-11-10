@@ -135,7 +135,7 @@ KEYSCRIBE_VERSION=1.2.0 KEYSCRIBE_BUILD=42 KEYSCRIBE_SCM_REVISION="$(git rev-par
 
 It fails, naming the first one, if any upstream pin is missing from your lockfile or sits at a different
 revision: update those pins to upstream's and keep your own. On success it prints `MARKETING_VERSION`,
-`CURRENT_PROJECT_VERSION`, and `KEYSCRIBE_SCM_REVISION` settings, one per line. Pass them to `xcodebuild`
+`CURRENT_PROJECT_VERSION`, `KEYSCRIBE_SCM_REVISION`, and `KEYSCRIBE_FLUIDAUDIO_REVISION` settings, one per line. Pass them to `xcodebuild`
 together with `-disableAutomaticPackageResolution -xcconfig ../keyscribe/App/Config/Packages.xcconfig`.
 Signing identity, entitlements, hardened runtime, updater, and export options stay on your target;
 upstream's Sparkle updater is linked only by the public `KeyScribe` target and never by the template.

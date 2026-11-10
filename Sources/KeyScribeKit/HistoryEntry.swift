@@ -41,11 +41,17 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         public var conversation: String
         public var text: String
         public var connection: String?
-        public init(at: Date, conversation: String, text: String, connection: String? = nil) {
+        public var voice: String?
+        public var reason: String?
+        public init(
+            at: Date, conversation: String, text: String, connection: String? = nil, voice: String? = nil, reason: String? = nil
+        ) {
             self.at = at
             self.conversation = conversation
             self.text = text
             self.connection = connection
+            self.voice = voice
+            self.reason = reason
         }
     }
 

@@ -31,6 +31,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var agentRuntime: AgentRuntime?
     private var spokenResult: SpokenResultOutput?
     private let spokenVoice = SpokenVoiceModel(installer: KokoroVoice.shared)
+    private let spokenAttempts = SpokenAttempts()
+    private lazy var historySpeech = HistorySpeech()
     private let llmClient = HTTPLLMClient()
     private var configRepository: ConfigRepository!
     // Legacy crash recovery for audio state markers written by earlier builds.
@@ -354,6 +356,29 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
         settingsController.onErrorsChanged = { [weak self] in self?.menu.setErrorBadge($0) }
         settingsController.codingAgents.voice = spokenVoice
+        controller.spokenAttempts = spokenAttempts
+        let history = settingsController.history
+        history.spokenAudio = { [spokenAttempts] in spokenAttempts.attempt(forEntry: $0) }
+        history.forgetSpokenAudio = { [weak self, spokenAttempts] ids in
+            spokenAttempts.forget(entries: ids)
+            if self?.controller.forgetSpokenReplies(ids) == true { self?.menu.setLastReply(available: false) }
+        }
+        history.readWithMacOSVoice = { [weak self] text, onEnd in self?.historySpeech.read(text, onEnd: onEnd) ?? .failed }
+        spokenAttempts.onChange = { [weak history] in history?.spokenAudioChanged() }
+        history.playHeldAudio = { [weak self] audio, onEnd in self?.historySpeech.play(audio, onEnd: onEnd) ?? .failed }
+        history.stopHistorySpeech = { [weak self] in self?.historySpeech.stop() }
+        controller.onSpokenReplyRecorded = { [weak self] attempt, entry in
+            self?.menu.setLastReply(available: true)
+            self?.spokenVoice.replySaved(attempt: attempt, entry: entry)
+        }
+        let showEntry = { [weak self] (entry: String) in
+            self?.settingsController.present(.history)
+            history.show(entry: entry)
+        }
+        menu.onOpenLastReply = { [weak self] in
+            if let entry = self?.controller.lastSpokenReplyEntry { showEntry(entry) }
+        }
+        spokenVoice.showEntry = showEntry
         applyCodingAgents()
         correctionPanel.openSharedVocabulary = { [weak self] id, draft in
             self?.settingsController.presentSharedVocabulary(id: id, draft: draft)
@@ -751,7 +776,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 settingsController.codingAgents.onCheckAgain = { [weak hub = runtime.hub] in Task { await hub?.rescan(rereadingTitles: true) } }
                 showCodingAgents(runtime.hub)
                 let spoken = SpokenResultOutput(
-                    client: llmClient, permits: AIServiceCatalog.permits, speech: spokenVoice.makeSpeech(),
+                    client: llmClient, permits: AIServiceCatalog.permits, speech: spokenVoice.makeSpeech(attempts: spokenAttempts),
                     settings: { [weak self] in self?.settings.codingAgents.spokenResult ?? SpokenResultSettings() },
                     connection: { [weak self] id in self?.config.connections.connection(id: id) },
                     warm: { Task { await KokoroVoice.shared.warm() } },

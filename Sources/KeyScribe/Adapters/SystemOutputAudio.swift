@@ -16,6 +16,25 @@ enum SystemOutputAudio {
         return status == noErr && deviceID != 0 ? deviceID : nil
     }
 
+    static func defaultOutputDescription() -> String? {
+        guard let device = defaultOutputDeviceID() else { return nil }
+        var nameAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var nameSize = UInt32(MemoryLayout<CFString?>.size)
+        var name: Unmanaged<CFString>?
+        let named = withUnsafeMutablePointer(to: &name) {
+            AudioObjectGetPropertyData(device, &nameAddress, 0, nil, &nameSize, $0)
+        } == noErr
+        var rateAddress = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyNominalSampleRate, mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var rate = Float64(0)
+        var rateSize = UInt32(MemoryLayout<Float64>.size)
+        let rated = AudioObjectGetPropertyData(device, &rateAddress, 0, nil, &rateSize, &rate) == noErr
+        let label = named ? (name?.takeRetainedValue() as String?) ?? "Unknown device" : "Unknown device"
+        return rated ? "\(label), \(Int(rate)) Hz" : label
+    }
+
     // level: 0 = silence, 1 = full volume. Returns false when AudioDeviceDuck is unavailable.
     @discardableResult
     static func duck(_ level: Float32, on device: AudioDeviceID) -> Bool {

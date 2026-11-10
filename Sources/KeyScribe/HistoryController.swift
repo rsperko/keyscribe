@@ -52,7 +52,14 @@ struct HistoryRow: Identifiable, Sendable {
 @MainActor
 final class HistoryPaneModel: ObservableObject {
     @Published var query = "" { didSet { scheduleRecompute() } }
-    @Published var selection: HistoryRow.ID? { didSet { if selection != oldValue { refreshHints() } } }
+    @Published var selection: HistoryRow.ID? {
+        didSet {
+            guard selection != oldValue else { return }
+            refreshHints()
+            if speaking != nil { stopSpeaking() }
+        }
+    }
+    private var wantedSelection: HistoryRow.ID?
     @Published private(set) var groups: [(day: String, rows: [HistoryRow])] = []
     @Published private(set) var isLoading = false
     @Published private(set) var statusMessage: String?
@@ -83,6 +90,17 @@ final class HistoryPaneModel: ObservableObject {
     var openSettings: (SettingsDestination) -> Void
     var copyText: ((String) -> Void)?
     var pasteText: ((String) -> Void)?
+    enum Speaking: Equatable { case audio, macOSVoice }
+    var readWithMacOSVoice: ((String, @escaping () -> Void) -> HistorySpeech.Start)?
+    var spokenAudio: ((String) -> SpokenAttempt?)?
+    var forgetSpokenAudio: (([String]) -> Void)?
+    var chooseSpokenAudioFolder: @MainActor () -> URL? = HistoryPaneModel.askForSpokenAudioFolder
+    var revealInFinder: @MainActor (URL) -> Void = { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
+    var writeFile: (Data, URL) throws -> Void = { try $0.write(to: $1, options: .withoutOverwriting) }
+    var playHeldAudio: ((Data, @escaping () -> Void) -> HistorySpeech.Start)?
+    var stopHistorySpeech: (() -> Void)?
+    @Published private(set) var speaking: Speaking?
+    @Published private(set) var spokenAudioChanges = 0
     var rewriteAgain: ((HistoryEntry) async -> DictationController.RewriteAgain)?
     var mishearingHints: ((HistoryEntry) async -> [MishearingHint.Suggestion])?
     @Published private(set) var hints: [MishearingHint.Suggestion] = []
@@ -137,6 +155,8 @@ final class HistoryPaneModel: ObservableObject {
     // Drop everything held for the visible window so a closed History window retains no parsed
     // transcripts or the full-store search cache; the next open re-reads from disk.
     func releaseForClose() {
+        stopSpeaking()
+        wantedSelection = nil
         loadGeneration &+= 1
         recomputeTask?.cancel(); searchTask?.cancel(); statusTask?.cancel()
         selectionTask?.cancel(); reloadTask?.cancel()
@@ -286,6 +306,18 @@ final class HistoryPaneModel: ObservableObject {
     // resets a selection assigned before its rows are in the view tree, so we wait for the rows to commit.
     private func resolveSelection() {
         let visible = Set(groups.flatMap { $0.rows.map(\.id) })
+        if let wanted = wantedSelection, !visible.contains(wanted) {
+            wantedSelection = nil
+            flash("That reply is no longer in History.")
+        } else if let wanted = wantedSelection {
+            wantedSelection = nil
+            selectionTask?.cancel()
+            selectionTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(50))
+                self?.selection = wanted
+            }
+            return
+        }
         if let selection, visible.contains(selection) { return }
         selectionTask?.cancel()
         selectionTask = Task { @MainActor [weak self] in
@@ -317,6 +349,93 @@ final class HistoryPaneModel: ObservableObject {
     func copyResult() { if let r = selected?.result, !r.isEmpty { copyText?(r) } }
     func copyHeard() { if let h = selected?.heard, !h.isEmpty { copyText?(h) } }
     func copyReply() { if let r = selected?.spokenReply?.text, !r.isEmpty { copyText?(r) } }
+
+    func readReplyWithMacOSVoice() {
+        guard let reply = selected?.spokenReply?.text, !reply.isEmpty, let readWithMacOSVoice else { return }
+        begin(.macOSVoice) { readWithMacOSVoice(reply, $0) }
+    }
+
+    func playSpokenAudio() {
+        guard let audio = selectedSpokenAudio?.audio, let playHeldAudio else { return }
+        begin(.audio) { playHeldAudio(audio, $0) }
+    }
+
+    var canPlaySpokenAudio: Bool { selectedSpokenAudio.map { $0.playback != .playing } ?? false }
+
+    func stopSpeaking() {
+        stopHistorySpeech?()
+        speaking = nil
+    }
+
+    private func begin(_ kind: Speaking, _ start: (@escaping () -> Void) -> HistorySpeech.Start) {
+        speaking = kind
+        switch start({ [weak self] in if self?.speaking == kind { self?.speaking = nil } }) {
+        case .started: break
+        case .dictating:
+            speaking = nil
+            flash("Can\u{2019}t play speech while you\u{2019}re dictating. Try again when you\u{2019}re done.")
+        case .failed:
+            speaking = nil
+            flash(kind == .audio ? "Couldn\u{2019}t play the generated audio." : "Couldn\u{2019}t read the reply aloud.")
+        }
+    }
+
+    func show(entry id: String) {
+        wantedSelection = "id|\(id)"
+        if !query.isEmpty { query = "" }
+        reload()
+    }
+
+    func spokenAudioChanged() { spokenAudioChanges += 1 }
+
+    var selectedSpokenAttempt: SpokenAttempt? { selected?.id.flatMap { spokenAudio?($0) } }
+
+    var selectedSpokenAudio: SpokenAttempt? { selectedSpokenAttempt?.audio == nil ? nil : selectedSpokenAttempt }
+
+    func saveSpokenAudio() {
+        guard let attempt = selectedSpokenAudio, let audio = attempt.audio, let folder = chooseSpokenAudioFolder() else { return }
+        let base = "Spoken reply \(Self.folderStamp.string(from: attempt.at))"
+        var name = base
+        var copy = 2
+        func files(_ name: String) -> (wav: URL, report: URL) {
+            (folder.appendingPathComponent("\(name).wav"), folder.appendingPathComponent("\(name) report.txt"))
+        }
+        while [files(name).wav, files(name).report].contains(where: { FileManager.default.fileExists(atPath: $0.path) }) {
+            name = "\(base) \(copy)"
+            copy += 1
+        }
+        let (wav, report) = files(name)
+        var written: [URL] = []
+        do {
+            try writeFile(audio, wav)
+            written.append(wav)
+            try writeFile(Data(attempt.report(appName: Branding.appName).utf8), report)
+            written.append(report)
+            revealInFinder(wav)
+            flash("Saved the generated audio and a report, and showed them in Finder.")
+        } catch {
+            for url in written { try? FileManager.default.removeItem(at: url) }
+            flash("Couldn\u{2019}t save the generated audio.")
+        }
+    }
+
+    private static let folderStamp: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        return formatter
+    }()
+
+    static func askForSpokenAudioFolder() -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose where to save the generated audio and a report about it."
+        panel.prompt = "Save Here"
+        return panel.runModal() == .OK ? panel.url : nil
+    }
     func pasteResult() { if let r = selected?.result, !r.isEmpty { pasteText?(r) } }
     // Likely mishearings of dictionary words in the selected dictation, for the user to judge. A command or a
     // Coding agent message is left out: its words were not dictated text.
@@ -443,6 +562,7 @@ final class HistoryPaneModel: ObservableObject {
         guard let entry = selected, !rewritingAgain else { return }
         switch store.delete(entry) {
         case .deleted, .notFound:
+            if let id = entry.id { forgetSpokenAudio?([id]) }
             if unsavedRewrite?.id == entry.id { unsavedRewrite = nil }
             reload()
         case .writeFailed: flash("Could not delete this entry.")
@@ -918,9 +1038,65 @@ private struct HistoryDetailView: View {
             detailRow("From", reply.conversation)
             detailRow("Read at", reply.at.formatted(date: .omitted, time: .standard))
             if let connection = reply.connection { detailRow("Summarized by", connection) }
+            spokenAudio(reply)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.History.spokenReply)
+    }
+
+    @ViewBuilder private func spokenAudio(_ reply: HistoryEntry.SpokenReply) -> some View {
+        let attempt = model.selectedSpokenAttempt
+        if let reader = reply.voice.flatMap(SpokenAttempt.Reader.init(rawValue:)) {
+            detailRow("Read by", reader.label.prefix(1).uppercased() + reader.label.dropFirst())
+        }
+        if let reason = reply.reason ?? attempt?.macOSReason { detailRow("Why", reason.prefix(1).uppercased() + reason.dropFirst()) }
+        if let attempt { detailRow("Playback", Self.playback(attempt.playback)) }
+        HStack(spacing: 8) {
+            if model.speaking == .macOSVoice {
+                Button("Stop") { model.stopSpeaking() }
+                    .accessibilityIdentifier(AccessibilityID.History.readWithMacOSVoice)
+            } else {
+                Button("Read with macOS Voice") { model.readReplyWithMacOSVoice() }
+                    .accessibilityIdentifier(AccessibilityID.History.readWithMacOSVoice)
+            }
+            if model.selectedSpokenAudio != nil {
+                if model.speaking == .audio {
+                    Button("Stop") { model.stopSpeaking() }
+                        .accessibilityIdentifier(AccessibilityID.History.playSpokenAudio)
+                } else {
+                    Button("Play Generated Audio") { model.playSpokenAudio() }
+                        .disabled(!model.canPlaySpokenAudio)
+                        .help(model.canPlaySpokenAudio ? "" : "This reply is still being read aloud.")
+                        .accessibilityIdentifier(AccessibilityID.History.playSpokenAudio)
+                }
+                Button("Save Generated Audio\u{2026}") { model.saveSpokenAudio() }
+                    .accessibilityIdentifier(AccessibilityID.History.saveSpokenAudio)
+            }
+        }
+        if let held = model.selectedSpokenAudio {
+            Text(Self.heldAudioCaption(held))
+                .font(.caption).foregroundStyle(.secondary)
+        } else if reply.voice.flatMap(SpokenAttempt.Reader.init(rawValue:)) == .natural {
+            Text("The original audio is no longer available.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private static func heldAudioCaption(_ held: SpokenAttempt) -> String {
+        let kept = "The audio \(Branding.appName) generated for this reply is kept for an hour while \(Branding.appName) is running."
+        guard held.reader != .macOS else {
+            return kept + " It is the natural voice\u{2019}s audio that was not played; the macOS voice read the reply."
+        }
+        return kept + " Play it to hear the audio \(Branding.appName) generated, or save it to report a reply that sounded wrong."
+    }
+
+    private static func playback(_ playback: SpokenAttempt.Playback) -> String {
+        switch playback {
+        case .preparing: "Not started"
+        case .playing: "Playing"
+        case .finished: "Played to the end"
+        case .interrupted: "Stopped before the end"
+        case .failed: "Failed"
+        }
     }
 
     private func plainPane(_ title: String, role: ComparisonTextRole, text: String) -> some View {

@@ -28,13 +28,32 @@ final class TakeReporter {
         replacementUsage?.record(effects: effects, capturedAt: epoch)
     }
 
+    func append(_ entry: HistoryEntry, retentionDays: Int, then: @escaping @MainActor (Bool) -> Void) {
+        guard history != nil else { return then(false) }
+        let write = writer(entry, retentionDays: retentionDays)
+        queue.async {
+            let written = write()
+            Task { @MainActor in then(written) }
+        }
+    }
+
     @discardableResult
     func append(_ entry: HistoryEntry, retentionDays: Int, confirm: Bool) -> Bool {
-        guard let history else { return false }
+        guard history != nil else { return false }
+        let write = writer(entry, retentionDays: retentionDays)
+        guard confirm else {
+            queue.async { _ = write() }
+            return true
+        }
+        return queue.sync(execute: write)
+    }
+
+    private func writer(_ entry: HistoryEntry, retentionDays: Int) -> @Sendable () -> Bool {
+        guard let history else { return { false } }
         let today = HistoryStore.todayString()
         let sweepRetention = lastRetentionSweepDay != today
         lastRetentionSweepDay = today
-        let write = { [log] () -> Bool in
+        let write: @Sendable () -> Bool = { [log] in
             do {
                 try history.append(entry, today: today)
                 if sweepRetention { history.applyRetention(today: today, retentionDays: retentionDays) }
@@ -44,11 +63,7 @@ final class TakeReporter {
                 return false
             }
         }
-        guard confirm else {
-            queue.async { _ = write() }
-            return true
-        }
-        return queue.sync(execute: write)
+        return write
     }
 
     func replace(_ entry: HistoryEntry, with updated: HistoryEntry) {
@@ -63,7 +78,7 @@ final class TakeReporter {
         id: String, near date: Date, _ change: @escaping @Sendable (HistoryEntry) -> HistoryEntry,
         then: @escaping @MainActor (Bool) -> Void
     ) {
-        guard let history else { return }
+        guard let history else { return then(false) }
         queue.async { [weak self] in
             let changed = history.update(id: id, near: date, change) == .updated
             Task { @MainActor in

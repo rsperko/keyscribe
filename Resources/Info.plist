@@ -2,8 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!-- Canonical Info.plist for every KeyScribe app target (App/project.yml). Xcode substitutes the $(...)
      build settings: identity from the target (PRODUCT_BUNDLE_IDENTIFIER / PRODUCT_NAME), version and
-     revision from the build invocation (MARKETING_VERSION / CURRENT_PROJECT_VERSION /
-     KEYSCRIBE_SCM_REVISION). Edit keys here, not in the build scripts. -->
+     revisions from the build invocation (MARKETING_VERSION / CURRENT_PROJECT_VERSION /
+     KEYSCRIBE_SCM_REVISION / KEYSCRIBE_FLUIDAUDIO_REVISION). Edit keys here, not in the build scripts. -->
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
@@ -14,6 +14,7 @@
   <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
   <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
   <key>SCMRevision</key><string>$(KEYSCRIBE_SCM_REVISION)</string>
+  <key>FluidAudioRevision</key><string>$(KEYSCRIBE_FLUIDAUDIO_REVISION)</string>
   <key>LSMinimumSystemVersion</key><string>$(MACOSX_DEPLOYMENT_TARGET)</string>
   <key>LSUIElement</key><true/>
   <key>NSPrincipalClass</key><string>NSApplication</string>
