@@ -13,9 +13,9 @@ public enum SpokenNameMatch: CaseIterable, Sendable {
         }
     }
 
-    public func matches(_ spoken: String, _ name: String) -> Bool {
-        let spoken = VoiceCommandText.key(spoken)
-        let name = VoiceCommandText.key(name)
+    public func matches(_ spoken: String, _ name: String, fold: (String) -> String = { $0 }) -> Bool {
+        let spoken = Self.key(spoken, fold)
+        let name = Self.key(name, fold)
         guard !spoken.isEmpty, !name.isEmpty else { return false }
         switch self {
         case .exact:
@@ -34,7 +34,8 @@ public enum SpokenNameMatch: CaseIterable, Sendable {
     }
 
     public static func leading(
-        _ words: [String], names: [String], limit: Int = .max, minimumWords: (SpokenNameMatch) -> Int = { _ in 1 }
+        _ words: [String], names: [String], limit: Int = .max, fold: (String) -> String = { $0 },
+        minimumWords: (SpokenNameMatch) -> Int = { _ in 1 }
     ) -> Leading? {
         let longest = names.map { VoiceCommandText.compact($0).count }.max() ?? 0
         let reach = min(words.count, limit, longest)
@@ -42,11 +43,15 @@ public enum SpokenNameMatch: CaseIterable, Sendable {
         for length in stride(from: reach, through: 1, by: -1) {
             let spoken = words.prefix(length).joined(separator: " ")
             for match in allCases where length >= minimumWords(match) {
-                let hits = names.filter { match.matches(spoken, $0) && (match != .words || usesEachWordOnce(spoken, $0)) }
+                let hits = names.filter { match.matches(spoken, $0, fold: fold) && (match != .words || usesEachWordOnce(key(spoken, fold), key($0, fold))) }
                 if !hits.isEmpty { return Leading(length: length, names: hits) }
             }
         }
         return nil
+    }
+
+    private static func key(_ text: String, _ fold: (String) -> String) -> String {
+        VoiceCommandText.key(text).split(separator: " ").map { fold(String($0)) }.joined(separator: " ")
     }
 
     private static func usesEachWordOnce(_ spoken: String, _ name: String) -> Bool {

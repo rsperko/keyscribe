@@ -396,8 +396,10 @@ the name was meant; the session list shows the names, and renaming one avoids th
 whole name, a run of its words, or its words in any order, so “tell jk boots …” and “tell boots jk …” both
 reach `foo-jk-boots-manager-1234`. The longest leading run of words that fits a name is the address, and a
 comma or colon ends it. Each of the name's words counts once, so “tell build build the project” sends “build the
-project”. Without “tell”, part of a name needs at least two of its words, because a single
-word at the start of a sentence is usually just prose. A take that starts with what sounds like an address
+project”. After “tell” or “ask”, a word said in the singular or the plural matches either form in the name
+(`AgentHandles.singular`), so “ask review manager …” reaches `reviews_manager_queue`; two names that differ
+only that way count as the same name. Without “tell”, part of a name needs at least two of its words, and
+words must match as written, because a single word at the start of a sentence is usually just prose. A take that starts with what sounds like an address
 but does not match is held rather than sent to the highlighted recipient: “session to …” (a misheard
 row) and a long word one sound away from a name (“keyscrib …”). One exception keeps the take: when that
 misheard word sounds like the highlighted recipient itself, it is sent there, since both readings agree.

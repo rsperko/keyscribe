@@ -488,7 +488,9 @@ Rename sheet lists them. The same goes for names you give in tmux (a renamed win
 tmux shows its status line), Zellij (a renamed tab), Ghostty (a terminal or tab name you set) and
 iTerm (a tab title you set); KeyScribe reads Ghostty and iTerm only if you already let it control them; to allow it, say “open” and a
 conversation's name there once, and KeyScribe asks. A title the agent made up is shown under the name and never
-becomes something you have to say. When one workspace holds more than one conversation, each is called by
+becomes something you have to say. After “tell” or “ask” you can say part of a name, and a word in the
+singular or the plural matches either: “ask review manager …” reaches a pane named `reviews_manager_queue`.
+When one workspace holds more than one conversation, each is called by
 the workspace name and its agent, such as “cos claude” and “cos pi”, and saying just “cos” asks which one
 you meant. A conversation keeps its longer name after the other one closes, so what you learned to say
 keeps working. Name the panes in herdr to give each its own name. A new conversation started in a named pane

@@ -193,7 +193,7 @@ struct AgentAddressTests {
     @Test func aShortWordCloseToANameIsStillTheMessageWithoutTell() {
         #expect(AgentAddress.parse("Build the project", names: ["builds"]) == .none(body: "Build the project"))
         #expect(AgentAddress.parse("Test the login flow", names: ["tests"]) == .none(body: "Test the login flow"))
-        #expect(AgentAddress.parse("Tell build the project", names: ["builds"]) == .nearMiss(spoken: "build", name: "builds", body: "the project", unaddressed: nil))
+        #expect(AgentAddress.parse("Tell build the project", names: ["builds"]) == .name("builds", body: "the project"))
     }
 
     @Test func theLongestMatchingPartOfANameWins() {

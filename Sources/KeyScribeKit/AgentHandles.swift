@@ -33,8 +33,20 @@ public enum AgentHandles {
 
     public static let distinguishingWords = ["blue", "green", "orange", "purple", "yellow", "pink", "silver", "brown", "amber", "black"]
 
-    public static func matchKey(_ raw: String) -> String {
+    static func spelling(_ raw: String) -> String {
         normalize(raw).filter { $0 != " " }
+    }
+
+    public static func matchKey(_ raw: String) -> String {
+        normalize(raw).split(separator: " ").map { singular(String($0)) }.joined()
+    }
+
+    public static func singular(_ word: String) -> String {
+        guard word.count > 3, word.hasSuffix("s"), word.allSatisfy(\.isLetter) else { return word }
+        if word.hasSuffix("ies") { return word.dropLast(3) + "y" }
+        if ["ses", "xes", "zes", "ches", "shes"].contains(where: word.hasSuffix) { return String(word.dropLast(2)) }
+        if ["ss", "us", "is"].contains(where: word.hasSuffix) { return word }
+        return String(word.dropLast())
     }
 
     public static func isReserved(_ name: String) -> Bool {
@@ -212,7 +224,7 @@ public enum AgentAddress: Equatable, Sendable {
             return nil
         }
         let found = SpokenNameMatch.leading(
-            Array(bare[...]), names: normalized, limit: span,
+            Array(bare[...]), names: normalized, limit: span, fold: assumeTold ? AgentHandles.singular : { $0 },
             minimumWords: { assumeTold || $0 == .exact ? 1 : 2 }) ?? readName()
         if bare[0] == "session", span > 1, found.map({ $0.length == 1 }) ?? true {
             let named = parse(
@@ -220,9 +232,9 @@ public enum AgentAddress: Equatable, Sendable {
             if case .none = named {} else { return named }
         }
         func nearName(_ length: Int) -> String? {
-            let said = AgentHandles.matchKey(spoken(length))
+            let said = AgentHandles.spelling(spoken(length))
             guard found == nil, assumeTold || said.count >= minimumUntoldNearMiss else { return nil }
-            return normalized.first { soundsAlike(said, AgentHandles.matchKey($0)) }
+            return normalized.first { soundsAlike(said, AgentHandles.spelling($0)) }
         }
         if let near = lengths.last(where: { nearName($0) != nil }), let name = nearName(near) {
             return .nearMiss(spoken: spoken(near), name: name, body: body(after: near), unaddressed: !assumeTold ? text : nil)
