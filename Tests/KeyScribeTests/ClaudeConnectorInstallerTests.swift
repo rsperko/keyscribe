@@ -270,7 +270,7 @@ struct ClaudeConnectorInstallerTests {
         let source = Self.script
         let reads = try Regex(#"\$\.env\.get\("([A-Z_]+)"\)"#)
         #expect(source.matches(of: reads).compactMap { $0.output[1].substring.map(String.init) } == ["ZELLIJ_PANE_ID", "CMUX_SURFACE_ID"])
-        #expect(source.contains("const features = ['focus', 'label', 'readiness', 'notify']"))
+        #expect(source.contains("const features = ['focus', 'label', 'readiness', 'notify', 'fill']"))
     }
 
     @Test func thePluginVersionNamesTheConnectorCodeItCarries() throws {

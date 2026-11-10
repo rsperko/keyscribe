@@ -119,6 +119,33 @@ struct AgentHubTests {
         #expect(await receipt == .kept("keyscribe", reason: .composing))
     }
 
+    @Test func aSubmitLeftInThePromptBoxAfterAStopIsKeptForTheUserToSend() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["fill"])))
+
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.refused(request: "r1", reason: "filled"))
+        #expect(await receipt == .kept("keyscribe", reason: .inPromptBox))
+    }
+
+    @Test func onlyAConnectorThatSaidItFillsThePromptBoxCanLeaveAMessageThere() {
+        #expect(AgentHub.filled(handle: "docs", features: ["focus", "fill"]) == .kept("docs", reason: .inPromptBox))
+        #expect(AgentHub.filled(handle: "docs", features: ["focus"]) == .notSent("docs", reason: .stopped))
+        #expect(AgentHub.filled(handle: "docs", features: nil) == .notSent("docs", reason: .stopped))
+    }
+
+    @Test func everySubmissionTheUserMakesIsCounted() {
+        let (hub, _, _, _) = makeHub()
+        #expect(hub.typedCount("claude:s1") == 0)
+        hub.handle(.typed(session: "claude:s1", prompts: 4))
+        hub.handle(.typed(session: "claude:s1"))
+        #expect(hub.typedCount("claude:s1") == 2)
+        #expect(hub.typedCount("claude:s2") == 0)
+    }
+
     private func ready(idle: Bool = true, gap: Bool) -> AgentEvent.Hello {
         .init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["readiness"], idle: idle, gap: gap)
     }

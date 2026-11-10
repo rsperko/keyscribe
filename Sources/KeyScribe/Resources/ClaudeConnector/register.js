@@ -11,7 +11,7 @@ const backoff = [30000, 60000, 120000, 300000]
 const late = { late: true }
 const unreachable = { unreachable: true }
 const freshSources = ['startup', 'clear', 'fork']
-const features = ['focus', 'label', 'readiness', 'notify']
+const features = ['focus', 'label', 'readiness', 'notify', 'fill']
 const readAloudTool = 'tell_me_when_done'
 
 let config = null
@@ -444,12 +444,28 @@ async function submit($, id, text, expiresAt, gen, expected) {
   try {
     result = await $.prompt.submit({ text: own.text, asUser: true })
   } catch (err) {
-    return reply($, gen, { op: 'refused', request: id, reason: refusal(err && err.message || err) })
+    return refused($, gen, id, own.text, refusal(err && err.message || err))
   } finally {
     if (ownSubmit === own) ownSubmit = null
   }
-  if (result && result.drop) return reply($, gen, { op: 'refused', request: id, reason: refusal(result.drop) })
+  if (result && result.drop) return refused($, gen, id, own.text, refusal(result.drop))
   return reply($, gen, { op: 'submitted', request: id, turn: own.turn || '' })
+}
+
+async function refused($, gen, id, text, reason) {
+  if (reason === 'stopped' && await leftInEmptyBox($, text)) reason = 'filled'
+  return reply($, gen, { op: 'refused', request: id, reason })
+}
+
+async function leftInEmptyBox($, text) {
+  try {
+    const box = await $.prompt.read()
+    if (box.text.trim()) return false
+    const filled = await $.prompt.fill({ text })
+    return Boolean(filled && filled.isFilled)
+  } catch (err) {
+    return false
+  }
 }
 
 function noteTitle($, e) {

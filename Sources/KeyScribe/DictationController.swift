@@ -2006,13 +2006,32 @@ final class DictationController {
                 outcome: .failed, heard: heard, body: text, transformed: transformed, rewrite: rewrite, facts: facts)
             return
         }
-        guard lease(for: .codingAgents).keepActing() else { return }
+        let lease = lease(for: .codingAgents)
+        guard lease.keepActing() else { return }
         lastResult = text
         hud.present(.transcribing(mode: mode.name, status: "Sending to \(agents.handle(of: id) ?? "it")"))
-        let (request, receipt) = await agentOutput.deliver(text, to: id, via: agents)
+        var (request, receipt) = await agentOutput.deliver(text, to: id, via: agents)
+        if case .kept(let handle, .inPromptBox) = receipt, let sent = await sendFromPromptBox(id, handle: handle, through: agents, lease: lease) {
+            receipt = sent
+        }
         finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id), outcome: AgentOutput.dictationOutcome(receipt),
                     heard: heard, body: text, transformed: transformed, rewrite: rewrite, transitioned: true,
                     facts: facts, awaitingReceipt: (request, receipt))
+    }
+
+    var promptBoxConfirmation: Duration = .seconds(2)
+
+    // After a Stop, Claude Code takes only a prompt the user enters, so the connector left the message in the
+    // empty box. Return goes only to that conversation, and only when it is the one in front.
+    private func sendFromPromptBox(_ id: String, handle: String, through agents: AgentHub, lease: TakeLease) async -> AgentReceipt? {
+        guard lease.keepActing(), await agents.sessionInFrontWithoutAsking()?.id == id, lease.keepActing() else { return nil }
+        let typedBefore = agents.typedCount(id)
+        await submitKey(.return)
+        let deadline = ContinuousClock.now + promptBoxConfirmation
+        while agents.typedCount(id) == typedBefore, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return agents.typedCount(id) > typedBefore ? .sent(handle) : .uncertain(handle)
     }
 
     private func reachable(_ snapshot: AgentSnapshot, _ agents: AgentHub, for retry: AgentOutput.Retry) -> [String: String] {

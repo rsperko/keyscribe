@@ -225,6 +225,7 @@ final class AgentOutput {
             case .interrupted: "its last turn was stopped"
             case .dialog: "it has a dialog open"
             case .connectionGap: "it lost its connection to \(Branding.appName) while this waited"
+            case .inPromptBox: "its last turn was interrupted, so the message is waiting in its prompt box. Press Return there to send it"
             }
             return .advisory(message: "Not sent to \(handle): \(why)")
         case .notSent(let handle, let reason):
@@ -233,7 +234,7 @@ final class AgentOutput {
             case .conversationEnded: "Not sent: that conversation has ended"
             case .connectorNotRunning: "Not sent: \(name) isn\u{2019}t connected to \(Branding.appName)"
             case .conversationChanged: "Not sent: \(name) switched to another conversation"
-            case .stopped: "Not sent: \(name) is stopped until you type in it"
+            case .stopped: "Not sent: \(name)\u{2019}s last turn was interrupted, so it takes only a message you type. Type one there, then dictate again"
             case .expired: "Not sent: \(name) didn\u{2019}t take it in time"
             case .refused: "Not sent: \(name) refused the message"
             case .disconnected: "Not sent: \(name) is disconnected"

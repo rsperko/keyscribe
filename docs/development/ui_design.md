@@ -636,6 +636,16 @@ or its prompt box holds a message the user has not sent. The HUD says so and why
 a message you haven’t sent”). An unsent message in the agent's prompt box is left exactly as it was, and
 what was said stays in History.
 
+After the user interrupts a Claude Code turn, Claude Code takes only a prompt the user enters until one is
+sent, and refuses one the connector submits. The connector then puts the message in the prompt box, only
+when the box is empty and only for that refusal; every other refusal leaves the box alone. When that
+conversation is confirmed as the one in front, the app presses Return for the user and reports “Sent to
+docs” once the connector sees the prompt arrive, or “May not have reached docs” when it does not. Otherwise
+Return is never pressed and the advisory says the message is waiting (“Not sent to docs: its last turn was
+interrupted, so the message is waiting in its prompt box. Press Return there to send it”). A connector that
+could not fill the box reports “Not sent: docs’s last turn was interrupted, so it takes only a message you
+type. Type one there, then dictate again”.
+
 A take addressed to a conversation that is not connected, or that the user disconnected, says so by name
 (“Not sent: docs isn’t connected to {app}”, “docs is disconnected”, or “The conversation in front is
 disconnected”) with **Open Coding Agent Settings**, and never falls through to another recipient. A

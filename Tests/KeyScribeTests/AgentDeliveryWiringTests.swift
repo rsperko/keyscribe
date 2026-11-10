@@ -33,9 +33,14 @@ struct AgentDeliveryWiringTests {
         var uncertainThenConfirmed = false
         var live = true
         var unreachable: Set<String> = []
+        var refusal: String?
         weak var hub: AgentHub?
         func enqueue(_ command: AgentCommand, for session: String) {
             sent.append((command, session))
+            if let refusal, case .submit = command {
+                Task { @MainActor [weak hub] in hub?.handle(.refused(request: command.id, reason: refusal)) }
+                return
+            }
             if uncertainThenConfirmed {
                 Task { @MainActor [weak hub] in
                     hub?.handle(.undelivered(request: command.id, reason: "", handedOff: true))
@@ -148,6 +153,12 @@ struct AgentDeliveryWiringTests {
         var insertedText: String?
     }
 
+    private final class Returns: @unchecked Sendable {
+        var pressed: [Mode.Submit] = []
+        var typedBy: String?
+        weak var hub: AgentHub?
+    }
+
     private final class FrontWindow: @unchecked Sendable {
         var snapshot: TargetSnapshot
         init(_ snapshot: TargetSnapshot) { self.snapshot = snapshot }
@@ -170,6 +181,7 @@ struct AgentDeliveryWiringTests {
         let supportDir: URL
         let registry: Registry
         let audio: FakeAudio
+        let returns: Returns
 
         var sent: [(AgentCommand, String)] { transport.sent }
         var texts: [String] {
@@ -230,6 +242,8 @@ struct AgentDeliveryWiringTests {
         if let current { hub.makeCurrent(current) }
 
         let captured = Captured()
+        let returns = Returns()
+        returns.hub = hub
         let hud = HUDSpy()
         let history = HistoryStore(supportDir: supportDir)
         let provider = try! SpeechEngineProvider(engines: [engine ?? FixedEngine(text: transcript)], activeId: "fixed")
@@ -241,7 +255,10 @@ struct AgentDeliveryWiringTests {
             history: history, hud: hud, permits: { _ in true },
             audio: audio,
             insert: { _, _, _, text, _ in captured.insertedText = text; return true },
-            submitKey: { _ in },
+            submitKey: { key in
+                returns.pressed.append(key)
+                if let session = returns.typedBy { await MainActor.run { returns.hub?.handle(.typed(session: session)) } }
+            },
             snapshot: { front.snapshot },
             micStatus: { .granted },
             accessibilityGranted: { true },
@@ -255,7 +272,7 @@ struct AgentDeliveryWiringTests {
         controller.agentNoticeDelayOverride = .milliseconds(10)
         return Rig(
             controller: controller, hub: hub, transport: transport, hud: hud, captured: captured, history: history,
-            supportDir: supportDir, registry: registry, audio: audio)
+            supportDir: supportDir, registry: registry, audio: audio, returns: returns)
     }
 
     private func take(_ rig: Rig, mode: String = Mode.codingAgentId, readingTheFront: Bool = false) async {
@@ -269,6 +286,89 @@ struct AgentDeliveryWiringTests {
 
     private func rosters(_ rig: Rig) -> [AgentRoster?] {
         rig.hud.states.compactMap { if case .recording(_, _, _, _, let agents) = $0 { agents } else { nil } }
+    }
+
+    private func stoppedRig(_ inFront: String?, typed: Bool = true, refusal: String = "filled", features: [String] = ["fill"]) async -> Rig {
+        let rig = await rig("Run the tests.", current: "claude:s1", glance: Front(inFront))
+        rig.hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 10, features: features)))
+        rig.transport.refusal = refusal
+        rig.returns.typedBy = typed ? "claude:s1" : nil
+        rig.controller.promptBoxConfirmation = .milliseconds(200)
+        return rig
+    }
+
+    private func settledEntry(_ rig: Rig) async -> HistoryEntry? {
+        for _ in 0..<200 where rig.history.entries().isEmpty {
+            try? await Task.sleep(for: .milliseconds(5))
+            rig.controller.waitForHistoryWrites()
+        }
+        return rig.history.entries().first
+    }
+
+    @Test func aMessageLeftInThePromptBoxOfTheConversationInFrontIsSentWithReturn() async {
+        let rig = await stoppedRig("claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.returns.pressed == [.return])
+        let entry = await settledEntry(rig)
+        #expect(entry?.outcome == .inserted)
+        #expect(entry?.summary == "Sent to keyscribe")
+    }
+
+    @Test func aMessageLeftInThePromptBoxOfAConversationNotInFrontWaitsThereForTheUser() async {
+        let rig = await stoppedRig("claude:s2")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.returns.pressed.isEmpty)
+        #expect(rig.hud.states.last == AgentOutput.receiptState(.kept("keyscribe", reason: .inPromptBox), mode: "Coding agent", heard: ""))
+    }
+
+    @Test func aMessageLeftInThePromptBoxWithNoConversationKnownInFrontWaitsThereForTheUser() async {
+        let rig = await stoppedRig(nil)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.returns.pressed.isEmpty)
+    }
+
+    @Test func aReturnTheConversationNeverSeesIsReportedAsUncertain() async {
+        let rig = await stoppedRig("claude:s1", typed: false)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.returns.pressed == [.return])
+        #expect((await settledEntry(rig))?.outcome == .failed)
+        #expect(rig.hud.states.last == AgentOutput.receiptState(.uncertain("keyscribe"), mode: "Coding agent", heard: ""))
+    }
+
+    @Test(arguments: ["stopped", "draft", "typedSince", "busy elsewhere"])
+    func noOtherRefusalPressesReturn(refusal: String) async {
+        let rig = await stoppedRig("claude:s1", refusal: refusal)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.returns.pressed.isEmpty)
+    }
+
+    @Test func aConnectorThatNeverSaidItFillsThePromptBoxIsNotTrustedToHaveFilledIt() async {
+        let rig = await stoppedRig("claude:s1", features: ["focus"])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.returns.pressed.isEmpty)
+        #expect((await settledEntry(rig))?.outcome == .failed)
+    }
+
+    @Test func aSubmissionThatGoesThroughNeverPressesReturn() async {
+        let rig = await rig("Run the tests.", current: "claude:s1", glance: Front("claude:s1"))
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.returns.pressed.isEmpty)
+        #expect(rig.texts == ["Run the tests."])
+    }
+
+    @Test func aStoppedConversationSaysWhatHappenedAndHowToGetPastIt() {
+        #expect(AgentOutput.receiptState(.notSent("docs", reason: .stopped), mode: "Agent", heard: "")
+            == .error(message: "Not sent: docs\u{2019}s last turn was interrupted, so it takes only a message you type. Type one there, then dictate again",
+                      action: nil, heard: HeardExcerpt(heard: "")))
+        #expect(AgentOutput.receiptState(.kept("docs", reason: .inPromptBox), mode: "Agent", heard: "")
+            == .advisory(message: "Not sent to docs: its last turn was interrupted, so the message is waiting in its prompt box. Press Return there to send it"))
     }
 
     @Test func aPaneRenamedJustBeforeRecordingIsReachedByItsNewNameOnceTheReadLandsDuringTheTake() async {

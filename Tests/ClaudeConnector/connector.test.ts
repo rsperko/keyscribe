@@ -74,11 +74,20 @@ function harness(on: any) {
       submits.push(e.text)
       if (submitHold.on) await new Promise<void>((resolve) => { heldSubmits.push(resolve) })
     }
-    return downstream['prompt.submit'] ?? { text: e.text }
+    const answer = downstream['prompt.submit']
+    return (typeof answer === 'function' ? answer(e) : answer) ?? { text: e.text }
   })
   on('turn.start', ($: any, e: any) => ({ turnId: e.turnId }))
   on('turn.complete', () => downstream['turn.complete'] ?? { text: '' })
   on('turn.abort', () => ({ value: undefined }))
+  const fills: string[] = []
+  const fillRefusal: { reason?: string } = {}
+  on('prompt.fill', ($: any, e: any) => {
+    fills.push(e.text)
+    if (fillRefusal.reason) return { isFilled: false, refusal: fillRefusal.reason }
+    box.text = e.text
+    return { isFilled: true }
+  })
   on('prompt.read', () => {
     const answer = () => ({ value: { text: box.text, cursor: box.text.length } })
     if (!box.held) return answer()
@@ -123,7 +132,7 @@ function harness(on: any) {
   const ready = (launch?: string, protocol = 2) => { files['/tmp/ks-ready.json'] = launch === undefined ? undefined : JSON.stringify({ launch, protocol }) }
 
   const releaseSubmits = () => { for (const release of heldSubmits.splice(0)) release() }
-  return { logs, env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
+  return { fills, fillRefusal, logs, env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
 }
 
 test('agent hooks return while the bridge never answers, through one sender', async ($, on) => {
@@ -482,13 +491,71 @@ test('a typed prompt overtaking queued dictation holds it while the sender is bl
   ])
 })
 
-test('a submission Claude Code turns away because the session was stopped is reported as stopped', async ($, on) => {
+const stopped = 'Cannot submit: the session was stopped by the user.'
+const submitCommand = (text = 'run the tests') => ({ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text, expectedPrompts: 0 })
+const outcome = (h: any) => h.events().filter((b: any) => b.request === 'r1').map((b: any) => b.reason ?? b.op)
+
+test('a submission Claude Code turns away because a stop stands is put in the empty prompt box for the user to send', async ($, on) => {
   const h = harness(on)
-  h.downstream['prompt.submit'] = { drop: 'Cannot submit: the session was stopped by the user.' }
+  h.downstream['prompt.submit'] = { drop: stopped }
   await h.connect($)
-  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests', expectedPrompts: 0 }])
+  await h.deliver([submitCommand()])
   await h.answerEvents()
-  expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).toEqual(['ack', 'stopped'])
+  expect(h.fills).toEqual(['run the tests'])
+  expect(h.box.text).toBe('run the tests')
+  expect(outcome(h)).toEqual(['ack', 'filled'])
+})
+
+test('a stopped submission keeps a slash command from running when the box is sent', async ($, on) => {
+  const h = harness(on)
+  h.downstream['prompt.submit'] = { drop: stopped }
+  await h.connect($)
+  await h.deliver([submitCommand('/resume')])
+  await h.answerEvents()
+  expect(h.fills).toEqual(['\u200b/resume'])
+})
+
+test('a stopped submission never fills over what the user started typing meanwhile', async ($, on) => {
+  const h = harness(on)
+  h.downstream['prompt.submit'] = () => {
+    h.box.text = 'half a thought'
+    return { drop: stopped }
+  }
+  await h.connect($)
+  await h.deliver([submitCommand()])
+  await h.answerEvents()
+  expect(h.fills).toEqual([])
+  expect(h.box.text).toBe('half a thought')
+  expect(outcome(h)).toEqual(['ack', 'stopped'])
+})
+
+test('a stopped submission the prompt box will not take is reported as stopped', async ($, on) => {
+  const h = harness(on)
+  h.downstream['prompt.submit'] = { drop: stopped }
+  h.fillRefusal.reason = 'dialog'
+  await h.connect($)
+  await h.deliver([submitCommand()])
+  await h.answerEvents()
+  expect(outcome(h)).toEqual(['ack', 'stopped'])
+})
+
+test('a submission turned away for any other reason never touches the prompt box', async ($, on) => {
+  const h = harness(on)
+  h.downstream['prompt.submit'] = { drop: 'another plugin dropped it' }
+  await h.connect($)
+  await h.deliver([submitCommand()])
+  await h.answerEvents()
+  expect(h.fills).toEqual([])
+  expect(outcome(h)).toEqual(['ack', 'another plugin dropped it'])
+})
+
+test('a submission that goes through never touches the prompt box', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await h.deliver([submitCommand()])
+  await h.answerEvents()
+  expect(h.fills).toEqual([])
+  expect(outcome(h)).toEqual(['ack', 'submitted'])
 })
 
 test('dictation decided on the current prompt count is submitted, acknowledged first', async ($, on) => {
@@ -881,7 +948,7 @@ test('a session the module saw start says hello as fresh and idle', async ($, on
   await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await h.settle()
-  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'label', 'readiness', 'notify'] })
+  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'label', 'readiness', 'notify', 'fill'] })
 })
 
 test('hello reports the zellij pane its session runs in, which only its own process can read', async ($, on) => {

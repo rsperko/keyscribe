@@ -15,7 +15,7 @@ extension AgentBridgeServer: AgentTransport {
 }
 
 enum AgentReceipt: Equatable {
-    enum KeptReason: Equatable { case composing, typedSince, interrupted, connectionGap, dialog }
+    enum KeptReason: Equatable { case composing, typedSince, interrupted, connectionGap, dialog, inPromptBox }
     enum NotSentReason: Equatable { case conversationEnded, connectorNotRunning, conversationChanged, stopped, expired, disconnected, refused(String) }
 
     case sent(String)
@@ -91,6 +91,7 @@ final class AgentHub {
     private(set) var loadedVersions: [String: String] = [:]
     private var environments: [String: [String: String]] = [:]
     private var prompts: [String: Int] = [:]
+    private var typedCounts: [String: Int] = [:]
     private var connectorNames: [String: String?] = [:]
     private var registryNames: [String: String?] = [:]
     private var labels: [String: String] = [:]
@@ -773,6 +774,10 @@ final class AgentHub {
             clearHandOff(request)
             settle(request, .kept(requests[request]?.handle ?? "", reason: .composing))
             releaseHeld()
+        case .refused(let request, "filled"):
+            clearHandOff(request)
+            settle(request, Self.filled(handle: requests[request]?.handle ?? "", features: requests[request].flatMap { features[$0.message.conversation] }))
+            releaseHeld()
         case .refused(let request, "dialog"):
             clearHandOff(request)
             settle(request, .kept(requests[request]?.handle ?? "", reason: .dialog))
@@ -796,6 +801,7 @@ final class AgentHub {
             settle(request, .notSent(requests[request]?.handle, reason: .connectorNotRunning))
             releaseHeld()
         case .typed(let session, let count):
+            typedCounts[session, default: 0] += 1
             if let count { prompts[session] = count }
             outbox.noteTyped(conversation: session)
             if handle(of: session) != nil { makeCurrent(session) }
@@ -977,6 +983,12 @@ final class AgentHub {
         case .interrupted: .interrupted
         case .connectionGap: .connectionGap
         }
+    }
+
+    func typedCount(_ session: String) -> Int { typedCounts[session] ?? 0 }
+
+    static func filled(handle: String, features: Set<String>?) -> AgentReceipt {
+        features?.contains("fill") == true ? .kept(handle, reason: .inPromptBox) : .notSent(handle, reason: .stopped)
     }
 
     private static func notSent(_ reason: String) -> AgentReceipt.NotSentReason {
