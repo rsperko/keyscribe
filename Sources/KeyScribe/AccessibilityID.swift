@@ -320,6 +320,7 @@ enum AccessibilityID {
         enum CodingAgents {
             static let connectorStatus = "mode.codingAgents.connectorStatus"
             static let currentRecipient = "mode.codingAgents.currentRecipient"
+            static let phrases = "mode.codingAgents.phrases"
             static let cancelReadAloud = "mode.codingAgents.cancelReadAloud"
             static let summary = "mode.codingAgents.summary"
             static let install = "mode.codingAgents.install"

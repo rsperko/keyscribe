@@ -48,6 +48,7 @@ struct ModeEditorView: View {
                 ExtraTriggersNote(mode: mode)
             }
             if let codingAgents {
+                CodingAgentPhrasesSection(model: codingAgents)
                 CodingAgentRecipientSection(model: codingAgents, shortcut: ModeSummary.triggerDescriptors(mode).first?.displayString)
                 SpokenResultSection(model: codingAgents, connections: connections)
                 ConnectorSetupsProblemSection(model: codingAgents)

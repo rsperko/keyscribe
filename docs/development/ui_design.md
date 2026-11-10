@@ -1774,7 +1774,15 @@ Its sections are, in order:
    default. Its help says saved commands include what was said, what ran (including input), and any
    error message, which may include text from a script or shortcut.
 
-**Coding agent** (experimental, shown only while its flag is on) puts an always-visible
+**Coding agent** (experimental, shown only while its flag is on) opens, after its shortcut, with **What you
+can say**, built like the Voice Commands section of that name: one introduction (“Start with a conversation’s
+name to send it an instruction.”), then short examples with what each does (`CodingAgentPhrasesSection.examples`):
+an instruction led by a name, “open” and a name, “what is” a name “waiting for?”, “who needs me?”, “go back”,
+and “repeat that” only while **Read replies aloud** is on. The examples use the name of the conversation the
+guidance below would use, a placeholder when there is none, and “session two” while names are unavailable.
+Captions then say where an instruction without a name goes, that the numbers shown while recording can be
+said as “session” and the number, and how to rename a conversation by voice. Every example is one the
+take's own parsers read as described, checked by test. It then puts an always-visible
 **Conversations** section before connector setup. One block shows **Current recipient: {name}** or
 **No current recipient**, with brief guidance underneath. With no recipient and a connected conversation,
 the example uses a real name and the mode's first recording shortcut (“Use Fn (Globe) and say …”, which reads
