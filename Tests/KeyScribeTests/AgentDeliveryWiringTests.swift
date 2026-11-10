@@ -290,6 +290,58 @@ struct AgentDeliveryWiringTests {
         #expect(rosters(rig).compactMap { $0?.rows.map(\.name) }.allSatisfy { $0 == ["keyscribe blue", "keyscribe"] })
     }
 
+    private func herdrNamedRig(_ text: String, firstStatus: String = "idle", firstWaitingFor: String? = nil) async -> Rig {
+        let reader = AgentPlaceTrackerTests.Reader()
+        let rig = await rig(text, current: "claude:s2", firstStatus: firstStatus, firstWaitingFor: firstWaitingFor, places: reader)
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        let pane = "/s#pane:p1", workspace = "/s#workspace:w9"
+        reader.answers = ["claude:s1": .found(AgentPlace(
+            surface: "herdr",
+            labels: [
+                .init(text: "marvin", level: .title, container: pane), .init(text: "cos", level: .agent, container: pane),
+                .init(text: "chief", level: .workspace, container: workspace),
+            ],
+            containers: [pane, workspace]))]
+        rig.controller.setNextModeOverride(id: Mode.codingAgentId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        return rig
+    }
+
+    @Test(arguments: [
+        ("Ask cos what's outstanding and what we're waiting on.", "what's outstanding and what we're waiting on."),
+        ("Ask Marvin what we should do next.", "what we should do next."),
+    ])
+    func theNameHerdrShowsAndTheAgentNameBothReachTheConversation(text: String, body: String) async {
+        let rig = await herdrNamedRig(text)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
+        #expect(rig.texts == [body])
+    }
+
+    @Test func aWorkspaceLabelThatLostTheNameIsHeldAndNamesTheConversation() async {
+        let rig = await herdrNamedRig("Ask chief what we should do next.")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hud.states.contains {
+            if case .error(let message, _, _) = $0 {
+                message == "Not sent: \u{201C}chief\u{201D} is the herdr workspace label of \u{201C}marvin\u{201D}. Try \u{201C}ask marvin, \u{2026}\u{201D}"
+            } else { false }
+        })
+        #expect(await lastHistoryEntry(rig)?.failureReason == "Not sent: \u{201C}chief\u{201D} is the herdr workspace label of \u{201C}marvin\u{201D}")
+    }
+
+    @Test(arguments: ["What is cos waiting for?", "What is marvin waiting for?"])
+    func aStatusQuestionReachesTheConversationByEitherName(text: String) async {
+        let rig = await herdrNamedRig(text, firstStatus: "waiting", firstWaitingFor: "permission prompt")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        #expect(rig.sent.isEmpty)
+        #expect(showsAnswer(rig, "marvin is waiting for approval. Say \u{201C}open marvin\u{201D} to see it."))
+    }
+
     @Test func aRetryUsesTheNameAPaneTookDuringTheTakeNotTheOneItLeft() async {
         let reader = AgentPlaceTrackerTests.Reader()
         let rig = await rig("Tell frontend to run the tests.", current: "claude:s1", places: reader)
@@ -360,15 +412,45 @@ struct AgentDeliveryWiringTests {
         while let reading = rig.hub.placeTracker?.reading { await reading.value }
     }
 
-    @Test func aTakeWhoseLabelReadFailedIsHeldInsteadOfGoingToTheCurrentConversation() async {
+    @Test func aTakeWhileAConversationsFirstReadIsStillRunningPastTheGraceIsHeld() async {
         let reader = SlowReader()
+        reader.answers = architect()
+        reader.blocking = true
         let rig = await rig("architect, run the tests.", current: "claude:s2", places: reader)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
-        while let reading = rig.hub.placeTracker?.reading { await reading.value }
-        reader.answers = ["claude:s1": .unknown]
+        rig.controller.placeNamesGrace = .milliseconds(50)
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.captured.insertedText == nil)
+        reader.blocking = false
+        reader.release.signal()
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+    }
+
+    @Test func aFirstReadThatFailsIsShownAndTheTakeGoesToTheCurrentConversation() async {
+        let reader = SlowReader()
+        reader.answers = ["claude:s1": .unknown]
+        let rig = await rig("Run the tests.", current: "claude:s2", places: reader)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        #expect(rig.hub.placeTracker?.failingSince["claude:s1"] != nil)
+        await take(rig)
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
+    }
+
+    @Test func aTakeAfterAFailedReadOfAPlaceReadBeforeKeepsItsNamesAndGoesToTheCurrentConversation() async {
+        let reader = SlowReader()
+        reader.answers = architect()
+        let rig = await rig("Run the tests.", current: "claude:s2", places: reader)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        reader.answers = ["claude:s1": .unknown]
+        rig.hub.readPlaces()
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        #expect(rig.hub.names["architect"] == "claude:s1")
+        #expect(rig.hub.placeTracker?.failingSince["claude:s1"] != nil)
+        await take(rig)
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
     }
 
     @Test func aTakeNamingAKnownConversationIsSentEvenWhileAnotherConversationsLabelIsUnchecked() async {

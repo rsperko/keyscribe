@@ -136,13 +136,15 @@ final class AgentHub {
     private var placeQueries: [AgentPlaceQuery] {
         (directory.conversations + directory.disconnected).compactMap { conversation in
             AgentSessionID.split(conversation.id).map {
-                AgentPlaceQuery(id: conversation.id, agent: $0.agent, native: $0.native, pid: conversation.pid)
+                AgentPlaceQuery(
+                    id: conversation.id, agent: $0.agent, native: $0.native, pid: conversation.pid,
+                    environment: environments[conversation.id] ?? [:], placed: placeTracker?.places[conversation.id] != nil)
             }
         }
     }
 
-    func placesUnchecked(_ ids: [String]) -> Bool {
-        placeTracker.map { !$0.unchecked(ids).isEmpty } ?? false
+    func placesUnread(_ ids: [String]) -> Bool {
+        placeTracker.map { !$0.unattempted(ids).isEmpty } ?? false
     }
 
     func readPlaces() {
@@ -541,7 +543,7 @@ final class AgentHub {
             places: placeTracker?.places ?? [:],
             unplaced: placeTracker.map { tracker in
                 tracker.unchecked(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }).subtracting(tracker.places.keys)
-            } ?? [])
+            } ?? [], unreadSince: placeTracker?.failingSince ?? [:])
         let reported = namesNotSaved
         rememberNames()
         if let current, handle(of: current) == nil { self.current = nil }
@@ -1026,7 +1028,7 @@ final class AgentRuntime {
             transport: server, discovery: discovery,
             names: AgentNameStore(directory: directory, legacyAgent: legacyAgent),
             focus: AgentTerminalFocus(connector: { session in await box.hub?.focusInPlace(session) ?? .notFound }),
-            front: AgentFront(), glance: AgentFront.confirmingWithoutAsking, exclusions: exclusions, places: HerdrPlaceReader())
+            front: AgentFront(), glance: AgentFront.confirmingWithoutAsking, exclusions: exclusions, places: CombinedPlaceReader(readers: [HerdrPlaceReader(), TerminalPlaceReader()]))
         box.hub = hub
         try server.start()
         Task { @MainActor [weak hub] in await hub?.rescan() }

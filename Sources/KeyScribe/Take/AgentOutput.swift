@@ -142,19 +142,25 @@ final class AgentOutput {
         }
     }
 
-    private static func either(_ items: [String]) -> String {
+    static func either(_ items: [String], joining word: String = "or") -> String {
         guard let last = items.last, items.count > 1 else { return items.first ?? "" }
-        return items.dropLast().joined(separator: ", ") + " or " + last
+        return items.dropLast().joined(separator: ", ") + " \(word) " + last
     }
 
     enum Retry {
-        case tell, open
+        case tell, ask, open
 
         func phrase(_ name: String) -> String {
             switch self {
             case .tell: "tell \(name), \u{2026}"
+            case .ask: "ask \(name), \u{2026}"
             case .open: "open \(name)"
             }
+        }
+
+        static func matching(_ text: String, _ address: AgentAddress) -> Retry {
+            if case .open = address { return .open }
+            return AgentAddress.asks(text) ? .ask : .tell
         }
     }
 
@@ -173,8 +179,13 @@ final class AgentOutput {
     }
 
     private static func retryHint(_ reason: AgentRecipient.AskReason, retry: Retry?, names: [String: String], current: String?) -> String {
-        guard case .unknownName = reason, let retry, let name = example(names: names, current: current) else { return "" }
-        return ". Try \u{201C}\(retry.phrase(name))\u{201D}"
+        guard let retry else { return "" }
+        let name: String? = switch reason {
+        case .unknownName: example(names: names, current: current)
+        case .shownOn(_, let name, _): names[name] == nil ? nil : name
+        default: nil
+        }
+        return name.map { ". Try \u{201C}\(retry.phrase($0))\u{201D}" } ?? ""
     }
 
     private static func askProblem(_ reason: AgentRecipient.AskReason) -> String {
@@ -182,6 +193,7 @@ final class AgentOutput {
         case .noRecipient: "start with a conversation\u{2019}s name"
         case .noSuchRow(let row): "there is no session \(row)"
         case .unknownName(let name): "no conversation named \u{201C}\(name)\u{201D}"
+        case .shownOn(let word, let name, let seenAs): "\u{201C}\(word)\u{201D} is the \(seenAs) of \u{201C}\(name)\u{201D}"
         case .soundsLike(let spoken, let name): "\u{201C}\(spoken)\u{201D} sounded like \u{201C}\(name)\u{201D}"
         case .noBreak(let name):
             "did you mean \u{201C}\(name)\u{201D}? Say \u{201C}tell \(name),\u{201D} with a pause, or \u{201C}tell \(name) to \u{2026}\u{201D}"

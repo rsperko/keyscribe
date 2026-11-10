@@ -259,6 +259,15 @@ struct TerminalRoutesTests {
         ] + ScriptedTerminalRoute.iterm.open(pid: 10, ttys: ["/dev/ttys005"]))
     }
 
+    @Test func anAgentInTmuxIsFoundWhenOnlyTheAgentReportsTmuxBecauseItsLoginShellCannotBeRead() {
+        let facts = tmuxFacts(clients: "/dev/ttys003\t55\tother\t900\n/dev/ttys005\t56\twork\t100\n")
+        facts.table[70]?.environment = ["TMUX": "/private/tmp/tmux-501/default,60,0"]
+        facts.table[65]?.environment = [:]
+        #expect(TerminalRoutes.plan(agent: 70, facts: facts) == [
+            Self.tmuxLayer(client: "/dev/ttys005"),
+        ] + ScriptedTerminalRoute.iterm.open(pid: 10, ttys: ["/dev/ttys005"]))
+    }
+
     @Test func withNoClientOnItsSessionTmuxSwitchesTheMostRecentlyUsedClient() {
         let facts = tmuxFacts(clients: "/dev/ttys005\t56\tother\t100\n/dev/ttys003\t55\tother\t900\n")
         #expect(TerminalRoutes.plan(agent: 70, facts: facts) == [

@@ -1,6 +1,6 @@
 import Foundation
 
-struct ZellijRoute: PaneRoute {
+struct ZellijRoute: PaneRoute, PlaceRoute {
     static let paneKey = "ZELLIJ_PANE_ID"
     let name = "Zellij"
     let processName = "zellij"
@@ -32,6 +32,39 @@ struct ZellijRoute: PaneRoute {
             PaneCommand(action + ["focus-next-pane"], until: walk),
         ]
         return (PaneLayer(name, commands: commands, confirmed: clients.count <= 1), client)
+    }
+
+    func place(_ server: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> (layer: PlaceLayer, next: Int?)? {
+        guard server.name == processName, let flag = server.arguments.firstIndex(of: "--server"), flag + 1 < server.arguments.count
+        else { return nil }
+        let socket = server.arguments[flag + 1]
+        guard let pane = TerminalRoutes.nearest(Self.paneKey, in: inner),
+              let id = pane.environment[Self.paneKey].flatMap({ Int($0.replacingOccurrences(of: "terminal_", with: "")) }),
+              let session = Self.session(server: server.pid, socket: socket, facts: facts),
+              let listed = Self.named(id, in: facts.run([server.executable, "--session", session, "action", "list-panes", "-t", "-j"]))
+        else { return (PlaceLayer(unresolved: true), nil) }
+        let key = "zellij:\(socket)"
+        let containers = ["\(key)#pane:\(id)", "\(key)#tab:\(listed.tab)"]
+        var labels: [AgentPlace.Label] = []
+        if let tab = TerminalPlaces.userSet(listed.tabName, unless: [#"^Tab #\d+$"#]) {
+            labels.append(.init(text: tab, level: .tab, container: containers[1], surface: name, term: "tab"))
+        }
+        let client = TerminalRoutes.steadiest(Self.clients(of: socket, server: server.pid, facts: facts), preferring: nil)
+        return (PlaceLayer(labels: labels, containers: containers), client)
+    }
+
+    private struct Named: Decodable {
+        var id: Int
+        var is_plugin: Bool
+        var tab_id: Int?
+        var tab_name: String?
+    }
+
+    static func named(_ id: Int, in result: (status: Int32, output: String)) -> (tab: Int, tabName: String?)? {
+        guard result.status == 0, let panes = try? JSONDecoder().decode([Named].self, from: Data(result.output.utf8)),
+              let pane = panes.first(where: { !$0.is_plugin && $0.id == id }), let tab = pane.tab_id
+        else { return nil }
+        return (tab, pane.tab_name)
     }
 
     private struct Pane: Decodable {

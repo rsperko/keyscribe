@@ -820,6 +820,57 @@ struct CodingAgentsSettingsModelTests {
         #expect(model.defaultNameNote(renamed) == "Default name: home, from its folder.")
     }
 
+    @Test func theRenameSheetListsTheOtherNamesThatReachTheConversation() {
+        let (model, _, _) = makeModel()
+        var row = CodingAgentsSettingsModel.Row(
+            id: "a", number: 1, name: "marvin", folder: "/src/home", state: "Ready", connected: true, current: false, agent: "pi")
+        row.otherNames = ["cos", "refactor auth"]
+        model.defaultName = { _ in
+            AgentDirectory.DefaultName(
+                name: "marvin", source: .place, place: AgentPlaceName(surface: "herdr", level: .title, label: "marvin"),
+                otherNames: ["cos", "refactor auth"])
+        }
+        #expect(model.defaultNameNote(row)
+            == "This name comes from its herdr pane title. Also answers to \u{201C}cos\u{201D} and \u{201C}refactor auth\u{201D}.")
+        #expect(model.alsoAnswers(row) == "Also answers to \u{201C}cos\u{201D} and \u{201C}refactor auth\u{201D}")
+    }
+
+    @Test(arguments: [
+        (AgentPlace.Level.title, nil as String?, "herdr", "This name is the title a herdr hook shows on its pane, so it changes when the hook changes it. Rename it here to keep a name of your own."),
+        (.agent, nil, "herdr", "This name follows this agent. To change it, rename the agent in herdr."),
+        (.pane, nil, "herdr", "This name follows this conversation, including when you resume it. To name future conversations in this pane, rename the pane in herdr."),
+        (.tab, "window", "tmux", "This name follows this conversation, including when you resume it. To name future conversations in this window, rename the window in tmux."),
+    ])
+    func theRenameSheetSaysWhatSetsTheNameItCameFrom(level: AgentPlace.Level, term: String?, surface: String, note: String) {
+        var row = CodingAgentsSettingsModel.Row(
+            id: "a", number: 1, name: "marvin", folder: "/src/home", state: "Ready", connected: true, current: false, agent: "pi")
+        row.surface = surface
+        row.place = AgentPlaceName(surface: surface, level: level, label: "marvin", term: term)
+        #expect(CodingAgentsSettingsModel.placeNote(row) == note)
+        row.renamed = true
+        #expect(CodingAgentsSettingsModel.placeNote(row) == "This name follows this conversation, including when you resume it.")
+        row.renamed = false
+        row.place = nil
+        #expect(CodingAgentsSettingsModel.placeNote(row)?.hasSuffix("rename the pane in \(surface).") == true)
+        row.surface = nil
+        #expect(CodingAgentsSettingsModel.placeNote(row) == nil)
+    }
+
+    @Test func aConversationWhosePlaceStoppedReadingSaysSoAndKeepsItsNames() {
+        var row = CodingAgentsSettingsModel.Row(
+            id: "a", number: 1, name: "marvin", folder: "/src/home", state: "Ready", connected: true, current: false, agent: "pi")
+        #expect(CodingAgentsSettingsModel.placeTrouble(row) == nil)
+        row.surface = "herdr"
+        let since = Date(timeIntervalSince1970: 1_800_000_000)
+        row.unreadSince = since
+        let time = since.formatted(date: .omitted, time: .shortened)
+        #expect(CodingAgentsSettingsModel.placeTrouble(row)
+            == "Couldn\u{2019}t read its herdr names since \(time). Using the names last read.")
+        row.surface = nil
+        #expect(CodingAgentsSettingsModel.placeTrouble(row)
+            == "Couldn\u{2019}t read where it runs since \(time). Using the names last read.")
+    }
+
     @Test func useDefaultNameReportsAFailedSaveAndKeepsTheSheetOpen() {
         let (model, _, _) = makeModel()
         model.onUseDefaultName = { _ in throw NSError(domain: "review", code: 1, userInfo: [NSLocalizedDescriptionKey: "disk unavailable"]) }

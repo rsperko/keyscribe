@@ -41,15 +41,18 @@ public enum AgentStatusQuery: Equatable, Sendable {
     ]
 
     public static func parse(
-        _ transcript: String, names: [String], namesKnown: Bool = true, read: ((String) -> String)? = nil
+        _ transcript: String, names: [String], namesKnown: Bool = true, read: ((String) -> String)? = nil, afterVerb: [String] = []
     ) -> AgentStatusQuery? {
         let said = spoken(transcript)
         guard !said.isEmpty else { return nil }
         if whoNeedsMeForms.contains(where: { match($0, said) != nil }) { return .whoNeedsMe }
         func conversation(_ subject: String) -> AgentAddress? {
+            if AgentAddress.exactName(subject, among: names) == nil, let other = AgentAddress.exactName(subject, among: afterVerb) {
+                return .name(other, body: "")
+            }
             switch AgentAddress.spokenName(subject, names: names, namesKnown: namesKnown, read: read) {
-            case .none: nil
-            case let address: address
+            case .none: return nil
+            case let address: return address
             }
         }
         if let subject = waitingSubjects.lazy.compactMap({ match($0, said) }).first {

@@ -94,3 +94,147 @@ struct AgentRecipientLateNameTests {
             == .ask(body: "", reason: .sharedName("cos", matches: ["cos claude", "cos pi"], tellApartIn: nil)))
     }
 }
+
+struct AgentRecipientOtherNameTests {
+    let names = ["marvin": "a", "builder": "b", "api": "c"]
+    let shared: [String: AgentRecipient.SharedName] = [
+        "cos": .init(names: ["marvin"], kind: .also("herdr agent name")),
+        "refactor auth": .init(names: ["builder"], kind: .afterVerb("herdr pane title")),
+        "api reviewer": .init(names: ["builder"], kind: .afterVerb("herdr pane title")),
+        "chief": .init(names: ["marvin"], kind: .held("herdr workspace label")),
+        "pair": .init(names: ["builder", "marvin"], kind: .also("herdr agent name")),
+    ]
+
+    private func resolve(_ text: String) -> AgentRecipient.Resolution {
+        let address = AgentAddress.parse(
+            text, names: AgentRecipient.spokenNames(names, shared: shared), afterVerb: AgentRecipient.afterVerbNames(shared))
+        return AgentRecipient.resolve(address, frozen: .init(id: "c", source: .current), rows: ["a", "b", "c"], names: names, shared: shared)
+    }
+
+    @Test(arguments: [
+        ("Ask cos what's outstanding", "a", "what's outstanding"),
+        ("cos, run the tests", "a", "run the tests"),
+        ("Ask refactor auth to review it", "b", "to review it"),
+        ("Please tell refactor auth, run the tests", "b", "run the tests"),
+        ("Ask api reviewer to look at it", "b", "to look at it"),
+    ])
+    func anotherNameReachesItsConversation(text: String, id: String, body: String) {
+        #expect(resolve(text) == .deliver(id: id, body: body, source: .spoken))
+    }
+
+    @Test func openingATitleOpensItsConversation() {
+        #expect(resolve("Open refactor auth") == .open(id: "b"))
+    }
+
+    @Test(arguments: ["Refactor auth, then run the tests", "ask questions if anything is unclear", "ask again if it fails"])
+    func aTitleSaidWithoutTellAskOrOpenIsJustTheMessage(text: String) {
+        #expect(resolve(text) == .deliver(id: "c", body: text, source: .current))
+    }
+
+    @Test(arguments: [("tell chief, run the tests", "run the tests"), ("Ask chief what we should do next", "what we should do next")])
+    func aLabelThatLostTheNameHoldsAndNamesTheConversation(text: String, body: String) {
+        #expect(resolve(text) == .ask(body: body, reason: .shownOn("chief", name: "marvin", as: "herdr workspace label")))
+    }
+
+    @Test func anotherNameTwoConversationsShareAsks() {
+        #expect(resolve("Ask pair to review it")
+            == .ask(body: "to review it", reason: .sharedName("pair", matches: ["builder", "marvin"], tellApartIn: nil)))
+    }
+
+    @Test func titlesAndHeldLabelsAreNotSpokenBare() {
+        #expect(AgentRecipient.spokenNames(names, shared: shared).sorted() == ["api", "builder", "cos", "marvin", "pair"])
+        #expect(AgentRecipient.afterVerbNames(shared) == ["api reviewer", "chief", "refactor auth"])
+    }
+
+    @Test func aTitleShownDuringRecordingCountsOnlyForAConversationTheTakeFroze() {
+        let late: [String: AgentRecipient.SharedName] = [
+            "zed": .init(names: ["marvin"], kind: .afterVerb("herdr pane title")),
+            "zork": .init(names: ["newcomer"], kind: .afterVerb("herdr pane title")),
+        ]
+        let merged = AgentRecipient.addingLate(["marvin": "a", "newcomer": "d"], sharing: late, to: names, sharing: [:])
+        #expect(AgentRecipient.afterVerbNames(merged.shared) == ["zed"])
+    }
+}
+
+struct AgentRecipientUncertainNameTests {
+    let names = ["marvin": "a", "builder": "b"]
+    let shared: [String: AgentRecipient.SharedName] = [
+        "clean up panes and close stale sessions": .init(names: ["marvin"], kind: .afterVerb("agent\u{2019}s own name")),
+        "review auth": .init(names: ["builder"], kind: .afterVerb("herdr pane title")),
+        "review billing": .init(names: ["marvin"], kind: .afterVerb("herdr pane title")),
+    ]
+
+    private func resolve(_ text: String) -> AgentRecipient.Resolution {
+        let address = AgentAddress.parse(
+            text, names: AgentRecipient.spokenNames(names, shared: shared), afterVerb: AgentRecipient.afterVerbNames(shared))
+        return AgentRecipient.resolve(address, frozen: .init(id: "b", source: .current), rows: ["a", "b"], names: names, shared: shared)
+    }
+
+    @Test func anOrdinaryInstructionThatStartsLikeAnUncertainNameIsTheMessage() {
+        let text = "Clean up panes in this repository"
+        #expect(resolve(text) == .deliver(id: "b", body: text, source: .current))
+    }
+
+    @Test func anUncertainNameSaidInFullAfterAVerbReachesItsConversation() {
+        #expect(resolve("Ask clean up panes and close stale sessions what is left")
+            == .deliver(id: "a", body: "what is left", source: .spoken))
+    }
+
+    @Test(arguments: [
+        "Ask clean up panes what is left",
+        "Ask review to check the changes",
+        "ask questions if anything is unclear",
+        "Ask the user whether to keep the schema.",
+    ])
+    func anAfterVerbNameMatchesOnlyInFullSoEverydayInstructionsStayMessages(text: String) {
+        var shared = shared
+        shared["questions about auth"] = .init(names: ["builder"], kind: .afterVerb("herdr pane title"))
+        shared["user onboarding flow"] = .init(names: ["marvin"], kind: .afterVerb("herdr pane title"))
+        let address = AgentAddress.parse(
+            text, names: AgentRecipient.spokenNames(names, shared: shared), afterVerb: AgentRecipient.afterVerbNames(shared))
+        #expect(AgentRecipient.resolve(address, frozen: .init(id: "b", source: .current), rows: ["a", "b"], names: names, shared: shared)
+            == .deliver(id: "b", body: text, source: .current))
+    }
+
+    @Test func aStatusQuestionReachesAConversationByAnAfterVerbName() throws {
+        let query = try #require(AgentStatusQuery.parse(
+            "what is review auth waiting for", names: AgentRecipient.spokenNames(names, shared: shared),
+            afterVerb: AgentRecipient.afterVerbNames(shared)))
+        guard case .waiting(let address?) = query else {
+            Issue.record("expected a waiting question, got \(query)")
+            return
+        }
+        #expect(AgentRecipient.resolve(address, frozen: nil, rows: ["a", "b"], names: names, shared: shared) == .select(id: "b"))
+    }
+}
+
+struct AgentRecipientAfterVerbSpanTests {
+    @Test func anAfterVerbNameCountsOnlyWhereTheAddressIsNotLaterInTheMessage() {
+        let names = ["api": "a", "builder": "b"]
+        let shared: [String: AgentRecipient.SharedName] = ["refactor auth": .init(names: ["builder"], kind: .afterVerb("herdr pane title"))]
+        let address = AgentAddress.parse(
+            "Tell refactor to explain refactor auth", names: AgentRecipient.spokenNames(names, shared: shared),
+            afterVerb: AgentRecipient.afterVerbNames(shared))
+        let resolution = AgentRecipient.resolve(address, frozen: .init(id: "a", source: .current), rows: ["a", "b"], names: names, shared: shared)
+        #expect(resolution != .deliver(id: "b", body: "to explain refactor auth", source: .spoken))
+        guard case .ask = resolution else {
+            Issue.record("expected a hold, got \(resolution)")
+            return
+        }
+    }
+
+    @Test func aMessageAndAStatusQuestionPickTheSameConversationForTheSameName() throws {
+        let names = ["auth reviewer": "a", "builder": "b"]
+        let shared: [String: AgentRecipient.SharedName] = ["reviewer": .init(names: ["builder"], kind: .afterVerb("herdr pane title"))]
+        let spoken = AgentRecipient.spokenNames(names, shared: shared), afterVerb = AgentRecipient.afterVerbNames(shared)
+        let message = AgentAddress.parse("Ask reviewer to check it", names: spoken, afterVerb: afterVerb)
+        #expect(AgentRecipient.resolve(message, frozen: nil, rows: ["a", "b"], names: names, shared: shared)
+            == .deliver(id: "b", body: "to check it", source: .spoken))
+        let query = try #require(AgentStatusQuery.parse("Ask reviewer what it is waiting for", names: spoken, afterVerb: afterVerb))
+        guard case .waiting(let address?) = query else {
+            Issue.record("expected a waiting question, got \(query)")
+            return
+        }
+        #expect(AgentRecipient.resolve(address, frozen: nil, rows: ["a", "b"], names: names, shared: shared) == .select(id: "b"))
+    }
+}

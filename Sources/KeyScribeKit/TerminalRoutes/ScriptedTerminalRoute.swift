@@ -6,13 +6,25 @@ public struct ScriptedTerminalRoute: TerminalRoute {
     let helperPrefix: String?
     let front: String
     let body: String
+    public var placeScript: String?
+    var placesFrom: (@Sendable (_ answer: String, _ ttys: [String], _ surface: String) -> PlaceLayer?)?
     public let environmentKeys: [String] = []
     public var frontScript: String? { front }
 
+    func claims(_ process: TerminalProcess) -> Bool {
+        process.app == app || helperPrefix.map(process.name.hasPrefix) == true
+    }
+
     public func open(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> Opening? {
-        guard process.app == app || helperPrefix.map(process.name.hasPrefix) == true else { return nil }
+        guard claims(process) else { return nil }
         return Opening(open(pid: process.pid, ttys: TerminalRoutes.ttys(of: inner)))
     }
+
+    public func places(answer: String, ttys: [String]) -> PlaceLayer? {
+        placesFrom?(answer, ttys, name)
+    }
+
+    public static func route(named name: String) -> ScriptedTerminalRoute? { all.first { $0.name == name } }
 
     public func open(pid: Int, ttys: [String]) -> [OpenAction] {
         guard !ttys.isEmpty else { return [.activate(app: app, pid: pid)] }
@@ -21,58 +33,6 @@ public struct ScriptedTerminalRoute: TerminalRoute {
     }
 
     public static let all = [ghostty, terminal, iterm]
-
-    public static let ghostty = ScriptedTerminalRoute(
-        name: "Ghostty", app: "com.mitchellh.ghostty", helperPrefix: nil,
-        front: "return tty of focused terminal of selected tab of front window", body: """
-        repeat with candidate in wanted
-            set found to (every terminal whose tty is (contents of candidate))
-            if (count of found) > 0 then
-                focus (item 1 of found)
-                return true
-            end if
-        end repeat
-        return false
-        """)
-
-    public static let terminal = ScriptedTerminalRoute(
-        name: "Terminal", app: "com.apple.Terminal", helperPrefix: nil, front: "return tty of selected tab of front window", body: """
-        repeat with w from 1 to count of windows
-            repeat with t from 1 to count of tabs of window w
-                if wanted contains (tty of tab t of window w) then
-                    set selected of tab t of window w to true
-                    if miniaturized of window w then set miniaturized of window w to false
-                    set index of window w to 1
-                    return true
-                end if
-            end repeat
-        end repeat
-        return false
-        """)
-
-    public static let iterm = ScriptedTerminalRoute(
-        name: "iTerm", app: "com.googlecode.iterm2", helperPrefix: "iTermServer-",
-        front: "return tty of current session of current window", body: """
-        set found to missing value
-        repeat with w from 1 to count of windows
-            repeat with t from 1 to count of tabs of window w
-                repeat with s from 1 to count of sessions of tab t of window w
-                    if wanted contains (tty of session s of tab t of window w) then
-                        set found to {id of window w, t, s}
-                        exit repeat
-                    end if
-                end repeat
-                if found is not missing value then exit repeat
-            end repeat
-            if found is not missing value then exit repeat
-        end repeat
-        if found is missing value then return false
-        set {windowId, t, s} to found
-        select tab t of window id windowId
-        select session s of tab t of window id windowId
-        select window id windowId
-        return true
-        """)
 }
 
 public enum AppleScriptText {

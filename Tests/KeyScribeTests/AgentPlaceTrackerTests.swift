@@ -102,6 +102,20 @@ struct AgentPlaceTrackerTests {
         #expect(reader.reads == first + 3)
     }
 
+    @Test func aPlaceWithoutAnyNameIsReadOnlyAsOftenAsNoPlace() async {
+        let reader = Reader()
+        let clock = Clock()
+        let (hub, _) = makeHub(reader, clock: clock)
+        reader.answers = ["claude:a": .found(AgentPlace(surface: "Ghostty", labels: [], containers: ["ghostty#terminal:t1"]))]
+        await hub.rescan()
+        await settle(hub)
+        let first = reader.reads
+        clock.now += AgentPlaceTracker.busyInterval
+        hub.tickPlaces()
+        await settle(hub)
+        #expect(reader.reads == first)
+    }
+
     @Test func aReplacementConversationInThePaneGetsItsNameButNothingElse() async {
         let reader = Reader()
         reader.answers = ["claude:a": .found(place(pane: "architect")), "claude:b": .found(place(pane: "architect"))]
@@ -176,12 +190,14 @@ struct AgentPlaceRestartTests {
         await second.rescan()
         await settle(second)
         #expect(second.names == ["cos claude": "claude:a"])
-        #expect(second.placesUnchecked(["claude:a"]))
+        #expect(!second.placesUnread(["claude:a"]))
+        #expect(second.placeTracker?.failingSince["claude:a"] != nil)
         reader.answers = ["claude:a": .found(place("p1"))]
         second.readPlaces()
         await settle(second)
         #expect(second.names == ["cos claude": "claude:a"])
-        #expect(!second.placesUnchecked(["claude:a"]))
+        #expect(!second.placesUnread(["claude:a"]))
+        #expect(second.placeTracker?.failingSince["claude:a"] == nil)
     }
 }
 

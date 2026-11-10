@@ -7,10 +7,15 @@ struct AgentDirectoryPlaceTests {
         AgentSession(agent: agent, id: id, pid: pid, cwd: cwd, explicitName: name, state: .idle, startedAt: pid * 100)
     }
 
-    private func place(pane: String? = nil, paneId: String = "p1", workspace: String? = "cos", workspaceId: String = "w1", socket: String = "/s") -> AgentPlace {
+    private func place(
+        agentName: String? = nil, pane: String? = nil, paneId: String = "p1", workspace: String? = "cos", workspaceId: String = "w1", socket: String = "/s",
+        title: String? = nil
+    ) -> AgentPlace {
         let paneKey = "\(socket)#pane:\(paneId)", tabKey = "\(socket)#tab:\(workspaceId):t1", workspaceKey = "\(socket)#workspace:\(workspaceId)"
         var labels: [AgentPlace.Label] = []
+        if let title { labels.append(.init(text: title, level: .title, container: paneKey)) }
         if let pane { labels.append(.init(text: pane, level: .pane, container: paneKey)) }
+        if let agentName { labels.append(.init(text: agentName, level: .agent, container: paneKey)) }
         if let workspace { labels.append(.init(text: workspace, level: .workspace, container: workspaceKey)) }
         return AgentPlace(surface: "herdr", labels: labels, containers: [paneKey, tabKey, workspaceKey])
     }
@@ -27,15 +32,142 @@ struct AgentDirectoryPlaceTests {
         #expect(directory.conversations[0].placeName == AgentPlaceName(surface: "herdr", level: .pane, label: "Architect"))
     }
 
-    @Test func theAgentsOwnNameAndAKeyScribeNameBothWinOverThePlace() {
+    @Test func thePaneNameBeatsTheAgentsOwnNameWhichStillAnswersAndAKeyScribeNameBeatsBoth() {
         var directory = AgentDirectory(chosen: ["claude:b": "builder"])
         directory.update(
             entries: [session("claude", "a", name: "tracker"), session("claude", "b", pid: 20)], live: [],
             places: ["claude:a": place(pane: "architect"), "claude:b": place(pane: "reviewer", paneId: "p2")])
-        #expect(handles(directory) == ["claude:a": "tracker", "claude:b": "builder"])
-        #expect(directory.conversations.first { $0.id == "claude:a" }?.nameSource == .agent)
+        #expect(handles(directory) == ["claude:a": "architect", "claude:b": "builder"])
+        #expect(directory.conversations.first { $0.id == "claude:a" }?.nameSource == .place)
         #expect(directory.conversations.first { $0.id == "claude:b" }?.nameSource == .chosen)
-        #expect(directory.conversations.first { $0.id == "claude:a" }?.placeName?.label == "architect")
+        #expect(directory.otherNames(for: "claude:a") == ["tracker"])
+        #expect(directory.otherNames(for: "claude:b") == ["reviewer"])
+    }
+
+    @Test func theAgentsOwnNameStillBeatsATabOrWorkspace() {
+        var directory = AgentDirectory()
+        directory.update(entries: [session("claude", "a", name: "tracker")], live: [], places: ["claude:a": place()])
+        #expect(directory.handles == ["tracker"])
+        #expect(directory.conversations[0].nameSource == .agent)
+    }
+
+    @Test func theNameHerdrShowsWinsAndTheAgentNameStillAnswers() {
+        var directory = AgentDirectory()
+        directory.update(
+            entries: [session("pi", "a", name: "clean up panes and close stale sessions")], live: [],
+            places: ["pi:a": place(agentName: "cos", workspace: nil, title: "marvin")])
+        #expect(directory.handles == ["marvin"])
+        #expect(directory.conversations[0].placeName == AgentPlaceName(surface: "herdr", level: .title, label: "marvin"))
+        #expect(directory.otherNames(for: "pi:a") == ["clean up panes and close stale sessions", "cos"])
+        #expect(directory.sharedPlaceNames["clean up panes and close stale sessions"]?.kind == .afterVerb("agent\u{2019}s own name"))
+        #expect(directory.defaultName(for: "pi:a")?.otherNames == ["clean up panes and close stale sessions", "cos"])
+    }
+
+    @Test func changingOnlyTheHerdrAgentNameUpdatesTheOtherNamesShown() {
+        var directory = AgentDirectory()
+        directory.update(entries: [session("pi", "a")], live: [], places: ["pi:a": place(agentName: "cos", workspace: nil, title: "marvin")])
+        let before = directory.revision
+        #expect(directory.conversations[0].otherNames == ["cos"])
+        directory.update(entries: [session("pi", "a")], live: [], places: ["pi:a": place(agentName: "chief", workspace: nil, title: "marvin")])
+        #expect(directory.conversations[0].handle == "marvin")
+        #expect(directory.conversations[0].otherNames == ["chief"])
+        #expect(directory.revision > before)
+    }
+
+    @Test func aKeyScribeNameStillWinsOverTheHerdrAgentName() {
+        var directory = AgentDirectory(chosen: ["pi:a": "chief"])
+        directory.update(entries: [session("pi", "a")], live: [], places: ["pi:a": place(agentName: "cos")])
+        #expect(directory.handles == ["chief"])
+    }
+
+    @Test(arguments: [
+        ("Ask cos what's outstanding", "what's outstanding"),
+        ("Ask Marvin what we should do next", "what we should do next"),
+        ("cos, run the tests", "run the tests"),
+    ])
+    func inTheReportedLayoutTheShownNameAndTheAgentNameBothReachTheChiefOfStaff(text: String, body: String) {
+        var directory = AgentDirectory()
+        directory.update(
+            entries: [
+                session("pi", "a", name: "clean up panes and close stale sessions"),
+                session("pi", "b", pid: 20, name: "cos workers"),
+                session("claude", "c", pid: 30, name: "inbox amendments"),
+            ], live: [],
+            places: [
+                "pi:a": place(agentName: "cos", title: "marvin"), "pi:b": place(paneId: "p2"), "claude:c": place(paneId: "p3"),
+            ])
+        #expect(handles(directory) == ["pi:a": "marvin", "pi:b": "cos workers", "claude:c": "inbox amendments"])
+        let names = Dictionary(uniqueKeysWithValues: directory.conversations.map { ($0.handle, $0.id) })
+        let shared = directory.sharedPlaceNames
+        let address = AgentAddress.parse(
+            text, names: AgentRecipient.spokenNames(names, shared: shared), afterVerb: AgentRecipient.afterVerbNames(shared))
+        #expect(AgentRecipient.resolve(address, frozen: .init(id: "pi:b", source: .current), rows: ["pi:a", "pi:b", "claude:c"], names: names, shared: shared)
+            == .deliver(id: "pi:a", body: body, source: .spoken))
+    }
+
+    @Test(arguments: [("cos", "cos"), ("api-review", "api_review")])
+    func twoHerdrAgentsWhoseNamesSoundTheSameAreQualifiedAndTheBareNameAsks(first: String, second: String) {
+        var directory = AgentDirectory()
+        directory.update(
+            entries: [session("pi", "a"), session("claude", "b", pid: 20)], live: [],
+            places: [
+                "pi:a": place(agentName: first, workspace: nil, socket: "/one"),
+                "claude:b": place(agentName: second, workspace: nil, socket: "/two"),
+            ])
+        let bare = AgentHandles.normalize(first)
+        #expect(handles(directory) == ["pi:a": "\(bare) pi", "claude:b": "\(bare) claude"])
+        #expect(directory.sharedPlaceNames.values.map(\.names) == [["\(bare) claude", "\(bare) pi"]])
+    }
+
+    @Test func eachOtherHerdrNameOfAConversationGetsItsKind() {
+        var directory = AgentDirectory(chosen: ["claude:b": "builder"])
+        directory.update(
+            entries: [session("pi", "a"), session("claude", "b", pid: 20)], live: [],
+            places: [
+                "pi:a": place(agentName: "cos", pane: "marvin", workspace: "chief"),
+                "claude:b": place(paneId: "p2", workspace: "builder", workspaceId: "w2", title: "Refactor auth"),
+            ])
+        #expect(handles(directory) == ["pi:a": "marvin", "claude:b": "builder"])
+        #expect(directory.sharedPlaceNames == [
+            "cos": AgentRecipient.SharedName(names: ["marvin"], kind: .also("herdr agent name")),
+            "chief": AgentRecipient.SharedName(names: ["marvin"], kind: .held("herdr workspace label")),
+            "refactor auth": AgentRecipient.SharedName(names: ["builder"], kind: .afterVerb("herdr pane title")),
+        ])
+    }
+
+    @Test func twoPanesShowingTheSameTitleAreQualifiedAndTheBareTitleAsks() {
+        var directory = AgentDirectory()
+        directory.update(
+            entries: [session("pi", "a"), session("claude", "b", pid: 20)], live: [],
+            places: [
+                "pi:a": place(workspace: nil, title: "marvin"),
+                "claude:b": place(paneId: "p2", workspace: nil, title: "marvin"),
+            ])
+        #expect(handles(directory) == ["pi:a": "marvin pi", "claude:b": "marvin claude"])
+        #expect(directory.sharedPlaceNames["marvin"]?.names == ["marvin claude", "marvin pi"])
+    }
+
+    @Test func anotherNameTwoConversationsHaveAsksAndOneEqualToANameIsLeftToThatName() {
+        var directory = AgentDirectory()
+        directory.update(
+            entries: [session("pi", "a"), session("claude", "b", pid: 20), session("claude", "c", pid: 30)], live: [],
+            places: [
+                "pi:a": place(agentName: "cos", pane: "alpha", workspace: nil, socket: "/one"),
+                "claude:b": place(agentName: "cos", pane: "beta", workspace: nil, socket: "/two"),
+                "claude:c": place(agentName: "alpha", pane: "gamma", paneId: "p3", workspace: nil),
+            ])
+        #expect(handles(directory) == ["pi:a": "alpha", "claude:b": "beta", "claude:c": "gamma"])
+        #expect(directory.sharedPlaceNames["cos"] == AgentRecipient.SharedName(names: ["alpha", "beta"], kind: .also("herdr agent name")))
+        #expect(directory.sharedPlaceNames["alpha"] == nil)
+    }
+
+    @Test func renamingAnotherConversationToANameThatAnswersForThisOneIsTaken() {
+        var directory = AgentDirectory()
+        directory.update(
+            entries: [session("pi", "a"), session("claude", "b", pid: 20)], live: [],
+            places: ["pi:a": place(agentName: "cos", workspace: nil, title: "marvin")])
+        #expect(directory.renameProblem("claude:b", to: "cos") == .taken)
+        #expect(directory.renameProblem("pi:a", to: "cos") == nil)
     }
 
     @Test func aLoneConversationTakesTheWorkspaceNameAsItIs() {

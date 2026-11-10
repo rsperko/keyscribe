@@ -22,12 +22,14 @@ struct HerdrPlacesTests {
         var tab = "w1:t1"
         var workspace = "w1"
         var label: String?
+        var title: String?
         var agent: String?
         var session: (kind: String, value: String)?
 
         var json: String {
             var fields = [#""pane_id":"\#(id)""#, #""tab_id":"\#(tab)""#, #""workspace_id":"\#(workspace)""#, #""terminal_title":"Generated title""#]
             if let label { fields.append(#""label":"\#(label)""#) }
+            if let title { fields.append(#""title":"\#(title)""#) }
             if let agent { fields.append(#""agent":"\#(agent)""#) }
             if let session, let agent {
                 fields.append(#""agent_session":{"agent":"\#(agent)","kind":"\#(session.kind)","source":"herdr:\#(agent)","value":"\#(session.value)"}"#)
@@ -40,11 +42,19 @@ struct HerdrPlacesTests {
         #"{"id":"cli:pane:list","result":{"panes":[\#(items.map(\.json).joined(separator: ","))]}}"#
     }
 
+    private func agents(_ items: [(pane: String, name: String?)]) -> String {
+        let rows = items.map { item in
+            item.name.map { #"{"agent":"pi","pane_id":"\#(item.pane)","name":"\#($0)"}"# } ?? #"{"agent":"pi","pane_id":"\#(item.pane)"}"#
+        }
+        return #"{"id":"cli:agent:list","result":{"agents":[\#(rows.joined(separator: ","))]}}"#
+    }
+
     private func listing(
         panes items: [Pane], tabs tabItems: [(id: String, label: String, number: Int)] = [("w1:t1", "1", 1)],
-        workspaces workspaceItems: [(id: String, label: String?)] = [("w1", "cos")]
+        workspaces workspaceItems: [(id: String, label: String?)] = [("w1", "cos")], agents agentItems: [(pane: String, name: String?)] = []
     ) throws -> HerdrPlaces.Listing {
-        try #require(HerdrPlaces.listing(panes: panes(items), tabs: tabs(tabItems), workspaces: workspaces(workspaceItems)))
+        try #require(HerdrPlaces.listing(
+            panes: panes(items), tabs: tabs(tabItems), workspaces: workspaces(workspaceItems), agents: agents(agentItems)))
     }
 
     private func lookup(
@@ -66,6 +76,22 @@ struct HerdrPlacesTests {
         #expect(place.labels.map(\.text) == ["architect", "backend", "cos"])
         #expect(place.labels.map(\.level) == [.pane, .tab, .workspace])
         #expect(place.surface == "herdr")
+    }
+
+    @Test func theTitleHerdrShowsComesFirstThenThePaneLabelThenTheAgentName() throws {
+        let listing = try listing(
+            panes: [Pane(id: "w1:p1", label: "pilot", title: "marvin", agent: "pi", session: ("id", "abc"))],
+            tabs: [("w1:t1", "🟢 cos", 1)], agents: [("w1:p1", "cos")])
+        let place = try #require(found(lookup("pi", "abc", in: listing)))
+        #expect(place.labels.map(\.text) == ["marvin", "pilot", "cos", "🟢 cos", "cos"])
+        #expect(place.labels.map(\.level) == [.title, .pane, .agent, .tab, .workspace])
+        #expect(Set(place.labels.prefix(3).map(\.container)).count == 1)
+    }
+
+    @Test func anAgentHerdrHasNotNamedGivesNoAgentName() throws {
+        let listing = try listing(panes: [Pane(id: "w1:p1", agent: "claude", session: ("id", "abc"))], agents: [("w1:p1", nil)])
+        let place = try #require(found(lookup("claude", "abc", in: listing)))
+        #expect(place.labels.map(\.level) == [.workspace])
     }
 
     @Test func aTabStillOnItsDefaultNumberAndAPaneNeverRenamedGiveNoLabel() throws {
@@ -156,9 +182,10 @@ struct HerdrPlacesTests {
     }
 
     @Test func unreadableOutputIsNoListing() {
-        #expect(HerdrPlaces.listing(panes: "not json", tabs: tabs([]), workspaces: workspaces([])) == nil)
-        #expect(HerdrPlaces.listing(panes: panes([]), tabs: "", workspaces: workspaces([])) == nil)
-        #expect(HerdrPlaces.listing(panes: panes([]), tabs: tabs([]), workspaces: #"{"result":{}}"#) == nil)
+        #expect(HerdrPlaces.listing(panes: "not json", tabs: tabs([]), workspaces: workspaces([]), agents: agents([])) == nil)
+        #expect(HerdrPlaces.listing(panes: panes([]), tabs: "", workspaces: workspaces([]), agents: agents([])) == nil)
+        #expect(HerdrPlaces.listing(panes: panes([]), tabs: tabs([]), workspaces: #"{"result":{}}"#, agents: agents([])) == nil)
+        #expect(HerdrPlaces.listing(panes: panes([]), tabs: tabs([]), workspaces: workspaces([]), agents: "") == nil)
     }
 }
 
@@ -168,5 +195,6 @@ struct HerdrPlaceCommandsTests {
         #expect(commands.panes == ["/usr/bin/env", "-u", "HERDR_PANE_ID", "HERDR_SOCKET_PATH=/s.sock", "/bin/herdr", "pane", "list"])
         #expect(commands.tabs.suffix(2) == ["tab", "list"])
         #expect(commands.workspaces.suffix(2) == ["workspace", "list"])
+        #expect(commands.agents.suffix(2) == ["agent", "list"])
     }
 }

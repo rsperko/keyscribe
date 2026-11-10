@@ -24,10 +24,12 @@ final class CodingAgentsSettingsModel: ObservableObject {
         var place: AgentPlaceName?
         var renamed = false
         var surface: String?
+        var otherNames: [String] = []
+        var unreadSince: Date?
 
         var location: String? {
             guard let place else { return terminal }
-            let within = "\(place.level.rawValue) \(place.label)"
+            let within = "\(place.word) \(place.label)"
             guard let terminal else { return "\(place.surface) \(within)" }
             if terminal.hasSuffix(place.surface) { return "\(terminal) \(within)" }
             return "\(terminal) \u{00B7} \(place.surface) \(within)"
@@ -209,7 +211,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
                 lastSeen: lastSeen, olderConnector: runsOlderConnector(conversation, loadedVersions: loadedVersions), startedAt: conversation.startedAt,
                 readAloud: readAloud.contains(conversation.id) ? .thisReply : readNextAloud.contains(conversation.id) ? .nextReply : nil,
                 place: conversation.placeName, renamed: conversation.nameSource == .chosen,
-                surface: conversation.placeSurface)
+                surface: conversation.placeSurface, otherNames: conversation.otherNames, unreadSince: conversation.placeUnreadSince)
         }
         next += candidates.map { candidate in
             Row(
@@ -224,7 +226,8 @@ final class CodingAgentsSettingsModel: ObservableObject {
                 id: conversation.id, number: 0, name: conversation.handle, folder: conversation.cwd, state: "Disconnected", connected: false,
                 current: false, agent: conversation.agent, terminal: terminals[conversation.pid] ?? nil, title: conversation.title,
                 setup: conversation.setup, key: conversation.id, place: conversation.placeName,
-                renamed: conversation.nameSource == .chosen, surface: conversation.placeSurface)
+                renamed: conversation.nameSource == .chosen, surface: conversation.placeSurface, otherNames: conversation.otherNames,
+                unreadSince: conversation.placeUnreadSince)
         }
         if away != disconnectedRows { disconnectedRows = away }
         for connector in connectors {
@@ -405,14 +408,39 @@ final class CodingAgentsSettingsModel: ObservableObject {
         return "\(full) \u{201C}\(short), \u{2026}\u{201D} also works."
     }
 
+    static func placeTrouble(_ row: Row) -> String? {
+        guard let since = row.unreadSince else { return nil }
+        let what = row.surface.map { "its \($0) names" } ?? "where it runs"
+        return "Couldn\u{2019}t read \(what) since \(since.formatted(date: .omitted, time: .shortened)). Using the names last read."
+    }
+
+    static func placeNote(_ row: Row) -> String? {
+        guard let surface = row.place?.surface ?? row.surface else { return nil }
+        if row.renamed { return "This name follows this conversation, including when you resume it." }
+        switch row.place?.level {
+        case .title?: return "This name is the title a \(surface) hook shows on its pane, so it changes when the hook changes it. Rename it here to keep a name of your own."
+        case .agent?: return "This name follows this agent. To change it, rename the agent in \(surface)."
+        default:
+            let word = row.place?.word ?? "pane"
+            return "This name follows this conversation, including when you resume it. To name future conversations in this \(word), rename the \(word) in \(surface)."
+        }
+    }
+
     func defaultNameNote(_ row: Row) -> String? {
         guard let preview = defaultName?(row.id) else { return nil }
         let from = switch preview.source {
-        case .place: preview.place.map { "from its \($0.surface) \($0.level.rawValue)" } ?? "from its folder"
+        case .place: preview.place.map { "from its \($0.surface) \($0.word)" } ?? "from its folder"
         case .agent: "from the agent\u{2019}s own name for it"
         case .folder, .chosen: "from its folder"
         }
-        return row.renamed ? "Default name: \(preview.name), \(from)." : "This name comes \(from)."
+        let note = row.renamed ? "Default name: \(preview.name), \(from)." : "This name comes \(from)."
+        return alsoAnswers(row).map { "\(note) \($0)." } ?? note
+    }
+
+    func alsoAnswers(_ row: Row) -> String? {
+        let others = row.otherNames
+        guard !others.isEmpty else { return nil }
+        return "Also answers to \(AgentOutput.either(others.map { "\u{201C}\($0)\u{201D}" }, joining: "and"))"
     }
 
     @discardableResult

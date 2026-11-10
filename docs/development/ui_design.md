@@ -291,10 +291,31 @@ what was captured. A Coding agent take whose microphone stopped never selects or
 it reports that the command did not run.
 
 **Coding agent session list.** A recording in the Coding agent mode lists the open sessions so the user
-can address one. Its displayed and spoken name is the user's KeyScribe override, else the agent's explicit
-conversation name, else the name the user gave the place it runs in (a herdr pane, else its tab, else its
-workspace), else a name generated from the project folder. A deliberate name for one conversation beats a
-place that can hold several. Names use the same normalization as Rename. Duplicate names gain a
+can address one. Its displayed and spoken name is the name the user sees for it: the user's KeyScribe
+override, else what herdr shows on its pane (the pane title a herdr hook sets, else the pane's label), else
+the name the user gave the agent in herdr, else the agent's explicit conversation name, else its herdr tab,
+else its workspace, else a name generated from the project folder. The pane comes before the agent's own
+name because that is what the user sees in herdr, and an agent's own name may be a title it generated. A
+deliberate name for one conversation beats a place that can hold several. The same order applies to the
+other places a conversation can run in, closest first: a tmux window the user renamed and a tmux session
+the user named (only while tmux shows its status line, and a window name only while tmux does not let
+programs rename windows), a Zellij tab the user renamed (a Zellij pane title follows the program's own
+title, so it is not a name), a Ghostty
+terminal or tab name the user set (a tab only in a window without splits, since Ghostty does not say which
+split belongs to which tab), and an iTerm tab title the user set. A title a program writes into its
+terminal is never a name, and a terminal app is read only when it already allows the app to script it,
+so naming never asks for access: saying “open” and a conversation's name there once asks for it. A read of
+the terminal app that fails or is not allowed drops only that app's names (keeping its last answer after a
+failure) and never makes the conversation's place unknown. Terminal and Warp offer no name the user provably set, so they give none.
+Each place is described in its own words (“tmux window backend”, “Ghostty terminal Architect”). A
+conversation that runs in herdr inside a named terminal tab gets the herdr name first and the tab after
+it. A read that fails keeps the names the conversation had; a conversation that never had a place answers
+that it has none, so a failing read never holds dictation for a user who named nothing. A newly named
+terminal tab is picked up within about ten seconds; a renamed one within a few.
+A name around several conversations, such as a tab holding a tmux client with several agents, is a shared
+label and asks. Two panes showing the same
+title or label, and two herdr agents whose names sound the same (on separate herdr servers, or differing
+only in punctuation), are qualified by their agents like a shared place label, and the bare name asks. Names use the same normalization as Rename. Duplicate names gain a
 distinguishing word; an arriving native name never steals an existing handle. Native names and place
 labels that cannot be addressed under the reserved row grammar fall through to the next source (a pane to
 its tab, then its workspace) before the project. A native rename or a renamed place updates an unaliased
@@ -318,6 +339,22 @@ send “claude …”). The qualified name also survives restarting the app whil
 only that conversation left, the bare label reaches it. A new conversation that
 opens alone under the label is `cos`. A disconnected conversation still counts.
 
+Each conversation shows one name, and the other names the user deliberately gave it still reach it: its
+herdr agent name and its pane label, which reach it like a name. A pane
+titled `marvin` whose agent herdr calls `cos` is shown as `marvin`, and both “Ask Marvin what we should do
+next” and “Ask cos what's outstanding” reach it; a particular agent named `cos` also beats a workspace label
+`cos` several conversations share. A pane title that lost to a KeyScribe name, and the agent's own
+conversation name when a herdr name took its place, may be text nobody chose, so they reach it only when
+said in full after “tell”, “ask” or “open”; part of one is ordinary message text, because such names are
+task phrases that everyday instructions start with. A tab or workspace label of one conversation that lost to a higher name
+does not deliver: after “tell”, “ask” or “open” it holds, “Not sent: “chief” is the herdr workspace label of
+“marvin”. Try “tell marvin, …”” (“ask marvin, …” when the user said “ask”), and History keeps the line without the suggestion, which appears only while
+that conversation can take a message. Another name two conversations have asks which one, and one equal to
+a conversation's shown name reaches that conversation. Renaming a conversation to another one's other name
+is refused as taken. The conversation list shows the other names under the place (“Also answers to
+“cos””), as does the Rename sheet after where the name comes from, and receipts, spoken replies and retry suggestions always use the shown name. A pane title is
+display text a hook can change: a take uses the names frozen when its recording started.
+
 Place labels are read in the background, every few seconds while a conversation runs in a named place and
 less often otherwise, again when a conversation connects, and when a recording starts. A take resolves
 against the names frozen when its recording started, plus any new name a read during the recording gave
@@ -325,9 +362,11 @@ one of those same conversations: the recipient chosen at the start and the row n
 a new name never takes a frozen one or adds a conversation. When the take is resolved while a read is
 still running, it waits for that read up to a second. A take that would go to the current conversation
 is held, “Not sent: couldn’t check conversation names yet. Say it again, or start with a name or session
-number.”, if the read still has not finished or the last read could not check where one of the listed
-conversations runs, because its first words may be a name that read did not deliver; a take that named a
-known conversation goes ahead. So a pane renamed just before recording is reached by its new name. A failed read keeps the names last
+number.”, if the read still has not finished or the first read of one of the listed conversations has not
+finished, because its first words may be a name that read did not deliver; a take that named a known
+conversation goes ahead. A read that finishes but fails never holds a take: the conversation keeps the names
+last read (or its remembered name), and Settings and the Rename sheet say “Couldn’t read its herdr names
+since 3:42 PM. Using the names last read.” from the first failure until a read works again. So a pane renamed just before recording is reached by its new name. A failed read keeps the names last
 shown, and so does a read that cannot tell which pane holds the conversation, for that conversation alone;
 only a read that shows the label gone, or herdr reporting the pane closed, changes the name. After a
 restart, a conversation keeps its remembered name until its place has been checked. A new conversation in the same pane gets
@@ -1989,7 +2028,7 @@ text available on hover and selectable for copying. Empty,
 reserved and already-used names are explained beside the field before submission. A save failure
 keeps the sheet and draft open for correction or retry, with the diagnostic reason under Technical
 details; Cancel makes no change. Under the field a quiet line says where the name comes from (“This name
-comes from its herdr workspace.”); when the conversation has a KeyScribe name, it names the name it would
+comes from its herdr workspace.”, or “from its herdr pane title.”); when the conversation has a KeyScribe name, it names the name it would
 have without one, with any distinguishing word it would need (“Default name: cos claude, from its herdr
 workspace.”). When the conversation has a KeyScribe name, **Use Default
 Name** leads the action row: it drops that name, saved first, and closes the sheet; a save failure keeps

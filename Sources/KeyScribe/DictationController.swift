@@ -161,6 +161,7 @@ final class DictationController {
         var addressable: [String: String] { merged.names }
         var sharedNames: [String: AgentRecipient.SharedName] { merged.shared }
         var spokenNames: [String] { AgentRecipient.spokenNames(addressable, shared: sharedNames) }
+        var afterVerbNames: [String] { AgentRecipient.afterVerbNames(sharedNames) }
     }
     private var activeStartTrigger: String?
 
@@ -1598,7 +1599,7 @@ final class DictationController {
             _ = try? await runWithDeadline(seconds: Self.seconds(placeNamesGrace)) { await reading.value }
         }
         let ids = (session?.agentSnapshot?.conversations ?? agents.directory.conversations).map(\.id)
-        return agents.placeTracker?.reading == nil && !agents.placesUnchecked(ids)
+        return agents.placeTracker?.reading == nil && !agents.placesUnread(ids)
     }
 
     private func followAgentInFront(target: Mode.Agent.Target, snapshot: AgentSnapshot, through agents: AgentHub) {
@@ -1678,13 +1679,13 @@ final class DictationController {
         }
         if let query = AgentStatusQuery.parse(
             routed.transcript, names: snapshot.spokenNames, namesKnown: snapshot.namesAvailable,
-            read: plan.agentAddressReader(for: routed.transcript, mode: mode)) {
+            read: plan.agentAddressReader(for: routed.transcript, mode: mode), afterVerb: snapshot.afterVerbNames) {
             await answerStatus(query, recipient: frozenRecipient, through: agents, heard: heard, mode: mode, snapshot: snapshot)
             return
         }
         let address = AgentAddress.parse(
             routed.transcript, names: snapshot.spokenNames, namesKnown: snapshot.namesAvailable,
-            read: plan.agentAddressReader(for: routed.transcript, mode: mode))
+            read: plan.agentAddressReader(for: routed.transcript, mode: mode), afterVerb: snapshot.afterVerbNames)
         if AgentRecipient.usesDefault(address) {
             await settleAgentInFront()
             if Task.isCancelled { return }
@@ -1744,7 +1745,7 @@ final class DictationController {
                         hideAfter: state.errorAction != nil ? 8 : state.indicator == .advisory ? 5 : 2,
                         summary: result.historySummary(handle: handle, agent: agents.kind(of: id)), facts: facts)
         case .ask(let body, let reason):
-            let retry: AgentOutput.Retry = if case .open = address { .open } else { .tell }
+            let retry = AgentOutput.Retry.matching(routed.transcript, address)
             let line = retry == .open ? AgentOutput.openAskLine : AgentOutput.askLine
             let shown = line(reason, retry, reachable(snapshot, agents, for: retry), frozen?.id)
             finishAgent(state: .error(message: shown, action: Self.askAction(reason, mode: mode), heard: HeardExcerpt(heard: body)),

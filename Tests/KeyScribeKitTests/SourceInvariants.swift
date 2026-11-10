@@ -80,6 +80,23 @@ enum SourceInvariants {
                 + "fixed local strings and names: never an agent reply, a secret, or an environment value."
         ),
         SourceRule(
+            pattern: #"(?i)herdr|tmux|zellij|ghostty|iterm|cmux|warp"#,
+            allowed: [
+                "Sources/KeyScribe/AgentHub.swift": 1,
+                "Sources/KeyScribe/DevCLI.swift": 1,
+                "Sources/KeyScribeKit/TerminalRoutes/ScriptedTerminalRoute.swift": 1,
+                "Sources/KeyScribeKit/TerminalRoutes/TerminalRoutes.swift": 2,
+            ],
+            reason: "Everything one terminal or multiplexer needs, to focus a conversation or to read the names the user "
+                + "gave its place, lives in that surface's files (named for it); shared code speaks Route, PlaceRoute, "
+                + "AgentPlace and AgentPlaceReading, so another surface is another adapter, never a branch "
+                + "(docs/development/areas/voice-commands.md). The registries and the composition root list the adapters.",
+            exempt: { name in
+                let file = (name as NSString).lastPathComponent
+                return ["Herdr", "Tmux", "Zellij", "Ghostty", "ITerm", "Cmux", "Warp", "TerminalApp"].contains { file.hasPrefix($0) }
+            }
+        ),
+        SourceRule(
             pattern: #"(?i)claude"#,
             allowed: [
                 "Sources/KeyScribe/AppDelegate.swift": 2,

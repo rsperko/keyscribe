@@ -111,9 +111,23 @@ every rule above applies to it, with these sharpenings:
   that has it, not per container. A qualified place name stays once given (`cos claude` keeps its
   qualifier after its sibling closes, and across an app restart through its remembered name), because the
   user may have learned it and the words after a name are the message.
-- **A conversation's name comes from the most specific name the user set.** The order is a KeyScribe
-  name, the agent's own user-set name, the user's label for its place (`AgentPlace`, read for herdr by
-  `HerdrPlaces` and `HerdrPlaceReader`: pane, then tab, then workspace), then the folder. A label that
+- **A conversation's name is the one the user sees.** The order is a KeyScribe
+  name, what herdr shows on its pane (a `.title` then a `.pane` `AgentPlace.Label`), the name the user gave
+  the agent in herdr (an `.agent` label, read from `herdr agent list`), the agent's own user-set name, the
+  user's label for its place (`AgentPlace`, read for herdr by `HerdrPlaces` and `HerdrPlaceReader`, and
+  for tmux, Zellij, Ghostty and iTerm by `TerminalPlaces.walk` over each `PlaceRoute` and
+  `ScriptedTerminalRoute.placeScript`, through `TerminalPlaceReader`; `CombinedPlaceReader` joins them
+  innermost first and any unknown answer is unknown: tab, then workspace), then the folder. A terminal read
+  that fails is unknown only for a conversation that already had a place (`AgentPlaceQuery.placed`), and
+  absent otherwise, so a hiccup keeps names but never holds dictation for one that had none. A terminal app
+  read that fails or is not allowed (`TerminalScripting.read` reports an undecided Automation grant as a
+  failure) drops only that app's labels and reuses its last answer; it is never unknown, so an app the user
+  has not yet allowed never holds dictation. The walk goes on
+  past herdr through its focus route to the terminal around it, and `CachedTerminalFacts` asks each server
+  once per read. Each label carries its surface's own word (`AgentPlace.Label.term`). The walk takes
+  the agent's environment from its connector report, because an agent that rewrites its process title (Pi)
+  cannot be read from outside. A terminal app is scripted only through the passive read, which never asks
+  for Automation. A label that
   cannot be said falls through to the next one. A place label is joined to its conversation by the
   session herdr reports for the pane, and only for a pane where herdr reports no session, by the pane id in
   the agent's environment; a pane id is only meaningful with its server's socket, so every place is keyed
@@ -122,15 +136,44 @@ every rule above applies to it, with these sharpenings:
   Labels are read off the main actor, by one coalesced read per poll for every conversation
   (`AgentPlaceTracker`), each command under a timeout, never on the 1 s registry tick's critical path and
   never awaited by the agent. Whether a conversation's place was checked is tracked per conversation
-  (`AgentPlaceTracker.checked`): found or absent checks it, unresolved unchecks it, and a conversation
-  never read is unchecked. An unchecked conversation with no cached place keeps its last name
+  (`AgentPlaceTracker.checked`): found or absent checks it, and it stays checked. Separately, any completed
+  answer, unknown included, marks it attempted (`AgentPlaceTracker.attempted`). An unknown answer keeps the
+  labels last read, so a name is never lost to a failed read, and records when reads stopped working
+  (`AgentPlaceTracker.failingSince`), from the first failure, which Settings and the Rename sheet show beside
+  the conversation instead of blocking on it. An unchecked conversation with no cached place keeps its last name
   (`AgentDirectory.update(unplaced:)`), so a failed first read after launch keeps remembered names. A take
   waits for a read already running only when it is resolved, up to `DictationController.placeNamesGrace`;
-  if a read is still running then, or any listed conversation is unchecked, a take that would go to the
-  default recipient is held, because its leading words may be a name a read did not deliver. A lookup is found, absent, or unresolved
+  if a read is still running then, or any listed conversation has no completed read yet (`placesUnread`), a
+  take that would go to the default recipient is held, because its leading words may be a name a first read
+  did not deliver (a new conversation whose pane already has a label). A read that completes, even unknown,
+  never holds: a pane renamed during an outage and then addressed bare is the one case left, and the receipt names
+  where the take went. Holding instead would block the main path for the whole outage, and some outages are
+  permanent (a herdr without `agent list`, an environment pointing at a dead herdr socket). A lookup is found, absent, or unresolved
   (`HerdrPlaces.Association`): two panes claiming one session, a pane claimed by another session, or an
   unreadable listing or environment is unresolved and keeps the labels last read; only a good listing with
   no pane for the session, or herdr reporting the pane gone, removes them. Unreadable never means unnamed.
+- **A place reader emits only names the user can see and provably set.** Each surface gets a reader behind
+  `AgentPlaceReading` that emits `AgentPlace` labels by level; the directory and the resolver stay
+  surface-blind, so a reader never implements addressing. Everything one surface needs, its focus route and its
+  names, lives in files named for it (`HerdrRoute`, `HerdrPlaces`, `HerdrPlaceReader`, `TmuxRoute`, `GhosttyRoute`,
+  …); only the registries and the composition root list them, and `SourceInvariantsTests` pins it. A label must be shown by that surface's current
+  configuration (tmux with its status line and pane borders off shows none), must be one the surface keeps
+  apart from the title a program writes through OSC 0/2 (which Claude Code and Pi set to generated text, so
+  it is never read: herdr's `terminal_title`, and Terminal.app's custom title, which receives it), and must be
+  joined to the conversation by its tty, pid or environment. An outer title that mirrors the active inner
+  pane belongs to that pane alone, never to every conversation behind it. `.title` is for a separate,
+  hook-set display field; `.agent` for a handle the surface's own commands target. A new reader is checked
+  against the surface's real output first, then by hand: name the place and say it, let the agent retitle
+  itself and confirm that is not a name, rename the place and confirm the name follows.
+- **One shown name; other names by kind.** `AgentDirectory.otherNames` freezes each conversation's other
+  names with the take as `SharedName`s whose `kind` says what they may do: a pane label or herdr agent name
+  (`.also`) reaches it like a name and beats a shared place label; a name of uncertain provenance, a pane
+  title that lost or the agent's own name a herdr name outranked (`.afterVerb`), reaches it only when said in
+  full after “tell”, “ask” or “open” (`AgentAddress.parse`'s `afterVerb`, and `AgentStatusQuery.parse`'s),
+  never in part, since such names are task phrases everyday instructions start with; a
+  tab or workspace label of one conversation (`.held`) holds with `AskReason.shownOn`. One another name two
+  conversations have asks; one equal to a shown name is dropped. A herdr agent name is grouped only with
+  other agent names when deciding whether it is shared.
 - **A title the agent generated never becomes a name.** An adapter reports what it knows to be generated as
   `AgentTitle.generatedTitle`, and a connector-reported name equal to it is ignored for naming
   (`AgentHub.isGenerated`).

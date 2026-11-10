@@ -361,8 +361,25 @@ state, and a write to it does not reload configuration.
   records and registry names marked `auto` or `derived` are descriptive text, never addresses.
   An omitted name in a connector hello leaves registry/transcript discovery available; an explicit
   name-cleared event overrides stale metadata. A subsequent registry rename can supersede that report.
-- After the agent's own name comes the label the user gave the conversation's place: a herdr pane's
-  label, else its tab's label when it is not the tab's number, else its workspace's label. A tab or
+- Before the agent's own name come what herdr shows on the conversation's pane (the `title` a hook reports
+  through `pane report-metadata`, else the pane's `label`) and then the name the user gave the agent in
+  herdr (`herdr agent list`'s `name`). Names that normalize alike, including the same name on two herdr
+  servers, are qualified by their agents and the bare name asks. Herdr is read for the agent names on every
+  place read; a read that cannot list them leaves every place unchecked, so the last names stay.
+- The pane label and the herdr agent name still reach a conversation whose shown name came from a higher
+  source; a pane title, and the agent's own name when a herdr name outranks it, do so only when said in full
+  after “tell”, “ask” or “open” (part of one is message text); a tab or workspace label of one conversation
+  holds the take and names the conversation. These other names are read with the
+  places and never saved.
+- Other places give names by the same levels, innermost first, read from each tool's own listing: tmux
+  window names with `automatic-rename` and `allow-rename` off and non-numeric session names while `status`
+  is on; Zellij tab names other than `Tab #N` (pane titles follow the program's title and are not read); Ghostty terminal and tab `name override` (tabs only in windows whose tab and terminal counts
+  match); iTerm's `tab.titleOverride`. Terminal-app reads use Automation only where it is already allowed.
+  Program-written titles (OSC 0/2, tmux `pane_title`, Zellij pane titles, Ghostty `name`, Terminal custom
+  titles) are never read. Each tool is asked once per read for all conversations. A read that fails keeps
+  a conversation's names when it had a place and reports no place when it never had one.
+- After the agent's own name comes the label the user gave the conversation's place: its tab's label when
+  it is not the tab's number, else its workspace's label. A tab or
   workspace label covering several conversations is followed by each conversation's agent, and a bare
   label then asks which one. Place labels are not saved; they are read from herdr while the app runs.
 - A native rename updates an unaliased conversation; a KeyScribe override keeps winning until changed

@@ -102,9 +102,46 @@ public enum AgentAddress: Equatable, Sendable {
     }
 
     public static func parse(
-        _ text: String, names: [String], namesKnown: Bool = true, read: ((String) -> String)? = nil
+        _ text: String, names: [String], namesKnown: Bool = true, read: ((String) -> String)? = nil, afterVerb: [String] = []
     ) -> AgentAddress {
-        parse(text, names: names, namesKnown: namesKnown, read: read, explicit: false, assumeTold: false)
+        let found = parse(text, names: names, namesKnown: namesKnown, read: read, explicit: false, assumeTold: false)
+        guard !afterVerb.isEmpty else { return found }
+        let verbOnly = Set(afterVerb.map(AgentHandles.matchKey))
+        func isVerbOnly(_ name: String) -> Bool { verbOnly.contains(AgentHandles.matchKey(name)) }
+        let bare = words(in: text).map { AgentHandles.normalize(String(text[$0])) }
+        let told = addressVerb(bare) != nil
+        func addressed(_ name: String, before body: String) -> Bool {
+            guard isVerbOnly(name), body.count <= text.count else { return false }
+            let head = String(text.dropLast(body.count))
+            var said = words(in: head).flatMap { AgentHandles.normalize(String(head[$0])).split(separator: " ").map(String.init) }
+            if let verb = addressVerb(said) {
+                said.removeFirst(verb.count)
+            } else if let verb = VoiceCommandGrammar.focusVerbs.map({ $0.split(separator: " ").map(String.init) })
+                .first(where: { said.starts(with: $0) }) {
+                said.removeFirst(verb.count)
+            } else {
+                return false
+            }
+            if said.first == "the" { said.removeFirst() }
+            return exactName(said.joined(separator: " "), among: [name]) != nil
+        }
+        switch parse(text, names: names + afterVerb, namesKnown: namesKnown, read: nil, explicit: false, assumeTold: false) {
+        case .open(.name(let name, "")) where addressed(name, before: ""):
+            return .open(.name(name, body: ""))
+        case .name(let name, let body) where told && addressed(name, before: body):
+            return .name(name, body: body)
+        default:
+            return found
+        }
+    }
+
+    public static func exactName(_ spoken: String, among names: [String]) -> String? {
+        let wanted = AgentHandles.matchKey(spoken)
+        return wanted.isEmpty ? nil : names.first { AgentHandles.matchKey($0) == wanted }
+    }
+
+    public static func asks(_ text: String) -> Bool {
+        addressVerb(words(in: text).map { AgentHandles.normalize(String(text[$0])) })?.soft == true
     }
 
     private static func parse(

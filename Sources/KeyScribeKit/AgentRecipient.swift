@@ -13,17 +13,38 @@ public enum AgentRecipient {
     }
 
     public struct SharedName: Equatable, Sendable {
+        public enum Kind: Equatable, Sendable {
+            case place
+            case also(String)
+            case afterVerb(String)
+            case held(String)
+
+            var spokenBare: Bool {
+                switch self {
+                case .place, .also: true
+                case .afterVerb, .held: false
+                }
+            }
+        }
+
         public var names: [String]
         public var tellApartIn: String?
+        public var kind: Kind
 
-        public init(names: [String], tellApartIn: String? = nil) {
+        public init(names: [String], tellApartIn: String? = nil, kind: Kind = .place) {
             self.names = names
             self.tellApartIn = tellApartIn
+            self.kind = kind
         }
     }
 
     public static func spokenNames(_ names: [String: String], shared: [String: SharedName]) -> [String] {
-        Array(names.keys) + shared.keys.filter { key in !names.keys.contains { AgentHandles.matchKey($0) == AgentHandles.matchKey(key) } }
+        Array(names.keys) + shared.filter(\.value.kind.spokenBare).keys
+            .filter { key in !names.keys.contains { AgentHandles.matchKey($0) == AgentHandles.matchKey(key) } }
+    }
+
+    public static func afterVerbNames(_ shared: [String: SharedName]) -> [String] {
+        shared.filter { !$0.value.kind.spokenBare }.keys.sorted()
     }
 
     public static func addingLate(
@@ -54,6 +75,7 @@ public enum AgentRecipient {
         case sharedName(String, matches: [String], tellApartIn: String?)
         case soundsLike(String, name: String)
         case noBreak(String)
+        case shownOn(String, name: String, as: String)
     }
 
     public enum Resolution: Equatable, Sendable {
@@ -97,6 +119,9 @@ public enum AgentRecipient {
             guard id(named: spoken, in: names) == nil,
                   let place = shared.first(where: { AgentHandles.matchKey($0.key) == AgentHandles.matchKey(spoken) })
             else { return nil }
+            if case .held(let seenAs) = place.value.kind, place.value.names.count == 1 {
+                return .ask(body: body, reason: .shownOn(place.key, name: place.value.names[0], as: seenAs))
+            }
             if place.value.names.count == 1, let only = id(named: place.value.names[0], in: names) { return addressed(only, body: body) }
             return .ask(body: body, reason: .sharedName(place.key, matches: place.value.names, tellApartIn: place.value.tellApartIn))
         }
@@ -123,7 +148,7 @@ public enum AgentRecipient {
             return .ask(body: body, reason: .unknownName(spoken))
         case .ambiguous(let spoken, let matches, let body):
             if let asked = sharedAsk(spoken, body: body) { return asked }
-            guard let first = matches.sorted().first, let id = id(named: first, in: names) else {
+            guard matches.allSatisfy({ id(named: $0, in: names) != nil }), let first = matches.sorted().first, let id = id(named: first, in: names) else {
                 return .ask(body: body, reason: .ambiguousName(spoken, matches: matches))
             }
             return addressed(id, body: body)

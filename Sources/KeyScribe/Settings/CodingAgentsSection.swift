@@ -96,6 +96,12 @@ struct CodingAgentRecipientSection: View {
                 }
             }
             .font(.caption).foregroundStyle(.secondary)
+            if let others = model.alsoAnswers(row) {
+                Text(others).font(.caption).foregroundStyle(.secondary)
+            }
+            if let trouble = CodingAgentsSettingsModel.placeTrouble(row) {
+                Text(trouble).font(.caption).foregroundStyle(.secondary)
+            }
             if let context = model.recognitionContext(for: row) {
                 Text(context).font(.caption).foregroundStyle(.secondary)
             }
@@ -117,7 +123,10 @@ struct CodingAgentRecipientSection: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            [row.name, row.state, row.folder, row.location, model.recognitionContext(for: row), row.readAloud?.note]
+            [
+                row.name, row.state, row.folder, row.location, model.alsoAnswers(row), CodingAgentsSettingsModel.placeTrouble(row),
+                model.recognitionContext(for: row), row.readAloud?.note,
+            ]
                 .compactMap { $0 }.joined(separator: ", "))
         .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.conversation)
     }
@@ -330,8 +339,11 @@ private struct ConversationNameEditor: View {
                 if let note = model.defaultNameNote(row) {
                     Text(note).accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.defaultName)
                 }
-                if let surface = row.surface {
-                    Text("This name follows this conversation, including when you resume it. To name future conversations in this pane, rename the pane in \(surface).")
+                if let note = CodingAgentsSettingsModel.placeNote(row) {
+                    Text(note)
+                }
+                if let trouble = CodingAgentsSettingsModel.placeTrouble(row) {
+                    Text(trouble)
                 }
             }
             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
