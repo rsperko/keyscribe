@@ -59,7 +59,7 @@ public enum HistoryExport {
                 if !labels.isEmpty { out += " · \(labels)" }
                 out += "\n"
                 if !e.heard.isEmpty, e.heard != e.result { out += "  - Heard: \(e.heard)\n" }
-                out += "  - Result: \(e.result.isEmpty ? "(no text)" : e.result)\n"
+                if !e.isSpokenReplyOnly { out += "  - Result: \(e.result.isEmpty ? "(no text)" : e.result)\n" }
                 if let reason = e.failureReason { out += "  - Why it failed: \(reason)\n" }
                 if let reported = e.reported { out += "  - Reported: \(reported)\n" }
                 for line in whatHappened(e, f) { out += "  - \(line)\n" }
@@ -78,7 +78,7 @@ public enum HistoryExport {
                 if !labels.isEmpty { out += "  [\(labels)]" }
                 out += "\n"
                 if !e.heard.isEmpty, e.heard != e.result { out += "    Heard:  \(e.heard)\n" }
-                out += "    Result: \(e.result.isEmpty ? "(no text)" : e.result)\n"
+                if !e.isSpokenReplyOnly { out += "    Result: \(e.result.isEmpty ? "(no text)" : e.result)\n" }
                 if let reason = e.failureReason { out += "    Why it failed: \(reason)\n" }
                 if let reported = e.reported { out += "    Reported: \(reported)\n" }
                 for line in whatHappened(e, f) { out += "    \(line)\n" }
@@ -89,7 +89,10 @@ public enum HistoryExport {
 
     private static func whatHappened(_ e: HistoryEntry, _ f: Formatting) -> [String] {
         let kept = e.keptLocalText ? ["Why local was kept: \(e.fallbackReason ?? "the rewrite was skipped")"] : []
-        return kept + (e.facts ?? []).map { "\($0.label): \($0.value)" } + (e.steps ?? []).map { "\(f.time($0.at)) \($0.text)" }
+        let spoken = e.spokenReply.map { reply in
+            ["Read aloud: \(reply.text)" + (reply.connection.map { " (summary by \($0))" } ?? "")]
+        } ?? []
+        return kept + (e.facts ?? []).map { "\($0.label): \($0.value)" } + (e.steps ?? []).map { "\(f.time($0.at)) \($0.text)" } + spoken
     }
 
     // Group by day key, preserving the input order (newest-first from the store) both across days and
@@ -141,6 +144,7 @@ public struct HistoryStats: Equatable, Sendable {
         var byOutcome: [HistoryEntry.Outcome: Int] = [:]
         var cloud = 0, redaction = 0, words = 0
         var first: Date?, last: Date?
+        let entries = entries.filter { !$0.isSpokenReplyOnly }
         for e in entries {
             byMode[e.modeName, default: 0] += 1
             byOutcome[e.outcome, default: 0] += 1

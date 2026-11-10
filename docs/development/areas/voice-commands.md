@@ -73,7 +73,11 @@ every rule above applies to it, with these sharpenings:
   review; it never grants old queued commands permission to run again.
 - **Reply text is in memory only.** A turn's final reply crosses the bridge bounded, for the spoken result of a
   turn the user's dictation started or that the user asked from inside the agent to hear; it is never written to History or logs, and the only place it may go is
-  the AI service the user chose for summaries, after redaction.
+  the AI service the user chose for summaries, after redaction. What was read aloud is the one exception, and only
+  once it is audible (`SpokenResultOutput.onHeard`): History keeps that line as heard, in its own field
+  (`HistoryEntry.spokenReply`), never in `heard`, `transformed` or `result`, so nothing that learns from the user's
+  speech reads it. It joins the dictation that asked for it only when that dictation was kept, and otherwise stands
+  alone only under the Coding agent mode's History choice. It is still never logged.
 - **A Coding agent take is delivered whatever field has focus, a password field included.** The text goes
   to the agent the user addressed, not into the field, so the secure-field policy that keeps a dictation
   local does not stop it. The take is still left out of History (`design.md` §4.7), and the turn's reply

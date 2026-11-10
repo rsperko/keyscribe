@@ -190,6 +190,28 @@ struct CodingAgentsSettingsModelTests {
         #expect(model.recognitionContext(for: model.rows[0]) == nil)
     }
 
+    @Test func aRevealedProcessRowIsTheOneTheHUDNamed() {
+        let (model, _, _) = makeModel()
+        let candidate = AgentCandidate(agent: "claude", pid: 7, startedAt: 5_000, cwd: "/src/atlas", setup: "/x/.claude")
+        model.show([], current: nil, candidates: [candidate])
+        #expect(model.rows.map(\.id) == [candidate.rowId])
+        model.reveal([candidate.rowId])
+        #expect(model.pendingReveal == [candidate.rowId])
+        model.reveal([])
+        #expect(model.pendingReveal.isEmpty)
+    }
+
+    @Test func aRevealWhoseRowNeverAppearsLapses() {
+        let (model, _, _) = makeModel()
+        var now = Date(timeIntervalSince1970: 1_000)
+        model.now = { now }
+        model.reveal(["claude:7"])
+        now += CodingAgentsSettingsModel.revealLasts - 1
+        #expect(model.pendingReveal == ["claude:7"])
+        now += 1
+        #expect(model.pendingReveal.isEmpty)
+    }
+
     @Test func removeUninstallsAndForgetsTheReloadHint() async {
         let (model, _, _) = makeModel()
         await setup(model).install()

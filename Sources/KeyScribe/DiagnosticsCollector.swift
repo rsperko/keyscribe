@@ -87,7 +87,7 @@ enum DiagnosticsCollector {
     private static func dictationLines(settings: Settings?, limit: Int) -> [DiagnosticsReport.DictationLine] {
         guard settings?.history.enabled ?? true else { return [] }
         let store = HistoryStore(supportDir: KeyScribePaths.supportDir)
-        return store.entries(limit: limit).map(DiagnosticsReport.DictationLine.init)
+        return store.entries(limit: limit, where: { !$0.isSpokenReplyOnly }).map(DiagnosticsReport.DictationLine.init)
     }
 
     private static func modelLoadFailures() -> [String] {

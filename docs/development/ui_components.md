@@ -123,6 +123,7 @@ it as a shared type — never a one-off inline pattern. (Anatomy, behavior, and 
 | `On-device speech` (idle status) | local transcription |
 | `Rewriting with {name}` | Polishing, processing |
 | `Cloud rewrite` | AI mode, remote magic |
+| `Spoken summary` (a spoken reply a service summarized) | AI voice, cloud reply |
 | `No cloud rewrite` (rewrite off) | off, don't use AI |
 | `Best-effort redaction` | protected, anonymized, safe |
 | `Insert without rewriting` | local transcript (implies raw STT), bypass, raw fallback |

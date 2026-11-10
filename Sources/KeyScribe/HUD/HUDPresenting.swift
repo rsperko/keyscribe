@@ -9,7 +9,7 @@ enum HUDErrorAction: Equatable {
     case openAutomationSettings
     case openSpeechModels
     case openAIService(String)
-    case openCodingAgents(String)
+    case openCodingAgents(String, reveal: [String] = [])
 
     var buttonTitle: String {
         switch self {

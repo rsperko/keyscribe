@@ -73,7 +73,7 @@ enum SourceInvariants {
             allowed: [
                 "Sources/KeyScribe/DictationController.swift": 2,
                 "Sources/KeyScribe/Take/AgentOutput.swift": 2,
-                "Sources/KeyScribeKit/AgentHistoryFacts.swift": 1,
+                "Sources/KeyScribeKit/AgentHistoryFacts.swift": 2,
                 "Sources/KeyScribeKit/LiveEditsStage.swift": 1,
             ],
             reason: "History shows summary, facts and steps without vetting them, so only reviewed writers fill them, with "

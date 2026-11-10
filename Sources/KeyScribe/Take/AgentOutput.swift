@@ -15,6 +15,8 @@ final class AgentOutput {
     var hide: @MainActor (Double) -> Void = { _ in }
     private var pendingNotices: [AgentReceipt] = []
     private var awaited: [String: AwaitedReceipt] = [:]
+    private var recordedTakes: [(request: String, id: String, at: Date)] = []
+    private static let rememberedTakes = 64
     private var noticeTask: Task<Void, Never>?
     var noticeDelayOverride: Duration?
 
@@ -42,6 +44,40 @@ final class AgentOutput {
     func noteRecorded(_ entry: HistoryEntry, request: String) {
         guard let id = entry.id else { return }
         awaited[request]?.entry = (id, entry.timestamp)
+        recordedTakes.append((request, id, entry.timestamp))
+        if recordedTakes.count > Self.rememberedTakes { recordedTakes.removeFirst(recordedTakes.count - Self.rememberedTakes) }
+    }
+
+    func recordSpokenReply(
+        _ heard: SpokenResultOutput.Heard, at now: Date = Date(), alone: () -> (mode: String, retentionDays: Int)?
+    ) {
+        guard keepsHistory(), reporter.keepsHistory else { return }
+        let reply = HistoryEntry.SpokenReply(
+            at: now, conversation: heard.name, text: heard.text, connection: heard.connection)
+        if let origin = heard.origin {
+            guard let take = recordedTakes.last(where: { $0.request == origin }) else { return }
+            reporter.update(id: take.id, near: take.at, { current in
+                var next = current
+                next.spokenReply = reply
+                return next
+            }, then: { _ in })
+            return
+        }
+        guard let alone = alone() else { return }
+        reporter.append(
+            AgentHistoryFacts.spokenReplyEntry(id: UUID().uuidString, mode: alone.mode, reply: reply),
+            retentionDays: alone.retentionDays, confirm: false)
+    }
+
+    func recordUnreadReply(_ unread: SpokenResultOutput.Unread, origin: String, at now: Date = Date()) {
+        guard keepsHistory(), reporter.keepsHistory, let take = recordedTakes.last(where: { $0.request == origin }) else { return }
+        reporter.update(id: take.id, near: take.at, { Self.adding(step: unread.line, at: now, to: $0) }, then: { _ in })
+    }
+
+    nonisolated private static func adding(step text: String, at now: Date, to current: HistoryEntry) -> HistoryEntry {
+        var next = current
+        next.steps = (current.steps ?? [.init(at: current.timestamp, text: current.summary ?? "")]) + [.init(at: now, text: text)]
+        return next
     }
 
     func replayEarlyReceipts(request: String, receipt: AgentReceipt) {
@@ -77,8 +113,7 @@ final class AgentOutput {
         if !Self.mayStillSettle(receipt) { stopAwaiting(request) }
         let now = Date()
         reporter.update(id: entry.id, near: entry.at, { current in
-            var next = current
-            next.steps = (current.steps ?? [.init(at: current.timestamp, text: current.summary ?? "")]) + [.init(at: now, text: summary)]
+            var next = Self.adding(step: summary, at: now, to: current)
             next.summary = summary
             next.outcome = failed ? .failed : current.keptLocalText ? .localFallback : .inserted
             next.failureReason = failed ? summary : nil
@@ -128,6 +163,33 @@ final class AgentOutput {
         }
     }
 
+    static func spokenRefusal(_ receipt: AgentReceipt) -> String? {
+        switch receipt {
+        case .sent, .queued, .uncertain: return nil
+        case .kept(let handle, let reason):
+            switch reason {
+            case .composing: return "\(handle) didn\u{2019}t take that: its prompt box has text"
+            case .typedSince: return "\(handle) didn\u{2019}t take that: you sent it a message since"
+            case .interrupted: return "\(handle) didn\u{2019}t take that: its last turn was stopped"
+            case .dialog: return "\(handle) didn\u{2019}t take that: it has a dialog open"
+            case .connectionGap: return "\(handle) didn\u{2019}t take that: it lost its connection"
+            case .inPromptBox: return "\(handle) has your message in its prompt box. Press Return there to send it."
+            }
+        case .notSent(let handle, let reason):
+            let it = handle == nil ? "the conversation" : "it"
+            let why = switch reason {
+            case .conversationEnded: "\(it) has ended"
+            case .connectorNotRunning: "\(it) isn\u{2019}t connected"
+            case .conversationChanged: "\(it) switched conversations"
+            case .stopped: "after a stopped turn \(it) takes only typed messages"
+            case .expired: "\(it) timed out"
+            case .refused: "\(it) wouldn\u{2019}t accept it"
+            case .disconnected: "\(it)\u{2019}s disconnected"
+            }
+            return handle.map { "\($0) didn\u{2019}t take that: \(why)" } ?? "Your message wasn\u{2019}t sent: \(why)"
+        }
+    }
+
     static func dictationOutcome(_ receipt: AgentReceipt) -> DictationOutcome {
         switch receipt {
         case .sent, .queued, .kept: .inserted
@@ -171,6 +233,15 @@ final class AgentOutput {
 
     static func askLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:], current: String? = nil) -> String {
         "Not sent: " + askProblem(reason) + retryHint(reason, retry: retry, names: names, current: current)
+    }
+
+    static let unconnectedShown = 2
+
+    static func unconnectedHint(_ names: [String]) -> String {
+        guard !names.isEmpty else { return "" }
+        let one = names.count == 1
+        let shown = names.count > unconnectedShown + 1 ? Array(names.prefix(unconnectedShown)) + ["\(names.count - unconnectedShown) more"] : names
+        return ". \(either(shown, joining: "and")) \(one ? "is" : "are") running but not connected. Coding agent settings shows how to connect \(one ? "it" : "them")"
     }
 
     static func example(names: [String: String], current: String?) -> String? {
@@ -221,7 +292,7 @@ final class AgentOutput {
         case .kept(let handle, let reason):
             let why = switch reason {
             case .typedSince: "you sent it a message since"
-            case .composing: "it has a message you haven\u{2019}t sent"
+            case .composing: "its prompt box already has text. Send or clear that text there, then say this again"
             case .interrupted: "its last turn was stopped"
             case .dialog: "it has a dialog open"
             case .connectionGap: "it lost its connection to \(Branding.appName) while this waited"
@@ -240,7 +311,7 @@ final class AgentOutput {
             case .disconnected: "Not sent: \(name) is disconnected"
             }
             let action: HUDErrorAction? = switch reason {
-            case .connectorNotRunning, .disconnected: settingsMode.map(HUDErrorAction.openCodingAgents)
+            case .connectorNotRunning, .disconnected: settingsMode.map { HUDErrorAction.openCodingAgents($0) }
             default: nil
             }
             return .error(message: message, action: action, heard: HeardExcerpt(heard: heard))

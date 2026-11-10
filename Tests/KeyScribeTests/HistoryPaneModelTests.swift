@@ -430,6 +430,17 @@ struct HistoryPaneModelTests {
         #expect(model.statusMessage?.contains("what you said") == true)
     }
 
+    @Test func copyReplyCopiesWhatWasReadAloud() async throws {
+        let reply = AgentHistoryFacts.spokenReplyEntry(
+            id: "r1", mode: "Coding agent",
+            reply: .init(at: Date(timeIntervalSince1970: 1_700_000_000), conversation: "docs", text: "docs: Done."))
+        let model = try await selectingOnly(reply, corrections: Corrections())
+        var copied: String?
+        model.copyText = { copied = $0 }
+        model.copyReply()
+        #expect(copied == "docs: Done.")
+    }
+
     @Test func correctionsFromACommandGoToTheVoiceCommandsVocabulary() async throws {
         var command = entry("~/bin/deploy prod")
         command.outcome = .command

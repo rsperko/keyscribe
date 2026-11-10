@@ -1747,10 +1747,21 @@ final class DictationController {
         case .ask(let body, let reason):
             let retry = AgentOutput.Retry.matching(routed.transcript, address)
             let line = retry == .open ? AgentOutput.openAskLine : AgentOutput.askLine
-            let shown = line(reason, retry, reachable(snapshot, agents, for: retry), frozen?.id)
-            finishAgent(state: .error(message: shown, action: Self.askAction(reason, mode: mode), heard: HeardExcerpt(heard: body)),
+            let unconnected = Self.spokenName(reason) == nil ? [] : agents.unconnected
+            let meant = Self.spokenName(reason).map { spoken in unconnected.filter { Self.names(spoken, $0) } } ?? []
+            if !meant.isEmpty {
+                let shown = Self.unconnectedLine(meant)
+                let action = HUDErrorAction.openCodingAgents(mode.id, reveal: meant.map(\.row))
+                finishAgent(state: .error(message: shown, action: action, heard: HeardExcerpt(heard: body)),
+                            outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: shown, facts: facts)
+                return
+            }
+            let hint = AgentOutput.unconnectedHint(unconnected.map(\.name))
+            let shown = hint.isEmpty ? line(reason, retry, reachable(snapshot, agents, for: retry), frozen?.id) : line(reason, nil, [:], nil) + hint
+            let action = hint.isEmpty ? Self.askAction(reason, mode: mode) : .openCodingAgents(mode.id)
+            finishAgent(state: .error(message: shown, action: action, heard: HeardExcerpt(heard: body)),
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil,
-                        recorded: line(reason, nil, [:], nil), facts: facts)
+                        recorded: line(reason, nil, [:], nil) + hint, facts: facts)
         case .deliver(let id, let body, _):
             session?.agentDestination = id
             session?.agentFacts = facts
@@ -2011,27 +2022,36 @@ final class DictationController {
         lastResult = text
         hud.present(.transcribing(mode: mode.name, status: "Sending to \(agents.handle(of: id) ?? "it")"))
         var (request, receipt) = await agentOutput.deliver(text, to: id, via: agents)
-        if case .kept(let handle, .inPromptBox) = receipt, let sent = await sendFromPromptBox(id, handle: handle, through: agents, lease: lease) {
+        if case .kept(let handle, .inPromptBox) = receipt,
+           let sent = await sendFromPromptBox(id, handle: handle, through: agents, lease: lease, request: request) {
             receipt = sent
         }
         finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id), outcome: AgentOutput.dictationOutcome(receipt),
                     heard: heard, body: text, transformed: transformed, rewrite: rewrite, transitioned: true,
                     facts: facts, awaitingReceipt: (request, receipt))
+        speakRefusal(receipt, conversation: id)
     }
 
     var promptBoxConfirmation: Duration = .seconds(2)
 
     // After a Stop, Claude Code takes only a prompt the user enters, so the connector left the message in the
     // empty box. Return goes only to that conversation, and only when it is the one in front.
-    private func sendFromPromptBox(_ id: String, handle: String, through agents: AgentHub, lease: TakeLease) async -> AgentReceipt? {
+    private func sendFromPromptBox(
+        _ id: String, handle: String, through agents: AgentHub, lease: TakeLease, request: String
+    ) async -> AgentReceipt? {
         guard lease.keepActing(), await agents.sessionInFrontWithoutAsking()?.id == id, lease.keepActing() else { return nil }
         let typedBefore = agents.typedCount(id)
+        agents.awaitTypedTurn(of: id, request: request)
         await submitKey(.return)
         let deadline = ContinuousClock.now + promptBoxConfirmation
         while agents.typedCount(id) == typedBefore, ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(20))
         }
-        return agents.typedCount(id) > typedBefore ? .sent(handle) : .uncertain(handle)
+        guard agents.typedCount(id) > typedBefore else {
+            agents.forgetTypedTurn(of: id, request: request)
+            return .uncertain(handle)
+        }
+        return .sent(handle)
     }
 
     private func reachable(_ snapshot: AgentSnapshot, _ agents: AgentHub, for retry: AgentOutput.Retry) -> [String: String] {
@@ -2040,6 +2060,28 @@ final class DictationController {
         return agents.names.filter {
             frozen.contains($0.value) && listed.contains($0.value) && !snapshot.disconnected.values.contains($0.value) && !agents.isExcluded($0.value)
         }
+    }
+
+    private static func spokenName(_ reason: AgentRecipient.AskReason) -> String? {
+        switch reason {
+        case .unknownName(let spoken), .soundsLike(let spoken, _): spoken
+        default: nil
+        }
+    }
+
+    static func unconnectedLine(_ meant: [AgentHub.Unconnected]) -> String {
+        guard meant.count > 1 else { return "Not sent: \(meant[0].name) isn\u{2019}t connected yet" }
+        let names = meant.map(\.name).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
+        let groups = names.map { name in
+            let same = meant.filter { $0.name == name }
+            return same.count == 1 ? name : "\(same.count) \(same[0].agent) conversations in \(same[0].folder)"
+        }
+        return "Not sent: \(AgentOutput.either(groups, joining: "and")) aren\u{2019}t connected yet"
+    }
+
+    private static func names(_ spoken: String, _ unconnected: AgentHub.Unconnected) -> Bool {
+        let key = AgentHandles.matchKey(spoken)
+        return !key.isEmpty && (key == AgentHandles.matchKey(unconnected.folder) || key == AgentHandles.matchKey(unconnected.name))
     }
 
     private static func askAction(_ reason: AgentRecipient.AskReason, mode: Mode) -> HUDErrorAction? {
@@ -2071,8 +2113,26 @@ final class DictationController {
         if let awaited { agentOutput.replayEarlyReceipts(request: awaited.request, receipt: awaited.receipt) }
     }
 
-    func showAgentNotice(_ receipt: AgentReceipt, request: String? = nil) {
+    func recordSpokenReply(_ heard: SpokenResultOutput.Heard) {
+        agentOutput.recordSpokenReply(heard) {
+            let mode = config.modes.first { $0.id == Mode.codingAgentId }
+            guard !(mode?.excludeFromHistory ?? false) else { return nil }
+            return (mode?.name ?? Mode.codingAgent.name, settings.history.retentionDays)
+        }
+    }
+
+    func recordUnreadReply(_ unread: SpokenResultOutput.Unread, origin: String) {
+        agentOutput.recordUnreadReply(unread, origin: origin)
+    }
+
+    func showAgentNotice(_ receipt: AgentReceipt, request: String? = nil, conversation: String? = nil) {
         agentOutput.showNotice(receipt, request: request)
+        if request != nil, let conversation { speakRefusal(receipt, conversation: conversation) }
+    }
+
+    private func speakRefusal(_ receipt: AgentReceipt, conversation: String) {
+        guard let line = AgentOutput.spokenRefusal(receipt) else { return }
+        spokenUpdates?.refused(conversation: conversation, line)
     }
 
     func forgetAgentReceipt(request: String) {

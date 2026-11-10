@@ -1,6 +1,15 @@
 import Foundation
 
 public enum AgentHistoryFacts {
+    public static func spokenReplyEntry(id: String, mode: String, reply: HistoryEntry.SpokenReply) -> HistoryEntry {
+        var entry = HistoryEntry(
+            id: id, timestamp: reply.at, modeName: mode, heard: "", result: "", outcome: .command,
+            cloudInvolved: false, redaction: false, contextCategories: [])
+        entry.summary = "Reply from " + reply.conversation
+        entry.spokenReply = reply
+        return entry
+    }
+
     public static func facts(
         address: AgentAddress, resolution: AgentRecipient.Resolution, frozen: AgentRecipient.Frozen?,
         conversations: [AgentConversation]

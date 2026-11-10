@@ -53,7 +53,7 @@ struct AgentHubTests {
             counter += 1
             return "r\(counter)"
         }
-        hub.onNotice = { receipt, request in
+        hub.onNotice = { receipt, request, _ in
             notices.items.append(receipt)
             notices.requests.append(request)
         }
@@ -643,7 +643,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var reported: [String] = []
-        hub.onResult = { _, _, _, _ in reported.append("result") }
+        hub.onResult = { _, _, _, _, _ in reported.append("result") }
         hub.onAttention = { _, _, _, _ in reported.append("attention") }
         await dictated(hub, transport)
         hub.stop()
@@ -674,7 +674,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { conversation, handle, value, _ in results.append("\(conversation)|\(handle)|\(value)") }
+        hub.onResult = { conversation, handle, value, _, _ in results.append("\(conversation)|\(handle)|\(value)") }
         hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "a typed turn"))
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
@@ -686,11 +686,59 @@ struct AgentHubTests {
         #expect(results == ["claude:s1|keyscribe|All green."])
     }
 
+    @Test func aDictatedTurnsResultAndEndingNameTheRequestThatStartedIt() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onEnded = { _, _, _, _, origin in origins.append(origin) }
+        async let first = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        hub.handle(.submitted(request: "r1", turn: "t1"))
+        _ = await first
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+        async let second = hub.deliver("try again", to: "claude:s1")
+        await untilSent(transport, 2)
+        hub.handle(.submitted(request: "r2", turn: "t2"))
+        _ = await second
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t2"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "error", answer: ""))
+        #expect(origins == ["r1", "r2"])
+    }
+
+    @Test func theTurnAMessageSentFromThePromptBoxStartsIsAwaitedForItsRequest() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var results: [String] = []
+        hub.onResult = { _, _, answer, _, origin in results.append("\(answer)|\(origin ?? "-")") }
+        hub.awaitTypedTurn(of: "claude:s1", request: "r7")
+        hub.handle(.typed(session: "claude:s1"))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t5"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Renamed."))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t6"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "a later typed turn"))
+        #expect(results == ["Renamed.|r7"])
+    }
+
+    @Test func aPromptBoxTurnNoLongerAwaitedLendsItsRequestToNothing() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        var results: [String] = []
+        hub.onResult = { _, _, answer, _, _ in results.append(answer) }
+        hub.awaitTypedTurn(of: "claude:s1", request: "r7")
+        hub.forgetTypedTurn(of: "claude:s1", request: "r7")
+        hub.handle(.typed(session: "claude:s1"))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t5"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "typed by hand"))
+        #expect(results.isEmpty)
+    }
+
     @Test func aDictatedTurnWhoseCompletionWasLostNeverLendsItsResultToALaterTypedTurn() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { _, _, value, _ in results.append(value) }
+        hub.onResult = { _, _, value, _, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: "t1"))
@@ -706,7 +754,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { _, _, value, _ in results.append(value) }
+        hub.onResult = { _, _, value, _, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: "t1"))
@@ -720,7 +768,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { _, _, value, _ in results.append(value) }
+        hub.onResult = { _, _, value, _, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: "1"))
@@ -735,7 +783,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { _, _, value, _ in results.append(value) }
+        hub.onResult = { _, _, value, _, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
@@ -751,7 +799,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { _, _, value, _ in results.append(value) }
+        hub.onResult = { _, _, value, _, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: ""))
@@ -765,7 +813,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { _, _, value, _ in results.append(value) }
+        hub.onResult = { _, _, value, _, _ in results.append(value) }
         for reason in ["aborted", "error"] {
             async let receipt = hub.deliver("one", to: "claude:s1")
             let before = transport.sent.count
@@ -1327,7 +1375,7 @@ struct AgentHubTests {
         await hub.rescan()
         hub.disconnect("fake:f1")
         var results: [String] = []
-        hub.onResult = { _, _, answer, _ in results.append(answer) }
+        hub.onResult = { _, _, answer, _, _ in results.append(answer) }
         hub.handle(.turnComplete(session: "fake:f1", reason: "complete", answer: "private"))
         #expect(results.isEmpty)
     }
@@ -1907,8 +1955,8 @@ struct AgentHubTests {
     private func listening(_ hub: AgentHub, speaks: Bool = true) -> Spoken {
         let spoken = Spoken()
         hub.speaks = { speaks }
-        hub.onResult = { _, _, answer, requested in spoken.results.append("\(answer)|\(requested)") }
-        hub.onEnded = { _, handle, body, requested in spoken.endings.append("\(handle)|\(body)|\(requested)") }
+        hub.onResult = { _, _, answer, requested, _ in spoken.results.append("\(answer)|\(requested)") }
+        hub.onEnded = { _, handle, body, requested, _ in spoken.endings.append("\(handle)|\(body)|\(requested)") }
         hub.onWithdraw = { spoken.withdrawn.append($0) }
         return spoken
     }

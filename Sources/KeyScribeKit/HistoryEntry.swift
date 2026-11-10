@@ -34,6 +34,21 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         }
     }
 
+    // A line a coding agent's spoken reply read aloud, exactly as it was heard, kept apart from `heard` and
+    // `result` so nothing that learns from the user's own speech ever reads an agent's words.
+    public struct SpokenReply: Codable, Equatable, Sendable {
+        public var at: Date
+        public var conversation: String
+        public var text: String
+        public var connection: String?
+        public init(at: Date, conversation: String, text: String, connection: String? = nil) {
+            self.at = at
+            self.conversation = conversation
+            self.text = text
+            self.connection = connection
+        }
+    }
+
     public struct Step: Codable, Equatable, Sendable {
         public var at: Date
         public var text: String
@@ -104,6 +119,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     public var summary: String?
     public var facts: [Fact]?
     public var steps: [Step]?
+    public var spokenReply: SpokenReply?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -142,6 +158,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case summary
         case facts
         case steps
+        case spokenReply = "spoken_reply"
     }
 
     public init(
@@ -243,16 +260,25 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
 
     public var listTextIsHeard: Bool { result.isEmpty && !heard.isEmpty }
 
+    public var isSpokenReplyOnly: Bool { spokenReply != nil && heard.isEmpty && result.isEmpty }
+
     public var listText: String {
         if !result.isEmpty { return result }
-        return heard.isEmpty ? "(no text)" : heard
+        if !heard.isEmpty { return heard }
+        return spokenReply?.text ?? "(no text)"
     }
 
     public var dataBoundaryLabels: [String] {
-        if !cloudInvolved { return ["On this Mac"] }
-        var labels = ["Cloud rewrite"]
-        if redaction { labels.append("Best-effort redaction") }
-        labels.append(contentsOf: contextLabels)
-        return labels
+        var labels: [String] = []
+        if cloudInvolved {
+            labels.append("Cloud rewrite")
+            if redaction { labels.append("Best-effort redaction") }
+            labels.append(contentsOf: contextLabels)
+        }
+        if spokenReply?.connection != nil {
+            labels.append("Spoken summary")
+            if !labels.contains("Best-effort redaction") { labels.append("Best-effort redaction") }
+        }
+        return labels.isEmpty ? ["On this Mac"] : labels
     }
 }

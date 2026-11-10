@@ -50,7 +50,7 @@ final class HUDController: HUDPresenting {
     var onPasteLast: (() -> Void)?
     var onOpenSpeechModels: (() -> Void)?
     var onOpenAIService: ((String) -> Void)?
-    var onOpenCodingAgents: ((String) -> Void)?
+    var onOpenCodingAgents: ((String, [String]) -> Void)?
     var onEscapeCancel: (() -> Void)?
     var onChooseVoiceCommand: ((Int, String) -> Void)?
     var onCancelVoiceCommandChoice: ((Int) -> Void)?
@@ -149,7 +149,7 @@ final class HUDController: HUDPresenting {
                 case .openAutomationSettings: Permissions.openSettings(.automation)
                 case .openSpeechModels: self?.onOpenSpeechModels?()
                 case .openAIService(let id): self?.onOpenAIService?(id)
-                case .openCodingAgents(let mode): self?.onOpenCodingAgents?(mode)
+                case .openCodingAgents(let mode, let rows): self?.onOpenCodingAgents?(mode, rows)
                 }
             },
             onChoose: { [weak self] id, identity in self?.onChooseVoiceCommand?(id, identity) },

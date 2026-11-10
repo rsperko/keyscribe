@@ -6,6 +6,9 @@ import UniformTypeIdentifiers
 struct CodingAgentRecipientSection: View {
     @ObservedObject var model: CodingAgentsSettingsModel
     let shortcut: String?
+    var scroll: ScrollViewProxy?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var highlighted: Set<String> = []
     @State private var renaming: CodingAgentsSettingsModel.Row?
     @State private var showingNameDetails = false
     @State private var showingDisconnected = false
@@ -60,6 +63,8 @@ struct CodingAgentRecipientSection: View {
                 missingHelp
             }
         }
+        .onChange(of: model.revealed, initial: true) { revealRows() }
+        .onChange(of: model.rows) { revealRows() }
         .sheet(item: $renaming, onDismiss: { model.clearRenameProblem() }) { row in
             ConversationNameEditor(row: row, model: model) { renaming = nil }
         }
@@ -73,6 +78,20 @@ struct CodingAgentRecipientSection: View {
             guard let connector = choosingFolder, case .success(let url) = result else { return }
             choosingFolder = nil
             folderProblem = model.choose(folder: url, for: connector)
+        }
+    }
+
+    private func revealRows() {
+        let wanted = model.pendingReveal
+        let rows = model.rows.filter { wanted.contains($0.id) }
+        guard let scroll, let first = rows.first else { return }
+        model.reveal([])
+        withAnimation(reduceMotion ? nil : .default) { scroll.scrollTo(first.key, anchor: .center) }
+        let keys = Set(rows.map(\.key))
+        highlighted = keys
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            if highlighted == keys { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.4)) { highlighted = [] } }
         }
     }
 
@@ -129,6 +148,7 @@ struct CodingAgentRecipientSection: View {
             ]
                 .compactMap { $0 }.joined(separator: ", "))
         .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.conversation)
+        .listRowBackground(highlighted.contains(row.key) ? Color.accentColor.opacity(0.15) : nil)
     }
 
     private func conversationHeading(_ row: CodingAgentsSettingsModel.Row) -> some View {

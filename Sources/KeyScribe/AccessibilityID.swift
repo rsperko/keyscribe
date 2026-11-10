@@ -516,6 +516,7 @@ enum AccessibilityID {
         static let mishearingHint = "history.detail.mishearingHint"
         static let stagePicker = "history.detail.stagePicker"
         static let whatHappened = "history.detail.whatHappened"
+        static let spokenReply = "history.detail.spokenReply"
         static let actionOutcome = "history.detail.actionOutcome"
         static let rewriteComparison = "history.detail.rewriteComparison"
         static let comparisonPicker = "history.detail.comparisonPicker"
@@ -523,6 +524,7 @@ enum AccessibilityID {
         static let promptDisclosure = "history.detail.promptDisclosure"
         static let receivedDisclosure = "history.detail.receivedDisclosure"
         static let copyResult = "history.action.copyResult"
+        static let copyReply = "history.action.copyReply"
         static let pasteResult = "history.action.pasteResult"
         static let copyHeard = "history.action.copyHeard"
         static let copyReport = "history.action.copyReport"
@@ -691,7 +693,7 @@ enum AccessibilityID {
         FirstRun.Playground.field, FirstRun.Playground.next, FirstRun.Playground.done,
         HUD.panel, HUD.insertWithoutRewriting, HUD.pasteLast, HUD.repairAction,
         History.list, History.search, History.export, History.stagePicker, History.comparisonPicker, History.whatHappened, History.actionOutcome, History.rewriteComparison,
-        History.promptDisclosure, History.receivedDisclosure, History.copyResult, History.pasteResult, History.copyHeard, History.delete,
+        History.promptDisclosure, History.receivedDisclosure, History.copyResult, History.copyReply, History.pasteResult, History.copyHeard, History.delete,
         History.rewriteAgain, History.copyUnsavedRewrite, History.mishearingHint,
         History.manageVocabulary, History.createReplacement, History.addToDictionary,
         History.retentionConfirm, History.retentionCancel,

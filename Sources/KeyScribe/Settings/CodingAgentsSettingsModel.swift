@@ -215,7 +215,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
         }
         next += candidates.map { candidate in
             Row(
-                id: "process:\(candidate.pid):\(candidate.startedAt ?? 0)", number: 0, name: name(of: candidate), folder: candidate.cwd,
+                id: candidate.rowId, number: 0, name: name(of: candidate), folder: candidate.cwd,
                 state: "Not connected", connected: false, current: false, agent: candidate.agent, terminal: terminals[candidate.pid] ?? nil,
                 setup: candidate.setup, key: Self.key(pid: candidate.pid, milliseconds: candidate.startedAt), identified: false,
                 startedAt: candidate.startedAt.map { Date(timeIntervalSince1970: Double($0) / 1000) })
@@ -280,8 +280,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
     }
 
     private func name(of candidate: AgentCandidate) -> String {
-        let agent = connectors.first { $0.kind.id == candidate.agent }?.kind.displayName ?? candidate.agent
-        return "\(agent) in \(URL(fileURLWithPath: candidate.cwd).lastPathComponent)"
+        candidate.label(agentName: connectors.first { $0.kind.id == candidate.agent }?.kind.displayName ?? candidate.agent)
     }
 
     func connector(for row: Row) -> AgentConnectorModel? { connectors.first { $0.kind.id == row.agent } }
@@ -307,6 +306,18 @@ final class CodingAgentsSettingsModel: ObservableObject {
     func disconnect(_ row: Row) { onDisconnect?(row.id) }
 
     func cancelReadAloud(_ row: Row) { onCancelReadAloud?(row.id) }
+
+    static let revealLasts: TimeInterval = 10
+    @Published private(set) var revealed: [String] = []
+    private var revealedAt = Date.distantPast
+    var now: () -> Date = Date.init
+
+    var pendingReveal: [String] { now().timeIntervalSince(revealedAt) < Self.revealLasts ? revealed : [] }
+
+    func reveal(_ rows: [String]) {
+        revealed = rows
+        revealedAt = now()
+    }
 
     func reconnect(_ row: Row) {
         if let setup = setup(for: row), let connector = connector(for: row), !(setup.isEnrolled && setup.isInstalled) {

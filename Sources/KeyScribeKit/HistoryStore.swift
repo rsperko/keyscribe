@@ -65,13 +65,13 @@ public struct HistoryStore: Sendable {
     }
 
     // Newest entry first; malformed lines are skipped and do not consume a page slot.
-    public func entries(limit: Int? = nil) -> [HistoryEntry] {
+    public func entries(limit: Int? = nil, where kept: ((HistoryEntry) -> Bool)? = nil) -> [HistoryEntry] {
         var all: [HistoryEntry] = []
         for file in dayFiles().reversed() {
             guard let data = try? Data(contentsOf: dir.appendingPathComponent(file), options: .mappedIfSafe)
             else { continue }
             let remaining = limit.map { max(0, $0 - all.count) }
-            let day = Self.lastLines(data, limit: remaining).sorted { $0.timestamp > $1.timestamp }
+            let day = Self.lastLines(data, limit: remaining, where: kept).sorted { $0.timestamp > $1.timestamp }
             all.append(contentsOf: day)
             if let limit, all.count >= limit { return Array(all.prefix(limit)) }
         }
@@ -79,7 +79,7 @@ public struct HistoryStore: Sendable {
     }
 
     // Walk a mapped JSONL day file backward so paging avoids whole-file line splitting.
-    private static func lastLines(_ data: Data, limit: Int?) -> [HistoryEntry] {
+    private static func lastLines(_ data: Data, limit: Int?, where kept: ((HistoryEntry) -> Bool)? = nil) -> [HistoryEntry] {
         var entries: [HistoryEntry] = []
         data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
             let bytes = raw.bindMemory(to: UInt8.self)
@@ -89,7 +89,7 @@ public struct HistoryStore: Sendable {
                 var start = end
                 while start > 0, bytes[start - 1] != 0x0A { start -= 1 }
                 if end > start,
-                   let entry = try? HistoryEntry(jsonLine: String(decoding: bytes[start..<end], as: UTF8.self)) {
+                   let entry = try? HistoryEntry(jsonLine: String(decoding: bytes[start..<end], as: UTF8.self)), kept?(entry) ?? true {
                     entries.append(entry)
                 }
                 end = start - 1

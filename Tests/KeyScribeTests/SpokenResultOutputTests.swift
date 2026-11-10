@@ -120,6 +120,19 @@ struct SpokenResultOutputTests {
         #expect(output.pendingSummaries == 0)
     }
 
+    @Test func aReplySkippedBecauseItsConversationWasInFrontIsReportedForTheTakeThatAskedForIt() async {
+        let (output, _, _) = make(inFront: { $0 == "pi:s1" })
+        var unread: [(SpokenResultOutput.Unread, String)] = []
+        output.onUnread = { unread.append(($0, $1)) }
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.", origin: "r1")
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "Docs done.", origin: "r2")
+        await settled()
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Typed turn.")
+        await settled()
+        #expect(unread.map(\.0) == [.inFront(name: "api")])
+        #expect(unread.map(\.1) == ["r1"])
+    }
+
     @Test func aResultStillCheckingWhatIsInFrontIsReplacedByANewerOneAndDroppedByStop() async {
         let gate = FrontGate()
         let (output, speech, llm) = make(inFront: { _ in await gate.wait() })
@@ -138,6 +151,127 @@ struct SpokenResultOutputTests {
         gate.open()
         await settled()
         #expect(speech.spoken.map(\.text) == ["api: Fourth."])
+    }
+
+    private func listening(_ output: SpokenResultOutput) -> () -> [SpokenResultOutput.Heard] {
+        var heard: [SpokenResultOutput.Heard] = []
+        output.onHeard = { heard.append($0) }
+        return { heard }
+    }
+
+    @Test func aReplyIsReportedAsHeardOnceItIsAudibleWithTheTakeThatAskedForIt() async {
+        let (output, speech, _) = make()
+        let heard = listening(output)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.", origin: "r1")
+        await settled()
+        #expect(heard().isEmpty)
+        speech.start()
+        #expect(heard() == [.init(conversation: "pi:s1", name: "api", text: "api: Done.", connection: nil, origin: "r1")])
+        speech.finish()
+        #expect(heard().count == 1)
+    }
+
+    @Test func aSummaryIsReportedWithTheServiceThatWroteIt() async {
+        let (output, speech, llm) = make()
+        let heard = listening(output)
+        llm.reply = "It passed."
+        output.finished(conversation: "pi:s1", handle: "api", answer: Array(repeating: "Then more words.", count: 30).joined(separator: " "))
+        await settled()
+        speech.start()
+        #expect(heard().map(\.connection) == ["Local"])
+        #expect(heard().map(\.origin) == [nil])
+    }
+
+    @Test func anEndingIsReportedAsAReply() async {
+        let (output, speech, _) = make()
+        let heard = listening(output)
+        output.ended(conversation: "pi:s1", handle: "api", body: "Ended with an error.", requested: false, origin: "r2")
+        await settled()
+        speech.start()
+        #expect(heard().map(\.origin) == ["r2"])
+    }
+
+    @Test func aNoticeIsNeverReportedAsHeard() async {
+        let (output, speech, _) = make(settings: SpokenResultSettings(enabled: true))
+        let heard = listening(output)
+        output.attention(conversation: "pi:s1", handle: "api", .approval)
+        await settled()
+        speech.start()
+        #expect(speech.spoken.count == 1)
+        #expect(heard().isEmpty)
+    }
+
+    @Test func nothingIsReportedForWhatWasNeverAudibleARepeatOrAnAnswerToAQuestion() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, _) = make(silencer: silencer)
+        let heard = listening(output)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "First.")
+        await settled()
+        output.withdraw(conversation: "pi:s1")
+        speech.finish()
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "Docs done.")
+        await settled()
+        speech.start()
+        speech.finish()
+        #expect(output.repeatLast() == .repeating("docs"))
+        speech.start()
+        speech.finish()
+        #expect(output.answer(conversation: "pi:s1", handle: "api", "api is working.", whileTrue: { true }))
+        speech.start()
+        speech.finish()
+        #expect(heard().map(\.text) == ["docs: Docs done."])
+    }
+
+    @Test func aRefusedDictationIsSpokenOnceEvenWithItsConversationInFrontAndIsNotRecordedAgain() async {
+        let (output, speech, llm) = make(inFront: { _ in true })
+        let heard = listening(output)
+        output.refused(conversation: "pi:s1", "Not sent to api: its prompt box already has text.")
+        await settled()
+        speech.start()
+        speech.finish()
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["Not sent to api: its prompt box already has text."])
+        #expect(llm.requests.isEmpty)
+        #expect(heard().isEmpty)
+    }
+
+    @Test func aRefusalAndAReplyFromOneConversationDoNotReplaceEachOther() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, _) = make(silencer: silencer)
+        silencer.recordingStarted()
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        output.refused(conversation: "pi:s1", "Not sent to api: its prompt box already has text.")
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done again.")
+        await settled()
+        #expect(speech.spoken.isEmpty)
+        silencer.recordingEnded()
+        speech.start()
+        speech.finish()
+        speech.start()
+        speech.finish()
+        #expect(speech.spoken.map(\.text) == ["Not sent to api: its prompt box already has text.", "api: Done again."])
+    }
+
+    @Test func refusalsOfTwoConversationsForTheSameReasonAreBothSpoken() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, _) = make(silencer: silencer)
+        silencer.recordingStarted()
+        output.refused(conversation: "pi:s1", "Not sent: that conversation has ended")
+        output.refused(conversation: "pi:s2", "Not sent: that conversation has ended")
+        silencer.recordingEnded()
+        speech.start()
+        speech.finish()
+        speech.start()
+        speech.finish()
+        #expect(speech.spoken.map(\.text) == ["Not sent: that conversation has ended", "Not sent: that conversation has ended"])
+    }
+
+    @Test func aRefusalIsNotSpokenWithSpokenUpdatesOff() async {
+        let (output, speech, _) = make(settings: SpokenResultSettings(enabled: false, connection: "omlx"))
+        output.refused(conversation: "pi:s1", "Not sent to api: its prompt box already has text.")
+        await settled()
+        #expect(speech.spoken.isEmpty)
     }
 
     @Test func repeatReplaysTheLastSummaryHeardAheadOfThoseWaiting() async {
@@ -732,6 +866,22 @@ struct SpokenResultOutputTests {
         speech.finish()
         speech.finish()
         #expect(speech.spoken.map(\.text) == ["api and web: The spoken summaries are unavailable.", "docs: Docs done.", "cli: Cli done."])
+    }
+
+    @Test func mergedUnavailableNoticesAreReportedForEachTakeThatAskedAndNeverOnTheirOwn() async {
+        let silencer = SpeechSilencer()
+        let failing = FakeLLM()
+        failing.fails = true
+        let (output, speech, _) = make(llm: failing, silencer: silencer)
+        let heard = listening(output)
+        silencer.recordingStarted()
+        output.finished(conversation: "pi:s1", handle: "api", answer: long, origin: "r1")
+        output.finished(conversation: "pi:s3", handle: "web", answer: long, origin: "r3")
+        await settled()
+        silencer.recordingEnded()
+        speech.start()
+        #expect(heard().map(\.origin) == ["r1", "r3"])
+        #expect(Set(heard().map(\.text)) == ["api and web: The spoken summaries are unavailable."])
     }
 
     @Test func resultsWaitWhileRecordingAndANewerOneForTheSameConversationReplacesTheOlder() async {

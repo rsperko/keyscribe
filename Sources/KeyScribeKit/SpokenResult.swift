@@ -122,10 +122,19 @@ public enum SpokenResult {
         return String(text.prefix(head)) + separator + String(text.suffix(tail))
     }
 
-    public static func request(answer: String, prompt: String, tokenizer: Tokenizer) -> (system: String, user: String) {
+    public struct Request: Equatable, Sendable {
+        public let system: String
+        public let user: String
+        fileprivate init(system: String, user: String) {
+            self.system = system
+            self.user = user
+        }
+    }
+
+    public static func request(answer: String, prompt: String, tokenizer: Tokenizer) -> Request {
         let user = RedactionTokenizer.apply(bounded(answer), into: tokenizer)
         let system = tokenizer.issuedTokens.isEmpty ? prompt : prompt + "\n\n" + tokenNote
-        return (system, user)
+        return Request(system: system, user: user)
     }
 
     public static let waitingPrompt = """
@@ -140,7 +149,7 @@ public enum SpokenResult {
     public static let waitingDetailLimit = 1_000
     public static let waitingSaidLimit = 500
 
-    public static func waitingRequest(_ waiting: AgentPrompt, tokenizer: Tokenizer) -> (system: String, user: String)? {
+    public static func waitingRequest(_ waiting: AgentPrompt, tokenizer: Tokenizer) -> Request? {
         let described = [
             ("Prompt", waiting.title), ("Tool", waiting.tool), ("Arguments", waiting.detail.map { bounded($0, limit: waitingDetailLimit) }),
             ("Agent said", waiting.said.map { bounded($0, limit: waitingSaidLimit) }),

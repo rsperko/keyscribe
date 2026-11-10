@@ -518,6 +518,16 @@ struct HistoryStoreTests {
         #expect(store.entries(limit: 2).map(\.heard) == ["c", "b"])
     }
 
+    @Test func entriesLimitCountsOnlyKeptEntriesAcrossDays() throws {
+        let store = tempStore()
+        defer { try? FileManager.default.removeItem(at: store.dir) }
+        try store.append(sampleEntry(heard: "a", at: 0), today: "2026-06-19")
+        try store.append(sampleEntry(heard: "b", at: 10), today: "2026-06-20")
+        try store.append(sampleEntry(heard: "skip", at: 20), today: "2026-06-20")
+        try store.append(sampleEntry(heard: "skip", at: 30), today: "2026-06-20")
+        #expect(store.entries(limit: 2, where: { $0.heard != "skip" }).map(\.heard) == ["b", "a"])
+    }
+
     @Test func entriesLimitFillsThePagePastTrailingMalformedLines() throws {
         let store = tempStore()
         defer { try? FileManager.default.removeItem(at: store.dir) }

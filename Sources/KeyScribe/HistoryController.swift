@@ -128,7 +128,7 @@ final class HistoryPaneModel: ObservableObject {
         let generation = loadGeneration
         let store = store
         let available = await Task.detached(priority: .utility) {
-            !store.entries(limit: 1).isEmpty
+            !store.entries(limit: 1, where: { !$0.isSpokenReplyOnly }).isEmpty
         }.value
         guard generation == loadGeneration, !Task.isCancelled else { return }
         hasStoredHistory = available
@@ -172,7 +172,7 @@ final class HistoryPaneModel: ObservableObject {
     private func applyLoaded(_ loaded: [HistoryEntry], generation: Int) {
         guard generation == loadGeneration else { return }
         rows = loaded.map { HistoryRow(entry: $0, day: Self.dayFormatter.string(from: $0.timestamp)) }
-        hasStoredHistory = !loaded.isEmpty
+        hasStoredHistory = loaded.contains { !$0.isSpokenReplyOnly }
         entryIndex = Dictionary(rows.map { ($0.id, $0.entry) }, uniquingKeysWith: { first, _ in first })
         statsLine = Self.statsSummary(HistoryStats.compute(from: loaded))
         recomputeGroups()
@@ -316,6 +316,7 @@ final class HistoryPaneModel: ObservableObject {
 
     func copyResult() { if let r = selected?.result, !r.isEmpty { copyText?(r) } }
     func copyHeard() { if let h = selected?.heard, !h.isEmpty { copyText?(h) } }
+    func copyReply() { if let r = selected?.spokenReply?.text, !r.isEmpty { copyText?(r) } }
     func pasteResult() { if let r = selected?.result, !r.isEmpty { pasteText?(r) } }
     // Likely mishearings of dictionary words in the selected dictation, for the user to judge. A command or a
     // Coding agent message is left out: its words were not dictated text.
@@ -394,7 +395,7 @@ final class HistoryPaneModel: ObservableObject {
     func copyReport() {
         guard let entry = selected else { return }
         copyText?(SupportReport.render(entry: entry, appName: Branding.appName, setup: supportSetup()))
-        flash("Report copied. It includes what you said and any AI request — check it before sending.")
+        flash("Report copied. It includes what you said, any AI request, and anything read aloud — check it before sending.")
     }
 
     var voiceCommandsEnabled: () -> Bool = { true }
@@ -591,7 +592,7 @@ struct HistoryPaneView: View {
             PaneListSectionHeader("History")
             SettingRow(
                 title: "Keep history on this Mac",
-                help: "Stores transcripts and final text locally so you can search and correct them. Audio and password-field dictations are never saved. For other sensitive work, choose a shorter period or exclude a mode in its Result handling.",
+                help: "Stores transcripts and final text locally so you can search and correct them, and coding agent replies as they were read aloud. Audio and password-field dictations are never saved. For other sensitive work, choose a shorter period or exclude a mode in its Result handling.",
                 combinesAccessibilityChildren: false)
             {
                 Toggle("Keep history on this Mac", isOn: $settings.historyEnabled).labelsHidden()
@@ -856,7 +857,7 @@ private struct HistoryDetailView: View {
         VStack(alignment: .leading, spacing: 12) {
             if let summary = entry.summary {
                 actionOutcome(summary)
-                plainPane("Heard", role: .heard, text: entry.heard)
+                if !entry.heard.isEmpty { plainPane("Heard", role: .heard, text: entry.heard) }
                 if !entry.result.isEmpty, entry.result != entry.heard {
                     plainPane("Message", role: .result, text: entry.result)
                 }
@@ -886,6 +887,7 @@ private struct HistoryDetailView: View {
                 }
                 .accessibilityIdentifier(AccessibilityID.History.whatHappened)
             }
+            if let reply = entry.spokenReply { readAloud(reply) }
             if entry.summary != nil, entry.cloudInvolved {
                 DisclosureSection("Compare with the AI rewrite", isExpanded: $rewriteComparisonExpanded) {
                     comparison
@@ -905,6 +907,20 @@ private struct HistoryDetailView: View {
             .accessibilityIdentifier(AccessibilityID.History.comparisonPicker)
         }
         ComparisonSectionView(section: selectedComparisonSection, onSelect: selectComparisonText)
+    }
+
+    private func readAloud(_ reply: HistoryEntry.SpokenReply) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Read aloud").font(.headline)
+            Text(reply.text)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            detailRow("From", reply.conversation)
+            detailRow("Read at", reply.at.formatted(date: .omitted, time: .standard))
+            if let connection = reply.connection { detailRow("Summarized by", connection) }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(AccessibilityID.History.spokenReply)
     }
 
     private func plainPane(_ title: String, role: ComparisonTextRole, text: String) -> some View {
@@ -1014,9 +1030,15 @@ private struct HistoryDetailView: View {
 
     private var actionBar: some View {
         HStack(spacing: 8) {
-            Button { model.copyResult() } label: { Label("Copy Result", systemImage: "doc.on.doc") }
-                .disabled(!canReuseResult)
-                .accessibilityIdentifier(AccessibilityID.History.copyResult)
+            if !entry.isSpokenReplyOnly {
+                Button { model.copyResult() } label: { Label("Copy Result", systemImage: "doc.on.doc") }
+                    .disabled(!canReuseResult)
+                    .accessibilityIdentifier(AccessibilityID.History.copyResult)
+            }
+            if entry.spokenReply != nil {
+                Button { model.copyReply() } label: { Label("Copy Reply", systemImage: "speaker.wave.2") }
+                    .accessibilityIdentifier(AccessibilityID.History.copyReply)
+            }
             if !entry.outcome.isCommand {
                 Button { model.pasteResult() } label: { Label("Paste Result", systemImage: "arrow.down.doc") }
                     .disabled(!canReuseResult)
@@ -1037,9 +1059,11 @@ private struct HistoryDetailView: View {
                 Button { model.copyUnsavedRewrite() } label: { Label("Copy Rewrite", systemImage: "doc.on.doc") }
                     .accessibilityIdentifier(AccessibilityID.History.copyUnsavedRewrite)
             }
-            Button { model.copyReport() } label: { Label("Copy Report", systemImage: "ladybug") }
-                .help("Copies this dictation for a bug report: what you said, the inserted text, the app it was for, your microphone's name, any AI request and reply (which can include your dictionary words, selected text, or text from the app), and details about your setup.")
-                .accessibilityIdentifier(AccessibilityID.History.copyReport)
+            if !entry.isSpokenReplyOnly {
+                Button { model.copyReport() } label: { Label("Copy Report", systemImage: "ladybug") }
+                    .help("Copies this dictation for a bug report: what you said, the inserted text, the app it was for, your microphone's name, any AI request and reply (which can include your dictionary words, selected text, or text from the app), what a coding agent's reply read aloud, and details about your setup.")
+                    .accessibilityIdentifier(AccessibilityID.History.copyReport)
+            }
             Spacer()
         }
     }

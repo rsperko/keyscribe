@@ -484,7 +484,7 @@ exactly as it was heard, ahead of any still waiting, and sends nothing. The repl
 rather than the queue, so a newer result for the same conversation does not replace it and an unavailable
 notice is never merged again with notices still waiting. It does not repeat the front check, since the user asked for it.
 The HUD names the conversation (“docs”), or says “Nothing to repeat yet.” or “Spoken replies are off.”;
-History records the command and never the summary. Inside a longer take or after “tell” and a name it is
+History records the command and adds no second copy of the line. Inside a longer take or after “tell” and a name it is
 message text. A take that is only “rename this session to” or “rename this conversation to” a new name (“name this
 session …” and “call this conversation …” work too) renames the take's recipient, with the same check
 Settings' Rename uses (`AgentRename.parse`, then `AgentHub.rename`), and sends nothing. The recipient is
@@ -632,9 +632,15 @@ waits for the turn, and the receipt says what it waits on, how to respond, and w
 (“Waiting for approval. Say “open docs” to respond; this message stays queued”).
 A take that would no longer fit what is on screen is not sent, and never sends later on its own: for
 example, the user sent that conversation a message after the take was decided, its question was answered,
-or its prompt box holds a message the user has not sent. The HUD says so and why (“Not sent to docs: it has
-a message you haven’t sent”). An unsent message in the agent's prompt box is left exactly as it was, and
-what was said stays in History.
+or its prompt box already holds text. The HUD says so, why, and how to recover (“Not sent to docs: its
+prompt box already has text. Send or clear that text there, then say this again”); it never says who wrote
+that text. Text already in the agent's prompt box is left exactly as it was, and what was said stays in
+History. With **Read replies aloud** on, a take the conversation did not take is also spoken once, as a short
+line naming the conversation and the reason (“docs didn’t take that: its prompt box has text”); what to do
+stays in the HUD and History. It is spoken whether that happens at once or after the take was queued, and even with the conversation in front:
+it is the only notice of a refusal that comes after the user has moved on. It waits like any spoken reply
+while a recording is open, never reads the text in the prompt box or the take itself, does not replace or
+get replaced by that conversation's replies, and is not added to History again.
 
 After the user interrupts a Claude Code turn, Claude Code takes only a prompt the user enters until one is
 sent, and refuses one the connector submits. The connector then puts the message in the prompt box, only
@@ -642,7 +648,10 @@ when the box is empty and only for that refusal; every other refusal leaves the 
 conversation is confirmed as the one in front, the app presses Return for the user and reports “Sent to
 docs” once the connector sees the prompt arrive, or “May not have reached docs” when it does not. Otherwise
 Return is never pressed and the advisory says the message is waiting (“Not sent to docs: its last turn was
-interrupted, so the message is waiting in its prompt box. Press Return there to send it”). A connector that
+interrupted, so the message is waiting in its prompt box. Press Return there to send it”). A spoken reply belongs to
+that take only for the turn that starts right after the prompt the press sent, within a few seconds; when the
+prompt is not seen before the confirmation runs out, when another prompt is typed first, or when no turn starts
+(a slash command), no later turn is read as the take's. A connector that
 could not fill the box reports “Not sent: docs’s last turn was interrupted, so it takes only a message you
 type. Type one there, then dictate again”.
 
@@ -653,6 +662,16 @@ disconnected conversation's name is still recognized for this, but it never appe
 "The conversation in front is disconnected" needs the conversation's terminal facts, which only a connected
 conversation sends; one disconnected since before the app last started, in a multiplexer pane, may not be
 recognized as the one in front, and the take then asks for a name.
+A running agent whose connector has not connected has no name the app could match, so a spoken name meant for
+it asks like any unknown name. While such a process is listed in Settings, a spoken name that matches no
+conversation, or only sounds like one, says so with **Open Coding Agent Settings**, where the process's row says
+what to do. When the name is that process's folder, or its whole description, only it is named (“Not sent: Pi in
+reviews isn’t connected yet”); when several processes share that name, all of them are named and none is
+picked (“Not sent: Claude Code in reviews and 2 Pi conversations in reviews aren’t connected yet”). The button
+scrolls Settings to the first named row and highlights every named row briefly (no animation with Reduce
+Motion); a row that has not appeared within a few seconds, because its process ended, is not waited for. Otherwise the line adds what is running but not connected, as Settings describes
+it (the first two, then how many more), in place of the retry example (“… Pi in reviews is running but not
+connected. Coding agent settings shows how to connect it”). It never connects, reloads or enrolls anything, and never sends to it.
 What was said is kept for Paste last dictation, and connecting the conversation never sends it.
 
 **Voice command choice.** The list interrupts the user, so it is used sparingly (`principles.md` §4,
@@ -1928,7 +1947,9 @@ recording is open or the dictation HUD shows: summaries wait and play once it ha
 being prepared; the interrupted summary is not resumed. While a summary is audible, the speaking panel (§5)
 shows it. Only turns the user's own dictation started, or that the user asked to hear, are spoken; another typed prompt's reply is
 not. A conversation that is in front when its turn finishes is neither summarized nor read: the user is already looking
-at the reply. A turn the user asked to hear is the exception, with its notices: the user asked, and may have stepped
+at the reply. Leaving it afterwards does not bring the reply back. When History keeps the dictation that started the
+turn, its “What happened” steps say so (“Not read aloud: docs was in front when it finished”), so a reply the user
+expected to hear can be explained. A turn the user asked to hear is the exception, with its notices: the user asked, and may have stepped
 away with the terminal still in front. The check uses the same front reading as voice commands, but reads once: voice commands read twice
 and act only on an unchanged view because they act on another app, while a wrong skip costs one summary, so the
 second read and the window lookup it compares are left out. When what is in front cannot
@@ -2228,6 +2249,20 @@ time, so a later rename or reorder does not change them. When an AI rewrite ran,
 rewrite** offers the usual comparison, collapsed, with the final text called **Result**. A message whose
 rewrite fell back or was skipped stays **Local fallback** or **Rewrite skipped** after it is sent. The
 text and Markdown exports carry the same summary and lines, and say why local text was kept.
+
+What a spoken reply (§7 Coding agent) read aloud is kept as it was heard, once it was audible: never a reply
+withdrawn or skipped before it played, and never a second copy for “repeat that”. A reply to a message the user
+dictated joins that message's entry, and only when that entry was kept; a reply the user asked for from inside
+the agent is an entry of its own under the Coding agent mode, reading *Reply from backend*, kept only while
+History is on and the mode is not left out of History. A notice (an approval or a wait) is not kept: a long
+session would fill History with them, and the agent's own screen already shows them. Either way a
+**Read aloud** section shows the line, selectable, with the conversation it came from (**From**), when it was
+read and, for a summary, **Summarized by**
+and the service; the entry's badges add **Spoken summary** and **Best-effort redaction**. The line is never
+offered for corrections, since it is the agent's words, not the user's. Search finds it, and the exports carry it. An entry that is only a reply is not a dictation: the History stats, the mishearing search and its count, and
+the diagnostics report leave it out, and its export has no Result line. Its action bar offers **Copy Reply** in
+place of Copy Result and has no Copy Report. A dictation with a reply joined to it offers **Copy Reply** beside
+Copy Result, and its **Copy Report** says it includes what was read aloud.
 
 A dictation in which live edits ran, including a Coding agent message (beside its recipient lines), adds a
 **What happened** row, **Spoken edits**, with the same words as the completion HUD (“new line ×2, scratch that”), so the user can tell afterwards whether a spoken edit fired.

@@ -232,7 +232,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         hud.onCancelVoiceCommandChoice = { [weak self] id in self?.controller.cancelVoiceCommandChoice(choice: id) }
         hud.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
         hud.onOpenAIService = { [weak self] id in self?.settingsController.presentAIService(id: id) }
-        hud.onOpenCodingAgents = { [weak self] mode in self?.settingsController.presentMode(id: mode) }
+        hud.onOpenCodingAgents = { [weak self] mode, rows in
+            self?.settingsController.presentMode(id: mode)
+            self?.settingsController.codingAgents.reveal(rows)
+        }
         hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
         hud.onVisibilityChange = { SpeechSilencer.shared.dictationHUD(visible: $0) }
         hud.onEscapeCancel = { [weak self] in
@@ -722,7 +725,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     supportDir: KeyScribePaths.supportDir,
                     discovery: [ClaudeDiscovery(setups: setups, processes: processes), PiDiscovery(processes: { processes.found(.pi) })], setups: setups,
                     legacyAgent: AgentKind.claude.id)
-                runtime.hub.onNotice = { [weak self] in self?.controller.showAgentNotice($0, request: $1) }
+                runtime.hub.onNotice = { [weak self] in self?.controller.showAgentNotice($0, request: $1, conversation: $2) }
                 runtime.hub.onForget = { [weak self] in self?.controller.forgetAgentReceipt(request: $0) }
                 runtime.hub.onChange = { [weak self, weak hub = runtime.hub] in
                     guard let hub else { return }
@@ -750,13 +753,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                         guard let candidates = hub?.frontCandidates else { return false }
                         return await AgentFront.withoutAsking.shown(among: candidates) { _ in }?.id == id
                     })
-                runtime.hub.onResult = { [weak spoken] in spoken?.finished(conversation: $0, handle: $1, answer: $2, requested: $3) }
-                runtime.hub.onEnded = { [weak spoken] in spoken?.ended(conversation: $0, handle: $1, body: $2, requested: $3) }
+                runtime.hub.onResult = { [weak spoken] in spoken?.finished(conversation: $0, handle: $1, answer: $2, requested: $3, origin: $4) }
+                runtime.hub.onEnded = { [weak spoken] in spoken?.ended(conversation: $0, handle: $1, body: $2, requested: $3, origin: $4) }
                 runtime.hub.onAttention = { [weak spoken] in spoken?.attention(conversation: $0, handle: $1, $2, requested: $3) }
                 runtime.hub.onWithdraw = { [weak spoken] in spoken?.withdraw(conversation: $0) }
                 runtime.hub.speaks = { [weak self] in self?.settings.codingAgents.spokenResult.enabled ?? false }
                 runtime.hub.onSilence = { [weak spoken] in spoken?.forget(conversation: $0) }
                 spoken.onSpeaking = { [weak self] name in self?.showSpeaking(name) }
+                spoken.onHeard = { [weak controller = self.controller] in controller?.recordSpokenReply($0) }
+                spoken.onUnread = { [weak controller = self.controller] in controller?.recordUnreadReply($0, origin: $1) }
                 spoken.onPendingChange = { [weak self, weak hub = runtime.hub] in
                     guard let hub else { return }
                     self?.showCodingAgents(hub)

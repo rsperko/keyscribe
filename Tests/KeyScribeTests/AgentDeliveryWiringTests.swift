@@ -171,6 +171,14 @@ struct AgentDeliveryWiringTests {
         var firstPid = 10
     }
 
+    @MainActor private final class Unconnected: AgentDiscovery {
+        let kind = AgentKind.pi
+        let candidates: [AgentCandidate]
+        init(candidates: [AgentCandidate]) { self.candidates = candidates }
+        func scan(rereadingTitles: Bool) async -> AgentScan { .found([], AgentScanExtras(candidates: candidates)) }
+        func stillRunning(_ remembered: RememberedName) -> Bool { false }
+    }
+
     private struct Rig {
         let controller: DictationController
         let hub: AgentHub
@@ -203,7 +211,8 @@ struct AgentDeliveryWiringTests {
         historyEnabled: Bool = true, receiptTimeout: Duration = .seconds(8),
         front: FrontWindow = FrontWindow(TargetSnapshot(bundleId: "test.bundle")), sessionInFront: Front = Front(),
         glance: (any AgentFronting)? = nil, engine: (any SpeechEngine)? = nil, frontGrace: Duration = .seconds(1),
-        maxRecordingSeconds: Double = RecordingLimit.backstopSeconds, places: (any AgentPlaceReading)? = nil
+        maxRecordingSeconds: Double = RecordingLimit.backstopSeconds, places: (any AgentPlaceReading)? = nil,
+        clipboard: String? = nil, unconnected: [AgentCandidate] = []
     ) async -> Rig {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-agent-\(UUID().uuidString)", isDirectory: true)
@@ -234,9 +243,10 @@ struct AgentDeliveryWiringTests {
             try? FileManager.default.createDirectory(at: agentsDir, withIntermediateDirectories: true)
             try? Data(namesFile.utf8).write(to: agentsDir.appendingPathComponent(AgentNameStore.fileName))
         }
-        let hub = AgentHub(transport: transport, scan: { entries() }, names: AgentNameStore(directory: agentsDir), focus: focus,
-                           front: sessionInFront, glance: glance, receiptTimeout: receiptTimeout, scanDeadline: .seconds(30),
-                           places: places)
+        let hub = AgentHub(
+            transport: transport, discovery: [ClaudeDiscovery(scan: { entries() }), Unconnected(candidates: unconnected)],
+            names: AgentNameStore(directory: agentsDir), focus: focus, front: sessionInFront, glance: glance,
+            receiptTimeout: receiptTimeout, scanDeadline: .seconds(30), places: places)
         transport.hub = hub
         await hub.rescan()
         if let current { hub.makeCurrent(current) }
@@ -259,6 +269,7 @@ struct AgentDeliveryWiringTests {
                 returns.pressed.append(key)
                 if let session = returns.typedBy { await MainActor.run { returns.hub?.handle(.typed(session: session)) } }
             },
+            clipboard: { clipboard },
             snapshot: { front.snapshot },
             micStatus: { .granted },
             accessibilityGranted: { true },
@@ -267,7 +278,7 @@ struct AgentDeliveryWiringTests {
             maxRecordingSeconds: maxRecordingSeconds)
         controller.agents = hub
         controller.frontReadingGrace = frontGrace
-        hub.onNotice = { [weak controller] in controller?.showAgentNotice($0, request: $1) }
+        hub.onNotice = { [weak controller] in controller?.showAgentNotice($0, request: $1, conversation: $2) }
         hub.onForget = { [weak controller] in controller?.forgetAgentReceipt(request: $0) }
         controller.agentNoticeDelayOverride = .milliseconds(10)
         return Rig(
@@ -369,6 +380,143 @@ struct AgentDeliveryWiringTests {
                       action: nil, heard: HeardExcerpt(heard: "")))
         #expect(AgentOutput.receiptState(.kept("docs", reason: .inPromptBox), mode: "Agent", heard: "")
             == .advisory(message: "Not sent to docs: its last turn was interrupted, so the message is waiting in its prompt box. Press Return there to send it"))
+    }
+
+    private func submittedRequest(_ rig: Rig) -> String? {
+        rig.sent.compactMap { if case .submit(let id, _, _, _, _) = $0.0 { id } else { nil } }.first
+    }
+
+    private func heard(_ text: String, connection: String? = nil, origin: String?) -> SpokenResultOutput.Heard {
+        .init(conversation: "claude:s1", name: "keyscribe", text: text, connection: connection, origin: origin)
+    }
+
+    private func entries(_ rig: Rig, count: Int) async -> [HistoryEntry] {
+        for _ in 0..<200 where rig.history.entries().count < count {
+            try? await Task.sleep(for: .milliseconds(5))
+            rig.controller.waitForHistoryWrites()
+        }
+        rig.controller.waitForHistoryWrites()
+        return rig.history.entries()
+    }
+
+    private func replied(_ rig: Rig) async -> HistoryEntry? {
+        for _ in 0..<200 where rig.history.entries().first?.spokenReply == nil {
+            try? await Task.sleep(for: .milliseconds(5))
+            rig.controller.waitForHistoryWrites()
+        }
+        return rig.history.entries().first
+    }
+
+    @Test func aReplyReadAloudIsKeptWithTheTakeThatAskedForIt() async {
+        let rig = await rig("Run the tests.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        _ = await entries(rig, count: 1)
+        rig.controller.recordSpokenReply(heard("keyscribe: The tests pass.", connection: "Local", origin: submittedRequest(rig)))
+        let entry = await replied(rig)
+        #expect(rig.history.entries().count == 1)
+        #expect(entry?.heard == "Run the tests.")
+        #expect(entry?.spokenReply?.text == "keyscribe: The tests pass.")
+        #expect(entry?.spokenReply?.connection == "Local")
+        #expect(entry?.spokenReply?.conversation == "keyscribe")
+    }
+
+    @Test func aReplyNotReadBecauseItsConversationWasInFrontSaysSoInItsTake() async {
+        let rig = await rig("Run the tests.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        _ = await entries(rig, count: 1)
+        rig.controller.recordUnreadReply(.inFront(name: "keyscribe"), origin: submittedRequest(rig) ?? "")
+        for _ in 0..<200 where (rig.history.entries().first?.steps?.count ?? 0) < 2 {
+            try? await Task.sleep(for: .milliseconds(5))
+            rig.controller.waitForHistoryWrites()
+        }
+        let entry = rig.history.entries().first
+        #expect(entry?.steps?.map(\.text) == ["Sent to keyscribe", "Not read aloud: keyscribe was in front when it finished"])
+        #expect(entry?.summary == "Sent to keyscribe")
+        #expect(entry?.outcome == .inserted)
+        #expect(entry?.spokenReply == nil)
+    }
+
+    @Test func aReplyToATakeHistoryLeftOutIsNotKeptAnywhere() async {
+        var excluded = agentMode()
+        excluded.excludeFromHistory = true
+        let rig = await rig("Run the tests.", modes: [excluded], current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        rig.controller.recordSpokenReply(heard("keyscribe: The tests pass.", origin: submittedRequest(rig)))
+        #expect(await entries(rig, count: 1).isEmpty)
+    }
+
+    @Test func aReplyNoTakeAskedForIsKeptOnItsOwn() async {
+        let rig = await rig("Run the tests.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.controller.recordSpokenReply(heard("keyscribe: Done.", origin: nil))
+        let kept = await entries(rig, count: 1)
+        rig.controller.waitForHistoryWrites()
+        #expect(kept.map(\.summary) == ["Reply from keyscribe"])
+        #expect(kept.map(\.modeName) == ["Coding agent"])
+        #expect(kept.allSatisfy { $0.heard.isEmpty && $0.result.isEmpty && $0.outcome == .command && $0.id != nil })
+        #expect(kept.map(\.spokenReply?.text) == ["keyscribe: Done."])
+    }
+
+    @Test(arguments: [true, false])
+    func aReplyOnItsOwnFollowsHistoryAndTheCodingAgentModesChoice(historyOn: Bool) async {
+        var excluded = agentMode()
+        excluded.excludeFromHistory = historyOn
+        let rig = await rig("Run the tests.", modes: [excluded], current: "claude:s1", historyEnabled: historyOn)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.controller.recordSpokenReply(heard("keyscribe: Done.", origin: nil))
+        #expect(await entries(rig, count: 1).isEmpty)
+    }
+
+    @Test func theTurnAMessageSentFromThePromptBoxStartsIsHeardForItsTake() async {
+        let rig = await stoppedRig("claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        var origins: [String?] = []
+        rig.hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        await take(rig)
+        rig.hub.handle(.turnStarted(session: "claude:s1", turn: "t9"))
+        rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Renamed."))
+        #expect(origins == [submittedRequest(rig)])
+    }
+
+    @Test func aPromptBoxReturnTheConversationNeverSeesAwaitsNoTurn() async {
+        let rig = await stoppedRig("claude:s1", typed: false)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        var origins: [String?] = []
+        rig.hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        await take(rig)
+        rig.hub.handle(.typed(session: "claude:s1"))
+        rig.hub.handle(.turnStarted(session: "claude:s1", turn: "t9"))
+        rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "typed by hand"))
+        #expect(origins.isEmpty)
+    }
+
+    @Test func aPromptBoxMessageThatStartsNoTurnLendsItsTakeToNoLaterTypedTurn() async {
+        let rig = await stoppedRig("claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        var origins: [String?] = []
+        rig.hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        await take(rig)
+        #expect(rig.returns.pressed == [.return])
+        rig.hub.handle(.typed(session: "claude:s1"))
+        rig.hub.handle(.turnStarted(session: "claude:s1", turn: "t9"))
+        rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "typed by hand"))
+        #expect(origins.isEmpty)
+    }
+
+    @Test func aTurnStartingLongAfterThePromptBoxMessageIsNotItsTakes() async {
+        let rig = await stoppedRig("claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.hub.typedTurnWindow = 0.05
+        var origins: [String?] = []
+        rig.hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        await take(rig)
+        try? await Task.sleep(for: .milliseconds(100))
+        rig.hub.handle(.turnStarted(session: "claude:s1", turn: "t9"))
+        rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "something else"))
+        #expect(origins.isEmpty)
     }
 
     @Test func aPaneRenamedJustBeforeRecordingIsReachedByItsNewNameOnceTheReadLandsDuringTheTake() async {
@@ -602,6 +750,21 @@ struct AgentDeliveryWiringTests {
         #expect(rig.texts == ["to run the tests."])
         #expect(rig.captured.insertedText == nil)
         #expect(rig.hub.current == "claude:s2")
+    }
+
+    @Test func insertClipboardContentsAfterANameSendsTheClipboardToThatConversation() async {
+        let rig = await rig("Tell keyscribe blue, review this. Insert clipboard contents.", clipboard: "func f() {}")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
+        #expect(rig.texts.count == 1 && rig.texts[0].hasPrefix("review this") && rig.texts[0].contains("func f() {}"))
+    }
+
+    @Test func insertClipboardContentsAloneSendsTheClipboardToTheConversationInFront() async {
+        let rig = await rig("Insert clipboard contents.", current: "claude:s1", clipboard: "func f() {}")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.texts.count == 1 && rig.texts[0].contains("func f() {}") && !rig.texts[0].lowercased().contains("clipboard"))
     }
 
     @Test func aLeadingNameWithoutTellSendsTheRestToThatConversation() async {
@@ -1990,8 +2153,158 @@ struct AgentDeliveryWiringTests {
         #expect(refused.flatMap(whyLocalWasKept) == reason)
     }
 
+    @Test func anUnknownNameWhileAnotherSessionIsNotConnectedSaysSoAndOffersSettings() async {
+        let pi = AgentCandidate(agent: "pi", pid: 40, startedAt: 1, cwd: "/src/reviews", setup: "/Users/me/.pi/agent")
+        let rig = await rig("Tell review manager queue, what is next?", current: "claude:s1", unconnected: [pi])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        guard case .error(let message, let action, _) = rig.hud.states.last else { Issue.record("no error"); return }
+        #expect(message.hasPrefix("Not sent: no conversation named \u{201C}review manager queue\u{201D}"))
+        #expect(message.hasSuffix(". Pi in reviews is running but not connected. Coding agent settings shows how to connect it"))
+        #expect(!message.contains("Try"))
+        #expect(action == .openCodingAgents(Mode.codingAgentId))
+        let entry = await lastHistoryEntry(rig)
+        #expect(entry?.failureReason?.hasSuffix("Pi in reviews is running but not connected. Coding agent settings shows how to connect it") == true)
+    }
+
+    @Test func aNameMatchingTheFolderOfASessionThatIsNotConnectedNamesOnlyIt() async {
+        let pi = AgentCandidate(agent: "pi", pid: 40, startedAt: 1, cwd: "/src/reviews", setup: "/Users/me/.pi/agent")
+        let other = AgentCandidate(agent: "pi", pid: 41, startedAt: 1, cwd: "/src/api", setup: "/Users/me/.pi/agent")
+        let rig = await rig("Tell review, what is next?", current: "claude:s1", unconnected: [pi, other])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        guard case .error(let message, let action, _) = rig.hud.states.last else { Issue.record("no error"); return }
+        #expect(message == "Not sent: Pi in reviews isn\u{2019}t connected yet")
+        #expect(action == .openCodingAgents(Mode.codingAgentId, reveal: [pi.rowId]))
+    }
+
+    @Test func aNameMatchingTheFolderOfSeveralSessionsThatAreNotConnectedNamesEachOfThem() async {
+        let pi = AgentCandidate(agent: "pi", pid: 40, startedAt: 1, cwd: "/src/reviews", setup: "/Users/me/.pi/agent")
+        let other = AgentCandidate(agent: "pi", pid: 41, startedAt: 2, cwd: "/work/reviews", setup: "/Users/me/.pi/agent")
+        let unrelated = AgentCandidate(agent: "pi", pid: 42, startedAt: 3, cwd: "/src/api", setup: "/Users/me/.pi/agent")
+        let rig = await rig("Tell reviews, what is next?", current: "claude:s1", unconnected: [pi, other, unrelated])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        guard case .error(let message, let action, _) = rig.hud.states.last else { Issue.record("no error"); return }
+        #expect(message == "Not sent: 2 Pi conversations in reviews aren\u{2019}t connected yet")
+        #expect(action == .openCodingAgents(Mode.codingAgentId, reveal: [pi.rowId, other.rowId]))
+    }
+
     @Test(arguments: [
-        (AgentReceipt.KeptReason.composing, "Not sent to docs: it has a message you haven\u{2019}t sent"),
+        (["Pi"], "Not sent: Pi in reviews isn\u{2019}t connected yet"),
+        (["Pi", "Claude Code"], "Not sent: Claude Code in reviews and Pi in reviews aren\u{2019}t connected yet"),
+        (["Pi", "Pi", "Claude Code"], "Not sent: Claude Code in reviews and 2 Pi conversations in reviews aren\u{2019}t connected yet"),
+    ])
+    func theUnconnectedLineNamesEachMatchOnce(agents: [String], line: String) {
+        let meant = agents.enumerated().map { index, agent in
+            AgentHub.Unconnected(agent: agent, folder: "reviews", row: "\(index)")
+        }.sorted { $0.name < $1.name }
+        #expect(DictationController.unconnectedLine(meant) == line)
+    }
+
+    @Test func aMissingSessionNumberSaysNothingAboutSessionsThatAreNotConnected() async {
+        let pi = AgentCandidate(agent: "pi", pid: 40, startedAt: 1, cwd: "/src/reviews", setup: "/Users/me/.pi/agent")
+        let rig = await rig("Tell session 7, run the tests.", current: "claude:s1", unconnected: [pi])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        guard case .error(let message, _, _) = rig.hud.states.last else { Issue.record("no error"); return }
+        #expect(!message.contains("not connected"))
+    }
+
+    @Test func aNameThatIsFoundSaysNothingAboutSessionsThatAreNotConnected() async {
+        let pi = AgentCandidate(agent: "pi", pid: 40, startedAt: 1, cwd: "/src/reviews", setup: "/Users/me/.pi/agent")
+        let rig = await rig("Tell keyscribe blue, run the tests.", current: "claude:s1", unconnected: [pi])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.sent.map(\.1) == ["claude:s2"])
+    }
+
+    @Test(arguments: [
+        ([String](), ""),
+        (["Pi in reviews"], ". Pi in reviews is running but not connected. Coding agent settings shows how to connect it"),
+        (["Pi in api", "Pi in reviews"], ". Pi in api and Pi in reviews are running but not connected. Coding agent settings shows how to connect them"),
+        (["Pi in a", "Pi in b", "Pi in c"], ". Pi in a, Pi in b and Pi in c are running but not connected. Coding agent settings shows how to connect them"),
+        (["Pi in a", "Pi in b", "Pi in c", "Pi in d"], ". Pi in a, Pi in b and 2 more are running but not connected. Coding agent settings shows how to connect them"),
+    ])
+    func theUnconnectedHintNamesEachSession(names: [String], hint: String) {
+        #expect(AgentOutput.unconnectedHint(names) == hint)
+    }
+
+    @Test func aRefusalAfterQueuingIsSpokenOnceAndKeepsTheMessageInHistory() async {
+        let rig = await rig("Run the tests.", current: "claude:s1", firstStatus: "busy")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        let (output, speaker) = speaking(rig)
+        rig.transport.confirms = false
+        await take(rig)
+        #expect(speaker.spoken.isEmpty)
+        rig.registry.firstStatus = "idle"
+        rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
+        await rig.hub.rescan()
+        guard case .submit(let request, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        rig.hub.handle(.refused(request: request, reason: "draft"))
+        for _ in 0..<200 where rig.history.entries().first?.outcome != .failed {
+            try? await Task.sleep(for: .milliseconds(5))
+            rig.controller.waitForHistoryWrites()
+        }
+        let line = "Not sent to keyscribe: its prompt box already has text. Send or clear that text there, then say this again"
+        #expect(speaker.spoken == ["keyscribe didn\u{2019}t take that: its prompt box has text"])
+        let entry = rig.history.entries().first
+        #expect(entry?.steps?.map(\.text) == ["Queued for keyscribe", line])
+        #expect(entry?.result == "Run the tests.")
+        withExtendedLifetime(output) {}
+    }
+
+    @Test(arguments: [
+        (AgentReceipt.kept("docs", reason: .composing), "docs didn\u{2019}t take that: its prompt box has text" as String?),
+        (.kept("docs", reason: .typedSince), "docs didn\u{2019}t take that: you sent it a message since"),
+        (.kept("docs", reason: .interrupted), "docs didn\u{2019}t take that: its last turn was stopped"),
+        (.kept("docs", reason: .dialog), "docs didn\u{2019}t take that: it has a dialog open"),
+        (.kept("docs", reason: .connectionGap), "docs didn\u{2019}t take that: it lost its connection"),
+        (.kept("docs", reason: .inPromptBox), "docs has your message in its prompt box. Press Return there to send it."),
+        (.notSent("docs", reason: .conversationEnded), "docs didn\u{2019}t take that: it has ended"),
+        (.notSent("docs", reason: .connectorNotRunning), "docs didn\u{2019}t take that: it isn\u{2019}t connected"),
+        (.notSent("docs", reason: .conversationChanged), "docs didn\u{2019}t take that: it switched conversations"),
+        (.notSent("docs", reason: .stopped), "docs didn\u{2019}t take that: after a stopped turn it takes only typed messages"),
+        (.notSent("docs", reason: .expired), "docs didn\u{2019}t take that: it timed out"),
+        (.notSent("docs", reason: .refused("x")), "docs didn\u{2019}t take that: it wouldn\u{2019}t accept it"),
+        (.notSent("docs", reason: .disconnected), "docs didn\u{2019}t take that: it\u{2019}s disconnected"),
+        (.notSent(nil, reason: .conversationEnded), "Your message wasn\u{2019}t sent: the conversation has ended"),
+        (.notSent(nil, reason: .refused("x")), "Your message wasn\u{2019}t sent: the conversation wouldn\u{2019}t accept it"),
+        (.sent("docs"), nil),
+        (.queued("docs"), nil),
+        (.uncertain("docs"), nil),
+    ])
+    func eachReceiptHasItsSpokenLine(receipt: AgentReceipt, line: String?) {
+        #expect(AgentOutput.spokenRefusal(receipt) == line)
+    }
+
+    @Test func aDeliveredMessageIsNotSpoken() async {
+        let rig = await rig("Run the tests.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        let (output, speaker) = speaking(rig)
+        await take(rig)
+        #expect(rig.hud.states.contains(.commandDone(summary: "Sent to keyscribe", detail: "Coding agent")))
+        #expect(speaker.spoken.isEmpty)
+        withExtendedLifetime(output) {}
+    }
+
+    @Test func aRefusalAtOnceIsSpokenExactlyOnce() async {
+        let rig = await rig("Run the tests.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        let (output, speaker) = speaking(rig)
+        rig.transport.refusal = "draft"
+        await take(rig)
+        try? await Task.sleep(for: .milliseconds(100))
+        rig.controller.waitForHistoryWrites()
+        #expect(speaker.spoken == ["keyscribe didn\u{2019}t take that: its prompt box has text"])
+        withExtendedLifetime(output) {}
+    }
+
+    @Test(arguments: [
+        (AgentReceipt.KeptReason.composing, "Not sent to docs: its prompt box already has text. Send or clear that text there, then say this again"),
         (.typedSince, "Not sent to docs: you sent it a message since"),
         (.connectionGap, "Not sent to docs: it lost its connection to \(Branding.appName) while this waited"),
     ])

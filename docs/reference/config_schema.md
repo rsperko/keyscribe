@@ -117,6 +117,14 @@
   the coarse `inserted` or `failed` that the rest of History keys on; read `summary` for what reached the
   agent. These fields hold fixed local wording and names, never an agent's reply, a credential, or an
   environment value, and they follow the same History setting and per-mode exclusion as everything else.
+  The optional `spoken_reply` is what a Coding agent spoken reply read aloud, written once it became audible:
+  `{at, conversation, text, connection}`, where `text` is the line exactly as heard (a reply, a summary, or how
+  a turn ended; a notice is never written), and `connection` names the service that wrote the
+  line, absent when it was read as written. A reply to a dictated message is added in place, by `id`, to that
+  take's entry, and only when the take was kept. A reply asked for from inside the agent is an entry of its own
+  under the Coding agent mode's name, with `outcome = "command"`, empty `heard` and `result`, and `summary`
+  `Reply from <name>`; it is written only when History is on and the Coding agent mode is not excluded from
+  History. A notice on its own is not written.
 
 ### Model storage
 

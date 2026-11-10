@@ -439,7 +439,7 @@ struct AgentBridgeServerTests {
         }, scanDeadline: .seconds(30))
         box.hub = hub
         var notices: [AgentReceipt] = []
-        hub.onNotice = { receipt, _ in notices.append(receipt) }
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
         let send = { (body: String) in try await Task.detached { try self.request(dir, path: "/event", body: body) }.value }
         let ready = #"{"op":"hello","protocol":3,"agent":"claude","instance":"i1","session":"s1","pid":1,"installation":"inst-1","features":["readiness"]"#
 

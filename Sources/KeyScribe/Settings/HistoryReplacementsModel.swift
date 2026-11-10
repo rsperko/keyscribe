@@ -249,7 +249,7 @@ final class HistoryReplacementsModel: ObservableObject, Identifiable {
             snapshot = fresh
             self.snapshot = fresh
         }
-        let items = scope.matching(snapshot.items, now: dependencies.now())
+        let items = scope.matching(snapshot.items, now: dependencies.now()).filter { !$0.entry.isSpokenReplyOnly }
         let vocabulary = dependencies.vocabulary()
         let words = mergedWords(vocabulary)
         let destination = destination

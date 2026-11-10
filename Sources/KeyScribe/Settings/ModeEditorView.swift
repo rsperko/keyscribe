@@ -32,6 +32,10 @@ struct ModeEditorView: View {
     }
 
     private var codingAgentBody: some View {
+        ScrollViewReader { scroll in codingAgentForm(scroll) }
+    }
+
+    private func codingAgentForm(_ scroll: ScrollViewProxy) -> some View {
         Form {
             Section {
                 PaneDetailHeader(
@@ -49,7 +53,8 @@ struct ModeEditorView: View {
             }
             if let codingAgents {
                 CodingAgentPhrasesSection(model: codingAgents)
-                CodingAgentRecipientSection(model: codingAgents, shortcut: ModeSummary.triggerDescriptors(mode).first?.displayString)
+                CodingAgentRecipientSection(
+                    model: codingAgents, shortcut: ModeSummary.triggerDescriptors(mode).first?.displayString, scroll: scroll)
                 SpokenResultSection(model: codingAgents, connections: connections)
                 ConnectorSetupsProblemSection(model: codingAgents)
                 ForEach(codingAgents.connectors) { connector in

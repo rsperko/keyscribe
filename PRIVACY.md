@@ -175,7 +175,8 @@ recognizable-span redaction, is the only user content that can leave the machine
 Everything KeyScribe persists is a plain file under `~/Library/Application Support/KeyScribe/`:
 
 - **Config** (modes, connections, dictionary, replacements) as TOML.
-- **History** as JSONL, one file per day. Each entry holds what you said and what was inserted, and,
+- **History** as JSONL, one file per day. Each entry holds what you said and what was inserted, what a
+  coding agent's spoken reply read aloud (see Spoken replies above), and,
   for a mode that uses an AI service, the request sent to it. That request can include text from other
   apps: the text you selected for a rewrite mode, and whatever context the mode attaches, such as text
   before the cursor. It is plain text, readable by anything running as you. Each entry also records
@@ -216,8 +217,12 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
   If you turn on **Read replies aloud** and choose an AI service for it, a longer final reply to an
   instruction you dictated, or to work you asked the agent to have KeyScribe read aloud, is sent to that service, after best-effort redaction, only to be summarized
   into a sentence or two; a reply of a few words is read as it is without any service. KeyScribe keeps
-  the reply and the summary in memory only and never writes them to History or logs; what the service
-  you chose keeps is up to that service.
+  the full reply in memory only and never writes it to History or logs; what the service you chose keeps
+  is up to that service. What KeyScribe actually reads aloud as a reply or a summary is saved in
+  History exactly as you heard it, with the service that summarized it, when History is on and the Coding
+  agent mode is not left out of History. A reply to an instruction you dictated is saved with that
+  dictation, and only when the dictation itself was saved. A spoken reply can include text from the
+  agent's output, such as a path or a command's result, as plain text. It is never written to logs.
 
 You can inspect, back up, or delete any of it with the Finder or a text editor. Deleting the history
 files removes that history; removing the application support folder resets KeyScribe.

@@ -16,6 +16,12 @@ public struct AgentCandidate: Equatable, Sendable {
         self.setup = setup
         self.tty = tty
     }
+
+    public var rowId: String { "process:\(pid):\(startedAt ?? 0)" }
+
+    public func label(agentName: String) -> String {
+        "\(agentName) in \(URL(fileURLWithPath: cwd).lastPathComponent)"
+    }
 }
 
 public enum AgentProcesses {

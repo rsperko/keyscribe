@@ -119,3 +119,19 @@ struct AgentHistoryFactsTests {
         #expect(!list.contains { $0.label == "Default recipient" })
     }
 }
+
+struct AgentSpokenReplyEntryTests {
+    @Test func aSpokenLineOnItsOwnIsAnEntryNamingWhoItCameFrom() {
+        let at = Date(timeIntervalSince1970: 1_700_000_000)
+        let reply = HistoryEntry.SpokenReply(at: at, conversation: "docs", text: "docs: Done.", connection: "Local")
+        let entry = AgentHistoryFacts.spokenReplyEntry(id: "e1", mode: "Coding agent", reply: reply)
+        #expect(entry.id == "e1")
+        #expect(entry.timestamp == at)
+        #expect(entry.modeName == "Coding agent")
+        #expect(entry.summary == "Reply from docs")
+        #expect(entry.spokenReply == reply)
+        #expect(entry.heard.isEmpty && entry.result.isEmpty)
+        #expect(entry.outcome == .command)
+        #expect(!entry.cloudInvolved)
+    }
+}
