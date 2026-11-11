@@ -32,7 +32,7 @@ public struct SpokenHelp: Equatable, Sendable {
             .filter { !$0.said.contains(unnamed) }
             .map { row in
             row.said == VoiceCommandGrammar.repeatSummary[0] && !canRepeat
-                ? Row(said: row.said, effect: row.effect, note: "Nothing to repeat yet") : row
+                ? Row(said: row.said, effect: row.effect, note: "There\u{2019}s nothing to repeat yet") : row
         }
         return SpokenHelp(
             title: title, status: recipient.map { "Recipient: \($0)" } ?? "No recipient selected",

@@ -274,14 +274,14 @@ struct SpokenResultOutputTests {
         let silencer = SpeechSilencer()
         let (output, speech, _) = make(silencer: silencer)
         silencer.recordingStarted()
-        output.refused(conversation: "pi:s1", "Not sent: that conversation has ended")
-        output.refused(conversation: "pi:s2", "Not sent: that conversation has ended")
+        output.refused(conversation: "pi:s1", "That conversation has ended. Nothing sent.")
+        output.refused(conversation: "pi:s2", "That conversation has ended. Nothing sent.")
         silencer.recordingEnded()
         speech.start()
         speech.finish()
         speech.start()
         speech.finish()
-        #expect(speech.spoken.map(\.text) == ["Not sent: that conversation has ended", "Not sent: that conversation has ended"])
+        #expect(speech.spoken.map(\.text) == ["That conversation has ended. Nothing sent.", "That conversation has ended. Nothing sent."])
     }
 
     @Test func aRefusalIsNotSpokenWithSpokenUpdatesOff() async {

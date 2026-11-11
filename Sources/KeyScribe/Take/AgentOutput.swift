@@ -233,20 +233,48 @@ final class AgentOutput {
 
     static func openAskLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:], current: String? = nil) -> String {
         if case .sayToSelect(let name) = reason { return selectHint(name) }
-        let problem = askProblem(reason) + retryHint(reason, retry: retry, names: names, current: current)
-        return problem.prefix(1).uppercased() + problem.dropFirst()
+        let advice = [askAdvice(reason), retryHint(reason, retry: retry, names: names, current: current)].compactMap { $0 }
+        guard !advice.isEmpty else {
+            let problem = askProblem(reason)
+            return problem.prefix(1).uppercased() + problem.dropFirst()
+        }
+        return ([sentence(askProblem(reason))] + advice).joined(separator: " ")
     }
 
     static func askLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:], current: String? = nil) -> String {
         if case .sayToSelect(let name) = reason { return selectHint(name) }
-        return "Not sent: " + askProblem(reason) + retryHint(reason, retry: retry, names: names, current: current)
+        let advice = [askAdvice(reason), retryHint(reason, retry: retry, names: names, current: current)].compactMap { $0 }
+        return ([sentence(askProblem(reason)), nothingSent] + advice).joined(separator: " ")
+    }
+
+    private static func sentence(_ text: String) -> String {
+        let capitalized = text.prefix(1).uppercased() + text.dropFirst()
+        return capitalized.hasSuffix("?") || capitalized.hasSuffix(".") ? capitalized : capitalized + "."
+    }
+
+    private static func askAdvice(_ reason: AgentRecipient.AskReason) -> String? {
+        switch reason {
+        case .noBreak(let name): "Say \u{201C}tell \(name),\u{201D} with a pause, or \u{201C}tell \(name) to \u{2026}\u{201D}."
+        case .sharedName(_, _, let surface?): "Name the panes in \(surface) to tell them apart."
+        default: nil
+        }
     }
 
     private static func selectHint(_ name: String) -> String {
         "Say \u{201C}select \(name)\u{201D} to choose it. Nothing sent."
     }
 
+    static let nothingSent = "Nothing sent."
+    static let keptHint = "Your words are kept for Paste last dictation."
+
+    static func kept(_ line: String, body: String) -> String {
+        body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? line : withHint(line, keptHint)
+    }
     static let cancelledLine = "Cancelled. Nothing sent."
+
+    static func withHint(_ line: String, _ hint: String) -> String {
+        hint.isEmpty ? line : line + (line.hasSuffix(".") ? " " : ". ") + hint
+    }
 
     static let unconnectedShown = 2
 
@@ -254,7 +282,7 @@ final class AgentOutput {
         guard !names.isEmpty else { return "" }
         let one = names.count == 1
         let shown = names.count > unconnectedShown + 1 ? Array(names.prefix(unconnectedShown)) + ["\(names.count - unconnectedShown) more"] : names
-        return ". \(either(shown, joining: "and")) \(one ? "is" : "are") running but not connected. Coding agent settings shows how to connect \(one ? "it" : "them")"
+        return "\(either(shown, joining: "and")) \(one ? "is" : "are") running but not connected. Coding agent settings shows how to connect \(one ? "it" : "them")"
     }
 
     static func example(names: [String: String], current: String?) -> String? {
@@ -262,14 +290,14 @@ final class AgentOutput {
         return ordered.first { names[$0] == current } ?? ordered.first
     }
 
-    private static func retryHint(_ reason: AgentRecipient.AskReason, retry: Retry?, names: [String: String], current: String?) -> String {
-        guard let retry else { return "" }
+    private static func retryHint(_ reason: AgentRecipient.AskReason, retry: Retry?, names: [String: String], current: String?) -> String? {
+        guard let retry else { return nil }
         let name: String? = switch reason {
         case .unknownName: example(names: names, current: current)
         case .shownOn(_, let name, _): names[name] == nil ? nil : name
         default: nil
         }
-        return name.map { ". Try \u{201C}\(retry.phrase($0))\u{201D}" } ?? ""
+        return name.map { "Try \u{201C}\(retry.phrase($0))\u{201D}" }
     }
 
     private static func askProblem(_ reason: AgentRecipient.AskReason) -> String {
@@ -280,13 +308,11 @@ final class AgentOutput {
         case .unknownName(let name): "no conversation named \u{201C}\(name)\u{201D}"
         case .shownOn(let word, let name, let seenAs): "\u{201C}\(word)\u{201D} is the \(seenAs) of \u{201C}\(name)\u{201D}"
         case .soundsLike(let spoken, let name): "\u{201C}\(spoken)\u{201D} sounded like \u{201C}\(name)\u{201D}"
-        case .noBreak(let name):
-            "did you mean \u{201C}\(name)\u{201D}? Say \u{201C}tell \(name),\u{201D} with a pause, or \u{201C}tell \(name) to \u{2026}\u{201D}"
+        case .noBreak(let name): "did you mean \u{201C}\(name)\u{201D}?"
         case .ambiguousName(let name, let matches):
             "\u{201C}\(name)\u{201D} could be \(Self.either(matches.map { "\u{201C}\($0)\u{201D}" }))"
-        case .sharedName(let name, let matches, let surface):
+        case .sharedName(let name, let matches, _):
             "\u{201C}\(name)\u{201D} could be \(Self.either(matches.map { "\u{201C}\($0)\u{201D}" }))"
-                + (surface.map { ". Name the panes in \($0) to tell them apart." } ?? "")
         }
     }
 
@@ -336,15 +362,15 @@ final class AgentOutput {
             }
             return .advisory(message: "Not sent to \(handle): \(why)")
         case .notSent(let handle, let reason):
-            let name = handle ?? "that conversation"
+            let name = handle ?? "That conversation"
             let message = switch reason {
-            case .conversationEnded: "Not sent: that conversation has ended"
-            case .connectorNotRunning: "Not sent: \(name) isn\u{2019}t connected to \(Branding.appName)"
-            case .conversationChanged: "Not sent: \(name) switched to another conversation"
-            case .stopped: "Not sent: \(name)\u{2019}s last turn was interrupted, so it takes only a message you type. Type one there, then dictate again"
-            case .expired: "Not sent: \(name) didn\u{2019}t take it in time"
-            case .refused: "Not sent: \(name) refused the message"
-            case .disconnected: "Not sent: \(name) is disconnected"
+            case .conversationEnded: "That conversation has ended. \(nothingSent)"
+            case .connectorNotRunning: "\(name) isn\u{2019}t connected to \(Branding.appName). \(nothingSent)"
+            case .conversationChanged: "\(name) switched to another conversation. \(nothingSent)"
+            case .stopped: "\(name)\u{2019}s last turn was interrupted, so it takes only a message you type. \(nothingSent) Type one there, then dictate again."
+            case .expired: "\(name) didn\u{2019}t take it in time. \(nothingSent)"
+            case .refused: "\(name) refused the message. \(nothingSent)"
+            case .disconnected: "\(name) is disconnected. \(nothingSent)"
             }
             let action: HUDErrorAction? = switch reason {
             case .connectorNotRunning, .disconnected: settingsMode.map { HUDErrorAction.openCodingAgents($0) }

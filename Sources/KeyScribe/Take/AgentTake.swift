@@ -215,15 +215,16 @@ final class AgentTake {
             return
         }
         if !namesSettled, AgentRecipient.usesDefault(address), case .deliver(_, let body, _) = resolution {
-            finishAgent(state: .error(message: "Not sent: couldn\u{2019}t check conversation names yet. Say it again, or start with \u{201C}tell\u{201D} and a name or conversation number.", action: nil, heard: HeardExcerpt(heard: body)),
-                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, facts: facts)
+            let line = "Couldn\u{2019}t check conversation names yet. Nothing sent. Say it again, or start with \u{201C}tell\u{201D} and a name or conversation number."
+            finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: nil, heard: HeardExcerpt(heard: body)),
+                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
             return
         }
         if let (id, front, body) = Self.target(of: resolution), snapshot.disconnected.values.contains(id) || agents.isExcluded(id) {
             let name = snapshot.disconnected.first { $0.value == id }?.key ?? "That conversation"
-            let line = front ? "The conversation in front is disconnected" : "\(name) is disconnected"
-            finishAgent(state: .error(message: line, action: .openCodingAgents(mode.id), heard: HeardExcerpt(heard: body)),
-                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, facts: facts)
+            let line = (front ? "The conversation in front is disconnected" : "\(name) is disconnected") + ". " + AgentOutput.nothingSent
+            finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: .openCodingAgents(mode.id), heard: HeardExcerpt(heard: body)),
+                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
             return
         }
         if let id = resolution.makesCurrent { agents.makeCurrent(id) }
@@ -266,16 +267,17 @@ final class AgentTake {
             if !meant.isEmpty {
                 let shown = Self.unconnectedLine(meant)
                 let action = HUDErrorAction.openCodingAgents(mode.id, reveal: meant.map(\.row))
-                finishAgent(state: .error(message: shown, action: action, heard: HeardExcerpt(heard: body)),
+                finishAgent(state: .error(message: AgentOutput.kept(shown, body: body), action: action, heard: HeardExcerpt(heard: body)),
                             outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: shown, facts: facts)
                 return
             }
             let hint = AgentOutput.unconnectedHint(unconnected.map(\.name))
-            let shown = hint.isEmpty ? line(reason, retry, reachable(snapshot, agents, for: retry), frozen?.id) : line(reason, nil, [:], nil) + hint
+            let shown = hint.isEmpty
+                ? line(reason, retry, reachable(snapshot, agents, for: retry), frozen?.id) : AgentOutput.withHint(line(reason, nil, [:], nil), hint)
             let action = hint.isEmpty ? Self.askAction(reason, mode: mode) : .openCodingAgents(mode.id)
-            finishAgent(state: .error(message: shown, action: action, heard: HeardExcerpt(heard: body)),
+            finishAgent(state: .error(message: AgentOutput.kept(shown, body: body), action: action, heard: HeardExcerpt(heard: body)),
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil,
-                        recorded: line(reason, nil, [:], nil) + hint, facts: facts)
+                        recorded: AgentOutput.withHint(line(reason, nil, [:], nil), hint), facts: facts)
         case .deliver(let id, let body, _):
             host.noteAgentDestination(id, facts: facts)
             await host.rewriteAndDeliver(
@@ -424,7 +426,7 @@ final class AgentTake {
         let name = agents.handle(of: id) ?? snapshot.disconnected.first { $0.value == id }?.key ?? "That conversation"
         if case .moreThanAQuestion = query {
             return fail(
-                "Nothing was sent. Say \u{201C}what is \(name) waiting for?\u{201D} to check on it, or start with \u{201C}tell \(name)\u{201D} to send a message")
+                "Nothing sent. Say \u{201C}what is \(name) waiting for?\u{201D} to check on it, or start with \u{201C}tell \(name)\u{201D} to send a message.")
         }
         if snapshot.disconnected.values.contains(id) || agents.isExcluded(id) {
             return fail("\(name) is disconnected", action: .openCodingAgents(mode.id))
@@ -472,9 +474,9 @@ final class AgentTake {
 
     private static func renameProblem(_ problem: AgentRename.Problem) -> String {
         switch problem {
-        case .noName: "Say \u{201C}rename this conversation to\u{201D} and the new name. Nothing was sent"
-        case .tooLong: "A name can be up to \(AgentRename.nameWords) words. Nothing was sent"
-        case .moreAfterName: "Say only the new name after \u{201C}rename this conversation to\u{201D}. Nothing was sent"
+        case .noName: "No new name was heard. Nothing sent. Say \u{201C}rename this conversation to\u{201D} and the new name."
+        case .tooLong: "A name can be up to \(AgentRename.nameWords) words. Nothing sent."
+        case .moreAfterName: "More words followed the name. Nothing sent. Say only the new name after \u{201C}rename this conversation to\u{201D}."
         }
     }
 
@@ -521,7 +523,7 @@ final class AgentTake {
             return
         }
         guard let agents = host.agents, let mode = host.takeMode, host.codingAgentsEnabled else {
-            finishAgent(state: .error(message: "Not sent: talking to coding agents was turned off", action: nil, heard: HeardExcerpt(heard: text)),
+            finishAgent(state: .error(message: "Talking to coding agents was turned off. Nothing sent.", action: nil, heard: HeardExcerpt(heard: text)),
                         outcome: .failed, heard: heard, body: text, transformed: transformed, rewrite: rewrite, facts: facts)
             return
         }
@@ -586,13 +588,13 @@ final class AgentTake {
     }
 
     static func unconnectedLine(_ meant: [AgentHub.Unconnected]) -> String {
-        guard meant.count > 1 else { return "Not sent: \(meant[0].name) isn\u{2019}t connected yet" }
+        guard meant.count > 1 else { return "\(meant[0].name) isn\u{2019}t connected yet. Nothing sent." }
         let names = meant.map(\.name).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         let groups = names.map { name in
             let same = meant.filter { $0.name == name }
             return same.count == 1 ? name : "\(same.count) \(same[0].agent) conversations in \(same[0].folder)"
         }
-        return "Not sent: \(AgentOutput.either(groups, joining: "and")) aren\u{2019}t connected yet"
+        return "\(AgentOutput.either(groups, joining: "and")) aren\u{2019}t connected yet. Nothing sent."
     }
 
     private static func names(_ spoken: String, _ unconnected: AgentHub.Unconnected) -> Bool {

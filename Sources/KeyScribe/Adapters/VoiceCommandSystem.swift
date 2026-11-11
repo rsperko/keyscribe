@@ -791,7 +791,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         }
     }
 
-    static let nothingToRepeat = "Nothing to repeat yet."
+    static let nothingToRepeat = "There\u{2019}s nothing to repeat yet."
 
     private func goBack(to origin: VoiceCommandOrigin?, stillWanted: @escaping @MainActor () -> Bool) async -> VoiceCommandOutcome {
         let nothing = VoiceCommandOutcome.failed(message: "Nothing to go back to.")

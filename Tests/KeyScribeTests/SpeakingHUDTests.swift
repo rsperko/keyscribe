@@ -85,7 +85,7 @@ struct SpeakingHUDTests {
         let claimed = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults())
         defer { claimed.hide() }
         claimed.show(name: "keyscribe blue", summary: "Done.")
-        #expect(claimed.status == "Speaking \u{00B7} Esc to stop")
+        #expect(claimed.status == "Speaking \u{00B7} Esc stops playback")
     }
 
     @Test(arguments: [HUDAnchor.topLeft, .bottomLeft])

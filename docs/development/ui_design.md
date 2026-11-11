@@ -259,7 +259,7 @@ because opening its mic switches it to call mode.
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | A short cause, such as “The model reached its output limit while reasoning.”, or “Rewrite could not be completed” when none was recorded. History keeps the full reason and advice. When copied, the focus-change or Accessibility explanation comes first. Stays five seconds when it carries a reason | AI Service Settings… opens the affected service when the failure names one. Paste last dictation also remains available when copied and Accessibility permits it |
 | Rewrite skipped | “Inserted without rewriting” — or “Copied without rewriting”; “Dictation failed” when the local text then could not be inserted | “You skipped the rewrite after 17.5 seconds.”, timed from when the rewrite started. The user chose this, so a delivered skip has its own neutral indicator, never success or failure styling; a failed delivery shows the failure styling first and keeps this line as context. When copied, the focus-change or Accessibility explanation comes first. Stays five seconds | No AI Service Settings… action. Paste last dictation remains available when copied and Accessibility permits it |
 | Reasoning setting not applied | The completed state’s own title (“Inserted”, or “Copied instead of inserted”) | “Reasoning setting not applied.” followed by a plain explanation naming the service and model — e.g. “[service] didn't accept a reasoning setting for [model], so the model uses its own. Rewrites may be slower.” Stays five seconds | None. Carried by the completion itself — never a second, delayed HUD that a following dictation could cancel unseen — once per connection and model each time the app runs. Shown when a requested reasoning setting had to be dropped and the service did not confirm the model used no reasoning, when no lower level was accepted, or when the model reasoned with reasoning off. Also shown when an OpenRouter route could only be found without guaranteeing the setting. Never after a fallback, whose reason already says what happened. On a copied completion it follows the explanation of where the text went, which is read first |
-| What you can say (any mode) | The mode's name with a neutral `info.circle` in the recording icon's place (no green, no pulse), and “What you can say” beneath it; a Coding agent mode adds “Recipient: name” or “No recipient selected” | The phrases for that mode (`SpokenHelp`), each with what it does, sorted alphabetically by the phrase as shown, about six at first and **Show N more** for the rest: in Voice Commands “open” and “switch to” with apps that are running and the first saved place and action with their verbs; the Coding agent phrases with the recipient's name, or another conversation's when none is selected, and without the name-led phrases when there is no conversation; spoken edits and “insert clipboard contents” when spoken edits are on; other modes' spoken suffixes in dictation; never an invented app or conversation name. A mode with nothing to show says so (“No spoken commands in this mode. Turn on spoken edits in its settings to add some.”) instead of an empty list. Also and the mode's replacement rules as verified examples (`RuleExample`: a pattern rule shows the phrases its own pattern matches completely, an open-ended capture as “…”; a pattern outside the supported forms is left out), each kept only when running it through the mode's own text stages, up to and including its rules, gives that output, so a rule a spoken edit or help itself would beat is not shown, while later polishing (numbers, the dictionary) never hides a rule that works. An edit-selection mode shows no rows, only how to give an instruction (“Select text first, then say how to change it …”), since its words are an instruction, not text the stages change. The list keeps the HUD's usual width and scrolls once it would pass a height cap, from the first view. Invisible output reads “New line”, “New paragraph”, “Tab”, “then presses Return”; a whole-take rule notes “Say alone”, and “repeat that” notes “Nothing to repeat yet” when there is nothing to repeat. The rows grow toward the screen's middle, above the header when the HUD sits at the bottom | Close button; closes after about 15 seconds, held while the pointer is over it and not timed at all while VoiceOver runs; Escape closes it from any app while it shows (the Escape claim is released when it closes); the next recording replaces it. Never takes key focus, never read aloud, nothing sent, run, inserted or recorded in History. Shown for a whole take of “what can I say” or “show commands” (optional “please”, `VoiceCommandGrammar.help`), checked before any rule runs; a longer take is ordinary text. While a voice command choice waits, the request is that choice's answer: the choice stays and its note says how to answer |
+| What you can say (any mode) | The mode's name with a neutral `info.circle` in the recording icon's place (no green, no pulse), and “What you can say” beneath it; a Coding agent mode adds “Recipient: name” or “No recipient selected” | The phrases for that mode (`SpokenHelp`), each with what it does, sorted alphabetically by the phrase as shown, about six at first and **Show N more** for the rest: in Voice Commands “open” and “switch to” with apps that are running and the first saved place and action with their verbs; the Coding agent phrases with the recipient's name, or another conversation's when none is selected, and without the name-led phrases when there is no conversation; spoken edits and “insert clipboard contents” when spoken edits are on; other modes' spoken suffixes in dictation; never an invented app or conversation name. A mode with nothing to show says so (“No spoken commands in this mode. Turn on spoken edits in its settings to add some.”) instead of an empty list. Also and the mode's replacement rules as verified examples (`RuleExample`: a pattern rule shows the phrases its own pattern matches completely, an open-ended capture as “…”; a pattern outside the supported forms is left out), each kept only when running it through the mode's own text stages, up to and including its rules, gives that output, so a rule a spoken edit or help itself would beat is not shown, while later polishing (numbers, the dictionary) never hides a rule that works. An edit-selection mode shows no rows, only how to give an instruction (“Select text first, then say how to change it …”), since its words are an instruction, not text the stages change. The list keeps the HUD's usual width and scrolls once it would pass a height cap, from the first view. Invisible output reads “New line”, “New paragraph”, “Tab”, “then presses Return”; a whole-take rule notes “Say alone”, and “repeat that” notes “There’s nothing to repeat yet” when there is nothing to repeat. The rows grow toward the screen's middle, above the header when the HUD sits at the bottom | Close button; closes after about 15 seconds, held while the pointer is over it and not timed at all while VoiceOver runs; Escape closes it from any app while it shows (the Escape claim is released when it closes); the next recording replaces it. Never takes key focus, never read aloud, nothing sent, run, inserted or recorded in History. Shown for a whole take of “what can I say” or “show commands” (optional “please”, `VoiceCommandGrammar.help`), checked before any rule runs; a longer take is ordinary text. While a voice command choice waits, the request is that choice's answer: the choice stays and its note says how to answer |
 | Voice command ran (Voice Commands mode, experimental) | Where it went — the app, the place and its browser (“Gmail · Google Chrome”), or the window and its app (“Budget — Numbers · Numbers”) — or the script or shortcut it ran (“Deploy”); a script that reported a result shows that message instead (“Switched to Inbox”) | “Voice command”, or “Started, still running” when the action has not finished; under a reported result, the script's name. A script's informational result (“Nothing waiting”) shows as an Advisory instead, with no failure styling. A window that closed, moved to another desktop, or could not be confirmed in front, and a search where some app did not list its windows, show an Error saying so (Accessibility off adds **Open Accessibility Settings**). A browser that refused control, and a script whose error output carries the Apple Events not-permitted code (`-1743`) on an error line, show an Error with **Open Automation Settings** (“Manager couldn’t control another app. Check Automation access for KeyScribe.”, followed by the script's denial line, which names the app that refused, even when later error lines follow); the button only opens that pane, never retries or asks again; if an action later fails, an Error naming the failure follows unless a dictation is in progress or a voice command choice is on screen, in which case History alone records it | None; dismiss automatically |
 | Voice command needs a choice (Voice Commands mode) | “Which one?” for apps, places, and a script's own options, “Which action?” for `run` | Numbered rows, each a name over a detail that tells it apart (app, browser and host, app identity where names repeat, a window's app plus its document or site when two titles are the same, Script/Shortcut, or the name of the script that offered the option), then how to answer with the actual Voice Commands shortcut, led by one line when window rows still read the same (“Same name; the lower number is further forward.” within one app instance, else “Same name; these windows can’t be told apart.”) | Click a row; Cancel. Stays until answered, dismissed, or idle for the timeout |
 | Voice command not recognized (Voice Commands mode) | “Command not recognized” | What the speech model heard, before any replacement: “Heard “stitch to Mail”” — omitted when the target was a password field or could not be confirmed | None; dismiss automatically |
@@ -332,7 +332,7 @@ A tab or workspace label that covers several conversations names each of them by
 same agent then gain a distinguishing word. A conversation whose pane has its own label still counts, so
 workspace `cos` with a pane named `pi` and one unnamed Claude pane gives `pi` and `cos claude`. Said bare,
 such a label never picks one: “tell cos to run the tests” and “cos, run the tests” are held and ask
-“Not sent: “cos” could be “cos claude” or “cos pi””, adding “Name the panes in herdr to tell them apart.”
+““cos” could be “cos claude” or “cos pi”. Nothing sent.”, adding “Name the panes in herdr to tell them apart.”
 when only a distinguishing word separates them. This holds for messages, open, and questions alike. Two
 places with the same label, even on separate herdr servers, are one spoken label listing all of their
 conversations, and so are two separate places with the same label, each holding one conversation (two
@@ -352,8 +352,8 @@ next” and “Ask cos what's outstanding” reach it; a particular agent named 
 conversation name when a herdr name took its place, may be text nobody chose, so they reach it only when
 said in full after “tell”, “ask” or “open”; part of one is ordinary message text, because such names are
 task phrases that everyday instructions start with. A tab or workspace label of one conversation that lost to a higher name
-does not deliver: after “tell”, “ask” or “open” it holds, “Not sent: “chief” is the herdr workspace label of
-“marvin”. Try “tell marvin, …”” (“ask marvin, …” when the user said “ask”), and History keeps the line without the suggestion, which appears only while
+does not deliver: after “tell”, “ask” or “open” it holds, ““chief” is the herdr workspace label of
+“marvin”. Nothing sent. Try “tell marvin, …”” (“ask marvin, …” when the user said “ask”), and History keeps the line without the suggestion, which appears only while
 that conversation can take a message. Another name two conversations have asks which one, and one equal to
 a conversation's shown name reaches that conversation. Renaming a conversation to another one's other name
 is refused as taken. The conversation list shows the other names under the place (“Also answers to
@@ -368,7 +368,7 @@ against the names frozen when its recording started, plus any new name a read du
 one of those same conversations: the recipient chosen at the start and the row numbers never change, and
 a new name never takes a frozen one or adds a conversation. When the take is resolved while a read is
 still running, it waits for that read up to a second. A take that would go to the current conversation
-is held, “Not sent: couldn’t check conversation names yet. Say it again, or start with “tell” and a name or
+is held, “Couldn’t check conversation names yet. Nothing sent. Say it again, or start with “tell” and a name or
 conversation number.”, if the read still has not finished or the first read of one of the listed conversations has not
 finished, because its first words may be a name that read did not deliver; a take that named a known
 conversation goes ahead. A read that finishes but fails never holds a take: the conversation keeps the names
@@ -425,8 +425,12 @@ offered under its current name, so a pane renamed during the take is offered by 
 it left. Its Open Coding Agent
 Settings button shows every name and renames a conversation; the spoken rename is not offered here, because
 a mode with a fixed recipient renames that recipient, not the conversation in front. History records only
-“No conversation named “architect””, since the names offered change as conversations come and go. A status
-question about an unknown name never reaches this line: it is a message (see below).
+“No conversation named “architect”. Nothing sent.”, since the names offered change as conversations come and go. A status
+question about an unknown name never reaches this line: it is a message (see below). Whenever a message is held
+with words in it (an unknown, ambiguous, unconnected, or disconnected recipient, or names not read yet), the HUD
+line ends “Your words are kept for Paste last dictation.”, because the held text is the last dictation (History
+on or off), so the user can paste it into the agent or dictate the address again without repeating the
+message; History keeps the line without that sentence.
 
 “Ask” works like “tell” for a conversation's name or number (“ask docs to review the changes”, “ask session
 two whether it is done”), and a name one sound away is held the same way. An unknown word after “ask” followed
@@ -443,7 +447,7 @@ changed”) when the name is followed by a break: the end of the take, a comma o
 what is said to it (`AgentAddress` lists them, such as “to”, “that”, “whether” and “what”). Without a break
 (“tell the docs run the tests”, “tell the session two run the tests”, “tell the backend team the API
 changed”) it is unclear whether the name was meant, so the take is held and never sent to another
-conversation: “Not sent: did you mean “docs”? Say “tell docs,” with a pause, or “tell docs to …””. When that
+conversation: “Did you mean “docs”? Nothing sent. Say “tell docs,” with a pause, or “tell docs to …”.”. When that
 conversation is already the recipient, the whole take is sent to it as said. Words after “the” that name no
 conversation (“tell the users that the API changed”) are the message for the highlighted recipient. A
 conversation whose own name starts with “the”, or with an opening word such as “so” or “okay”
@@ -512,7 +516,7 @@ the same kind of local command on either trigger: it replays the last spoken rep
 exactly as it was heard, ahead of any still waiting, and sends nothing. The replay waits in its own place
 rather than the queue, so a newer result for the same conversation does not replace it and an unavailable
 notice is never merged again with notices still waiting. It does not repeat the front check, since the user asked for it.
-The HUD names the conversation (“docs”), or says “Nothing to repeat yet.” or “Spoken replies are off.”;
+The HUD names the conversation (“docs”), or says “There’s nothing to repeat yet.” or “Spoken replies are off.”;
 History records the command and adds no second copy of the line. Inside a longer take or after “tell” and a name it is
 message text. A take that is only “rename this conversation to” or “rename this session to” a new name (“name this
 conversation …” and “call this session …” work too) renames the take's recipient, with the same check
@@ -544,8 +548,8 @@ opening “please”, “hey”, “so” or “okay” (also skipped before “
 “hey docs, run the tests” addresses docs), “currently”, “still”, and a
 closing “now” or “right now” are fine. More words after a question about a named conversation (“what does
 docs need from me to continue”, or a second question after it) hold the take, since sending it would put a
-question about docs to another conversation: “Nothing was sent. Say “what is docs waiting for?” to check on
-it, or start with “tell docs” to send a message”. A longer question about “you” (“what are you waiting for before
+question about docs to another conversation: “Nothing sent. Say “what is docs waiting for?” to check on
+it, or start with “tell docs” to send a message.” A longer question about “you” (“what are you waiting for before
 merging”) and anything after “ask” and a name (“ask docs what it needs from me”) are messages to
 that conversation, and “what is the build waiting for” names no conversation, so it is a message. “Tell docs …”
 is always sent, which is how to ask the agent itself. The name must be a conversation's name or number; one
@@ -681,11 +685,11 @@ interrupted, so the message is waiting in its prompt box. Press Return there to 
 that take only for the turn that starts right after the prompt the press sent, within a few seconds; when the
 prompt is not seen before the confirmation runs out, when another prompt is typed first, or when no turn starts
 (a slash command), no later turn is read as the take's. A connector that
-could not fill the box reports “Not sent: docs’s last turn was interrupted, so it takes only a message you
-type. Type one there, then dictate again”.
+could not fill the box reports “docs’s last turn was interrupted, so it takes only a message you
+type. Nothing sent. Type one there, then dictate again.”.
 
 A take addressed to a conversation that is not connected, or that the user disconnected, says so by name
-(“Not sent: docs isn’t connected to {app}”, “docs is disconnected”, or “The conversation in front is
+(“docs isn’t connected to {app}. Nothing sent.”, “docs is disconnected. Nothing sent.”, or “The conversation in front is
 disconnected”) with **Open Coding Agent Settings**, and never falls through to another recipient. A
 disconnected conversation's name is still recognized for this, but it never appears in the numbered list.
 "The conversation in front is disconnected" needs the conversation's terminal facts, which only a connected
@@ -694,9 +698,9 @@ recognized as the one in front, and the take then asks for a name.
 A running agent whose connector has not connected has no name the app could match, so a spoken name meant for
 it asks like any unknown name. While such a process is listed in Settings, a spoken name that matches no
 conversation, or only sounds like one, says so with **Open Coding Agent Settings**, where the process's row says
-what to do. When the name is that process's folder, or its whole description, only it is named (“Not sent: Pi in
-reviews isn’t connected yet”); when several processes share that name, all of them are named and none is
-picked (“Not sent: Claude Code in reviews and 2 Pi conversations in reviews aren’t connected yet”). The button
+what to do. When the name is that process's folder, or its whole description, only it is named (“Pi in
+reviews isn’t connected yet. Nothing sent.”); when several processes share that name, all of them are named and none is
+picked (“Claude Code in reviews and 2 Pi conversations in reviews aren’t connected yet. Nothing sent.”). The button
 scrolls Settings to the first named row and highlights every named row briefly (no animation with Reduce
 Motion); a row that has not appeared within a few seconds, because its process ended, is not waited for. Otherwise the line adds what is running but not connected, as Settings describes
 it (the first two, then how many more), in place of the retry example (“… Pi in reviews is running but not
@@ -776,7 +780,7 @@ governs it (KeyScribe does not currently distinguish a "polishing on this Mac" s
 A spoken reply (§7 Coding agent) has its own small panel, separate from the dictation HUD and drawn with the
 same card, appearance and anchor, at the dictation HUD's normal width (`SpeakingHUDLayout.width`) whether or
 not the summary is shown. Its header shows a stop button, the exact name of the conversation being read with
-"Speaking · Esc to stop" beneath it, and a small trailing chevron; a long name wraps within that width. The
+"Speaking · Esc stops playback" beneath it, and a small trailing chevron; a long name wraps within that width. The
 stop button is a steady 16-point rounded square on a 26-point rounded-square halo, the same filled-halo
 language as the listening indicator; while audio plays the halo's opacity gently rises and falls on a timer,
 never its size, and under Reduce Motion it is static. The button's 30-point hit target never changes, and its
@@ -2307,7 +2311,7 @@ editor carries its own **Do not save this mode in history** toggle.
 A **Coding agent** entry is an attempted action, not a text transformation, so every one of them (Open,
 choosing a recipient, a sent, queued, kept or refused message) uses one presentation instead of the
 comparison. Its Result view leads with the outcome in large type, red when it failed (*Sent to backend*,
-*Opened backend*, *Not sent: start with a conversation’s name*). The header carries no outcome badge or
+*Opened backend*, *Start with a conversation’s name. Nothing sent.*). The header carries no outcome badge or
 second copy of it. Below it come what was heard, on its own and selectable for corrections, then the
 **Message** that was sent or kept when it differs from what was heard. **What happened** follows:
 labelled lines recorded when the take happened (the command, the spoken address, the conversation, or

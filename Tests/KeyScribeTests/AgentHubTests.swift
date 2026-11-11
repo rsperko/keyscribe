@@ -1610,7 +1610,7 @@ struct AgentHubTests {
         hub.handle(.title(session: "fake:f1", text: "Bravo"))
         #expect(hub.directory.conversations.first?.handle == "bravo")
         fake.blocked = false
-        await hub.rescan()
+        for _ in 0..<100 where !hub.discoveryProblems.isEmpty { await hub.rescan() }
         #expect(fake.scans == 2)
         #expect(hub.discoveryProblems.isEmpty)
         #expect(hub.directory.conversations.first?.handle == "bravo")

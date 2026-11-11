@@ -8,7 +8,7 @@ struct AgentAskLineTests {
 
     @Test func anUnknownNameWithNoConversationToOfferSaysOnlyThat() {
         #expect(AgentOutput.askLine(.unknownName("architect"), retry: .tell, names: [:], current: nil)
-            == "Not sent: no conversation named \u{201C}architect\u{201D}")
+            == "No conversation named \u{201C}architect\u{201D}. Nothing sent.")
     }
 
     @Test func theRetryNamesTheHighlightedConversationElseTheFirstAlphabetically() {
@@ -20,9 +20,9 @@ struct AgentAskLineTests {
     @Test func aWordShownOnAConversationOffersThatConversationOnlyWhileItCanBeReached() {
         let reason = AgentRecipient.AskReason.shownOn("marvin", name: "cos", as: "herdr pane title")
         #expect(AgentOutput.askLine(reason, retry: .tell, names: ["cos": "a", "api": "b"], current: "b")
-            == "Not sent: \u{201C}marvin\u{201D} is the herdr pane title of \u{201C}cos\u{201D}. Try \u{201C}tell cos, \u{2026}\u{201D}")
+            == "\u{201C}marvin\u{201D} is the herdr pane title of \u{201C}cos\u{201D}. Nothing sent. Try \u{201C}tell cos, \u{2026}\u{201D}")
         #expect(AgentOutput.askLine(reason, retry: .tell, names: ["api": "b"], current: "b")
-            == "Not sent: \u{201C}marvin\u{201D} is the herdr pane title of \u{201C}cos\u{201D}")
+            == "\u{201C}marvin\u{201D} is the herdr pane title of \u{201C}cos\u{201D}. Nothing sent.")
     }
 
     @Test func theRetryRepeatsAsk() {
@@ -35,7 +35,16 @@ struct AgentAskLineTests {
     }
 
     @Test func otherReasonsOfferNoRetry() {
-        #expect(AgentOutput.askLine(.noSuchRow(4), retry: .tell, names: names, current: nil) == "Not sent: there is no conversation 4")
+        #expect(AgentOutput.askLine(.noSuchRow(4), retry: .tell, names: names, current: nil) == "There is no conversation 4. Nothing sent.")
+    }
+
+    @Test func adviceComesAfterNothingSentWithOnePeriodEach() {
+        let shared = AgentRecipient.AskReason.sharedName("cos", matches: ["cos claude", "cos pi"], tellApartIn: "herdr")
+        #expect(AgentOutput.askLine(shared) == "\u{201C}cos\u{201D} could be \u{201C}cos claude\u{201D} or \u{201C}cos pi\u{201D}. Nothing sent. Name the panes in herdr to tell them apart.")
+        #expect(AgentOutput.askLine(.noBreak("docs"))
+                == "Did you mean \u{201C}docs\u{201D}? Nothing sent. Say \u{201C}tell docs,\u{201D} with a pause, or \u{201C}tell docs to \u{2026}\u{201D}.")
+        #expect(AgentOutput.openAskLine(shared)
+                == "\u{201C}cos\u{201D} could be \u{201C}cos claude\u{201D} or \u{201C}cos pi\u{201D}. Name the panes in herdr to tell them apart.")
     }
 
     @Test func aRecipientSaidAloneTeachesSelect() {
@@ -48,7 +57,7 @@ struct AgentAskLineTests {
         let text = "select frontend"
         #expect(AgentOutput.Retry.matching(text, AgentAddress.parse(text, names: ["chief"])) == .select)
         #expect(AgentOutput.askLine(.unknownName("frontend"), retry: .select, names: ["chief": "a"], current: nil)
-            == "Not sent: no conversation named \u{201C}frontend\u{201D}. Try \u{201C}select chief\u{201D}")
+            == "No conversation named \u{201C}frontend\u{201D}. Nothing sent. Try \u{201C}select chief\u{201D}")
     }
 
     @Test(arguments: ["two", "api", "web blue"])

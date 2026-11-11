@@ -8,6 +8,7 @@ private final class ResidencySpyEngine: SpeechEngine, @unchecked Sendable {
     let displayName = "Residency Spy"
     let supportsRecognitionBias = false
     let loaded = Signal("loaded")
+    let loadStarted = Signal("load started")
     let evicted = Signal("evicted")
     let transcribeStarted = Signal("transcribe started")
     private let loadRelease: Signal?
@@ -30,6 +31,7 @@ private final class ResidencySpyEngine: SpeechEngine, @unchecked Sendable {
 
     func loadIfNeeded() async throws {
         lock.withLock { _loads += 1 }
+        loadStarted.fire()
         if let loadRelease { await loadRelease.wait() }
         lock.withLock { _isLoaded = true }
         loaded.fire()
@@ -233,6 +235,7 @@ struct ModelResidencyTierTests {
                             serialized: true, idleSeconds: 3600)
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
         h.controller.preloadActiveEngineIfNeeded()
+        #expect(await fires(h.engine.loadStarted, within: 10))
         var settings = h.controller.settings
         settings.stt.eviction = .frugal
         h.controller.updateSettings(settings)

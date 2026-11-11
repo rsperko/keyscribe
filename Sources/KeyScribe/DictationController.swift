@@ -2262,7 +2262,7 @@ final class DictationController {
         if case .abort(let message, let action) = final { return finishError(message, action: action) }
         let destination: Destination
         if activeMode?.output == .agent {
-            guard let id = session?.agentDestination else { return finishError("Not sent: the recipient was lost") }
+            guard let id = session?.agentDestination else { return finishError("The recipient was lost. Nothing sent.") }
             destination = .agent(id: id, facts: session?.agentFacts ?? [])
         } else {
             destination = .cursor

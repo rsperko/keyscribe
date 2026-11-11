@@ -189,7 +189,7 @@ struct HistoryPaneModelTests {
     @Test func aFailedDeliveryStillExplainsWhyTheRewriteReplyWasNotUsed() {
         var refused = entry("run the tests")
         refused.outcome = .failed
-        refused.failureReason = "Not sent: keyscribe refused the message"
+        refused.failureReason = "keyscribe refused the message. Nothing sent."
         refused.fallbackReason = "The reply dropped a protected token"
         refused.received = "garbled"
         #expect(whyLocalWasKept(refused) == "The reply dropped a protected token")

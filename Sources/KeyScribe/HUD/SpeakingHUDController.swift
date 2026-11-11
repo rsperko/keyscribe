@@ -133,7 +133,7 @@ enum SpeakingHUDLayout {
     static let spacing: CGFloat = 12
     static let button: CGFloat = 30
     static let chevron: CGFloat = 16
-    static let withEscape = "Speaking \u{00B7} Esc to stop"
+    static let withEscape = "Speaking \u{00B7} Esc stops playback"
     static let withoutEscape = "Speaking"
 
     static func placement(anchor: HUDAnchor, screen: CGRect, rowSize: CGSize, captionHeight: CGFloat?) -> Placement {

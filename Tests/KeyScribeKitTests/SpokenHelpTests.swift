@@ -32,7 +32,7 @@ struct SpokenHelpTests {
 
     @Test func repeatSaysWhenThereIsNothingToRepeat() {
         let help = SpokenHelp.codingAgent(title: "Coding agent", recipient: "backend", example: nil, readsReplies: true, canRepeat: false, stages: [])
-        #expect(help.rows.first { $0.said == "repeat that" }?.note == "Nothing to repeat yet")
+        #expect(help.rows.first { $0.said == "repeat that" }?.note == "There\u{2019}s nothing to repeat yet")
     }
 
     @Test func dictationHelpListsSpokenEditsSuffixesAndRulesThatHaveExamples() {

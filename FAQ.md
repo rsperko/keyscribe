@@ -500,7 +500,9 @@ docs run the tests”; later dictation without a name goes there too. To choose 
 anything, say **“select docs”** (or “choose docs”); **“open docs”** also brings its terminal forward. While
 recording, conversations are numbered, so “tell conversation two …” and “select conversation two” work too,
 and “session” means the same as “conversation”. A name said on its own sends nothing and the panel tells you
-to say “select” first. **“Cancel”** or **“never mind”** on its own sends nothing; to send that word to an
+to say “select” first. If a message can't be delivered (an unknown or ambiguous name, a conversation that
+isn't connected), nothing is sent and your words are kept: **Paste Last Dictation** pastes them.
+**“Cancel”** or **“never mind”** on its own sends nothing; to send that word to an
 agent, for example to answer its prompt, say “tell docs cancel”.
 
 ### How do I rename a conversation?
@@ -622,7 +624,8 @@ the text being read; it remembers that choice. Click its stop button or press Es
 to stop it and drop any summaries still waiting; summaries stay on for the next result. While a summary is
 audible, Esc goes to KeyScribe instead of the app you're in, and reaches your app again the moment it stops. If
 another app already holds Esc, the panel says only "Speaking" and the stop button is the way to stop it.
-Starting a dictation also stops it, and waiting summaries play once the dictation's own panel has gone. The
+Starting a dictation also stops it, and waiting summaries play once the dictation's own panel has gone.
+Both only stop the speech: the agent keeps working. The
 **Read Agent Replies Aloud** item in the menu bar menu turns the feature off and on. Only instructions you dictated, and
 work you asked the agent to have KeyScribe read aloud (below), are spoken about. To hear the last one again, say **"repeat that"** or **"say that
 again"** as the whole dictation, with either the Coding agent or the Voice Commands shortcut; with the Coding
