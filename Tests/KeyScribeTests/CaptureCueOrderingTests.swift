@@ -1,15 +1,14 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import KeyScribeApp
 @testable import KeyScribeKit
 
-// THE CONTRACT: if the recording HUD is visible, admission is open and the user's next word will be
-// captured. The HUD is the visual half of the start cue, so it may not appear one instant before the cue
-// sounds — a HUD at trigger time invites speech into the ~200-500ms the mic is still negotiating, and every
-// word of it is discarded (admission stays closed so the cue itself is never recorded).
+// THE CONTRACT: the HUD is the visual half of the start cue, so it may not appear one instant before the cue
+// sounds — a HUD at trigger time invites speech into the time the mic is still negotiating, when nothing can
+// be recorded. The mic records from its first buffer and the cue stays in the recording.
 //
-// The order is: hidden at the press -> first buffer -> cue -> publish the cue-end admission boundary ->
-// recording HUD + duck. Nothing before that boundary may invite speech.
+// The order is: hidden at the press -> first buffer -> cue -> cue ends -> recording HUD + duck.
 @MainActor
 struct CaptureCueOrderingTests {
     private final class TinyEngine: SpeechEngine, @unchecked Sendable {
@@ -37,18 +36,21 @@ struct CaptureCueOrderingTests {
     }
 
     // start() blocks until the test fires `ready`, standing in for a Bluetooth route that has bound and
-    // started but not yet delivered a buffer. Records every openAdmission boundary the controller publishes.
+    // started but not yet delivered a buffer.
     private final class GatedAudio: AudioCapturing, @unchecked Sendable {
         private let url: URL
         private let ready: SignalLatch
         private let failWith: Error?
         private let lock = NSLock()
-        private var _boundaries: [UInt64] = []
         private var _startCalls = 0
         private var _stops = 0
-        var boundaries: [UInt64] { lock.withLock { _boundaries } }
         var startCalls: Int { lock.withLock { _startCalls } }
         var stops: Int { lock.withLock { _stops } }
+        private var lost: (@Sendable () -> Void)?
+        func setCaptureLostHandler(_ handler: @escaping @Sendable () -> Void) { lock.withLock { lost = handler } }
+        func loseCapture() { lock.withLock { lost }?() }
+        var bluetooth = false
+        var inputIsBluetooth: Bool { bluetooth }
         init(url: URL, ready: SignalLatch, failWith: Error? = nil) {
             self.url = url
             self.ready = ready
@@ -63,7 +65,6 @@ struct CaptureCueOrderingTests {
         }
         func stop() -> URL? { lock.withLock { _stops += 1 }; return url }
         func finishDraining() async -> URL? { url }
-        func openAdmission(afterHostTime: UInt64) { lock.withLock { _boundaries.append(afterHostTime) } }
     }
 
     private final class StartMarkingAudio: AudioCapturing, @unchecked Sendable {
@@ -102,15 +103,18 @@ struct CaptureCueOrderingTests {
         controller.cancel()
     }
 
+    @MainActor private final class Sounds { var played = 0 }
+
     private func makeController(
-        audio: AudioCapturing, hud: HUDPresenting, cueSeconds: TimeInterval, silencer: SpeechSilencer = .shared
+        audio: AudioCapturing, hud: HUDPresenting, cueSeconds: TimeInterval, silencer: SpeechSilencer = .shared,
+        sounds: Sounds? = nil
     ) -> DictationController {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-cue-order-\(UUID().uuidString)", isDirectory: true)
         let provider = try! SpeechEngineProvider(engines: [TinyEngine()], activeId: "tiny")
         let effects = DuringDictationEffects(
             defaultOutputDeviceID: { nil }, setDuck: { _, _ in false },
-            startCueDurationOverride: cueSeconds)
+            startCueDurationOverride: cueSeconds, playSound: { _, _ in MainActor.assumeIsolated { sounds?.played += 1 } })
         return DictationController(
             settings: Settings.defaults, provider: provider, config: ConfigCache(supportDir: dir),
             history: nil, hud: hud, permits: { _ in true }, audio: audio, effects: effects, micStatus: { .granted },
@@ -125,18 +129,17 @@ struct CaptureCueOrderingTests {
         }
     }
 
-    @Test func admissionStaysClosedWhileTheMicHasNotDeliveredABuffer() async {
+    @Test func noCueIsCutWhileTheMicHasNotDeliveredABuffer() async {
         let ready = SignalLatch()
         let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
         let hud = RecordingHUD()
         let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05)
         controller.handleStart()
         await poll { audio.startCalls == 1 }
-        #expect(audio.boundaries.isEmpty)
+        #expect(!hud.sawRecording)
         #expect(!hud.sawVisibleHUD)
         ready.signal()
         await poll { hud.sawRecording }
-        #expect(audio.boundaries.count == 1)
     }
 
     @Test func thePressShowsNoVisibleHUDBeforeTheMicrophoneIsRequested() async {
@@ -165,37 +168,25 @@ struct CaptureCueOrderingTests {
         #expect(hud.states.filter { $0 != .hidden }.count == 1)
     }
 
-    @Test func theHUDStaysHiddenThroughTheCueAndAppearsOnlyAtAdmission() async throws {
+    @Test func theHUDAppearsOnlyOnceTheCueThatStartsAtReadinessHasEnded() async throws {
         let ready = SignalLatch()
         let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
         let hud = RecordingHUD()
         let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.3)
         controller.handleStart()
         await poll { audio.startCalls == 1 }
-        ready.signal()
-        await poll { hud.sawRecording }
-        #expect(hud.sawRecording)
-        let boundary = try #require(audio.boundaries.first)
-        let shown = try #require(hud.firstVisibleAt)
-        #expect(boundary > 0)
-        #expect(shown >= boundary)
-    }
-
-    @Test func theCueEndBoundaryIsAnchoredToReadinessNotToTheTrigger() async {
-        let ready = SignalLatch()
-        let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
-        let hud = RecordingHUD()
-        let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.2)
-        controller.handleStart()
-        await poll { audio.startCalls == 1 }
-        try? await Task.sleep(for: .milliseconds(300))
+        try? await Task.sleep(for: .milliseconds(200))
         let readyAt = mach_absolute_time()
         ready.signal()
-        await poll { !audio.boundaries.isEmpty }
-        #expect(audio.boundaries.first! > readyAt)
+        await poll { hud.sawRecording }
+        let shown = try #require(hud.firstVisibleAt)
+        var timebase = mach_timebase_info_data_t()
+        mach_timebase_info(&timebase)
+        let cueTicks = UInt64(0.3e9 * Double(timebase.denom) / Double(timebase.numer))
+        #expect(shown >= readyAt &+ cueTicks)
     }
 
-    @Test func aTimedOutBringUpReportsTheErrorAndNeverOpensAdmission() async {
+    @Test func aTimedOutBringUpReportsTheErrorAndPlaysNoCue() async {
         let ready = SignalLatch()
         let audio = GatedAudio(
             url: URL(fileURLWithPath: "/dev/null"), ready: ready, failWith: AudioCaptureError.bringUpTimedOut)
@@ -206,11 +197,11 @@ struct CaptureCueOrderingTests {
         ready.signal()
         await poll { hud.errorMessage != nil }
         #expect(hud.errorMessage == "Could not start the microphone")
-        #expect(audio.boundaries.isEmpty)
+        #expect(!hud.sawRecording)
         #expect(!hud.sawRecording)
     }
 
-    @Test func releasingDuringArmingNeverOpensAdmissionAndTearsTheCaptureDown() async {
+    @Test func releasingDuringArmingPlaysNoCueAndTearsTheCaptureDown() async {
         let ready = SignalLatch()
         let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
         let hud = RecordingHUD()
@@ -220,9 +211,222 @@ struct CaptureCueOrderingTests {
         controller.handleCommit()
         ready.signal()
         await poll { !controller.isBusy }
-        #expect(audio.boundaries.isEmpty)
+        #expect(!hud.sawRecording)
         #expect(!hud.sawVisibleHUD)
         #expect(audio.stops == 1)
+    }
+
+    @Test func theMicStartsAtTheKeyDownButTheCuePlaysOnlyOnceThePressStands() async {
+        let ready = SignalLatch()
+        let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
+        let hud = RecordingHUD()
+        let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05)
+        controller.pressConfirmationBackstop = .seconds(60)
+        controller.handleEngage(triggerKey: "right_option")
+        await poll { audio.startCalls == 1 }
+        ready.signal()
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(!hud.sawRecording)
+        #expect(!hud.sawVisibleHUD)
+        controller.handleStart(triggerKey: "right_option")
+        await poll { hud.sawRecording }
+        #expect(audio.startCalls == 1)
+        controller.cancel()
+    }
+
+    @Test func aPressThatBecomesAChordStopsTheMicWithoutACueOrHUD() async {
+        let ready = SignalLatch()
+        let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
+        let hud = RecordingHUD()
+        let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05)
+        controller.pressConfirmationBackstop = .seconds(60)
+        controller.handleEngage(triggerKey: "right_option")
+        await poll { audio.startCalls == 1 }
+        ready.signal()
+        controller.handleEngageDropped(triggerKey: "right_option")
+        await poll { !controller.isBusy }
+        #expect(!controller.isBusy)
+        #expect(audio.stops == 1)
+        #expect(!hud.sawRecording)
+        #expect(!hud.sawVisibleHUD)
+    }
+
+    @Test func aPressNeverConfirmedStopsTheMicAfterTheBackstop() async {
+        let ready = SignalLatch()
+        let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
+        let hud = RecordingHUD()
+        let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05)
+        controller.pressConfirmationBackstop = .milliseconds(50)
+        controller.handleEngage(triggerKey: "right_option")
+        await poll { audio.startCalls == 1 }
+        ready.signal()
+        await poll { !controller.isBusy }
+        #expect(!controller.isBusy)
+        #expect(audio.stops == 1)
+        #expect(!hud.sawVisibleHUD)
+    }
+
+    @Test func aDroppedPressLeavesTheNextPressFreeToStart() async {
+        let ready = SignalLatch()
+        let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
+        let hud = RecordingHUD()
+        let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05)
+        ready.signal()
+        controller.pressConfirmationBackstop = .seconds(60)
+        controller.handleEngage(triggerKey: "right_option")
+        controller.handleEngageDropped(triggerKey: "right_option")
+        await poll { !controller.isBusy }
+        controller.handleStart(triggerKey: "right_option")
+        await poll { hud.sawRecording }
+        #expect(audio.startCalls == 2)
+        controller.cancel()
+    }
+
+    @Test func cancellingAnUnconfirmedPressStopsTheMicSilentlyAndFreesTheApp() async {
+        let ready = SignalLatch()
+        let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
+        let hud = RecordingHUD()
+        let sounds = Sounds()
+        let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05, sounds: sounds)
+        controller.pressConfirmationBackstop = .seconds(60)
+        controller.handleEngage(triggerKey: "right_option")
+        await poll { audio.startCalls == 1 }
+        ready.signal()
+        try? await Task.sleep(for: .milliseconds(100))
+        controller.cancel()
+        await poll { !controller.isBusy }
+        #expect(!controller.isBusy)
+        #expect(audio.stops == 1)
+        #expect(sounds.played == 0)
+        #expect(!hud.sawVisibleHUD)
+    }
+
+    @Test func aLostCaptureDuringAnUnconfirmedPressStopsTheMicSilentlyAndFreesTheApp() async {
+        let ready = SignalLatch()
+        let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
+        let hud = RecordingHUD()
+        let sounds = Sounds()
+        let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05, sounds: sounds)
+        controller.pressConfirmationBackstop = .seconds(60)
+        controller.handleEngage(triggerKey: "right_option")
+        await poll { audio.startCalls == 1 }
+        ready.signal()
+        try? await Task.sleep(for: .milliseconds(100))
+        audio.loseCapture()
+        await poll { !controller.isBusy }
+        #expect(!controller.isBusy)
+        #expect(audio.stops == 1)
+        #expect(sounds.played == 0)
+        #expect(!hud.sawVisibleHUD)
+    }
+
+    @Test func aStartRightAfterADroppedPressWaitsForTheTeardownThenRecords() async {
+        let ready = SignalLatch()
+        let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
+        let hud = RecordingHUD()
+        let sounds = Sounds()
+        let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05, sounds: sounds)
+        controller.pressConfirmationBackstop = .seconds(60)
+        controller.handleEngage(triggerKey: "right_option")
+        await poll { audio.startCalls == 1 }
+        controller.handleEngageDropped(triggerKey: "right_option")
+        controller.handleStart(triggerKey: "right_option+c")
+        ready.signal()
+        await poll { hud.sawRecording }
+        #expect(hud.sawRecording)
+        #expect(audio.startCalls == 2)
+        #expect(sounds.played == 0)
+        controller.cancel()
+    }
+
+    @Test func aReleaseBeforeTheDeferredStartRunsCancelsIt() async {
+        let ready = SignalLatch()
+        let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
+        let hud = RecordingHUD()
+        let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05)
+        controller.pressConfirmationBackstop = .seconds(60)
+        controller.handleEngage(triggerKey: "right_option")
+        await poll { audio.startCalls == 1 }
+        controller.handleEngageDropped(triggerKey: "right_option")
+        controller.handleStart(triggerKey: "right_option+c")
+        controller.handleCommit()
+        ready.signal()
+        await poll { audio.startCalls == 2 && !controller.isBusy }
+        #expect(!controller.isBusy)
+        #expect(!hud.sawRecording)
+    }
+
+    @Test func aBluetoothInputIsNotOpenedAtTheKeyDownButStillRecordsOnceThePressStands() async {
+        let ready = SignalLatch()
+        let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
+        audio.bluetooth = true
+        let hud = RecordingHUD()
+        let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.05)
+        controller.handleEngage(triggerKey: "right_option")
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(audio.startCalls == 0)
+        #expect(!controller.isBusy)
+        controller.handleEngageDropped(triggerKey: "right_option")
+        controller.handleStart(triggerKey: "right_option")
+        ready.signal()
+        await poll { hud.sawRecording }
+        #expect(audio.startCalls == 1)
+        controller.cancel()
+    }
+
+    @MainActor private final class Replayed { var events: [CGEvent] = [] }
+
+    private func optionC() -> CGEvent {
+        let event = CGEvent(keyboardEventSource: nil, virtualKey: 8, keyDown: true)!
+        event.flags = .maskAlternate
+        return event
+    }
+
+    private func recordingController(_ replayed: Replayed) async -> (DictationController, GatedAudio, RecordingHUD) {
+        let ready = SignalLatch()
+        let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
+        let hud = RecordingHUD()
+        let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.01)
+        controller.replayKeys = { replayed.events += $0 }
+        controller.handleStart(triggerKey: "right_option")
+        ready.signal()
+        await poll { hud.sawRecording }
+        return (controller, audio, hud)
+    }
+
+    @Test func aKeyThePanelTookIsReplayedWhenAChordCancelsTheTake() async {
+        let replayed = Replayed()
+        let (controller, _, _) = await recordingController(replayed)
+        controller.noteKeyReceivedByHUD(optionC())
+        controller.cancelStartedByModifier(triggerKey: "right_option")
+        await poll { !replayed.events.isEmpty }
+        #expect(replayed.events.map { $0.getIntegerValueField(.keyboardEventKeycode) } == [8])
+        #expect(replayed.events.first?.flags.contains(.maskAlternate) == true)
+    }
+
+    @Test func aKeyThePanelReceivesJustAfterTheChordCancelIsStillReplayed() async {
+        let replayed = Replayed()
+        let (controller, _, _) = await recordingController(replayed)
+        controller.cancelStartedByModifier(triggerKey: "right_option")
+        controller.noteKeyReceivedByHUD(optionC())
+        await poll { !replayed.events.isEmpty }
+        #expect(replayed.events.count == 1)
+    }
+
+    @Test func keysAreNotReplayedWhenTheTakeEndsAnyOtherWay() async {
+        let replayed = Replayed()
+        let (controller, _, _) = await recordingController(replayed)
+        controller.noteKeyReceivedByHUD(optionC())
+        controller.cancel()
+        controller.noteKeyReceivedByHUD(optionC())
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(replayed.events.isEmpty)
+    }
+
+    @Test func aReplayedKeyIsMarkedSoTheKeyboardMonitorIgnoresIt() {
+        let event = optionC()
+        #expect(!KeyReplay.isReplayed(event))
+        #expect(KeyReplay.isReplayed(KeyReplay.marked(event)!))
     }
 
     @Test func aRepeatedArmingErrorIsStillShown() async throws {

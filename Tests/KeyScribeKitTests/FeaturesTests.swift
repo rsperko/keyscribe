@@ -46,17 +46,16 @@ struct FeaturesTests {
         #expect(ids.count == Set(ids).count)
     }
 
-    @Test func streamingTranscriptionDefaultsOff() {
-        #expect(!Settings.defaults.features.isEnabled(.streamingTranscription))
-    }
-
-    @Test func streamingTranscriptionOverridePersists() throws {
-        var s = Settings.defaults
-        s.features.setEnabled(true, for: .streamingTranscription)
-        let toml = try SettingsStore.encode(s)
-        #expect(toml.contains("streaming_transcription = true"))
-        let decoded = try SettingsStore.decode(from: toml)
-        #expect(decoded.features.isEnabled(.streamingTranscription))
+    @Test func retiredStreamingTranscriptionIdLoadsCleanly() throws {
+        let toml = """
+        schema_version = 1
+        [features]
+        streaming_transcription = true
+        """
+        let s = try SettingsStore.decode(from: toml)
+        #expect(s.features == Settings.Features())
+        #expect(SettingsStore.unknownKeys(in: toml).isEmpty)
+        #expect(try !SettingsStore.encode(s).contains("streaming_transcription"))
     }
 
     @Test func consumptionDrivenRestoreDefaultsOff() {
@@ -78,15 +77,6 @@ struct FeaturesTests {
         s.features.setEnabled(false, for: .consumptionDrivenRestore)
         #expect(s.features == Settings.Features())
         #expect(try !SettingsStore.encode(s).contains("consumption_driven_restore"))
-    }
-
-    @Test func streamingTranscriptionOffIsElided() throws {
-        var s = Settings.defaults
-        s.features.setEnabled(true, for: .streamingTranscription)
-        s.features.setEnabled(false, for: .streamingTranscription)
-        #expect(s.features == Settings.Features())
-        let toml = try SettingsStore.encode(s)
-        #expect(!toml.contains("streaming_transcription"))
     }
 
     @Test func voiceCommandsDefaultsOff() {

@@ -1,6 +1,6 @@
 # Speech-to-text engines
 
-Read before adding or changing a speech model, an engine adapter, the no-speech gate, the empty-transcript recovery, recognition bias, or streaming transcription.
+Read before adding or changing a speech model, an engine adapter, the no-speech gate, the empty-transcript recovery, or recognition bias.
 
 ## Platform facts
 
@@ -126,12 +126,22 @@ recommended model; no sooner than one release later it is **retired** — remove
 `retiredDisplayNames`, which moves its users to a usable model with a notice. Never retire a model that was
 not legacy in a shipped release, and never switch a user off a legacy model automatically.
 
+**Measure the warm-up clip for every new model.** After a load, `EngineKeeper.warm` transcribes the bundled
+warm-up clip once, for engines whose `benefitsFromWarmupClip` is true, so the first real dictation does not pay
+a slow first inference. A clip already running when the user releases holds the engine lock, so it is a cost
+for a model whose first inference is no slower than its second. Run `KeyScribe --warmup-probe --engines <id>`
+(load time, then the clip three times) and keep the clip only when the first run is at least 100 ms slower than
+the second. `WarmupClipChoiceTests` lists the measured choice for every catalog id and fails for a model with
+none. Measured 2026-11-11 (first / second run): Whisper Large v3 Turbo 3,627 / 476 ms, Whisper Small 444 / 194 ms,
+Parakeet TDT-CTC 110M 187 / 16 ms keep it; the other Parakeet models (≤ 56 / 35 ms) and Qwen3-ASR (110 / 47 ms
+and 216 / 129 ms) do not.
+
 ## Silence / no-speech behavior — exercise every new model
 
 **First line of defense: the audio-side no-speech gate.** A finished take runs once through Silero VAD
 (`SpeechPresenceDetector` adapter over FluidAudio's `VadManager`; verdict logic in the pure
 `SpeechPresenceGate`, KeyScribeKit) BEFORE transcription — `DictationController.presenceReading`, at the
-commit call site after `finishDraining()` and before `finalizeStreamingIfActive`. Admission is a minimum
+commit call site after `finishDraining()` and before transcription. Admission is a minimum
 speech **duration**, not a take-level max: fewer than `minSpeechChunks` (2) of the 256 ms chunks clearing
 probability `0.30` is `.noSpeech` (a digital-silence peak short-circuits without even invoking the model),
 and the dictation is suppressed with the same `.noSpeech` UX as an empty transcript — nothing is
@@ -203,7 +213,7 @@ Empirically observed no-speech output (2026-07-01, one machine — deterministic
 | Whisper Small (en) | bracketed marker `[BLANK_AUDIO]`, **and** parenthetical sound-tags e.g. `(water running)` |
 | Whisper Large v3 Turbo | lexical hallucinations: `Thank you.`, `.`, `...` |
 | Qwen3-ASR 1.7B | lexical, e.g. `嗯。` / `哦。` (CJK), and on a biased mode an echoed dictionary term |
-| Apple Speech (`SpeechTranscriber`) | `""` on silence (swept 2026-09-25 over 1/2/3/5/7 s, batch and streaming); **lexical on white noise**: `.`, `I`, `So` at amplitude 0.02–0.03, `""` at 0.01 and 0.05 (swept 2026-09-26, 4 s and 6 s × three seeds, batch and streaming identical — every clip that emitted text was suppressed by the gate here, but a lone `-` on 6 s of 0.02 noise that passed the gate was reported from another generator) |
+| Apple Speech (`SpeechTranscriber`) | `""` on silence (swept 2026-09-25 over 1/2/3/5/7 s); **lexical on white noise**: `.`, `I`, `So` at amplitude 0.02–0.03, `""` at 0.01 and 0.05 (swept 2026-09-26, 4 s and 6 s × three seeds — every clip that emitted text was suppressed by the gate here, but a lone `-` on 6 s of 0.02 noise that passed the gate was reported from another generator) |
 | Apple Dictation (`DictationTranscriber`, the fallback) | rare lexical, e.g. `No` (reproduced 2026-09-25 on 3 s silence) |
 
 Qwen3's CJK output is its **language head auto-detecting** on ambiguous noise (`Qwen3DecodingOptions.language`
@@ -270,7 +280,7 @@ engine annotation (`[BLANK_AUDIO]` is the engine asserting blank audio, not a si
 VAD reading, speech starting in chunk zero, a trim that removes nothing (a `speechStart` of exactly one
 chunk — the pre-roll reaches the take's start, so the retry input would be byte-identical and can only
 burn the deadline for the same answer), a WAV-only engine (Apple — no trimmed-temp-WAV path exists by
-design), or a streamed result (stated policy, not an accident: the session is spent). Never twice. The
+design). Never twice. The
 256 ms pre-roll is load-bearing — trimming to 0.768 s turns the repro into a different word. Only the
 LEAD is trimmed; trailing audio is never touched. **Once the first pass has returned empty, the recovery
 owns every later failure:** an engine error or the shared deadline expiring mid-retry both surface as the
@@ -284,24 +294,6 @@ dictation the user saw fail, so the decision is RETURNED as a value and logged o
 ACCEPTED the result (the deadline path logs `retry-deadline` itself). Whoever owns the authoritative
 outcome writes the line, so it always matches the terminal. `--vad-probe` prints
 each clip's `speechStart` (the trim boundary).
-
-**A streaming session is a DISTINCT no-speech path — sweep it separately.** An engine's `makeStreamingSession`
-feed→finalize can emit different silence artifacts than its batch `transcribe`, so a model that ships a
-streaming path (`supportsStreaming=true`) must be exercised against silence **both ways**. Use
-`--benchmark <sil-dir> --engines <id> --streaming --raw` (raw dumps the literal streamed output per clip)
-alongside the batch `--raw`. Include a **≥5 s** silence/hiss clip: the real dictation path defers session
-creation past the `StreamingStartPolicy` threshold (4 s), so only clips longer than that actually open a
-session live. The benchmark's streaming replay applies the same threshold, so a clip under 4 s reports
-`<fell back to batch>` — expected, not a failure; only the longer clips exercise the streaming session.
-(2026-07-04, Apple Dictation: streaming output was byte-identical to batch — clean-empty except a
-deterministic `No` on 3 s silence, the same documented lexical artifact — so streaming added no new
-marker class. 2026-09-26, Apple Speech: streaming output byte-identical to batch over silence and
-white noise, including its noise artifacts. Do not assume
-that generalizes; a slower or looping engine could differ.) The no-speech gate also covers the streamed path: it runs at commit on the
-finished take before `finalizeStreamingIfActive`, so a silent streamed session is suppressed there (its
-partials are never inserted before commit) and its driver is cancelled through the normal terminal — the
-gate is engine- and path-independent, but the per-engine streaming sweep still stands because the gate is
-fail-open.
 
 ## Recognition bias — the distractor false-fire gate (exercise every bias-capable model)
 

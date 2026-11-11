@@ -561,7 +561,7 @@ Rules this supports:
 |---|---|---|
 | Term recall and WER per engine, with and without bias | `KeyScribe --benchmark corpus/stt [--fuzzy]`, ranked by `corpus/compare.sh` | `corpus/stt/results.json`, `results-fuzzy.json` (gitignored, one voice) |
 | False fires per engine | `--benchmark corpus/distractors [--fuzzy]` | `corpus/distractors/results*.json` |
-| Bias stress on entity-dense long clips; new-engine onboarding | `--benchmark corpus/bias [--streaming] [--raw]` | `corpus/bias/results.json` |
+| Bias stress on entity-dense long clips; new-engine onboarding | `--benchmark corpus/bias [--raw]` | `corpus/bias/results.json` |
 | What a rule does to raw engine output | `--benchmark <dir> --raw`, then the text rule over the `RAW` lines | the corpora above |
 | Recovery rules in isolation | `FuzzyCorrectorTests` (adversarial negatives, known limitations) | — |
 | LLM term hints | `--rewrite-eval evals/rewrite --connection <id> --repeat 3` | `evals/rewrite/README.md` records each variant's verdict |

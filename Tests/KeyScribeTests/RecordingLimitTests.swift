@@ -18,6 +18,13 @@ struct RecordingLimitTests {
 
     private final class FakeAudio: AudioCapturing, @unchecked Sendable {
         private let url: URL
+        var level: Float = 0
+        var alternates = false
+        private var reads = 0
+        var currentLevel: Float {
+            reads += 1
+            return alternates ? Float(reads % 2) / 2 : level
+        }
         init(url: URL) { self.url = url }
         func start(sampleRate: Int) async throws -> URL { url }
         func stop() -> URL? { url }
@@ -49,7 +56,11 @@ struct RecordingLimitTests {
 
     private final class HUDSpy: HUDPresenting {
         private(set) var states: [HUDState] = []
-        func render(_ state: HUDState) { states.append(state) }
+        private(set) var times: [ContinuousClock.Instant] = []
+        func render(_ state: HUDState) {
+            states.append(state)
+            times.append(.now)
+        }
     }
 
     private struct Harness {
@@ -60,6 +71,7 @@ struct RecordingLimitTests {
         let submits: SubmitSpy
         let history: HistoryStore
         let supportDir: URL
+        let audio: FakeAudio
     }
 
     private let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
@@ -90,10 +102,11 @@ struct RecordingLimitTests {
         if historyUnwritable { FileManager.default.createFile(atPath: historyDir.path, contents: Data()) }
         let history = HistoryStore(supportDir: historyUnwritable ? historyDir : supportDir)
         let provider = try! SpeechEngineProvider(engines: [FixedEngine(text: transcript, id: engineId)], activeId: engineId)
+        let audio = FakeAudio(url: supportDir.appendingPathComponent("capture.wav"))
         let controller = DictationController(
             settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
             history: history, hud: hud, permits: { _ in true },
-            audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
+            audio: audio,
             presenceDetector: StubPresence(),
             insert: { _, _, _, text, _ in await inserts.record(text); return true },
             submitKey: { await submits.record($0) },
@@ -108,7 +121,7 @@ struct RecordingLimitTests {
         controller.setNextModeOverride(id: mode.id)
         return Harness(
             controller: controller, hud: hud, inserts: inserts, llm: llm, submits: submits,
-            history: history, supportDir: supportDir)
+            history: history, supportDir: supportDir, audio: audio)
     }
 
     private func plainMode() -> Mode {
@@ -150,6 +163,29 @@ struct RecordingLimitTests {
         hud.states.compactMap { state -> RecordingCountdown?? in
             if case .recording(_, _, _, let countdown, _) = state { return countdown } else { return nil }
         }
+    }
+
+    @Test func aSteadyLevelRebuildsTheRecordingCardOnlyOccasionallyAndANewLevelStillShows() async throws {
+        let h = makeHarness(mode: plainMode(), maxRecordingSeconds: 300)
+        defer { try? FileManager.default.removeItem(at: h.supportDir) }
+        var reads = 0
+        let choices = h.controller.hud.choices
+        h.controller.hud.choices = {
+            reads += 1
+            return choices()
+        }
+        h.controller.handleStart()
+        await h.controller.captureBringUpTask?.value
+        try await Task.sleep(for: .milliseconds(450))
+        #expect(reads <= 3)
+        h.audio.level = 0.5
+        let raised = HUDState.recording(mode: "Plain", level: 0.5, latchedTrigger: nil, countdown: nil, agents: nil)
+        for _ in 0..<200 where h.hud.states.last != raised {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(h.hud.states.last == raised)
+        h.controller.handleCommit()
+        await h.controller.dictationTask?.value
     }
 
     @Test func aTakeThatReachesTheLimitIsTranscribedAndInsertedInsteadOfDiscarded() async {
@@ -322,6 +358,29 @@ struct RecordingLimitTests {
         let seconds = countdowns(h.hud).compactMap { $0?.secondsLeft }
         #expect(seconds.first == 3)
         #expect(Set(seconds).count >= 2)
+    }
+
+    @Test func aCountdownDrawnWithAChangingLevelIsNeverBehindTheTimeLeft() async throws {
+        let h = makeHarness(mode: plainMode(), maxRecordingSeconds: 1.1, limitWarningSeconds: 30)
+        defer { try? FileManager.default.removeItem(at: h.supportDir) }
+        h.audio.alternates = true
+
+        h.controller.handleStart()
+        await h.controller.captureBringUpTask?.value
+        let deadline = try #require(h.controller.recordingDeadline)
+        for _ in 0..<400 where h.controller.isBusy || h.controller.lastRecord == nil {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        await h.controller.dictationTask?.value
+
+        let drawn = zip(h.hud.states, h.hud.times).compactMap { state, time -> (shown: Int, left: Int)? in
+            guard case .recording(_, _, _, let countdown?, _) = state else { return nil }
+            let left = time.duration(to: deadline)
+            let seconds = Double(left.components.seconds) + Double(left.components.attoseconds) / 1e18
+            return (countdown.secondsLeft, max(0, Int((seconds + 0.05).rounded(.up))))
+        }
+        #expect(Set(drawn.map(\.shown)).count >= 2)
+        #expect(drawn.allSatisfy { $0.shown <= $0.left })
     }
 
     @Test func theActiveModelsOwnLimitShortensTheBackstop() async {

@@ -6,9 +6,7 @@ import Testing
 
 // Capture is READY only once a valid input buffer has crossed off the realtime thread — a successful
 // AudioUnit start return proves nothing. Readiness is observed on the writer
-// thread (never signalled from the RT callback), and it must be observed ABOVE head admission: the very
-// buffer that proves the mic is live arrives while admission is still closed, so a readiness check placed
-// below the gate would never see it.
+// thread (never signalled from the RT callback). Everything from that first buffer is recorded.
 //
 // Drives a real CaptureWriter over a real AudioSampleRing with no microphone, the same way CaptureWriterTests
 // exercises the write path.
@@ -47,11 +45,9 @@ struct CaptureReadinessTests {
     // Runs one capture and returns only after the writer thread has joined AND the write-file is released, so
     // the WAV the caller reopens is finalized. The `file` local is confined here (its scope end is the last
     // release — the writer drops its own reference on thread exit), mirroring CaptureWriterTests.
-    // `admission` nil ⇒ never opened, the pre-cue state.
     @discardableResult
     private func runCapture(
         to url: URL,
-        admission: (afterHostTime: UInt64, hostTicksPerSecond: Double, cueWindowSeconds: Double)? = nil,
         slots: Int, hostTimeStride: UInt64 = 1, frames: Int = 100, sampleRate: Double = 16_000,
         onFirstBuffer: (@Sendable () -> Void)? = nil
     ) throws -> CaptureWriter {
@@ -62,11 +58,6 @@ struct CaptureReadinessTests {
             ring: ring, file: file, recordFormat: format,
             onFirstBuffer: onFirstBuffer, observeHostTime: { _ in false })
         writer.start()
-        if let admission {
-            writer.openAdmission(
-                afterHostTime: admission.afterHostTime, hostTicksPerSecond: admission.hostTicksPerSecond,
-                cueWindowSeconds: admission.cueWindowSeconds)
-        }
         for i in 1...slots {
             ring.write(
                 channelCount: 1, frameCount: frames, sampleRate: sampleRate, hostTime: UInt64(i) * hostTimeStride
@@ -95,32 +86,12 @@ struct CaptureReadinessTests {
         #expect(spy.fires == 0)
     }
 
-    @Test func audioBeforeAdmissionOpensIsDiscardedWithoutAWriterDrop() throws {
+    @Test func audioFromTheFirstBufferIsKept() throws {
         let url = tempURL()
         defer { try? FileManager.default.removeItem(at: url) }
-        let writer = try runCapture(to: url, slots: 20)
-        #expect(try readMonoFloat(url).isEmpty)
+        let writer = try runCapture(to: url, slots: 20, hostTimeStride: 6_250_000)
+        #expect(try readMonoFloat(url).count == 2000)
         #expect(writer.writerDroppedFrames() == 0)
-    }
-
-    @Test func openingAdmissionExcludesTheCueWindowAndKeepsEverythingAfterIt() throws {
-        let url = tempURL()
-        defer { try? FileManager.default.removeItem(at: url) }
-        let slotTicks: UInt64 = 6_250_000
-        try runCapture(
-            to: url,
-            admission: (afterHostTime: 5 * slotTicks, hostTicksPerSecond: 1e9, cueWindowSeconds: 0.03125),
-            slots: 10, hostTimeStride: slotTicks)
-        #expect(try readMonoFloat(url).count == 600)  // slots 5…10 admitted; 1…4 are the cue window
-    }
-
-    @Test func openingAdmissionWithNoCueBoundaryAdmitsFromReadiness() throws {
-        let url = tempURL()
-        defer { try? FileManager.default.removeItem(at: url) }
-        try runCapture(
-            to: url, admission: (afterHostTime: 0, hostTicksPerSecond: 1e9, cueWindowSeconds: 0),
-            slots: 10, hostTimeStride: 6_250_000)
-        #expect(try readMonoFloat(url).count == 1000)
     }
 
     @Test func aBluetoothTargetGetsAdditionalTimeToBecomeReady() {

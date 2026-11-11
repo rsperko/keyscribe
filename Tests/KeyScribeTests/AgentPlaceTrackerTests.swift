@@ -85,21 +85,38 @@ struct AgentPlaceTrackerTests {
         await settle(hub)
         let first = reader.reads
         clock.now += AgentPlaceTracker.busyInterval
-        hub.tickPlaces()
+        hub.tickPlaces(settingsOpen: true)
         await settle(hub)
         #expect(reader.reads == first)
         clock.now += AgentPlaceTracker.quietInterval
-        hub.tickPlaces()
+        hub.tickPlaces(settingsOpen: true)
         await settle(hub)
         #expect(reader.reads == first + 1)
         reader.answers = ["claude:a": .found(place(pane: "architect"))]
         clock.now += AgentPlaceTracker.quietInterval
-        hub.tickPlaces()
+        hub.tickPlaces(settingsOpen: true)
         await settle(hub)
         clock.now += AgentPlaceTracker.busyInterval
-        hub.tickPlaces()
+        hub.tickPlaces(settingsOpen: true)
         await settle(hub)
         #expect(reader.reads == first + 3)
+    }
+
+    @Test func placesAreNotReadOnATimerWhileSettingsIsClosed() async {
+        let reader = Reader()
+        let clock = Clock()
+        let (hub, _) = makeHub(reader, clock: clock)
+        reader.answers = ["claude:a": .found(place(pane: "architect"))]
+        await hub.rescan()
+        await settle(hub)
+        let first = reader.reads
+        clock.now += AgentPlaceTracker.quietInterval
+        hub.tickPlaces(settingsOpen: false)
+        await settle(hub)
+        #expect(reader.reads == first)
+        hub.readPlaces()
+        await settle(hub)
+        #expect(reader.reads == first + 1)
     }
 
     @Test func aPlaceWithoutAnyNameIsReadOnlyAsOftenAsNoPlace() async {
@@ -111,7 +128,7 @@ struct AgentPlaceTrackerTests {
         await settle(hub)
         let first = reader.reads
         clock.now += AgentPlaceTracker.busyInterval
-        hub.tickPlaces()
+        hub.tickPlaces(settingsOpen: true)
         await settle(hub)
         #expect(reader.reads == first)
     }

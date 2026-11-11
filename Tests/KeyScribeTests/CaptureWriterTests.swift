@@ -9,11 +9,8 @@ import Testing
 // on its own thread, and the resulting WAV is read back. This covers the direct-write path, the resampling
 // path, and the drain-gate seal — the logic that moved off the CoreAudio realtime thread.
 //
-// Each session opens admission with a 0 boundary right after start(): a writer arms CLOSED (it must not record
-// before the start cue proves the mic live — see CaptureReadinessTests), and these tests predate cue gating,
-// so opening immediately is what keeps them testing the write path rather than the gate.
 // Wraps a real AVAudioFile but throws on the Nth write, so a test can prove a failed WAV write also keeps
-// that chunk out of the in-memory accumulator/streaming sink.
+// that chunk out of the in-memory accumulator.
 private final class FlakyFileWriter: CaptureFileWriting, @unchecked Sendable {
     private let real: AVAudioFile
     private let failWriteIndex: Int
@@ -53,7 +50,6 @@ struct CaptureWriterTests {
         let ring = AudioSampleRing(slotCount: 64, maxFramesPerSlot: 1024, maxChannels: 2)
         let writer = CaptureWriter(ring: ring, file: file, recordFormat: format, observeHostTime: seal)
         writer.start()
-        writer.openAdmission(afterHostTime: 0, hostTicksPerSecond: 0, cueWindowSeconds: 0)
         for i in 1...count {
             ring.write(channelCount: 1, frameCount: frames, sampleRate: pushRate, hostTime: UInt64(i)) { _, dest in
                 for k in 0..<dest.count { dest[k] = 0.25 }
@@ -77,7 +73,6 @@ struct CaptureWriterTests {
             ring: ring, file: file, recordFormat: format, wantsSamples: wantsSamples,
             observeHostTime: seal)
         writer.start()
-        writer.openAdmission(afterHostTime: 0, hostTicksPerSecond: 0, cueWindowSeconds: 0)
         for i in 1...count {
             ring.write(channelCount: 1, frameCount: frames, sampleRate: pushRate, hostTime: UInt64(i)) { _, dest in
                 for k in 0..<dest.count { dest[k] = 0.25 }
@@ -96,7 +91,6 @@ struct CaptureWriterTests {
         let ring = AudioSampleRing(slotCount: 64, maxFramesPerSlot: 1024, maxChannels: 2)
         let writer = CaptureWriter(ring: ring, file: flaky, recordFormat: format, observeHostTime: { _ in false })
         writer.start()
-        writer.openAdmission(afterHostTime: 0, hostTicksPerSecond: 0, cueWindowSeconds: 0)
         for i in 1...count {
             ring.write(channelCount: 1, frameCount: frames, sampleRate: 16_000, hostTime: UInt64(i)) { _, dest in
                 for k in 0..<dest.count { dest[k] = 0.25 }
@@ -113,7 +107,6 @@ struct CaptureWriterTests {
         let ring = AudioSampleRing(slotCount: 64, maxFramesPerSlot: 1024, maxChannels: 2)
         let writer = CaptureWriter(ring: ring, file: flaky, recordFormat: format, observeHostTime: { _ in false })
         writer.start()
-        writer.openAdmission(afterHostTime: 0, hostTicksPerSecond: 0, cueWindowSeconds: 0)
         for i in 1...count {
             ring.write(channelCount: 1, frameCount: frames, sampleRate: 16_000, hostTime: UInt64(i)) { _, dest in
                 for k in 0..<dest.count { dest[k] = 0.25 }
@@ -152,7 +145,6 @@ struct CaptureWriterTests {
             slotCount: slots.count + 2, maxFramesPerSlot: slots.map { $0.frames }.max()!, maxChannels: 8)
         let writer = CaptureWriter(ring: ring, file: file, recordFormat: format, observeHostTime: { _ in false })
         writer.start()
-        writer.openAdmission(afterHostTime: 0, hostTicksPerSecond: 0, cueWindowSeconds: 0)
         var frameStart = 0
         var rateStart = slots.first?.rate ?? recordRate
         for (i, slot) in slots.enumerated() {
@@ -448,7 +440,6 @@ struct CaptureWriterTests {
         let ring = AudioSampleRing(slotCount: 64, maxFramesPerSlot: 1024, maxChannels: 2)
         let writer = CaptureWriter(ring: ring, file: file, recordFormat: format, observeHostTime: { _ in false })
         writer.start()
-        writer.openAdmission(afterHostTime: 0, hostTicksPerSecond: 0, cueWindowSeconds: 0)
         for i in 1...3 {
             ring.write(channelCount: 1, frameCount: 100, sampleRate: 0, hostTime: UInt64(i)) { _, dest in
                 for k in 0..<dest.count { dest[k] = 0.25 }
@@ -466,7 +457,6 @@ struct CaptureWriterTests {
         let ring = AudioSampleRing(slotCount: 4, maxFramesPerSlot: 1024, maxChannels: 2)
         let writer = CaptureWriter(ring: ring, file: file, recordFormat: format, observeHostTime: { ($0 ?? 0) >= 1 })
         writer.start()
-        writer.openAdmission(afterHostTime: 0, hostTicksPerSecond: 0, cueWindowSeconds: 0)
         ring.write(channelCount: 1, frameCount: 100, sampleRate: 16_000, hostTime: 1) { _, dest in
             for k in 0..<dest.count { dest[k] = 0.25 }
         }
@@ -488,7 +478,6 @@ struct CaptureWriterTests {
         let ring = AudioSampleRing(slotCount: 64, maxFramesPerSlot: 1024, maxChannels: 2)
         let writer = CaptureWriter(ring: ring, file: file, recordFormat: format, observeHostTime: { _ in false })
         writer.start()
-        writer.openAdmission(afterHostTime: 0, hostTicksPerSecond: 0, cueWindowSeconds: 0)
         for i in 1...4 {
             ring.write(channelCount: 1, frameCount: 100, sampleRate: 16_000, hostTime: UInt64(i)) { _, dest in
                 for k in 0..<dest.count { dest[k] = 0.25 }
@@ -521,7 +510,6 @@ struct CaptureWriterTests {
         let writer = CaptureWriter(ring: ring, file: file, recordFormat: format, observeHostTime: { _ in false })
         writer.finish(flushConverter: false)
         writer.start()
-        writer.openAdmission(afterHostTime: 0, hostTicksPerSecond: 0, cueWindowSeconds: 0)
         writer.finish(flushConverter: false)
     }
 }

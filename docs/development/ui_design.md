@@ -228,15 +228,19 @@ The HUD is a movable, transient status surface. It is not a transcript editor an
 becomes a second destination for configuration.
 
 **Timing contract: the HUD never appears until speech spoken immediately after its appearance will
-be admitted.** The HUD is the visual half of the start cue (start/end sounds are optional and must
-have equivalent visual feedback), so it appears at the same instant the cue ends and admission
-opens — never at the press. A trigger is therefore acknowledged by *silence*: nothing is shown while
+be recorded.** The HUD is the visual half of the start cue (start/end sounds are optional and must
+have equivalent visual feedback), so it appears at the same instant the cue ends — never at the press.
+Speech that starts with the press is recorded too, from the moment the mic delivers, and the cue stays in
+the recording, because cutting it out would cut the speech under it. A trigger is therefore acknowledged by *silence*: nothing is shown while
 the microphone is brought up, which on a cold Bluetooth route is 200–500 ms (a built-in mic with
 sounds off is ~50 ms and reads as instant). Recording is the first thing the user sees; a failed arm
 shows Error with no HUD before it; a dictation released or cancelled during bring-up shows nothing at
-all. There is no "arming"/"preparing" HUD: a panel that appears before admission grants visual
-permission to speak into a window whose audio is discarded, and users react to the panel appearing,
-not to its label.
+all. There is no "arming"/"preparing" HUD: a panel that appears before the mic is live grants visual
+permission to speak before anything can be recorded, and users react to the panel appearing, not to its
+label. A modifier-only shortcut starts the mic as the key goes down, before its chord grace ends, so the
+macOS microphone indicator lights briefly when that key turns out to be part of another shortcut; nothing
+from that press is kept. A Bluetooth headset input is the exception: it starts when the press is confirmed,
+because opening its mic switches it to call mode.
 
 ### HUD states
 
@@ -355,8 +359,10 @@ is refused as taken. The conversation list shows the other names under the place
 “cos””), as does the Rename sheet after where the name comes from, and receipts, spoken replies and retry suggestions always use the shown name. A pane title is
 display text a hook can change: a take uses the names frozen when its recording started.
 
-Place labels are read in the background, every few seconds while a conversation runs in a named place and
-less often otherwise, again when a conversation connects, and when a recording starts. A take resolves
+Place labels are read in the background when a conversation connects, when the listed conversations
+change, and when a recording that could go to a coding agent starts; while Settings is open they are also
+read every few seconds while a conversation runs in a named place and less often otherwise. A tab renamed
+since the last read takes its new name at the next recording, which reads the labels again. A take resolves
 against the names frozen when its recording started, plus any new name a read during the recording gave
 one of those same conversations: the recipient chosen at the start and the row numbers never change, and
 a new name never takes a frozen one or adds a conversation. When the take is resolved while a read is
@@ -803,7 +809,8 @@ waveform.
 - When the wait passes the **max-wait escape-hatch threshold** (`design.md` §4.1 latency
   budgets), show **Insert without rewriting**. This action is always explicit; the HUD never
   auto-inserts the un-rewritten transcript early. Until the user acts, the rewrite keeps waiting, so a
-  slow model can finish. Only the whole-rewrite backstop ends it on its own: a dictation then inserts
+  slow model can finish. Only the automatic limits in `design.md` §4.1 end it on its own (a service that does
+  not connect within a few seconds, and the whole-rewrite backstop): a dictation then inserts
   the local text with the Rewrite fallback state and History records a reason naming the limit; a
   selection rewrite leaves the selection unchanged and shows the failure in the HUD, without a History
   record. Once **Insert without rewriting** is on screen, pressing the dictation shortcut does the same
@@ -1094,8 +1101,9 @@ Show the few choices a new user is most likely to need:
 
 The warm-up tier lives behind a `Keep speech recognition ready` disclosure pinned above the model
 list in Speech Models (collapsed by default; the collapsed row shows the current tier's benefit, such as `Fastest start-up`). Explain Fastest,
-Balanced, and Frugal as a memory/first-response tradeoff (it governs both the STT model's memory
-residency and idle microphone warm-up), not as cache terminology. The footer copy **never shows a raw
+Balanced, and Frugal as a memory/first-response tradeoff (it governs the STT model's memory
+residency, the natural voice that reads Coding agent replies, and idle microphone warm-up), not as cache
+terminology. The footer copy **never shows a raw
 byte count** — it describes behavior, not size.
 
 ### Speech Models

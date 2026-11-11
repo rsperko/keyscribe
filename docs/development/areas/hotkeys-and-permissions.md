@@ -163,8 +163,10 @@ held back, and a keyDown (or a foreign modifier) arriving inside the window disc
 **silently** — `onStart` never fires, so there is no mic, no cue, and nothing to cancel. This is the
 layer that matters: arming is *not* cheap (synchronous secure-field AX probe, mic open, and the start
 cue as soon as a prewarmed unit is ready), so an eager arm made every chord audibly start-then-cancel a
-dictation. It trades only latency — nothing is recorded until admission opens at cue end regardless — and
-a release inside the grace still flushes the held-back `.down` so a fast tap is not swallowed.
+dictation. The mic still starts at the key-down: `beginArm` reports `onEngage`, and every engage ends in
+exactly one `onStart` (the press stood) or `onEngageDropped` (a chord, a reset in `cancelGestures`, or a binding
+that vanished before the grace ended), so the controller can record speech that starts with the press and
+discard it silently otherwise. A release inside the grace still flushes the held-back `.down` so a fast tap is not swallowed.
 **The held-back `.down` must re-resolve its binding by DESCRIPTOR, never through the index captured
 when it was scheduled** (`beginArm`): `update` rebuilds the array in the INCOMING order and carries
 `pendingArm`/`armGeneration` across by descriptor, so a binding dropping out ahead of the pending one
@@ -174,7 +176,16 @@ makes that a routine race rather than the config-reload rarity it used to be. It
 what makes a subset trigger coexist with its superset (`left_command` alongside
 `left_command+left_control`): the smaller set's arm is still pending when the second modifier lands.
 (2) **The keyDown abort** (`handle`): the fallback for a chord slower than the grace, which really has
-armed — it cancels via `onCancel`, cues and all.
+armed — it cancels via `onCancel`, cues and all. By then the recording HUD may be key, so the chord's key went
+to the panel instead of the app. The HUD reports every key it receives (`HUDController.onKeyTaken`), and a take
+cancelled by the abort replays those keys once focus is back (`DictationController.cancelStartedByModifier`,
+collecting for `keyReplayWindow` so a key that reaches the panel just after the cancel is included). A key the
+app receives for no window counts as the panel's: the abort is handled before the queued key event, so by then
+the panel has given up focus. Replayed events go to the frontmost app's process (`CGEvent.postToPid`), not to the
+focused window, because keyboard focus stays with this app for a moment after the panel gives it up and a posted
+key would come straight back. They carry `KeyReplay.marker`, and the tap callback ignores them, so a replay never
+aborts or arms anything.
+No other cancel replays keys.
 **Mouse and scroll are in the tap mask for the same reason and are NOT symmetric.** A held modifier
 followed by a click emits no keyDown at all, so without `leftMouseDown`/`rightMouseDown`/`otherMouseDown`
 a `left_command` trigger fires on every ⌘-click, ⌥-drag and ⇧-click. **A click aborts only a set that

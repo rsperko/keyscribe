@@ -30,10 +30,9 @@ struct ParakeetUnifiedEngineTests {
         #expect(e.verifyInstalled(in: dir) == false)
     }
 
-    @Test func advertisesNoBiasAndNoStreaming() {
+    @Test func advertisesNoBiasAndAcceptsSamples() {
         let e = engine()
         #expect(e.supportsRecognitionBias == false)
-        #expect(e.supportsStreaming == false)
         #expect(e.supportsSampleInput == true)
         #expect(e.captureSampleRate == 16000)
     }

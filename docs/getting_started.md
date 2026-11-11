@@ -359,7 +359,7 @@ kinds of rule behave differently when you press the shortcut somewhere it does n
 - **App rule.** The key is not KeyScribe's there at all. Nothing happens, and the key does whatever it
   normally does in that app.
 - **Website or window-title rule.** KeyScribe has to start dictating to find out, so you hear the start
-  sound and then the cancel sound. Nothing is recorded or inserted. See below for how to avoid this.
+  sound and then the cancel sound. Nothing is kept or inserted. See below for how to avoid this.
 
 ### URL and window-title routing
 

@@ -87,9 +87,9 @@ final class DuringDictationEffects {
         return sound
     }
 
-    // First-party ~62ms cue in Resources/ (NOT a system sound): short so gating capture on it costs
+    // First-party ~62ms cue in Resources/ (NOT a system sound): short so the wait before the recording HUD costs
     // little, and original so the GPLv3 bundle ships no redistributed Apple audio. Its length IS the
-    // admission hold `begin` returns, so trimming inaudible tail off the asset is a latency fix — see
+    // hold `begin` returns, so trimming inaudible tail off the asset is a latency fix — see
     // make-start-cue.py. Loaded eagerly (byReference: false) and cached so play() never touches disk.
     // Absent (unbundled dev run) → no cue.
     private func startCueSound() -> NSSound? {
@@ -107,7 +107,7 @@ final class DuringDictationEffects {
         playSound(sound, position * position)
     }
 
-    // Loads every cue at launch so the first press's admission boundary does not absorb the asset load.
+    // Loads every cue at launch so the first press's cue does not wait on the asset load.
     func prewarm() {
         _ = startCueSound()
         for cue in [EndCue.success, .cancel, .error] { _ = sound(named: cue.soundName) }
@@ -117,8 +117,8 @@ final class DuringDictationEffects {
         play(startCueSound(), volumePercent: volumePercent)
     }
 
-    // Returns how long the caller should defer capture so the start cue stays out of the recording: the
-    // cue's duration when one plays, else 0 (sounds off / cue absent). The duck follows the same deferral.
+    // Returns how long the cue plays, so the caller shows the recording HUD and ducks other audio only once it
+    // ends: the cue's duration when one plays, else 0 (sounds off / cue absent).
     @discardableResult
     func begin(_ config: Settings.DuringDictation) -> TimeInterval {
         generation &+= 1
@@ -128,10 +128,9 @@ final class DuringDictationEffects {
         // A2DP->HFP switch until capture comes up. Cancelled-before-capture bumps generation → duck dropped.
         pendingDuck = Self.duckLevel(for: config.otherAudio).map { (generation, $0) }
         guard config.sounds else { return 0 }
-        // A cue at zero volume is silent, so there is nothing to keep out of the recording: skip it and let
-        // capture admit immediately rather than holding the mic shut for inaudible audio. The hold exists to
-        // fence the cue out of the take, not as a fixed ceremony. Exact zero only — a threshold would need a
-        // magic "inaudible enough" constant, and the slider already reaches 0 for anyone who wants silence.
+        // A cue at zero volume is silent, so skip it and show the recording HUD at once rather than waiting
+        // out inaudible audio. Exact zero only — a threshold would need a magic "inaudible enough" constant,
+        // and the slider already reaches 0 for anyone who wants silence.
         guard config.soundVolumePercent > 0 else { return 0 }
         if let startCueDurationOverride { return startCueDurationOverride }
         let startCue = startCueSound()

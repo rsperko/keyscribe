@@ -32,6 +32,10 @@ actor InFlightWork<Value: Sendable> {
         return try await run(work)
     }
 
+    func waitUntilFinished() async {
+        for task in tasks.values { _ = try? await task.value }
+    }
+
     func cancelAndWait() async {
         let running = tasks
         for task in running.values { task.cancel() }

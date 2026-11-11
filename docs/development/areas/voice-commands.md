@@ -71,7 +71,10 @@ every rule above applies to it, with these sharpenings:
   in a watched session folder (`AgentDiscovery.watchedFolders`) plus a slow fallback
   (`AgentRuntime.rescanInterval`); the first conversation to connect ends the slow fallback at once. A press
   refreshes, reads places and freezes the roster only when a Coding agent mode is eligible for it; the refresh
-  stays, because a connector that resumes polling without a hello reports no event.
+  stays, because a connector that resumes polling without a hello reports no event. Places are read when
+  something needs them (a hello, a change in the listed conversations, that press), and on a timer only while
+  Settings is open (`AgentHub.tickPlaces`): a terminal read is AppleScript or a CLI per surface, measured at
+  about 4% CPU around the clock when it ran on a timer while a conversation was connected (2026-11-11).
 - **Bound background work across failures and reconnects.** A timed-out request still counts as
   outstanding until it settles. Idle checks, retries, queues, timers, and stored receipts must not
   grow with session age or failure count.
@@ -183,7 +186,7 @@ every rule above applies to it, with these sharpenings:
   (`AgentPlaceTracker.failingSince`), from the first failure, which Settings and the Rename sheet show beside
   the conversation instead of blocking on it. An unchecked conversation with no cached place keeps its last name
   (`AgentDirectory.update(unplaced:)`), so a failed first read after launch keeps remembered names. A take
-  waits for a read already running only when it is resolved, up to `DictationController.placeNamesGrace`,
+  waits for a read already running only when it is resolved, up to `AgentTake.placeNamesGrace`,
   and never for Go back or Repeat that, which name no conversation;
   if a read is still running then, or any listed conversation has no completed read yet (`placesUnread`), a
   take that would go to the default recipient is held, because its leading words may be a name a first read

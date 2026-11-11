@@ -124,4 +124,22 @@ struct InFlightWorkTests {
         _ = try? await first.value
         #expect(try await work.runAlone { 3 } == 3)
     }
+
+    @Test func waitingForWorkToEndLetsItFinishUncancelled() async throws {
+        let work = InFlightWork<Int>()
+        let gate = Gate()
+        let ended = Flag()
+        let first = Task { try await work.run { await gate.wait(); return 1 } }
+        try await Task.sleep(for: .milliseconds(50))
+        let waiting = Task {
+            await work.waitUntilFinished()
+            ended.set()
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!ended.value)
+        gate.release()
+        await waiting.value
+        #expect(ended.value)
+        #expect(try await first.value == 1)
+    }
 }

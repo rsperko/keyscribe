@@ -31,7 +31,6 @@ public enum DevCLI {
                 --engines <a,b,...>     Limit the benchmark run to these engine ids.
                 --raw                   Emit raw per-clip benchmark output.
                 --fuzzy                 Apply the post-STT fuzzy corrector (dict = clip bias terms) before scoring.
-                --streaming             Compare streaming vs batch WER per streaming-capable engine (P3-1 parity).
               --commands-check <dir>  Exercise every spoken command (scratch that, verbatim, insert new
                                       line/paragraph/tab, insert clipboard contents, whole-utterance
                                       replacements) across every installed engine on the recordings in <dir>
@@ -59,6 +58,9 @@ public enum DevCLI {
                 --variants <a,b,...>    Limit to these prompt variants (default: all, including baseline).
                 --repeat <n>            Attempts per case × variant (default 1).
                 --raw                   Emit each model output as RAW <variant> <case> <verdict> <text>.
+              --warmup-probe          Per installed engine: load time, then the bundled warm-up clip transcribed
+                                      three times, so the first-after-load cost the warm-up clip pays is visible.
+                                      Honors --engines. Run the built app, which bundles the clip.
               --vad-probe <dir>       Run the no-speech VAD gate over the recordings in <dir> (manifest.json)
                                       and exit: per clip verdict (speech/noSpeech), max probability, and gate
                                       latency, plus the minimum take-level max probability over speech clips
@@ -294,14 +296,9 @@ public enum DevCLI {
             }
             let raw = CommandLine.arguments.contains("--raw")
             let fuzzy = CommandLine.arguments.contains("--fuzzy")
-            let streaming = CommandLine.arguments.contains("--streaming")
             let done = DispatchSemaphore(value: 0)
             Task.detached {
-                if streaming {
-                    await BenchmarkRunner.runStreamingParity(dir: dir, only: only, raw: raw)
-                } else {
-                    await BenchmarkRunner.run(dir: dir, only: only, raw: raw, fuzzy: fuzzy)
-                }
+                await BenchmarkRunner.run(dir: dir, only: only, raw: raw, fuzzy: fuzzy)
                 done.signal()
             }
             done.wait()
@@ -385,6 +382,18 @@ public enum DevCLI {
             }
             done.wait()
             exit(ok.load(ordering: .relaxed) ? 0 : 1)
+        }
+
+        if CommandLine.arguments.contains("--warmup-probe") {
+            let args = CommandLine.arguments
+            let only = args.firstIndex(of: "--engines").flatMap { $0 + 1 < args.count ? Set(args[$0 + 1].split(separator: ",").map(String.init)) : nil }
+            let done = DispatchSemaphore(value: 0)
+            Task.detached {
+                await WarmupProbeRunner.run(only: only)
+                done.signal()
+            }
+            done.wait()
+            exit(0)
         }
 
         if let i = CommandLine.arguments.firstIndex(of: "--vad-probe"), i + 1 < CommandLine.arguments.count {

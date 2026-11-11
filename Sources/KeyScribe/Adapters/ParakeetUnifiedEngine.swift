@@ -8,15 +8,12 @@ import KeyScribeKit
 // Two things set it apart from ParakeetEngine's TDT models, and both are why it is a separate adapter
 // rather than a third ParakeetModelProfile: it is reached through UnifiedAsrManager (AsrModelVersion has
 // no Unified case), and it emits punctuation and capitalization.
-//
-// Streaming is deliberately not wired. StreamingUnifiedAsrManager exists, but each latency tier is a
-// distinct encoder bundle and a streaming session is its own no-speech path that needs its own silence
-// sweep (docs/development/areas/stt-engines.md "A streaming session is a DISTINCT no-speech path").
 actor ParakeetUnifiedEngine: SpeechEngine {
     nonisolated let id = "parakeet-unified-en"
     nonisolated let displayName = "Parakeet Unified 0.6B (English)"
     nonisolated let supportsRecognitionBias = false
     nonisolated let supportsSampleInput = true
+    nonisolated let benefitsFromWarmupClip = false
 
     // The offline variant is selected by encoderPrecision, not by a variant string: the SDK maps
     // .int8 -> "offline" and .fp16 -> "offline-fp16" internally. int8 is the shipped choice — same

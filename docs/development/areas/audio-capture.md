@@ -122,16 +122,23 @@ control call to a private serial `controlQueue`; `start()` is `async` and bounde
 (`runWithBudget`). **`start()` resolves on READINESS — the input's first valid buffer — not on the
 AudioUnit start call returning**: bind/initialize/start can all succeed on a route that never delivers audio,
 so a start return proves nothing. Readiness is observed on the **writer thread**
-(`CaptureWriter.onFirstBuffer` → `SignalLatch`), ABOVE head admission — the proving buffer arrives while
-admission is still closed, so a check below the gate would never see it — and **never signalled from the RT
-callback**. `AudioCapture.awaitReadiness` releases its wait on cancellation (the deadline ABANDONS the
+(`CaptureWriter.onFirstBuffer` → `SignalLatch`), and **never signalled from the RT callback**. `AudioCapture.awaitReadiness` releases its wait on cancellation (the deadline ABANDONS the
 operation, so an unsignalled latch would strand the continuation) and therefore MUST keep its
 `Task.checkCancellation()`: without it a released wait can return success and beat the timer to
-`runWithBudget`'s one-shot gate, reporting a ready mic that never delivered a buffer. Capture **arms with
-admission CLOSED and records nothing** until `openAdmission(afterHostTime:)` publishes the cue-end boundary
-(0 ⇒ admit from now): the start cue is the go-signal, so it may not sound until the route is proven live,
-and it then plays into an already-open mic that must not record it. Every `AudioCapture.start` caller must
-open admission or it captures silence — grep `openAdmission` to see every caller.
+`runWithBudget`'s one-shot gate, reporting a ready mic that never delivered a buffer. **Capture records from
+its first buffer, and the start cue stays in the recording.** The cue is the go-signal, so it may not sound
+until the route is proven live; it then plays into the open mic. Do not cut it back out: when speech overlaps
+the cue, cutting its window also cuts the speech under it, which costs more words than the cue does, and when
+speech follows the cue the cue costs about nothing (`corpus/stt` with the cue mixed in, 2026-11-11: first word
+right, parakeet-ultra, of 107 — original 101, cue over the word 99, cue window silenced 88, cue before the
+speech 101; the no-speech gate still suppressed every `corpus/blips` empty press with a bare cue). That holds
+for the bundled tone; a cue with speech-like sound in it would be transcribed. For a modifier-only trigger the mic
+starts at the key-down, during the chord grace (`DictationController.handleEngage`), except on a Bluetooth input
+(`AudioCapturing.inputIsBluetooth`): opening it forces A2DP→HFP, and AirPods audibly dropped and returned on every
+Option-chord when it did (2026-11-11); a press that turns into
+a chord stops it with no cue and no HUD (`handleEngageDropped`), and one never confirmed is stopped by
+`pressConfirmationBackstop`. The macOS mic indicator therefore lights briefly on such a press; that is the
+accepted cost.
 **One extensible `ReadinessBudget` bounds the WHOLE operation** — configure, start, and the wait for a
 buffer — since any of them can be the slow step on a transitioning route: `bringUpTimeout` (2 s) **plus**
 `bringUpGrace` (2 s) for local devices, `bluetoothReadyTimeout` (9 s) for Bluetooth, whose A2DP→HFP

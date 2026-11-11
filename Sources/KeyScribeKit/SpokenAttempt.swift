@@ -112,7 +112,7 @@ public struct SpokenAttempt: Sendable, Equatable, Identifiable {
 public struct SpokenAttemptLog: Sendable {
     public static let keptFor: TimeInterval = 60 * 60
     public static let maxAttempts = 10
-    public static let maxAudioBytes = 64 * 1024 * 1024
+    public static let maxAudioBytes = maxAttempts * 30 * 24_000 * 2
 
     public private(set) var attempts: [SpokenAttempt] = []
     private var kept: Set<String> = []

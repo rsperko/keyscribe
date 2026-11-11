@@ -113,9 +113,8 @@ are the ones that must never break; the guide explains why and what else applies
   - `PasteboardSnapshot.capture` stays synchronous and `@MainActor`. `runWithDeadline` and
     `runWithBudget` are never used for AppKit work.
 - **Speech-to-text engines** → `docs/development/areas/stt-engines.md` (catalog, engine adapters,
-  no-speech gate, empty-transcript recovery, recognition bias, streaming).
-  - Sweep every new model, and every dependency bump, over silence in batch and in streaming. The
-    audio-side gate fails open.
+  no-speech gate, empty-transcript recovery, recognition bias).
+  - Sweep every new model, and every dependency bump, over silence. The audio-side gate fails open.
   - A bias-capable engine passes the distractor false-fire sweep before bias ships enabled.
   - Do not raise `minSpeechChunks` without the measurements the guide names.
 - **Dependencies** → `docs/development/areas/dependencies.md` (forks, pins, upstream mutation, MLX shaders).
@@ -151,10 +150,10 @@ controller owns the state machine, the take's lease, and the diagnostics record;
 
 - `beginCapture`, `handleStart`, `handleCommit`, `TakeRecorder` → audio capture, plus insertion and HUD for
   the HUD flip.
-- `presenceReading`, `finalizeStreamingIfActive`, `Transcriber`, `EngineKeeper` → speech-to-text engines.
+- `presenceReading`, `Transcriber`, `EngineKeeper` → speech-to-text engines.
 - `finishInsertion`, `InsertOutput`, `HUDChannel`, `rewriteSelection`, `pasteLast` → insertion, pasteboard,
   HUD focus.
-- `VoiceCommandOutput`, `AgentOutput` → voice commands and coding agents.
+- `VoiceCommandOutput`, `AgentOutput`, `AgentTake` → voice commands and coding agents.
 - `probeCandidates`, `PressResolver`, and in `AppDelegate` `rebuildHotkeyMonitor`, `claimableModes`,
   `shadowedHotkeyIds`, `launchAttention` → hotkeys, triggers, permissions.
 - `maybePreconnect`, `produceDictationText`, `TakeText`, `TakeRewrite`, `SelectionText` → the hard
@@ -273,7 +272,8 @@ keyscribe/
 - **Reuse the UI vocabulary** in `docs/development/ui_components.md`; never overstate privacy (no "secure/safe/
   private" for best-effort redaction — say what actually happens).
 - **Every HUD draw goes through `HUDChannel.present`** — it keeps a pending voice-command question
-  readable. **Every event that stops voice-command work goes through `VoiceCommandOutput.stop`** — its counter
+  readable. `presentLevel` is the one exception: it only redraws the level of the state `present` last
+  drew. **Every event that stops voice-command work goes through `VoiceCommandOutput.stop`** — its counter
   is what both the spoken and clicked paths re-check. No direct `hud?.render`, no stop event that cancels by hand.
 - **Never hardcode the product name in user-facing copy — use `Branding.appName`** (resolves from the
   running bundle: "KeyScribe" prod, "KeyScribeDev" dev, the bundle name for a `custom` rebrand). The

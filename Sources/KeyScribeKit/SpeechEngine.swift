@@ -21,15 +21,6 @@ public protocol SpeechEngine: Sendable {
     // is true. `wavURL` is still written for archive/probe/fallback.
     func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String
 
-    // True when the engine can consume audio incrementally during capture (streaming). Default false. The
-    // controller only calls makeStreamingSession when this is true AND the streaming flag is on; every other
-    // path stays on the batch transcribe above.
-    var supportsStreaming: Bool { get }
-    // Open a streaming session for one dictation. The session holds the engine's non-Sendable handle until
-    // finalizeTranscript/cancel, so the decorator keeps its exclusive lock for that whole span. Only called
-    // when supportsStreaming is true.
-    func makeStreamingSession(sampleRate: Int, biasTerms: [String]) async throws -> any StreamingSpeechSession
-
     func evict() async
 
     // Preheat per-dictation session state at press so it overlaps speech; fire-and-forget, default no-op.
@@ -67,40 +58,11 @@ public extension SpeechEngine {
     func transcribe(samples: [Float], sampleRate: Int, biasTerms: [String]) async throws -> String {
         throw SpeechEngineError.sampleInputUnsupported
     }
-
-    var supportsStreaming: Bool { false }
-    // Never reached: the controller only calls this when supportsStreaming is true. Present so batch-only
-    // engines satisfy the protocol.
-    func makeStreamingSession(sampleRate: Int, biasTerms: [String]) async throws -> any StreamingSpeechSession {
-        throw SpeechEngineError.streamingUnsupported
-    }
-}
-
-// One dictation's incremental transcription. Every exit path must be reached exactly once so the
-// decorator's exclusive lock is released; a leaked session wedges the engine until relaunch (SerializedEngine
-// holds its lock for the session's whole lifetime).
-//
-// Contract: append/finalizeTranscript MUST run inference off the main actor — the controller awaits
-// finalizeTranscript from the @MainActor commit task, so heavy work here freezes the HUD.
-//
-// Contract: cancel() may overlap an in-flight append()/finalizeTranscript() (the driver cancels at a
-// suspension point). Adapters MUST tolerate this — tear down SDK state so the pending call unblocks without
-// corruption/double-release — and cancel() must be idempotent-safe against a concurrent terminal call.
-public protocol StreamingSpeechSession: Sendable {
-    // Feed the next decoded mono Float32 chunk (engine sample rate). Called off the writer/RT threads.
-    // Throws if the chunk cannot be admitted (e.g. failed resample); the driver then cancels and degrades to
-    // a batch transcribe of the intact audio, so spoken audio is never silently dropped mid-utterance.
-    func append(samples: [Float]) async throws
-    // Run the final chunk and return the whole transcript. Terminal: the session is spent after this.
-    func finalizeTranscript() async throws -> String
-    // Abort without a result (ESC/cancel). Terminal: releases SDK state, no transcript.
-    func cancel() async
 }
 
 public enum SpeechEngineError: Error, Equatable {
     case unknownEngine(String)
     case sampleInputUnsupported
-    case streamingUnsupported
 }
 
 public final class SpeechEngineProvider: @unchecked Sendable {

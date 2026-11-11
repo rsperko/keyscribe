@@ -69,28 +69,11 @@ final class CaptureWriter: @unchecked Sendable {
     // False for a sample-incapable engine (e.g. Apple): skip accumulation and report no samples so the commit
     // path re-reads the WAV.
     private let wantsSamples: Bool
-    // Writer-thread-only, on device-native slots (pre-resample). Starts CLOSED: capture is armed before the
-    // start cue plays, so every buffer up to the cue-end boundary is audio the user was never invited to
-    // speak. `.gated` trims the cue window; `.open` is the no-cue case (sounds off).
-    private enum Admission {
-        case closed
-        case gated(HeadAdmitGate)
-        case open
-    }
-    private var admission: Admission = .closed
-    // Published by the control side at cue time and installed by the writer thread, so gate state keeps a
-    // single owner. nil until the cue-end boundary is known — which cannot happen before readiness.
-    private let admissionLock = NSLock()
-    private var pendingAdmission: (afterHostTime: UInt64, hostTicksPerSecond: Double, cueWindowSeconds: Double)?
     // One-shot readiness signal. The first VALID buffer off the ring is the only proof the route actually
     // delivers audio — configure/initialize/start all succeed on a route that never will. Fired from the
     // writer thread; the RT callback must never signal the control path.
     private let onFirstBuffer: (@Sendable () -> Void)?
     private var signalledReady = false
-    // Each post-conversion mono chunk written to the file is also handed here so a streaming session can
-    // transcribe during capture. Writer thread ONLY, and MUST be non-blocking (real wiring is a bounded
-    // AsyncStream yield) — never the realtime IO thread. nil when streaming is off.
-    private let onSamples: (@Sendable ([Float]) -> Void)?
     // Writer thread only; the RT meter reads what it publishes, so it must be a lock-free store.
     private let onChannelSelected: (@Sendable (Int) -> Void)?
 
@@ -104,7 +87,6 @@ final class CaptureWriter: @unchecked Sendable {
 
     init(ring: AudioSampleRing, file: (any CaptureFileWriting)?, recordFormat: AVAudioFormat,
          wantsSamples: Bool = true,
-         onSamples: (@Sendable ([Float]) -> Void)? = nil,
          onFirstBuffer: (@Sendable () -> Void)? = nil,
          onChannelSelected: (@Sendable (Int) -> Void)? = nil,
          observeHostTime: @escaping (UInt64?) -> Bool) {
@@ -112,7 +94,6 @@ final class CaptureWriter: @unchecked Sendable {
         self.file = file
         self.recordFormat = recordFormat
         self.wantsSamples = wantsSamples
-        self.onSamples = onSamples
         self.onFirstBuffer = onFirstBuffer
         self.onChannelSelected = onChannelSelected
         self.observeHostTime = observeHostTime
@@ -177,27 +158,20 @@ final class CaptureWriter: @unchecked Sendable {
             recordDrop(frames: info.frameCount, reason: "unusable input format")
             return
         }
-        // Readiness FIRST: this buffer is what proves the mic is live, and admission is still closed while the
-        // cue has not played — so a readiness check below the gate would never see the buffer it needs.
         signalReadyIfFirst()
-        installPendingAdmission()
-        // Head admission: drop/trim cue-window frames before the boundary, before conversion/write.
-        var offset = 0
-        var count = info.frameCount
-        switch admission {
-        case .closed: return  // pre-cue audio, discarded by design — never a drop canary
-        case .open: break
-        case .gated(var gate):
-            let host: UInt64? = info.hostTime == 0 ? nil : info.hostTime
-            let outcome = gate.observe(slotStartHostTime: host, frameCount: info.frameCount, sampleRate: info.sampleRate)
-            admission = .gated(gate)
-            switch outcome {
-            case .admit: break
-            case .drop: return
-            case .admitTrailing(let dropFrames): offset = dropFrames; count = info.frameCount - dropFrames
-            }
+        write(0..<info.frameCount, of: info, channel: channel)
+        let host: UInt64? = info.hostTime == 0 ? nil : info.hostTime
+        if observeHostTime(host) {
+            // Snapshot before the tail flush: the RT thread keeps pushing during the flush, and those overruns
+            // are post-release too, so they must not reach the seal snapshot.
+            ringDropsAtSeal = ring.droppedCount
+            flushConverterTail()
+            sealed = true
         }
-        guard count > 0 else { return }
+    }
+
+    private func write(_ range: Range<Int>, of info: AudioSampleRing.SlotInfo, channel: (Int) -> UnsafeBufferPointer<Float>) {
+        let offset = range.lowerBound, count = range.count
         guard let input = inputBuffer(for: info) else {
             recordDrop(frames: count, reason: "input buffer unavailable")
             return
@@ -215,14 +189,6 @@ final class CaptureWriter: @unchecked Sendable {
             }
         }
         write(input)
-        let host: UInt64? = info.hostTime == 0 ? nil : info.hostTime
-        if observeHostTime(host) {
-            // Snapshot before the tail flush: the RT thread keeps pushing during the flush, and those overruns
-            // are post-release too, so they must not reach the seal snapshot.
-            ringDropsAtSeal = ring.droppedCount
-            flushConverterTail()
-            sealed = true
-        }
     }
 
     private func selectChannel(
@@ -242,26 +208,6 @@ final class CaptureWriter: @unchecked Sendable {
         guard !signalledReady else { return }
         signalledReady = true
         onFirstBuffer?()
-    }
-
-    // Publish the cue-end boundary. Control side (any thread); the writer thread does the install.
-    func openAdmission(afterHostTime: UInt64, hostTicksPerSecond: Double, cueWindowSeconds: Double) {
-        admissionLock.withLock {
-            pendingAdmission = (afterHostTime, hostTicksPerSecond, cueWindowSeconds)
-        }
-    }
-
-    // Writer thread only. A 0 boundary means no cue played, so there is nothing to keep out of the recording.
-    private func installPendingAdmission() {
-        guard case .closed = admission else { return }
-        guard let pending = admissionLock.withLock({ pendingAdmission }) else { return }
-        guard pending.afterHostTime != 0, pending.hostTicksPerSecond > 0 else {
-            admission = .open
-            return
-        }
-        admission = .gated(HeadAdmitGate(
-            admitAfterHostTime: pending.afterHostTime, hostTicksPerSecond: pending.hostTicksPerSecond,
-            fallbackDropSeconds: pending.cueWindowSeconds))
     }
 
     // Rebuild when the native rate/channels change, which also resets the resampler and the channel selector.
@@ -332,7 +278,7 @@ final class CaptureWriter: @unchecked Sendable {
         guard let file else { return }
         let inFmt = input.format
         if inFmt.sampleRate == recordFormat.sampleRate && inFmt.channelCount == recordFormat.channelCount {
-            // Mirror to the accumulator/streaming sink only if the WAV write landed, so in-memory samples never
+            // Mirror to the accumulator only if the WAV write landed, so in-memory samples never
             // contain a chunk the file lacks — samples == WAV, true by construction.
             if writeToFile(file, input) { appendSamples(from: input) }
             return
@@ -371,16 +317,12 @@ final class CaptureWriter: @unchecked Sendable {
         if writeToFile(file, outBuffer) { appendSamples(from: outBuffer) }
     }
 
-    // Mirror the mono PCM written to the file into the accumulator (and streaming sink), so an engine's
-    // samples are bit-identical to the WAV.
+    // Mirror the mono PCM written to the file into the accumulator, so an engine's samples are bit-identical
+    // to the WAV. Skipped when the engine can't consume in-memory samples.
     private func appendSamples(from buffer: AVAudioPCMBuffer) {
         let n = Int(buffer.frameLength)
-        guard n > 0, let ptr = buffer.floatChannelData?[0] else { return }
-        let slice = UnsafeBufferPointer(start: ptr, count: n)
-        // Skip the accumulator when the engine can't consume in-memory samples; the streaming sink is
-        // independent (feeds Apple's live session) and still fires. Only allocates the copy when streaming is on.
-        if wantsSamples { accumulated.append(contentsOf: slice) }
-        if let onSamples { onSamples(Array(slice)) }
+        guard wantsSamples, n > 0, let ptr = buffer.floatChannelData?[0] else { return }
+        accumulated.append(contentsOf: UnsafeBufferPointer(start: ptr, count: n))
     }
 
     // Committed post-conversion mono PCM, or nil when the engine can't consume samples (caller re-reads the

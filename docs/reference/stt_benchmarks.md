@@ -69,9 +69,10 @@ cell says otherwise.
 | Qwen3-ASR 1.7B | 8.5% | 9.8% | 10.5% | 15.2%, drops short words | 98.7%, degenerates |
 | Qwen3-ASR 0.6B | 9.7% | 8.8% | 28.2% | 54.5% | 67.3%, degenerates |
 
-Apple Speech and Apple Dictation were also run through the streaming path, replayed at real time over the
-same takes: both streamed every take to completion without falling back to batch, with the same word error
-rate as batch on every take.
+Transcription is batch only. A streaming path for Apple Speech was measured on 2026-11-11 over 107
+real-voice clips (`corpus/stt`): word error rate matched batch (10.5% both ways), and over the 84 clips long
+enough to stream, release→text fell from 110 ms to 85 ms. That gain was too small to keep a second path, so
+streaming was removed.
 
 Qwen3-ASR decodes a take in one pass, and both sizes degrade past a length the others do not reach. At
 10 minutes 0.6B measured 29.2% joined and 23.3% continuous, while 1.7B measured 11.2% and 6.0%, and 4.2%

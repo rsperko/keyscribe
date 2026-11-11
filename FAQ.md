@@ -428,12 +428,23 @@ apply. What you get depends on which kind of rule the mode uses:
   longer takes that key away from every other app.
 - **Limited to a website or window title.** You hear the start sound and then the cancel sound.
   KeyScribe cannot tell which page or window you are on until dictation begins, so it has to start
-  before it can rule the mode out. Nothing is recorded, transcribed, or inserted.
+  before it can rule the mode out. Nothing is kept, transcribed, or inserted.
 
 Two ways to change it. To dictate plainly there instead, give Plain Dictation the same shortcut — a
 shortcut only falls back to Plain Dictation where Plain Dictation also owns it. To silence a website
 rule outside its browser, add the browser to the same rule; see
 [Pair a website rule with its browser](docs/getting_started.md#pair-a-website-rule-with-its-browser).
+
+### Can I start talking the moment I press the shortcut?
+
+Yes. Speech is recorded from the moment the microphone is on, not from the start sound, and the speech models
+handle the start sound playing over your first word. Waiting for the sound is still the most accurate. With a
+modifier key on its own
+as the shortcut, such as right Option or Fn, the microphone turns on as the key goes down, unless it is a
+Bluetooth headset: opening a headset's microphone switches it to call mode, which would interrupt your audio
+each time you used that key in another shortcut, so a headset starts when the press is confirmed instead. That is why the
+microphone indicator in the menu bar flashes for a moment when you hold that key for another shortcut, such
+as Option-click. Nothing from that moment is kept.
 
 ### Is there a limit on how long one dictation can be?
 
@@ -577,7 +588,9 @@ summary can't be made, you hear that it is unavailable rather than a guess; seve
 read as one notice that names each conversation, except replies you asked to hear, which are each read on their own. For a natural voice, choose
 **Download** beside **Voice**: it is a one-time download that runs on your Mac, and you can pick the speaker.
 Its speakers are English only. Until it is downloaded the macOS voice reads summaries, and **Preview Voice**
-lets you hear it first. The instruction the service gets is under **Advanced**, with **Reset to
+lets you hear it first. The natural voice follows **Keep speech recognition ready** in Speech Models: Fastest keeps it
+in memory, Balanced frees it after the same idle time, and Frugal frees it after each reply or preview, so the next
+reply takes a moment longer to start. The instruction the service gets is under **Advanced**, with **Reset to
 Default** to get the original back.
 
 While a summary plays, a small panel shows which conversation it is from, and the chevron beside the name adds

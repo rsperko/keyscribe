@@ -34,6 +34,7 @@ final class Qwen3ASREngine: SpeechEngine, @unchecked Sendable {
     nonisolated let displayName: String
     nonisolated let supportsRecognitionBias = true
     nonisolated let captureSampleRate = 24000
+    nonisolated let benefitsFromWarmupClip = false
     var installDirNames: [String] { [subdir] }
 
     private let modelId: String

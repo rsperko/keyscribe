@@ -39,25 +39,10 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
 
     private let loadGate: Gate?
     private let transcribeGate: Gate?
-    private let streamFinalizeThrows: Bool
-    private let makeStreamingSessionThrows: Bool
-    init(loadGate: Gate? = nil, transcribeGate: Gate? = nil, failNextLoad: Bool = false,
-         streamFinalizeThrows: Bool = false, makeStreamingSessionThrows: Bool = false) {
+    init(loadGate: Gate? = nil, transcribeGate: Gate? = nil, failNextLoad: Bool = false) {
         self.loadGate = loadGate
         self.transcribeGate = transcribeGate
         self._failNextLoad = failNextLoad
-        self.streamFinalizeThrows = streamFinalizeThrows
-        self.makeStreamingSessionThrows = makeStreamingSessionThrows
-    }
-
-    let supportsStreaming = true
-    private var _lastStreamingSession: SpyStreamingSession?
-    var lastStreamingSession: SpyStreamingSession? { lock.withLock { _lastStreamingSession } }
-    func makeStreamingSession(sampleRate: Int, biasTerms: [String]) async throws -> any StreamingSpeechSession {
-        if makeStreamingSessionThrows { throw FakeLoadError() }
-        let session = SpyStreamingSession(finalizeThrows: streamFinalizeThrows)
-        lock.withLock { _lastStreamingSession = session }
-        return session
     }
 
     var loadBodies: Int { lock.withLock { _loadBodies } }
@@ -132,27 +117,6 @@ private final class SpyEngine: SpeechEngine, @unchecked Sendable {
             _installBodyRan = false
         }
     }
-}
-
-private final class SpyStreamingSession: StreamingSpeechSession, @unchecked Sendable {
-    private let lock = NSLock()
-    private var _appended: [Float] = []
-    private var _finalized = false
-    private var _cancelled = false
-    private let finalizeThrows: Bool
-    init(finalizeThrows: Bool) { self.finalizeThrows = finalizeThrows }
-
-    var appendedCount: Int { lock.withLock { _appended.count } }
-    var finalized: Bool { lock.withLock { _finalized } }
-    var cancelled: Bool { lock.withLock { _cancelled } }
-
-    func append(samples: [Float]) async throws { lock.withLock { _appended.append(contentsOf: samples) } }
-    func finalizeTranscript() async throws -> String {
-        lock.withLock { _finalized = true }
-        if finalizeThrows { throw FakeLoadError() }
-        return "stream-text"
-    }
-    func cancel() async { lock.withLock { _cancelled = true } }
 }
 
 private struct FakeLoadError: Error {}
@@ -320,75 +284,6 @@ struct SerializedEngineTests {
         await gate.fire()
         _ = try await (first, second)
         #expect(spy.maxConcurrentTranscribes == 1)
-    }
-
-    @Test func supportsStreamingForwardsFromBase() {
-        let engine = SerializedEngine(SpyEngine())
-        #expect(engine.supportsStreaming)
-    }
-
-    @Test func makeStreamingSessionForwardsAppendAndFinalize() async throws {
-        let spy = SpyEngine()
-        let engine = SerializedEngine(spy)
-        let session = try await engine.makeStreamingSession(sampleRate: 16000, biasTerms: [])
-        #expect(spy.runtimeBodies == 1)   // ensureRuntimeLocked ran before the base session was built
-        try await session.append(samples: [0, 0.1, -0.1])
-        try await session.append(samples: [0.2])
-        let text = try await session.finalizeTranscript()
-        #expect(text == "stream-text")
-        #expect(spy.lastStreamingSession?.appendedCount == 4)
-        #expect(spy.lastStreamingSession?.finalized == true)
-    }
-
-    @Test func streamingSessionHoldsLockUntilFinalize() async throws {
-        let spy = SpyEngine()
-        let engine = SerializedEngine(spy)
-        let session = try await engine.makeStreamingSession(sampleRate: 16000, biasTerms: [])
-        async let evict: Void = engine.evict()
-        try await Task.sleep(for: .milliseconds(20))
-        #expect(!spy.evicted)             // evict blocked on the lock the session holds
-        _ = try await session.finalizeTranscript()
-        await evict
-        #expect(spy.evicted)              // released on finalize, so evict could proceed
-    }
-
-    @Test func streamingSessionReleasesLockOnFinalizeThrow() async throws {
-        let spy = SpyEngine(streamFinalizeThrows: true)
-        let engine = SerializedEngine(spy)
-        let session = try await engine.makeStreamingSession(sampleRate: 16000, biasTerms: [])
-        do {
-            _ = try await session.finalizeTranscript()
-            #expect(Bool(false))
-        } catch is FakeLoadError {
-        } catch {
-            #expect(Bool(false))
-        }
-        let text = try await engine.transcribe(wavURL: URL(fileURLWithPath: "/x"), biasTerms: [])
-        #expect(text == "text")           // did not deadlock → the lock was released on the throw
-    }
-
-    @Test func streamingSessionReleasesLockOnCancel() async throws {
-        let spy = SpyEngine()
-        let engine = SerializedEngine(spy)
-        let session = try await engine.makeStreamingSession(sampleRate: 16000, biasTerms: [])
-        await session.cancel()
-        #expect(spy.lastStreamingSession?.cancelled == true)
-        let text = try await engine.transcribe(wavURL: URL(fileURLWithPath: "/x"), biasTerms: [])
-        #expect(text == "text")           // lock released on cancel → no deadlock
-    }
-
-    @Test func makeStreamingSessionReleasesLockWhenBuildThrows() async throws {
-        let spy = SpyEngine(makeStreamingSessionThrows: true)
-        let engine = SerializedEngine(spy)
-        do {
-            _ = try await engine.makeStreamingSession(sampleRate: 16000, biasTerms: [])
-            #expect(Bool(false))
-        } catch is FakeLoadError {
-        } catch {
-            #expect(Bool(false))
-        }
-        let text = try await engine.transcribe(wavURL: URL(fileURLWithPath: "/x"), biasTerms: [])
-        #expect(text == "text")           // lock released on the build throw → no deadlock
     }
 
     @Test func evictOnUnloadedEngineIsANoOp() async {

@@ -136,25 +136,36 @@ sites. There is no per-mode STT (YAGNI); the seam stays clean.
 **Batch, not streaming.** Most users run LLM post-processing, so live partial text is not needed:
 dictation commits on key-release, then runs the pipeline. The result is inserted as **one atomic,
 undoable action** (a single ⌘Z removes the entire dictation), which also covers local-only (no-LLM)
-use.
+use. Transcribing during capture was built for Apple Speech and retired on 2026-11-11: measured over
+107 real-voice clips (`corpus/stt`), its word error rate matched batch (10.5% both ways), and over the 84
+clips long enough to stream, release→text fell from 110 ms (batch) to 85 ms — short of the 100 ms gain
+set as the bar for keeping a second transcription path. Batch with the press-time prewarm
+(`AppleEngine.prepareForDictation`) is the only path.
 
 **Latency budgets (perceived speed).** Batch must still *feel* instant; budgets are explicit and
 measured (`principles.md` §1):
 - **hotkey → recording feedback:** gated on the microphone actually being live, NOT immediate. The
-  start cue BEGINS at first-buffer readiness and plays into an already-open mic; admission opens at
-  cue END, and the HUD appears there with it (`ui_design.md` §5's timing contract). So the press is
-  acknowledged by silence: ~50 ms on a built-in mic with sounds off (no cue ⇒ admission opens at
-  readiness), 200–500 ms on a cold Bluetooth route. The budget here is READINESS (first delivered
-  buffer), not paint — painting sooner would only invite speech into a window whose audio is
-  discarded.
+  mic records from its first buffer (for a modifier-only trigger it starts at the key-down, during the
+  chord grace, unless the input is Bluetooth); the start cue BEGINS once the press stands and the mic is live, stays in the recording,
+  and the HUD appears at cue END (`ui_design.md` §5's timing contract). So the
+  press is acknowledged by silence: ~50 ms on a built-in mic with sounds off, 200–500 ms on a cold
+  Bluetooth route. The budget here is READINESS (first delivered buffer), not paint — painting sooner
+  would invite speech before anything can be recorded. Measured 2026-11-11 (right Option, built-in mic,
+  Fastest), before the mic started at the key-down: grace 157 ms, first buffer 61 ms after the start call,
+  cue and pad 102 ms; a word said at the press was lost.
 - **release → local text ready:** p50/p95 per engine — a short utterance must feel instant.
 - **release → cloud-rewrite ready:** p50/p95 per provider/model (the LLM is the slow leg).
 - **max wait → escape hatch:** past a threshold the HUD offers "insert without rewriting," so the
   user is never stuck waiting on the cloud. Waiting longer is the user's choice: a slow model is allowed
-  to finish. The only automatic limit is one backstop over the whole rewrite, every attempt and retry
-  included (`RewriteService.defaultDeadlineSeconds`), which exists to free a dictation from an endpoint
-  that never answers. Per-request network timeouts are at least that long, so they never cut a rewrite off
-  first; Settings' connection test keeps its own short timeout because a person is waiting on it.
+  to finish. Nothing ends the wait automatically except these limits. A request that cannot even connect
+  to the service within `ProviderTransport.connectTimeout` gives up and falls back to the local text, so an unreachable or dead
+  endpoint costs seconds, not a manual skip; the request counts as connected once its body starts going out,
+  so a connected model is never cut off by this limit, and a request without a body is left to its session's
+  own timeout. Separately, one backstop runs over the whole rewrite, every attempt and retry included
+  (`RewriteService.defaultDeadlineSeconds`), which frees a dictation from an endpoint that connects but never
+  answers. Per-request response timeouts are at least that long, so they never cut a rewrite off first;
+  Settings' connection test keeps its own short response timeout because a person is waiting on it; the
+  connect limit applies there too.
   A temporary failure — a dropped connection, a rate limit, or a server error — is retried twice with
   short backoff, or after the server's own `Retry-After` when that is brief; a longer ask, and every other
   error, falls back to the local text at once (`ProviderTransport.retryWait`). The waits between tries
@@ -668,7 +679,11 @@ behavior are normative in `ui_design.md` §7 and `ui_components.md` (`SettingsDe
 roster in code). Three settings carry architecture rather than presentation:
 - **Warm-up / eviction tier:** governs STT-model residency *and* idle microphone warm-up together
   (Fastest = model kept loaded + mic held warm; Balanced = both released after an idle timer;
-  Frugal = model freed each dictation + mic opened only while dictating).
+  Frugal = model freed each dictation + mic opened only while dictating). The Coding agent natural voice
+  (`KokoroVoice`) follows the same tier through `SpokenResultOutput`: Fastest loads it at launch and keeps it;
+  Balanced loads it when a reply starts and frees it after the idle timer; Frugal frees it after each reply.
+  A Preview Voice or an install counts as a use and is freed the same way (`SpokenVoiceModel.onVoiceUsed`).
+  Critical memory pressure and turning spoken replies or coding agents off free it under any tier.
 - **AI Services (BYOK):** **named LLM connections** — each a `(name, provider, model, auth method,
   params)`. Hosted providers use a `key_ref` into Keychain. OpenAI-compatible endpoints additionally
   support no auth for local/no-auth servers or a token command that mints a bearer token on demand;

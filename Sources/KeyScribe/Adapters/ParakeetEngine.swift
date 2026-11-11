@@ -7,19 +7,22 @@ struct ParakeetModelProfile {
     let id: String
     let displayName: String
     let version: AsrModelVersion
+    let benefitsFromWarmupClip: Bool
 
     static let tdtV3 = ParakeetModelProfile(
-        id: "parakeet", displayName: "Parakeet TDT v3", version: .v3)
+        id: "parakeet", displayName: "Parakeet TDT v3", version: .v3, benefitsFromWarmupClip: false)
     static let ultra = ParakeetModelProfile(
-        id: "parakeet-ultra", displayName: "Parakeet Ultra", version: .ultra)
+        id: "parakeet-ultra", displayName: "Parakeet Ultra", version: .ultra, benefitsFromWarmupClip: false)
     static let tdtCtc110m = ParakeetModelProfile(
-        id: "parakeet-tdt-ctc-110m", displayName: "Parakeet TDT-CTC 110M", version: .tdtCtc110m)
+        id: "parakeet-tdt-ctc-110m", displayName: "Parakeet TDT-CTC 110M", version: .tdtCtc110m,
+        benefitsFromWarmupClip: true)
 }
 
 actor ParakeetEngine: SpeechEngine {
     nonisolated let id: String
     nonisolated let displayName: String
     nonisolated let supportsRecognitionBias = false
+    nonisolated let benefitsFromWarmupClip: Bool
 
     // Dir names come from FluidAudio (never hardcoded): the TDT bundle, plus — for the 110M hybrid — the
     // CTC-head companion FluidAudio's load unconditionally fetches (~103 MB), unused (no recognition bias)
@@ -49,6 +52,7 @@ actor ParakeetEngine: SpeechEngine {
         self.id = profile.id
         self.displayName = profile.displayName
         self.version = profile.version
+        self.benefitsFromWarmupClip = profile.benefitsFromWarmupClip
         self.modelsDir = modelsDir
     }
 

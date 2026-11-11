@@ -161,7 +161,8 @@ final class AgentHub {
         placeTracker?.request()
     }
 
-    func tickPlaces() {
+    func tickPlaces(settingsOpen: Bool) {
+        guard settingsOpen else { return }
         placeTracker?.tick()
     }
 
@@ -1134,7 +1135,7 @@ final class AgentRuntime {
     }
 
     private func step() async -> Duration {
-        hub.tickPlaces()
+        hub.tickPlaces(settingsOpen: settingsOpen)
         await hub.rescan(rereadingTitles: false)
         watch(hub.watchedFolders)
         let interval = Self.rescanInterval(connected: hub.hasConnectedConversation, settingsOpen: settingsOpen)

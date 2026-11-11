@@ -62,8 +62,12 @@ final class SpokenResultOutput {
     private let deadlineSeconds: Double
     private let describeDeadlineSeconds: Double
     private let warm: () -> Void
+    private let release: () -> Void
+    private let residency: () -> (eviction: Eviction, idleSeconds: Double?)
+    private var resident = false
+    private var releasing: (task: Task<Void, Never>, eviction: Eviction, idleSeconds: Double?)?
+    private let wait: @MainActor (Duration) async -> Void
     private let inFront: @MainActor (String) async -> Bool
-    private var wasOn = false
     private var nextOrder = 0
     private(set) var queued: [Queued] = []
     private var generating: [String: Task<Void, Never>] = [:]
@@ -89,6 +93,9 @@ final class SpokenResultOutput {
         client: any LLMClient, permits: @escaping @Sendable (Connection) -> Bool, speech: any SpeechSynthesizing,
         silencer: SpeechSilencer = .shared, settings: @escaping () -> SpokenResultSettings, connection: @escaping (String) -> Connection?,
         deadlineSeconds: Double = 30, describeDeadlineSeconds: Double = 5, warm: @escaping () -> Void = {},
+        release: @escaping () -> Void = {},
+        residency: @escaping () -> (eviction: Eviction, idleSeconds: Double?) = { (.fastest, nil) },
+        wait: @escaping @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) },
         inFront: @escaping @MainActor (String) async -> Bool = { _ in false }
     ) {
         self.client = client
@@ -100,23 +107,86 @@ final class SpokenResultOutput {
         self.deadlineSeconds = deadlineSeconds
         self.describeDeadlineSeconds = describeDeadlineSeconds
         self.warm = warm
+        self.release = release
+        self.residency = residency
+        self.wait = wait
         self.inFront = inFront
         speech.onStarted = { [weak self] in self?.started() }
         speech.onFinished = { [weak self] in self?.ended() }
         silencer.register(speech)
         silencer.onAvailable = { [weak self] in self?.playNext() }
-        wasOn = settings().enabled
-        if wasOn { warm() }
+        if settings().enabled, residency().eviction == .fastest { load() }
     }
 
     func settingsChanged() {
-        let isOn = settings().enabled
-        defer { wasOn = isOn }
-        guard isOn else { return stop() }
-        if !wasOn { warm() }
+        guard settings().enabled else {
+            stop()
+            return releaseVoice()
+        }
+        let residency = residency()
+        if residency.eviction == .fastest { return load() }
+        if let releasing, releasing.eviction != residency.eviction || releasing.idleSeconds != residency.idleSeconds {
+            cancelRelease()
+        }
+        settle()
+    }
+
+    func voiceUsedElsewhere() {
+        resident = true
+        settle()
+    }
+
+    func releaseVoice() {
+        cancelRelease()
+        resident = false
+        release()
+    }
+
+    private func load() {
+        cancelRelease()
+        guard !resident else { return }
+        resident = true
+        warm()
+    }
+
+    private func unload() {
+        cancelRelease()
+        guard resident else { return }
+        resident = false
+        release()
+    }
+
+    private func cancelRelease() {
+        releasing?.task.cancel()
+        releasing = nil
+    }
+
+    private var isIdle: Bool {
+        playing == nil && !speech.isSpeaking && queued.isEmpty && generating.isEmpty && checkingNotice.isEmpty
+            && answering == nil && replay == nil
+    }
+
+    private func settle() {
+        guard resident, isIdle, releasing == nil else { return }
+        let residency = residency()
+        switch EvictionPolicy.afterDictation(mode: residency.eviction, idleSeconds: residency.idleSeconds) {
+        case .keepLoaded: break
+        case .evictNow: unload()
+        case .scheduleIdleCheck(let after):
+            let wait = wait
+            let task = Task { [weak self] in
+                await wait(.milliseconds(Int((after * 1000).rounded(.up))))
+                guard !Task.isCancelled, let self else { return }
+                self.releasing = nil
+                guard self.isIdle else { return }
+                self.unload()
+            }
+            releasing = (task, residency.eviction, residency.idleSeconds)
+        }
     }
 
     func stop() {
+        defer { settle() }
         for task in generating.values { task.cancel() }
         generating = [:]
         for task in checkingNotice.values { task.cancel() }
@@ -136,6 +206,7 @@ final class SpokenResultOutput {
     }
 
     func forget(conversation: String) {
+        defer { settle() }
         generating.removeValue(forKey: conversation)?.cancel()
         generating.removeValue(forKey: Self.requestedKey(conversation))?.cancel()
         pendingRequested.remove(conversation)
@@ -156,6 +227,7 @@ final class SpokenResultOutput {
     }
 
     func withdraw(conversation: String) {
+        defer { settle() }
         generating.removeValue(forKey: conversation)?.cancel()
         generating.removeValue(forKey: Self.requestedKey(conversation))?.cancel()
         checkingNotice.removeValue(forKey: conversation)?.cancel()
@@ -200,6 +272,7 @@ final class SpokenResultOutput {
         let settings = settings()
         let usable = connection(settings.connection).flatMap { permits($0) ? $0 : nil }
         if plan == .nothing { return }
+        load()
         supersede(conversation, requested: requested)
         if requested { pendingRequested.insert(conversation) }
         let key = requested ? Self.requestedKey(conversation) : conversation
@@ -212,7 +285,7 @@ final class SpokenResultOutput {
             guard !shown else {
                 self.generating.removeValue(forKey: key)
                 if let origin { self.onUnread?(.inFront(name: handle), origin) }
-                return
+                return self.settle()
             }
             var text = ""
             var summarizedBy: String?
@@ -267,6 +340,7 @@ final class SpokenResultOutput {
             playNext()
         }
         guard let attention, settings().enabled else { return }
+        load()
         generating.removeValue(forKey: conversation)?.cancel()
         let inFront = inFront
         checkingNotice[conversation] = Task { [weak self] in
@@ -274,7 +348,7 @@ final class SpokenResultOutput {
             guard !Task.isCancelled, let self else { return }
             guard !shown, self.settings().enabled else {
                 self.checkingNotice.removeValue(forKey: conversation)
-                return
+                return self.settle()
             }
             var body = SpokenResult.notice(attention)
             var describedBy: String?
@@ -297,6 +371,7 @@ final class SpokenResultOutput {
 
     func refused(conversation: String, _ line: String) {
         guard settings().enabled else { return }
+        load()
         enqueue(Queued(conversation: conversation, name: "", body: line, notice: true, standalone: true, refusal: true))
     }
 
@@ -306,6 +381,7 @@ final class SpokenResultOutput {
             checkingNotice.removeValue(forKey: conversation)?.cancel()
             queued.removeAll { $0.conversation == conversation && $0.notice && !$0.refusal }
         }
+        load()
         answering = (Queued(conversation: conversation, name: handle, body: text, notice: true, standalone: true), stillTrue)
         playNext()
         return true
@@ -323,6 +399,7 @@ final class SpokenResultOutput {
     func repeatLast() -> Replay {
         guard settings().enabled else { return .off }
         guard let heard else { return .nothingHeard }
+        load()
         replay = heard
         playNext()
         return .repeating(heard.name)
@@ -394,7 +471,7 @@ final class SpokenResultOutput {
             replayed.replayed = true
             return play(replayed)
         }
-        guard !queued.isEmpty else { return }
+        guard !queued.isEmpty else { return settle() }
         var next = queued.removeFirst()
         if next.unavailable && !next.requested {
             let merged = queued.filter { $0.unavailable && !$0.requested }
@@ -408,6 +485,7 @@ final class SpokenResultOutput {
     }
 
     private func play(_ item: Queued, while stillTrue: (() -> Bool)? = nil, requested: Set<String> = []) {
+        resident = true
         playing = item
         playingCheck = stillTrue
         playingRequested = requested
@@ -416,6 +494,7 @@ final class SpokenResultOutput {
             playing = nil
             pendingRequested.subtract(playingRequested)
             playingRequested = []
+            settle()
         }
     }
 }

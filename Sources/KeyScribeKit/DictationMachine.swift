@@ -29,8 +29,8 @@ public struct DictationMachine: Sendable {
         }
     }
 
-    // The states where a sound would be recorded into the take. Arming counts: admission opens moments later,
-    // so a cue started here can still land in the audio.
+    // The states where a sound would be recorded into the take. Arming counts: the mic records from its first
+    // buffer, so a cue started here lands in the audio.
     public var isCapturingAudio: Bool {
         switch state {
         case .arming, .recording: return true

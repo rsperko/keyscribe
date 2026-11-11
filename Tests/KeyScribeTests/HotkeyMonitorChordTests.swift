@@ -205,10 +205,13 @@ struct HotkeyMonitorChordTests {
         schedule: ((TimeInterval, @escaping @MainActor () -> Void) -> Void)? = nil,
         onStart: @escaping (String?, PressStyle, DispatchTime) -> Void = { _, _, _ in },
         onCommit: @escaping (String?) -> Void = { _ in },
-        onCancel: @escaping (String?) -> Void = { _ in }
+        onCancel: @escaping (String?) -> Void = { _ in },
+        onEngage: @escaping (String?) -> Void = { _ in },
+        onEngageDropped: @escaping (String?) -> Void = { _ in }
     ) -> HotkeyMonitor {
         let m = HotkeyMonitor(
             bindings: [], onStart: onStart, onCommit: onCommit, onCancel: onCancel,
+            onEngage: onEngage, onEngageDropped: onEngageDropped,
             carbon: FakeChordRegistrar(), chordGraceSeconds: grace,
             schedule: schedule ?? { delay, work in
                 DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated(work) }
@@ -304,6 +307,61 @@ struct HotkeyMonitorChordTests {
         await drainMain()
 
         #expect(started == ["left_command+left_control"])
+    }
+
+    @Test func aGracedPressReportsTheKeyDownBeforeTheGraceEnds() async {
+        let clock = ManualScheduler()
+        var events: [String] = []
+        let m = monitor(
+            [chordBinding("left_command")], grace: 0.15, schedule: clock.schedule,
+            onStart: { key, _, _ in events.append("start \(key ?? "")") },
+            onEngage: { key in events.append("engage \(key ?? "")") },
+            onEngageDropped: { key in events.append("dropped \(key ?? "")") })
+
+        m.handle(type: .flagsChanged, keyCode: 55, flags: flags([.maskCommand], Self.leftCmd))
+        await drainMain()
+        #expect(events == ["engage left_command"])
+        clock.fireAll()
+        await drainMain()
+        #expect(events == ["engage left_command", "start left_command"])
+    }
+
+    @Test func aChordInsideTheGraceDropsTheEngagedPress() async {
+        let clock = ManualScheduler()
+        var events: [String] = []
+        let m = monitor(
+            [chordBinding("left_command")], grace: 0.15, schedule: clock.schedule,
+            onStart: { key, _, _ in events.append("start \(key ?? "")") },
+            onEngage: { key in events.append("engage \(key ?? "")") },
+            onEngageDropped: { key in events.append("dropped \(key ?? "")") })
+
+        m.handle(type: .flagsChanged, keyCode: 55, flags: flags([.maskCommand], Self.leftCmd))
+        m.handle(type: .keyDown, keyCode: 0, flags: flags([.maskCommand], Self.leftCmd))
+        clock.fireAll()
+        await drainMain()
+        #expect(events == ["engage left_command", "dropped left_command"])
+    }
+
+    @Test func resettingGesturesDropsAnEngagedPress() async {
+        let clock = ManualScheduler()
+        var dropped = 0
+        let m = monitor(
+            [chordBinding("left_command")], grace: 0.15, schedule: clock.schedule,
+            onEngageDropped: { _ in dropped += 1 })
+
+        m.handle(type: .flagsChanged, keyCode: 55, flags: flags([.maskCommand], Self.leftCmd))
+        m.cancelGestures()
+        await drainMain()
+        #expect(dropped == 1)
+    }
+
+    @Test func aPressWithoutAGraceReportsNoEngage() async {
+        var engages = 0
+        let m = monitor([chordBinding("left_command")], grace: 0, onEngage: { _ in engages += 1 })
+
+        m.handle(type: .flagsChanged, keyCode: 55, flags: flags([.maskCommand], Self.leftCmd))
+        await drainMain()
+        #expect(engages == 0)
     }
 
     @Test func aGracedStartReportsThePhysicalPressTimeNotTheGraceExpiry() async throws {

@@ -1104,6 +1104,220 @@ struct SpokenResultOutputTests {
         #expect(warmed == 1)
     }
 
+    final class VoiceBox {
+        var tier: Eviction
+        var idleSeconds: Double?
+        var warmed = 0
+        var released = 0
+        init(_ tier: Eviction, idleSeconds: Double? = nil) {
+            self.tier = tier
+            self.idleSeconds = idleSeconds
+        }
+    }
+
+    @MainActor final class Sleeper {
+        private(set) var requested: [Duration] = []
+        private var waiting: [CheckedContinuation<Void, Never>?] = []
+        func wait(_ duration: Duration) async {
+            requested.append(duration)
+            await withCheckedContinuation { waiting.append($0) }
+        }
+        func end(_ index: Int) {
+            waiting[index]?.resume()
+            waiting[index] = nil
+        }
+        func endAll() {
+            for index in waiting.indices { end(index) }
+        }
+    }
+
+    private func residing(
+        _ voice: VoiceBox, settings box: SettingsBox = SettingsBox(SpokenResultSettings(connection: "omlx")), sleeper: Sleeper = Sleeper()
+    ) -> (SpokenResultOutput, FakeSpeech) {
+        let speech = FakeSpeech()
+        let connection = connection
+        let output = SpokenResultOutput(
+            client: FakeLLM(), permits: { _ in true }, speech: speech, silencer: SpeechSilencer(), settings: { box.value },
+            connection: { $0 == connection.id ? connection : nil }, warm: { voice.warmed += 1 },
+            release: { voice.released += 1 }, residency: { (voice.tier, voice.idleSeconds) }, wait: { await sleeper.wait($0) })
+        return (output, speech)
+    }
+
+    @Test func underFrugalTheVoiceLoadsWhenAReplyStartsAndIsReleasedOnceItHasBeenSpoken() async {
+        let voice = VoiceBox(.frugal)
+        let (output, speech) = residing(voice)
+        #expect(voice.warmed == 0)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        #expect(voice.warmed == 1)
+        #expect(voice.released == 0)
+        speech.finish()
+        await settled()
+        #expect(voice.released == 1)
+    }
+
+    @Test func underBalancedTheVoiceIsReleasedAfterTheIdleWindowAndNotWhileAnotherReplyPlays() async {
+        let voice = VoiceBox(.balanced, idleSeconds: 30)
+        let sleeper = Sleeper()
+        let (output, speech) = residing(voice, sleeper: sleeper)
+        #expect(voice.warmed == 0)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        speech.finish()
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "Docs done.")
+        await settled()
+        sleeper.end(0)
+        await settled()
+        #expect(voice.released == 0)
+        #expect(voice.warmed == 1)
+        speech.finish()
+        await settled()
+        #expect(voice.released == 0)
+        #expect(sleeper.requested == [.seconds(30), .seconds(30)])
+        sleeper.end(1)
+        await settled()
+        #expect(voice.released == 1)
+    }
+
+    @Test func underBalancedAReplyInsideTheIdleWindowStartsTheWindowAgain() async {
+        let voice = VoiceBox(.balanced, idleSeconds: 30)
+        let sleeper = Sleeper()
+        let (output, speech) = residing(voice, sleeper: sleeper)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        speech.finish()
+        await settled()
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "Docs done.")
+        await settled()
+        speech.finish()
+        await settled()
+        sleeper.end(0)
+        await settled()
+        #expect(voice.released == 0)
+        sleeper.endAll()
+        await settled()
+        #expect(voice.released == 1)
+    }
+
+    @Test func aNewIdleTimeReplacesAWindowAlreadyRunning() async {
+        let voice = VoiceBox(.balanced, idleSeconds: 30)
+        let sleeper = Sleeper()
+        let (output, speech) = residing(voice, sleeper: sleeper)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        speech.finish()
+        await settled()
+        output.settingsChanged()
+        voice.idleSeconds = 60
+        output.settingsChanged()
+        await settled()
+        #expect(sleeper.requested == [.seconds(30), .seconds(60)])
+        sleeper.end(0)
+        await settled()
+        #expect(voice.released == 0)
+        sleeper.endAll()
+        await settled()
+        #expect(voice.released == 1)
+    }
+
+    @Test func aReplyPlayedAfterAReleaseIsReleasedAgainWhenItEnds() async {
+        let voice = VoiceBox(.frugal)
+        let (output, speech) = residing(voice)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "Docs done.")
+        await settled()
+        output.releaseVoice()
+        #expect(voice.released == 1)
+        speech.finish()
+        await settled()
+        #expect(speech.spoken.count == 2)
+        speech.finish()
+        await settled()
+        #expect(voice.released == 2)
+    }
+
+    @Test func aVoiceUsedByAPreviewOrInstallFollowsTheTier() async {
+        let frugal = VoiceBox(.frugal)
+        let (first, _) = residing(frugal)
+        first.voiceUsedElsewhere()
+        #expect(frugal.released == 1)
+        let fastest = VoiceBox(.fastest)
+        let (second, _) = residing(fastest)
+        second.voiceUsedElsewhere()
+        #expect(fastest.released == 0)
+        let balanced = VoiceBox(.balanced, idleSeconds: 30)
+        let sleeper = Sleeper()
+        let (third, _) = residing(balanced, sleeper: sleeper)
+        third.voiceUsedElsewhere()
+        await settled()
+        #expect(sleeper.requested == [.seconds(30)])
+        sleeper.endAll()
+        await settled()
+        #expect(balanced.released == 1)
+    }
+
+    @Test func aVoiceUsedElsewhereWhileAReplyPlaysIsReleasedOnlyWhenTheReplyEnds() async {
+        let voice = VoiceBox(.frugal)
+        let (output, speech) = residing(voice)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        output.voiceUsedElsewhere()
+        #expect(voice.released == 0)
+        speech.finish()
+        await settled()
+        #expect(voice.released == 1)
+    }
+
+    @Test func memoryPressureReleasesAVoiceLoadedSomewhereElse() {
+        let voice = VoiceBox(.frugal)
+        let (output, _) = residing(voice)
+        output.releaseVoice()
+        #expect(voice.released == 1)
+    }
+
+    @Test func underFastestTheVoiceLoadsAtStartAndStaysAfterAReply() async {
+        let voice = VoiceBox(.fastest)
+        let (output, speech) = residing(voice)
+        #expect(voice.warmed == 1)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        speech.finish()
+        await settled()
+        #expect(voice.warmed == 1)
+        #expect(voice.released == 0)
+    }
+
+    @Test func turningSpokenRepliesOffReleasesTheVoice() {
+        let voice = VoiceBox(.fastest)
+        let box = SettingsBox(SpokenResultSettings(connection: "omlx"))
+        let (output, _) = residing(voice, settings: box)
+        box.value.enabled = false
+        output.settingsChanged()
+        #expect(voice.released == 1)
+    }
+
+    @Test func memoryPressureReleasesTheVoiceAndTheNextReplyLoadsItAgain() async {
+        let voice = VoiceBox(.fastest)
+        let (output, _) = residing(voice)
+        output.releaseVoice()
+        #expect(voice.released == 1)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        #expect(voice.warmed == 2)
+    }
+
+    @Test func switchingToFastestLoadsTheVoiceAndSwitchingToFrugalReleasesItWhileNothingIsSpoken() {
+        let voice = VoiceBox(.frugal)
+        let (output, _) = residing(voice)
+        voice.tier = .fastest
+        output.settingsChanged()
+        #expect(voice.warmed == 1)
+        voice.tier = .frugal
+        output.settingsChanged()
+        #expect(voice.released == 1)
+    }
+
     @Test func aPreviewReplacedWhileItsMacOSVoiceSpeaksKeepsWaitingResultsWaiting() async {
         let silencer = SpeechSilencer()
         let (output, speech, _) = make(silencer: silencer)

@@ -48,7 +48,7 @@ struct AccessibilityIDTests {
         let cases: [(String, String)] = [
             (AccessibilityID.Settings.Speech.primaryAction("apple"), "settings.speech.row."),
             (AccessibilityID.Settings.Permissions.openSettings("accessibility"), "settings.permissions.row."),
-            (AccessibilityID.Settings.Advanced.feature("streaming_transcription"), "settings.advanced.feature."),
+            (AccessibilityID.Settings.Advanced.feature("consumption_driven_restore"), "settings.advanced.feature."),
             (AccessibilityID.FirstRun.Permissions.grant("microphone"), "firstrun.permissions.row."),
             (AccessibilityID.FirstRun.Playground.lesson("polish"), "firstrun.playground.lesson."),
         ]

@@ -252,12 +252,24 @@ final class HUDController: HUDPresenting {
         })
     }
 
+    static func tookKey(eventWindow: NSWindow?, panel: NSWindow?) -> Bool {
+        eventWindow == nil || eventWindow === panel
+    }
+
+    var onKeyTaken: ((CGEvent) -> Void)?
+
     private func installLocalKeyMonitor() {
         guard localKeyMonitor == nil else { return }
-        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, event.keyCode == 53, self.canCancel?() == true else { return event }
-            self.onEscapeCancel?()
-            return nil
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+            guard let self else { return event }
+            if event.type == .keyDown, event.keyCode == 53, self.canCancel?() == true {
+                self.onEscapeCancel?()
+                return nil
+            }
+            if Self.tookKey(eventWindow: event.window, panel: self.panel), let cgEvent = event.cgEvent {
+                self.onKeyTaken?(cgEvent)
+            }
+            return event
         }
     }
 

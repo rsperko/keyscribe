@@ -55,10 +55,10 @@ final class HotkeyMonitor {
     var layout: () -> KeyboardLayoutIndex = { KeyboardLayout.current() }
     private let isProcessTrusted: () -> Bool
     // How long a modifier-only trigger waits before arming, so the key of a chord built on it lands first.
-    // Arming is not cheap — it runs the synchronous secure-field probe, opens the mic, and (once ready)
-    // plays the start cue — so an eager arm makes every fn+delete or ⌃⌥⇧⌘X audibly start-then-cancel a
-    // dictation. Only latency is traded: nothing is recorded until admission opens at cue end regardless.
-    // A chord slower than the grace still falls through to the keyDown abort, cues and all.
+    // Arming runs the synchronous secure-field probe and plays the start cue, so an eager arm would make every
+    // fn+delete or ⌃⌥⇧⌘X audibly start-then-cancel a dictation. The mic itself starts silently at the key-down
+    // (onEngage), so the grace costs no speech. A chord slower than the grace still falls through to the
+    // keyDown abort, cues and all.
     private let chordGraceSeconds: TimeInterval
     private let schedule: (TimeInterval, @escaping @MainActor () -> Void) -> Void
 
@@ -71,12 +71,16 @@ final class HotkeyMonitor {
     // aborting binding's triggerKey so the controller cancels only a dictation THIS key started, never an
     // unrelated in-flight one another trigger committed.
     let onCancel: (String?) -> Void
+    let onEngage: (String?) -> Void
+    let onEngageDropped: (String?) -> Void
 
     init(
         bindings: [Binding], actionBindings: [ActionBinding] = [],
         onStart: @escaping (String?, PressStyle, DispatchTime) -> Void, onCommit: @escaping (String?) -> Void,
         onAction: @escaping (String) -> Void = { _ in },
         onCancel: @escaping (String?) -> Void = { _ in },
+        onEngage: @escaping (String?) -> Void = { _ in },
+        onEngageDropped: @escaping (String?) -> Void = { _ in },
         carbon: ChordRegistering = CarbonHotKeys(),
         mouseTap: MouseTapping = MouseEventTap(),
         isProcessTrusted: @escaping () -> Bool = { AXIsProcessTrusted() },
@@ -93,6 +97,8 @@ final class HotkeyMonitor {
         self.onCommit = onCommit
         self.onAction = onAction
         self.onCancel = onCancel
+        self.onEngage = onEngage
+        self.onEngageDropped = onEngageDropped
         self.carbon = carbon
         self.mouseTap = mouseTap
         self.isProcessTrusted = isProcessTrusted
@@ -126,6 +132,7 @@ final class HotkeyMonitor {
 
     func cancelGestures() {
         for i in bindings.indices {
+            if bindings[i].pendingArm { dropEngaged(index: i) }
             bindings[i].gesture.cancel()
             bindings[i].engaged = false
             bindings[i].suppressedUntilRelease = false
@@ -428,11 +435,15 @@ final class HotkeyMonitor {
         // config-reload rarity. The generation check still discards an arm that lost its race.
         let descriptor = bindings[i].descriptor
         let pressedAt = DispatchTime.now()
+        let key = bindings[i].triggerKey
+        dispatchSideEffect { self.onEngage(key) }
         schedule(chordGraceSeconds) { [weak self] in
-            guard let self,
-                  let index = self.bindings.firstIndex(where: { $0.descriptor == descriptor }),
-                  self.bindings[index].pendingArm,
-                  self.bindings[index].armGeneration == generation else { return }
+            guard let self else { return }
+            guard let index = self.bindings.firstIndex(where: { $0.descriptor == descriptor }) else {
+                self.dispatchSideEffect { self.onEngageDropped(key) }
+                return
+            }
+            guard self.bindings[index].pendingArm, self.bindings[index].armGeneration == generation else { return }
             self.bindings[index].pendingArm = false
             self.fire(index: index, edge: .down, now: ProcessInfo.processInfo.systemUptime, pressedAt: pressedAt)
         }
@@ -442,9 +453,15 @@ final class HotkeyMonitor {
     // user hears nothing. Barred from re-arming until the key is fully released, exactly like a real abort.
     private func cancelPendingArm(index i: Int) {
         guard bindings[i].pendingArm else { return }
+        dropEngaged(index: i)
         bindings[i].pendingArm = false
         bindings[i].armGeneration &+= 1
         bindings[i].suppressedUntilRelease = true
+    }
+
+    private func dropEngaged(index i: Int) {
+        let key = bindings[i].triggerKey
+        dispatchSideEffect { self.onEngageDropped(key) }
     }
 
     // Released inside the grace — a genuine fast tap, not a chord. Fire the held-back .down now so the
@@ -583,6 +600,7 @@ private func hotkeyTapCallback(
         MainActor.assumeIsolated { activeHotkeyMonitor?.reEnable(reason: type) }
         return Unmanaged.passUnretained(event)
     }
+    if KeyReplay.isReplayed(event) { return Unmanaged.passUnretained(event) }
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
     let rawFlags = event.flags.rawValue
     let scrollIsUserDriven = type != .scrollWheel || HotkeyMonitor.scrollIsUserDriven(

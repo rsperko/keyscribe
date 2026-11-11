@@ -1416,7 +1416,8 @@ eviction = "fastest"            # "fastest" | "balanced" | "frugal" (default: fa
 # Governs both STT-model residency AND idle microphone warm-up (the input unit is kept prewarmed for
 # instant starts). Fastest = model loaded + mic held warm (periodic binding refresh); Balanced = both
 # released after eviction_idle_seconds idle; Frugal = mic opened only while dictating, model freed each
-# dictation.
+# dictation. The natural voice that reads Coding agent replies follows the same tier: Fastest keeps it
+# loaded, Balanced frees it after eviction_idle_seconds without use, Frugal frees it after each reply or preview.
 # eviction_idle_seconds = 1800  # used when eviction = "balanced" (default: 1800 = 30 min)
 # The one dictionary-mechanism control: recognition bias is default-ON for the engines that support it
 # (the bias-capable ones) and can be disabled per engine. Post-STT dictionary recovery has no toggle

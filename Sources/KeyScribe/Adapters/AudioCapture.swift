@@ -9,12 +9,10 @@ import Synchronization
 protocol AudioCapturing: AnyObject, Sendable {
     // Ready means a valid input buffer arrived; AudioUnit can start without delivering audio.
     func start(sampleRate: Int) async throws -> URL
-    func start(sampleRate: Int, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL
-    func start(sampleRate: Int, wantsSamples: Bool, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL
-    // Capture arms closed; admission opens at cue end (or immediately for zero).
-    func openAdmission(afterHostTime: UInt64)
+    func start(sampleRate: Int, wantsSamples: Bool) async throws -> URL
     var currentLevel: Float { get }
     var currentInputName: String? { get }
+    var inputIsBluetooth: Bool { get }
     func stop() -> URL?
     func finishDraining() async -> URL?
     func takeDrainedSamples() -> [Float]?
@@ -30,18 +28,15 @@ extension AudioCapturing {
     func prewarm() {}
     func refreshBinding() {}
     func releaseWarm() {}
-    func openAdmission(afterHostTime: UInt64) {}
     func finishDraining() async -> URL? { stop() }
     func takeDrainedSamples() -> [Float]? { nil }
     func setPreferredInputUID(_ uid: String?) {}
     func setCaptureLostHandler(_ handler: @escaping @Sendable () -> Void) {}
     var currentLevel: Float { 0 }
     var currentInputName: String? { nil }
-    func start(sampleRate: Int, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
+    var inputIsBluetooth: Bool { false }
+    func start(sampleRate: Int, wantsSamples: Bool) async throws -> URL {
         try await start(sampleRate: sampleRate)
-    }
-    func start(sampleRate: Int, wantsSamples: Bool, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
-        try await start(sampleRate: sampleRate, onSamples: onSamples)
     }
 }
 
@@ -213,6 +208,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             return true
         }
         guard changed else { return }
+        forgetInputTransport()
         markRebuild()
         if !captureIsActive { prewarm() }
     }
@@ -263,15 +259,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     func start(sampleRate: Int) async throws -> URL {
-        try await start(sampleRate: sampleRate, onSamples: nil)
+        try await start(sampleRate: sampleRate, wantsSamples: true)
     }
 
-    func start(sampleRate: Int, onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
-        try await start(sampleRate: sampleRate, wantsSamples: true, onSamples: onSamples)
-    }
-
-    func start(sampleRate: Int, wantsSamples: Bool,
-               onSamples: (@Sendable ([Float]) -> Void)?) async throws -> URL {
+    func start(sampleRate: Int, wantsSamples: Bool) async throws -> URL {
         rebuildIfNeeded()
         // Resolved ONCE and threaded through: the deadline, the policy label, the diagnostics and the bind
         // must describe the same device. Sampling transport separately hands a Bluetooth route the 4 s deadline.
@@ -295,7 +286,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             // and a wedged LOCAL device must still fail at its own deadline rather than inherit Bluetooth's.
             let url = try await runWithBudget(allowedSeconds: { budget.allowedSeconds }) { [self] in
                 let url = try await bringUp(
-                    sampleRate: sampleRate, wantsSamples: wantsSamples, onSamples: onSamples,
+                    sampleRate: sampleRate, wantsSamples: wantsSamples,
                     target: target, ready: ready, record: record, queue: queue, generation: generation)
                 try await Self.awaitReadiness(ready)
                 return url
@@ -358,22 +349,8 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         context.record.event("\(label)(\(from)->\(to))")
     }
 
-    // mach_absolute_time() ticks per second, from the timebase (nanos = ticks * numer / denom). Used to
-    // place a cue-end admission boundary on the same host clock the RT buffers are stamped with.
-    static let hostTicksPerSecond: Double = {
-        var info = mach_timebase_info_data_t()
-        mach_timebase_info(&info)
-        guard info.numer > 0 else { return 1e9 }
-        return 1e9 * Double(info.denom) / Double(info.numer)
-    }()
-
-    // Host-time ticks spanning `seconds`, for offsetting `mach_absolute_time()` by a wall duration.
-    static func hostTicks(seconds: Double) -> UInt64 {
-        UInt64(max(0, (seconds * hostTicksPerSecond).rounded()))
-    }
-
     private func bringUp(
-        sampleRate: Int, wantsSamples: Bool, onSamples: (@Sendable ([Float]) -> Void)?,
+        sampleRate: Int, wantsSamples: Bool,
         target: CaptureTarget, ready: SignalLatch, record: CaptureStartRecord,
         queue: DispatchQueue, generation: Int
     ) async throws -> URL {
@@ -381,7 +358,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             queue.async { [self] in
                 do {
                     cont.resume(returning: try armSync(
-                        sampleRate: sampleRate, wantsSamples: wantsSamples, onSamples: onSamples,
+                        sampleRate: sampleRate, wantsSamples: wantsSamples,
                         target: target, ready: ready, record: record, generation: generation))
                 } catch { cont.resume(throwing: error) }
             }
@@ -406,20 +383,6 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // value is an unvalidated initial cap.
     static func startDeadlineSeconds(targetIsBluetooth: Bool) -> Double {
         targetIsBluetooth ? bluetoothReadyTimeout : bringUpTimeout + bringUpGrace
-    }
-
-    // Publish the cue-end admission boundary to the live capture. No-op once the capture is gone (a release
-    // during the cue), so a late cue can never open admission on a successor.
-    func openAdmission(afterHostTime: UInt64) {
-        guard let writer = lock.withLock({ session?.writer }) else { return }
-        let now = mach_absolute_time()
-        // Approximates the remaining cue window so the head gate's invalid-timestamp fallback drops about the
-        // cue's worth of audio on a device that never stamps hostTime.
-        let cueWindowSeconds = afterHostTime > now
-            ? Double(afterHostTime - now) / Self.hostTicksPerSecond : 0
-        writer.openAdmission(
-            afterHostTime: afterHostTime, hostTicksPerSecond: Self.hostTicksPerSecond,
-            cueWindowSeconds: cueWindowSeconds)
     }
 
     // Realizes the input HAL unit before the first dictation so the hot path skips the one-time realization
@@ -480,7 +443,6 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // session/`capturing`, and start the unit's IOProc LAST — so the first delivered buffer already lands in a
     // correctly-sized, actively-drained ring.
     private func armSync(sampleRate: Int, wantsSamples: Bool,
-                         onSamples: (@Sendable ([Float]) -> Void)? = nil,
                          target: CaptureTarget, ready: SignalLatch, record: CaptureStartRecord,
                          generation: Int) throws -> URL {
         guard let recordFormat = AVAudioFormat(
@@ -518,7 +480,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         lock.withLock { lastWriter }?.finish(flushConverter: false)
         let mySession = try prepareRingAndPublishSession(
             desiredRing: Self.ringGeometry(for: boundDeviceID), file: file, url: url,
-            recordFormat: recordFormat, wantsSamples: wantsSamples, onSamples: onSamples,
+            recordFormat: recordFormat, wantsSamples: wantsSamples,
             ready: ready, record: record, generation: generation)
         let writer = mySession.writer
 
@@ -556,7 +518,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // that dead capture alone, so its stray frames cannot land in the successor's audio.
     private func prepareRingAndPublishSession(
         desiredRing: AudioSampleRing.RingGeometry, file: AVAudioFile, url: URL, recordFormat: AVAudioFormat,
-        wantsSamples: Bool, onSamples: (@Sendable ([Float]) -> Void)?,
+        wantsSamples: Bool,
         ready: SignalLatch, record: CaptureStartRecord, generation: Int
     ) throws -> CaptureSession {
         let ring = AudioSampleRing(desiredRing)
@@ -572,12 +534,9 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // The previous capture's samples are consumed by the controller right after finishDraining; clear any
         // straggler here so "valid until the next arm" (takeDrainedSamples) is true by construction.
         lock.withLock { lastDrainedSamples = nil }
-        // Admission opens later, at the cue-end boundary the controller publishes once this writer reports the
-        // route live (openAdmission) — so the writer starts closed and discards everything until then.
         let writer = CaptureWriter(
             ring: ring, file: file, recordFormat: recordFormat,
             wantsSamples: wantsSamples,
-            onSamples: onSamples,
             onFirstBuffer: {
                 record.noteFirstBuffer()
                 ready.signal()
@@ -1137,6 +1096,25 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     // True when the *effective* input (preferred-if-present, else default) is a Bluetooth headset. Holding
     // such a device open forces it from A2DP (stereo music) to HFP (mono call mode), muting the user's
     // audio — so we avoid holding it while idle and dispose the unit after each dictation.
+    var bluetoothLookup: (@Sendable () -> Bool)?
+    private var cachedInputIsBluetooth: Bool?
+    private var inputTransportGeneration = 0
+
+    var inputIsBluetooth: Bool {
+        let (cached, generation) = lock.withLock { (cachedInputIsBluetooth, inputTransportGeneration) }
+        if let cached { return cached }
+        let value = bluetoothLookup?() ?? effectiveInputIsBluetooth()
+        lock.withLock { if inputTransportGeneration == generation { cachedInputIsBluetooth = value } }
+        return value
+    }
+
+    func forgetInputTransport() {
+        lock.withLock {
+            cachedInputIsBluetooth = nil
+            inputTransportGeneration &+= 1
+        }
+    }
+
     private func effectiveInputIsBluetooth() -> Bool {
         guard let id = effectiveDeviceID() else { return false }
         return AudioInputDevices.isBluetooth(id)
@@ -1169,6 +1147,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     private func handleInputTopologyChanged() {
+        forgetInputTransport()
         // One physical plug/unplug fires this listener several times; coalesce a burst into a single action
         // by debouncing on the (serial) listener queue.
         topologyDebounce?.cancel()
@@ -1477,7 +1456,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         lock.withLock { unit = testUnit }
         _ = try prepareRingAndPublishSession(
             desiredRing: geometry, file: file, url: url, recordFormat: recordFormat,
-            wantsSamples: true, onSamples: nil, ready: SignalLatch(),
+            wantsSamples: true, ready: SignalLatch(),
             record: CaptureStartRecord(targetIsBluetooth: false, explicitDevice: false, target: nil),
             generation: generation)
         return testUnit

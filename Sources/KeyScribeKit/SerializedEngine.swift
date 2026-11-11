@@ -39,7 +39,6 @@ public actor SerializedEngine: SpeechEngine {
     public nonisolated var installDirNames: [String] { base.installDirNames }
     public nonisolated var benefitsFromWarmupClip: Bool { base.benefitsFromWarmupClip }
     public nonisolated var supportsSampleInput: Bool { base.supportsSampleInput }
-    public nonisolated var supportsStreaming: Bool { base.supportsStreaming }
     public nonisolated func verifyInstalled(in modelsDir: URL) -> Bool? { base.verifyInstalled(in: modelsDir) }
 
     // Forward under the exclusive lock so prepare never races a base op on the non-Sendable handle.
@@ -151,22 +150,6 @@ public actor SerializedEngine: SpeechEngine {
         return try await base.transcribe(samples: samples, sampleRate: sampleRate, biasTerms: biasTerms)
     }
 
-    // A streaming session holds the non-Sendable handle for the whole recording, so it must hold the
-    // exclusive lock for that whole span, not just this method. Hand back a wrapper that releases the lock
-    // exactly once on every terminal path (build-throw, finalize success/throw, cancel) — a leaked lock
-    // wedges every later transcribe, hangs evict, and deadlocks the controller's post-throw batch fallback.
-    public func makeStreamingSession(sampleRate: Int, biasTerms: [String]) async throws -> any StreamingSpeechSession {
-        await acquire()
-        do {
-            try await ensureRuntimeLocked()
-            let session = try await base.makeStreamingSession(sampleRate: sampleRate, biasTerms: biasTerms)
-            return LockedStreamingSession(base: session) { [weak self] in await self?.release() }
-        } catch {
-            release()
-            throw error
-        }
-    }
-
     public func evict() async {
         // Never evict a half-loaded engine or race a base load: wait for in-flight loads (either level) to
         // settle first.
@@ -180,48 +163,6 @@ public actor SerializedEngine: SpeechEngine {
         await base.evict()
         runtimeLoaded = false
         fullLoaded = false
-    }
-}
-
-// Releases the SerializedEngine's exclusive lock exactly once, whichever terminal path (finalize
-// success/throw, cancel) fires. The once-guard makes a double-release (cancel after a failed finalize)
-// impossible.
-private final class LockedStreamingSession: StreamingSpeechSession, @unchecked Sendable {
-    private let base: any StreamingSpeechSession
-    private let onTerminate: @Sendable () async -> Void
-    private let releaseLock = NSLock()
-    private var released = false
-
-    init(base: any StreamingSpeechSession, onTerminate: @escaping @Sendable () async -> Void) {
-        self.base = base
-        self.onTerminate = onTerminate
-    }
-
-    func append(samples: [Float]) async throws { try await base.append(samples: samples) }
-
-    func finalizeTranscript() async throws -> String {
-        do {
-            let text = try await base.finalizeTranscript()
-            await terminate()
-            return text
-        } catch {
-            await terminate()
-            throw error
-        }
-    }
-
-    func cancel() async {
-        await base.cancel()
-        await terminate()
-    }
-
-    private func terminate() async {
-        let first = releaseLock.withLock { () -> Bool in
-            if released { return false }
-            released = true
-            return true
-        }
-        if first { await onTerminate() }
     }
 }
 

@@ -18,9 +18,29 @@ final class HUDChannel {
     }
 
     func present(_ state: HUDState) {
+        draw(shown(state))
+    }
+
+    func presentIfChanged(_ state: HUDState) {
         let shown = shown(state)
-        lastPresented = shown
-        hud?.render(shown)
+        guard shown != lastPresented else { return }
+        draw(shown)
+    }
+
+    func presentLevel(_ level: Float) {
+        switch lastPresented {
+        case .recording(let mode, _, let latched, let countdown, let agents):
+            draw(.recording(mode: mode, level: level, latchedTrigger: latched, countdown: countdown, agents: agents))
+        case .choice(let prompt, .listening(let latched), _):
+            draw(.choice(prompt, status: .listening(latchedTrigger: latched), level: level))
+        default:
+            break
+        }
+    }
+
+    private func draw(_ state: HUDState) {
+        lastPresented = state
+        hud?.render(state)
     }
 
     func relinquishKeyFocus() {

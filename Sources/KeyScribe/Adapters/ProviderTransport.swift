@@ -12,6 +12,7 @@ enum ProviderTransportError: Error, CustomStringConvertible, LocalizedError {
     case incompleteReply
     case reasoningLevelRefused(String)
     case noRouteForReasoningLevel(String)
+    case unreachable
 
     // Routes `description` through localizedDescription so a caught rewrite error carries the real cause
     // into logs and history, instead of the generic "The operation couldn't be completed" a bare Error yields.
@@ -30,7 +31,8 @@ enum ProviderTransportError: Error, CustomStringConvertible, LocalizedError {
                 return "The model service returned an error (\(code)): \(snippet)"
             }
             return "The model service returned an error (\(code))."
-        case .badResponse, .truncated, .limitBeforeAnswer, .incompleteReply, .reasoningLevelRefused, .noRouteForReasoningLevel:
+        case .badResponse, .truncated, .limitBeforeAnswer, .incompleteReply, .reasoningLevelRefused, .noRouteForReasoningLevel,
+             .unreachable:
             return rewriteFailureReason
         }
     }
@@ -57,6 +59,8 @@ extension ProviderTransportError: RewriteFailureReporting {
         case .incompleteReply: return "The model service returned an incomplete reply."
         case .reasoningLevelRefused(let level):
             return "This model doesn't accept the reasoning level “\(ReasoningReport.displayName(level))”. Change it in Settings."
+        case .unreachable:
+            return "The AI service didn't connect in time."
         case .noRouteForReasoningLevel(let level):
             return "No provider for this model accepts every setting sent, including the reasoning level “\(ReasoningReport.displayName(level))”. Choose another level or Recommended in Settings."
         }
@@ -73,7 +77,7 @@ extension URLError: RewriteFailureReporting {
 // session: one session is shared across connections with different base URLs, so a session-wide delegate
 // would have no single origin to pin. Returning nil from the redirect callback declines the redirect and
 // surfaces the 3xx response instead of following it.
-final class OriginPinnedRedirects: NSObject, URLSessionTaskDelegate {
+class OriginPinnedRedirects: NSObject, URLSessionTaskDelegate {
     private let pinned: RequestOrigin?
 
     init(_ url: URL?) { pinned = RequestOrigin(url) }
@@ -92,6 +96,35 @@ final class OriginPinnedRedirects: NSObject, URLSessionTaskDelegate {
     }
 }
 
+final class ConnectWatch: OriginPinnedRedirects, @unchecked Sendable {
+    private let lock = NSLock()
+    private var task: URLSessionTask?
+    private var connected = false
+    private var abandoned = false
+
+    var gaveUp: Bool { lock.withLock { abandoned } }
+
+    func urlSession(_ session: URLSession, didCreateTask task: URLSessionTask) {
+        lock.withLock { self.task = task }
+    }
+
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64,
+        totalBytesExpectedToSend: Int64
+    ) {
+        lock.withLock { connected = true }
+    }
+
+    func giveUpIfNotConnected() {
+        let task: URLSessionTask? = lock.withLock {
+            guard !connected else { return nil }
+            abandoned = true
+            return self.task
+        }
+        task?.cancel()
+    }
+}
+
 struct ProviderTransport: Sendable {
     var session: URLSession
     var keyProvider: @Sendable (String) -> SecretLookup
@@ -99,6 +132,7 @@ struct ProviderTransport: Sendable {
     var tokenCache: TokenCommandCache
     var now: @Sendable () -> Date
     var sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    var connectTimeout: Duration = .seconds(3)
 
     static func makeSession(requestTimeout: TimeInterval, resourceTimeout: TimeInterval) -> URLSession {
         let config = URLSessionConfiguration.ephemeral
@@ -184,7 +218,21 @@ struct ProviderTransport: Sendable {
     }
 
     private func attempt(_ request: URLRequest) async throws -> Data {
-        let (data, response) = try await session.data(for: request, delegate: OriginPinnedRedirects(request.url))
+        let watch = ConnectWatch(request.url)
+        let deadline = Task { [connectTimeout, hasBody = request.httpBody?.isEmpty == false] in
+            guard hasBody else { return }
+            try await Task.sleep(for: connectTimeout)
+            watch.giveUpIfNotConnected()
+        }
+        defer { deadline.cancel() }
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: request, delegate: watch)
+        } catch {
+            if watch.gaveUp { throw ProviderTransportError.unreachable }
+            throw error
+        }
         guard let http = response as? HTTPURLResponse else { throw ProviderTransportError.badResponse }
         guard (200..<300).contains(http.statusCode) else {
             throw HTTPFailure(

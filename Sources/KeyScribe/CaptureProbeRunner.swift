@@ -27,10 +27,8 @@ enum CaptureProbeRunner {
             print("capture-probe: bring-up failed: \(error)")
             return
         }
-        // start() now returns at first-buffer readiness and capture arms with admission CLOSED, so the probe
-        // must open it or it would record silence. No cue plays here ⇒ a 0 boundary admits from readiness,
-        // which also makes the window below `seconds` of LIVE audio rather than seconds minus bring-up.
-        audio.openAdmission(afterHostTime: 0)
+        // start() returns at first-buffer readiness and capture keeps everything from that buffer, so the
+        // window below is `seconds` of live audio rather than seconds minus bring-up.
         try? await Task.sleep(for: .seconds(seconds))
         guard let finalURL = await audio.finishDraining() else {
             print("capture-probe: capture produced no file.")

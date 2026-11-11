@@ -45,11 +45,4 @@ struct TakeRecorderTests {
         try await Task.sleep(for: .milliseconds(80))
         #expect(ticks == 3)
     }
-
-    @Test func aTakeThatNeverStreamedHasNothingToFinalizeOrRelease() async {
-        let recorder = TakeRecorder()
-        #expect(!recorder.isStreaming)
-        #expect(await recorder.finalizeStreaming(gate: SingleFlightDeadline(), timeout: 1) == nil)
-        #expect(recorder.tearDown() == nil)
-    }
 }

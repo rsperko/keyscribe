@@ -29,14 +29,6 @@ public struct Feature: CaseIterable, Hashable, Sendable {
     public var dependents: [Feature] { Self.allCases.filter { $0.requiresId == id } }
     public static var topLevel: [Feature] { allCases.filter { $0.requiresId == nil } }
 
-    // Streaming transcription (P3-1): on supported engines, transcribe incrementally during capture so the
-    // transcript is ready sooner after release. Off by default; non-streaming engines keep the batch path.
-    public static let streamingTranscription = Feature(
-        id: "streaming_transcription",
-        title: "Streaming transcription",
-        summary: "On supported speech models, begin transcribing while you talk, so longer dictations can be ready sooner after you finish. Short dictations are unaffected."
-    )
-
     // Consumption-driven clipboard restore: instead of holding the dictation on the clipboard for a fixed
     // delay, publish it as a lazy pasteboard flavor and restore as soon as the target has actually read it.
     // Flagged until verified live: target-side paste latency (the read is fulfilled through this app's main
@@ -71,5 +63,5 @@ public struct Feature: CaseIterable, Hashable, Sendable {
         summary: "Send what you say to a coding agent conversation running in a terminal, such as Claude Code or Pi, and hear when it finishes. Requires installing the agent connector."
     )
 
-    public static let allCases: [Feature] = [streamingTranscription, consumptionDrivenRestore, voiceCommands, findInApps, codingAgents]
+    public static let allCases: [Feature] = [consumptionDrivenRestore, voiceCommands, findInApps, codingAgents]
 }

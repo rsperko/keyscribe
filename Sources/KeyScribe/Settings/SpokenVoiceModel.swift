@@ -33,6 +33,7 @@ final class SpokenVoiceModel: ObservableObject {
     private var fallbackAttempt: String?
     var fellBack: Bool { fallbackReason != nil }
     var showEntry: ((String) -> Void)?
+    var onVoiceUsed: (() -> Void)?
 
     func replySaved(attempt: String?, entry: String) {
         guard let attempt, attempt == fallbackAttempt else { return }
@@ -68,7 +69,7 @@ final class SpokenVoiceModel: ObservableObject {
 
     func makeSpeech(
         player: any AudioPlaying = WAVPlayer(), fallback: any SpeechSynthesizing = SystemSpeech(), attempts: SpokenAttempts? = nil,
-        preview: Bool = false
+        preview: Bool = false, details: @escaping @Sendable (Bool) -> [SpokenAttempt.Detail] = SpokenAttempts.environment
     ) -> NaturalSpeech {
         let installer = installer
         let speech = NaturalSpeech(
@@ -85,12 +86,16 @@ final class SpokenVoiceModel: ObservableObject {
             outcome: { [weak self] natural, reason, attempt in
                 guard let self else { return }
                 let shown = natural || self.status != .ready ? nil : reason ?? "the natural voice failed"
-                guard !preview else { return self.previewFallbackReason = shown }
+                guard !preview else {
+                    self.previewFallbackReason = shown
+                    self.onVoiceUsed?()
+                    return
+                }
                 guard natural || shown != nil else { return }
                 self.fallbackReason = shown
                 self.fallbackAttempt = shown == nil ? nil : attempt
                 self.fallbackEntry = nil
-            }, attempts: attempts)
+            }, attempts: attempts, details: details)
         speakers = speakers.filter { $0.speech != nil } + [WeakSpeech(speech: speech)]
         return speech
     }
@@ -176,7 +181,9 @@ final class SpokenVoiceModel: ObservableObject {
                 return
             }
             self.status = .testing
-            guard await installer.verify() else {
+            let verified = await installer.verify()
+            self.onVoiceUsed?()
+            guard verified else {
                 Log.models.error("voice produced no sound")
                 self.status = .needsAttention
                 self.error = "This voice didn\u{2019}t produce any sound. Reinstall it."

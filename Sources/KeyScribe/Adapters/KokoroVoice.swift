@@ -68,6 +68,7 @@ actor KokoroVoice: VoiceInstalling {
     private nonisolated let pronunciationDirectory: @Sendable () -> URL?
     private nonisolated var marker: URL { directory.appendingPathComponent(".installed") }
     private var loading: Task<KokoroAneManager, any Error>?
+    private var evicting: Task<Void, Never>?
     private let speaking = InFlightWork<KokoroAneSynthesisResult>()
     private var removing = false
 
@@ -129,6 +130,7 @@ actor KokoroVoice: VoiceInstalling {
     func remove() async throws {
         removing = true
         await speaking.cancelAndWait()
+        await evicting?.value
         let pending = loading
         loading = nil
         if let manager = try? await pending?.value { await manager.cleanup() }
@@ -137,7 +139,23 @@ actor KokoroVoice: VoiceInstalling {
         }
     }
 
+    func evict() async {
+        let pending = loading
+        loading = nil
+        let speaking = speaking
+        let previous = evicting
+        let cleanup = Task {
+            await previous?.value
+            await speaking.waitUntilFinished()
+            if let manager = try? await pending?.value { await manager.cleanup() }
+        }
+        evicting = cleanup
+        await cleanup.value
+        if evicting == cleanup { evicting = nil }
+    }
+
     func warm() async {
+        await evicting?.value
         guard !removing, isInstalled, isIntact else { return }
         _ = try? await loaded()
     }

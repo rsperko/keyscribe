@@ -63,7 +63,7 @@ struct VoiceCommandNoticeTests {
             settings: settings, onChange: { saved.append($0) }, onReload: {}, onResetHUDPosition: {})
 
         #expect(model.binding(for: .findInApps).wrappedValue)
-        model.binding(for: .streamingTranscription).wrappedValue = true
+        model.binding(for: .consumptionDrivenRestore).wrappedValue = true
 
         let last = try #require(saved.last)
         #expect(last.features.isSwitchedOn(.findInApps))

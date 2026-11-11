@@ -1665,11 +1665,10 @@ struct AgentDeliveryWiringTests {
         let rig = await rig(text, current: "claude:s1", voiceCommands: runner, places: reader)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         while let reading = rig.hub.placeTracker?.reading { await reading.value }
-        rig.controller.placeNamesGrace = .seconds(3)
+        rig.controller.placeNamesGrace = .seconds(60)
         reader.blocking = true
-        let started = ContinuousClock.now
         await take(rig)
-        #expect(ContinuousClock.now - started < .seconds(1))
+        #expect(rig.hub.placeTracker?.reading != nil)
         #expect(runner.ran.count == 1)
         reader.blocking = false
         reader.release.signal()

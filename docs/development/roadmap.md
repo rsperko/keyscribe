@@ -36,8 +36,10 @@ intentionally short. It records work with a concrete user outcome, not a running
 - Do not automatically collect visible screen text for rewrites without new evidence that changes its
   permission and privacy trade-off.
 - Prompt changes are eval-gated.
-- Streaming transcription ships behind an experimental toggle (Settings > Maintenance) and stays
-  opt-in until it is proven to preserve commit-on-release insertion in ordinary use.
+- Streaming transcription was measured and retired on 2026-11-11. Over 107 real-voice clips
+  (`corpus/stt`, Apple Speech) it matched batch accuracy (WER 10.5% both ways); over the 84 clips long
+  enough to stream it cut release→text from 110 ms to 85 ms, below the 100 ms gain required to keep it.
+  Batch with the press-time prewarm is the only path; reopen only with a measured gain past that bar.
 - Voice commands ship behind the experimental `voice_commands` toggle. Remove the flag only when:
   - Recorded voice-command phrases ("switch to …", "open …", "run …", "go back") resolve correctly
     on the recommended speech model. No corpus covers these phrases yet, so record one first.

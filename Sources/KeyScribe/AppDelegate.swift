@@ -31,6 +31,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var agentRuntime: AgentRuntime?
     private var spokenResult: SpokenResultOutput?
     private let spokenVoice = SpokenVoiceModel(installer: KokoroVoice.shared)
+    private let voiceResidency = VoiceResidency.kokoro()
     private let spokenAttempts = SpokenAttempts()
     private lazy var historySpeech = HistorySpeech()
     private let llmClient = HTTPLLMClient()
@@ -251,6 +252,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.settingsController.codingAgents.reveal(rows)
         }
         hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
+        hud.onKeyTaken = { [weak self] event in self?.controller.noteKeyReceivedByHUD(event) }
         hud.onVisibilityChange = { SpeechSilencer.shared.dictationHUD(visible: $0) }
         hud.onEscapeCancel = { [weak self] in
             self?.hotkey.cancelGestures()
@@ -371,6 +373,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         history.readWithMacOSVoice = { [weak self] text, onEnd in self?.historySpeech.read(text, onEnd: onEnd) ?? .failed }
         spokenAttempts.onChange = { [weak history] in history?.spokenAudioChanged() }
+        spokenVoice.onVoiceUsed = { [weak self] in
+            guard let self else { return }
+            if let spoken = self.spokenResult {
+                spoken.voiceUsedElsewhere()
+            } else if self.settings.stt.eviction != .fastest {
+                self.voiceResidency.release()
+            }
+        }
+        controller.onMemoryPressure = { [weak self] in
+            guard let self else { return }
+            if let spoken = self.spokenResult { spoken.releaseVoice() } else { self.voiceResidency.release() }
+        }
         history.playHeldAudio = { [weak self] audio, onEnd in self?.historySpeech.play(audio, onEnd: onEnd) ?? .failed }
         history.stopHistorySpeech = { [weak self] in self?.historySpeech.stop() }
         controller.onSpokenReplyRecorded = { [weak self] attempt, entry in
@@ -561,7 +575,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     self?.refreshStatus()
                 },
                 onAction: { [weak self] id in self?.handleHotkeyAction(id) },
-                onCancel: { [weak self] key in self?.controller.cancelStartedByModifier(triggerKey: key) })
+                onCancel: { [weak self] key in self?.controller.cancelStartedByModifier(triggerKey: key) },
+                onEngage: { [weak self] key in self?.controller.handleEngage(triggerKey: key) },
+                onEngageDropped: { [weak self] key in self?.controller.handleEngageDropped(triggerKey: key) })
         } else {
             hotkey.update(bindings: bindings, actionBindings: actionBindings)
         }
@@ -785,7 +801,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     client: llmClient, permits: AIServiceCatalog.permits, speech: spokenVoice.makeSpeech(attempts: spokenAttempts),
                     settings: { [weak self] in self?.settings.codingAgents.spokenResult ?? SpokenResultSettings() },
                     connection: { [weak self] id in self?.config.connections.connection(id: id) },
-                    warm: { Task { await KokoroVoice.shared.warm() } },
+                    warm: { [voiceResidency] in voiceResidency.warm() },
+                    release: { [voiceResidency] in voiceResidency.release() },
+                    residency: { [weak self] in
+                        (self?.settings.stt.eviction ?? .fastest, self?.settings.stt.evictionIdleSeconds.map(Double.init))
+                    },
                     inFront: { [weak hub = runtime.hub] id in
                         guard let candidates = hub?.frontCandidates else { return false }
                         return await AgentFront.withoutAsking.shown(among: candidates) { _ in }?.id == id
@@ -823,6 +843,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsController.onOpenChange = nil
             spokenResult?.stop()
             spokenResult = nil
+            voiceResidency.release()
             controller.agents = nil
             settingsController.codingAgents.onRename = nil
             settingsController.codingAgents.onReloadNames = nil

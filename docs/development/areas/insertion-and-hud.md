@@ -21,7 +21,7 @@ Read before changing text insertion, pasteboard capture or restore, selection ca
   an agent delivery, a voice command's first act), in `rewriteSelection`, in `pasteLast`, and on every
   non-recording `render`. Take code reaches the HUD only through `HUDChannel`, never `HUDPresenting` directly.
   **Arming is deliberately outside this**: it shows no HUD (`ui_design.md` §5's timing contract — a
-  panel before admission invites speech that is discarded), so the panel is NOT key while the mic
+  panel before the mic is live invites speech it cannot record), so the panel is NOT key while the mic
   comes up and ESC does not reach us there. That is not a gap: `handleCommit`'s `.arming` case means
   the TRIGGER cancels an arming dictation — release for a hold trigger, second tap for a latched one.
   It also means a wedged bring-up can no longer swallow the user's typing, which it did when arming

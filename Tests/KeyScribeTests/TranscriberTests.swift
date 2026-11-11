@@ -39,8 +39,8 @@ struct TranscriberTests {
         }
         transcriber.logRecovery(
             engine: Engine(), audioSeconds: 2, reading: nil,
-            decision: .init(attempted: false, outcome: "skipped-streamed"))
+            decision: .init(attempted: true, outcome: "retry-deadline"))
         #expect(lines.count == 1)
-        #expect(lines.first?.contains("outcome=skipped-streamed") == true)
+        #expect(lines.first?.contains("outcome=retry-deadline") == true)
     }
 }

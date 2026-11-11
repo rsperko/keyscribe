@@ -23,6 +23,7 @@ final class DictationController {
     private let inserter: InsertOutput
     private let agentOutput: AgentOutput
     private let commandOutput: VoiceCommandOutput
+    private let agentTake: AgentTake
     private let rewriter: TakeRewrite
     private let engines: EngineKeeper
     private let audio: AudioCapturing
@@ -55,7 +56,7 @@ final class DictationController {
         get { engines.selfTestClipOverride }
         set { engines.selfTestClipOverride = newValue }
     }
-    private let hud: HUDChannel
+    let hud: HUDChannel
 
     private var machine = DictationMachine()
 
@@ -74,8 +75,9 @@ final class DictationController {
         let identity = DictationIdentity()
         let captureLoss = CaptureLossFlag()
         let recorder = TakeRecorder()
-        let voiceCommandStopsAtPress: Int
+        var voiceCommandStopsAtPress: Int
         var building: DictationRecord
+        var pendingPress: PendingPress?
         var pressedAt = DispatchTime.now()
         var capturedSnapshot: TargetSnapshot?
         var capturedPlan: ResolvedConfig?
@@ -119,8 +121,13 @@ final class DictationController {
         var agentDestination: String?
         var agentFacts: [HistoryEntry.Fact] = []
     }
+    private final class PendingPress {
+        let confirmed = SignalLatch()
+        var backstop: Task<Void, Never>?
+    }
     private var session: DictationSession?
     weak var spokenUpdates: SpokenResultOutput?
+    var onMemoryPressure: (() -> Void)?
     var spokenAttempts: SpokenAttempts?
     private(set) var lastSpokenReplyEntry: String?
     var onSpokenReplyRecorded: ((_ attempt: String?, _ entry: String) -> Void)?
@@ -151,24 +158,6 @@ final class DictationController {
             })
     }
 
-    private struct AgentSnapshot {
-        let names: [String: String]
-        let conversations: [AgentConversation]
-        let current: String?
-        var namesAvailable = true
-        var disconnected: [String: String] = [:]
-        var shared: [String: AgentRecipient.SharedName] = [:]
-        var late: [String: String] = [:]
-        var lateShared: [String: AgentRecipient.SharedName] = [:]
-        var rows: [String] { conversations.map(\.id) }
-        private var merged: (names: [String: String], shared: [String: AgentRecipient.SharedName]) {
-            AgentRecipient.addingLate(late, sharing: lateShared, to: names.merging(disconnected) { kept, _ in kept }, sharing: shared)
-        }
-        var addressable: [String: String] { merged.names }
-        var sharedNames: [String: AgentRecipient.SharedName] { merged.shared }
-        var spokenNames: [String] { AgentRecipient.spokenNames(addressable, shared: sharedNames) }
-        var afterVerbNames: [String] { AgentRecipient.afterVerbNames(sharedNames) }
-    }
     private var activeStartTrigger: String?
 
     private var building: DictationRecord {
@@ -184,16 +173,17 @@ final class DictationController {
     var captureBringUpTask: Task<Void, Never>? {
         get { session?.captureBringUpTask } set { session?.captureBringUpTask = newValue }
     }
-    var agentFrontTask: Task<Void, Never>? { session?.agentFrontTask }
+    var agentFrontTask: Task<Void, Never>? {
+        get { session?.agentFrontTask } set { session?.agentFrontTask = newValue }
+    }
     var hasFrozenAgentSnapshot: Bool { session?.agentSnapshot != nil }
+    var recordingDeadline: ContinuousClock.Instant? { session?.recorder.deadline }
     var snapshotAdoptionTask: Task<Void, Never>? {
         get { session?.snapshotAdoptionTask } set { session?.snapshotAdoptionTask = newValue }
     }
     var dictationTask: Task<Void, Never>? {
         get { session?.dictationTask } set { session?.dictationTask = newValue }
     }
-
-    private(set) var streamingCancelTask: Task<Void, Never>?
 
     func transcribeGateBusy() async -> Bool { await transcriber.gate.isBusy }
 
@@ -209,7 +199,7 @@ final class DictationController {
     private var captureTruncated = false
 
     // The synchronous flag catches loss before the main-actor handler runs.
-    private var captureWasLost: Bool {
+    var captureWasLost: Bool {
         captureTruncated || (session?.captureLoss.isLost ?? false)
     }
     private(set) var lastRecord: DictationRecord?
@@ -227,10 +217,13 @@ final class DictationController {
     private static let modelLoadDeadlineSeconds: Double = 300
 
     private var lastRenderedLevel: Float = -1
+    private var levelTicks = 0
+    private var tickedCountdown: RecordingCountdown?
+    private static let levelTicksPerRebuild = 15
 
     private var latchedTriggerName: String?
 
-    private static let cueAdmitPadSeconds: Double = 0.04
+    private static let cueTailPadSeconds: Double = 0.04
 
     private func pollLevelWhileRecording() {
         session?.recorder.pollLevel { [weak self] in
@@ -243,22 +236,34 @@ final class DictationController {
     private func renderLevel(_ level: Float) {
         guard case .recording = machine.state else { return }
         let quantized = (level * 20).rounded() / 20
+        let countdown = recordingCountdown
+        levelTicks += 1
+        if levelTicks % Self.levelTicksPerRebuild == 1 || countdown != tickedCountdown {
+            tickedCountdown = countdown
+            lastRenderedLevel = quantized
+            hud.presentIfChanged(recordingHUD(level: quantized))
+            return
+        }
+        guard quantized != lastRenderedLevel else { return }
         lastRenderedLevel = quantized
-        let state = recordingHUD(level: quantized)
-        guard hud.shown(state) != hud.lastPresented else { return }
-        hud.present(state)
+        hud.presentLevel(quantized)
     }
 
-    private func recordingHUD(level: Float) -> HUDState {
-        let countdown = session?.recorder.deadline.flatMap { deadline in
+    private var recordingCountdown: RecordingCountdown? {
+        session?.recorder.deadline.flatMap { deadline in
             RecordingCountdown(
                 remaining: Self.seconds(ContinuousClock.now.duration(to: deadline)),
                 warningSeconds: limitWarningSeconds)
         }
-        return .recording(mode: activeMode?.name, level: level, latchedTrigger: latchedTriggerName, countdown: countdown, agents: agentRoster)
     }
 
-    private nonisolated static func seconds(_ duration: Duration) -> Double {
+    private func recordingHUD(level: Float) -> HUDState {
+        .recording(
+            mode: activeMode?.name, level: level, latchedTrigger: latchedTriggerName, countdown: recordingCountdown,
+            agents: agentTake.roster)
+    }
+
+    nonisolated static func seconds(_ duration: Duration) -> Double {
         let parts = duration.components
         return Double(parts.seconds) + Double(parts.attoseconds) / 1e18
     }
@@ -362,6 +367,9 @@ final class DictationController {
         self.rewriter = TakeRewrite(client: llmClient, permits: permits, hud: self.hud)
         self.voiceCommands = voiceCommands ?? VoiceCommandRunner(findsInApps: { config.findsInAppsEnabled })
         self.commandOutput = VoiceCommandOutput(runner: self.voiceCommands, hud: self.hud, reporter: self.reporter)
+        self.agentTake = AgentTake(
+            hud: self.hud, output: self.agentOutput, voiceCommands: self.voiceCommands, submitKey: submitKey,
+            snapshotAsync: self.snapshotAsync, agentClipboard: agentClipboard)
         self.permits = permits
         self.recordModelLoadFailure = recordModelLoadFailure
         self.maxRecordingSeconds = maxRecordingSeconds
@@ -379,6 +387,7 @@ final class DictationController {
         agentOutput.noticesBlocked = { [weak self] in self.map { $0.machine.isBusy || $0.voiceCommands.pendingChoice != nil } ?? false }
         agentOutput.hide = { [weak self] in self?.scheduleHide(after: $0) }
         commandOutput.host = self
+        agentTake.host = self
         engines.host = self
     }
 
@@ -396,6 +405,10 @@ final class DictationController {
             // A tap-to-toggle user may never release; commit the available prefix now.
             handleCommit()
         case .arming:
+            if session?.pendingPress != nil {
+                cancelBeforeCaptureStarted()
+                return
+            }
             // Arming has no audio; report the microphone failure instead of a silent early release.
             cancelBeforeCaptureStarted()
             finishTruncatedCapture(transcript: "")
@@ -408,6 +421,7 @@ final class DictationController {
         let source = DispatchSource.makeMemoryPressureSource(eventMask: .critical, queue: .main)
         source.setEventHandler { [weak self] in
             MainActor.assumeIsolated {
+                self?.onMemoryPressure?()
                 guard let self, !self.isBusy else { return }
                 let active = self.provider.active
                 self.log.notice("memory pressure (critical): evicting \(active.id, privacy: .public)")
@@ -537,50 +551,110 @@ final class DictationController {
         scheduleHide(after: 8)
     }
 
+    var pressConfirmationBackstop: Duration = .seconds(1)
+
+    func handleEngage(triggerKey: String?) {
+        guard !isSessionLocked(), machine.state == .idle, micStatus() != .denied, !audio.inputIsBluetooth else { return }
+        let engine = provider.active
+        guard activeEngineUsable(engine), machine.beginArming() else { return }
+        engines.cancelIdleEviction()
+        captureRefreshTask?.cancel()
+        if !replayingKeys { keysTakenByHUD = [] }
+        let pending = PendingPress()
+        session = DictationSession(voiceCommandStopsAtPress: commandOutput.stops, building: DictationRecord(modeName: currentModeName))
+        session?.pendingPress = pending
+        session?.capturedEngine = engine
+        engines.protect(engine)
+        beginCapture()
+        pending.backstop = Task { @MainActor [weak self, backstop = pressConfirmationBackstop] in
+            try? await Task.sleep(for: backstop)
+            guard !Task.isCancelled else { return }
+            self?.dropUnconfirmedPress()
+        }
+    }
+
+    func handleEngageDropped(triggerKey: String?) {
+        dropUnconfirmedPress()
+    }
+
+    private func dropUnconfirmedPress() {
+        guard session?.pendingPress != nil, machine.state == .arming else { return }
+        cancelBeforeCaptureStarted()
+    }
+
+    private struct DeferredPress {
+        let triggerKey: String?
+        let pressStyle: PressStyle
+        let pressedAt: DispatchTime?
+        var released = false
+    }
+    private var droppingPress = false
+    private var deferredPress: DeferredPress?
+
     func handleStart(
         triggerKey: String? = nil, pressStyle: PressStyle = .holdOrTap, pressedAt: DispatchTime? = nil
     ) {
         // A wake key can reach the tap while the login window still owns the console.
         guard !isSessionLocked() else { return }
-        guard machine.beginArming() else {
-            if pressStyle == .startOnly { return }
-            if case .rewriting(_, _, _, _, true)? = hud.lastPresented {
-                insertLocalTranscriptNow()
-            } else {
-                playBusyPressCue()
-            }
+        if droppingPress, machine.state == .cancellingBringUp {
+            deferredPress = DeferredPress(triggerKey: triggerKey, pressStyle: pressStyle, pressedAt: pressedAt)
             return
         }
+        let engaged = machine.state == .arming ? session?.pendingPress : nil
+        if engaged == nil {
+            guard machine.beginArming() else {
+                if pressStyle == .startOnly { return }
+                if case .rewriting(_, _, _, _, true)? = hud.lastPresented {
+                    insertLocalTranscriptNow()
+                } else {
+                    playBusyPressCue()
+                }
+                return
+            }
+        }
         dictationStarts += 1
+        if !replayingKeys { keysTakenByHUD = [] }
         silencer.recordingStarted()
         activeStartTrigger = triggerKey
         latchedTriggerName = (pressStyle == .tapToToggle)
             ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
         hideTask?.cancel()
-        engines.cancelIdleEviction()
-        captureRefreshTask?.cancel()
-        session = DictationSession(voiceCommandStopsAtPress: commandOutput.stops, building: DictationRecord(modeName: currentModeName))
+        if let engaged {
+            session?.pendingPress = nil
+            session?.voiceCommandStopsAtPress = commandOutput.stops
+            engaged.backstop?.cancel()
+        } else {
+            engines.cancelIdleEviction()
+            captureRefreshTask?.cancel()
+            session = DictationSession(voiceCommandStopsAtPress: commandOutput.stops, building: DictationRecord(modeName: currentModeName))
+        }
         if let pressedAt {
             session?.pressedAt = pressedAt
             building.stageMillis[.grace] = elapsedMs(since: pressedAt)
         }
-        // A denied mic captures silence without throwing, so diagnose permission before starting.
-        if micStatus() == .denied {
-            finishError("Microphone access is off", action: .openMicrophoneSettings)
-            return
+        let engine: any SpeechEngine
+        if engaged != nil, let captured = session?.capturedEngine {
+            engine = captured
+        } else {
+            // A denied mic captures silence without throwing, so diagnose permission before starting.
+            if micStatus() == .denied {
+                finishError("Microphone access is off", action: .openMicrophoneSettings)
+                return
+            }
+            engine = provider.active
+            guard activeEngineUsable(engine) else {
+                finishError("The selected speech model is not installed", action: .openSpeechModels)
+                return
+            }
+            session?.capturedEngine = engine
+            engines.protect(engine)
+            // The mic comes up while the probe and mode resolution below run. Audio never leaves the machine,
+            // so nothing here needs the secure-field verdict first: everything content-bearing (preconnect,
+            // context, rewrite, history) waits for snapshot adoption. A press no mode can serve now opens the
+            // mic briefly and tears it down without a cue.
+            beginCapture()
         }
-        let engine = provider.active
-        guard activeEngineUsable(engine) else {
-            finishError("The selected speech model is not installed", action: .openSpeechModels)
-            return
-        }
-        session?.capturedEngine = engine
-        engines.protect(engine)
-        // The mic comes up while the probe and mode resolution below run. Audio never leaves the machine and
-        // admission stays closed until the start cue, so nothing here needs the secure-field verdict first:
-        // everything content-bearing (preconnect, context, rewrite, history) waits for snapshot adoption. A
-        // press no mode can serve now opens the mic briefly and tears it down without a cue.
-        beginCapture()
+        engaged?.confirmed.signal()
 
         // Capture secure-field state at press before any asynchronous work can change the target.
         let snapshotStart = DispatchTime.now()
@@ -601,7 +675,7 @@ final class DictationController {
                 guard let self else { return }
                 await self.resolveModeProbing(triggerKey: triggerKey)
                 guard !Task.isCancelled else { return }
-                // A late resolution must not show the HUD before admission opens.
+                // A late resolution must not show the HUD before the cue has played.
                 if self.machine.state == .recording {
                     self.hud.present(self.recordingHUD(level: max(0, self.lastRenderedLevel)))
                 } else if self.machine.state == .transcribing {
@@ -615,7 +689,7 @@ final class DictationController {
             guard machine.state == .arming else { return }
         }
 
-        // Keep the HUD hidden until audio admission opens; showing it earlier invites discarded speech.
+        // Keep the HUD hidden until the cue has played; showing it earlier invites speech before the mic is live.
         hud.present(.hidden)
 
         warmActiveEngine()
@@ -658,39 +732,10 @@ final class DictationController {
         }
     }
 
-    // Stand up the streaming driver + writer→driver feed, or nil when streaming is off / the engine can't
-    // stream (the sole gate — the pipeline never branches on flag identity again). Returns the writer-thread
-    // sink; nil keeps the batch path byte-for-byte.
-    private func setUpStreamingIfEnabled(sampleRate: Int) -> (@Sendable ([Float]) -> Void)? {
-        guard settings.features.isEnabled(.streamingTranscription), activeEngine.supportsStreaming,
-              let recorder = session?.recorder else { return nil }
-        let identity = session?.identity
-        return recorder.startStreaming(sampleRate: sampleRate, makeSession: { [weak self] in
-            guard let self, let identity else { throw CancellationError() }
-            return try await self.makeStreamingSession(for: identity)
-        })
-    }
-
-    // Built lazily at the deferred-start crossing (seconds into the recording), so the mode has resolved and
-    // its recognition bias is known. Goes through the SerializedEngine wrapper, which holds the exclusive
-    // lock for the session's whole lifetime.
-    private func makeStreamingSession(for identity: DictationIdentity) async throws -> any StreamingSpeechSession {
-        // A SUCCESSOR can start while this deferred-start build is suspended (MainActor hop, mode-resolve
-        // await, analyzer setup). Bind to THIS dictation's identity across EVERY suspension: if the live
-        // session is gone or is a different dictation, don't open — opening would (a) escape captured-engine
-        // discipline by reading the successor's `provider.active`, and (b) steal + lock the successor's engine
-        // and consume its one-shot analyzer. Throw so the driver degrades to batch, no lock taken. Check
-        // BEFORE the mode-resolve await too, so we wait on THIS dictation's mode task, not a successor's.
-        guard session?.identity === identity else { throw StreamingSessionUnavailable() }
-        await session?.modeResolveTask?.value
-        guard let session, session.identity === identity, let engine = session.capturedEngine else {
-            throw StreamingSessionUnavailable()
-        }
-        return try await engine.makeStreamingSession(sampleRate: engine.captureSampleRate, biasTerms: recognitionBiasTerms())
-    }
-
     private func beginCapture() {
         lastRenderedLevel = 0
+        levelTicks = 0
+        tickedCountdown = nil
         captureTruncated = false
         // Bound to THIS dictation's identity and installed before arming, so AudioCapture snapshots it into
         // the session it belongs to. Without that, the main-actor hop below could deliver a dead capture's
@@ -705,11 +750,10 @@ final class DictationController {
         }
         let sampleRate = activeEngine.captureSampleRate
         let wantsSamples = activeEngine.supportsSampleInput
-        let onSamples = setUpStreamingIfEnabled(sampleRate: sampleRate)
         // Detached so bring-up starts NOW, while the caller still holds the main actor for the press probe and
         // mode resolution. A main-actor task would not begin until handleStart returned.
         let starting = Task.detached(priority: .userInitiated) { [audio] in
-            try await audio.start(sampleRate: sampleRate, wantsSamples: wantsSamples, onSamples: onSamples)
+            try await audio.start(sampleRate: sampleRate, wantsSamples: wantsSamples)
         }
         captureBringUpTask = Task { @MainActor [weak self] in
             guard let self else { starting.cancel(); return }
@@ -731,6 +775,12 @@ final class DictationController {
                     }
                     return
                 }
+                if let pending = self.session?.pendingPress {
+                    pending.backstop?.cancel()
+                    self.session?.pendingPress = nil
+                    self.finishCanceledBringUp(stopAudio: false)
+                    return
+                }
                 self.log.error("bring-up failed: \(String(describing: error), privacy: .public)")
                 if case AudioCaptureError.preferredInputFailed = error {
                     let name = self.settings.audio.inputDeviceName ?? "selected microphone"
@@ -743,22 +793,21 @@ final class DictationController {
                 }
                 return
             }
+            if let pending = self.session?.pendingPress { await pending.confirmed.wait() }
             // Released or cancelled while the mic was coming up: nothing to record, so tear the capture
             // back down and bail.
             guard !Task.isCancelled, self.machine.state == .arming else {
                 self.finishCanceledBringUp(stopAudio: true)
                 return
             }
-            // The mic is live, so the cue can honestly invite speech. It plays into an OPEN mic, so admission
-            // opens only at cue end: the cue stays out of the recording and speech right after it is kept
-            // whole. No cue (sounds off) ⇒ a 0 boundary admits from here.
+            // The mic is live, so the cue can honestly invite speech. The mic has been recording since its first
+            // buffer and the cue stays in the recording: cutting it out would also cut the speech under it, which
+            // costs more words than the cue does.
             self.session?.effectsBegan = true
             let cueSeconds = self.effects.begin(self.settings.duringDictation)
-            let hold = cueSeconds > 0 ? cueSeconds + Self.cueAdmitPadSeconds : 0
-            self.audio.openAdmission(
-                afterHostTime: hold > 0 ? mach_absolute_time() &+ AudioCapture.hostTicks(seconds: hold) : 0)
-            // Hold "Listening" and the duck until the cue actually ends, so the go-signal and the mute never
-            // precede the admission boundary.
+            let hold = cueSeconds > 0 ? cueSeconds + Self.cueTailPadSeconds : 0
+            // Hold "Listening" and the duck until the cue actually ends, so the HUD never precedes the go-signal
+            // and the mute never swallows it.
             if hold > 0 {
                 try? await Task.sleep(nanoseconds: UInt64(hold * 1e9))
                 guard !Task.isCancelled, self.machine.state == .arming else {
@@ -793,7 +842,7 @@ final class DictationController {
     }
 
     private var recordingLimitSeconds: Double { session?.recorder.limitSeconds ?? maxRecordingSeconds }
-    private var limitPhrase: String { RecordingLimit.phrase(seconds: recordingLimitSeconds) }
+    var limitPhrase: String { RecordingLimit.phrase(seconds: recordingLimitSeconds) }
 
     static let rewriteSkippedAtLimitReason = "The recording limit stopped this dictation, so the rewrite was skipped."
 
@@ -809,11 +858,7 @@ final class DictationController {
         session?.rewriteEscapeTask?.cancel()
         session?.precedingTextTask?.cancel()
         session?.agentFrontTask?.cancel()
-        // Streaming teardown on EVERY terminal (commit, cancel, error): finish the feed and
-        // cancel the driver so a session still holding the SerializedEngine lock releases it. Idempotent — a
-        // committed dictation already finalized (driver.finish marked it done), so cancel is a no-op there;
-        // an aborted dictation with a live session gets its lock freed here (else the engine wedges).
-        if let teardown = session?.recorder.tearDown() { streamingCancelTask = teardown }
+        session?.recorder.tearDown()
         engines.releaseProtection()
         discardPrefetchedClipboard()
         session = nil
@@ -826,6 +871,10 @@ final class DictationController {
     }
 
     func handleCommit() {
+        if deferredPress != nil {
+            deferredPress?.released = true
+            return
+        }
         switch machine.state {
         case .arming:
             // Released before the mic went live — nothing to transcribe; tear the pending bring-up down.
@@ -898,32 +947,7 @@ final class DictationController {
                 }
                 return
             }
-            // If a streaming session opened, its finalize (post-release inference) produces the transcript;
-            // else the driver degraded to batch. Runs after finishDraining, so every sample (incl. the tail)
-            // is fed. Bounded by the transcribe deadline gate (finalizeStreamingIfActive): a wedged finalize
-            // is terminal — abandoned, never a same-engine batch fallback (the abandoned session still holds
-            // the engine lock, so a fallback would queue behind it forever).
-            switch await self.finalizeStreamingIfActive(audioSeconds: audioSeconds ?? 0) {
-            case .streamed(let text):
-                // The streamed arm never re-transcribes, so it has no use for the PCM copy — drop it here
-                // rather than carry a multi-MiB buffer through the call for nothing.
-                await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: nil, reading: reading, streamedTranscript: text)
-            case .batch:
-                await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: samples, reading: reading, streamedTranscript: nil)
-            case .busy:
-                try? FileManager.default.removeItem(at: url)
-                self.transcriber.noteBusyRejection()
-                if Task.isCancelled { return }
-                self.log.error("streaming finalize rejected — previous transcription still running (\(self.activeEngine.id, privacy: .public))")
-                self.finishError("Still finishing the previous dictation")
-            case .timedOut:
-                try? FileManager.default.removeItem(at: url)
-                if Task.isCancelled { return }
-                self.log.error("streaming finalize timed out (\(self.activeEngine.id, privacy: .public))")
-                self.finishError("Transcription timed out")
-            case .cancelled:
-                try? FileManager.default.removeItem(at: url)
-            }
+            await self.transcribeAndInsert(url: url, audioSeconds: audioSeconds, samples: samples, reading: reading)
         }
     }
 
@@ -1007,7 +1031,7 @@ final class DictationController {
         }
     }
 
-    private static func origin(of snapshot: TargetSnapshot) -> VoiceCommandOrigin? {
+    static func origin(of snapshot: TargetSnapshot) -> VoiceCommandOrigin? {
         snapshot.bundleId.map { VoiceCommandOrigin(bundleId: $0, pid: snapshot.pid, windowId: snapshot.focusedWindowId) }
     }
 
@@ -1098,14 +1122,14 @@ final class DictationController {
 
     func cancelVoiceCommandChoice(choice id: Int) { commandOutput.cancel(choice: id) }
 
-    private func finishCommandCaptureLost() {
+    func finishCommandCaptureLost() {
         log.error("capture lost mid-recording — voice command not run")
         finish(machine: .finish(.failed), cue: .error,
                state: .error(message: "The microphone stopped, so the command did not run.", action: nil),
                hideAfter: 8, record: (.failed, "capture lost mid-recording"))
     }
 
-    private func finishNoSpeech() {
+    func finishNoSpeech() {
         guard machine.beginInserting() else { return }
         hud.relinquishKeyFocus()
         let completion = DictationCompletion(
@@ -1116,7 +1140,7 @@ final class DictationController {
     }
 
     // The user threw the take away by voice: nothing is inserted or kept in History, like a cancel.
-    private func finishDiscarded() {
+    func finishDiscarded() {
         guard machine.beginInserting() else { return }
         hud.relinquishKeyFocus()
         let completion = DictationCompletion(
@@ -1159,62 +1183,13 @@ final class DictationController {
                hideAfter: 8, record: (.noSpeech, nil), completion: completion)
     }
 
-    private enum StreamingFinalizeOutcome {
-        case streamed(String)   // streaming produced the transcript — use it, no batch transcribe
-        case batch              // no session opened, or the driver degraded — run the batch transcribe
-        case busy               // the transcribe gate is still occupied by a prior wedged transcribe/finalize
-        case timedOut           // this finalize wedged past the deadline; the session may still hold the lock
-        case cancelled          // the commit task was cancelled mid-finalize — terminal, no error to show
-    }
-
-    // The dictation ended before the deferred-start session finished building; the driver degrades to batch.
-    private struct StreamingSessionUnavailable: Error {}
-
-    // Test seam: the streaming-finalize deadline. Production scales with the recording length exactly like
-    // the batch transcribe deadline; tests override it to force the deadline in bounded time.
-    var streamingFinalizeTimeoutOverride: Double?
-    private func streamingFinalizeTimeout(audioSeconds: Double) -> Double {
-        streamingFinalizeTimeoutOverride ?? max(30, audioSeconds * 20)
-    }
-
-    // Close the feed and finalize under the SAME single-flight deadline gate as the batch transcribe.
-    // Wrapping the WHOLE thing — the feed-drain await AND driver.finish() — is load-bearing: a wedged append
-    // hangs at `await feedTask?.value` before finalize, so bounding finalize alone wouldn't save the commit.
-    // On deadline/Busy the finalize is terminal (never a same-engine batch fallback: the abandoned session
-    // holds the engine's exclusive lock forever) — the gate stays closed until it settles and the next press
-    // reports "Still finishing…". Stamps .streamFinalize on success.
-    private func finalizeStreamingIfActive(audioSeconds: Double) async -> StreamingFinalizeOutcome {
-        guard let recorder = session?.recorder, recorder.isStreaming else { return .batch }
-        await awaitSelfTestClearance()
-        let finalized = await recorder.finalizeStreaming(
-            gate: transcriber.gate, timeout: streamingFinalizeTimeout(audioSeconds: audioSeconds))
-        switch finalized {
-        case nil: return .batch
-        case .busy: return .busy
-        case .cancelled: return .cancelled   // a user cancel, not a wedge — don't misreport it as a timeout
-        case .timedOut: return .timedOut
-        case .streamed(let text, let milliseconds):
-            transcriber.resetBusyStreak()
-            building.stageMillis[.streamFinalize] = milliseconds
-            return .streamed(text)
-        case .fellBackToBatch(let fellBehind):
-            transcriber.resetBusyStreak()
-            if fellBehind {
-                log.debug("streaming fell behind real time — falling back to batch transcription")
-            } else {
-                log.debug("streaming fell back to batch transcription")
-            }
-            return .batch
-        }
-    }
-
     // The pressed key belongs only to modes that cannot run here, and the Direct floor does not own it
     // either — so this press was never ours to serve.
     //
     // The mic is already coming up (beginCapture runs before resolution). If the start cue has not played,
     // tear it down silently: no cue, no HUD, like the chord grace discarding a pending arm. Once it has
     // played — a URL/window-title probe can land after the cue — cancel audibly so the go-signal is answered.
-    // The probe is bounded at 0.6s and usually returns before admission opens, so nothing is recorded.
+    // The probe is bounded at 0.6s and usually returns before the cue; what the mic heard is discarded.
     // `.cancel`, not `.error`: nothing is wrong, the key just does not apply here.
     private func abortPressWithNoEligibleMode() {
         log.notice(
@@ -1231,6 +1206,11 @@ final class DictationController {
     }
 
     private func cancelBeforeCaptureStarted(silently: Bool = false) {
+        let unconfirmed = session?.pendingPress
+        session?.pendingPress = nil
+        unconfirmed?.backstop?.cancel()
+        defer { unconfirmed?.confirmed.signal() }
+        let silently = silently || unconfirmed != nil
         // Release/ESC during the cue is a release during bring-up (the unit comes up under the cue). Cancel
         // the bring-up task so a fast bring-up sitting in the cue-end hold wakes at once (its guards see
         // `.isCancelled` and tear the mic down) rather than staying live until the hold expires. The task's
@@ -1243,6 +1223,7 @@ final class DictationController {
             finish(machine: .cancel, cue: silently ? nil : .cancel, state: .hidden)
             return
         }
+        droppingPress = unconfirmed != nil
         // Surface the cancel now, but defer the release tail to finishCanceledBringUp so the in-flight
         // bring-up task unwinds first.
         machine.beginCancellingBringUp()
@@ -1256,6 +1237,12 @@ final class DictationController {
             try? FileManager.default.removeItem(at: url)
         }
         finish(machine: .cancel, cue: nil, state: nil)
+        droppingPress = false
+        if let deferred = deferredPress {
+            deferredPress = nil
+            handleStart(triggerKey: deferred.triggerKey, pressStyle: deferred.pressStyle, pressedAt: deferred.pressedAt)
+            if deferred.released { handleCommit() }
+        }
     }
 
     // The modes whose eligibility the frontmost bundle cannot settle on its own, so a URL or window-title
@@ -1287,7 +1274,7 @@ final class DictationController {
         session?.shortcutCandidates = choice.shortcutCandidates
         session?.triggerDisplay = choice.triggerDisplay
         activeMode = securePolicyApplied(chosen)
-        freezeAgentRecipient()
+        agentTake.freezeRecipient()
         session?.modeReady = true
         claimOrDismissVoiceCommandChoice()
         onModeAndSnapshotReady()
@@ -1391,7 +1378,7 @@ final class DictationController {
     // abandons a true hang. The gate runs the engine as an unstructured task, so even an engine that ignores
     // cancellation is abandoned at the deadline; a late result no-ops. An abandoned transcribe may still run,
     // so the gate refuses a second concurrent call (throws `Busy`) until it settles — two never run at once.
-    // Test seam, mirroring streamingFinalizeTimeoutOverride: production scales the deadline with the recording
+    // Test seam: production scales the deadline with the recording
     // length; tests pin it to exercise the retry's budget check in bounded time.
     var transcribeTimeoutOverride: Double? {
         get { transcriber.timeoutOverride }
@@ -1403,7 +1390,7 @@ final class DictationController {
         set { transcriber.recoveryObserver = newValue }
     }
 
-    private func transcribeAndInsert(url: URL, audioSeconds: Double?, samples: [Float]? = nil, reading: SpeechPresenceReading? = nil, streamedTranscript: String? = nil) async {
+    private func transcribeAndInsert(url: URL, audioSeconds: Double?, samples: [Float]? = nil, reading: SpeechPresenceReading? = nil) async {
         let transcribesWithoutTheMode = session?.capturedRecognitionBias == false
         if !transcribesWithoutTheMode { await settleModeAndTarget() }
         // A password field can steal focus AFTER adoption settled (autofill, a manager prompt, the user
@@ -1416,128 +1403,113 @@ final class DictationController {
         let recovery = Transcriber.RecoveryProgress()
 
         let rawFromEngine: String
-        if let streamedTranscript {
-            // Streaming already produced the transcript during capture (finalize ran in handleCommit). No
-            // batch transcribe, no .transcribe stage. The model-load block is skipped: a finalized session
-            // proves the model is loaded, so running load machinery here could only fabricate an impossible
-            // "model load failed" after a successful transcript.
-            rawFromEngine = streamedTranscript
-            // A streamed session is spent once finalized and its PCM is deliberately dropped, so there is
-            // nothing to retry on — record the decision rather than leaving the streamed arm silent.
-            if streamedTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                self.transcriber.logRecovery(engine: engine, audioSeconds: audioSeconds ?? 0, reading: reading,
-                                 decision: Transcriber.RecoveryDecision(attempted: false, outcome: "skipped-streamed"))
+        // Load the model OUTSIDE the bounded transcribe. A CoreML/MLX compile is a one-time cost (632 MB
+        // measured ~140 s even from a compiled cache), so counting it against the transcribe deadline
+        // (≥30 s) both false-times-out a healthy load and leaves the gate `Busy` (the abandoned load keeps
+        // running) until it settles. Awaiting the single warm load (started at press) keeps the deadline
+        // on inference.
+        func loadOnce() async throws {
+            try await runWithDeadline(seconds: Self.modelLoadDeadlineSeconds) { [task = engines.warm(engine)] in
+                try await task.value
             }
+        }
+        func settledBeforeFailing() async -> Bool {
+            if transcribesWithoutTheMode { await settleModeAndTarget() }
+            return !Task.isCancelled
+        }
+        func failModelLoadTerminal(_ error: Error) async {
             try? FileManager.default.removeItem(at: url)
-        } else {
-            // Load the model OUTSIDE the bounded transcribe. A CoreML/MLX compile is a one-time cost (632 MB
-            // measured ~140 s even from a compiled cache), so counting it against the transcribe deadline
-            // (≥30 s) both false-times-out a healthy load and leaves the gate `Busy` (the abandoned load keeps
-            // running) until it settles. Awaiting the single warm load (started at press) keeps the deadline
-            // on inference.
-            func loadOnce() async throws {
-                try await runWithDeadline(seconds: Self.modelLoadDeadlineSeconds) { [task = engines.warm(engine)] in
-                    try await task.value
-                }
-            }
-            func settledBeforeFailing() async -> Bool {
-                if transcribesWithoutTheMode { await settleModeAndTarget() }
-                return !Task.isCancelled
-            }
-            func failModelLoadTerminal(_ error: Error) async {
-                try? FileManager.default.removeItem(at: url)
-                engines.invalidateWarm(engine.id)
-                let timedOut = error is DeadlineExceeded
-                recordModelLoadFailure(engine.id, timedOut, String(describing: error))
-                log.error("model load \(timedOut ? "timed out" : "failed", privacy: .public) (\(engine.id, privacy: .public)): \(error, privacy: .public)")
-                guard await settledBeforeFailing() else { return }
-                finishError(timedOut ? "Loading the speech model timed out" : "Could not load the speech model")
-            }
-            let modelWaitStart = DispatchTime.now()
-            // A resident model resolves loadOnce() in ~0 ms; a cold load can run seconds (~140 s for a big ANE
-            // model). Rather than leave the HUD on "Transcribing" — a lie during a load — name the wait once
-            // it exceeds ~1 s. Cancelled on resolution; guarded on machine.state so a cancel can't render it stale.
-            let loadingHUD = scheduleLoadingModelHUD()
+            engines.invalidateWarm(engine.id)
+            let timedOut = error is DeadlineExceeded
+            recordModelLoadFailure(engine.id, timedOut, String(describing: error))
+            log.error("model load \(timedOut ? "timed out" : "failed", privacy: .public) (\(engine.id, privacy: .public)): \(error, privacy: .public)")
+            guard await settledBeforeFailing() else { return }
+            finishError(timedOut ? "Loading the speech model timed out" : "Could not load the speech model")
+        }
+        let modelWaitStart = DispatchTime.now()
+        // A resident model resolves loadOnce() in ~0 ms; a cold load can run seconds (~140 s for a big ANE
+        // model). Rather than leave the HUD on "Transcribing" — a lie during a load — name the wait once
+        // it exceeds ~1 s. Cancelled on resolution; guarded on machine.state so a cancel can't render it stale.
+        let loadingHUD = scheduleLoadingModelHUD()
+        do {
+            try await loadOnce()
+        } catch {
+            if Task.isCancelled { loadingHUD.cancel(); try? FileManager.default.removeItem(at: url); return }
+            // A genuine 300 s hang is not retried — a second wait is worse than surfacing.
+            if error is DeadlineExceeded { loadingHUD.cancel(); await failModelLoadTerminal(error); return }
+            // One automatic retry: a cold CoreML/MLX compile can fail transiently right after launch; a
+            // fresh reload usually succeeds. invalidateWarm drops the failed task so warm(engine) builds a
+            // new one; the HUD stays on `transcribing`, so a recovered transient is invisible. Mirrors the
+            // pipeline's one-retry policy (design.md §4.2).
+            engines.invalidateWarm(engine.id)
+            log.notice("model load failed, retrying once (\(engine.id, privacy: .public)): \(error, privacy: .public)")
             do {
                 try await loadOnce()
             } catch {
-                if Task.isCancelled { loadingHUD.cancel(); try? FileManager.default.removeItem(at: url); return }
-                // A genuine 300 s hang is not retried — a second wait is worse than surfacing.
-                if error is DeadlineExceeded { loadingHUD.cancel(); await failModelLoadTerminal(error); return }
-                // One automatic retry: a cold CoreML/MLX compile can fail transiently right after launch; a
-                // fresh reload usually succeeds. invalidateWarm drops the failed task so warm(engine) builds a
-                // new one; the HUD stays on `transcribing`, so a recovered transient is invisible. Mirrors the
-                // pipeline's one-retry policy (design.md §4.2).
-                engines.invalidateWarm(engine.id)
-                log.notice("model load failed, retrying once (\(engine.id, privacy: .public)): \(error, privacy: .public)")
-                do {
-                    try await loadOnce()
-                } catch {
-                    loadingHUD.cancel()
-                    if Task.isCancelled { try? FileManager.default.removeItem(at: url); return }
-                    await failModelLoadTerminal(error)
-                    return
-                }
-            }
-            modelLoadedForTesting?()
-            loadingHUD.cancel()
-            // A load that finished as the cancel landed still returns success; rendering now would re-show a
-            // dismissed HUD.
-            if Task.isCancelled { try? FileManager.default.removeItem(at: url); return }
-            // Flip back to Transcribing for the inference that follows. A no-op (render dedupes) unless the
-            // loading-model state was actually shown during a slow load.
-            hud.present(.transcribing(mode: currentModeName))
-            building.stageMillis[.modelWait] = elapsedMs(since: modelWaitStart)
-
-            let transcribeStart = DispatchTime.now()
-            let clipboardSnapshot = startClipboardPrefetch()
-            do {
-                await awaitSelfTestClearance()
-                rawFromEngine = try await transcriber.transcribe(
-                    audioSeconds: audioSeconds ?? 0, biasTerms: recognitionBiasTerms(), engine: engine, url: url, samples: samples,
-                    reading: reading, recovery: recovery)
-                transcriber.resetBusyStreak()
-            } catch is SingleFlightDeadline.Busy {
-                try? FileManager.default.removeItem(at: url)
-                transcriber.noteBusyRejection()
-                if Task.isCancelled { return }
-                log.error("transcribe rejected — previous transcription still running (\(engine.id, privacy: .public))")
-                guard await settledBeforeFailing() else { return }
-                finishError("Still finishing the previous dictation")
-                return
-            } catch is DeadlineExceeded {
-                try? FileManager.default.removeItem(at: url)
-                // A user cancel cancels this task too; cancel() already handled the terminal state, so a
-                // late deadline/error must not stomp the next dictation's HUD/effects/state.
-                if Task.isCancelled { return }
-                // The deadline landed during the retry: the engine already returned nothing on a take with
-                // speech in it, so this is that silent failure — not a timeout to hand the user. The
-                // abandoned call keeps the gate closed exactly as it does for any other deadline.
-                if let trimmedSeconds = recovery.retryTrimmedSeconds {
-                    self.transcriber.logRecovery(
-                        engine: engine, audioSeconds: audioSeconds ?? 0, reading: reading,
-                        decision: Transcriber.RecoveryDecision(
-                            attempted: true, outcome: "retry-deadline", trimmedSeconds: trimmedSeconds))
-                    guard await settledBeforeFailing() else { return }
-                    finishHeardButNoText(engine: engine)
-                    return
-                }
-                log.error("transcribe timed out (\(engine.id, privacy: .public))")
-                guard await settledBeforeFailing() else { return }
-                finishError("Transcription timed out")
-                return
-            } catch {
-                try? FileManager.default.removeItem(at: url)
-                if Task.isCancelled { return }
-                log.error("transcribe failed (\(engine.id, privacy: .public)): \(error, privacy: .public)")
-                guard await settledBeforeFailing() else { return }
-                finishError("Transcription failed")
+                loadingHUD.cancel()
+                if Task.isCancelled { try? FileManager.default.removeItem(at: url); return }
+                await failModelLoadTerminal(error)
                 return
             }
-            try? FileManager.default.removeItem(at: url)
-            building.stageMillis[.transcribe] = elapsedMs(since: transcribeStart)
-            await clipboardSnapshot?.value
         }
+        modelLoadedForTesting?()
+        loadingHUD.cancel()
+        // A load that finished as the cancel landed still returns success; rendering now would re-show a
+        // dismissed HUD.
+        if Task.isCancelled { try? FileManager.default.removeItem(at: url); return }
+        // Flip back to Transcribing for the inference that follows. A no-op (render dedupes) unless the
+        // loading-model state was actually shown during a slow load.
+        hud.present(.transcribing(mode: currentModeName))
+        building.stageMillis[.modelWait] = elapsedMs(since: modelWaitStart)
+
+        let transcribeStart = DispatchTime.now()
+        let clipboardSnapshot = startClipboardPrefetch()
+        do {
+            await awaitSelfTestClearance()
+            rawFromEngine = try await transcriber.transcribe(
+                audioSeconds: audioSeconds ?? 0, biasTerms: recognitionBiasTerms(), engine: engine, url: url, samples: samples,
+                reading: reading, recovery: recovery)
+            transcriber.resetBusyStreak()
+        } catch is SingleFlightDeadline.Busy {
+            try? FileManager.default.removeItem(at: url)
+            transcriber.noteBusyRejection()
+            if Task.isCancelled { return }
+            log.error("transcribe rejected — previous transcription still running (\(engine.id, privacy: .public))")
+            guard await settledBeforeFailing() else { return }
+            finishError("Still finishing the previous dictation")
+            return
+        } catch is DeadlineExceeded {
+            try? FileManager.default.removeItem(at: url)
+            // A user cancel cancels this task too; cancel() already handled the terminal state, so a
+            // late deadline/error must not stomp the next dictation's HUD/effects/state.
+            if Task.isCancelled { return }
+            // The deadline landed during the retry: the engine already returned nothing on a take with
+            // speech in it, so this is that silent failure — not a timeout to hand the user. The
+            // abandoned call keeps the gate closed exactly as it does for any other deadline.
+            if let trimmedSeconds = recovery.retryTrimmedSeconds {
+                self.transcriber.logRecovery(
+                    engine: engine, audioSeconds: audioSeconds ?? 0, reading: reading,
+                    decision: Transcriber.RecoveryDecision(
+                        attempted: true, outcome: "retry-deadline", trimmedSeconds: trimmedSeconds))
+                guard await settledBeforeFailing() else { return }
+                finishHeardButNoText(engine: engine)
+                return
+            }
+            log.error("transcribe timed out (\(engine.id, privacy: .public))")
+            guard await settledBeforeFailing() else { return }
+            finishError("Transcription timed out")
+            return
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            if Task.isCancelled { return }
+            log.error("transcribe failed (\(engine.id, privacy: .public)): \(error, privacy: .public)")
+            guard await settledBeforeFailing() else { return }
+            finishError("Transcription failed")
+            return
+        }
+        try? FileManager.default.removeItem(at: url)
+        building.stageMillis[.transcribe] = elapsedMs(since: transcribeStart)
+        await clipboardSnapshot?.value
         if transcribesWithoutTheMode {
             if Task.isCancelled { return }
             await settleModeAndTarget()
@@ -1592,7 +1564,7 @@ final class DictationController {
         activeMode = finalMode
         session?.pendingHeardTranscript = raw
         if let finalMode, finalMode.output == .agent {
-            await finishAgentTake(routed: routed, heard: raw, mode: finalMode)
+            await agentTake.finish(routed: routed, heard: raw, mode: finalMode)
             return
         }
         let (final, rewrite, transformed) = await produceFinalText(routed: routed, mode: finalMode)
@@ -1623,537 +1595,32 @@ final class DictationController {
             clearRewriteEscapeHatch()
             finishDiscarded()
         case (.insert(let text, _, _), .agent(let id, let facts)):
-            await deliverToAgent(id, text: text, heard: heard, transformed: transformed, rewrite: rewrite, facts: facts)
+            await agentTake.deliver(id, text: text, heard: heard, transformed: transformed, rewrite: rewrite, facts: facts)
         case (.insert(let text, let bare, let submit), .cursor):
             await finishInsertion(transcript: text, heard: heard, transformed: transformed, rewrite: rewrite, bare: bare, submitOverride: submit)
         }
     }
 
-    private func freezeAgentRecipient() {
-        guard let agents, settings.features.isEnabled(.codingAgents),
-              session?.eligibleModes.contains(where: { $0.output == .agent }) == true
-        else { return }
-        agents.refresh()
-        agents.readPlaces()
-        let snapshot = AgentSnapshot(
-            names: agents.names, conversations: agents.recordingOrder, current: agents.current,
-            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames, shared: agents.sharedNames)
-        session?.agentSnapshot = snapshot
-        guard let mode = activeMode, mode.output == .agent else { return }
-        session?.agentRecipient = AgentRecipient.initial(
-            target: mode.agent.target, current: snapshot.current, names: snapshot.names)
-        followAgentInFront(target: mode.agent.target, snapshot: snapshot, through: agents)
+    var frontReadingGrace: Duration {
+        get { agentTake.frontReadingGrace } set { agentTake.frontReadingGrace = newValue }
+    }
+    var placeNamesGrace: Duration {
+        get { agentTake.placeNamesGrace } set { agentTake.placeNamesGrace = newValue }
+    }
+    var promptBoxConfirmation: Duration {
+        get { agentTake.promptBoxConfirmation } set { agentTake.promptBoxConfirmation = newValue }
     }
 
-    var frontReadingGrace: Duration = .seconds(1)
-    var placeNamesGrace: Duration = .seconds(1)
+    static func unconnectedLine(_ meant: [AgentHub.Unconnected]) -> String { AgentTake.unconnectedLine(meant) }
 
-    private func settlePlaceNames(_ agents: AgentHub) async -> Bool {
-        if let reading = agents.placeTracker?.reading {
-            _ = try? await runWithDeadline(seconds: Self.seconds(placeNamesGrace)) { await reading.value }
-        }
-        let ids = (session?.agentSnapshot?.conversations ?? agents.directory.conversations).map(\.id)
-        return agents.placeTracker?.reading == nil && !agents.placesUnread(ids)
-    }
-
-    private func followAgentInFront(target: Mode.Agent.Target, snapshot: AgentSnapshot, through agents: AgentHub) {
-        guard target == .current else { return }
-        let identity = session?.identity
-        session?.agentFrontTask?.cancel()
-        session?.agentFrontTask = Task { @MainActor [weak self, weak agents] in
-            guard let shown = await agents?.sessionInFrontWithoutAsking(), let self, !Task.isCancelled,
-                  let identity, self.session?.identity === identity,
-                  self.session?.agentFrontCutoff.map({ ContinuousClock.now <= $0 }) ?? true,
-                  snapshot.rows.contains(shown.id) || snapshot.disconnected.values.contains(shown.id),
-                  self.capturedSnapshot.flatMap(Self.origin)?.leaving(shown).session == shown.id
-            else { return }
-            self.session?.agentRecipient = AgentRecipient.Frozen(id: shown.id, source: .front)
-            if case .recording = self.machine.state {
-                self.hud.present(self.recordingHUD(level: max(0, self.lastRenderedLevel)))
-            }
-        }
-    }
-
-    private func settleAgentInFront() async {
-        guard let task = session?.agentFrontTask else { return }
-        let left = session?.agentFrontCutoff.map { ContinuousClock.now.duration(to: $0) } ?? frontReadingGrace
-        if left > .zero { _ = try? await runWithDeadline(seconds: Self.seconds(left)) { await task.value } }
-        task.cancel()
-    }
-
-    private var agentRoster: AgentRoster? {
-        guard activeMode?.output == .agent, let agents, let snapshot = session?.agentSnapshot else { return nil }
-        return AgentRoster(
-            frozen: snapshot.conversations, live: agents.directory.conversations, recipient: session?.agentRecipient,
-            namesAvailable: snapshot.namesAvailable, disconnected: snapshot.namesAvailable ? agents.disconnected : [])
-    }
-
-    private func finishAgentTake(routed: PhaseBResult, heard: String, mode: Mode) async {
-        guard let agents, settings.features.isEnabled(.codingAgents) else {
-            finishError("Talking to coding agents is turned off")
-            return
-        }
-        guard !routed.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            finishNoSpeech()
-            return
-        }
-        let pressed = session?.agentSnapshot ?? AgentSnapshot(
-            names: agents.names, conversations: agents.recordingOrder, current: agents.current,
-            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames, shared: agents.sharedNames)
-        func recipient(in snapshot: AgentSnapshot) -> AgentRecipient.Frozen? {
-            session?.agentRecipient ?? AgentRecipient.initial(target: mode.agent.target, current: snapshot.current, names: snapshot.names)
-        }
-        switch VoiceCommandGrammar.parse(routed.transcript) {
-        case .goBack:
-            session?.agentFrontTask?.cancel()
-            await builtInFromAgent(
-                VoiceCommandGrammar.goBack, heard: heard, facts: AgentHistoryFacts.goBack(frozen: recipient(in: pressed), conversations: pressed.conversations))
-            return
-        case .repeatSummary:
-            session?.agentFrontTask?.cancel()
-            await builtInFromAgent(
-                VoiceCommandGrammar.repeatSummary[0], heard: heard,
-                facts: AgentHistoryFacts.repeatSummary(frozen: recipient(in: pressed), conversations: pressed.conversations))
-            return
-        default:
-            break
-        }
-        let namesSettled = await settlePlaceNames(agents)
-        if Task.isCancelled { return }
-        let snapshot = {
-            var frozen = pressed
-            if frozen.namesAvailable, agents.namesProblem == nil {
-                frozen.late = agents.names.merging(agents.disconnectedNames) { kept, _ in kept }
-                frozen.lateShared = agents.sharedNames
-            }
-            return frozen
-        }()
-        func frozenRecipient() -> AgentRecipient.Frozen? { recipient(in: snapshot) }
-        if let request = AgentRename.request(in: routed.transcript) {
-            await renameFromAgent(request, in: routed.transcript, recipient: frozenRecipient, through: agents, heard: heard, mode: mode, snapshot: snapshot)
-            return
-        }
-        if let query = AgentStatusQuery.parse(
-            routed.transcript, names: snapshot.spokenNames, namesKnown: snapshot.namesAvailable,
-            read: plan.agentAddressReader(for: routed.transcript, mode: mode), afterVerb: snapshot.afterVerbNames) {
-            await answerStatus(query, recipient: frozenRecipient, through: agents, heard: heard, mode: mode, snapshot: snapshot)
-            return
-        }
-        let address = AgentAddress.parse(
-            routed.transcript, names: snapshot.spokenNames, namesKnown: snapshot.namesAvailable,
-            read: plan.agentAddressReader(for: routed.transcript, mode: mode), afterVerb: snapshot.afterVerbNames)
-        if AgentRecipient.usesDefault(address) {
-            await settleAgentInFront()
-            if Task.isCancelled { return }
-        } else {
-            session?.agentFrontTask?.cancel()
-        }
-        let frozen = frozenRecipient()
-        let resolution = AgentRecipient.resolve(address, frozen: frozen, rows: snapshot.rows, names: snapshot.addressable, shared: snapshot.sharedNames)
-        let facts = AgentHistoryFacts.facts(
-            address: address, resolution: resolution, frozen: frozen, conversations: snapshot.conversations)
-        if captureWasLost {
-            if case .deliver(_, let body, _) = resolution { finishTruncatedCapture(transcript: body) } else { finishCommandCaptureLost() }
-            return
-        }
-        if !namesSettled, AgentRecipient.usesDefault(address), case .deliver(_, let body, _) = resolution {
-            finishAgent(state: .error(message: "Not sent: couldn\u{2019}t check conversation names yet. Say it again, or start with a name or session number.", action: nil, heard: HeardExcerpt(heard: body)),
-                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, facts: facts)
-            return
-        }
-        if let (id, front, body) = Self.target(of: resolution), snapshot.disconnected.values.contains(id) || agents.isExcluded(id) {
-            let name = snapshot.disconnected.first { $0.value == id }?.key ?? "That conversation"
-            let line = front ? "The conversation in front is disconnected" : "\(name) is disconnected"
-            finishAgent(state: .error(message: line, action: .openCodingAgents(mode.id), heard: HeardExcerpt(heard: body)),
-                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, facts: facts)
-            return
-        }
-        if let id = resolution.makesCurrent { agents.makeCurrent(id) }
-
-        switch resolution {
-        case .select(let id):
-            finishAgent(state: .commandDone(summary: "Talking to \(agents.handle(of: id) ?? "it")", detail: mode.name),
-                        outcome: .inserted, heard: heard, body: "", transformed: nil, rewrite: nil, facts: facts)
-        case .open(let id):
-            let handle = agents.handle(of: id) ?? "it"
-            hud.present(.transcribing(mode: mode.name, status: "Opening \(handle)\u{2026}"))
-            let lease = lease(for: .codingAgents)
-            let place = capturedSnapshot.flatMap(Self.origin)
-            let shown = place == nil ? nil : await agents.sessionInFront { [weak self] app in
-                guard !Task.isCancelled else { return }
-                self?.hud.present(.transcribing(mode: mode.name, status: "Allow access to \(app) to remember where you were"))
-            }
-            let origin = place?.leaving(shown)
-            if Task.isCancelled { return }
-            let result = await agents.open(id, stillWanted: { lease.stillWanted() }) { [weak self] app in
-                guard !Task.isCancelled else { return }
-                self?.hud.present(.transcribing(mode: mode.name, status: "Allow access to \(app) to open the tab for \(handle)"))
-            }
-            let after = Self.origin(of: await snapshotAsync())
-            let movedSession = result == .exact && origin?.session != nil && origin?.session != id
-            if result != .none, movedSession || after != place, lease.stillWanted(), let origin, origin.session != id {
-                voiceCommands.recordReturn(to: origin)
-            }
-            if Task.isCancelled { return }
-            let state = result.hudState(handle: handle, detail: mode.name, agent: agents.kind(of: id))
-            let outcome: DictationOutcome = if case .notAllowed = result { .failed } else { .inserted }
-            finishAgent(state: state, outcome: outcome, heard: heard, body: "", transformed: nil, rewrite: nil,
-                        hideAfter: state.errorAction != nil ? 8 : state.indicator == .advisory ? 5 : 2,
-                        summary: result.historySummary(handle: handle, agent: agents.kind(of: id)), facts: facts)
-        case .ask(let body, let reason):
-            let retry = AgentOutput.Retry.matching(routed.transcript, address)
-            let line = retry == .open ? AgentOutput.openAskLine : AgentOutput.askLine
-            let unconnected = Self.spokenName(reason) == nil ? [] : agents.unconnected
-            let meant = Self.spokenName(reason).map { spoken in unconnected.filter { Self.names(spoken, $0) } } ?? []
-            if !meant.isEmpty {
-                let shown = Self.unconnectedLine(meant)
-                let action = HUDErrorAction.openCodingAgents(mode.id, reveal: meant.map(\.row))
-                finishAgent(state: .error(message: shown, action: action, heard: HeardExcerpt(heard: body)),
-                            outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: shown, facts: facts)
-                return
-            }
-            let hint = AgentOutput.unconnectedHint(unconnected.map(\.name))
-            let shown = hint.isEmpty ? line(reason, retry, reachable(snapshot, agents, for: retry), frozen?.id) : line(reason, nil, [:], nil) + hint
-            let action = hint.isEmpty ? Self.askAction(reason, mode: mode) : .openCodingAgents(mode.id)
-            finishAgent(state: .error(message: shown, action: action, heard: HeardExcerpt(heard: body)),
-                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil,
-                        recorded: line(reason, nil, [:], nil) + hint, facts: facts)
-        case .deliver(let id, let body, _):
-            session?.agentDestination = id
-            session?.agentFacts = facts
-            let (final, rewrite, transformed) = await produceFinalText(
-                routed: PhaseBResult(routedModeId: routed.routedModeId, transcript: body), mode: mode)
-            if Task.isCancelled { return }
-            await dispatch(final, to: .agent(id: id, facts: facts), heard: heard, transformed: transformed, rewrite: rewrite)
-        }
-    }
-
-    private static func target(of resolution: AgentRecipient.Resolution) -> (id: String, front: Bool, body: String)? {
-        switch resolution {
-        case .deliver(let id, let body, let source): (id, source == .front, body)
-        case .select(let id), .open(let id): (id, false, "")
-        case .ask: nil
-        }
-    }
-
-    private func renameFromAgent(
-        _ request: Result<Substring, AgentRename.Problem>, in transcript: String, recipient: @escaping () -> AgentRecipient.Frozen?, through agents: AgentHub, heard: String,
-        mode: Mode, snapshot: AgentSnapshot
-    ) async {
-        if captureWasLost {
-            finishCommandCaptureLost()
-            return
-        }
-        func edited(_ text: String) -> TakeText {
-            TakeText(text, pipeline: dictationPipeline(for: mode, willRewrite: false), trimsTrailingPunctuation: false)
-        }
-        let rename: AgentRename
-        switch request {
-        case .failure(let problem):
-            guard !edited(transcript).discarded else {
-                session?.agentFrontTask?.cancel()
-                finishDiscarded()
-                return
-            }
-            rename = .invalid(problem)
-        case .success(let spoken):
-            let edited = edited(String(spoken))
-            session?.spokenEdits = SpokenEdit.summary(edited.payload.spokenEdits)
-            if edited.discarded {
-                session?.agentFrontTask?.cancel()
-                finishDiscarded()
-                return
-            }
-            let name = edited.isBlank ? "" : edited.localText
-            rename = AgentRename.parse(name) ?? AgentRename.name(from: name)
-        }
-        guard case .rename(let spoken) = rename else {
-            session?.agentFrontTask?.cancel()
-            if case .invalid(let problem) = rename {
-                finishAgent(state: .error(message: Self.renameProblem(problem), action: nil, heard: HeardExcerpt(heard: heard)),
-                            outcome: .failed, heard: heard, body: "", transformed: nil, rewrite: nil,
-                            facts: AgentHistoryFacts.rename(frozen: nil, to: nil, conversations: snapshot.conversations))
-            }
-            return
-        }
-        await settleAgentInFront()
-        if Task.isCancelled { return }
-        let name = AgentHandles.normalize(spoken)
-        let frozen = recipient()
-        let facts = AgentHistoryFacts.rename(frozen: frozen, to: name, conversations: snapshot.conversations)
-        func fail(_ message: String, action: HUDErrorAction? = nil) {
-            finishAgent(state: .error(message: message, action: action, heard: HeardExcerpt(heard: heard)),
-                        outcome: .failed, heard: heard, body: "", transformed: nil, rewrite: nil, transitioned: true, facts: facts)
-        }
-        let lease = lease(for: .codingAgents)
-        guard lease.keepActing() else {
-            if machine.isBusy { finish(machine: .cancel, cue: .cancel, state: .hidden) }
-            return
-        }
-        guard let id = frozen?.id else {
-            return fail("Switch to a conversation, then say the rename command again", action: .openCodingAgents(mode.id))
-        }
-        guard let old = agents.handle(of: id) else { return fail("That conversation has ended") }
-        do {
-            try agents.rename(id, to: name)
-        } catch let error as AgentHandles.RenameError {
-            return fail(Self.renameProblem(error, name: name))
-        } catch {
-            return fail("Couldn\u{2019}t save the new name. \(old) is unchanged", action: .openCodingAgents(mode.id))
-        }
-        agents.makeCurrent(id)
-        finishAgent(state: .commandDone(summary: "Renamed \(old) to \(name)", detail: mode.name), outcome: .inserted, heard: heard,
-                    body: "", transformed: nil, rewrite: nil, transitioned: true, hideAfter: 4, facts: facts)
-    }
-
-    private func answerStatus(
-        _ query: AgentStatusQuery, recipient: () -> AgentRecipient.Frozen?, through agents: AgentHub, heard: String, mode: Mode,
-        snapshot: AgentSnapshot
-    ) async {
-        if captureWasLost {
-            session?.agentFrontTask?.cancel()
-            finishCommandCaptureLost()
-            return
-        }
-        func stopQuietly() {
-            if machine.isBusy { finish(machine: .cancel, cue: .cancel, state: .hidden) }
-        }
-        let address: AgentAddress?
-        switch query {
-        case .whoNeedsMe:
-            session?.agentFrontTask?.cancel()
-            guard lease(for: .codingAgents).keepActing() else { return stopQuietly() }
-            func report() -> (names: [String], complete: Bool) {
-                let stale = agents.lastSeen
-                let listed = agents.recordingOrder.filter { !agents.isExcluded($0.id) }
-                let names = listed.filter { !stale.contains($0.id) && AgentRoster.isWaitingForInput($0) }.map(\.handle)
-                let complete = agents.discoveryProblems.isEmpty
-                    && listed.allSatisfy { !stale.contains($0.id) && ($0.connectorLive || AgentRoster.isWaitingForInput($0)) }
-                return (names, complete)
-            }
-            let reported = report()
-            let line = AgentStatusAnswer.whoNeedsMe(reported.names, complete: reported.complete)
-            return answered(line, shown: line, conversation: "", handle: "Who needs me", summary: "Who needs me", heard: heard,
-                            facts: AgentHistoryFacts.whoNeedsMe(), whileTrue: { report() == reported })
-        case .moreThanAQuestion(let named):
-            address = named
-        case .waiting(let named):
-            address = named
-        }
-        let frozen: AgentRecipient.Frozen?
-        let resolution: AgentRecipient.Resolution
-        if let address {
-            session?.agentFrontTask?.cancel()
-            frozen = recipient()
-            resolution = AgentRecipient.resolve(address, frozen: frozen, rows: snapshot.rows, names: snapshot.addressable, shared: snapshot.sharedNames)
-        } else {
-            await settleAgentInFront()
-            if Task.isCancelled { return }
-            frozen = recipient()
-            resolution = frozen.map { .deliver(id: $0.id, body: "", source: $0.source) } ?? .ask(body: "", reason: .noRecipient)
-        }
-        let facts = AgentHistoryFacts.status(address: address, resolution: resolution, frozen: frozen, conversations: snapshot.conversations)
-        func fail(_ message: String, action: HUDErrorAction? = nil) {
-            finishAgent(state: .error(message: message, action: action, heard: HeardExcerpt(heard: heard)),
-                        outcome: .failed, heard: heard, body: "", transformed: nil, rewrite: nil, transitioned: true, facts: facts)
-        }
-        let lease = lease(for: .codingAgents)
-        guard lease.keepActing() else { return stopQuietly() }
-        guard let id = resolution.recipient else {
-            if case .ask(_, let reason) = resolution, reason != .noRecipient { return fail(AgentOutput.openAskLine(reason)) }
-            return fail("Say the name of the conversation to check on", action: .openCodingAgents(mode.id))
-        }
-        let name = agents.handle(of: id) ?? snapshot.disconnected.first { $0.value == id }?.key ?? "That conversation"
-        if case .moreThanAQuestion = query {
-            return fail(
-                "Nothing was sent. Say \u{201C}what is \(name) waiting for?\u{201D} to check on it, or start with \u{201C}tell \(name)\u{201D} to send a message")
-        }
-        if snapshot.disconnected.values.contains(id) || agents.isExcluded(id) {
-            return fail("\(name) is disconnected", action: .openCodingAgents(mode.id))
-        }
-        func observed() -> (conversation: AgentConversation, prompt: AgentPrompt?)? {
-            guard let conversation = agents.directory.conversations.first(where: { $0.id == id }) else { return nil }
-            return (conversation, AgentRoster.isWaitingForInput(conversation) ? agents.waitingPrompt(of: id) : nil)
-        }
-        guard let before = observed() else { return fail("That conversation has ended") }
-        var description: String?
-        if let prompt = before.prompt, AgentStatusAnswer.question(in: prompt) == nil, let spoken = spokenUpdates {
-            hud.present(.transcribing(mode: mode.name, status: "Checking \(before.conversation.handle)\u{2026}"))
-            description = await spoken.describe(prompt, handle: before.conversation.handle)
-            if Task.isCancelled { return }
-            guard lease.keepActing() else { return stopQuietly() }
-        }
-        guard let now = observed() else { return fail("That conversation has ended") }
-        if now.prompt != before.prompt || now.conversation.state != before.conversation.state { description = nil }
-        let handle = now.conversation.handle
-        let connected = now.conversation.connectorLive
-        let current = !agents.lastSeen.contains(id)
-        let line = AgentStatusAnswer.waiting(
-            handle: handle, state: now.conversation.state, connected: connected, current: current, prompt: now.prompt,
-            description: description)
-        let shown = [line, AgentStatusAnswer.hint(handle: handle, state: now.conversation.state, connected: connected, current: current)]
-            .compactMap { $0 }.joined(separator: " ")
-        answered(line, shown: shown, conversation: id, handle: handle, summary: "Checked \(handle)", heard: heard, facts: facts,
-                 whileTrue: {
-                     observed().map {
-                         $0.prompt == now.prompt && $0.conversation.state == now.conversation.state && $0.conversation.connectorLive == connected
-                             && agents.lastSeen.contains(id) != current
-                     } ?? false
-                 })
-    }
-
-    private func answered(
-        _ line: String, shown: String, conversation: String, handle: String, summary: String, heard: String, facts: [HistoryEntry.Fact],
-        whileTrue stillTrue: @escaping () -> Bool
-    ) {
-        let enabled = { [weak self] in self?.settings.features.isEnabled(.codingAgents) == true }
-        _ = spokenUpdates?.answer(conversation: conversation, handle: handle, line, whileTrue: { enabled() && stillTrue() })
-        finishAgent(state: .advisory(message: shown), outcome: .inserted, heard: heard, body: "", transformed: nil, rewrite: nil,
-                    transitioned: true, hideAfter: 8, summary: summary, facts: facts)
-    }
-
-    private static func renameProblem(_ problem: AgentRename.Problem) -> String {
-        switch problem {
-        case .noName: "Say \u{201C}rename this session to\u{201D} and the new name. Nothing was sent"
-        case .tooLong: "A name can be up to \(AgentRename.nameWords) words. Nothing was sent"
-        case .moreAfterName: "Say only the new name after \u{201C}rename this session to\u{201D}. Nothing was sent"
-        }
-    }
-
-    private static func renameProblem(_ error: AgentHandles.RenameError, name: String) -> String {
-        switch error {
-        case .empty: renameProblem(.noName)
-        case .taken: "Another conversation is already called \u{201C}\(name)\u{201D}"
-        case .reserved: "\u{201C}Session\u{201D} followed by a number is how you say a row, so it cannot be a name"
-        }
-    }
-
-    private func builtInFromAgent(_ transcript: String, heard: String, facts: [HistoryEntry.Fact]) async {
-        let lease = lease(for: .codingAgents, stopsAtPress: session?.voiceCommandStopsAtPress)
-        guard lease.keepActing() else { return }
-        let outcome = await voiceCommands.run(
-            transcript: transcript, places: [], scripts: [], origin: capturedSnapshot.flatMap(Self.origin),
-            stillWanted: { lease.keepActing() }, onLateResult: { _ in })
-        if Task.isCancelled { return }
-        guard let shown = VoiceCommandOutput.presentation(of: outcome, resultPrefix: "") else {
-            if captureWasLost {
-                finishCommandCaptureLost()
-            } else if machine.isBusy {
-                finish(machine: .cancel, cue: .cancel, state: .hidden)
-            }
-            return
-        }
-        finishAgent(state: shown.state, outcome: shown.failure == nil ? .inserted : .failed, heard: heard, body: "",
-                    transformed: nil, rewrite: nil, transitioned: true, hideAfter: shown.hideAfter, summary: shown.result,
-                    facts: facts)
-    }
-
-    private func deliverToAgent(
-        _ id: String, text: String, heard: String, transformed: String?, rewrite: RewriteDetails?, facts: [HistoryEntry.Fact]
-    ) async {
-        clearRewriteEscapeHatch()
-        if captureWasLost {
-            finishTruncatedCapture(transcript: text)
-            return
-        }
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            finishNoSpeech()
-            return
-        }
-        guard let agents, let mode = activeMode, settings.features.isEnabled(.codingAgents) else {
-            finishAgent(state: .error(message: "Not sent: talking to coding agents was turned off", action: nil, heard: HeardExcerpt(heard: text)),
-                        outcome: .failed, heard: heard, body: text, transformed: transformed, rewrite: rewrite, facts: facts)
-            return
-        }
-        if session?.stoppedAtLimit == true {
-            finishAgent(
-                state: .error(
-                    message: "Stopped at the \(limitPhrase) limit, so it was not sent. Use \u{201C}Paste last dictation\u{201D} to see what was captured.",
-                    action: nil, heard: HeardExcerpt(heard: text)),
-                outcome: .failed, heard: heard, body: text, transformed: transformed, rewrite: rewrite, facts: facts)
-            return
-        }
-        let lease = lease(for: .codingAgents)
-        guard lease.keepActing() else { return }
-        lastResult = text
-        hud.present(.transcribing(mode: mode.name, status: "Sending to \(agents.handle(of: id) ?? "it")"))
-        let clipboard = agentClipboard.note(for: text, attached: agents.takesImages(id))
-        var (request, receipt) = await agentOutput.deliver(text, to: id, via: agents, images: agentClipboard.images(in: text))
-        if case .kept(let handle, .inPromptBox) = receipt,
-           let sent = await sendFromPromptBox(id, handle: handle, through: agents, lease: lease, request: request) {
-            receipt = sent
-        }
-        finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id, clipboard: clipboard),
-                    outcome: AgentOutput.dictationOutcome(receipt),
-                    heard: heard, body: text, transformed: transformed, rewrite: rewrite, transitioned: true,
-                    facts: facts, awaitingReceipt: (request, receipt))
-        speakRefusal(receipt, conversation: id)
-    }
-
-    var promptBoxConfirmation: Duration = .seconds(2)
-
-    // After a Stop, Claude Code takes only a prompt the user enters, so the connector left the message in the
-    // empty box. Return goes only to that conversation, and only when it is the one in front.
-    private func sendFromPromptBox(
-        _ id: String, handle: String, through agents: AgentHub, lease: TakeLease, request: String
-    ) async -> AgentReceipt? {
-        guard lease.keepActing(), await agents.sessionInFrontWithoutAsking()?.id == id, lease.keepActing() else { return nil }
-        let typedBefore = agents.typedCount(id)
-        agents.awaitTypedTurn(of: id, request: request)
-        await submitKey(.return)
-        let deadline = ContinuousClock.now + promptBoxConfirmation
-        while agents.typedCount(id) == typedBefore, ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(20))
-        }
-        guard agents.typedCount(id) > typedBefore else {
-            agents.forgetTypedTurn(of: id, request: request)
-            return .uncertain(handle)
-        }
-        return .sent(handle)
-    }
-
-    private func reachable(_ snapshot: AgentSnapshot, _ agents: AgentHub, for retry: AgentOutput.Retry) -> [String: String] {
-        let frozen = Set(snapshot.addressable.values)
-        let listed = agents.recordingOrder.filter { retry == .open || AgentRoster.isAvailable($0) }.map(\.id)
-        return agents.names.filter {
-            frozen.contains($0.value) && listed.contains($0.value) && !snapshot.disconnected.values.contains($0.value) && !agents.isExcluded($0.value)
-        }
-    }
-
-    private static func spokenName(_ reason: AgentRecipient.AskReason) -> String? {
-        switch reason {
-        case .unknownName(let spoken), .soundsLike(let spoken, _): spoken
-        default: nil
-        }
-    }
-
-    static func unconnectedLine(_ meant: [AgentHub.Unconnected]) -> String {
-        guard meant.count > 1 else { return "Not sent: \(meant[0].name) isn\u{2019}t connected yet" }
-        let names = meant.map(\.name).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
-        let groups = names.map { name in
-            let same = meant.filter { $0.name == name }
-            return same.count == 1 ? name : "\(same.count) \(same[0].agent) conversations in \(same[0].folder)"
-        }
-        return "Not sent: \(AgentOutput.either(groups, joining: "and")) aren\u{2019}t connected yet"
-    }
-
-    private static func names(_ spoken: String, _ unconnected: AgentHub.Unconnected) -> Bool {
-        let key = AgentHandles.matchKey(spoken)
-        return !key.isEmpty && (key == AgentHandles.matchKey(unconnected.folder) || key == AgentHandles.matchKey(unconnected.name))
-    }
-
-    private static func askAction(_ reason: AgentRecipient.AskReason, mode: Mode) -> HUDErrorAction? {
-        if case .unknownName = reason { .openCodingAgents(mode.id) } else { nil }
-    }
-
-    private func finishAgent(
+    func finishAgent(
         state: HUDState, outcome: DictationOutcome, heard: String, body: String, transformed: String?,
-        rewrite: RewriteDetails?, transitioned: Bool = false, hideAfter: Double? = nil, summary: String? = nil,
-        recorded: String? = nil, facts: [HistoryEntry.Fact], awaitingReceipt awaited: (request: String, receipt: AgentReceipt)? = nil
-    ) {
+        rewrite: RewriteDetails?, transitioned: Bool, hideAfter: Double?, summary: String?,
+        recorded: String?, facts: [HistoryEntry.Fact], onRecorded: ((HistoryEntry) -> Void)?
+    ) -> Bool {
         if !transitioned {
             if !body.isEmpty { lastResult = body }
-            guard lease().beginActing() else { return }
+            guard lease().beginActing() else { return false }
         }
         machine.finish(outcome)
         building.fingerprints[.final] = .of(body)
@@ -2165,10 +1632,8 @@ final class DictationController {
                    heard: heard, transformed: transformed, result: body, insertion: outcome, rewrite: rewrite,
                    failureReason: reason, summary: summary ?? recorded ?? state.primaryText,
                    facts: facts + (SpokenEdit.historyFacts(session?.spokenEdits) ?? []),
-                   onRecorded: awaited.map { awaited in { [weak self] entry in
-                       self?.agentOutput.noteRecorded(entry, request: awaited.request)
-                   } }))
-        if let awaited { agentOutput.replayEarlyReceipts(request: awaited.request, receipt: awaited.receipt) }
+                   onRecorded: onRecorded))
+        return true
     }
 
     func recordSpokenReply(_ heard: SpokenResultOutput.Heard) {
@@ -2198,12 +1663,7 @@ final class DictationController {
 
     func showAgentNotice(_ receipt: AgentReceipt, request: String? = nil, conversation: String? = nil) {
         agentOutput.showNotice(receipt, request: request)
-        if request != nil, let conversation { speakRefusal(receipt, conversation: conversation) }
-    }
-
-    private func speakRefusal(_ receipt: AgentReceipt, conversation: String) {
-        guard let line = AgentOutput.spokenRefusal(receipt) else { return }
-        spokenUpdates?.refused(conversation: conversation, line)
+        if request != nil, let conversation { agentTake.speakRefusal(receipt, conversation: conversation) }
     }
 
     func forgetAgentReceipt(request: String) {
@@ -2217,7 +1677,7 @@ final class DictationController {
 
     // The one definition of a take that may still act: not cancelled, its capture intact, still the current
     // take, its feature still on, no voice-command stop since the press, and the machine where acting is allowed.
-    private func lease(for feature: Feature? = nil, stopsAtPress: Int? = nil) -> TakeLease {
+    func lease(for feature: Feature? = nil, stopsAtPress: Int? = nil) -> TakeLease {
         let identity = session?.identity
         return TakeLease(
             stillWanted: { [weak self] in
@@ -2642,7 +2102,7 @@ final class DictationController {
     // tokenizing the fully-transformed text just before the LLM. Pipeline sorts by position/order, so
     // append order does not matter. Verbatim/redaction hold per-dictation tokenizers and are built
     // fresh here; the text stages are pure config and reused from the plan.
-    private func dictationPipeline(for mode: Mode?, willRewrite: Bool) -> Pipeline {
+    func dictationPipeline(for mode: Mode?, willRewrite: Bool) -> Pipeline {
         let text = plan.postSTTTextStages(for: mode)
         logDroppedReturnMarkerRules(in: text, mode: mode)
         // The read is main-actor (NSPasteboard); this pipeline's forward pass runs on the main actor.
@@ -2725,6 +2185,31 @@ final class DictationController {
         guard activeStartTrigger == triggerKey,
               machine.state == .arming || machine.state == .recording else { return }
         cancel()
+        replayingKeys = true
+        Task { @MainActor [weak self, wait = keyReplayWindow] in
+            try? await Task.sleep(for: wait)
+            guard let self else { return }
+            let keys = self.keysTakenByHUD
+            self.keysTakenByHUD = []
+            self.replayingKeys = false
+            guard !keys.isEmpty else { return }
+            self.log.info("chord cancel replays \(keys.count, privacy: .public) key event(s)")
+            self.replayKeys(keys)
+        }
+    }
+
+    var replayKeys: @MainActor ([CGEvent]) -> Void = { events in
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+        KeyReplay.post(events, to: app.processIdentifier)
+    }
+    var keyReplayWindow: Duration = .milliseconds(50)
+    private var keysTakenByHUD: [CGEvent] = []
+    private var replayingKeys = false
+
+    func noteKeyReceivedByHUD(_ event: CGEvent) {
+        guard replayingKeys || machine.state == .arming || machine.state == .recording else { return }
+        keysTakenByHUD.append(event)
     }
 
     // The screen locked mid-dictation (lid close / hot corner). Cancel any in-flight capture so the
@@ -2802,7 +2287,7 @@ final class DictationController {
         }
     }
 
-    private func clearRewriteEscapeHatch() {
+    func clearRewriteEscapeHatch() {
         session?.rewriteEscapeTask?.cancel()
         session?.rewriteEscapeTask = nil
         session?.pendingLocalTranscript = nil
@@ -2911,7 +2396,7 @@ final class DictationController {
     // Terminal for a take whose microphone went away mid-recording. Keeps whatever was transcribed as
     // `lastResult` so the user can still paste it deliberately, and reports the loss rather than dressing a
     // partial take up as a completed dictation.
-    private func finishTruncatedCapture(transcript: String) {
+    func finishTruncatedCapture(transcript: String) {
         if !transcript.isEmpty { lastResult = transcript }
         let message = transcript.isEmpty
             ? "The microphone stopped. Nothing was recorded."
@@ -2921,7 +2406,7 @@ final class DictationController {
                hideAfter: 8, record: (.failed, "capture lost mid-recording"))
     }
 
-    private func finishError(_ message: String, action: HUDErrorAction? = nil) {
+    func finishError(_ message: String, action: HUDErrorAction? = nil) {
         // A take whose microphone died can also fail downstream — empty transcript, timeout, engine error.
         // The mic is the cause the user can act on, so it wins over the symptom.
         if captureWasLost {
@@ -2970,4 +2455,43 @@ extension DictationController: EngineKeeperHost {
     var warmupPlan: ResolvedConfig { plan }
     var activeProviderEngine: any SpeechEngine { provider.active }
     func releaseWarmCapture() { audio.releaseWarm() }
+}
+
+extension DictationController: AgentTakeHost {
+    var codingAgentsEnabled: Bool { settings.features.isEnabled(.codingAgents) }
+    var takeIdentity: AnyObject? { session?.identity }
+    var takeMode: Mode? { activeMode }
+    var eligibleModes: [Mode]? { session?.eligibleModes }
+    var takePlan: ResolvedConfig { plan }
+    var captureOrigin: VoiceCommandOrigin? { capturedSnapshot.flatMap(Self.origin) }
+    var stoppedAtLimit: Bool { session?.stoppedAtLimit == true }
+    var voiceCommandStopsAtPress: Int? { session?.voiceCommandStopsAtPress }
+    var spokenEdits: String? {
+        get { session?.spokenEdits } set { session?.spokenEdits = newValue }
+    }
+    var agentSnapshot: AgentSnapshot? {
+        get { session?.agentSnapshot } set { session?.agentSnapshot = newValue }
+    }
+    var agentRecipient: AgentRecipient.Frozen? {
+        get { session?.agentRecipient } set { session?.agentRecipient = newValue }
+    }
+    var agentFrontCutoff: ContinuousClock.Instant? { session?.agentFrontCutoff }
+    func noteAgentDestination(_ id: String, facts: [HistoryEntry.Fact]) {
+        session?.agentDestination = id
+        session?.agentFacts = facts
+    }
+    func redrawRecordingHUD() {
+        if case .recording = machine.state {
+            hud.present(recordingHUD(level: max(0, lastRenderedLevel)))
+        }
+    }
+    func rememberResult(_ text: String) { lastResult = text }
+    func rewriteAndDeliver(_ routed: PhaseBResult, mode: Mode, to id: String, facts: [HistoryEntry.Fact], heard: String) async {
+        let (final, rewrite, transformed) = await produceFinalText(routed: routed, mode: mode)
+        if Task.isCancelled { return }
+        await dispatch(final, to: .agent(id: id, facts: facts), heard: heard, transformed: transformed, rewrite: rewrite)
+    }
+    func cancelQuietly() {
+        if machine.isBusy { finish(machine: .cancel, cue: .cancel, state: .hidden) }
+    }
 }
