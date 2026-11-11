@@ -104,9 +104,55 @@ struct TokenCommandCacheTests {
         #expect(b == "btok")
     }
 
+    @Test func concurrentMissesForOneCommandRunItOnce() async throws {
+        let cache = TokenCommandCache()
+        let runs = Counter()
+        let base = Date(timeIntervalSince1970: 1_000_000)
+        let slowRun: @Sendable () async throws -> String = {
+            await runs.bump()
+            try await Task.sleep(for: .milliseconds(100))
+            return "tok"
+        }
+
+        async let first = cache.token(forKey: "cmd", now: base, run: slowRun)
+        async let second = cache.token(forKey: "cmd", now: base, run: slowRun)
+        let tokens = try await [first, second]
+
+        #expect(tokens == ["tok", "tok"])
+        #expect(await runs.value == 1)
+    }
+
+    @Test func aFailedRunIsSharedByItsWaitersAndRetriedByTheNextCall() async throws {
+        struct Boom: Error {}
+        let cache = TokenCommandCache()
+        let runs = Counter()
+        let base = Date(timeIntervalSince1970: 1_000_000)
+        let failing: @Sendable () async throws -> String = {
+            await runs.bump()
+            try await Task.sleep(for: .milliseconds(100))
+            throw Boom()
+        }
+
+        async let first = Result { try await cache.token(forKey: "cmd", now: base, run: failing) }
+        async let second = Result { try await cache.token(forKey: "cmd", now: base, run: failing) }
+        let outcomes = await [first, second]
+        #expect(outcomes.allSatisfy { if case .failure = $0 { true } else { false } })
+        #expect(await runs.value == 1)
+
+        let retried = try await cache.token(forKey: "cmd", now: base) { await runs.bump(); return "tok" }
+        #expect(retried == "tok")
+        #expect(await runs.value == 2)
+    }
+
     actor Counter {
         private(set) var value = 0
         func bump() { value += 1 }
+    }
+}
+
+private extension Result where Failure == Error {
+    init(catching body: () async throws -> Success) async {
+        do { self = .success(try await body()) } catch { self = .failure(error) }
     }
 }
 

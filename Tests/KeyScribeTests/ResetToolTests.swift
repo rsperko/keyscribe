@@ -22,6 +22,8 @@ struct ResetToolTests {
         tool.modelsDir = dir.appendingPathComponent("models", isDirectory: true)
         tool.captureArchiveDir = URL(fileURLWithPath: dir.path + "-captures", isDirectory: true)
         tool.modelLoadDiagFile = URL(fileURLWithPath: dir.path + "-model-load.log")
+        tool.requestAdaptationsFile = URL(fileURLWithPath: dir.path + "-request-adaptations.json")
+        tool.wireOverridesFile = URL(fileURLWithPath: dir.path + "-wire-overrides.json")
         tool.temporaryDir = URL(fileURLWithPath: dir.path + "-tmp", isDirectory: true)
         tool.eraseKeychain = { [] }
         tool.resetTCCService = { _, _ in "" }
@@ -174,6 +176,18 @@ struct ResetToolTests {
         #expect(!fm.fileExists(atPath: tool.modelLoadDiagFile.path))
         #expect(!fm.fileExists(atPath: abandoned.path))
         #expect(fm.fileExists(atPath: legacy.path))
+    }
+
+    @Test func eraseAllRemovesWhatTheAIServicesAccepted() throws {
+        let dir = try makeSupportDir()
+        let tool = isolatedTool(dir, ephemeralDefaults())
+        let files = [tool.requestAdaptationsFile, tool.wireOverridesFile]
+        defer { for url in [dir] + files { try? FileManager.default.removeItem(at: url) } }
+        for file in files { try #"{"work\nmodel\nhttps://proxy.example/v1":"responses"}"#.write(to: file, atomically: true, encoding: .utf8) }
+
+        tool.run(.eraseAll)
+
+        #expect(files.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })
     }
 
     @Test func eraseAllReportsNoRecordingsWhenTheArchiveIsAbsent() throws {

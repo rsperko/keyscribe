@@ -1,13 +1,13 @@
 import Foundation
 
-public enum TokenLimitField: String, Equatable, Sendable {
+public enum TokenLimitField: String, Codable, Equatable, Sendable {
     case maxTokens = "max_tokens"
     case maxCompletionTokens = "max_completion_tokens"
 
     public var jsonKey: String { rawValue }
 }
 
-public struct RequestAdaptations: Equatable, Sendable {
+public struct RequestAdaptations: Codable, Equatable, Sendable {
     public var tokenLimitField: TokenLimitField
     public var includeTemperature: Bool
     public var foldSystemIntoUser: Bool

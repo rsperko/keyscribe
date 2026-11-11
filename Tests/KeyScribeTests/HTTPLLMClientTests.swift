@@ -1847,6 +1847,226 @@ struct HTTPLLMClientTests {
             Issue.record("expected limitBeforeAnswer, got \(error)")
         }
     }
+
+    @Test func preconnectRunsATokenCommandSoTheRewriteFindsItCached() async throws {
+        let runs = RunCount()
+        nonisolated(unsafe) var headAuthorization: String?? = .none
+        nonisolated(unsafe) var postAuthorization: String?
+        LLMStubProtocol.handler = { request in
+            if request.httpMethod == "HEAD" {
+                headAuthorization = .some(request.value(forHTTPHeaderField: "Authorization"))
+                return (resp(request.url!, 200), Data())
+            }
+            postAuthorization = request.value(forHTTPHeaderField: "Authorization")
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+        var client = stubbedClient()
+        client.tokenCache = TokenCommandCache()
+        client.tokenCommandRunner = { _ in runs.bump(); return "minted" }
+        let connection = Connection(
+            id: "work", name: "Work", provider: .openaiCompatible, model: "m", keyRef: "",
+            baseUrl: "http://127.0.0.1:11234/v1", tokenCommand: "print-token")
+
+        await client.preconnect(connection: connection)
+        #expect(runs.value == 1)
+        #expect(headAuthorization == .some(nil))
+
+        _ = try await client.complete(system: "s", user: "u", connection: connection)
+        #expect(runs.value == 1)
+        #expect(postAuthorization == "Bearer minted")
+    }
+
+    @Test func preconnectLeavesAnAPIKeyUnread() async {
+        let reads = RunCount()
+        LLMStubProtocol.handler = { request in (resp(request.url!, 200), Data()) }
+        let client = stubbedClient(keyProvider: { _ in reads.bump(); return "secret" })
+
+        await client.preconnect(connection: compatConnection())
+        #expect(reads.value == 0)
+    }
+
+    private func shapeFiles() -> (adaptations: URL, wires: URL, cleanup: () -> Void) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-shapes-\(UUID().uuidString)", isDirectory: true)
+        return (dir.appendingPathComponent("adaptations.json"), dir.appendingPathComponent("wires.json"),
+                { try? FileManager.default.removeItem(at: dir) })
+    }
+
+    @Test func anAcceptedAdaptationIsReusedAfterARelaunch() async throws {
+        let files = shapeFiles()
+        defer { files.cleanup() }
+        nonisolated(unsafe) var bodies: [[String: Any]?] = []
+        LLMStubProtocol.handler = { request in
+            let body = request.decodedBody()
+            bodies.append(body)
+            return body?["temperature"] != nil
+                ? (resp(request.url!, 400), errBody("unsupported_value", "temperature"))
+                : (resp(request.url!, 200), okBody("OK"))
+        }
+        _ = try await stubbedClient(cache: RequestAdaptationCache(file: files.adaptations))
+            .complete(system: "the system prompt", user: "the private words", connection: compatConnection())
+        #expect(bodies.count == 2)
+
+        bodies = []
+        let relaunched = stubbedClient(cache: RequestAdaptationCache(file: files.adaptations))
+        _ = try await relaunched.complete(system: "s", user: "u", connection: compatConnection())
+        #expect(bodies.count == 1)
+        #expect(bodies.first??["temperature"] == nil)
+
+        let stored = try String(contentsOf: files.adaptations, encoding: .utf8)
+        #expect(!stored.contains("private words"))
+        #expect(!stored.contains("system prompt"))
+        #expect(!stored.contains("secret"))
+    }
+
+    @Test func anyUnadaptableFailureFromARememberedChatAdaptationForgetsIt() async throws {
+        let files = shapeFiles()
+        defer { files.cleanup() }
+        LLMStubProtocol.handler = { request in
+            request.decodedBody()?["temperature"] != nil
+                ? (resp(request.url!, 400), errBody("unsupported_value", "temperature"))
+                : (resp(request.url!, 200), okBody("OK"))
+        }
+        _ = try await stubbedClient(cache: RequestAdaptationCache(file: files.adaptations))
+            .complete(system: "s", user: "u", connection: compatConnection())
+
+        LLMStubProtocol.handler = { request in (resp(request.url!, 400), errBody("context_length_exceeded", "messages")) }
+        await #expect(throws: ProviderTransportError.self) {
+            _ = try await stubbedClient(cache: RequestAdaptationCache(file: files.adaptations))
+                .complete(system: "s", user: "u", connection: compatConnection())
+        }
+
+        nonisolated(unsafe) var bodies: [[String: Any]?] = []
+        LLMStubProtocol.handler = { request in
+            bodies.append(request.decodedBody())
+            return (resp(request.url!, 200), okBody("OK"))
+        }
+        _ = try await stubbedClient(cache: RequestAdaptationCache(file: files.adaptations))
+            .complete(system: "s", user: "u", connection: compatConnection())
+        #expect(bodies.first??["temperature"] != nil)
+    }
+
+    @Test func anyUnadaptableFailureFromARememberedGeminiAdaptationForgetsIt() async throws {
+        let files = shapeFiles()
+        defer { files.cleanup() }
+        let connection = Connection(id: "g", name: "G", provider: .gemini, model: "gemini-2.5-flash", keyRef: "k")
+        let ok = try JSONSerialization.data(withJSONObject: ["candidates": [["content": ["parts": [["text": "OK"]]]]]])
+        let levelRejected = try JSONSerialization.data(withJSONObject: [
+            "error": ["code": 400, "message": "Unknown name \"thinkingLevel\" at 'generation_config.thinking_config': Cannot find field.", "status": "INVALID_ARGUMENT"],
+        ])
+        let unrelated = try JSONSerialization.data(withJSONObject: [
+            "error": ["code": 400, "message": "The input is too long.", "status": "INVALID_ARGUMENT"],
+        ])
+        func thinking(_ request: URLRequest) -> [String: Any]? {
+            (request.decodedBody()?["generationConfig"] as? [String: Any])?["thinkingConfig"] as? [String: Any]
+        }
+        LLMStubProtocol.handler = { request in
+            let rejected = thinking(request)?["thinkingLevel"] != nil
+            return (resp(request.url!, rejected ? 400 : 200), rejected ? levelRejected : ok)
+        }
+        _ = try await stubbedClient(cache: RequestAdaptationCache(file: files.adaptations))
+            .complete(system: "s", user: "u", connection: connection)
+
+        LLMStubProtocol.handler = { request in (resp(request.url!, 400), unrelated) }
+        await #expect(throws: ProviderTransportError.self) {
+            _ = try await stubbedClient(cache: RequestAdaptationCache(file: files.adaptations))
+                .complete(system: "s", user: "u", connection: connection)
+        }
+
+        nonisolated(unsafe) var sent: [String: Any]?
+        LLMStubProtocol.handler = { request in
+            sent = thinking(request)
+            return (resp(request.url!, 200), ok)
+        }
+        _ = try await stubbedClient(cache: RequestAdaptationCache(file: files.adaptations))
+            .complete(system: "s", user: "u", connection: connection)
+        #expect(sent?["thinkingLevel"] != nil)
+    }
+
+    @Test func theSharedCacheStaysInMemoryUntilAFileIsAttached() async throws {
+        let files = shapeFiles()
+        defer { files.cleanup() }
+        let saved = RequestAdaptations(tokenLimitField: .maxCompletionTokens, includeTemperature: false)
+        await RequestAdaptationCache(file: files.adaptations).remember(saved, for: "saved")
+
+        let cache = RequestAdaptationCache()
+        let learned = RequestAdaptations(tokenLimitField: .maxTokens, foldSystemIntoUser: true)
+        await cache.remember(learned, for: "learned")
+        #expect(await cache.lookup("saved") == nil)
+
+        await cache.persist(to: files.adaptations)
+        #expect(await cache.lookup("saved") == saved)
+        await cache.remember(learned, for: "learned")
+        #expect(await RequestAdaptationCache(file: files.adaptations).lookup("learned") == learned)
+
+        await cache.reset()
+        #expect(!FileManager.default.fileExists(atPath: files.adaptations.path))
+        await cache.remember(learned, for: "after erase")
+        #expect(!FileManager.default.fileExists(atPath: files.adaptations.path))
+    }
+
+    @Test func aWireOverrideSurvivesARelaunchAndItsForgettingDoesToo() async {
+        let files = shapeFiles()
+        defer { files.cleanup() }
+        let key = WireAPIOverrideCache.key(for: compatConnection())
+        await WireAPIOverrideCache(file: files.wires).remember(.responses, for: key)
+        #expect(await WireAPIOverrideCache(file: files.wires).lookup(key) == .responses)
+
+        await WireAPIOverrideCache(file: files.wires).forget(key)
+        #expect(await WireAPIOverrideCache(file: files.wires).lookup(key) == nil)
+
+        let erased = WireAPIOverrideCache(file: files.wires)
+        await erased.reset()
+        await erased.remember(.responses, for: key)
+        #expect(!FileManager.default.fileExists(atPath: files.wires.path))
+    }
+
+    @Test func aShapeFileFromAnotherAppVersionStartsEmpty() async {
+        let files = shapeFiles()
+        defer { files.cleanup() }
+        let adaptations = RequestAdaptations(tokenLimitField: .maxCompletionTokens, includeTemperature: false)
+        await RequestAdaptationCache(file: files.adaptations, appVersion: "1.4 (40)").remember(adaptations, for: "k")
+        await WireAPIOverrideCache(file: files.wires, appVersion: "1.4 (40)").remember(.responses, for: "k")
+
+        #expect(await RequestAdaptationCache(file: files.adaptations, appVersion: "1.4 (40)").lookup("k") == adaptations)
+        #expect(await WireAPIOverrideCache(file: files.wires, appVersion: "1.4 (40)").lookup("k") == .responses)
+        #expect(await RequestAdaptationCache(file: files.adaptations, appVersion: "1.5 (41)").lookup("k") == nil)
+        #expect(await WireAPIOverrideCache(file: files.wires, appVersion: "1.5 (41)").lookup("k") == nil)
+
+        let upgraded = RequestAdaptationCache(appVersion: "1.5 (41)")
+        await upgraded.persist(to: files.adaptations)
+        #expect(await upgraded.lookup("k") == nil)
+    }
+
+    @Test func aShapeFileWithoutAVersionStartsEmpty() async throws {
+        let files = shapeFiles()
+        defer { files.cleanup() }
+        try FileManager.default.createDirectory(
+            at: files.wires.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(#"{"k":"responses"}"#.utf8).write(to: files.wires)
+        #expect(await WireAPIOverrideCache(file: files.wires).lookup("k") == nil)
+    }
+
+    @Test func anUnreadableShapeFileStartsEmptyAndIsReplaced() async throws {
+        let files = shapeFiles()
+        defer { files.cleanup() }
+        try FileManager.default.createDirectory(
+            at: files.adaptations.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("not json".utf8).write(to: files.adaptations)
+        let cache = RequestAdaptationCache(file: files.adaptations)
+        #expect(await cache.lookup("k") == nil)
+
+        let adaptations = RequestAdaptations(tokenLimitField: .maxCompletionTokens, includeTemperature: false)
+        await cache.remember(adaptations, for: "k")
+        #expect(await RequestAdaptationCache(file: files.adaptations).lookup("k") == adaptations)
+    }
+}
+
+private final class RunCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    func bump() { lock.withLock { count += 1 } }
+    var value: Int { lock.withLock { count } }
 }
 
 private extension URLRequest {

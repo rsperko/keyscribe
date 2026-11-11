@@ -27,7 +27,8 @@ before you edit code in its area.
   field — a **bodyless, auth-less HEAD preconnect** to that connection's host may fire during recording
   to warm the TLS connection (`HTTPLLMClient.preconnect`, gated by `DictationController.maybePreconnect`
   on the resolved mode AND the adopted snapshot). It carries no user content and touches only the host
-  that mode's connection points at. The rewrite may not ultimately fire (cancel, no speech, a
+  that mode's connection points at. Under the same gate, a `token_command` connection also runs its command
+  to fill the in-memory token cache. The rewrite may not ultimately fire (cancel, no speech, a
   whole-utterance replacement, or a Phase-B route to a local mode); the preconnect stays content-free
   regardless, and a focused secure field neuters the mode so none fires there.
 - **No telemetry, no analytics.** Speech, transcripts, and usage are never collected.

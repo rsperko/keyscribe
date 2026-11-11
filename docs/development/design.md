@@ -781,6 +781,12 @@ Silence-based auto-stop is a non-goal (§1) and stays one: the limit is the only
     tokens in memory only).
   - **STT weights → `models/` dir** under the support root (runtime-downloaded, never committed,
     backup-excluded; §4.1).
+  - **What each provider endpoint accepted → two JSON files beside the support root**
+    (`RequestAdaptationCache`, `WireAPIOverrideCache`, attached at launch; `.shared` is in-memory until
+    then): field choices and the wire, keyed by connection id, model, base URL, wire, and reasoning setting;
+    no content, and no credential beyond what a base URL itself carries. Stamped with the app version; a
+    different version starts empty. Outside the watched config tree so a write never
+    reloads config.
   - **Redaction/verbatim maps → in-memory only**, never persisted.
   - No SQLite (simple architecture, YAGNI). Revisit only if history search outgrows line-scanning
     JSONL.

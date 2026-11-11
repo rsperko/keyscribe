@@ -44,7 +44,7 @@ public enum ReasoningPreference: Hashable, Sendable, Codable {
     }
 }
 
-public enum ReasoningRequest: Equatable, Sendable {
+public enum ReasoningRequest: Codable, Equatable, Sendable {
     case effort(String)
     case anthropicThinking(String)
     case anthropicEffort(String, adaptive: Bool)
@@ -76,7 +76,7 @@ public enum ReasoningRequest: Equatable, Sendable {
     }
 }
 
-public enum ReasoningShape: Equatable, Sendable {
+public enum ReasoningShape: Codable, Equatable, Sendable {
     case rung(ReasoningRequest)
     case modelDefault(exhausted: Bool)
     case unknown
@@ -349,7 +349,7 @@ public enum ReplyLimit {
 
 // What replies have shown about reasoning. Only an explicit zero count confirms none: a service that omits
 // the count (many proxies do) leaves the question open. Once a reply has reasoned, that sticks.
-public enum ReasoningEvidence: Equatable, Sendable {
+public enum ReasoningEvidence: Codable, Equatable, Sendable {
     case unreported, none, reasoned
 
     public func merged(with reply: ReasoningEvidence) -> ReasoningEvidence {

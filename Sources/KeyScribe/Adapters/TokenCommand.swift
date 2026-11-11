@@ -128,14 +128,19 @@ actor TokenCommandCache {
     }
 
     private var entries: [String: Entry] = [:]
+    private var running: [String: Task<ParsedToken, Error>] = [:]
     private let defaultTTL: TimeInterval = 300
     private let refreshSkew: TimeInterval = 30
 
-    func token(forKey key: String, now: Date, run: @Sendable () async throws -> String) async throws -> String {
+    func token(forKey key: String, now: Date, run: @escaping @Sendable () async throws -> String) async throws -> String {
         if let entry = entries[key], entry.expiresAt.addingTimeInterval(-refreshSkew) > now {
             return entry.token
         }
-        let parsed = try TokenCommandOutput.parse(from: try await run())
+        if let pending = running[key] { return try await pending.value.token }
+        let pending = Task { try TokenCommandOutput.parse(from: try await run()) }
+        running[key] = pending
+        defer { running[key] = nil }
+        let parsed = try await pending.value
         let expiresAt: Date
         if let absolute = parsed.expiresAt {
             expiresAt = absolute

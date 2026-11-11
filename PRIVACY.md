@@ -87,8 +87,9 @@ KeyScribe only reaches the network for these things, and never to send your audi
 2. **Your own AI service**, if you set one up — the optional LLM cleanup and the summaries
    read aloud under Spoken replies, described above, plus the connection test and model list when you add or edit a connection. All of it goes to the provider
    you configured and nowhere else. While you are recording a mode that uses it, KeyScribe may also
-   open the connection ahead of time so the cleanup comes back faster; that request carries no
-   content, and it is skipped entirely when you are typing in a password field.
+   open the connection ahead of time so the cleanup comes back faster, and run the connection's token
+   command if it has one; neither carries content, and both are skipped entirely when you are typing in
+   a password field.
 3. **Checking for app updates** — KeyScribe periodically fetches a small update feed to see whether a
    newer version is available, and downloads it only if you choose to install one. It asks before the
    first automatic check and you can turn it off. It carries no speech, transcript, or usage data —
@@ -172,7 +173,8 @@ recognizable-span redaction, is the only user content that can leave the machine
 
 ## Where your data lives
 
-Everything KeyScribe persists is a plain file under `~/Library/Application Support/KeyScribe/`:
+Everything KeyScribe persists is a plain file under `~/Library/Application Support/KeyScribe/`, or beside it
+in the same `Application Support` folder:
 
 - **Config** (modes, connections, dictionary, replacements) as TOML.
 - **History** as JSONL, one file per day. Each entry holds what you said and what was inserted, what a
@@ -185,6 +187,11 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
   and the app and macOS versions. History's **Copy Report** copies one entry, every one of those fields
   and the text included, plus a summary of your setup, to your clipboard for a bug report; it is sent only
   if you paste it somewhere yourself.
+- **What your AI service accepted**, in two small files beside that folder (named after it, ending in
+  `-request-adaptations.json` and `-wire-overrides.json`): which request format and fields each connection's
+  model took, so KeyScribe does not have to find out again after a restart. An update starts them over. Each entry names the connection,
+  its model and its address as written in your connections. They hold no prompt or reply and no saved key or
+  generated token.
 - **Replacement use counts** under `usage/`: for each of your replacements, how many dictations it
   changed and the day it was last used. No dictation text is stored there, and it is kept whether or
   not History is on.

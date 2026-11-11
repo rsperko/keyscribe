@@ -21,6 +21,8 @@ struct ResetTool {
     // it — but it is raw user speech, which is exactly what an erase promises to destroy.
     var captureArchiveDir: URL = KeyScribePaths.captureArchiveDir
     var modelLoadDiagFile: URL = KeyScribePaths.modelLoadDiagFile
+    var requestAdaptationsFile: URL = KeyScribePaths.requestAdaptationsFile
+    var wireOverridesFile: URL = KeyScribePaths.wireOverridesFile
     var temporaryDir: URL = FileManager.default.temporaryDirectory
     var isProcessAlive: (Int32) -> Bool = CaptureLeftovers.isRunning
     var bundleID: String = Bundle.main.bundleIdentifier ?? "com.keyscribe.app"
@@ -49,7 +51,9 @@ struct ResetTool {
         actions += eraseCaptureArchive()
         actions += eraseInterruptedRecordings()
         actions += eraseAgentClipboard()
-        try? fileManager.removeItem(at: modelLoadDiagFile)
+        for file in [modelLoadDiagFile, requestAdaptationsFile, wireOverridesFile] {
+            try? fileManager.removeItem(at: file)
+        }
         actions += eraseKeychain()
         return actions
     }

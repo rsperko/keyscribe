@@ -1304,8 +1304,8 @@ final class DictationController {
 
     // Fires only once the mode is resolved AND the secure-aware snapshot has confirmed the field isn't a
     // password field (a secure field neuters the mode first, so it has no connection → no preconnect).
-    // llmClient.preconnect is a bodyless, auth-less HEAD — content-free regardless of whether a rewrite
-    // ultimately runs.
+    // llmClient.preconnect is a bodyless, auth-less HEAD plus a token-command cache fill — content-free
+    // regardless of whether a rewrite ultimately runs.
     private func maybePreconnect() {
         guard let session, session.modeReady, session.snapshotReady, !session.preconnectFired,
               let mode = activeMode, let connection = connection(for: mode),

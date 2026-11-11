@@ -31,11 +31,19 @@ struct HTTPLLMClient: LLMClient {
     // Bodyless, auth-less HEAD warm-up — carries no user content — so a rewrite moments later reuses the
     // pooled connection.
     func preconnect(connection: Connection) async {
-        guard let url = preconnectURL(for: connection) else { return }
-        var req = URLRequest(url: url)
-        req.httpMethod = "HEAD"
-        req.timeoutInterval = Self.preconnectTimeout
-        _ = try? await session.data(for: req, delegate: OriginPinnedRedirects(req.url))
+        async let credential: Void = warmTokenCommand(for: connection)
+        if let url = preconnectURL(for: connection) {
+            var req = URLRequest(url: url)
+            req.httpMethod = "HEAD"
+            req.timeoutInterval = Self.preconnectTimeout
+            _ = try? await session.data(for: req, delegate: OriginPinnedRedirects(req.url))
+        }
+        await credential
+    }
+
+    private func warmTokenCommand(for connection: Connection) async {
+        guard connection.authMethod == .tokenCommand else { return }
+        _ = try? await transport.credential(for: connection)
     }
 
     private func preconnectURL(for connection: Connection) -> URL? {
@@ -78,7 +86,8 @@ struct HTTPLLMClient: LLMClient {
     // and caches nothing.
     private func completeNegotiated(system: String, user: String, connection: Connection, key: String?) async throws -> String {
         let cacheKey = adaptationCacheKey(for: connection)
-        let initial = await adaptationCache.lookup(cacheKey) ?? .initial(for: connection)
+        let remembered = await adaptationCache.lookup(cacheKey)
+        let initial = remembered ?? .initial(for: connection)
         var adaptations = initial
         var attempts = 0
         while true {
@@ -91,7 +100,10 @@ struct HTTPLLMClient: LLMClient {
             } catch let ProviderTransportError.http(status, body) where status == 400 {
                 guard attempts < Self.maxRemediations, let apiError = OpenAIAPIError.parse(body: body),
                       let next = try remediate(adaptations, for: apiError, connection: connection, status: status)
-                else { throw ProviderTransportError.http(status, body: body) }
+                else {
+                    if remembered != nil { await adaptationCache.forget(cacheKey) }
+                    throw ProviderTransportError.http(status, body: body)
+                }
                 adaptations = next
                 attempts += 1
             }
@@ -204,7 +216,8 @@ struct HTTPLLMClient: LLMClient {
         var wired = connection
         wired.wireAPI = wire
         let cacheKey = adaptationCacheKey(for: wired)
-        let initial = await adaptationCache.lookup(cacheKey) ?? .initial(for: wired)
+        let remembered = await adaptationCache.lookup(cacheKey)
+        let initial = remembered ?? .initial(for: wired)
         var adaptations = initial
         var attempts = 0
         while true {
@@ -214,7 +227,7 @@ struct HTTPLLMClient: LLMClient {
                 let reply = try parse(
                     try await transport.send(request), provider: connection.provider, wireAPI: wire)
                 // Remember only a remediation the server actually accepted. Caching before the retry proves it
-                // lets one 400 with an unrelated cause pin a wrong remediation for the process lifetime — a
+                // lets one 400 with an unrelated cause pin a wrong remediation across launches — a
                 // max_tokens VALUE error, for instance, message-scans to a max_completion_tokens FIELD remap
                 // that no reverse remediation can undo.
                 await settle(adaptations, initial: initial, reply: reply, cacheKey: cacheKey, connection: wired)
@@ -250,7 +263,10 @@ struct HTTPLLMClient: LLMClient {
                 }
                 guard attempts < Self.maxRemediations, let apiError, status == 400,
                       let next = try remediate(adaptations, for: apiError, connection: wired, status: status)
-                else { throw ProviderTransportError.http(status, body: body) }
+                else {
+                    if remembered != nil { await adaptationCache.forget(cacheKey) }
+                    throw ProviderTransportError.http(status, body: body)
+                }
                 adaptations = next
                 attempts += 1
             }

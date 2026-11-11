@@ -746,7 +746,8 @@ reasoning = "lowest"  # "lowest" | "model_default" | a level: "minimal" "low" "m
 - **`lowest`** (the default on every provider) negotiates. The first request asks for reasoning off; when
   the service rejects that *value*, the client steps to the next lower-cost setting the provider family
   offers, jumping straight to the lowest value the error lists when it lists any. The setting that
-  produced a reply is remembered for the connection, model, and endpoint until the app quits. If no step is
+  produced a reply is remembered for the connection, model, and endpoint, across restarts, until a request
+  that starts from it fails or the app is updated. If no step is
   accepted, the model runs at its own default and that is reported. Read
   `ReasoningLadder.rungs(for:provider:)` for the steps.
 - **A level** (`minimal`…`max`) is sent exactly. If the model rejects it, the rewrite falls back to local
@@ -802,11 +803,18 @@ user just adds a key; reopening the connection recovers the preset from its base
 | `auth_method` | Meaning |
 | --- | --- |
 | `api_key` | Read the secret from Keychain using `key_ref`. Hosted providers require this. OpenAI-compatible endpoints may use it when a proxy expects a bearer token. |
-| `token_command` | Run `token_command` before requests and send its output as `Authorization: Bearer …`. The generated token is kept in memory only and never written to disk. |
+| `token_command` | Run `token_command` before requests and send its output as `Authorization: Bearer …`. While you record in a mode that uses the connection, a token that is missing or about to expire is fetched ahead of the request. The generated token is kept in memory only and never written to disk. |
 | `none` | Send no Authorization header. Valid for local/no-auth OpenAI-compatible endpoints. |
 
 For OpenAI-shaped connections, KeyScribe automatically selects the compatible request format for each model
-endpoint. Responses requests map the rewrite system instruction to `instructions` and the user text to `input`,
+endpoint. What a service accepted (the wire, and any field it made the request drop or rename) is kept in
+`<support folder>-request-adaptations.json` and `<support folder>-wire-overrides.json` beside the support
+folder, so the first rewrite after a restart does not relearn it. An entry is keyed by connection id, model,
+base URL, wire, and reasoning setting, and is dropped when a request that starts from it fails for any reason
+the client cannot adapt to. Each file is stamped with the app version that wrote it, and a different version
+starts empty, so every update relearns once. The files hold no prompt or reply and nothing read from Keychain or a token command;
+a base URL is stored as written, so one with a credential in it is copied here just as it sits in
+`connections.toml`. **Erase All Data** removes both files; deleting them by hand only costs the relearning. Responses requests map the rewrite system instruction to `instructions` and the user text to `input`,
 send `reasoning.effort` when a reasoning step is in play, and size `max_output_tokens` by the same output
 room rule as Chat. Every Responses request is stateless — `store = false` is load-bearing for privacy and is never
 dropped: an endpoint that rejects it fails the rewrite rather than silently allowing server-side storage. A

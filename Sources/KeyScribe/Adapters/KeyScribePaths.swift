@@ -67,6 +67,16 @@ enum KeyScribePaths {
         appSupportBase.appendingPathComponent("\(variant.supportFolderName)-captures", isDirectory: true)
     }
 
+    static var requestAdaptationsFile: URL {
+        appSupportBase.appendingPathComponent(
+            "\(variant.supportFolderName)-request-adaptations.json", isDirectory: false)
+    }
+
+    static var wireOverridesFile: URL {
+        appSupportBase.appendingPathComponent(
+            "\(variant.supportFolderName)-wire-overrides.json", isDirectory: false)
+    }
+
     static var modesDir: URL {
         supportDir.appendingPathComponent("modes", isDirectory: true)
     }

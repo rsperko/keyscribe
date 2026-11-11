@@ -204,6 +204,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         history = HistoryStore(supportDir: KeyScribePaths.supportDir)
         history.applyRetention(retentionDays: settings.history.retentionDays)
         excludeHistoryFromBackups(settings.history)
+        Task {
+            await RequestAdaptationCache.shared.persist(to: KeyScribePaths.requestAdaptationsFile)
+            await WireAPIOverrideCache.shared.persist(to: KeyScribePaths.wireOverridesFile)
+        }
         Task.detached(priority: .utility) {
             CaptureLeftovers.sweep()
             try? await Task.sleep(for: .seconds(CaptureLeftovers.legacyMinimumAge))
@@ -1007,12 +1011,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     // instance is spawned before this one terminates so the menu-bar app does not just vanish; with the
     // onboarding flag cleared (and TCC grants intact) it lands on the first-run wizard.
     private func eraseAllDataAndRelaunch() {
-        ResetTool(supportDir: KeyScribePaths.supportDir, defaults: .standard).run(.eraseAll)
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.createsNewApplicationInstance = true
-        relaunch(
-            configuration,
-            guidance: "Your \(Branding.appName) data was erased. Quit \(Branding.appName) from the menu bar and open it again to finish the reset.")
+        Task { @MainActor in
+            await RequestAdaptationCache.shared.reset()
+            await WireAPIOverrideCache.shared.reset()
+            ResetTool(supportDir: KeyScribePaths.supportDir, defaults: .standard).run(.eraseAll)
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.createsNewApplicationInstance = true
+            relaunch(
+                configuration,
+                guidance: "Your \(Branding.appName) data was erased. Quit \(Branding.appName) from the menu bar and open it again to finish the reset.")
+        }
     }
 
     // Terminate only once the replacement instance is actually running: a discarded launch error made every
