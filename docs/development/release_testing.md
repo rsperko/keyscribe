@@ -88,6 +88,9 @@ actually catches the list above.
 - **The package and its tests build with the oldest supported Xcode** (`make check-min-xcode`), installed
   beside the current one. A newer compiler accepts code an older one rejects, no flag makes it behave like
   the older one, and downstream builds with the oldest — so without this, downstream finds the break first.
+- **The printable cheat sheet renders** (`make test-cheatsheet`) with one page per section on Letter
+  and A4; a machine without `uv` skips it loudly. Separately, `swift test` checks every phrase the sheet
+  teaches against the real parsers (`CheatSheetPhraseTests`), so the sheet cannot drift from the grammar.
 - Artifact present, and `codesign --verify --deep --strict` passes (nested resource bundles/xcframeworks too).
 - **MLX runs from the bundled shader library** (`--mlx-smoke`) — the silent Qwen killer.
 - `Info.plist` stamped: real `CFBundleShortVersionString` / `CFBundleVersion` / bundle id (no `__PLACEHOLDER__`).

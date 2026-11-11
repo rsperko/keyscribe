@@ -153,6 +153,8 @@ prerequisites, signing options, release builds, and permission persistence are i
 
 ## Documentation
 
+- [What you can say](docs/cheat_sheet.md) — voice cheat sheet: phrases, where they work, and what they do
+  ([print a PDF](BUILD.md#print-the-voice-cheat-sheet)).
 - [docs/README.md](docs/README.md) — start here for the full documentation map.
 - [docs/getting_started.md](docs/getting_started.md) — progressive ramp from first dictation to
   modes, privacy controls, and history.

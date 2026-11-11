@@ -4,6 +4,8 @@ Start with the shortest path that matches what you are trying to do.
 
 ## Use KeyScribe
 
+- [What you can say](cheat_sheet.md) — a desk reference for spoken edits, formatting, navigation,
+  and coding-agent commands, grouped by context ([print a PDF](../BUILD.md#print-the-voice-cheat-sheet)).
 - [Getting Started](getting_started.md) — first dictation, reliability, vocabulary, spoken edits,
   optional rewrite, modes, history, and advanced setup.
 - [Privacy](../PRIVACY.md) — what stays on your Mac, what can leave it, and the limits of

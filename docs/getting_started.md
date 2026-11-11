@@ -117,6 +117,8 @@ it wrong the same way, use a replacement instead of adding more dictionary entri
 
 ## 4. Use spoken edits while dictating
 
+Keep [What you can say](cheat_sheet.md) nearby for phrases, contexts, and effects across modes.
+
 Modes can turn spoken commands into local text edits before insertion.
 
 Useful phrases:
@@ -201,7 +203,7 @@ guarantees apply. The fence is longer than any run of backticks in what you copi
 the clipboard cannot end the block early. Paths to copied files or a saved image are inserted as they
 are, never in a code fence.
 
-To control this per mode, open Settings > Modes, choose a mode, and toggle **Turn spoken commands into
+To control this per mode, open Settings > Modes, choose a mode, and toggle **Turn spoken editing phrases into
 edits**.
 
 ## 5. Pick the local speech model that fits your use

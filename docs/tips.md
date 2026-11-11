@@ -4,6 +4,8 @@ Small techniques that are easy to miss. This is not a linear guide — that's
 [Getting Started](getting_started.md) — and it's not troubleshooting — that's [FAQ.md](../FAQ.md).
 Skim for the one that fits, and come back as you grow your setup.
 
+For a quick reminder of phrases and where they work, keep the [voice cheat sheet](cheat_sheet.md) nearby.
+
 ## Make a word or command come out exactly right
 
 A **Dictionary** entry and a **Replacement** do different jobs, and the difference trips people up:

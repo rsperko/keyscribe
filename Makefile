@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test test-kit test-connector test-pi-connector check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major
+.PHONY: help build run release publish ship cask test test-kit test-connector test-pi-connector check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major cheatsheet test-cheatsheet
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -58,6 +58,13 @@ check-catalog-contract: ## Run the test suite against a restrictive stand-in AI 
 
 check-min-xcode: ## Build the package and tests with the oldest supported Xcode, installed beside the current one
 	./scripts/check-min-xcode.sh
+
+PAPER ?= letter
+cheatsheet: ## Build the printable voice cheat sheet (PAPER=letter or a4; needs uv)
+	uv run --no-project --with-requirements scripts/cheatsheet-requirements.txt python scripts/cheatsheet.py --paper $(PAPER) --output output/pdf/keyscribe-cheat-sheet-$(PAPER).pdf
+
+test-cheatsheet: ## Check PDF rendering, page breaks, links, and table continuation (needs uv)
+	uv run --no-project --with-requirements scripts/cheatsheet-requirements.txt --with pypdf==7.0.1 python scripts/test_cheatsheet.py
 
 fix-deps: ## Clear SwiftPM's stale binary-artifact caches after an upstream asset changed
 	./scripts/clear-binary-artifact-cache.sh

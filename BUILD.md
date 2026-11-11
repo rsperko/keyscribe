@@ -65,6 +65,30 @@ includes the build/run/test targets, the release gate (`make preflight`, `make p
 and maintenance helpers such as `make check-deps`, `make setup`, and `make clean`. It's a thin front
 door over the same scripts documented here.
 
+## Print the voice cheat sheet
+
+[What you can say](docs/cheat_sheet.md) is the editable source for the printable desk reference.
+With [uv](https://docs.astral.sh/uv/) installed, run:
+
+```bash
+make cheatsheet
+make cheatsheet PAPER=a4
+```
+
+The PDFs are written to `output/pdf/keyscribe-cheat-sheet-letter.pdf` and
+`output/pdf/keyscribe-cheat-sheet-a4.pdf`. Print at actual size, in portrait; double-sided printing
+works well for a desk copy. Generated PDFs stay out of git. The renderer uses its own Python
+dependencies and does not build the app. Run `make test-cheatsheet` to check the renderer; `make preflight`
+runs it too. `--product` and `--repo-url` set the page header and the base for relative links.
+
+Edit the Markdown, then regenerate. Horizontal rules in the cheat sheet become print page breaks;
+table headers repeat if a table continues onto another page. The renderer accepts headings,
+paragraphs, three-column tables, inline emphasis/code/links, and `<br>` line breaks; unsupported
+Markdown fails explicitly. `CheatSheetPhraseTests` (part of `make test-kit` and `make test`) runs every
+phrase in a table row through the parser for its section, so a phrase the app no longer understands fails
+the suite; a page's sections are dispatched by their heading, and the alternatives page by its subheadings.
+Inspect the rendered PDF before sharing it.
+
 ## How the build works
 
 One shared Xcode app definition owns everything that turns the Swift package into a runnable app.

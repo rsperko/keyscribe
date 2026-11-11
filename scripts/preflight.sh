@@ -248,6 +248,22 @@ chk_a_pi_connector_tests() {
 }
 guard a-pi-connector-tests "$(sig_source)" chk_a_pi_connector_tests
 
+chk_a_cheatsheet() {
+  # The printable desk reference renders through its own Python dependencies. A machine without uv can
+  # still ship the app, so that is a loud skip; a sheet that no longer renders or fits its pages fails.
+  if ! command -v uv >/dev/null 2>&1; then
+    result skip "cheat sheet — uv is not installed here; run make test-cheatsheet on a machine that has it"
+    return
+  fi
+  if timeout --foreground 300 make -C "$REPO_ROOT" test-cheatsheet >/tmp/preflight-cheatsheet.log 2>&1; then
+    result pass "cheat sheet — renders and keeps one page per section"
+  else
+    tail -20 /tmp/preflight-cheatsheet.log
+    result fail "cheat sheet — see /tmp/preflight-cheatsheet.log"
+  fi
+}
+guard a-cheatsheet "$(sig_source)" chk_a_cheatsheet
+
 chk_a_catalog_contract() {
   # A downstream build swaps the AI service catalog, and the public one permits everything, so a test or
   # seam leaning on the public lineup stays green above and breaks only downstream. Runs in a synced copy

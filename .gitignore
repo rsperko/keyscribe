@@ -1,5 +1,6 @@
 .DS_Store
 .build/
+output/pdf/
 *.app
 agent_notes/
 .claude/*
