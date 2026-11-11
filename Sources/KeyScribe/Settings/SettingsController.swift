@@ -128,6 +128,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
     }
     private let problems = SettingsProblemModel()
     private let navigation = SettingsNavigationModel()
+    var onOpenChange: ((Bool) -> Void)?
+    var isOpen: Bool { window?.isVisible == true }
     private let detectProblems: () -> [SettingsProblem]
     private let accessibilityTapActive: () -> Bool
     private let onRelaunch: () -> Void
@@ -331,6 +333,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         }
         refreshProblems()
         startProblemPoll()
+        onOpenChange?(true)
         if let destination { navigation.destination = destination }
         if let window {
             if !window.isVisible { AppActivationPolicy.pushRegular() }
@@ -365,6 +368,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         problemPollTask?.cancel()
         problemPollTask = nil
+        onOpenChange?(false)
         // "Navigated away" equals "closed" for retained transcript state — a memory/privacy invariant.
         handleHistoryPaneChange(active: false)
         // Drop the paste-target only on real close (not on pane-switch, where it must persist) so a reopen

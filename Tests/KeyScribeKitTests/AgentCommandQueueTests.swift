@@ -28,6 +28,18 @@ struct AgentCommandQueueTests {
         #expect(queue.poll(session: "s1", instance: "i2", connection: "i2", at: at(20)) == [])
     }
 
+    @Test func theQueueIsSettledOnlyWhenNoCommandWaitsToBeCollectedOrAcknowledged() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "i1", connection: "i1", at: t0)
+        #expect(queue.isSettled)
+        queue.enqueue(command("r1"), for: "s1", at: t0)
+        #expect(!queue.isSettled)
+        _ = queue.poll(session: "s1", instance: "i1", connection: "i1", at: at(1))
+        #expect(!queue.isSettled)
+        queue.ack("r1", instance: "i1", connection: "i1")
+        #expect(queue.isSettled)
+    }
+
     @Test func aQueuedCommandIsDeliveredToThePollingInstance() {
         var queue = AgentCommandQueue()
         queue.hello(session: "s1", instance: "i1", connection: "i1", at: t0)

@@ -71,6 +71,43 @@ struct AgentHubTests {
         await hub.rescan()
     }
 
+    @Test func theHubKnowsWhetherAnyListedConversationIsConnected() async {
+        let (hub, transport, registry, _) = makeHub()
+        registry.set("s1")
+        await hub.rescan()
+        #expect(!hub.hasConnectedConversation)
+        transport.live.insert("claude:s1")
+        await hub.rescan()
+        #expect(hub.hasConnectedConversation)
+    }
+
+    @Test func theHubSaysWhenTheFirstConversationConnects() async {
+        let (hub, transport, registry, _) = makeHub()
+        var connects = 0
+        hub.onFirstConnection = { connects += 1 }
+        registry.set("s1")
+        registry.set("s2")
+        await hub.rescan()
+        #expect(connects == 0)
+        transport.live.insert("claude:s1")
+        hub.refresh()
+        #expect(connects == 1)
+        transport.live.insert("claude:s2")
+        hub.refresh()
+        #expect(connects == 1)
+        transport.live = []
+        hub.refresh()
+        transport.live.insert("claude:s2")
+        hub.refresh()
+        #expect(connects == 2)
+    }
+
+    @Test func theRescanIsQuickOnlyWhileAConversationIsConnectedOrSettingsIsOpen() {
+        #expect(AgentRuntime.rescanInterval(connected: true, settingsOpen: false) == .seconds(1))
+        #expect(AgentRuntime.rescanInterval(connected: false, settingsOpen: true) == .seconds(1))
+        #expect(AgentRuntime.rescanInterval(connected: false, settingsOpen: false) == .seconds(10))
+    }
+
     @Test func anIdleConversationIsSentAndConfirmedByTheConnector() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
@@ -1494,6 +1531,19 @@ struct AgentHubTests {
         #expect(hub.directory.conversations.map(\.id) == ["fake:f1"])
         #expect(hub.discoveryProblems.isEmpty)
         await hub.rescan()
+        #expect(fake.scans == 2)
+    }
+
+    @Test func aRescanAskedForWhileAScanRunsRunsAgainAfterIt() async {
+        let fake = FakeDiscovery()
+        fake.blocked = true
+        let hub = AgentHub(transport: FakeTransport(), discovery: [fake], scanDeadline: .seconds(5))
+        async let first: Void = hub.rescan(rereadingTitles: false)
+        while fake.scans == 0 { await Task.yield() }
+        async let second: Void = hub.rescan(rereadingTitles: false)
+        try? await Task.sleep(for: .milliseconds(20))
+        fake.blocked = false
+        _ = await (first, second)
         #expect(fake.scans == 2)
     }
 

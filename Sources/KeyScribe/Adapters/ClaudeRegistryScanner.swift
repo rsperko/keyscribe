@@ -7,6 +7,7 @@ enum ClaudeRegistryScanner {
         var entries: [ClaudeRegistryEntry]
         var unreadable: [String]
         var folders: [String] = []
+        var watched: [String] = []
         var processesUnreadable = false
     }
 

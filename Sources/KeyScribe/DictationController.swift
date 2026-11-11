@@ -185,6 +185,7 @@ final class DictationController {
         get { session?.captureBringUpTask } set { session?.captureBringUpTask = newValue }
     }
     var agentFrontTask: Task<Void, Never>? { session?.agentFrontTask }
+    var hasFrozenAgentSnapshot: Bool { session?.agentSnapshot != nil }
     var snapshotAdoptionTask: Task<Void, Never>? {
         get { session?.snapshotAdoptionTask } set { session?.snapshotAdoptionTask = newValue }
     }
@@ -1629,7 +1630,9 @@ final class DictationController {
     }
 
     private func freezeAgentRecipient() {
-        guard let agents, settings.features.isEnabled(.codingAgents) else { return }
+        guard let agents, settings.features.isEnabled(.codingAgents),
+              session?.eligibleModes.contains(where: { $0.output == .agent }) == true
+        else { return }
         agents.refresh()
         agents.readPlaces()
         let snapshot = AgentSnapshot(
@@ -1694,36 +1697,38 @@ final class DictationController {
             finishNoSpeech()
             return
         }
-        let namesSettled = await settlePlaceNames(agents)
-        if Task.isCancelled { return }
-        let snapshot = {
-            var frozen = session?.agentSnapshot ?? AgentSnapshot(
-                names: agents.names, conversations: agents.recordingOrder, current: agents.current,
-                namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames, shared: agents.sharedNames)
-            if frozen.namesAvailable, agents.namesProblem == nil {
-                frozen.late = agents.names.merging(agents.disconnectedNames) { kept, _ in kept }
-                frozen.lateShared = agents.sharedNames
-            }
-            return frozen
-        }()
-        func frozenRecipient() -> AgentRecipient.Frozen? {
+        let pressed = session?.agentSnapshot ?? AgentSnapshot(
+            names: agents.names, conversations: agents.recordingOrder, current: agents.current,
+            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames, shared: agents.sharedNames)
+        func recipient(in snapshot: AgentSnapshot) -> AgentRecipient.Frozen? {
             session?.agentRecipient ?? AgentRecipient.initial(target: mode.agent.target, current: snapshot.current, names: snapshot.names)
         }
         switch VoiceCommandGrammar.parse(routed.transcript) {
         case .goBack:
             session?.agentFrontTask?.cancel()
             await builtInFromAgent(
-                VoiceCommandGrammar.goBack, heard: heard, facts: AgentHistoryFacts.goBack(frozen: frozenRecipient(), conversations: snapshot.conversations))
+                VoiceCommandGrammar.goBack, heard: heard, facts: AgentHistoryFacts.goBack(frozen: recipient(in: pressed), conversations: pressed.conversations))
             return
         case .repeatSummary:
             session?.agentFrontTask?.cancel()
             await builtInFromAgent(
                 VoiceCommandGrammar.repeatSummary[0], heard: heard,
-                facts: AgentHistoryFacts.repeatSummary(frozen: frozenRecipient(), conversations: snapshot.conversations))
+                facts: AgentHistoryFacts.repeatSummary(frozen: recipient(in: pressed), conversations: pressed.conversations))
             return
         default:
             break
         }
+        let namesSettled = await settlePlaceNames(agents)
+        if Task.isCancelled { return }
+        let snapshot = {
+            var frozen = pressed
+            if frozen.namesAvailable, agents.namesProblem == nil {
+                frozen.late = agents.names.merging(agents.disconnectedNames) { kept, _ in kept }
+                frozen.lateShared = agents.sharedNames
+            }
+            return frozen
+        }()
+        func frozenRecipient() -> AgentRecipient.Frozen? { recipient(in: snapshot) }
         if let request = AgentRename.request(in: routed.transcript) {
             await renameFromAgent(request, in: routed.transcript, recipient: frozenRecipient, through: agents, heard: heard, mode: mode, snapshot: snapshot)
             return

@@ -29,6 +29,7 @@ final class AgentBridgeServer: @unchecked Sendable {
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var timer: DispatchSourceTimer?
+    private var wake: Date?
     private var readers: [Int32: DispatchSourceRead] = [:]
     private var buffers: [Int32: Data] = [:]
     private var parked: [Parked] = []
@@ -89,7 +90,7 @@ final class AgentBridgeServer: @unchecked Sendable {
         acceptSource = accept
 
         let tick = DispatchSource.makeTimerSource(queue: queue)
-        tick.schedule(deadline: .now() + 0.1, repeating: 0.1)
+        tick.schedule(deadline: .distantFuture)
         tick.setEventHandler { [weak self] in self?.tick() }
         tick.resume()
         timer = tick
@@ -131,6 +132,7 @@ final class AgentBridgeServer: @unchecked Sendable {
             withdrawReadiness()
             launch = nil
             timer?.cancel()
+            wake = nil
             acceptSource?.cancel()
             for (fd, reader) in readers {
                 reader.cancel()
@@ -152,6 +154,7 @@ final class AgentBridgeServer: @unchecked Sendable {
         queue.async {
             self.commands.enqueue(command, for: session, instance: instance, at: Date())
             self.flush(session: session)
+            self.reschedule()
         }
     }
 
@@ -161,6 +164,7 @@ final class AgentBridgeServer: @unchecked Sendable {
             self.installationByInstance = [:]
             self.answerRetired(self.commands.retire(), parked: self.parked)
             self.parked = []
+            self.reschedule()
         }
     }
 
@@ -175,6 +179,7 @@ final class AgentBridgeServer: @unchecked Sendable {
             let waiting = self.parked.filter { instances.contains($0.instance) }
             self.parked.removeAll { instances.contains($0.instance) }
             self.answerRetired(self.commands.retire(instances: instances), parked: waiting)
+            self.reschedule()
         }
     }
 
@@ -194,7 +199,24 @@ final class AgentBridgeServer: @unchecked Sendable {
     }
 
     func isLive(session: String) -> Bool {
-        queue.sync { commands.isLive(session: session, at: Date()) }
+        queue.sync {
+            let now = Date()
+            touchParked(at: now)
+            return commands.isLive(session: session, at: now)
+        }
+    }
+
+    var nextWake: Date? { queue.sync { wake } }
+
+    private func touchParked(at now: Date) {
+        for p in parked { commands.touch(instance: p.instance, connection: p.connection, at: min(now, p.deadline)) }
+    }
+
+    private func reschedule() {
+        guard let timer, let next = commands.isSettled ? parked.map(\.deadline).min() : Date().addingTimeInterval(0.1) else { return }
+        if let wake, wake <= next { return }
+        wake = next
+        timer.schedule(wallDeadline: .now() + max(0, next.timeIntervalSinceNow))
     }
 
     private func acceptAll() {
@@ -223,6 +245,7 @@ final class AgentBridgeServer: @unchecked Sendable {
             readers.removeValue(forKey: fd)?.cancel()
             buffers[fd] = nil
             handle(request, on: fd)
+            reschedule()
         }
     }
 
@@ -243,6 +266,7 @@ final class AgentBridgeServer: @unchecked Sendable {
         guard let agent = agentByInstance[instance] else { return respond(fd, status: 409) }
         let session = AgentSessionID.make(agent: agent, native: native)
         let now = Date()
+        touchParked(at: now)
         guard let ready = commands.poll(session: session, instance: instance, connection: connection, at: now) else {
             return respond(fd, status: 409)
         }
@@ -297,7 +321,8 @@ final class AgentBridgeServer: @unchecked Sendable {
 
     private func tick() {
         let now = Date()
-        for p in parked { commands.touch(instance: p.instance, connection: p.connection, at: now) }
+        wake = nil
+        touchParked(at: now)
         commands.tick(at: now)
         for refusal in commands.undeliverable(at: now) {
             onEvent(.undelivered(request: refusal.command.id, reason: refusal.reason.rawValue, handedOff: refusal.handedOff))
@@ -306,10 +331,12 @@ final class AgentBridgeServer: @unchecked Sendable {
         parked.removeAll { $0.deadline <= now }
         for p in expired { send([], to: p.fd) }
         for session in Set(parked.map(\.session)) { flush(session: session) }
+        reschedule()
     }
 
     private func flush(session: String) {
         let now = Date()
+        touchParked(at: now)
         var stillParked: [Parked] = []
         for p in parked {
             guard p.session == session else { stillParked.append(p); continue }
@@ -338,6 +365,7 @@ final class AgentBridgeServer: @unchecked Sendable {
         let earlier = parked.filter { $0.session == hello.session }
         parked.removeAll { $0.session == hello.session }
         for p in earlier { send([], to: p.fd) }
+        reschedule()
         if excludes(hello.session) {
             onEvent(.hello(hello.withoutContent))
             respond(fd, status: 200, body: Data(#"{"ok":true,"quiet":true}"#.utf8))

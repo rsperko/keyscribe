@@ -756,6 +756,8 @@ struct AgentDeliveryWiringTests {
         private var _delay: TimeInterval = 0
         let release = DispatchSemaphore(value: 0)
         private var _blocking = false
+        private var _reads = 0
+        var reads: Int { lock.withLock { _reads } }
         var answers: [String: AgentPlaceAnswer] {
             get { lock.withLock { _answers } }
             set { lock.withLock { _answers = newValue } }
@@ -769,6 +771,7 @@ struct AgentDeliveryWiringTests {
             set { lock.withLock { _blocking = newValue } }
         }
         func read(_ queries: [AgentPlaceQuery]) -> [String: AgentPlaceAnswer] {
+            lock.withLock { _reads += 1 }
             if blocking { _ = release.wait(timeout: .now() + 5) }
             if delay > 0 { Thread.sleep(forTimeInterval: delay) }
             let known = answers
@@ -870,6 +873,34 @@ struct AgentDeliveryWiringTests {
         #expect(roster?.rows.map(\.name) == ["keyscribe blue", "keyscribe"])
         #expect(roster?.recipientName == "keyscribe blue")
         #expect(roster?.source == .current)
+    }
+
+    @Test func aPressNoCodingAgentModeCanServeReadsNoPlacesAndFreezesNoConversations() async {
+        let reader = SlowReader()
+        let rig = await rig("hello", modes: [.direct], current: "claude:s1", places: reader)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        let before = reader.reads
+        rig.controller.setNextModeOverride(id: Mode.directId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        #expect(!rig.controller.hasFrozenAgentSnapshot)
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        #expect(reader.reads == before)
+    }
+
+    @Test func aConnectorThatResumedPollingWithoutAHelloIsReachableAtThePress() async {
+        let rig = await rig("Run the tests.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.transport.live = false
+        rig.hub.refresh()
+        #expect(!rig.hub.hasConnectedConversation)
+        rig.transport.live = true
+        await take(rig)
+        #expect(rosters(rig).compactMap { $0 }.first?.rows.first { $0.id == "claude:s1" }?.available == true)
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
     }
 
     @Test func anOrdinaryDictationShowsNoSessionList() async {
@@ -1624,6 +1655,25 @@ struct AgentDeliveryWiringTests {
         #expect(entry?.outcome == .inserted)
         #expect(fact(entry, "Command") == "Go back")
         #expect(fact(entry, "Default recipient") == "keyscribe")
+    }
+
+    @Test(arguments: ["Go back.", "Repeat that."])
+    func aTakeThatNamesNoConversationDoesNotWaitForAPlaceRead(text: String) async {
+        let runner = BackRunner()
+        runner.outcome = .done(summary: "docs", command: "Replays the last spoken reply.")
+        let reader = SlowReader()
+        let rig = await rig(text, current: "claude:s1", voiceCommands: runner, places: reader)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
+        rig.controller.placeNamesGrace = .seconds(3)
+        reader.blocking = true
+        let started = ContinuousClock.now
+        await take(rig)
+        #expect(ContinuousClock.now - started < .seconds(1))
+        #expect(runner.ran.count == 1)
+        reader.blocking = false
+        reader.release.signal()
+        while let reading = rig.hub.placeTracker?.reading { await reading.value }
     }
 
     @Test(arguments: ["Repeat that.", "say that again"])

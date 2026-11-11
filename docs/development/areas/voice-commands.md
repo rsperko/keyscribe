@@ -65,6 +65,13 @@ every rule above applies to it, with these sharpenings:
   explicitly (the read-aloud tool and command): it waits for the app's answer within a bounded deadline, never for
   the turn or for speech, and a timeout promises nothing. They preserve downstream results,
   errors, cancellation, and other extensions' UI; connector failures must not interrupt agent work.
+- **Idle means asleep.** Background work runs only while something needs it. The bridge wakes for a parked
+  poll's deadline or a command not yet settled, never on a fixed tick (`AgentBridgeServer.reschedule`). The
+  hub rescans quickly only while a conversation is connected or Settings is open, and otherwise on a change
+  in a watched session folder (`AgentDiscovery.watchedFolders`) plus a slow fallback
+  (`AgentRuntime.rescanInterval`); the first conversation to connect ends the slow fallback at once. A press
+  refreshes, reads places and freezes the roster only when a Coding agent mode is eligible for it; the refresh
+  stays, because a connector that resumes polling without a hello reports no event.
 - **Bound background work across failures and reconnects.** A timed-out request still counts as
   outstanding until it settles. Idle checks, retries, queues, timers, and stored receipts must not
   grow with session age or failure count.
@@ -168,7 +175,7 @@ every rule above applies to it, with these sharpenings:
   by socket. The environment's pane id is resolved through herdr's own `pane current` with that id as the
   caller's pane, because herdr gives a moved pane a new id and resolves the old one only for its caller.
   Labels are read off the main actor, by one coalesced read per poll for every conversation
-  (`AgentPlaceTracker`), each command under a timeout, never on the 1 s registry tick's critical path and
+  (`AgentPlaceTracker`), each command under a timeout, never on the registry tick's critical path and
   never awaited by the agent. Whether a conversation's place was checked is tracked per conversation
   (`AgentPlaceTracker.checked`): found or absent checks it, and it stays checked. Separately, any completed
   answer, unknown included, marks it attempted (`AgentPlaceTracker.attempted`). An unknown answer keeps the
@@ -176,7 +183,8 @@ every rule above applies to it, with these sharpenings:
   (`AgentPlaceTracker.failingSince`), from the first failure, which Settings and the Rename sheet show beside
   the conversation instead of blocking on it. An unchecked conversation with no cached place keeps its last name
   (`AgentDirectory.update(unplaced:)`), so a failed first read after launch keeps remembered names. A take
-  waits for a read already running only when it is resolved, up to `DictationController.placeNamesGrace`;
+  waits for a read already running only when it is resolved, up to `DictationController.placeNamesGrace`,
+  and never for Go back or Repeat that, which name no conversation;
   if a read is still running then, or any listed conversation has no completed read yet (`placesUnread`), a
   take that would go to the default recipient is held, because its leading words may be a name a first read
   did not deliver (a new conversation whose pane already has a label). A read that completes, even unknown,

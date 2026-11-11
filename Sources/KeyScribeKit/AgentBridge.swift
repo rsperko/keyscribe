@@ -473,6 +473,8 @@ public struct AgentCommandQueue: Sendable {
             .map(\.key)
     }
 
+    public var isSettled: Bool { pending.isEmpty && inFlight.isEmpty }
+
     public func isLive(session: String, at now: Date) -> Bool {
         !activeInstances(session: session, at: now).isEmpty
     }

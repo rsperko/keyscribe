@@ -9,6 +9,7 @@ final class ClaudeDiscovery: AgentDiscovery {
     private let running: (RememberedName) -> Bool
     private let isRunning: @Sendable (Int) -> Bool
     private var lastByFolder: [String: [ClaudeRegistryEntry]] = [:]
+    private(set) var watchedFolders: [URL] = []
 
     nonisolated static let partialProblem = "Some Claude Code session lists couldn\u{2019}t be read. Conversations seen earlier stay listed."
 
@@ -44,6 +45,8 @@ final class ClaudeDiscovery: AgentDiscovery {
             var found = ClaudeRegistryScanner.scanEach(configDirs: dirs)
             found.processesUnreadable = running.isPartial
             found.folders = fromProcesses.map(\.path)
+            found.watched = dirs.map { $0.appendingPathComponent("sessions", isDirectory: true).path }
+                .filter { FileManager.default.fileExists(atPath: $0) }
             return found
         }, titles: ClaudeTranscriptTitles(configDirs: []))
     }
@@ -56,7 +59,7 @@ final class ClaudeDiscovery: AgentDiscovery {
 
     func scan(rereadingTitles: Bool) async -> AgentScan {
         let (scanRegistry, titles, previous, isRunning) = (scanRegistry, titles, lastByFolder, isRunning)
-        let (scan, kept) = await Task.detached { () -> (AgentScan, [String: [ClaudeRegistryEntry]]) in
+        let (scan, kept, watched) = await Task.detached { () -> (AgentScan, [String: [ClaudeRegistryEntry]], [String]) in
             let found = scanRegistry()
             var entries = found.entries
             var carried: Set<String> = []
@@ -79,9 +82,10 @@ final class ClaudeDiscovery: AgentDiscovery {
             for setup in found.folders + entries.compactMap(\.configDir) where !setups.contains(setup) { setups.append(setup) }
             let problem = found.unreadable.isEmpty && !found.processesUnreadable ? nil : Self.partialProblem
             let kept = Dictionary(grouping: entries) { $0.configDir ?? Self.unknownFolder }
-            return (.found(sessions, AgentScanExtras(setups: setups, problem: problem, carried: carried)), kept)
+            return (.found(sessions, AgentScanExtras(setups: setups, problem: problem, carried: carried)), kept, found.watched)
         }.value
         lastByFolder = kept
+        watchedFolders = watched.map { URL(fileURLWithPath: $0, isDirectory: true) }
         return scan
     }
 

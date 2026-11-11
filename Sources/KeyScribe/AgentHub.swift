@@ -38,6 +38,7 @@ final class AgentHub {
     var onNotice: ((AgentReceipt, _ request: String, _ conversation: String) -> Void)?
     var onForget: ((_ request: String) -> Void)?
     var onChange: (() -> Void)?
+    var onFirstConnection: (() -> Void)?
     var onResult: ((_ conversation: String, _ handle: String, _ answer: String, _ requested: Bool, _ origin: String?) -> Void)?
     var onEnded: ((_ conversation: String, _ handle: String, _ body: String, _ requested: Bool, _ origin: String?) -> Void)?
     var onAttention: ((_ conversation: String, _ handle: String, _ attention: AgentAttention?, _ requested: Bool) -> Void)?
@@ -69,6 +70,7 @@ final class AgentHub {
     private var shownExtras: [String: AgentScanExtras] = [:]
     private var scanTask: Task<Void, Never>?
     private var rescanWanted = false
+    private var rereadWanted = false
     private var outstanding: [String: Outstanding] = [:]
     private var connectorNamesAt: [String: Date] = [:]
     private var stopped = false
@@ -196,6 +198,10 @@ final class AgentHub {
     }
 
     var rows: [String] { directory.conversations.map(\.id) }
+
+    var hasConnectedConversation: Bool { directory.conversations.contains(where: \.connectorLive) }
+
+    var watchedFolders: [URL] { discoveries.flatMap(\.watchedFolders) }
 
     var candidates: [AgentCandidate] { discoveries.flatMap { lastExtras[$0.kind.id]?.candidates ?? [] } }
 
@@ -423,7 +429,8 @@ final class AgentHub {
 
     func rescan(rereadingTitles: Bool = true) async {
         if let scanTask {
-            rescanWanted = rescanWanted || rereadingTitles
+            rescanWanted = true
+            rereadWanted = rereadWanted || rereadingTitles
             await scanTask.value
             return
         }
@@ -431,8 +438,9 @@ final class AgentHub {
             var rereading = rereadingTitles
             repeat {
                 self?.rescanWanted = false
+                self?.rereadWanted = false
                 await self?.scanOnce(rereadingTitles: rereading)
-                rereading = true
+                rereading = self?.rereadWanted ?? false
             } while self?.rescanWanted == true
             self?.scanTask = nil
         }
@@ -497,6 +505,7 @@ final class AgentHub {
         scanTask = nil
         placeTracker?.stop()
         onChange = nil
+        onFirstConnection = nil
         onNotice = nil
         onForget = nil
         onResult = nil
@@ -635,7 +644,9 @@ final class AgentHub {
         for session in live.subtracting(liveSessions).subtracting(tracked) {
             onAttention?(session, handle(of: session) ?? "", nil, false)
         }
+        let firstConnection = liveSessions.isEmpty && !live.isEmpty
         liveSessions = live
+        if firstConnection { onFirstConnection?() }
         waitingPrompts = waitingPrompts.filter { live.contains($0.key) }
     }
 
@@ -1054,7 +1065,17 @@ final class AgentRuntime {
 
     let hub: AgentHub
     private let server: AgentBridgeServer
-    private var timer: Timer?
+    private var pace: Task<Void, Never>?
+    private var watcher: FolderWatcher?
+    private var quick = false
+    private var stopped = false
+    var settingsOpen = false {
+        didSet { if settingsOpen && !oldValue { wake() } }
+    }
+
+    static func rescanInterval(connected: Bool, settingsOpen: Bool) -> Duration {
+        connected || settingsOpen ? .seconds(1) : .seconds(10)
+    }
 
     static func bridgeDirectory(supportDir: URL) -> URL {
         supportDir.appendingPathComponent("agents", isDirectory: true)
@@ -1091,12 +1112,40 @@ final class AgentRuntime {
             front: AgentFront(), glance: AgentFront.confirmingWithoutAsking, exclusions: exclusions, places: CombinedPlaceReader(readers: [HerdrPlaceReader(), TerminalPlaceReader()]))
         box.hub = hub
         try server.start()
-        Task { @MainActor [weak hub] in await hub?.rescan() }
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak hub] _ in
-            Task { @MainActor in
-                hub?.tickPlaces()
-                await hub?.rescan(rereadingTitles: false)
+        hub.onFirstConnection = { [weak self] in
+            guard self?.quick == false else { return }
+            self?.wake()
+        }
+        Task { @MainActor [weak self] in
+            await self?.hub.rescan()
+            self?.wake()
+        }
+    }
+
+    private func wake() {
+        guard !stopped else { return }
+        pace?.cancel()
+        pace = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                guard let interval = await self?.step() else { return }
+                try? await Task.sleep(for: interval)
             }
+        }
+    }
+
+    private func step() async -> Duration {
+        hub.tickPlaces()
+        await hub.rescan(rereadingTitles: false)
+        watch(hub.watchedFolders)
+        let interval = Self.rescanInterval(connected: hub.hasConnectedConversation, settingsOpen: settingsOpen)
+        quick = interval == Self.rescanInterval(connected: true, settingsOpen: false)
+        return interval
+    }
+
+    private func watch(_ folders: [URL]) {
+        guard folders != watcher?.folders ?? [] else { return }
+        watcher = FolderWatcher(folders: folders) { [weak hub] in
+            Task { @MainActor in await hub?.rescan(rereadingTitles: false) }
         }
     }
 
@@ -1106,8 +1155,10 @@ final class AgentRuntime {
     }
 
     func stop() {
-        timer?.invalidate()
-        timer = nil
+        stopped = true
+        pace?.cancel()
+        pace = nil
+        watcher = nil
         hub.stop()
         server.stop()
     }

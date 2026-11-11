@@ -15,6 +15,16 @@ struct ClaudeRegistryScannerTests {
         try Data(json.utf8).write(to: dir.appendingPathComponent("sessions/\(pid).json"))
     }
 
+    @MainActor
+    @Test func aScanWatchesEverySessionFolderThatExists() async throws {
+        let present = try configDir()
+        let absent = FileManager.default.temporaryDirectory.appendingPathComponent("ks-claude-\(UUID().uuidString)")
+        let discovery = ClaudeDiscovery(enrolled: { [present, absent] }, defaultFolder: absent, processes: { AgentProcesses.Found() })
+        #expect(discovery.watchedFolders.isEmpty)
+        _ = await discovery.scan(rereadingTitles: false)
+        #expect(discovery.watchedFolders.map(\.standardizedFileURL.path) == [present.appendingPathComponent("sessions").standardizedFileURL.path])
+    }
+
     @Test func liveInteractiveSessionsAreListed() throws {
         let dir = try configDir()
         try write(dir, pid: getpid(), session: "alive")

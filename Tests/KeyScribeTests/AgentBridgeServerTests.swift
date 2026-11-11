@@ -333,6 +333,59 @@ struct AgentBridgeServerTests {
         #expect(Date().timeIntervalSince(started) >= 0.35)
     }
 
+    private func settles(_ server: AgentBridgeServer) -> Bool {
+        let deadline = Date().addingTimeInterval(1)
+        while Date() < deadline, server.nextWake != nil { usleep(20_000) }
+        return server.nextWake == nil
+    }
+
+    @Test func anIdleBridgeSchedulesNoWake() throws {
+        let (server, _, dir) = try makeServer(pollHold: 0.3)
+        defer { server.stop() }
+        try hello(dir)
+        #expect(server.nextWake == nil)
+        _ = try poll(dir)
+        #expect(settles(server))
+    }
+
+    @Test func aParkedPollWakesTheBridgeOnlyAtItsDeadline() async throws {
+        let (server, _, dir) = try makeServer(pollHold: 5)
+        defer { server.stop() }
+        try hello(dir)
+        let parkedAt = Date()
+        async let polled = Task.detached { try self.poll(dir) }.value
+        try await Task.sleep(for: .milliseconds(300))
+        let wake = try #require(server.nextWake)
+        #expect(wake.timeIntervalSince(parkedAt) > 4)
+        server.enqueue(.status(id: "r1", expectedSession: "claude:s1", text: "Dictating"), for: "claude:s1")
+        _ = try await polled
+    }
+
+    @Test func aCommandWaitingToBeCollectedKeepsTheBridgeTickingUntilItIsAcknowledged() throws {
+        let (server, _, dir) = try makeServer()
+        defer { server.stop() }
+        try hello(dir)
+        server.enqueue(.status(id: "r1", expectedSession: "claude:s1", text: "Dictating"), for: "claude:s1")
+        let waiting = try #require(server.nextWake)
+        #expect(waiting.timeIntervalSinceNow < 0.5)
+        _ = try poll(dir)
+        #expect(server.nextWake != nil)
+        let ack = #"{"op":"ack","request":"r1","instance":"i1","connection":"i1"}"#
+        #expect(try request(dir, path: "/event", body: ack).0 == 200)
+        #expect(settles(server))
+    }
+
+    @Test func aParkedPollKeepsItsConversationLiveBeyondTheActiveWindow() async throws {
+        let (server, _, dir) = try makeServer(pollHold: 3, activeWindow: 0.5)
+        defer { server.stop() }
+        try hello(dir)
+        async let polled = Task.detached { try self.poll(dir) }.value
+        try await Task.sleep(for: .milliseconds(1200))
+        #expect(server.isLive(session: "claude:s1"))
+        server.enqueue(.status(id: "r1", expectedSession: "claude:s1", text: "Dictating"), for: "claude:s1")
+        _ = try await polled
+    }
+
     @Test func anUnacknowledgedCommandNeverReachesAnInstanceThatResumesAfterAGap() throws {
         let (server, events, dir) = try makeServer(pollHold: 0.3)
         defer { server.stop() }

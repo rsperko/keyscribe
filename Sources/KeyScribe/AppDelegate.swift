@@ -807,6 +807,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 spokenResult = spoken
                 controller.spokenUpdates = spoken
                 agentRuntime = runtime
+                runtime.settingsOpen = settingsController.isOpen
+                settingsController.onOpenChange = { [weak runtime] in runtime?.settingsOpen = $0 }
                 controller.agents = runtime.hub
                 Task { [weak self, weak codingAgents = settingsController.codingAgents] in
                     await codingAgents?.maintain()
@@ -818,6 +820,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             agentRuntime?.stop()
             agentRuntime = nil
+            settingsController.onOpenChange = nil
             spokenResult?.stop()
             spokenResult = nil
             controller.agents = nil
