@@ -270,7 +270,7 @@ struct DictationPipelineWiringTests {
             insertedText: await insertSpy.text, insertionMethod: await insertSpy.method,
             insertedPaste: await insertSpy.paste,
             submits: await submitSpy.keys, llm: llm, historyEntry: entry,
-            lastHUD: hudSpy.states.last, recordedBiasTerms: engine.lastBiasTerms, usage: usage.snapshot())
+            lastHUD: hudSpy.states.last { $0 != .hidden }, recordedBiasTerms: engine.lastBiasTerms, usage: usage.snapshot())
     }
 
     private func firstHistoryEntry(in history: HistoryStore) async -> HistoryEntry? {

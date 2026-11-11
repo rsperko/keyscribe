@@ -597,9 +597,9 @@ struct CodingAgentsSettingsModelTests {
     @Test func guidanceShowsHowToCheckOnAConversationWithoutSendingAnything() {
         let (model, _, _) = makeModel()
         model.show([conversation("backend", pid: 1)], current: nil)
-        #expect(model.recipientGuidance().hasSuffix(" Say \u{201C}what is backend waiting for?\u{201D} to check on it without sending anything."))
+        #expect(model.recipientGuidance().hasSuffix(" Say \u{201C}check on backend\u{201D} to see its status without sending anything."))
         model.show([conversation("backend", pid: 1)], current: "backend")
-        #expect(model.recipientGuidance().hasSuffix(" Say \u{201C}what are you waiting for?\u{201D} to check on it without sending anything."))
+        #expect(model.recipientGuidance().hasSuffix(" Say \u{201C}check on backend\u{201D} to see its status without sending anything."))
     }
 
     @Test func agentTypesAreShownOnlyWhenTheConversationListIsMixed() {

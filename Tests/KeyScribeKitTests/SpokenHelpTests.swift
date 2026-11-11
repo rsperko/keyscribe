@@ -12,8 +12,8 @@ struct SpokenHelpTests {
         let help = SpokenHelp.codingAgent(title: "Coding agent", recipient: "backend", example: "api", readsReplies: true, canRepeat: true, stages: [])
         #expect(help.status == "Recipient: backend")
         #expect(help.rows.map(\.said) == [
-            "cancel", "go back", "open backend", "repeat that", "select backend", "tell backend run the unit tests",
-            "what is backend waiting for?", "who needs me?",
+            "cancel", "check on all conversations", "check on backend", "go back", "open backend", "repeat that", "select backend",
+            "tell backend run the unit tests",
         ])
         for row in help.rows { #expect(!row.effect.isEmpty) }
     }
@@ -27,7 +27,7 @@ struct SpokenHelpTests {
 
     @Test func codingAgentHelpWithNoConversationInventsNoName() {
         let help = SpokenHelp.codingAgent(title: "Coding agent", recipient: nil, example: nil, readsReplies: false, canRepeat: false, stages: [])
-        #expect(help.rows.map(\.said) == ["cancel", "go back", "who needs me?"])
+        #expect(help.rows.map(\.said) == ["cancel", "check on all conversations", "go back"])
     }
 
     @Test func repeatSaysWhenThereIsNothingToRepeat() {
@@ -126,9 +126,9 @@ struct SpokenHelpTests {
         #expect(AgentAddress.parse("tell backend run the unit tests", names: ["backend"]) == .name("backend", body: "run the unit tests"))
         #expect(AgentAddress.parse("select backend", names: ["backend"]) == .select(.name("backend", body: "")))
         #expect(AgentAddress.parse("open backend", names: ["backend"]) == .open(.name("backend", body: "")))
-        #expect(AgentStatusQuery.parse("what is backend waiting for?", names: ["backend"]) == .waiting(.name("backend", body: "")))
-        #expect(AgentStatusQuery.parse("who needs me?", names: ["backend"]) == .whoNeedsMe)
-        for phrase in ["tell backend run the unit tests", "select backend", "open backend", "what is backend waiting for?", "who needs me?"] {
+        #expect(AgentStatusQuery.parse("check on backend", names: ["backend"]) == .check(.name("backend", body: "")))
+        #expect(AgentStatusQuery.parse("check on all conversations", names: ["backend"]) == .all)
+        for phrase in ["tell backend run the unit tests", "select backend", "open backend", "check on backend", "check on all conversations"] {
             #expect(agent.contains(phrase))
         }
         for (phrase, intent) in [("repeat that", VoiceCommandIntent.repeatSummary), ("go back", .goBack), ("cancel", .cancel)] {

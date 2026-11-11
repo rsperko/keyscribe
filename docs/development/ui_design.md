@@ -538,43 +538,53 @@ is refused with the reason and nothing changes; with no recipient it says “Swi
 say the rename command again” with **Open Coding Agent Settings**. History records Rename, the conversation, the new name and how it was chosen. After “tell” and a
 name it is message text.
 
-A take that is only a question about what a conversation is waiting for is answered by KeyScribe and sends
-nothing (`AgentStatusQuery`): “what is docs waiting for”, “what does docs need from me”, “is docs waiting
-for me”, and the same without a name (“what are you waiting for”), which
-asks about the take's recipient. “Blocked on”, “stuck on”, “why is docs waiting” (or stuck), “what is
-blocking docs” and “does docs need anything” ask the same thing, and hold with more words after them like the
-other forms. Contractions, closing punctuation, an
-opening “please”, “hey”, “so” or “okay” (also skipped before “tell”, “ask” or a conversation's name, so
-“hey docs, run the tests” addresses docs), “currently”, “still”, and a
-closing “now” or “right now” are fine. More words after a question about a named conversation (“what does
-docs need from me to continue”, or a second question after it) hold the take, since sending it would put a
-question about docs to another conversation: “Nothing sent. Say “what is docs waiting for?” to check on
-it, or start with “tell docs” to send a message.” A longer question about “you” (“what are you waiting for before
-merging”) and anything after “ask” and a name (“ask docs what it needs from me”) are messages to
-that conversation, and “what is the build waiting for” names no conversation, so it is a message. “Tell docs …”
-is always sent, which is how to ask the agent itself. The name must be a conversation's name or number; one
-that sounds like a name is held. The answer says only what is reported,
-in this order: the prompt's own question when it is short (“docs asks: keep the schema or add a migration?”),
-read with the same redaction as a spoken reply, else a description from the chosen summary service (the HUD
-says “Checking docs…” while it waits), else the state (“docs is waiting for approval”). The HUD adds “Say
-“open docs” to see it”; speech leaves it out. A working conversation is “docs is working. No request for your
-input is currently reported.”, an idle one “docs is ready for another message.”, and one that is not
-connected is reported as last seen. So is one whose state was carried over because its agent's session list
-could not be read: “docs was last seen waiting for approval. I couldn’t check its current status.” A description is used only while the prompt it describes is still the one
-pending; if the prompt or state changed meanwhile, the answer is rebuilt from what is pending now. The answer
-shows in the HUD, and is read aloud when spoken replies are on, even with the conversation in front; speech
-that has to wait (for the dictation HUD, or while its audio is prepared) is dropped if what it reports
-stopped being true, its state, prompt, connection or freshness, while “repeat that” still replays it as heard.
-An answer replaces a notice about the same conversation that is still waiting to play or being described, so
-the same news is not heard twice; finished replies stay queued. A conversation the user disconnected is reported as disconnected, with
-**Open Coding Agent Settings**. “Who needs me”, “who's waiting for me”, “who is blocked” (or stuck),
-“is anyone waiting for me”, “what is everyone waiting for” and “which conversations are waiting” count the conversations waiting for input, typed turns and conversations without a connector included, and
-name them in recording order; a state carried over from an earlier check is not counted. When some agents
-could not be checked, a state is carried over, or a conversation without a connector could be waiting without
-reporting it, the answer adds “I couldn’t check every conversation.”, and with none to name it says “No
-confirmed requests for your input.” instead of “No conversation needs you.”. Spoken, it is dropped if the
-names or that completeness changed while it waited. Checking never changes the recipient. History records the
-command and the conversation, never the answer.
+A status check is an explicit command, never a question: questions are what people say to agents, so a
+question such as “what are you waiting for?”, “do you need anything from me?” or “what does docs need from
+me?” is a message to the recipient like any other dictation. Only a whole take that starts with “check on”
+is answered by KeyScribe, and it sends nothing (`AgentStatusQuery`): “check on docs” (a conversation's name,
+including a name reached only after a verb), “check on conversation two” or “session two”, “check on this
+conversation” for the take's recipient, and “check on all conversations” (or “sessions”). “Who needs me?” is
+the one other phrase, the same as checking on all conversations. Capitals, closing punctuation, an opening “please”, “hey”,
+“so” or “okay”, and a closing “please” are fine; nothing else is added. Which window is in front never decides whether a take is a
+check or a message; it only feeds the recipient “this conversation” means. “Check on” inside a longer take
+(“before you change anything, check on docs”) and after “tell” or “ask” and a name (“tell docs check on
+the build”) is message text. After “check on”, words that name no conversation are held like any unknown
+name when they are no longer than a conversation name can be, with the reason and the words kept for Paste last dictation
+(“No conversation named “frontend”. Nothing sent.”), and never checked on the recipient instead; longer words
+(“check on the deploy before we merge today”) are a message. A conversation named with an everyday word makes
+“check on” that word a status check, so “tell” is how to say it to the agent. With no recipient, “check on
+this conversation” says “No recipient selected. Nothing sent. Say “check on” and a conversation’s name.” with
+**Open Coding Agent Settings**.
+
+Every answer starts with “Status for docs:” and says “Nothing sent.” after what is reported (the HUD's
+“open” hint follows it), the same words every held take uses. It says only what is reported,
+in this order: the prompt's own question when it is short (“waiting for your answer to “keep the schema or add
+a migration?””), read with the same redaction as a spoken reply, else a description from the chosen summary
+service (the HUD says “Checking docs…” while it waits), else the state (“waiting for approval”). The HUD adds
+“Say “open docs” to see it”; speech leaves it out. A working conversation is “working. No pending input
+request is reported.” and an idle one “idle. No pending input request is reported.”, never that it needs
+nothing. One that is not connected is “not connected. Its current status is unavailable.” with what it was last
+seen, and one whose state was carried over because its agent's session list could not be read is
+“last seen waiting for approval. Its current status is unavailable.” A description is used only while
+the prompt it describes is still the one pending; if the prompt or state changed meanwhile, the answer is
+rebuilt from what is pending now. The answer shows in the HUD, and is read aloud when spoken replies are on,
+even with the conversation in front; speech that has to wait (for the dictation HUD, or while its audio is
+prepared) is dropped if what it reports stopped being true, its state, prompt, connection or freshness,
+while “repeat that” still replays it as heard. An answer replaces a notice about the same conversation that
+is still waiting to play or being described, so the same news is not heard twice; finished replies stay
+queued. A conversation the user disconnected is reported as disconnected, with **Open Coding Agent
+Settings**. Checking all conversations counts the conversations waiting for input, typed turns and
+conversations without a connector included, and names them in recording order (“Status for all
+conversations: two need you: docs and backend. Nothing sent.”); a state carried over from an earlier
+check is not counted. When some agents could not be checked, a state is carried over, or a conversation
+without a connector could be waiting without reporting it, the answer adds “Some conversations couldn’t be
+checked.”, and with none to name it says “no pending input requests are reported, but some conversations
+couldn’t be checked” instead of an all-clear. Spoken, it is dropped if the names or that completeness
+changed while it waited. Checking never changes the recipient or the window in front. History records Check
+status and the conversation (or all conversations), never the answer.
+
+An opening “please”, “hey”, “so” or “okay” is skipped before “tell”, “ask” or a conversation's name, so “hey
+docs, run the tests” addresses docs.
 
 With the Coding agent feature off, a remembered conversation is only its app and window. While
 it looks, the HUD says so (“Opening docs…”). It follows the agent's processes outward and
@@ -1869,7 +1879,7 @@ Its sections are, in order:
 can say**, built like the Voice Commands section of that name: one introduction (“Start with “tell” and a
 conversation’s name to send it an instruction.”), then short examples with what each does
 (`CodingAgentPhrasesSection.examples`): “tell” and a name with an instruction, “select” and a name, “open” and a
-name, “what is” a name “waiting for?”, “who needs me?”, “go back”, “cancel”, and “repeat that” only while
+name, “check on” a name, “check on all conversations”, “go back”, “cancel”, and “repeat that” only while
 **Read replies aloud** is on. The examples use the name of the conversation the
 guidance below would use, a placeholder when there is none, and “conversation two” while names are unavailable.
 Captions then say where an instruction without a name goes, that the numbers shown while recording can be

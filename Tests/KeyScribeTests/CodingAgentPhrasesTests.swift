@@ -31,10 +31,10 @@ struct CodingAgentPhrasesTests {
         #expect(AgentAddress.parse(said, names: ["backend"]) == .open(.name("backend", body: "")))
     }
 
-    @Test func theQuestionsAreAnsweredWithoutSendingAnything() {
+    @Test func theStatusChecksAreAnsweredWithoutSendingAnything() {
         let said = phrases(name: "backend", readsReplies: false)
-        #expect(AgentStatusQuery.parse(said[3], names: ["backend"]) == .waiting(.name("backend", body: "")))
-        #expect(AgentStatusQuery.parse(said[4], names: ["backend"]) == .whoNeedsMe)
+        #expect(AgentStatusQuery.parse(said[3], names: ["backend"]) == .check(.name("backend", body: "")))
+        #expect(AgentStatusQuery.parse(said[4], names: ["backend"]) == .all)
     }
 
     @Test func goBackCancelAndRepeatAreTheBuiltInCommands() {
@@ -52,7 +52,7 @@ struct CodingAgentPhrasesTests {
         #expect(AgentAddress.parse(said[0], names: [], namesKnown: false) == .row(2, body: "run the unit tests"))
         #expect(AgentAddress.parse(said[1], names: [], namesKnown: false) == .select(.row(2, body: "")))
         #expect(AgentAddress.parse(said[2], names: [], namesKnown: false) == .open(.row(2, body: "")))
-        #expect(AgentStatusQuery.parse(said[3], names: [], namesKnown: false) == .waiting(.row(2, body: "")))
+        #expect(AgentStatusQuery.parse(said[3], names: [], namesKnown: false) == .check(.row(2, body: "")))
     }
 
     @Test func renamingNamesTheConversationInstructionsGoTo() {

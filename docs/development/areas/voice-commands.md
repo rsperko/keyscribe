@@ -49,6 +49,11 @@ review keeps finding the same few of them.
   always sends, so a question put to the agent never becomes a local status answer; an unknown name after
   `ask` followed by a question holds rather than falling to the current recipient, except after `the`, where
   a word that names no conversation is message text by design.
+- **A status check is an explicit command, never a question.** Only a whole take starting with `check on`
+  (or exactly `who needs me`) checks status (`AgentStatusQuery.parse`); every question is a message, because
+  questions are what people say to agents. Focus never decides whether a take is a check or a message. An
+  unknown target after `check on` holds like any unknown name unless it is longer than a name can be
+  (`AgentRename.nameWords`), which makes it a message.
 - **Local controls are whole utterances.** `cancel`/`never mind`, `go back`, and `repeat that` act only as the
   whole take, with an optional `please` around them (`VoiceCommandGrammar.parse`); inside a longer take they
   are text. A closing `please` is part of the words a text-taking script receives, and is dropped everywhere

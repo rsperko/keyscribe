@@ -46,7 +46,7 @@ LLM calls** to a service you configured, and both off unless you turn them on:
   dictation was or the mode is now, so turning redaction off later never sends that dictation unredacted.
 - **Spoken replies**, in the experimental Coding agent feature. Notices that a conversation is waiting for you or
   lost its connector are fixed sentences and send nothing, with one exception: when a Pi conversation you
-  dictated to opens a prompt, or you ask what a Pi conversation is waiting for and its prompt has no short
+  dictated to opens a prompt, or you check on a Pi conversation and its prompt has no short
   question to read as it is (whoever started that turn, you typing included), the prompt's kind and title, the tool call it seems to be about (its name and up
   to a thousand characters of arguments, such as the command it asks you to approve), and the agent's last
   words before it asked are sent to the service you chose, after best-effort redaction, to say in a sentence

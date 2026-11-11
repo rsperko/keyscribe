@@ -44,8 +44,8 @@ public struct SpokenHelp: Equatable, Sendable {
             Row(said: "tell \(name) run the unit tests", effect: "Sends the instruction to \(name). Later instructions go there too."),
             Row(said: "select \(name)", effect: "Makes \(name) the recipient. Nothing is sent."),
             Row(said: "open \(name)", effect: "Brings \(name) to the front and makes it the recipient. Nothing is sent."),
-            Row(said: "what is \(name) waiting for?", effect: "Tells you what \(name) needs from you. Nothing is sent."),
-            Row(said: "who needs me?", effect: "Names the conversations waiting for you."),
+            Row(said: "check on \(name)", effect: "Reports \(name)\u{2019}s status. Nothing is sent."),
+            Row(said: "check on all conversations", effect: "Names the conversations waiting for you. Nothing is sent."),
         ]
         if readsReplies { rows.append(Row(said: VoiceCommandGrammar.repeatSummary[0], effect: "Reads the last spoken reply again.")) }
         rows.append(Row(said: VoiceCommandGrammar.goBack, effect: "Returns to where you were."))

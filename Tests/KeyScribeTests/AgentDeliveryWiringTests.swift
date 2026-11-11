@@ -720,12 +720,12 @@ struct AgentDeliveryWiringTests {
         #expect(await lastHistoryEntry(rig)?.failureReason == "\u{201C}chief\u{201D} is the herdr workspace label of \u{201C}marvin\u{201D}. Nothing sent.")
     }
 
-    @Test(arguments: ["What is cos waiting for?", "What is marvin waiting for?"])
-    func aStatusQuestionReachesTheConversationByEitherName(text: String) async {
+    @Test(arguments: ["Check on cos.", "Check on marvin."])
+    func aStatusCheckReachesTheConversationByEitherName(text: String) async {
         let rig = await herdrNamedRig(text, firstStatus: "waiting", firstWaitingFor: "permission prompt")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         #expect(rig.sent.isEmpty)
-        #expect(showsAnswer(rig, "marvin is waiting for approval. Say \u{201C}open marvin\u{201D} to see it."))
+        #expect(showsAnswer(rig, "Status for marvin: waiting for approval. Nothing sent. Say \u{201C}open marvin\u{201D} to see it."))
     }
 
     @Test func aRetryUsesTheNameAPaneTookDuringTheTakeNotTheOneItLeft() async {
@@ -2617,54 +2617,54 @@ struct AgentDeliveryWiringTests {
         rig.hud.states.contains(.advisory(message: line))
     }
 
-    @Test func aWaitingQuestionAboutANamedConversationIsAnsweredAndSendsNothing() async {
-        let rig = await rig("What is keyscribe blue waiting for?", current: "claude:s1")
+    @Test func checkingOnANamedConversationAnswersAndSendsNothing() async {
+        let rig = await rig("Okay, check on keyscribe blue.", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         let entry = await lastHistoryEntry(rig)
         #expect(rig.sent.isEmpty)
-        #expect(showsAnswer(rig, "keyscribe blue is ready for another message."))
+        #expect(showsAnswer(rig, "Status for keyscribe blue: idle. No pending input request is reported. Nothing sent."))
         #expect(rig.hub.current == "claude:s1")
         #expect(entry?.outcome == .inserted)
         #expect(entry?.summary == "Checked keyscribe blue")
         #expect(fact(entry, "Command") == "Check status")
         #expect(fact(entry, "Conversation")?.hasPrefix("keyscribe blue") == true)
-        #expect(!(entry?.facts ?? []).contains { $0.value.contains("ready") })
+        #expect(!(entry?.facts ?? []).contains { $0.value.contains("idle") })
     }
 
-    @Test func aQuestionAboutTheNamedConversationReportsTheApproval() async {
+    @Test func checkingOnTheNamedConversationReportsTheApproval() async {
         let rig = await rig(
-            "What is the keyscribe waiting for from me?", current: "claude:s2", firstStatus: "waiting", firstWaitingFor: "permission prompt")
+            "Please check on keyscribe", current: "claude:s2", firstStatus: "waiting", firstWaitingFor: "permission prompt")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
-        #expect(showsAnswer(rig, "keyscribe is waiting for approval. Say \u{201C}open keyscribe\u{201D} to see it."))
+        #expect(showsAnswer(rig, "Status for keyscribe: waiting for approval. Nothing sent. Say \u{201C}open keyscribe\u{201D} to see it."))
         #expect(rig.hub.current == "claude:s2")
     }
 
     @Test func thePendingQuestionIsReadAsAsked() async {
-        let rig = await rig("What does keyscribe need from me?", current: "claude:s1", firstStatus: "waiting", firstWaitingFor: "custom")
+        let rig = await rig("Check on keyscribe.", current: "claude:s1", firstStatus: "waiting", firstWaitingFor: "custom")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.hub.handle(.waiting(session: "claude:s1", prompt: AgentPrompt(kind: "select", title: "Keep the schema or add a migration?")))
         let (output, speaker) = speaking(rig)
         await take(rig)
-        #expect(showsAnswer(rig, "keyscribe asks: Keep the schema or add a migration? Say \u{201C}open keyscribe\u{201D} to see it."))
-        #expect(speaker.spoken == ["keyscribe asks: Keep the schema or add a migration?"])
+        #expect(showsAnswer(rig, "Status for keyscribe: waiting for your answer to \u{201C}Keep the schema or add a migration?\u{201D} Nothing sent. Say \u{201C}open keyscribe\u{201D} to see it."))
+        #expect(speaker.spoken == ["Status for keyscribe: waiting for your answer to \u{201C}Keep the schema or add a migration?\u{201D} Nothing sent."])
         withExtendedLifetime(output) {}
     }
 
     @Test func aPromptWithoutAQuestionIsDescribedThroughTheChosenService() async {
-        let rig = await rig("What is keyscribe waiting for?", current: "claude:s1", firstStatus: "waiting", firstWaitingFor: "custom")
+        let rig = await rig("Check on keyscribe.", current: "claude:s1", firstStatus: "waiting", firstWaitingFor: "custom")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.hub.handle(.waiting(session: "claude:s1", prompt: AgentPrompt(kind: "confirm", tool: "bash", detail: "git push origin main")))
         let (output, _) = speaking(rig, llm: DescribingLLM(), connection: Self.service.id)
         await take(rig)
-        #expect(showsAnswer(rig, "keyscribe: Asks whether to allow pushing to main. Say \u{201C}open keyscribe\u{201D} to see it."))
+        #expect(showsAnswer(rig, "Status for keyscribe: Asks whether to allow pushing to main. Nothing sent. Say \u{201C}open keyscribe\u{201D} to see it."))
         withExtendedLifetime(output) {}
     }
 
     @Test func aDescriptionOfAPromptThatWasReplacedMeanwhileIsNeverShown() async {
-        let rig = await rig("What is keyscribe waiting for?", current: "claude:s1", firstStatus: "waiting", firstWaitingFor: "custom")
+        let rig = await rig("Check on keyscribe.", current: "claude:s1", firstStatus: "waiting", firstWaitingFor: "custom")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.hub.handle(.waiting(session: "claude:s1", prompt: AgentPrompt(kind: "confirm", tool: "bash", detail: "git push origin main")))
         let llm = DescribingLLM()
@@ -2672,33 +2672,33 @@ struct AgentDeliveryWiringTests {
         llm.during = { await MainActor.run { hub.handle(.waiting(session: "claude:s1", prompt: AgentPrompt(kind: "confirm", tool: "bash", detail: "rm -rf build"))) } }
         let (output, _) = speaking(rig, llm: llm, connection: Self.service.id)
         await take(rig)
-        #expect(showsAnswer(rig, "keyscribe has a dialog open. Say \u{201C}open keyscribe\u{201D} to see it."))
+        #expect(showsAnswer(rig, "Status for keyscribe: a dialog is open. Nothing sent. Say \u{201C}open keyscribe\u{201D} to see it."))
         #expect(!rig.hud.states.contains { $0.primaryText?.contains("pushing") == true })
         withExtendedLifetime(output) {}
     }
 
-    @Test func aWaitingQuestionWithoutANameChecksTheTakesRecipient() async {
-        let rig = await rig("What are you waiting for?", current: "claude:s1", firstStatus: "busy")
+    @Test func checkingOnThisConversationChecksTheTakesRecipient() async {
+        let rig = await rig("Check on this conversation.", current: "claude:s1", firstStatus: "busy")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
-        #expect(showsAnswer(rig, "keyscribe is working. No request for your input is currently reported."))
+        #expect(showsAnswer(rig, "Status for keyscribe: working. No pending input request is reported. Nothing sent."))
         #expect(fact(await lastHistoryEntry(rig), "Chosen by") == "The current conversation")
     }
 
-    @Test func aWaitingQuestionWithNoRecipientAsksForAName() async {
-        let rig = await rig("What are you waiting for?")
+    @Test func checkingOnThisConversationWithNoRecipientAsksForAName() async {
+        let rig = await rig("Check on this conversation.")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains {
-            if case .error("Say the name of the conversation to check on", _, _) = $0 { true } else { false }
+            if case .error("No recipient selected. Nothing sent. Say \u{201C}check on\u{201D} and a conversation\u{2019}s name.", _, _) = $0 { true } else { false }
         })
     }
 
     @Test func turningCodingAgentsOffWhileFindingTheConversationInFrontAnswersNothing() async {
         let slow = SlowFront()
-        let rig = await inFront("What are you waiting for?", glance: slow, frontGrace: .seconds(30))
+        let rig = await inFront("Check on this conversation.", glance: slow, frontGrace: .seconds(30))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.controller.setNextModeOverride(id: Mode.codingAgentId)
         rig.controller.handleStart()
@@ -2762,24 +2762,44 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func aDisconnectedConversationIsReportedAsDisconnectedNotEnded() async {
-        let rig = await rig("What is keyscribe blue waiting for?", current: "claude:s1")
+        let rig = await rig("Check on keyscribe blue.", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.hub.disconnect("claude:s2")
         await take(rig)
         #expect(rig.texts.isEmpty)
         #expect(rig.hud.states.contains {
-            if case .error("keyscribe blue is disconnected", .openCodingAgents?, _) = $0 { true } else { false }
+            if case .error("keyscribe blue is disconnected. Nothing sent.", .openCodingAgents?, _) = $0 { true } else { false }
         })
     }
 
-    @Test func aWaitingQuestionWithMoreWordsAboutANamedConversationIsHeld() async {
-        let rig = await rig("What does keyscribe blue need from me to continue?", current: "claude:s1")
+    @Test(arguments: [
+        ("Check on frontend.", "No conversation named \u{201C}frontend\u{201D}. Nothing sent."),
+        ("Check on conversation nine.", "There is no conversation 9. Nothing sent."),
+    ])
+    func checkingOnAConversationThatIsNotThereHoldsKeepsTheWordsAndLeavesTheRecipient(text: String, problem: String) async {
+        let rig = await rig(text, current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.current == "claude:s1")
+        #expect(rig.hud.states.contains {
+            if case .error(let message, _, _) = $0 { message.hasPrefix(problem) && message.hasSuffix(AgentOutput.keptHint) } else { false }
+        })
+        #expect(rig.controller.lastResult == text)
+        #expect(await lastHistoryEntry(rig)?.outcome == .failed)
+    }
+
+    @Test func checkingOnANameWhileNamesCannotBeLoadedHoldsAndKeepsTheWords() async {
+        let rig = await rig("Check on keyscribe blue.", current: "claude:s1", namesFile: "not json")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains {
-            if case .error("Nothing sent. Say \u{201C}what is keyscribe blue waiting for?\u{201D} to check on it, or start with \u{201C}tell keyscribe blue\u{201D} to send a message.", _, _) = $0 { true } else { false }
+            if case .error(let message, _, _) = $0 {
+                message.hasPrefix("Couldn\u{2019}t check conversation names yet. Nothing sent.") && message.hasSuffix(AgentOutput.keptHint)
+            } else { false }
         })
+        #expect(rig.controller.lastResult == "Check on keyscribe blue.")
     }
 
     @Test func theBeforeANameWithoutABreakIsHeldRatherThanSentToTheCurrentConversation() async {
@@ -2801,7 +2821,7 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func aSpokenAnswerIsDroppedWhenTheConnectorGoesAwayBeforeItPlays() async {
-        let rig = await rig("What is keyscribe waiting for?", current: "claude:s1")
+        let rig = await rig("Check on keyscribe.", current: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         let silencer = SpeechSilencer()
         let speaker = Speaker()
@@ -2811,7 +2831,7 @@ struct AgentDeliveryWiringTests {
         rig.controller.spokenUpdates = output
         silencer.recordingStarted()
         await take(rig)
-        #expect(showsAnswer(rig, "keyscribe is ready for another message."))
+        #expect(showsAnswer(rig, "Status for keyscribe: idle. No pending input request is reported. Nothing sent."))
         rig.transport.live = false
         rig.hub.refresh()
         silencer.recordingEnded()
@@ -2823,18 +2843,18 @@ struct AgentDeliveryWiringTests {
     @Test func aStateCarriedFromAnEarlierCheckIsReportedAsLastSeen() async {
         let running = Int(ProcessInfo.processInfo.processIdentifier)
         let rig = await rig(
-            "What is keyscribe waiting for?", current: "claude:s2", firstStatus: "waiting", firstWaitingFor: "permission prompt", firstPid: running)
+            "Check on keyscribe.", current: "claude:s2", firstStatus: "waiting", firstWaitingFor: "permission prompt", firstPid: running)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.registry.unreadable = true
         await rig.hub.rescan()
         await take(rig)
-        #expect(showsAnswer(rig, "keyscribe was last seen waiting for approval. I couldn\u{2019}t check its current status."))
+        #expect(showsAnswer(rig, "Status for keyscribe: last seen waiting for approval. Its current status is unavailable. Nothing sent."))
         let who = await self.rig("Who needs me?", current: "claude:s2", firstStatus: "waiting", firstWaitingFor: "permission prompt", firstPid: running)
         defer { try? FileManager.default.removeItem(at: who.supportDir) }
         who.registry.unreadable = true
         await who.hub.rescan()
         await take(who)
-        #expect(showsAnswer(who, "No confirmed requests for your input. I couldn\u{2019}t check every conversation."))
+        #expect(showsAnswer(who, "Status for all conversations: no pending input requests are reported, but some conversations couldn\u{2019}t be checked. Nothing sent."))
     }
 
     @Test func whoNeedsMeIsNotSpokenOnceItCouldNoLongerCheckEveryConversation() async {
@@ -2848,7 +2868,7 @@ struct AgentDeliveryWiringTests {
         rig.controller.spokenUpdates = output
         silencer.recordingStarted()
         await take(rig)
-        #expect(showsAnswer(rig, "No conversation needs you."))
+        #expect(showsAnswer(rig, "Status for all conversations: no pending input requests are reported. Nothing sent."))
         rig.registry.unreadable = true
         await rig.hub.rescan()
         silencer.recordingEnded()
@@ -2863,17 +2883,19 @@ struct AgentDeliveryWiringTests {
         rig.transport.live = false
         rig.hub.refresh()
         await take(rig)
-        #expect(showsAnswer(rig, "One conversation needs you: keyscribe. I couldn\u{2019}t check every conversation."))
+        #expect(showsAnswer(rig, "Status for all conversations: one needs you: keyscribe. Some conversations couldn\u{2019}t be checked. Nothing sent."))
     }
 
     @Test func whoNeedsMeNamesTheConversationsWaitingForInput() async {
-        let rig = await rig("Who needs me?", current: "claude:s2", firstStatus: "waiting", firstWaitingFor: "permission prompt")
+        let rig = await rig("Check on all conversations.", current: "claude:s2", firstStatus: "waiting", firstWaitingFor: "permission prompt")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
-        #expect(showsAnswer(rig, "One conversation needs you: keyscribe."))
+        #expect(showsAnswer(rig, "Status for all conversations: one needs you: keyscribe. Nothing sent."))
         #expect(rig.hub.current == "claude:s2")
-        #expect(fact(await lastHistoryEntry(rig), "Command") == "Who needs me")
+        let entry = await lastHistoryEntry(rig)
+        #expect(fact(entry, "Command") == "Check status")
+        #expect(fact(entry, "Conversation") == "All conversations")
     }
 
     @Test(arguments: [
@@ -2881,6 +2903,13 @@ struct AgentDeliveryWiringTests {
         ("What is the build waiting for?", "What is the build waiting for?"),
         ("What is frontend waiting for?", "What is frontend waiting for?"),
         ("Ask keyscribe what it needs, then review the changes.", "what it needs, then review the changes."),
+        ("Do you need anything from me?", "Do you need anything from me?"),
+        ("What are you waiting for?", "What are you waiting for?"),
+        ("What does keyscribe blue need from me?", "What does keyscribe blue need from me?"),
+        ("What does keyscribe blue need from me to continue?", "What does keyscribe blue need from me to continue?"),
+        ("Who's stuck?", "Who's stuck?"),
+        ("Tell keyscribe check on keyscribe blue", "check on keyscribe blue"),
+        ("Before you change anything, check on keyscribe blue and say what it needs.", "Before you change anything, check on keyscribe blue and say what it needs."),
     ])
     func aQuestionThatIsNotAStatusCheckIsSentAsAMessage(text: String, sent: String) async {
         let rig = await rig(text, current: "claude:s1")

@@ -54,8 +54,8 @@ public enum AgentHistoryFacts {
         return [fact(command: "Check status")] + recorded.dropFirst().filter { $0.label != "Default recipient" }
     }
 
-    public static func whoNeedsMe() -> [HistoryEntry.Fact] {
-        [fact(command: "Who needs me")]
+    public static func allConversations() -> [HistoryEntry.Fact] {
+        [fact(command: "Check status"), .init(label: "Conversation", value: "All conversations")]
     }
 
     private static func described(_ id: String, in conversations: [AgentConversation]) -> String {

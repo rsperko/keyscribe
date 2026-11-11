@@ -1,80 +1,41 @@
 import Foundation
 
 public enum AgentStatusQuery: Equatable, Sendable {
-    case waiting(AgentAddress?)
-    case moreThanAQuestion(AgentAddress)
-    case whoNeedsMe
+    case check(AgentAddress?)
+    case all
 
-    private static let pronouns: Set<String> = ["you", "it", "he", "she", "they"]
+    private static let verb = ["check", "on"]
+    private static let thisConversation: Set<String> = AgentAddress.rowNouns.reduce(into: []) { $0.insert("this \($1)") }
+    private static let allConversations: Set<String> = AgentAddress.rowNouns.reduce(into: []) { $0.insert("all \($1)s") }
+    private static let whoNeedsMe = "who needs me"
     private static let openers: Set<String> = ["please", "hey", "so", "okay", "ok"]
-    private static let contractions = [("what's", "what is"), ("who's", "who is"), ("it's", "it is")]
-    private static let fromMe = "(?: from me| for me| on me)?"
-    private static let now = "(?: right now| now)?"
-    private static let still = "(?: currently| still)?"
-    private static let waits = "(?:waiting (?:for|on)|blocked on|stuck on)"
-    private static let waitingSubjects = [
-        "^what (?:is|are) (.+?)\(still) \(waits)\(fromMe)\(now)$",
-        "^what (?:does|do) (.+?)\(still) (?:need|want)\(fromMe)\(now)$",
-        "^(?:does|do) (.+?)\(still) need anything\(fromMe)\(now)$",
-        "^(?:is|are) (.+?)\(still) waiting\(fromMe)\(now)$",
-        "^why (?:is|are) (.+?)\(still) (?:waiting|stuck|blocked)\(now)$",
-        "^what is blocking (.+?)\(now)$",
-    ]
-    private static let longerQuestions = [
-        "^what (?:is|are) (.+?)\(still) \(waits) .+$",
-        "^what (?:does|do) (.+?)\(still) (?:need|want) .+$",
-        "^(?:does|do) (.+?)\(still) need anything .+$",
-        "^(?:is|are) (.+?)\(still) waiting (?:for|on) .+$",
-        "^why (?:is|are) (.+?)\(still) (?:waiting|stuck|blocked) .+$",
-        "^what is blocking (.+?) .+$",
-    ]
-    private static let whoNeedsMeForms = [
-        "^who (?:needs|need) me\(now)$",
-        "^who is (?:waiting|blocked|stuck)\(fromMe)\(now)$",
-        "^is (?:anyone|anybody) waiting\(fromMe)\(now)$",
-        "^what (?:is|are) (?:everyone|everybody) waiting (?:for|on)\(now)$",
-        "^which (?:conversations|sessions) (?:are|is) waiting\(fromMe)\(now)$",
-    ]
 
     public static func parse(
         _ transcript: String, names: [String], namesKnown: Bool = true, read: ((String) -> String)? = nil, afterVerb: [String] = []
     ) -> AgentStatusQuery? {
-        let said = spoken(transcript)
-        guard !said.isEmpty else { return nil }
-        if whoNeedsMeForms.contains(where: { match($0, said) != nil }) { return .whoNeedsMe }
-        func conversation(_ subject: String) -> AgentAddress? {
-            if AgentAddress.exactName(subject, among: names) == nil, let other = AgentAddress.exactName(subject, among: afterVerb) {
-                return .name(other, body: "")
-            }
-            switch AgentAddress.spokenName(subject, names: names, namesKnown: namesKnown, read: read) {
-            case .none: return nil
-            case let address: return address
-            }
+        let words = spoken(transcript)
+        let said = words.joined(separator: " ")
+        if said == whoNeedsMe { return .all }
+        guard words.count > verb.count, Array(words.prefix(verb.count)) == verb else { return nil }
+        let subject = words.dropFirst(verb.count).joined(separator: " ")
+        if thisConversation.contains(subject) { return .check(nil) }
+        if allConversations.contains(subject) { return .all }
+        if AgentAddress.exactName(subject, among: names) == nil, let other = AgentAddress.exactName(subject, among: afterVerb) {
+            return .check(.name(other, body: ""))
         }
-        if let subject = waitingSubjects.lazy.compactMap({ match($0, said) }).first {
-            if pronouns.contains(subject) { return .waiting(nil) }
-            if let address = conversation(subject) { return .waiting(address) }
+        switch AgentAddress.spokenName(subject, names: names, namesKnown: namesKnown, read: read) {
+        case .none: return words.count - verb.count > AgentRename.nameWords ? nil : .check(.unresolved(spoken: subject, body: ""))
+        case let address: return .check(address)
         }
-        guard let subject = longerQuestions.lazy.compactMap({ match($0, said) }).first, !pronouns.contains(subject) else { return nil }
-        return conversation(subject).map { .moreThanAQuestion($0) }
     }
 
-    private static func spoken(_ transcript: String) -> String {
-        var text = transcript.lowercased().replacingOccurrences(of: "\u{2019}", with: "'")
-        for (short, long) in contractions { text = text.replacingOccurrences(of: short, with: long) }
+    private static func spoken(_ transcript: String) -> [String] {
+        let text = transcript.lowercased().replacingOccurrences(of: "\u{2019}", with: "'")
         let letters = String(text.map { (c: Character) -> Character in c.isLetter || c.isNumber ? c : " " })
         var words = letters.split(separator: " ").map(String.init)
         while let first = words.first, openers.contains(first) { words.removeFirst() }
         if words.last == "please" { words.removeLast() }
-        return words.joined(separator: " ")
-    }
-
-    private static func match(_ pattern: String, _ text: String) -> String? {
-        guard let regex = RegexCache.regex(pattern, options: []),
-              let found = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text))
-        else { return nil }
-        guard found.numberOfRanges > 1, let range = Range(found.range(at: 1), in: text) else { return "" }
-        return String(text[range])
+        return words
     }
 }
 
@@ -88,38 +49,49 @@ public enum AgentStatusAnswer {
         return words > 0 && words <= questionWordLimit ? spoken : nil
     }
 
-    public static func waiting(
+    public static func status(
         handle: String, state: AgentLiveState, connected: Bool, current: Bool, prompt: AgentPrompt?, description: String?
     ) -> String {
-        let seen: String? = switch state {
+        let reported: String? = switch state {
         case .disconnected: nil
-        case .idle: "ready"
+        case .idle: "idle"
         case .working: "working"
         case .waitingApproval: "waiting for approval"
         case .waitingQuestion: "waiting for an answer"
         case .userDialog: "with a dialog open"
         }
-        guard connected, state != .disconnected else {
-            return "\(handle) isn\u{2019}t connected." + (seen.map { " Last seen \($0)." } ?? "")
-        }
-        if !current, let seen {
-            return "\(handle) was last seen \(seen). I couldn\u{2019}t check its current status."
-        }
-        switch state {
-        case .idle: return "\(handle) is ready for another message."
-        case .working: return "\(handle) is working. No request for your input is currently reported."
-        case .disconnected: return "\(handle) isn\u{2019}t connected."
-        case .waitingApproval, .waitingQuestion, .userDialog:
-            if let question = question(in: prompt) { return "\(handle) asks: \(question)" }
-            if let description = description?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty {
-                return SpokenResult.prefaced(description, name: handle)
-            }
-            return switch state {
-            case .waitingApproval: "\(handle) is waiting for approval."
-            case .waitingQuestion: "\(handle) is waiting for an answer."
-            default: "\(handle) has a dialog open."
+        let unavailable = "Its current status is unavailable."
+        let body: String
+        if !connected || state == .disconnected {
+            body = (["not connected.", unavailable] + [reported.map { "Last seen \($0)." }].compactMap { $0 }).joined(separator: " ")
+        } else if !current, let reported {
+            body = "last seen \(reported). \(unavailable)"
+        } else {
+            body = switch state {
+            case .idle, .working, .disconnected: "\(reported ?? "unknown"). No pending input request is reported."
+            case .waitingApproval, .waitingQuestion, .userDialog: waitingBody(state, prompt: prompt, description: description)
             }
         }
+        return "Status for \(handle): \(body) \(nothingSent)"
+    }
+
+    private static let nothingSent = "Nothing sent."
+
+    private static func waitingBody(_ state: AgentLiveState, prompt: AgentPrompt?, description: String?) -> String {
+        if let question = question(in: prompt) { return "waiting for your answer to \u{201C}\(question)\u{201D}" + (".?!".contains(question.last ?? ".") ? "" : ".") }
+        if let description = description?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty {
+            return sentence(description)
+        }
+        return switch state {
+        case .waitingApproval: "waiting for approval."
+        case .waitingQuestion: "waiting for an answer."
+        default: "a dialog is open."
+        }
+    }
+
+    private static func sentence(_ text: String) -> String {
+        guard let last = text.last, !".?!".contains(last) else { return text }
+        return text + "."
     }
 
     public static func hint(handle: String, state: AgentLiveState, connected: Bool, current: Bool) -> String? {
@@ -132,15 +104,16 @@ public enum AgentStatusAnswer {
 
     private static let counts = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
 
-    public static func whoNeedsMe(_ handles: [String], complete: Bool) -> String {
-        let unchecked = complete ? "" : " I couldn\u{2019}t check every conversation."
-        guard !handles.isEmpty else {
-            return complete ? "No conversation needs you." : "No confirmed requests for your input." + unchecked
+    public static func all(_ handles: [String], complete: Bool) -> String {
+        let unchecked = "conversations couldn\u{2019}t be checked"
+        let body: String
+        if handles.isEmpty {
+            body = "no pending input requests are reported" + (complete ? "." : ", but some \(unchecked).")
+        } else {
+            let count = handles.count < counts.count ? counts[handles.count] : String(handles.count)
+            let list = handles.count > 1 ? handles.dropLast().joined(separator: ", ") + " and " + handles[handles.count - 1] : handles[0]
+            body = "\(count) \(handles.count == 1 ? "needs" : "need") you: \(list)." + (complete ? "" : " Some \(unchecked).")
         }
-        let count = handles.count < counts.count ? counts[handles.count] : String(handles.count)
-        let list = handles.count > 1 ? handles.dropLast().joined(separator: ", ") + " and " + handles[handles.count - 1] : handles[0]
-        let noun = handles.count == 1 ? "conversation needs" : "conversations need"
-        return "\(count.prefix(1).uppercased() + count.dropFirst()) \(noun) you: \(list)." + unchecked
+        return "Status for all conversations: \(body) \(nothingSent)"
     }
-
 }

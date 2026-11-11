@@ -379,7 +379,7 @@ final class AgentTake {
         }
         let address: AgentAddress?
         switch query {
-        case .whoNeedsMe:
+        case .all:
             host.agentFrontTask?.cancel()
             guard host.lease(for: .codingAgents, stopsAtPress: nil).keepActing() else { return stopQuietly() }
             func report() -> (names: [String], complete: Bool) {
@@ -391,12 +391,10 @@ final class AgentTake {
                 return (names, complete)
             }
             let reported = report()
-            let line = AgentStatusAnswer.whoNeedsMe(reported.names, complete: reported.complete)
-            return answered(line, shown: line, conversation: "", handle: "Who needs me", summary: "Who needs me", heard: heard,
-                            facts: AgentHistoryFacts.whoNeedsMe(), whileTrue: { report() == reported })
-        case .moreThanAQuestion(let named):
-            address = named
-        case .waiting(let named):
+            let line = AgentStatusAnswer.all(reported.names, complete: reported.complete)
+            return answered(line, shown: line, conversation: "", handle: "All conversations", summary: "Checked all conversations", heard: heard,
+                            facts: AgentHistoryFacts.allConversations(), whileTrue: { report() == reported })
+        case .check(let named):
             address = named
         }
         let frozen: AgentRecipient.Frozen?
@@ -413,29 +411,34 @@ final class AgentTake {
             resolution = frozen.map { .deliver(id: $0.id, body: "", source: $0.source) } ?? .ask(body: "", reason: .noRecipient)
         }
         let facts = AgentHistoryFacts.status(address: address, resolution: resolution, frozen: frozen, conversations: snapshot.conversations)
-        func fail(_ message: String, action: HUDErrorAction? = nil) {
-            finishAgent(state: .error(message: message, action: action, heard: HeardExcerpt(heard: heard)),
-                        outcome: .failed, heard: heard, body: "", transformed: nil, rewrite: nil, transitioned: true, facts: facts)
+        func fail(_ message: String, action: HUDErrorAction? = nil, keepingWords: Bool = false) {
+            let body = keepingWords ? heard : ""
+            if keepingWords { host.rememberResult(heard) }
+            finishAgent(state: .error(message: AgentOutput.kept(message, body: body), action: action, heard: HeardExcerpt(heard: heard)),
+                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, transitioned: true, facts: facts)
         }
         let lease = host.lease(for: .codingAgents, stopsAtPress: nil)
         guard lease.keepActing() else { return stopQuietly() }
         guard let id = resolution.recipient else {
-            if case .ask(_, let reason) = resolution, reason != .noRecipient { return fail(AgentOutput.openAskLine(reason)) }
-            return fail("Say the name of the conversation to check on", action: .openCodingAgents(mode.id))
+            if case .ask(_, let reason) = resolution, reason != .noRecipient {
+                if !snapshot.namesAvailable, case .unresolved? = address {
+                    return fail("Couldn\u{2019}t check conversation names yet. \(AgentOutput.nothingSent) Say it again, or say \u{201C}check on conversation\u{201D} and its number.",
+                                keepingWords: true)
+                }
+                return fail(AgentOutput.askLine(reason), action: .openCodingAgents(mode.id), keepingWords: true)
+            }
+            return fail("No recipient selected. \(AgentOutput.nothingSent) Say \u{201C}check on\u{201D} and a conversation\u{2019}s name.",
+                        action: .openCodingAgents(mode.id))
         }
         let name = agents.handle(of: id) ?? snapshot.disconnected.first { $0.value == id }?.key ?? "That conversation"
-        if case .moreThanAQuestion = query {
-            return fail(
-                "Nothing sent. Say \u{201C}what is \(name) waiting for?\u{201D} to check on it, or start with \u{201C}tell \(name)\u{201D} to send a message.")
-        }
         if snapshot.disconnected.values.contains(id) || agents.isExcluded(id) {
-            return fail("\(name) is disconnected", action: .openCodingAgents(mode.id))
+            return fail("\(name) is disconnected. \(AgentOutput.nothingSent)", action: .openCodingAgents(mode.id))
         }
         func observed() -> (conversation: AgentConversation, prompt: AgentPrompt?)? {
             guard let conversation = agents.directory.conversations.first(where: { $0.id == id }) else { return nil }
             return (conversation, AgentRoster.isWaitingForInput(conversation) ? agents.waitingPrompt(of: id) : nil)
         }
-        guard let before = observed() else { return fail("That conversation has ended") }
+        guard let before = observed() else { return fail("That conversation has ended. \(AgentOutput.nothingSent)") }
         var description: String?
         if let prompt = before.prompt, AgentStatusAnswer.question(in: prompt) == nil, let spoken = host.spokenUpdates {
             hud.present(.transcribing(mode: mode.name, status: "Checking \(before.conversation.handle)\u{2026}"))
@@ -443,12 +446,12 @@ final class AgentTake {
             if Task.isCancelled { return }
             guard lease.keepActing() else { return stopQuietly() }
         }
-        guard let now = observed() else { return fail("That conversation has ended") }
+        guard let now = observed() else { return fail("That conversation has ended. \(AgentOutput.nothingSent)") }
         if now.prompt != before.prompt || now.conversation.state != before.conversation.state { description = nil }
         let handle = now.conversation.handle
         let connected = now.conversation.connectorLive
         let current = !agents.lastSeen.contains(id)
-        let line = AgentStatusAnswer.waiting(
+        let line = AgentStatusAnswer.status(
             handle: handle, state: now.conversation.state, connected: connected, current: current, prompt: now.prompt,
             description: description)
         let shown = [line, AgentStatusAnswer.hint(handle: handle, state: now.conversation.state, connected: connected, current: current)]

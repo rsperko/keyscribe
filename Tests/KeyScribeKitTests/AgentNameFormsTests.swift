@@ -35,8 +35,8 @@ struct AgentNameFormsTests {
         }
     }
 
-    @Test func aStatusQuestionReachesTheNameInTheSingularToo() throws {
-        let query = try #require(AgentStatusQuery.parse("what is review manager waiting for", names: names))
-        #expect(query == .waiting(.name("reviews manager queue", body: "")))
+    @Test func aStatusCheckReachesTheNameInTheSingularToo() throws {
+        let query = try #require(AgentStatusQuery.parse("check on review manager", names: names))
+        #expect(query == .check(.name("reviews manager queue", body: "")))
     }
 }

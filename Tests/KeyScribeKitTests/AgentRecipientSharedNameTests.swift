@@ -82,12 +82,12 @@ struct AgentRecipientLateNameTests {
             == .deliver(id: "a", body: "run the tests", source: .spoken))
     }
 
-    @Test func aStatusQuestionAboutASharedNameAsks() throws {
+    @Test func aStatusCheckOfASharedNameAsks() throws {
         let names = ["cos claude": "a", "cos pi": "b"]
         let shared = ["cos": AgentRecipient.SharedName(names: ["cos claude", "cos pi"])]
-        let query = try #require(AgentStatusQuery.parse("what is cos waiting for", names: AgentRecipient.spokenNames(names, shared: shared)))
-        guard case .waiting(let address?) = query else {
-            Issue.record("expected a waiting question, got \(query)")
+        let query = try #require(AgentStatusQuery.parse("check on cos", names: AgentRecipient.spokenNames(names, shared: shared)))
+        guard case .check(let address?) = query else {
+            Issue.record("expected a status check, got \(query)")
             return
         }
         #expect(AgentRecipient.resolve(address, frozen: nil, rows: ["a", "b"], names: names, shared: shared)
@@ -196,12 +196,12 @@ struct AgentRecipientUncertainNameTests {
             == .deliver(id: "b", body: text, source: .current))
     }
 
-    @Test func aStatusQuestionReachesAConversationByAnAfterVerbName() throws {
+    @Test func aStatusCheckReachesAConversationByAnAfterVerbName() throws {
         let query = try #require(AgentStatusQuery.parse(
-            "what is review auth waiting for", names: AgentRecipient.spokenNames(names, shared: shared),
+            "check on review auth", names: AgentRecipient.spokenNames(names, shared: shared),
             afterVerb: AgentRecipient.afterVerbNames(shared)))
-        guard case .waiting(let address?) = query else {
-            Issue.record("expected a waiting question, got \(query)")
+        guard case .check(let address?) = query else {
+            Issue.record("expected a status check, got \(query)")
             return
         }
         #expect(AgentRecipient.conversation(address, frozen: nil, rows: ["a", "b"], names: names, shared: shared) == .select(id: "b"))
@@ -239,16 +239,16 @@ struct AgentRecipientAfterVerbSpanTests {
         }
     }
 
-    @Test func aMessageAndAStatusQuestionPickTheSameConversationForTheSameName() throws {
+    @Test func aMessageAndAStatusCheckPickTheSameConversationForTheSameName() throws {
         let names = ["auth reviewer": "a", "builder": "b"]
         let shared: [String: AgentRecipient.SharedName] = ["reviewer": .init(names: ["builder"], kind: .afterVerb("herdr pane title"))]
         let spoken = AgentRecipient.spokenNames(names, shared: shared), afterVerb = AgentRecipient.afterVerbNames(shared)
         let message = AgentAddress.parse("Ask reviewer to check it", names: spoken, afterVerb: afterVerb)
         #expect(AgentRecipient.resolve(message, frozen: nil, rows: ["a", "b"], names: names, shared: shared)
             == .deliver(id: "b", body: "to check it", source: .spoken))
-        let query = try #require(AgentStatusQuery.parse("What is reviewer waiting for", names: spoken, afterVerb: afterVerb))
-        guard case .waiting(let address?) = query else {
-            Issue.record("expected a waiting question, got \(query)")
+        let query = try #require(AgentStatusQuery.parse("Check on reviewer", names: spoken, afterVerb: afterVerb))
+        guard case .check(let address?) = query else {
+            Issue.record("expected a status check, got \(query)")
             return
         }
         #expect(AgentRecipient.conversation(address, frozen: nil, rows: ["a", "b"], names: names, shared: shared) == .select(id: "b"))

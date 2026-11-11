@@ -541,19 +541,21 @@ read, and if it doesn't finish, the message is not sent and KeyScribe asks you t
 fails, the conversation keeps the names it had, messages still go through, and Settings shows since when
 reading has failed.
 
-### How do I ask what a conversation needs?
+### How do I check what a conversation needs without sending anything?
 
-In the Coding agent mode, ask as the whole dictation: **“what is docs waiting for?”**, **“what does docs
-need from me?”**, or **“what are you waiting for?”** for the conversation you are talking to. To put the
-question to the agent itself, start with “ask” or “tell”: “ask docs what it needs from me” is sent to docs. KeyScribe answers from what the agent reports and sends nothing: the
-question it is asking when it is short, else a description (with an AI service chosen under Spoken replies),
-else that it is waiting for approval or an answer, with “open docs” to bring it forward. When nothing is
-pending, the same question tells you whether it is working or ready for another message. Ask only the
-question: “what does docs need from me to continue” sends nothing, and the panel says what to say instead.
-**“Who needs me?”** names every
-conversation waiting for you. The answer is shown, and read aloud when Read replies aloud is on. To put the question to the
-agent itself, start with **“tell”**: “tell docs what you still need”. “Ask docs to review the changes” sends
-that instruction to docs, while “ask clarifying questions first” goes to the conversation you are talking to.
+In the Coding agent mode, say **“check on docs”** as the whole dictation, or **“check on this
+conversation”** for the one you are talking to. KeyScribe answers from what the agent reports and sends
+nothing: the question it is asking when it is short, else a description (with an AI service chosen under
+Spoken replies), else that it is waiting for approval or an answer, with “open docs” to bring it forward.
+When nothing is pending, it tells you whether the agent is working or idle. Every answer starts with
+**Status** and says **Nothing sent.** **“Check on all conversations”** (or **“who needs me?”**) names
+every conversation waiting for you. The answer is shown, and read aloud when Read replies aloud is on.
+
+Any question you say, such as “what are you waiting for?” or “do you need anything from me?”, is a message
+to the conversation you are talking to, like the rest of your dictation. “Tell docs check on the build”
+sends those words to docs. If “check on” is followed by a name KeyScribe doesn't know, nothing is sent and
+your words are kept for Paste Last Dictation; a conversation named with an everyday word, such as “tests”,
+makes “check on tests” a status check, so start with “tell” to send it instead.
 
 ### How do I stop one conversation from receiving what I say?
 

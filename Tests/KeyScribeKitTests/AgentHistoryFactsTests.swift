@@ -51,7 +51,7 @@ struct AgentHistoryFactsTests {
             address: nil, resolution: .deliver(id: "s-docs", body: "", source: .current), frozen: current, conversations: roster)
         #expect(unnamed.first?.value == "Check status")
         #expect(unnamed.first { $0.label == "Chosen by" }?.value == "The current conversation")
-        #expect(AgentHistoryFacts.whoNeedsMe().map(\.value) == ["Who needs me"])
+        #expect(AgentHistoryFacts.allConversations().map(\.value) == ["Check status", "All conversations"])
     }
 
     @Test func anOpenByNameRecordsTheCommandAddressAndConversation() {

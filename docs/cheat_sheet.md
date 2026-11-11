@@ -103,8 +103,8 @@ the agent in Settings > Modes > Coding agent). [Name] is a conversation name sho
 | `select [name]`<br>Also: `choose [name]` | Known conversation | Makes it the recipient. Sends nothing; windows stay put. |
 | `open [name]` | Known conversation | Brings its terminal forward and makes it the recipient. Sends nothing. |
 | `tell conversation two [instruction]` | While recording | Uses number 2 from the list on screen. Saying "session two" works too. |
-| `what is [name] waiting for?` | Named conversation | Says what it needs from you. Sends nothing. |
-| `who needs me?` | Coding agent mode | Names the conversations waiting for you. |
+| `check on [name]` | Known conversation | Reports its status. Sends nothing; the recipient stays the same. |
+| `check on all conversations` | Coding agent mode | Names the conversations waiting for you. Sends nothing. |
 | `rename this conversation to [name]` | The current conversation | Renames it. Say only the rename. |
 | `repeat that` | Spoken replies on | Replays the last spoken reply and names its conversation. |
 | `cancel`<br>Also: `never mind` | Said alone | Sends nothing. To send the word, say `tell [name] cancel`. |
@@ -113,8 +113,9 @@ the agent in Settings > Modes > Coding agent). [Name] is a conversation name sho
 ### Practice without sending anything
 
 These send nothing: “select backend” shows **Recipient: backend**; “open backend” also brings its terminal
-forward; “what is backend waiting for?” answers locally; “backend” alone tells you to say “select backend”;
-“cancel” shows **Cancelled. Nothing sent.** “Tell” and “ask” always send, so check the **To …** line on
+forward; “check on backend” answers locally; “backend” alone tells you to say “select backend”;
+“cancel” shows **Cancelled. Nothing sent.** Any question you ask, such as “what are you waiting for?”, is a
+message. “Tell” and “ask” always send, so check the **To …** line on
 the recording panel before you stop recording.
 
 **If it didn't go through:** when the panel says **Nothing sent.**, your words are kept: **Paste Last
@@ -150,9 +151,8 @@ These work too. The phrases on the earlier pages are the ones worth remembering.
 | Say | Works in | What happens |
 | --- | --- | --- |
 | `[name], [instruction]` | Connected conversation | Same as `tell [name] [instruction]`. |
-| `select conversation two`<br>Also: `open session two` | While recording | Picks or opens by number. |
-| `what does [name] need from me?`<br>Also: `why is [name] stuck?`, `what is blocking [name]?` | Named conversation | Same as `what is [name] waiting for?` |
-| `what are you waiting for?`<br>Also: `what do you need from me?` | The current conversation | Checks the conversation you're talking to. |
-| `is anyone waiting for me?` | Coding agent mode | Same as `who needs me?` |
+| `select conversation two`<br>Also: `open session two`, `check on conversation two` | While recording | Picks, opens, or checks by number. |
+| `check on this conversation` | The current conversation | Checks the recipient. |
+| `who needs me?` | Coding agent mode | Same as `check on all conversations`. |
 | `rename this session to [name]`<br>Also: `name this conversation [name]`, `call this conversation [name]` | The current conversation | Same as `rename this conversation to`. |
 | `switch to [name]`<br>Also: `go to [name]` | Known conversation | Same as `open [name]`. |
