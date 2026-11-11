@@ -45,9 +45,7 @@ struct RewriteRequestBuilder {
         let styleRules = plan.fragmentBodies(ids: mode.aiRewrite?.fragments ?? [])
 
         // Dictionary terms present in the content → hinted as valid/not-misspelled (design.md §4.2).
-        let dictionary = plan.mergedDictionary(for: mode)
-        let lowerContent = content.lowercased()
-        let validTerms = dictionary.filter { lowerContent.contains($0.lowercased()) }
+        let validTerms = plan.dictionaryWordsPresent(in: content, for: mode)
 
         // Context opt-in (mode.effectiveContext — privacy mode forces it all off). App identity is a context
         // channel; the browser URL is a local routing key only, never sent to the LLM (design.md §4.3/§4.4).

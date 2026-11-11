@@ -13,7 +13,57 @@ struct PerfBenchmarkTests {
         tokenPath()
         regexCacheInvalid()
         dateFormatter()
+        localTextStages()
         print("=== end ===\n")
+    }
+
+    private func localTextStages() {
+        print("\n[#5] Local text stages per dictation (replacements, near match, verbatim)")
+        print(pad("words", 8) + padL("rules", 7) + padL("terms", 7) + padL("replace", 11) + padL("fuzzy", 11)
+            + padL("verbatim", 11) + padL("hints", 11))
+        let cases: [(Int, Int, Int)] = [(150, 30, 50), (150, 500, 500), (800, 500, 500), (3_000, 500, 500)]
+        for (words, ruleCount, termCount) in cases {
+            let text = prose(words: words)
+            let stage = ReplacementsStage(rules: benchmarkRules(ruleCount))
+            let fuzzy = FuzzyStage(terms: benchmarkTerms(termCount))
+            let config = ResolvedConfig(
+                modes: [], dictionary: DictionarySet(words: benchmarkTerms(termCount)), replacements: ReplacementsSet(),
+                connections: ConnectionSet(), fragments: [:])
+            let reps = words <= 150 ? 50 : 5
+            var replaceMs = 0.0, fuzzyMs = 0.0, verbatimMs = 0.0, hintsMs = 0.0
+            for _ in 0..<reps {
+                var context = PipelineContext(text: text)
+                replaceMs += time { stage.apply(&context) }
+                fuzzyMs += time { fuzzy.apply(&context) }
+                verbatimMs += time { _ = VerbatimTokenizer.apply(text, into: Tokenizer()) }
+                hintsMs += time { _ = config.dictionaryWordsPresent(in: text, for: nil) }
+            }
+            print(pad("\(words)", 8) + padL("\(ruleCount)", 7) + padL("\(termCount)", 7)
+                + padL(us(replaceMs / Double(reps)), 11) + padL(us(fuzzyMs / Double(reps)), 11)
+                + padL(us(verbatimMs / Double(reps)), 11) + padL(us(hintsMs / Double(reps)), 11))
+        }
+        print("  (a 60 s take is about 150 words; shared vocabularies push rule counts into the hundreds)")
+    }
+
+    private func prose(words: Int) -> String {
+        let sentence = "So the deploy to Kubernetes failed again, and the Postgress replica on krytenpost lagged by ten seconds while flu dio waited."
+        let vocabulary = sentence.split(separator: " ")
+        return (0..<words).map { String(vocabulary[$0 % vocabulary.count]) }.joined(separator: " ")
+    }
+
+    private func benchmarkRules(_ count: Int) -> [ReplacementRule] {
+        (0..<count).map { i in
+            i % 10 == 0
+                ? ReplacementRule(heard: #"\bticket (\d+)\#(i)\b"#, replace: "T-$1", isRegex: true)
+                : ReplacementRule(heard: "phrase\(i) word", replace: "Phrase\(i)", isRegex: false)
+        }
+    }
+
+    private func benchmarkTerms(_ count: Int) -> [String] {
+        let syllables = ["kry", "ten", "post", "gres", "flu", "id", "au", "dio", "ku", "ber", "net", "zo", "mar", "lin", "dex", "tra"]
+        return (0..<count).map { i in
+            [i, i / 16, i / 256 + 3].map { syllables[$0 % syllables.count] }.joined().capitalized
+        }
     }
 
     // Only edit-in-place over a large selection with many tokens could hit O(tokens × text-length)

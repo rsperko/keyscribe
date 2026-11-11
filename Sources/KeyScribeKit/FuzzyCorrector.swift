@@ -14,19 +14,19 @@ public enum FuzzyCorrector {
     public struct Prepared: Sendable {
         fileprivate let terms: [Term]
         fileprivate let byNorm: [String: Term]            // O(1) casing/spacing match
-        fileprivate let byLength: [Int: [Int]]            // normalized length → term indices, ascending
+        fileprivate let byLengthAndKey: [Int: [String: [Int]]]
         public var isEmpty: Bool { terms.isEmpty }
     }
 
     public static func prepare(_ terms: [String]) -> Prepared {
         let canonical = canonicalize(terms)
         var byNorm: [String: Term] = [:]
-        var byLength: [Int: [Int]] = [:]
+        var byLengthAndKey: [Int: [String: [Int]]] = [:]
         for (i, term) in canonical.enumerated() {
             byNorm[term.norm] = term
-            if let latin = term.latin { byLength[latin.count, default: []].append(i) }
+            if let latin = term.latin { byLengthAndKey[latin.count, default: [:]][term.key, default: []].append(i) }
         }
-        return Prepared(terms: canonical, byNorm: byNorm, byLength: byLength)
+        return Prepared(terms: canonical, byNorm: byNorm, byLengthAndKey: byLengthAndKey)
     }
 
     public struct Candidate: Sendable, Equatable {
@@ -70,21 +70,22 @@ public enum FuzzyCorrector {
         pass: (_ token: String) -> Void
     ) {
         let tokens = text.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
+        // A ⟦SN:…⟧ nonce is opaque (design.md §4.2): never fuzzy-snap a window touching one, else a token
+        // fragment ("VERB") could be rewritten to a dictionary term and corrupt the span.
+        let opaque = tokens.map { $0.contains(SentinelText.open) }
+        let norms = tokens.map { normalize(stripPunct($0)) }
         var i = 0
         while i < tokens.count {
             var matched = false
             for span in stride(from: min(2, tokens.count - i), through: 1, by: -1) {
+                if opaque[i..<i + span].contains(true) { continue }
                 let window = Array(tokens[i..<i + span])
-                // A ⟦SN:…⟧ nonce is opaque (design.md §4.2): never fuzzy-snap a window touching one, else a
-                // token fragment ("VERB") could be rewritten to a dictionary term and corrupt the span.
-                if window.contains(where: { $0.contains(SentinelText.open) }) { continue }
                 // A snap keeps only alphanumerics and outer-edge punctuation, merging inter-token spaces away.
                 // Any other dictated char inside a token — interior punctuation ("git-hub"), a clause comma
                 // ("spring, boot"), a LiveEdits control char ("git\nhub") — would be silently deleted, so
                 // leave such a window untouched.
                 if wouldDeleteInteriorContent(window) { continue }
-                let core = window.map(stripPunct).joined()
-                let norm = normalize(core)
+                let norm = norms[i..<i + span].joined()
                 guard norm.count >= 4 else { continue }
                 // Multi-token windows only snap on an exact normalized match (split/spacing fix); fuzzy
                 // distance is single-token only, so a short glue word ("to kubernetes") is never merged away.
@@ -151,7 +152,7 @@ public enum FuzzyCorrector {
         let allowed = latin.count < shortestNearMatch ? 0 : latin.count >= 7 ? 2 : 1
         var candidateIndices: [Int] = []
         for len in (latin.count - allowed)...(latin.count + allowed) where len >= 0 {
-            if let bucket = prepared.byLength[len] { candidateIndices.append(contentsOf: bucket) }
+            if let bucket = prepared.byLengthAndKey[len]?[latinKey] { candidateIndices.append(contentsOf: bucket) }
         }
         candidateIndices.sort()
         var best: Term?
@@ -159,7 +160,7 @@ public enum FuzzyCorrector {
         for idx in candidateIndices {
             let term = prepared.terms[idx]
             // The phonetic key drops digits, so a version number would otherwise be one free edit ("llama2" → Llama3).
-            guard let termLatin = term.latin, term.key == latinKey, term.digits == latinDigits else { continue }
+            guard let termLatin = term.latin, term.digits == latinDigits else { continue }
             let distance = levenshtein(latin, termLatin)
             let termAllowed = termLatin.count < shortestNearMatch ? 0 : allowed
             guard distance <= termAllowed, distance < bestDistance else { continue }

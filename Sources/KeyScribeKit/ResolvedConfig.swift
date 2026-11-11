@@ -17,6 +17,7 @@ public final class ResolvedConfig: @unchecked Sendable {
     private let lock = NSLock()
     private var mergedDictionaryCache: [String: [String]] = [:]
     private var biasTermsCache: [String: [String]] = [:]
+    private var lowercasedDictionaryCache: [String: [(word: String, lowercased: String)]] = [:]
     private var textStageCache: [String: [any PipelineStage]] = [:]
     private static let nilModeKey = "\u{0}nil"
     private let onBuildTextStages: (@Sendable (String) -> Void)?
@@ -59,6 +60,26 @@ public final class ResolvedConfig: @unchecked Sendable {
     public func mergedDictionary(for mode: Mode?) -> [String] {
         memoized(mode, in: \.mergedDictionaryCache) {
             VocabularyMerge.words(for: mode, global: dictionary.words, shared: shared)
+        }
+    }
+
+    public func dictionaryWordsPresent(in content: String, for mode: Mode?) -> [String] {
+        let words = memoized(mode, in: \.lowercasedDictionaryCache) {
+            mergedDictionary(for: mode).map { (word: $0, lowercased: $0.lowercased()) }
+        }
+        let lowerContent = content.lowercased()
+        let bytes = Array(lowerContent.precomposedStringWithCanonicalMapping.utf8)
+        return words.filter { word in
+            if word.lowercased.utf8.allSatisfy({ $0 < 0x80 }), !Self.containsBytes(bytes, word.lowercased) { return false }
+            return lowerContent.contains(word.lowercased)
+        }.map(\.word)
+    }
+
+    private static func containsBytes(_ haystack: [UInt8], _ needle: String) -> Bool {
+        let needle = Array(needle.utf8)
+        guard !needle.isEmpty else { return true }
+        return haystack.withUnsafeBytes { hay in
+            needle.withUnsafeBytes { memmem(hay.baseAddress, hay.count, $0.baseAddress, $0.count) != nil }
         }
     }
 

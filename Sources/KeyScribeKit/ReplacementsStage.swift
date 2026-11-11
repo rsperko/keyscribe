@@ -68,7 +68,16 @@ public struct ReplacementsStage: PipelineStage {
         let regex: NSRegularExpression
         let template: String
         let submit: Mode.Submit?
+        let anchorsAtSearchStart: Bool
         var wholeDictation: Bool { source.wholeDictation }
+
+        init(source: ReplacementRule, regex: NSRegularExpression, template: String, submit: Mode.Submit?) {
+            self.source = source
+            self.regex = regex
+            self.template = template
+            self.submit = submit
+            anchorsAtSearchStart = source.isRegex && source.heard.contains(#"\G"#)
+        }
     }
 
     private struct PreparedMatch {
@@ -78,6 +87,7 @@ public struct ReplacementsStage: PipelineStage {
     }
 
     private let preparedRulesHighestTiePriorityFirst: [PreparedRule]
+    private let inlineRules: [PreparedRule]
 
     // When the transform leaves text unchanged, the only possible whole-utterance owner is an *identity*
     // replacement (output == matched span); absent any such rule we skip the whole-utterance scan. A literal
@@ -167,6 +177,7 @@ public struct ReplacementsStage: PipelineStage {
             }
         }
         self.preparedRulesHighestTiePriorityFirst = prepared
+        self.inlineRules = prepared.filter { !$0.wholeDictation }
         self.droppedForReturnMarker = droppedForReturnMarker
         self.hasWholeDictationRule = prepared.contains(where: \.wholeDictation)
         self.mayHaveIdentityReplacement = rules.contains { rule in
@@ -199,34 +210,103 @@ public struct ReplacementsStage: PipelineStage {
         var effects: [ReplacementEffect] = []
         let transformed = SentinelText.mappingOutsideSentinels(text) { run in
             var result = ""
+            var scan = RunScan(run: run, rules: inlineRules)
             var cursor = run.startIndex
-            while cursor < run.endIndex {
-                if let winner = winningMatch(in: run, at: cursor, includingWholeDictation: false) {
-                    let output = winner.rule.regex.replacementString(
-                        for: winner.result, in: run, offset: 0, template: winner.rule.template)
-                    let changed = output != run[winner.range]
-                    let insideWord = changed && Self.landsInsideWord(winner.range, in: run)
-                    let effect = ReplacementEffect(
-                        rule: winner.rule.source, changedWords: changed && !insideWord,
-                        insideWord: insideWord,
-                        returnOmitted: winner.rule.submit != nil, ownsWholeDictation: false)
-                    if let i = effects.firstIndex(where: { $0.rule == effect.rule }) {
-                        effects[i].changedWords = effects[i].changedWords || effect.changedWords
-                        effects[i].insideWord = effects[i].insideWord || effect.insideWord
-                    } else {
-                        effects.append(effect)
-                    }
-                    result += output
-                    cursor = winner.range.upperBound
+            while cursor < run.endIndex, let winner = scan.winner(atOrAfter: cursor) {
+                result += run[cursor..<winner.range.lowerBound]
+                let output = winner.rule.regex.replacementString(
+                    for: winner.result, in: run, offset: 0, template: winner.rule.template)
+                let changed = output != run[winner.range]
+                let insideWord = changed && Self.landsInsideWord(winner.range, in: run)
+                let effect = ReplacementEffect(
+                    rule: winner.rule.source, changedWords: changed && !insideWord,
+                    insideWord: insideWord,
+                    returnOmitted: winner.rule.submit != nil, ownsWholeDictation: false)
+                if let i = effects.firstIndex(where: { $0.rule == effect.rule }) {
+                    effects[i].changedWords = effects[i].changedWords || effect.changedWords
+                    effects[i].insideWord = effects[i].insideWord || effect.insideWord
                 } else {
-                    let next = run.index(after: cursor)
-                    result.append(contentsOf: run[cursor..<next])
-                    cursor = next
+                    effects.append(effect)
                 }
+                result += output
+                cursor = winner.range.upperBound
             }
+            result += run[cursor...]
             return SentinelText.neutralizeOpen(result)
         }
         return (transformed, effects)
+    }
+
+    private struct RunScan {
+        let run: String
+        let rules: [PreparedRule]
+        private let length: Int
+        private let boundaries: [Bool]
+        private var next: [PreparedMatch?]
+        private var nextStart: [Int]
+        private static let searching: NSRegularExpression.MatchingOptions = [.withTransparentBounds, .withoutAnchoringBounds]
+        private static let exhausted = Int.max
+        private static let unsearched = -1
+
+        init(run: String, rules: [PreparedRule]) {
+            self.run = run
+            self.rules = rules
+            length = run.utf16.count
+            var boundaries = [Bool](repeating: false, count: length + 1)
+            var index = run.startIndex
+            while index < run.endIndex {
+                boundaries[index.utf16Offset(in: run)] = true
+                index = run.index(after: index)
+            }
+            boundaries[length] = true
+            self.boundaries = boundaries
+            next = Array(repeating: nil, count: rules.count)
+            nextStart = Array(repeating: Self.unsearched, count: rules.count)
+        }
+
+        mutating func winner(atOrAfter cursor: String.Index) -> PreparedMatch? {
+            let offset = cursor.utf16Offset(in: run)
+            let onBoundary = boundaries[offset]
+            var earliest = Self.exhausted
+            for i in rules.indices {
+                if nextStart[i] < offset || (!onBoundary && nextStart[i] != offset) {
+                    search(i, from: offset)
+                }
+                earliest = min(earliest, nextStart[i])
+            }
+            guard earliest != Self.exhausted else { return nil }
+            var winner: PreparedMatch?
+            for i in rules.indices where nextStart[i] == earliest {
+                guard let candidate = next[i] else { continue }
+                if winner == nil || candidate.result.range.length > winner!.result.range.length { winner = candidate }
+            }
+            return winner
+        }
+
+        private mutating func search(_ i: Int, from cursor: Int) {
+            let options = rules[i].anchorsAtSearchStart ? Self.searching.union(.anchored) : Self.searching
+            var from = cursor
+            while from < length {
+                guard let result = rules[i].regex.firstMatch(
+                    in: run, options: options, range: NSRange(location: from, length: length - from))
+                else {
+                    guard options.contains(.anchored),
+                          let after = boundaries[(from + 1)...].firstIndex(of: true), after < length else { break }
+                    from = after
+                    continue
+                }
+                let start = result.range.location
+                if result.range.length > 0, start == cursor || boundaries[start], let range = Range(result.range, in: run) {
+                    next[i] = PreparedMatch(rule: rules[i], result: result, range: range)
+                    nextStart[i] = start
+                    return
+                }
+                guard let after = boundaries[(start + 1)...].firstIndex(of: true), after < length else { break }
+                from = after
+            }
+            next[i] = nil
+            nextStart[i] = Self.exhausted
+        }
     }
 
     // A match edge that splits two word characters cut a word in half ("copy" → "co|py"). Uses the same
@@ -248,13 +328,13 @@ public struct ReplacementsStage: PipelineStage {
         return wordCharacter.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
     }
 
-    private func winningMatch(in text: String, at cursor: String.Index, includingWholeDictation: Bool) -> PreparedMatch? {
+    private func winningMatch(in text: String, at cursor: String.Index) -> PreparedMatch? {
         let searchRange = NSRange(cursor..<text.endIndex, in: text)
         let options: NSRegularExpression.MatchingOptions = [
             .anchored, .withTransparentBounds, .withoutAnchoringBounds,
         ]
         var winner: PreparedMatch?
-        for rule in preparedRulesHighestTiePriorityFirst where includingWholeDictation || !rule.wholeDictation {
+        for rule in preparedRulesHighestTiePriorityFirst {
             guard let result = rule.regex.firstMatch(in: text, options: options, range: searchRange),
                   result.range.length > 0,
                   let range = Range(result.range, in: text)
@@ -292,7 +372,7 @@ public struct ReplacementsStage: PipelineStage {
         of core: String
     ) -> (text: String, submit: Mode.Submit?, rule: ReplacementRule, segments: [BareSegment]?)? {
         let coreRange = NSRange(core.startIndex..., in: core)
-        guard let winner = winningMatch(in: core, at: core.startIndex, includingWholeDictation: true),
+        guard let winner = winningMatch(in: core, at: core.startIndex),
               winner.result.range == coreRange else { return nil }
         let raw = winner.rule.regex.replacementString(
             for: winner.result, in: core, offset: 0, template: winner.rule.template)

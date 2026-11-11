@@ -33,6 +33,7 @@ public enum VerbatimTokenizer {
     private static let keywordEdgePunct = CharacterSet(charactersIn: ".,!?;:'\"()[]")
 
     private static func snapMarkerKeyword(_ text: String) -> String {
+        guard text.range(of: beginWord, options: .caseInsensitive) != nil else { return text }
         let beginSnapped = snapKeywordAfterMarker(in: text) { marker, _ in
             markerCore(marker) == beginWord
         }

@@ -16,6 +16,25 @@ struct ResolvedConfigTests {
             connections: ConnectionSet(), fragments: fragments)
     }
 
+    @Test func theRewriteNamesOnlyTheDictionaryWordsTheContentContainsIgnoringCase() {
+        let rc = resolved(dictionary: ["Kubernetes", "Postgres", "Kryten", "ChargeBee"])
+        #expect(rc.dictionaryWordsPresent(in: "the KUBERNETES pod talks to postgresql", for: nil)
+            == ["Kubernetes", "Postgres"])
+        #expect(rc.dictionaryWordsPresent(in: "nothing to see", for: nil).isEmpty)
+    }
+
+    @Test func aDictionaryWordIsPresentOnlyAsWholeCharactersAsBefore() {
+        let rc = resolved(dictionary: ["cafe", "café", "Ünter", ""])
+        #expect(rc.dictionaryWordsPresent(in: "un cafe\u{301} noir", for: nil) == ["café"])
+        #expect(rc.dictionaryWordsPresent(in: "ein ÜNTER cafe", for: nil) == ["cafe", "Ünter"])
+    }
+
+    @Test func aDictionaryWordMatchesTextThatIsTheSameCharactersInAnotherEncoding() {
+        let rc = resolved(dictionary: ["a;b", "x`y", "kelvin"])
+        #expect(rc.dictionaryWordsPresent(in: "see a\u{37E}b and x\u{1FEF}y at 3 \u{212A}elvin", for: nil)
+            == ["a;b", "x`y", "kelvin"])
+    }
+
     @Test func aModeCompilingItsStagesDoesNotBlockAnotherModesLookup() {
         let slow = Mode(id: "slow", name: "Slow")
         let fast = Mode(id: "fast", name: "Fast")
