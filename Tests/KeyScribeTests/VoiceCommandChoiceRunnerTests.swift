@@ -132,7 +132,7 @@ struct VoiceCommandChoiceRunnerTests {
         let (runner, system, _) = make()
         let terminal = VoiceCommandPlace(name: "Terminal", target: .app(bundleId: ghostty.bundleId))
         _ = try #require(await ask(runner, places: [personal, work, terminal]))
-        guard case .command(let outcome) = await answer(runner, "terminal", places: [personal, work, terminal]) else {
+        guard case .command(let outcome) = await answer(runner, "open terminal", places: [personal, work, terminal]) else {
             Issue.record("expected a new command"); return
         }
         #expect(outcome == .done(summary: "Terminal", command: "Brings Ghostty to the front, opening it if needed."))
@@ -149,6 +149,18 @@ struct VoiceCommandChoiceRunnerTests {
         #expect(runner.resumeChoice(pending.id))
         #expect(runner.pendingChoice?.id == pending.id)
         #expect(system.opened.isEmpty && system.openedURLs.isEmpty)
+    }
+
+    @Test func aSavedNameWithoutItsVerbKeepsTheList() async throws {
+        let (runner, system, _) = make()
+        let terminal = VoiceCommandPlace(name: "Terminal", target: .app(bundleId: ghostty.bundleId))
+        let pending = try #require(await ask(runner, places: [personal, work, terminal]))
+        let message = "Choose 1\u{2013}2, say \u{201C}cancel\u{201D}, or give a new command."
+        #expect(await answer(runner, "terminal", places: [personal, work, terminal])
+                == .retry(message: message, reason: .unrecognizedAnswer))
+        #expect(runner.resumeChoice(pending.id))
+        #expect(runner.pendingChoice?.id == pending.id)
+        #expect(system.opened.isEmpty)
     }
 
     @Test func spokenCancelDismissesWithoutRunningAnything() async throws {

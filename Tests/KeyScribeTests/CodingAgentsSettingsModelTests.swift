@@ -803,7 +803,7 @@ struct CodingAgentsSettingsModelTests {
         model.rename("a", to: "  ")
         #expect(model.renameProblem == "Enter a name.")
         model.rename("a", to: "session 2")
-        #expect(model.renameProblem == "\u{201C}Session\u{201D} followed by a number is how you say a row, so it cannot be a name.")
+        #expect(model.renameProblem == "\u{201C}Conversation\u{201D} or \u{201C}session\u{201D} followed by a number is how you say a row, so it cannot be a name.")
     }
     @Test func aRowNamesThePlaceItsNameCameFromWithoutRepeatingTheTerminal() async {
         let terminals = Terminals()

@@ -244,54 +244,93 @@ public enum VoiceCommandResolution: Equatable, Sendable {
     case scriptNeedsText(String)
     case takesNoText(String)
     case scriptNotFound(String)
+    case needsVerb(open: String?, run: String?)
+    case cancelled
 }
 
 public enum VoiceCommandResolver {
     public enum Route: Equatable, Sendable {
         case saved(SavedMatch)
+        case needsVerb(SavedMatch)
         case goBack
         case repeatSummary
+        case cancel
         case focus(String, VoiceCommandReach)
         case scriptNotFound(String)
         case notACommand
     }
 
     public static func route(_ transcript: String, catalog: VoiceCommandCatalog) -> Route {
-        if let saved = savedMatch(transcript, catalog: catalog) { return .saved(saved) }
         switch VoiceCommandGrammar.parse(transcript) {
-        case nil: return .notACommand
+        case nil:
+            let bare = savedMatch(
+                transcript, from: VoiceCommandGrammar.politeStart(transcript), places: catalog.places, scripts: catalog.scripts)
+            return bare.map(Route.needsVerb) ?? .notACommand
         case .goBack: return .goBack
         case .repeatSummary: return .repeatSummary
-        case .focus(let target, let reach): return .focus(target, reach)
+        case .cancel: return .cancel
+        case .focus(let target, let reach):
+            guard var saved = savedCommand(transcript, places: catalog.places, scripts: [])?.match else { return .focus(target, reach) }
+            saved.reach = reach
+            return .saved(saved)
         case .runScript(let target):
-            return savedMatch(transcript, from: 1, places: [], scripts: catalog.scripts).map(Route.saved) ?? .scriptNotFound(target)
+            return savedCommand(transcript, places: [], scripts: catalog.scripts).map { Route.saved($0.match) } ?? .scriptNotFound(target)
         }
     }
 
     public static func resolve(_ transcript: String, catalog: VoiceCommandCatalog) -> VoiceCommandResolution {
         switch route(transcript, catalog: catalog) {
         case .saved(let match): return resolve(match, catalog: catalog)
+        case .needsVerb(let match): return needsVerb(match)
         case .goBack: return .action(.goBack)
         case .repeatSummary: return .action(.repeatSummary)
+        case .cancel: return .cancelled
         case .focus(let target, let reach): return resolve(target: target, reach: reach, catalog: catalog)
         case .scriptNotFound(let target): return .scriptNotFound(target)
         case .notACommand: return .notACommand
         }
     }
 
+    private static func needsVerb(_ match: SavedMatch) -> VoiceCommandResolution {
+        func said(_ verb: String, for kind: (VoiceCommandCandidate) -> Bool) -> String? {
+            guard let candidate = match.candidates.first(where: kind) else { return nil }
+            let text = words(for: candidate, in: match.text)
+            return ([verb, match.target] + (text.isEmpty ? [] : [text])).joined(separator: " ")
+        }
+        return .needsVerb(
+            open: said(VoiceCommandGrammar.openingVerbs[0]) { if case .script = $0 { false } else { true } },
+            run: said(VoiceCommandGrammar.run) { if case .script = $0 { true } else { false } })
+    }
+
+    private static func words(for candidate: VoiceCommandCandidate, in text: String) -> String {
+        if case .script(let script) = candidate, script.takesText { return text }
+        guard let polite = text.range(of: VoiceCommandGrammar.polite, options: [.caseInsensitive, .anchored, .backwards])
+        else { return text }
+        let before = text[..<polite.lowerBound]
+        guard before.last.map({ !$0.isLetter && !$0.isNumber }) ?? true else { return text }
+        return VoiceCommandGrammar.cleanedText(before)
+    }
+
     public static func reach(_ transcript: String, catalog: VoiceCommandCatalog) -> VoiceCommandReach {
-        guard case .focus(_, let reach) = route(transcript, catalog: catalog) else { return .opening }
-        return reach
+        switch route(transcript, catalog: catalog) {
+        case .focus(_, let reach): return reach
+        case .saved(let match): return match.reach
+        default: return .opening
+        }
     }
 
     public struct SavedMatch: Equatable, Sendable {
         public var candidates: [VoiceCommandCandidate]
         public var text: String
         public var target: String
+        public var reach: VoiceCommandReach = .opening
     }
 
     public static func savedMatch(_ transcript: String, catalog: VoiceCommandCatalog) -> SavedMatch? {
-        savedMatch(transcript, from: 0, places: catalog.places, scripts: catalog.scripts)
+        switch route(transcript, catalog: catalog) {
+        case .saved(let match), .needsVerb(let match): match
+        default: nil
+        }
     }
 
     // Where the words after a saved command's name begin, found the same way `route` finds the command. Those
@@ -317,9 +356,16 @@ public enum VoiceCommandResolver {
     private static func savedCommand(
         _ transcript: String, places: [VoiceCommandPlace], scripts: [VoiceCommandScript]
     ) -> (match: SavedMatch, nameEnd: String.Index)? {
-        if let found = savedMatchAndEnd(transcript, from: 0, places: places, scripts: scripts) { return found }
-        guard case .runScript = VoiceCommandGrammar.parse(transcript) else { return nil }
-        return savedMatchAndEnd(transcript, from: 1, places: [], scripts: scripts)
+        guard let start = VoiceCommandGrammar.targetStart(transcript) else { return nil }
+        switch VoiceCommandGrammar.parse(transcript) {
+        case .runScript: return savedMatchAndEnd(transcript, from: start, places: [], scripts: scripts)
+        case .focus:
+            guard let found = savedMatchAndEnd(transcript, from: start, places: places, scripts: []),
+                  found.match.candidates.contains(where: { if case .place(let place) = $0 { place.isTabSearch } else { false } })
+            else { return nil }
+            return found
+        default: return nil
+        }
     }
 
     private static func savedMatch(
@@ -370,7 +416,7 @@ public enum VoiceCommandResolver {
             return .ambiguous(VoiceCommandChoice(
                 family: allActions ? .action : .navigation, target: match.target, matches: match.candidates, text: match.text))
         }
-        return resolve(only, text: match.text, reach: .opening, catalog: catalog)
+        return resolve(only, text: match.text, reach: match.reach, catalog: catalog)
     }
 
     private indirect enum Match {
@@ -639,6 +685,7 @@ public enum VoiceCommandResolver {
     public static func resolve(
         _ candidate: VoiceCommandCandidate, text: String, reach: VoiceCommandReach, catalog: VoiceCommandCatalog
     ) -> VoiceCommandResolution {
+        let text = words(for: candidate, in: text)
         switch candidate {
         case .app(let app):
             guard catalog.findsInApps, !text.isEmpty else { return action(for: candidate, reach: reach, catalog: catalog) }

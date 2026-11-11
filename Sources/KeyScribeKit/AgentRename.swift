@@ -25,7 +25,8 @@ public enum AgentRename: Equatable, Sendable {
     }
 
     public static func request(in transcript: String) -> Result<Substring, Problem>? {
-        let words = VoiceCommandGrammar.spokenWords(transcript)
+        let spoken = VoiceCommandGrammar.spokenWords(transcript)
+        let words = Array(spoken.dropFirst(spoken.prefix { $0.key == VoiceCommandGrammar.polite }.count))
         let keys = words.map(\.key)
         guard let verb = keys.first, ["rename", "name", "call"].contains(verb),
               let object = currentObjects.first(where: { Array(keys.dropFirst().prefix($0.count)) == $0 })
@@ -39,7 +40,7 @@ public enum AgentRename: Equatable, Sendable {
     }
 
     public static func name<S: StringProtocol>(from spoken: S) -> AgentRename {
-        let rest = Substring(spoken)
+        let rest = withoutClosingPlease(Substring(spoken))
         let clause = rest[..<(clauseEnd(in: rest) ?? rest.endIndex)]
         if clause.endIndex < rest.endIndex, rest[clause.endIndex...].contains(where: { $0.isLetter || $0.isNumber }) {
             return .invalid(.moreAfterName)
@@ -49,6 +50,14 @@ public enum AgentRename: Equatable, Sendable {
         if count == 0 { return .invalid(.noName) }
         if count > nameWords { return .invalid(.tooLong) }
         return .rename(name)
+    }
+
+    private static func withoutClosingPlease(_ text: Substring) -> Substring {
+        let said = text[..<(text.lastIndex { $0.isLetter || $0.isNumber }.map(text.index(after:)) ?? text.startIndex)]
+        guard let polite = said.range(of: VoiceCommandGrammar.polite, options: [.caseInsensitive, .anchored, .backwards]),
+              let before = said[..<polite.lowerBound].last, !before.isLetter, !before.isNumber
+        else { return text }
+        return text[..<polite.lowerBound]
     }
 
     private static func clauseEnd(in text: Substring) -> String.Index? {

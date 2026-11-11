@@ -204,11 +204,27 @@ struct AgentRecipientUncertainNameTests {
             Issue.record("expected a waiting question, got \(query)")
             return
         }
-        #expect(AgentRecipient.resolve(address, frozen: nil, rows: ["a", "b"], names: names, shared: shared) == .select(id: "b"))
+        #expect(AgentRecipient.conversation(address, frozen: nil, rows: ["a", "b"], names: names, shared: shared) == .select(id: "b"))
     }
 }
 
 struct AgentRecipientAfterVerbSpanTests {
+    @Test(arguments: [
+        "select refactor auth", "please select refactor auth", "select refactor auth please",
+        "select refactor auth flow handling please", "Please choose refactor auth flow handling.",
+    ])
+    func pleaseAroundSelectingByAPaneTitleStillSelects(text: String) {
+        let names = ["api": "a", "builder": "b", "reviewer": "c"]
+        let shared: [String: AgentRecipient.SharedName] = [
+            "refactor auth": .init(names: ["builder"], kind: .afterVerb("herdr pane title")),
+            "refactor auth flow handling": .init(names: ["reviewer"], kind: .afterVerb("herdr pane title")),
+        ]
+        let address = AgentAddress.parse(
+            text, names: AgentRecipient.spokenNames(names, shared: shared), afterVerb: AgentRecipient.afterVerbNames(shared))
+        let resolution = AgentRecipient.resolve(address, frozen: .init(id: "a", source: .current), rows: ["a", "b", "c"], names: names, shared: shared)
+        #expect(resolution == .select(id: text.lowercased().contains("handling") ? "c" : "b"))
+    }
+
     @Test func anAfterVerbNameCountsOnlyWhereTheAddressIsNotLaterInTheMessage() {
         let names = ["api": "a", "builder": "b"]
         let shared: [String: AgentRecipient.SharedName] = ["refactor auth": .init(names: ["builder"], kind: .afterVerb("herdr pane title"))]
@@ -230,11 +246,11 @@ struct AgentRecipientAfterVerbSpanTests {
         let message = AgentAddress.parse("Ask reviewer to check it", names: spoken, afterVerb: afterVerb)
         #expect(AgentRecipient.resolve(message, frozen: nil, rows: ["a", "b"], names: names, shared: shared)
             == .deliver(id: "b", body: "to check it", source: .spoken))
-        let query = try #require(AgentStatusQuery.parse("Ask reviewer what it is waiting for", names: spoken, afterVerb: afterVerb))
+        let query = try #require(AgentStatusQuery.parse("What is reviewer waiting for", names: spoken, afterVerb: afterVerb))
         guard case .waiting(let address?) = query else {
             Issue.record("expected a waiting question, got \(query)")
             return
         }
-        #expect(AgentRecipient.resolve(address, frozen: nil, rows: ["a", "b"], names: names, shared: shared) == .select(id: "b"))
+        #expect(AgentRecipient.conversation(address, frozen: nil, rows: ["a", "b"], names: names, shared: shared) == .select(id: "b"))
     }
 }

@@ -50,6 +50,7 @@ enum VoiceCommandOutcome: Equatable, Sendable {
     case started(summary: String, command: String)
     case failed(message: String, command: String? = nil, action: HUDErrorAction? = nil, kind: VoiceCommandFailureKind = .other)
     case needsChoice(VoiceCommandPendingChoice)
+    case cancelled
     case abandoned
 }
 
@@ -279,7 +280,8 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     ) async -> VoiceCommandResolution {
         let reach = Self.reach(of: transcript, places: places, scripts: scripts)
         if Self.isSavedPhrase(transcript, places: places, scripts: scripts) {
-            return await reading(await catalog(places: places, scripts: scripts), reach: reach, stillWanted: stillWanted) {
+            let running = reach == .running ? system.runningApps() : []
+            return await reading(await catalog(places: places, scripts: scripts, running: running), reach: reach, stillWanted: stillWanted) {
                 VoiceCommandResolver.resolve(transcript, catalog: $0)
             }
         }
@@ -511,7 +513,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         case .invalidSelection:
             return .retry(message: pending.choice.retryMessage, reason: .invalidSelection)
         case .unrecognized:
-            guard VoiceCommandGrammar.parse(transcript) != nil || Self.isSavedPhrase(transcript, places: places, scripts: scripts) else {
+            guard VoiceCommandGrammar.parse(transcript) != nil else {
                 return .retry(message: pending.choice.retryMessage, reason: .unrecognizedAnswer)
             }
             return .command(await run(transcript: transcript, places: places, scripts: scripts, origin: origin,
@@ -555,6 +557,10 @@ final class VoiceCommandRunner: VoiceCommandRunning {
                            kind: .unrecognizedCommand)
         case .scriptNotFound(let target):
             return .failed(message: Self.notFoundMessage(target), kind: .nothingMatched)
+        case .needsVerb(let open, let run):
+            return .failed(message: Self.needsVerbMessage(open: open, run: run))
+        case .cancelled:
+            return .cancelled
         case .noMatch(let target):
             return .failed(message: Self.noMatchMessage(target), kind: .nothingMatched)
         case .closed(let closed):
@@ -919,7 +925,14 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         VoiceCommandResolver.savedMatch(transcript, catalog: VoiceCommandCatalog(places: places, scripts: scripts)) != nil
     }
 
-    static let notACommandHint = "Say the name of a saved command. You can also " + VoiceCommandPhrase.guidance + "."
+    static let notACommandHint = "S" + VoiceCommandPhrase.guidance.dropFirst() + "."
+
+    static func needsVerbMessage(open: String?, run: String?) -> String {
+        let ways = [open.map { "\u{201C}\($0)\u{201D} to open it" }, run.map { "\u{201C}\($0)\u{201D} to run it" }].compactMap { $0 }
+        return "Say " + ways.joined(separator: " or ") + "."
+    }
+
+    static let cancelledMessage = "Cancelled. Nothing ran."
 
     static func notFoundMessage(_ target: String) -> String {
         "No script or shortcut is called \u{201C}\(target)\u{201D}."

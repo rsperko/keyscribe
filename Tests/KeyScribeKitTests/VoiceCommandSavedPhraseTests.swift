@@ -23,9 +23,9 @@ struct VoiceCommandSavedPhraseTests {
         Tab(browserBundleId: browser, window: 1, tab: tab, url: "https://example.com/\(tab)", title: title)
     }
 
-    @Test func aSavedActionRunsByItsNameAndRunStillWorks() {
+    @Test func aSavedActionRunsOnlyAfterRun() {
         let note = script("Note")
-        #expect(resolve("note buy milk", scripts: [note]) == .action(.script(note, arguments: ["buy milk"])))
+        #expect(resolve("note buy milk", scripts: [note]) == .needsVerb(open: nil, run: "run note buy milk"))
         #expect(resolve("run note buy milk", scripts: [note]) == .action(.script(note, arguments: ["buy milk"])))
     }
 
@@ -35,15 +35,8 @@ struct VoiceCommandSavedPhraseTests {
         let action = VoiceCommandScript(name: phrase, run: ["/bin/a"])
         #expect(place.issue == nil)
         #expect(action.issue == nil)
-        #expect(resolve(phrase, places: [place]) == .action(.place(place, .app(bundleId: "com.example.a"))))
-        #expect(resolve(phrase, scripts: [action]) == .action(.script(action, arguments: [])))
-    }
-
-    @Test func aSavedPhraseTakesPrecedenceOverTheVerbItStartsWith() {
-        let notes = VoiceCommandPlace(name: "Open notes", target: .app(bundleId: "com.example.notes"))
-        let mail = VoiceCommandCatalog.App(name: "Mail", bundleId: "com.apple.mail")
-        #expect(resolve("open notes", places: [notes]) == .action(.place(notes, .app(bundleId: "com.example.notes"))))
-        #expect(resolve("open mail", places: [notes], running: [mail]) == .action(.app(mail)))
+        #expect(resolve("open \(phrase)", places: [place]) == .action(.place(place, .app(bundleId: "com.example.a"))))
+        #expect(resolve("run \(phrase)", scripts: [action]) == .action(.script(action, arguments: [])))
     }
 
     @Test(arguments: [false, true])
@@ -51,84 +44,83 @@ struct VoiceCommandSavedPhraseTests {
         let note = script("Note")
         let work = script("Note work")
         let scripts = reversed ? [work, note] : [note, work]
-        #expect(resolve("note work buy milk", scripts: scripts) == .action(.script(work, arguments: ["buy milk"])))
-        #expect(resolve("note buy milk", scripts: scripts) == .action(.script(note, arguments: ["buy milk"])))
+        #expect(resolve("run note work buy milk", scripts: scripts) == .action(.script(work, arguments: ["buy milk"])))
+        #expect(resolve("run note buy milk", scripts: scripts) == .action(.script(note, arguments: ["buy milk"])))
     }
 
     @Test func aLongerPhraseThatNeedsWordsNeverFallsBackToTheShorterOne() {
         let slack = script("Slack")
         let joe = script("Slack Joe")
-        #expect(resolve("slack joe", scripts: [slack, joe]) == .scriptNeedsText("Slack Joe"))
+        #expect(resolve("run slack joe", scripts: [slack, joe]) == .scriptNeedsText("Slack Joe"))
     }
 
     @Test func aLongerPhraseWithoutWordsSaysSoInsteadOfRunningTheShorterOne() {
         let slack = script("Slack")
         let joe = VoiceCommandScript(name: "Slack Joe", run: ["/bin/joe"])
-        #expect(resolve("slack joe about lunch", scripts: [slack, joe]) == .takesNoText("Slack Joe"))
         #expect(resolve("run slack joe about lunch", scripts: [slack, joe]) == .takesNoText("Slack Joe"))
-        #expect(resolve("slack joe", scripts: [slack, joe]) == .action(.script(joe, arguments: [])))
+        #expect(resolve("run slack joe", scripts: [slack, joe]) == .action(.script(joe, arguments: [])))
     }
 
-    @Test func aPlaceSaysItTakesNoWords() {
+    @Test func aPlaceOpensByItsSpokenName() {
         let channel = VoiceCommandPlace(
             name: "Webhooks and Callbacks", say: ["web hooks"], target: .url("slack://channel?team=T1&id=C1"))
-        #expect(resolve("Web hooks.", places: [channel])
-                == .action(.place(channel, .openURL("slack://channel?team=T1&id=C1", browser: nil))))
+        #expect(resolve("Web hooks.", places: [channel]) == .needsVerb(open: "open web hooks", run: nil))
         #expect(resolve("webhooks", places: [channel]) == .notACommand)
         #expect(resolve("open web hooks", places: [channel])
                 == .action(.place(channel, .openURL("slack://channel?team=T1&id=C1", browser: nil))))
-        #expect(resolve("web hooks please", places: [channel]) == .takesNoText("Webhooks and Callbacks"))
+        #expect(resolve("open web hooks please", places: [channel])
+                == .action(.place(channel, .openURL("slack://channel?team=T1&id=C1", browser: nil))))
     }
 
     @Test func aSavedWebPlaceReadsTabsFirst() {
         let gmail = VoiceCommandPlace(name: "Gmail", target: .url("https://mail.google.com/"))
-        #expect(resolve("gmail", places: [gmail], tabs: nil) == .needsTabs(browser: nil))
+        #expect(resolve("switch to gmail", places: [gmail], tabs: nil) == .needsTabs(browser: nil))
     }
 
     @Test func aTabSearchLooksOnlyInItsBrowser() {
         let chrome = VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: chromeId)
         let inChrome = tab("Inbox (3) - Gmail", in: chromeId, tab: 2)
         let inBrave = tab("Gmail", in: braveId, tab: 1)
-        #expect(resolve("chrome gmail", places: [chrome], tabs: nil) == .needsTabs(browser: chromeId))
-        #expect(resolve("chrome gmail", places: [chrome], tabs: [inBrave, inChrome]) == .action(.tab(inChrome)))
-        #expect(resolve("chrome gmail", places: [chrome], tabs: [inBrave]) == .noTabMatch("gmail", browser: chromeId))
+        #expect(resolve("open chrome gmail", places: [chrome], tabs: nil) == .needsTabs(browser: chromeId))
+        #expect(resolve("open chrome gmail", places: [chrome], tabs: [inBrave, inChrome]) == .action(.tab(inChrome)))
+        #expect(resolve("open chrome gmail", places: [chrome], tabs: [inBrave]) == .noTabMatch("gmail", browser: chromeId))
     }
 
     @Test func aTabSearchMatchesTitlesLoosely() {
         let chrome = VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: chromeId)
         let run = tab("Afternoon Run | Run | Strava", in: chromeId, tab: 3)
-        #expect(resolve("Chrome, strava run.", places: [chrome], tabs: [tab("Inbox", in: chromeId), run]) == .action(.tab(run)))
-        #expect(resolve("chrome stravva", places: [chrome], tabs: [tab("Inbox", in: chromeId), run]) == .action(.tab(run)))
+        #expect(resolve("Open Chrome, strava run.", places: [chrome], tabs: [tab("Inbox", in: chromeId), run]) == .action(.tab(run)))
+        #expect(resolve("open chrome stravva", places: [chrome], tabs: [tab("Inbox", in: chromeId), run]) == .action(.tab(run)))
     }
 
     @Test func aTabSearchForAnyBrowserLooksEverywhere() {
         let tabs = VoiceCommandPlace(name: "Tab", target: .tabSearch)
         let inBrave = tab("Home Assistant", in: braveId)
-        #expect(resolve("tab home assistant", places: [tabs], tabs: nil) == .needsTabs(browser: nil))
-        #expect(resolve("tab home assistant", places: [tabs], tabs: [inBrave]) == .action(.tab(inBrave)))
+        #expect(resolve("open tab home assistant", places: [tabs], tabs: nil) == .needsTabs(browser: nil))
+        #expect(resolve("open tab home assistant", places: [tabs], tabs: [inBrave]) == .action(.tab(inBrave)))
     }
 
     @Test func aTabSearchSaidAloneBringsItsBrowserForward() {
         let chrome = VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: chromeId)
-        #expect(resolve("chrome", places: [chrome]) == .action(.place(chrome, .app(bundleId: chromeId))))
+        #expect(resolve("open chrome", places: [chrome]) == .action(.place(chrome, .app(bundleId: chromeId))))
         let any = VoiceCommandPlace(name: "Tab", target: .tabSearch)
-        #expect(resolve("tab", places: [any]) == .scriptNeedsText("Tab"))
+        #expect(resolve("open tab", places: [any]) == .scriptNeedsText("Tab"))
     }
 
     @Test func switchingToTheBrowsersNameStillOpensTheBrowser() {
         let chrome = VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: chromeId)
         let app = VoiceCommandCatalog.App(name: "Google Chrome", bundleId: chromeId)
-        #expect(resolve("switch to chrome", places: [chrome], running: [app]) == .action(.app(app)))
+        #expect(resolve("switch to chrome", places: [chrome], running: [app]) == .action(.place(chrome, .app(bundleId: chromeId))))
     }
 
-    @Test func equalPhrasesAcrossKindsAskWhichOne() throws {
+    @Test func equalPhrasesAcrossKindsAreToldApartByTheVerb() throws {
         let place = VoiceCommandPlace(name: "Deploy Docs", say: ["deploy"], target: .url("https://docs.example.com/"))
         let deploy = VoiceCommandScript(name: "Deploy", run: ["/bin/deploy"])
-        guard case .ambiguous(let choice) = resolve("deploy", places: [place], scripts: [deploy]) else {
-            Issue.record("expected a choice"); return
-        }
-        #expect(choice.candidates == [.place(place), .script(deploy)])
-        #expect(choice.family == .navigation)
+        #expect(resolve("deploy", places: [place], scripts: [deploy]) == .needsVerb(open: "open deploy", run: "run deploy"))
+        #expect(resolve("run deploy", places: [place], scripts: [deploy]) == .action(.script(deploy, arguments: [])))
+        #expect(resolve("open deploy", places: [place], scripts: [deploy])
+                == .action(.place(place, .openURL("https://docs.example.com/", browser: nil))))
+        #expect(VoiceCommandConfig(places: [place]).conflicts(for: .script(deploy)).isEmpty)
     }
 
     @Test func aTabSearchCannotBeAnAppLinkOrApp() throws {
@@ -229,11 +221,10 @@ struct VoiceCommandIdentityTests {
 struct VoiceCommandConflictTests {
     private let mail = VoiceCommandPlace(name: "Mail", target: .app(bundleId: "com.apple.mail"))
 
-    @Test func aPhraseSharedWithAnotherKindAsksAndSaysSo() {
+    @Test func aPhraseSharedWithAnotherKindIsToldApartByTheVerb() {
         let config = VoiceCommandConfig(places: [mail])
         let script = VoiceCommandScript(name: "Mailer", say: ["mail"], run: ["/bin/mailer"])
-        #expect(config.conflicts(for: .script(script))
-                == ["\u{201C}mail\u{201D} is also a name for Mail, so saying it will ask you to choose. Give this one a name of its own."])
+        #expect(config.conflicts(for: .script(script)).isEmpty)
     }
 
     @Test func aCommandDoesNotConflictWithItsOwnSavedCopy() {
@@ -247,7 +238,7 @@ struct VoiceCommandConflictTests {
         let joe = VoiceCommandScript(name: "Slack Joe", run: ["/bin/joe"])
         let slack = VoiceCommandScript(name: "Slack", run: ["/bin/slack", "{text}"])
         #expect(VoiceCommandConfig(scripts: [joe]).conflicts(for: .script(slack))
-                == ["\u{201C}Slack Joe\u{201D} runs Slack Joe instead, because its name is longer."])
+                == ["\u{201C}run Slack Joe\u{201D} reaches Slack Joe instead, because its name is longer."])
         let bare = VoiceCommandScript(name: "Slack", run: ["/bin/slack"])
         #expect(VoiceCommandConfig(scripts: [joe]).conflicts(for: .script(bare)).isEmpty)
     }
@@ -256,34 +247,21 @@ struct VoiceCommandConflictTests {
         let note = VoiceCommandScript(name: "Note", run: ["/bin/note", "{text}"])
         let work = VoiceCommandScript(name: "Note work", run: ["/bin/work", "{text}"])
         #expect(VoiceCommandConfig(scripts: [note]).conflicts(for: .script(work))
-                == ["Saying \u{201C}Note work \u{2026}\u{201D} will run this command instead of Note, because its name is longer."])
+                == ["Saying \u{201C}run Note work \u{2026}\u{201D} will reach this command instead of Note, because its name is longer."])
         let board = VoiceCommandPlace(name: "Note board", target: .app(bundleId: "com.example.board"))
-        #expect(VoiceCommandConfig(scripts: [note]).conflicts(for: .place(board))
-                == ["Saying \u{201C}Note board\u{201D} will run this command instead of Note, because its name is longer."])
+        #expect(VoiceCommandConfig(scripts: [note]).conflicts(for: .place(board)).isEmpty)
+        let search = VoiceCommandPlace(name: "Note", target: .tabSearch)
+        #expect(VoiceCommandConfig(places: [search]).conflicts(for: .place(board))
+                == ["Saying \u{201C}open Note board\u{201D} will reach this command instead of Note, because its name is longer."])
         let ping = VoiceCommandScript(name: "Ping", run: ["/bin/ping"])
         let pingAll = VoiceCommandScript(name: "Ping all", run: ["/bin/ping-all"])
         #expect(VoiceCommandConfig(scripts: [ping]).conflicts(for: .script(pingAll)).isEmpty)
     }
 
-    @Test func aPhraseThatCoversABuiltInCommandIsExplained() {
-        let go = VoiceCommandScript(name: "Go", run: ["/bin/go", "{text}"])
-        #expect(VoiceCommandConfig().conflicts(for: .script(go))
-                == ["Saying \u{201C}go back\u{201D} will run this command instead of returning to the previous window."])
-        let say = VoiceCommandScript(name: "Say that", run: ["/bin/say", "{text}"])
-        #expect(VoiceCommandConfig().conflicts(for: .script(say))
-                == ["Saying \u{201C}say that again\u{201D} will run this command instead of repeating the last spoken reply."])
-        let repeatThat = VoiceCommandPlace(name: "Repeat that", target: .app(bundleId: "com.example.repeat"))
-        #expect(VoiceCommandConfig().conflicts(for: .place(repeatThat))
-                == ["Saying \u{201C}repeat that\u{201D} will run this command instead of repeating the last spoken reply."])
-        let open = VoiceCommandPlace(name: "Open", target: .app(bundleId: "com.example.open"))
-        #expect(VoiceCommandConfig().conflicts(for: .place(open))
-                == ["Saying \u{201C}open \u{2026}\u{201D} will reach this command instead of opening an app or place."])
-        let switchTo = VoiceCommandPlace(name: "Switch to", target: .app(bundleId: "com.example.switch"))
-        #expect(VoiceCommandConfig().conflicts(for: .place(switchTo))
-                == ["Saying \u{201C}switch to \u{2026}\u{201D} will reach this command instead of switching to an open app or place."])
-        let run = VoiceCommandScript(name: "Run", run: ["/bin/run"])
-        #expect(VoiceCommandConfig().conflicts(for: .script(run))
-                == ["Saying \u{201C}run \u{2026}\u{201D} will reach this command instead of your other actions."])
+    @Test(arguments: ["Go", "Say that", "Repeat that", "Open", "Switch to", "Run"])
+    func aNameLikeABuiltInCommandIsFineBecauseSavedNamesFollowAVerb(_ name: String) {
+        #expect(VoiceCommandConfig().conflicts(for: .script(VoiceCommandScript(name: name, run: ["/bin/a", "{text}"]))).isEmpty)
+        #expect(VoiceCommandConfig().conflicts(for: .place(VoiceCommandPlace(name: name, target: .app(bundleId: "com.example.a")))).isEmpty)
     }
 
     @Test(arguments: ["go home", "open notes", "focus mode", "Mail"])
@@ -297,7 +275,7 @@ struct VoiceCommandExampleTests {
     @Test func aScriptExampleFollowsTheEditedSampleWords() {
         let probe = VoiceCommandScript(name: "Probe", run: ["/bin/probe", "--find", "{text}"])
         let example = VoiceCommandExample.make(for: .script(probe), sample: "  release notes  ")
-        #expect(example.heard == "probe release notes")
+        #expect(example.heard == "run probe release notes")
         #expect(example.result == "Runs /bin/probe --find 'release notes' in the background.")
         #expect(example.conflict == nil)
     }
@@ -307,40 +285,40 @@ struct VoiceCommandExampleTests {
         let meeting = VoiceCommandScript(name: "Note meeting", run: ["/bin/meeting", "{text}"])
         let example = VoiceCommandExample.make(
             for: .script(note), sample: "meeting agenda", among: VoiceCommandConfig(scripts: [meeting]))
-        #expect(example.conflict == "Saying \u{201C}note meeting agenda\u{201D} runs Note meeting instead, because its name is longer.")
+        #expect(example.conflict == "Saying \u{201C}run note meeting agenda\u{201D} runs Note meeting instead, because its name is longer.")
     }
 
     @Test func anEmptySampleExplainsTheMissingSpokenInput() {
         let probe = VoiceCommandScript(name: "Probe", run: ["/bin/probe", "{text}"])
         let example = VoiceCommandExample.make(for: .script(probe), sample: "   ")
-        #expect(example.heard == "probe")
+        #expect(example.heard == "run probe")
         #expect(example.result.isEmpty)
-        #expect(example.conflict == "Saying \u{201C}probe\u{201D} gives this command no words after its name.")
+        #expect(example.conflict == "Saying \u{201C}run probe\u{201D} gives this command no words after its name.")
     }
 
     @Test func anActionExampleUsesItsOwnNameAndWords() {
         let probe = VoiceCommandScript(name: "Probe", say: ["memo"], run: ["/bin/probe", "{text}"])
         let example = VoiceCommandExample.make(for: .script(probe))
-        #expect(example.heard == "probe buy milk")
+        #expect(example.heard == "run probe buy milk")
         #expect(example.result == "Runs /bin/probe 'buy milk' in the background.")
         #expect(example.conflict == nil)
         let bare = VoiceCommandScript(name: "Ping", run: ["/bin/ping"])
-        #expect(VoiceCommandExample.make(for: .script(bare)).heard == "ping")
+        #expect(VoiceCommandExample.make(for: .script(bare)).heard == "run ping")
     }
 
     @Test func aPlaceExampleNamesWhereItGoes() {
         let hooks = VoiceCommandPlace(name: "Web Hooks", target: .url("slack://channel?team=T1&id=C1"))
         let example = VoiceCommandExample.make(for: .place(hooks))
-        #expect(example.heard == "web hooks")
+        #expect(example.heard == "open web hooks")
         #expect(example.result == "Opens slack://channel?team=T1&id=C1 in the app that handles it.")
         let mail = VoiceCommandPlace(name: "Mail", target: .app(bundleId: "com.apple.mail"))
-        #expect(VoiceCommandExample.make(for: .place(mail), appName: { _ in "Mail" }).heard == "mail")
+        #expect(VoiceCommandExample.make(for: .place(mail), appName: { _ in "Mail" }).heard == "open mail")
     }
 
     @Test func aTabSearchExampleSaysWhereItLooks() {
         let chrome = VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: "com.google.Chrome")
         let example = VoiceCommandExample.make(for: .place(chrome), appName: { _ in "Google Chrome" })
-        #expect(example.heard == "chrome inbox")
+        #expect(example.heard == "open chrome inbox")
         #expect(example.result == "Switches to the open Google Chrome tab whose title or site best matches \u{201C}inbox\u{201D}. If several match equally, it picks the leftmost match in the frontmost window that has one.")
         let any = VoiceCommandPlace(name: "Tab", target: .tabSearch)
         #expect(VoiceCommandExample.make(for: .place(any)).result.hasSuffix(
@@ -351,11 +329,10 @@ struct VoiceCommandExampleTests {
         let note = VoiceCommandScript(name: "Note", run: ["/bin/note", "{text}"])
         let noteBuy = VoiceCommandScript(name: "Note buy", run: ["/bin/shop", "{text}"])
         let example = VoiceCommandExample.make(for: .script(note), among: VoiceCommandConfig(scripts: [noteBuy]))
-        #expect(example.conflict == "Saying \u{201C}note buy milk\u{201D} runs Note buy instead, because its name is longer.")
+        #expect(example.conflict == "Saying \u{201C}run note buy milk\u{201D} runs Note buy instead, because its name is longer.")
         let shared = VoiceCommandPlace(name: "Notes", say: ["note"], target: .app(bundleId: "com.apple.Notes"))
         let bare = VoiceCommandScript(name: "Note", run: ["/bin/note"])
-        #expect(VoiceCommandExample.make(for: .script(bare), among: VoiceCommandConfig(places: [shared])).conflict
-                == "Saying \u{201C}note\u{201D} would ask you to choose between this command and Notes.")
+        #expect(VoiceCommandExample.make(for: .script(bare), among: VoiceCommandConfig(places: [shared])).conflict == nil)
     }
 
     @Test func theExampleIsReadThroughReplacementsLikeALiveCommand() {
@@ -365,22 +342,22 @@ struct VoiceCommandExampleTests {
         let redirected = VoiceCommandExample.make(
             for: .script(note), among: saved, readAs: { $0.replacingOccurrences(of: "note", with: "shop") })
         #expect(redirected.conflict
-                == "Your replacements read \u{201C}note buy milk\u{201D} as \u{201C}shop buy milk\u{201D}, so it runs Shop instead.")
+                == "Your replacements read \u{201C}run note buy milk\u{201D} as \u{201C}run shop buy milk\u{201D}, so it runs Shop instead.")
         let lost = VoiceCommandExample.make(for: .script(note), readAs: { _ in "switch to mail" })
         #expect(lost.conflict
-                == "Your replacements read \u{201C}note buy milk\u{201D} as \u{201C}switch to mail\u{201D}, so it does not run this command.")
+                == "Your replacements read \u{201C}run note buy milk\u{201D} as \u{201C}switch to mail\u{201D}, so it does not run this command.")
         let kept = VoiceCommandExample.make(for: .script(note), readAs: { $0.replacingOccurrences(of: "milk", with: "eggs") })
-        #expect(kept == VoiceCommandExample(heard: "note buy milk", result: "Runs /bin/note 'buy eggs' in the background."))
+        #expect(kept == VoiceCommandExample(heard: "run note buy milk", result: "Runs /bin/note 'buy eggs' in the background."))
     }
 
     @Test func everyNameIsCheckedSoAnOtherNameARuleTakesAwayIsReported() {
         let slack = VoiceCommandScript(name: "Slack", say: ["slack unread"], run: ["/bin/slack", "{text}"])
         let jump = VoiceCommandScript(name: "Jump", run: ["/bin/jump", "{text}"])
         let saved = VoiceCommandConfig(scripts: [slack, jump])
-        let readAs: (String) -> String = { $0.hasPrefix("slack unread") ? "jump " + $0 : $0 }
+        let readAs: (String) -> String = { $0.replacingOccurrences(of: "run slack unread", with: "run jump slack unread") }
         #expect(VoiceCommandExample.make(for: .script(slack), among: saved, readAs: readAs).conflict == nil)
         #expect(VoiceCommandExample.namesLostToReplacements(for: .script(slack), among: saved, readAs: readAs) == [
-            "Your replacements read \u{201C}slack unread buy milk\u{201D} as \u{201C}jump slack unread buy milk\u{201D}, so it runs Jump instead.",
+            "Your replacements read \u{201C}run slack unread buy milk\u{201D} as \u{201C}run jump slack unread buy milk\u{201D}, so it runs Jump instead.",
         ])
         #expect(VoiceCommandExample.namesLostToReplacements(for: .script(slack), among: saved).isEmpty)
     }
@@ -393,13 +370,7 @@ struct VoiceCommandExampleTests {
             for: .script(note), among: VoiceCommandConfig(scripts: [shop, store]),
             readAs: { $0.replacingOccurrences(of: "note", with: "shop") })
         #expect(example.conflict
-                == "Your replacements read \u{201C}note buy milk\u{201D} as \u{201C}shop buy milk\u{201D}, so it would ask you to choose between Shop and Store.")
-    }
-
-    @Test func aReplacementThatAddsRunStillPreviewsTheSameCommand() {
-        let note = VoiceCommandScript(name: "Note", run: ["/bin/note", "{text}"])
-        let example = VoiceCommandExample.make(for: .script(note), readAs: { "run " + $0 })
-        #expect(example == VoiceCommandExample(heard: "note buy milk", result: "Runs /bin/note 'buy milk' in the background."))
+                == "Your replacements read \u{201C}run note buy milk\u{201D} as \u{201C}run shop buy milk\u{201D}, so it would ask you to choose between Shop and Store.")
     }
 
     @Test func aTabSearchPreviewUsesTheWordsAfterReplacements() {
@@ -407,12 +378,6 @@ struct VoiceCommandExampleTests {
         let example = VoiceCommandExample.make(
             for: .place(chrome), readAs: { $0.replacingOccurrences(of: "inbox", with: "gmail") }, appName: { _ in "Google Chrome" })
         #expect(example.result.hasPrefix("Switches to the open Google Chrome tab whose title or site best matches \u{201C}gmail\u{201D}."))
-    }
-
-    @Test func aReplacementThatTurnsAPlaceIntoAVerbStillFindsIt() {
-        let mail = VoiceCommandPlace(name: "Mail", target: .app(bundleId: "com.apple.mail"))
-        let example = VoiceCommandExample.make(for: .place(mail), readAs: { "open " + $0 }, appName: { _ in "Mail" })
-        #expect(example == VoiceCommandExample(heard: "mail", result: "Brings Mail to the front, opening it if needed."))
     }
 
     @Test func editingACommandIgnoresItsOwnSavedCopy() {
@@ -425,10 +390,10 @@ struct VoiceCommandExampleTests {
 
     @Test func sayLinesShowThePhrasesThatWork() {
         let mail = VoiceCommandPlace(name: "Mail", say: ["inbox"], target: .app(bundleId: "com.apple.mail"))
-        #expect(VoiceCommandExample.phrases(for: .place(mail)) == ["Mail", "inbox"])
+        #expect(VoiceCommandExample.phrases(for: .place(mail)) == ["open Mail", "open inbox"])
         let chrome = VoiceCommandPlace(name: "Chrome", target: .tabSearch)
-        #expect(VoiceCommandExample.phrases(for: .place(chrome)) == ["Chrome \u{2026}"])
+        #expect(VoiceCommandExample.phrases(for: .place(chrome)) == ["open Chrome \u{2026}"])
         let note = VoiceCommandScript(name: "Note", run: ["/bin/note", "{text}"])
-        #expect(VoiceCommandExample.phrases(for: .script(note)) == ["Note \u{2026}"])
+        #expect(VoiceCommandExample.phrases(for: .script(note)) == ["run Note \u{2026}"])
     }
 }

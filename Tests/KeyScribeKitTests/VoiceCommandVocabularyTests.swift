@@ -119,8 +119,8 @@ struct VoiceCommandVocabularyTests {
         let mode = commands(words: ["Metafield", "Jaspar"])
         let plan = plan(mode: mode)
         let jasper = VoiceCommandScript(name: "Jasper", run: ["/bin/jasper", "{text}"])
-        let read = plan.voiceCommandText(heard: "Jasper, fix the meta field errors.", mode: mode, scripts: [jasper])
-        #expect(read == "Jasper, fix the Metafield errors.")
+        let read = plan.voiceCommandText(heard: "Run Jasper, fix the meta field errors.", mode: mode, scripts: [jasper])
+        #expect(read == "Run Jasper, fix the Metafield errors.")
         #expect(VoiceCommandResolver.resolve(read, catalog: VoiceCommandCatalog(scripts: [jasper]))
                 == .action(.script(jasper, arguments: ["fix the Metafield errors"])))
     }
@@ -134,19 +134,19 @@ struct VoiceCommandVocabularyTests {
 
     @Test func theDictionaryCorrectsTheWordsAWholeTakeRuleHandsToASavedCommand() {
         let rule = ReplacementsSet.Rule(
-            heard: #"(?s)^\s*(.*?)[\s,.!?]*\bend of transmission[\s,.!?]*$"#, replace: "jasper $1", regex: true)
+            heard: #"(?s)^\s*(.*?)[\s,.!?]*\bend of transmission[\s,.!?]*$"#, replace: "run jasper $1", regex: true)
         let mode = commands(words: ["Metafield"], rules: [rule])
         let jasper = VoiceCommandScript(name: "Jasper", run: ["/bin/jasper", "{text}"])
         #expect(plan(mode: mode).voiceCommandText(
             heard: "Find the meta field errors. End of transmission.", mode: mode, scripts: [jasper])
-            == "jasper Find the Metafield errors")
+            == "run jasper Find the Metafield errors")
     }
 
     @Test func theDictionaryCorrectsAPlacesFindText() {
         let mode = commands(words: ["Metafield"])
         let docs = VoiceCommandPlace(name: "Docs", target: .app(bundleId: "com.example.docs"))
-        #expect(plan(mode: mode).voiceCommandText(heard: "docs meta field", mode: mode, places: [docs])
-            == "docs Metafield")
+        #expect(plan(mode: mode).voiceCommandText(heard: "open docs meta field", mode: mode, places: [docs])
+            == "open docs Metafield")
     }
 
     @Test func withoutASavedCommandTheWordsAreLeftAsHeard() {
@@ -162,7 +162,7 @@ struct VoiceCommandVocabularyTests {
         let deploy = VoiceCommandScript(name: "Deploy", say: ["ship"], run: ["/bin/deploy", "{text}"])
         let deployPostgres = VoiceCommandScript(name: "Deploy Postgres", say: ["ship Postgres"], run: ["/bin/dp", "{text}"])
         let scripts = [deploy, deployPostgres]
-        for heard in ["Deploy postgrass", "run deploy postgrass", "ship postgrass"] {
+        for heard in ["Run deploy postgrass", "run deploy postgrass", "run ship postgrass"] {
             let read = plan.voiceCommandText(heard: heard, mode: mode, scripts: scripts)
             #expect(read == heard)
             #expect(VoiceCommandResolver.resolve(read, catalog: VoiceCommandCatalog(scripts: scripts))

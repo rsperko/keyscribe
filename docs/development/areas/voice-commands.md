@@ -37,6 +37,24 @@ review keeps finding the same few of them.
   places, or windows, or tabs in different browsers, tied for a switch are offered as a choice (`ui_design.md`, *Voice command
   choice*; `config_schema.md` has the full order).
 
+## Spoken grammar
+
+- **A saved name acts only after its verb.** A place, link, or tab search follows a focus verb; a script or
+  shortcut follows `run` (`VoiceCommandResolver.route`). A saved name said alone acts on nothing and answers
+  with the phrase to say, which is what keeps a saved name from ever taking over a built-in command or
+  ordinary speech, so never reintroduce a bare-name match.
+- **A Coding agent recipient changes only on an explicit verb.** `select`/`choose` with an address selects
+  (`AgentAddress.select`), `open` brings forward, and `tell`/`ask` or a name with a message sends; an address
+  alone, or followed only by `please`, holds with the select hint and leaves the recipient as it was. `ask`
+  always sends, so a question put to the agent never becomes a local status answer; an unknown name after
+  `ask` followed by a question holds rather than falling to the current recipient, except after `the`, where
+  a word that names no conversation is message text by design.
+- **Local controls are whole utterances.** `cancel`/`never mind`, `go back`, and `repeat that` act only as the
+  whole take, with an optional `please` around them (`VoiceCommandGrammar.parse`); inside a longer take they
+  are text. A closing `please` is part of the words a text-taking script receives, and is dropped everywhere
+  else. A standalone cancel records nothing in either action mode.
+- **`conversation` and `session` are one word** wherever the grammar takes either (`AgentAddress.rowNouns`).
+
 ## One rule, one function
 
 - **Previews, advisories, examples, and uniqueness checks call the same matching function execution

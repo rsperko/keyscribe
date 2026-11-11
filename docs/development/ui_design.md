@@ -367,8 +367,8 @@ against the names frozen when its recording started, plus any new name a read du
 one of those same conversations: the recipient chosen at the start and the row numbers never change, and
 a new name never takes a frozen one or adds a conversation. When the take is resolved while a read is
 still running, it waits for that read up to a second. A take that would go to the current conversation
-is held, “Not sent: couldn’t check conversation names yet. Say it again, or start with a name or session
-number.”, if the read still has not finished or the first read of one of the listed conversations has not
+is held, “Not sent: couldn’t check conversation names yet. Say it again, or start with “tell” and a name or
+conversation number.”, if the read still has not finished or the first read of one of the listed conversations has not
 finished, because its first words may be a name that read did not deliver; a take that named a known
 conversation goes ahead. A read that finishes but fails never holds a take: the conversation keeps the names
 last read (or its remembered name), and Settings and the Rename sheet say “Couldn’t read its herdr names
@@ -386,10 +386,12 @@ name (one the user gave it, else the one the agent generated), and the project f
 show it labels its own session with the same name (the name in quotes on the agent's status line, after the
 connector's name, which Claude Code adds and the Pi connector writes itself), so the
 terminal on screen can be matched to its row; the label is display only and never renames the agent's
-conversation. The user can address a session by starting the take with its name or its number (“docs, run the tests”, “session two …”);
-a leading “tell” (or “please tell”) is optional, and “session” may come before a name as it does before a number (“session docs,
-run the tests”, “open session docs”) — a sentence about sessions, such as “Session timeout is too short”, is
-still a message, and a conversation whose own name starts with “session” matches whole first. A row number always needs “session”, and “session two” is always row two,
+conversation. The user can address a conversation by starting the take with “tell” and its name or its number (“tell docs run the
+tests”, “tell conversation two …”); the “tell” (or “please tell”) is optional (“docs, run the tests”), and “conversation” or
+“session”, which mean the same everywhere the spoken grammar takes that word, may come before a name as before a number (“session docs,
+run the tests”, “open conversation docs”) — a sentence about sessions, such as “Session timeout is too short”, is
+still a message, and a conversation whose own name starts with “session” or “conversation” matches whole first. A row number
+always needs “conversation” or “session”, and “conversation two” is always row two,
 even beside a conversation named two. A name made only of number words — the words a row number accepts,
 including “to”, “too” and “for” — is reached only with “tell” or “open”, because a take that starts with a
 number is ordinary prose: “One more thing: …”, “For the record, …” and “Two tests failed” go whole to the
@@ -426,7 +428,14 @@ a mode with a fixed recipient renames that recipient, not the conversation in fr
 question about an unknown name never reaches this line: it is a message (see below).
 
 “Ask” works like “tell” for a conversation's name or number (“ask docs to review the changes”, “ask session
-two whether it is done”), and a name one sound away is held the same way. Anything else after “ask” is an
+two whether it is done”), and a name one sound away is held the same way. An unknown word after “ask” followed
+by a question (“ask frontend what changed”, “ask frontend why it is stuck”: “what”, “whether”, “why” or “how”
+not followed by “to”, or “if”, “when” or “where” followed by “it”, “they”, “he” or “she”) is held with
+“No conversation named “frontend””, since it was plainly meant as an address. With “the” before the word the
+take stays a message, as for any “the” that names no conversation (below), so “ask the team whether it is
+done” reaches the recipient. A common adverb or a reflexive after “ask” is never taken for an unknown name, so
+“ask again if it fails” and “ask yourself whether …” stay messages; after a bring-forward word or
+“select” it still holds (“open first” with no conversation named first). Anything else after “ask” is an
 instruction for the highlighted recipient, so “ask clarifying questions first” and “ask me before you push”
 are messages, not addresses. After “tell” or “ask”, one “the” may come before the name (“ask the docs what
 changed”) when the name is followed by a break: the end of the take, a comma or colon, or a word that starts
@@ -449,10 +458,23 @@ current recipient does not override that order. A whole-name match wins over a l
 address length. The receipt names the selected conversation, which becomes current; no choice is required
 for an accepted tie. A first match that is no longer available is held, never replaced by the next one. The list is not a question: a take that does not start with a name or
 number from the list sends to the highlighted recipient.
+A take that is only an address, with nothing to send (“docs”, “tell docs”, “conversation two”), is held: it sends
+nothing, leaves the recipient as it was, and the HUD says “Say “select docs” to choose it. Nothing sent.” A take
+that is only “select” or “choose”, an optional “the”, and an address (“select docs”, “choose conversation two”,
+`AgentAddress.selectVerbs`) makes that conversation the recipient, sends nothing, leaves every window as it
+is, and the HUD shows “Recipient: docs”. It follows the bring-forward rules below for an address that names
+nothing (held, never sent) and for more words after the verb (a message, so “select docs rows where active is
+true” goes to the recipient as text). An unknown name after “select” offers “Try “select keyscribe””.
+A take that is only “cancel” or “never mind” (`VoiceCommandGrammar.cancel`) cancels it locally and the HUD
+says “Cancelled. Nothing sent.”; inside a longer take (“tell docs cancel”, “tell docs cancel the deployment”) it
+is message text, which is how to send the word to an agent that asked for it.
+An optional “please” before or after a recognized command (“please select docs”, “repeat that, please”,
+“please rename this conversation to docs”) changes nothing, and an address followed only by “please”
+(“docs, please”) is held with the select hint like an address alone.
 A take that is only a bring-forward word and an address opens that conversation: the words Voice Commands
 uses to bring something forward (`VoiceCommandGrammar.focusVerbs`, such as “open”, “switch to”, “go to”), an
 optional “the”, then a name or number that meets the same evidence as an address without “tell” (“open
-docs”, “switch to session two”). It makes the conversation current, sends nothing, and brings its terminal
+docs”, “switch to conversation two”). It makes the conversation current, sends nothing, and brings its terminal
 forward. A bring-forward word followed by a few words (at most `AgentAddress.navigationWords`) is navigation
 even when those words name nothing: the take is held with the reason and never sent, so a misheard name
 cannot become a message. The held line names the closest conversation when one sounds like what was heard,
@@ -491,29 +513,29 @@ rather than the queue, so a newer result for the same conversation does not repl
 notice is never merged again with notices still waiting. It does not repeat the front check, since the user asked for it.
 The HUD names the conversation (“docs”), or says “Nothing to repeat yet.” or “Spoken replies are off.”;
 History records the command and adds no second copy of the line. Inside a longer take or after “tell” and a name it is
-message text. A take that is only “rename this session to” or “rename this conversation to” a new name (“name this
-session …” and “call this conversation …” work too) renames the take's recipient, with the same check
+message text. A take that is only “rename this conversation to” or “rename this session to” a new name (“name this
+conversation …” and “call this session …” work too) renames the take's recipient, with the same check
 Settings' Rename uses (`AgentRename.parse`, then `AgentHub.rename`), and sends nothing. The recipient is
 the one an unaddressed take would go to: the conversation in front when it is confirmed, otherwise the
 current one; renaming makes it current. The feature is rechecked right before the name is saved. Only the current conversation can be renamed by voice, because
 long, changing generated names are hard to say right for one in the background: switch to it first. The
 name may run to `AgentRename.nameWords` words and is stored as it will be said (“auth 2” becomes “auth
-two”). Once a take starts with “rename this session”, it is never sent: no name, a longer one, or more words
-after the name's clause ends (“rename this session to docs. Run the tests.”) is held with the reason,
-so an instruction never becomes part of a name. A take without “this session” (“rename this to
-parseConfig”) is a message for the agent, and the command is recognized from the words as heard, so replacements never
+two”). Once a take starts with “rename this conversation” (or session), it is never sent: no name, a longer one, or more words
+after the name's clause ends (“rename this conversation to docs. Run the tests.”) is held with the reason,
+so an instruction never becomes part of a name. A take without “this conversation” or “this session” (“rename this to
+parseConfig”, “rename this function to parseConfig”) is a message for the agent, and the command is recognized from the words as heard, so replacements never
 change it. The mode's local text stages (spoken edits, replacements, numbers), without the AI rewrite, then
 run on the words after it before the name is read (`AgentRename.request`, then `AgentRename.name`): “never
-mind” at the end discards the take (nothing in History), and “rename this session to docs, scratch that,
+mind” at the end discards the take (nothing in History), and “rename this conversation to docs, scratch that,
 notes” names it notes. The HUD shows “Renamed keyscribe to auth refactor” long enough to read, so a misheard name is caught
-and fixed by saying it again. A name another conversation holds, or a row name such as “session three”,
+and fixed by saying it again. A name another conversation holds, or a row name such as “conversation three” or “session three”,
 is refused with the reason and nothing changes; with no recipient it says “Switch to a conversation, then
 say the rename command again” with **Open Coding Agent Settings**. History records Rename, the conversation, the new name and how it was chosen. After “tell” and a
 name it is message text.
 
 A take that is only a question about what a conversation is waiting for is answered by KeyScribe and sends
-nothing (`AgentStatusQuery`): “what is docs waiting for”, “what does docs need from me”, “ask the docs what
-it is waiting for”, “is docs waiting for me”, and the same without a name (“what are you waiting for”), which
+nothing (`AgentStatusQuery`): “what is docs waiting for”, “what does docs need from me”, “is docs waiting
+for me”, and the same without a name (“what are you waiting for”), which
 asks about the take's recipient. “Blocked on”, “stuck on”, “why is docs waiting” (or stuck), “what is
 blocking docs” and “does docs need anything” ask the same thing, and hold with more words after them like the
 other forms. Contractions, closing punctuation, an
@@ -523,7 +545,7 @@ closing “now” or “right now” are fine. More words after a question about
 docs need from me to continue”, or a second question after it) hold the take, since sending it would put a
 question about docs to another conversation: “Nothing was sent. Say “what is docs waiting for?” to check on
 it, or start with “tell docs” to send a message”. A longer question about “you” (“what are you waiting for before
-merging”) and one after “ask” and a name (“ask docs what it needs, then review the changes”) are messages to
+merging”) and anything after “ask” and a name (“ask docs what it needs from me”) are messages to
 that conversation, and “what is the build waiting for” names no conversation, so it is a message. “Tell docs …”
 is always sent, which is how to ask the agent itself. The name must be a conversation's name or number; one
 that sounds like a name is held. The answer says only what is reported,
@@ -598,7 +620,7 @@ focus at the press, for it to be this take's recipient. The read never asks for 
 terminal not yet allowed reads as unknown. Unknown, no terminal in front, a different app or window, or a
 front view that could belong to another session leaves the current recipient. The read runs beside the
 recording, and a reading that lands more than a moment after release is ignored, however long transcription
-takes. A spoken name or session number still wins and never waits for the read; a mode with a fixed
+takes. A spoken name or conversation number still wins and never waits for the read; a mode with a fixed
 conversation or set to ask never follows the front, and neither does a take that reaches an agent mode only
 through a spoken phrase after the press. A take sent to the conversation in front makes it the current
 recipient. When the read lands, only the highlight and the recipient line change: the list keeps its order
@@ -1661,12 +1683,20 @@ Its sections are, in order:
    “open Slack general” opens general in Slack (shown only while **Find items in apps by voice** is on),
    and “go back” returns to where you were. A caption then draws the one distinction a user must know
    (“Open” can start an app. Use “switch to” to stay with what’s already running.), and a final caption
-   says users can also say the name of a command saved below. There is no expanded phrase guide here. Spoken input is explained beside the script and
+   says a command saved below is reached with “open” and its name for a place, or “run” and its name for a
+   script or shortcut. There is no expanded phrase guide here. Spoken input is explained beside the script and
    shortcut input controls; choosing a match is explained in the choice panel when it appears. The FAQ
-   carries the fuller phrase reference, including “switch to …” and optional “run …”. Alternative verbs
+   carries the fuller phrase reference, including “switch to …” and “run …”. Alternative verbs
    and their common mishearings (`VoiceCommandGrammar.focusVerbs`) still work in live commands and Preview
-   a command without changing the original heard text or action input. A saved name is checked first,
-   including one that starts with an app-switching word; a prefix alone never runs an unsaved action.
+   a command without changing the original heard text or action input. A saved name never acts on its own:
+   a place, link, or tab search follows “open” or “switch to”, and a script or shortcut follows “run”, so a
+   name that starts with a verb or matches a built-in phrase cannot take it over. A saved name said alone
+   runs and opens nothing and says the phrase to use (“Say “run new note buy milk” to run it.”). A take that
+   is only “cancel” or “never mind” runs nothing and says “Cancelled. Nothing ran.”, and an optional
+   “please” before or after a recognized command (“please open Mail”, “repeat that, please”) changes nothing,
+   except that a closing “please” stays in the words a script or shortcut that takes words receives. A name a
+   place and a script share offers both verbs (“Say “open docs” to open it or “run docs” to run it.”), and a
+   bare saved name while a numbered choice waits keeps the choice and asks again.
 3. **Preview a command** — a field that shows what a typed phrase would do, live, without running anything (a script
    shows the exact command line it would run, a shortcut its name and input). A result is two short lines: the
    outcome (“Switch to Gmail”, “Open Example Page”, “Run Deploy”) and what kind of thing it is and where (“Window
@@ -1709,13 +1739,13 @@ Its sections are, in order:
    comma-separated field and a caption suggesting one for a word that is often misheard; it opens itself when
    one of those names has an error. The tab search's spoken-name placeholder is “tabs”, since a browser's
    own name already finds its tabs. There
-   is no setting for whether a name works on its own: every saved name does. Any phrase can be a name,
+   is no setting for whether a name works on its own: none does, since every saved name follows its verb
+   (“open” for a place, “run” for a script or shortcut, which the field captions say). Any phrase can be a name,
    including one that starts with a command word (“go home”, “open notes”). Below the fields, orange
-   advisories (`VoiceCommandConfig.conflicts`) name concrete outcomes: a phrase another command already
-   answers to (saying it will ask which one), a longer saved name that takes over some of what this command
-   would receive (“slack joe” runs Slack Joe instead), a longer name that takes words away from an existing
-   command that takes them (adding Note work beside Note), and a name that catches a built-in command word
-   (“Saying “open …” will reach this command instead of opening an app or place.”).
+   advisories (`VoiceCommandConfig.conflicts`) name concrete outcomes among commands reached by the same
+   verb: a phrase another command already answers to (saying it will ask which one), a longer saved name that
+   takes over some of what this command would receive (“run slack joe” reaches Slack Joe instead), and a
+   longer name that takes words away from an existing command that takes them (adding Note work beside Note).
    **Preview** is an example card, “You say” → “What happens”, for a sample utterance (“buy milk” for words,
    “inbox” for a tab search), read through the mode's replacements and checked against the other saved
    commands exactly as a live command would be (`VoiceCommandExample`). When a replacement or another
@@ -1753,14 +1783,14 @@ Its sections are, in order:
    caption names the app that opens it (“Opens this link in …. Open tabs are not checked.”), and an orange
    advisory says when no app on this Mac opens it. If the current tab cannot be read, the sheet opens on a
    link with that browser chosen and an orange advisory asking for the address. **Find a Browser Tab**
-   says to say the name, then words from the tab's title or site, and has the
+   says to say “open” and the name, then words from the tab's title or site, and has the
    **Browser** picker. Tabs that match equally well in one browser always switch to the leftmost match in its
    frontmost window that has one; only ties across browsers offer a choice. Navigation keeps the choice list to
    a minimum: sidebar items tied by name open the first in sidebar order, and a sidebar that could not be read
    in full still opens its match. Finding items inside an app needs **no
    setup** and has no control in the sheet: while the experimental **Find items in apps by voice** flag is on,
-   an **Open an App** command's caption reads “Say this name to open the app. Add more words to find a tab, channel,
-   mailbox, or other item in it.” (and “Say this name to open it.” while the flag is off). The same works for
+   an **Open an App** command's caption reads “Say “open” and this name to open the app. Add more words to find a tab, channel,
+   mailbox, or other item in it.” (and “Say “open” and this name to open it.” while the flag is off). The same works for
    any app's own name after “open” with nothing saved. There is no item list, toggle, or read button in
    Settings; the sidebar is read only when such a phrase is spoken, and a failed lookup says what was searched
    and how to reveal more (expand a section or scroll the sidebar). **Preview** never reads a sidebar: it
@@ -1831,13 +1861,14 @@ Its sections are, in order:
    error message, which may include text from a script or shortcut.
 
 **Coding agent** (experimental, shown only while its flag is on) opens, after its shortcut, with **What you
-can say**, built like the Voice Commands section of that name: one introduction (“Start with a conversation’s
-name to send it an instruction.”), then short examples with what each does (`CodingAgentPhrasesSection.examples`):
-an instruction led by a name, “open” and a name, “what is” a name “waiting for?”, “who needs me?”, “go back”,
-and “repeat that” only while **Read replies aloud** is on. The examples use the name of the conversation the
-guidance below would use, a placeholder when there is none, and “session two” while names are unavailable.
+can say**, built like the Voice Commands section of that name: one introduction (“Start with “tell” and a
+conversation’s name to send it an instruction.”), then short examples with what each does
+(`CodingAgentPhrasesSection.examples`): “tell” and a name with an instruction, “select” and a name, “open” and a
+name, “what is” a name “waiting for?”, “who needs me?”, “go back”, “cancel”, and “repeat that” only while
+**Read replies aloud** is on. The examples use the name of the conversation the
+guidance below would use, a placeholder when there is none, and “conversation two” while names are unavailable.
 Captions then say where an instruction without a name goes, that the numbers shown while recording can be
-said as “session” and the number, and how to rename a conversation by voice. Every example is one the
+said as “conversation” and the number, and how to rename a conversation by voice. Every example is one the
 take's own parsers read as described, checked by test. It then puts an always-visible
 **Conversations** section before connector setup. One block shows **Current recipient: {name}** or
 **No current recipient**, with brief guidance underneath. With no recipient and a connected conversation,
@@ -1845,7 +1876,7 @@ the example uses a real name and the mode's first recording shortcut (“Use Fn 
 right whether the shortcut is held or tapped); when none is assigned it says to
 start recording without inventing a shortcut. With a current recipient it explains that
 instructions go there unless another conversation is in front, and another name switches the recipient. Compact rows follow, each its own native row of the grouped form (native insets and separators). Rows carry no numbers: Settings is an inventory, not
-an addressing surface, so row numbers appear only on the recording HUD, where “session two” is said and the
+an addressing surface, so row numbers appear only on the recording HUD, where “conversation two” is said and the
 numbering is frozen for the take. Each row is identified to assistive technology by its conversation name.
 The first line holds the name, Current and the text-only live state, with small, native bordered actions
 visibly distinct from the status labels. Actions stay aligned at the trailing edge; the name wraps within
@@ -2263,7 +2294,8 @@ the pair reads correctly even when other entries fall between them or a filter h
 cancel reads **Choice cancelled**, and a reply that was not an answer reads **Needs a choice** with the
 standard instruction for answering (“Choose 1–2, say “cancel”, or give a new command.”), even when the
 HUD showed what was heard instead. Clicking a row completes the question's own entry instead, since nothing was spoken; the
-Cancel button marks it **Choice cancelled**. An idle timeout records nothing. A failed command adds a **Why it failed** row in Details explaining the
+Cancel button marks it **Choice cancelled**. A take that is only “cancel” or “never mind”, with no question
+waiting, records nothing, in either action mode, like a dictation discarded with “never mind”. An idle timeout records nothing. A failed command adds a **Why it failed** row in Details explaining the
 failure, and a script that reported a result adds a **Reported** row with the message the HUD showed. That row can say more than the compact HUD: an unrecognized command keeps the full “Not a
 command. Say …” guidance there while the HUD shows only “Command not recognized” and what was heard. **Paste Result** is hidden for commands, since there is nothing to insert;
 **Copy Result** stays. **Add to Dictionary** and **Create Replacement** on a command entry write to the

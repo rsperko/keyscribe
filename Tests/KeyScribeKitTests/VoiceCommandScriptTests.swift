@@ -202,9 +202,10 @@ struct VoiceCommandScriptTests {
         #expect(config.issue == "command \"deploy\": another command already uses this name")
     }
 
-    @Test func aScriptRunsByItsNameAlone() {
-        #expect(resolve("Herdr.", scripts: [herdr]) == .action(.script(herdr, arguments: ["attach"])))
-        #expect(resolve("deploy staging", scripts: [deploy]) == .action(.script(deploy, arguments: ["--env", "staging"])))
+    @Test func aScriptRunsAfterRun() {
+        #expect(resolve("Run Herdr.", scripts: [herdr]) == .action(.script(herdr, arguments: ["attach"])))
+        #expect(resolve("Herdr.", scripts: [herdr]) == .needsVerb(open: nil, run: "run herdr"))
+        #expect(resolve("run deploy staging", scripts: [deploy]) == .action(.script(deploy, arguments: ["--env", "staging"])))
     }
 
     @Test func runUsesTheSpokenNameRatherThanTheProgramFileName() {
@@ -248,7 +249,17 @@ struct VoiceCommandScriptTests {
     }
 
     @Test func aScriptWithoutTextSaysItTakesNoWords() {
-        #expect(resolve("run herdr please", scripts: [herdr]) == .takesNoText("herdr"))
+        #expect(resolve("run herdr now", scripts: [herdr]) == .takesNoText("herdr"))
+    }
+
+    @Test func aClosingPleaseIsNotWordsForAScriptThatTakesNone() {
+        #expect(resolve("run herdr please", scripts: [herdr]) == .action(.script(herdr, arguments: ["attach"])))
+        #expect(resolve("Run herdr, please.", scripts: [herdr]) == .action(.script(herdr, arguments: ["attach"])))
+    }
+
+    @Test func aClosingPleaseStaysInTheWordsAScriptTakes() {
+        #expect(resolve("run deploy staging please", scripts: [deploy])
+            == .action(.script(deploy, arguments: ["--env", "staging please"])))
     }
 
     @Test func whatFollowsTheNameBecomesTheText() {

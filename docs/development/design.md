@@ -458,9 +458,10 @@ mode identity: the pipeline branches on the output kind. Such a take skips Phase
 suffix never re-routes a command into a dictation mode), and skips the rewrite and insertion; History
 records it as a command (Result is what it ran, plus why it failed) under the usual History rules —
 the heard transcript, after the mode's replacements and dictionary clean it (Global vocabulary included,
-like every other mode, unless its file sets `include_global = false`), is matched first against the user's saved commands by spoken name, then
-parsed as a closed set of command words. A saved name matches in whole words at the start of the
-utterance; the longest wins, and only then are the words after it checked against what that command
+like every other mode, unless its file sets `include_global = false`), is parsed as a closed set of command
+words, and a saved command is reached only after its verb: a place, link, or tab search after a focus verb, a
+script or shortcut after `run`. A saved name said alone acts on nothing and answers with the phrase to say.
+A saved name matches in whole words right after the verb; the longest wins, and only then are the words after it checked against what that command
 accepts, so a failed check explains instead of falling back to a shorter name. **Run** resolves only against
 the user's configured scripts and shortcuts; focus verbs resolve only against apps, the user's places, open windows, and open browser tabs (window
 titles are read over Accessibility on this Mac and tab titles over Apple Events, each only when nothing
@@ -505,8 +506,8 @@ something open), through a pending choice (`VoiceCommandChoice.reach`), through 
 target by its process rather than through a call that can launch it, since a running check followed by a
 launch-capable call would race. Browser scripts address the browser's process as well
 (`BrowserScripting.run(_:pid:)`), because AppleScript starts any app a script names: a browser that quit makes
-the script fail instead of restarting. A saved name said on its own does what it is configured to do, and
-**go back** never starts an app.
+the script fail instead of restarting. A saved name said on its own acts on nothing, and **go back** never
+starts an app.
 **Ambiguity asks; it never guesses.** Ties at the winning match step resolve to a typed
 `VoiceCommandChoice` (frozen candidate identities and order, the spoken target, any `{text}` input, and
 the full match count) rather than to a recency or intent tie-break, because a wrong switch can expose a

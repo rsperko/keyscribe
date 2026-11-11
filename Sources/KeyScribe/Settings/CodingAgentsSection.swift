@@ -403,24 +403,26 @@ struct CodingAgentPhrasesSection: View {
 
     static func examples(name: String, readsReplies: Bool) -> [(phrase: String, meaning: String)] {
         var examples = [
-            ("\u{201C}\(name), run the unit tests\u{201D}", "Sends the instruction to \(name). Later instructions go there too."),
-            ("\u{201C}open \(name)\u{201D}", "Brings \(name) to the front. Nothing is sent."),
+            ("\u{201C}tell \(name) run the unit tests\u{201D}", "Sends the instruction to \(name). Later instructions go there too."),
+            ("\u{201C}select \(name)\u{201D}", "Makes \(name) the recipient. Nothing is sent."),
+            ("\u{201C}open \(name)\u{201D}", "Brings \(name) to the front and makes it the recipient. Nothing is sent."),
             ("\u{201C}what is \(name) waiting for?\u{201D}", "Tells you what \(name) needs from you. Nothing is sent."),
             ("\u{201C}who needs me?\u{201D}", "Names the conversations waiting for you."),
             ("\u{201C}go back\u{201D}", "Returns to where you were."),
+            ("\u{201C}cancel\u{201D}", "Stops this recording. Nothing is sent."),
         ]
         if readsReplies { examples.append(("\u{201C}repeat that\u{201D}", "Reads the last spoken reply again.")) }
         return examples
     }
 
     private var exampleName: String {
-        guard model.namesProblem == nil else { return "session two" }
+        guard model.namesProblem == nil else { return "conversation two" }
         return (model.rows.first(where: \.current) ?? model.rows.first(where: \.connected) ?? model.rows.first)?.name ?? "backend"
     }
 
     var body: some View {
         Section("What you can say") {
-            Text("Start with a conversation\u{2019}s name to send it an instruction.")
+            Text("Start with \u{201C}tell\u{201D} and a conversation\u{2019}s name to send it an instruction.")
                 .font(.callout).foregroundStyle(.secondary)
             ForEach(Self.examples(name: exampleName, readsReplies: model.spokenResult.enabled), id: \.phrase) { example in
                 VStack(alignment: .leading, spacing: 2) {
@@ -431,7 +433,7 @@ struct CodingAgentPhrasesSection: View {
             }
             Text("Without a name, an instruction goes to the current recipient, or to the conversation in front of you.")
                 .font(.caption).foregroundStyle(.secondary)
-            Text("While recording, conversations are numbered. Say \u{201C}session\u{201D} and the number to use one without its name.")
+            Text("While recording, conversations are numbered. Say \u{201C}conversation\u{201D} and the number to use one without its name.")
                 .font(.caption).foregroundStyle(.secondary)
             Text("Say \(Self.renameExample) to give the conversation an instruction would go to a name of your own.")
                 .font(.caption).foregroundStyle(.secondary)

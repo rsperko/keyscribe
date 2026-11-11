@@ -66,11 +66,16 @@ public struct VoiceCommandExample: Equatable, Sendable {
 
     public static func phrases(for candidate: VoiceCommandCandidate) -> [String] {
         let more = candidate.takesWords ? " \u{2026}" : ""
-        return candidate.spokenForms.map { $0 + more }
+        return candidate.spokenForms.map { "\(verb(for: candidate)) \($0)\(more)" }
+    }
+
+    public static func verb(for candidate: VoiceCommandCandidate) -> String {
+        if case .script = candidate { return VoiceCommandGrammar.run }
+        return VoiceCommandGrammar.openingVerbs[0]
     }
 
     private static func heard(for candidate: VoiceCommandCandidate, saying name: String, sample: String? = nil) -> String {
-        let phrase = VoiceCommandText.key(name)
+        let phrase = "\(verb(for: candidate)) \(VoiceCommandText.key(name))"
         switch candidate {
         case .place(let place) where place.isTabSearch: return "\(phrase) \(sampleTabWords)"
         case .script(let script) where script.takesText:

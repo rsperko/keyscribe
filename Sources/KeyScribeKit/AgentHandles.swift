@@ -51,7 +51,7 @@ public enum AgentHandles {
 
     public static func isReserved(_ name: String) -> Bool {
         let words = normalize(name).split(separator: " ").map(String.init)
-        guard words.first == "session" else { return false }
+        guard let first = words.first, AgentAddress.rowNouns.contains(first) else { return false }
         return words.count == 1 || AgentAddress.isRowWord(words[1])
     }
 
@@ -95,6 +95,7 @@ public enum AgentAddress: Equatable, Sendable {
     case nearMiss(spoken: String, name: String, body: String, unaddressed: String?)
     case none(body: String)
     indirect case open(AgentAddress)
+    indirect case select(AgentAddress)
     indirect case unbroken(AgentAddress, unaddressed: String)
 
     private static let notAnAddress: Set<String> = [
@@ -102,11 +103,17 @@ public enum AgentAddress: Equatable, Sendable {
         "the", "a", "an", "my", "your", "our", "their", "his", "its", "this", "that", "these", "those",
         "what", "why", "how", "when", "where", "whether", "if", "who", "which",
     ]
+    private static let notANameAfterAsk: Set<String> = [
+        "again", "first", "later", "then", "now", "also", "always", "never", "only", "before", "after", "once",
+        "yourself", "yourselves", "myself", "ourselves", "itself", "themselves",
+    ]
     private static let rowWords = [
         "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
         "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty",
     ]
     private static let soundsLikeARow: Set<String> = ["to", "too", "for"]
+    static let rowNouns: Set<String> = ["session", "conversation"]
+    static let selectVerbs = ["select", "choose"]
     private static let minimumUntoldNearMiss = 6
 
     static func isRowWord(_ word: String) -> Bool {
@@ -126,9 +133,11 @@ public enum AgentAddress: Equatable, Sendable {
             guard isVerbOnly(name), body.count <= text.count else { return false }
             let head = String(text.dropLast(body.count))
             var said = words(in: head).flatMap { AgentHandles.normalize(String(head[$0])).split(separator: " ").map(String.init) }
+            said.removeFirst(said.prefix { openers.contains($0) }.count)
+            if said.count > 1, said.last == "please" { said.removeLast() }
             if let verb = addressVerb(said) {
                 said.removeFirst(verb.count)
-            } else if let verb = VoiceCommandGrammar.focusVerbs.map({ $0.split(separator: " ").map(String.init) })
+            } else if let verb = (VoiceCommandGrammar.focusVerbs + selectVerbs).map({ $0.split(separator: " ").map(String.init) })
                 .first(where: { said.starts(with: $0) }) {
                 said.removeFirst(verb.count)
             } else {
@@ -140,6 +149,8 @@ public enum AgentAddress: Equatable, Sendable {
         switch parse(text, names: names + afterVerb, namesKnown: namesKnown, read: nil, explicit: false, assumeTold: false) {
         case .open(.name(let name, "")) where addressed(name, before: ""):
             return .open(.name(name, body: ""))
+        case .select(.name(let name, "")) where addressed(name, before: ""):
+            return .select(.name(name, body: ""))
         case .name(let name, let body) where told && addressed(name, before: body):
             return .name(name, body: body)
         default:
@@ -165,8 +176,13 @@ public enum AgentAddress: Equatable, Sendable {
         func body(after count: Int) -> String { rest(of: text, after: tokens[count - 1]) }
         guard !bare.isEmpty else { return .none(body: text) }
 
-        if !assumeTold, let opened = opening(tokens, bare: bare, in: text, names: names, namesKnown: namesKnown, read: read) {
+        if !assumeTold, let opened = opening(
+            tokens, bare: bare, in: text, names: names, namesKnown: namesKnown, read: read, verbs: VoiceCommandGrammar.focusVerbs) {
             return .open(opened)
+        }
+        if !assumeTold, let selected = opening(
+            tokens, bare: bare, in: text, names: names, namesKnown: namesKnown, read: read, verbs: selectVerbs) {
+            return .select(selected)
         }
 
         if !assumeTold, let verb = addressVerb(bare) {
@@ -178,6 +194,7 @@ public enum AgentAddress: Equatable, Sendable {
             switch addressed {
             case .name, .row, .ambiguous, .nearMiss, .unbroken: return addressed
             case .unresolved where !verb.soft: return addressed
+            case .unresolved(let spoken, let body) where !notANameAfterAsk.contains(spoken) && asksAboutItself(body): return addressed
             default: return .none(body: text)
             }
         }
@@ -195,7 +212,7 @@ public enum AgentAddress: Equatable, Sendable {
         func spoken(_ length: Int) -> String { bare[0..<length].joined(separator: " ") }
         func unresolved(_ length: Int) -> AgentAddress { .unresolved(spoken: spoken(length), body: body(after: length)) }
 
-        if bare[0] == "session", available > 1 {
+        if rowNouns.contains(bare[0]), available > 1 {
             let said = bare[1]
             if let row = Int(said) ?? rowWords.firstIndex(of: said).map({ $0 + 1 }) { return .row(row, body: body(after: 2)) }
             if soundsLikeARow.contains(said) { return unresolved(2) }
@@ -226,7 +243,7 @@ public enum AgentAddress: Equatable, Sendable {
         let found = SpokenNameMatch.leading(
             Array(bare[...]), names: normalized, limit: span, fold: assumeTold ? AgentHandles.singular : { $0 },
             minimumWords: { assumeTold || $0 == .exact ? 1 : 2 }) ?? readName()
-        if bare[0] == "session", span > 1, found.map({ $0.length == 1 }) ?? true {
+        if rowNouns.contains(bare[0]), span > 1, found.map({ $0.length == 1 }) ?? true {
             let named = parse(
                 body(after: 1), names: names, namesKnown: namesKnown, read: read, explicit: explicit, assumeTold: assumeTold)
             if case .none = named {} else { return named }
@@ -281,6 +298,14 @@ public enum AgentAddress: Equatable, Sendable {
         }
     }
 
+    private static func asksAboutItself(_ body: String) -> Bool {
+        let said = AgentHandles.normalize(body).split(separator: " ").prefix(2).map(String.init)
+        guard let first = said.first else { return false }
+        if ["what", "whether", "why", "how"].contains(first) { return said.count == 1 || said[1] != "to" }
+        guard said.count == 2, ["if", "when", "where"].contains(first) else { return false }
+        return ["it", "they", "he", "she"].contains(said[1])
+    }
+
     private static let breakWords: Set<String> = [
         "to", "that", "about", "whether", "if", "what", "why", "how", "when", "where", "which", "who", "for", "not", "please",
     ]
@@ -315,19 +340,20 @@ public enum AgentAddress: Equatable, Sendable {
 
     private static func opening(
         _ tokens: [Range<String.Index>], bare: [String], in text: String, names: [String], namesKnown: Bool,
-        read: ((String) -> String)?
+        read: ((String) -> String)?, verbs: [String]
     ) -> AgentAddress? {
-        guard let verb = VoiceCommandGrammar.focusVerbs.map({ $0.split(separator: " ").map(String.init) })
+        guard let verb = verbs.map({ $0.split(separator: " ").map(String.init) })
             .first(where: { bare.starts(with: $0) && bare.count > $0.count })
         else { return nil }
         let skipped = verb.count + (bare.count > verb.count + 1 && bare[verb.count] == "the" ? 1 : 0)
-        let target = rest(of: text, after: tokens[skipped - 1])
+        let polite = bare.count > skipped + 1 && bare.last == "please" ? tokens.count - 1 : tokens.count
+        let target = rest(of: text, after: tokens[skipped - 1], upTo: tokens[polite - 1].upperBound)
         guard !target.isEmpty else { return nil }
         let inner = parse(target, names: names, namesKnown: namesKnown, read: read, explicit: true, assumeTold: false)
         switch inner {
         case .name(_, ""), .row(_, ""), .ambiguous(_, _, ""), .nearMiss(_, _, "", _), .unresolved(_, ""): return inner
         case .none: return unmatchedNavigation(target)
-        default: return bare[skipped] == "session" ? unmatchedNavigation(target) : nil
+        default: return rowNouns.contains(bare[skipped]) ? unmatchedNavigation(target) : nil
         }
     }
 
@@ -335,7 +361,7 @@ public enum AgentAddress: Equatable, Sendable {
 
     private static func unmatchedNavigation(_ target: String) -> AgentAddress? {
         let words = AgentHandles.normalize(target).split(separator: " ").map(String.init)
-        if words.first == "session", words.count > 1 {
+        if let first = words.first, rowNouns.contains(first), words.count > 1 {
             return .unresolved(spoken: words.dropFirst().joined(separator: " "), body: "")
         }
         guard let first = words.first, !notAnAddress.contains(first) else { return nil }
@@ -368,8 +394,8 @@ public enum AgentAddress: Equatable, Sendable {
         return ranges
     }
 
-    private static func rest(of text: String, after word: Range<String.Index>) -> String {
-        let remainder = text[word.upperBound...].drop { $0.isWhitespace || $0 == "," || $0 == ":" }
+    private static func rest(of text: String, after word: Range<String.Index>, upTo end: String.Index? = nil) -> String {
+        let remainder = text[word.upperBound..<(end ?? text.endIndex)].drop { $0.isWhitespace || $0 == "," || $0 == ":" }
         return remainder.contains(where: { $0.isLetter || $0.isNumber }) ? String(remainder) : ""
     }
 

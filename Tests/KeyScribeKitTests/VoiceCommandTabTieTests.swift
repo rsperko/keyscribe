@@ -21,31 +21,31 @@ struct VoiceCommandTabTieTests {
         let back = tab("Pull requests", window: 2, tab: 1)
         let right = tab("Issues", window: 1, tab: 5)
         let left = tab("Actions", window: 1, tab: 3)
-        #expect(resolve("chrome github", place: quick, tabs: [back, right, left]) == .action(.tab(left)))
+        #expect(resolve("open chrome github", place: quick, tabs: [back, right, left]) == .action(.tab(left)))
     }
 
     @Test func moreMatchesThanAChooserShowsStillSwitch() {
         let tabs = (1...(VoiceCommandChoice.displayLimit + 2)).map { tab("Page \($0)", window: 1, tab: 10 - $0) }
-        #expect(resolve("chrome github", place: quick, tabs: tabs) == .action(.tab(tabs[tabs.count - 1])))
+        #expect(resolve("open chrome github", place: quick, tabs: tabs) == .action(.tab(tabs[tabs.count - 1])))
     }
 
     @Test func aBetterMatchStillWins() {
         let issues = tab("Issues", window: 1, tab: 1)
         let pulls = tab("Pull requests", window: 2, tab: 4)
-        #expect(resolve("chrome pull requests", place: quick, tabs: [issues, pulls]) == .action(.tab(pulls)))
+        #expect(resolve("open chrome pull requests", place: quick, tabs: [issues, pulls]) == .action(.tab(pulls)))
     }
 
     @Test func aMisheardNameStillSwitches() {
         let back = tab("Release notes", window: 2, tab: 1)
         let front = tab("Release notes", window: 1, tab: 2)
-        #expect(resolve("chrome relese notes", place: quick, tabs: [back, front]) == .action(.tab(front)))
+        #expect(resolve("open chrome relese notes", place: quick, tabs: [back, front]) == .action(.tab(front)))
     }
 
     @Test func tiesInDifferentBrowsersStillAsk() {
         let anyBrowser = VoiceCommandPlace(name: "Tab", target: .tabSearch)
         let safari = Tab(browserBundleId: "com.apple.Safari", window: 1, tab: 1, url: "https://github.com/", title: "Issues")
         let chrome = tab("Pull requests", window: 1, tab: 5)
-        guard case .ambiguous(let choice) = resolve("tab github", place: anyBrowser, tabs: [safari, chrome]) else {
+        guard case .ambiguous(let choice) = resolve("open tab github", place: anyBrowser, tabs: [safari, chrome]) else {
             Issue.record("expected a choice"); return
         }
         #expect(choice.candidates == [.tab(safari), .tab(chrome)])
@@ -55,7 +55,7 @@ struct VoiceCommandTabTieTests {
         let anyBrowser = VoiceCommandPlace(name: "Tab", target: .tabSearch)
         let back = tab("Pull requests", window: 2, tab: 1)
         let front = tab("Issues", window: 1, tab: 4)
-        #expect(resolve("tab github", place: anyBrowser, tabs: [back, front]) == .action(.tab(front)))
+        #expect(resolve("open tab github", place: anyBrowser, tabs: [back, front]) == .action(.tab(front)))
     }
 
     @Test func anAppNameAndWordsAlsoGoToTheFrontmostTie() {

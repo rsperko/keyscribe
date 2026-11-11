@@ -476,7 +476,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
         switch error {
         case .empty: "Enter a name."
         case .taken: "Another conversation is already called \u{201C}\(name)\u{201D}. Both names are unchanged."
-        case .reserved: "\u{201C}Session\u{201D} followed by a number is how you say a row, so it cannot be a name."
+        case .reserved: "\u{201C}Conversation\u{201D} or \u{201C}session\u{201D} followed by a number is how you say a row, so it cannot be a name."
         }
     }
 

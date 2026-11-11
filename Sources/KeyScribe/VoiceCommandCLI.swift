@@ -68,6 +68,8 @@ enum VoiceCommandCLI {
         case .scriptNeedsText(let name): return "\(name) needs words after its name"
         case .takesNoText(let name): return VoiceCommandRunner.takesNoTextMessage(name)
         case .scriptNotFound(let target): return "no script or shortcut matches \u{201C}\(target)\u{201D}"
+        case .needsVerb(let open, let run): return VoiceCommandRunner.needsVerbMessage(open: open, run: run)
+        case .cancelled: return VoiceCommandRunner.cancelledMessage
         case .action(let action):
             let preview = action.preview(
                 spoken: spoken, appName: system.appName(forBundleId:),

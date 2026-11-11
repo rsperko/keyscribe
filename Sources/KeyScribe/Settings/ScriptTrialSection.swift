@@ -86,7 +86,7 @@ struct ScriptTrialSection: View {
                         .disabled(trial.isRunning)
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptTrialChoice(row.number))
                 }
-            case .abandoned:
+            case .abandoned, .cancelled:
                 Text("Stopped before it finished.").foregroundStyle(.secondary)
             }
             if result.finishedLate {

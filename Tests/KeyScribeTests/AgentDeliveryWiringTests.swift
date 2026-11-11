@@ -1426,14 +1426,6 @@ struct AgentDeliveryWiringTests {
         #expect(rig.hub.current == "claude:s1")
     }
 
-    @Test func aNameAloneSelectsWithoutSending() async {
-        let rig = await rig("Tell keyscribe blue.", current: "claude:s1")
-        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
-        await take(rig)
-        #expect(rig.sent.isEmpty)
-        #expect(rig.hub.current == "claude:s2")
-    }
-
     final class Focus: AgentTerminalFocusing, @unchecked Sendable {
         var sessions: [String] = []
         let result: AgentFocusResult
@@ -1728,7 +1720,7 @@ struct AgentDeliveryWiringTests {
 
     @Test(arguments: [
         ("Rename this session to keyscribe blue", "Another conversation is already called \u{201C}keyscribe blue\u{201D}"),
-        ("Rename this session to session 3", "\u{201C}Session\u{201D} followed by a number is how you say a row, so it cannot be a name"),
+        ("Rename this session to session 3", "\u{201C}Conversation\u{201D} or \u{201C}session\u{201D} followed by a number is how you say a row, so it cannot be a name"),
     ])
     func aRenameThatCannotTakeTheNameKeepsTheOldOne(text: String, message: String) async {
         let rig = await rig(text, current: "claude:s1")
@@ -1755,9 +1747,9 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test(arguments: [
-        ("Rename this session to", "Say \u{201C}rename this session to\u{201D} and the new name. Nothing was sent"),
+        ("Rename this session to", "Say \u{201C}rename this conversation to\u{201D} and the new name. Nothing was sent"),
         ("Rename this session to the one we used for the parser yesterday", "A name can be up to 4 words. Nothing was sent"),
-        ("Rename this session to docs. Run the tests.", "Say only the new name after \u{201C}rename this session to\u{201D}. Nothing was sent"),
+        ("Rename this session to docs. Run the tests.", "Say only the new name after \u{201C}rename this conversation to\u{201D}. Nothing was sent"),
     ])
     func aRenameWithoutAUsableNameIsHeldAndSendsNothing(text: String, message: String) async {
         let rig = await rig(text, current: "claude:s1")
@@ -1863,6 +1855,51 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         #expect(rig.texts == [sent])
         #expect(runner.ran.isEmpty)
+    }
+
+    @Test(arguments: ["Cancel.", "never mind", "Please cancel"])
+    func cancelAloneSendsNothing(text: String) async {
+        let rig = await rig(text, current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.captured.insertedText == nil)
+        #expect(rig.hud.states.contains(.advisory(message: "Cancelled. Nothing sent.")))
+        #expect(await lastHistoryEntry(rig) == nil)
+    }
+
+    @Test func cancelInsideAMessageIsStillAMessage() async {
+        let rig = await rig("Tell keyscribe cancel the deployment", current: "claude:s2")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.texts == ["cancel the deployment"])
+    }
+
+    @Test(arguments: ["Select keyscribe blue.", "choose keyscribe blue"])
+    func selectingAConversationChoosesItAndLeavesWindowsAlone(text: String) async {
+        let focus = Focus()
+        let rig = await rig(text, current: "claude:s1", focus: focus)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(focus.sessions.isEmpty)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.captured.insertedText == nil)
+        #expect(rig.hub.current == "claude:s2")
+        #expect(rig.hud.states.contains(.commandDone(summary: "Recipient: keyscribe blue", detail: "Coding agent")))
+    }
+
+    @Test(arguments: ["Keyscribe blue.", "Tell keyscribe blue"])
+    func aConversationNameAloneHoldsAndTeachesSelect(text: String) async {
+        let rig = await rig(text, current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.captured.insertedText == nil)
+        #expect(rig.hub.current == "claude:s1")
+        #expect(rig.hud.states.contains { state in
+            if case .error(let message, _, _) = state { return message == "Say \u{201C}select keyscribe blue\u{201D} to choose it. Nothing sent." }
+            return false
+        })
     }
 
     @Test func openingAConversationBringsItForwardAndSendsNothing() async {
@@ -2582,9 +2619,9 @@ struct AgentDeliveryWiringTests {
         #expect(!(entry?.facts ?? []).contains { $0.value.contains("ready") })
     }
 
-    @Test func askingTheNamedConversationWhatItIsWaitingForReportsTheApproval() async {
+    @Test func aQuestionAboutTheNamedConversationReportsTheApproval() async {
         let rig = await rig(
-            "Ask the keyscribe what it is waiting for from me.", current: "claude:s2", firstStatus: "waiting", firstWaitingFor: "permission prompt")
+            "What is the keyscribe waiting for from me?", current: "claude:s2", firstStatus: "waiting", firstWaitingFor: "permission prompt")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)

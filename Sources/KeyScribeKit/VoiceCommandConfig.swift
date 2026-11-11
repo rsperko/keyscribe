@@ -483,9 +483,12 @@ public struct VoiceCommandConfig: Codable, Equatable, Sendable {
 
 extension VoiceCommandConfig {
     public func conflicts(for candidate: VoiceCommandCandidate) -> [String] {
-        let others = commands.map(\.candidate).filter { $0.identity != candidate.identity }
-        return [Self.duplicate(candidate, among: others), Self.longer(candidate, among: others), Self.shorter(candidate, among: others)]
-            .compactMap { $0 } + candidate.spokenForms.compactMap(Self.builtInConflict)
+        let verb = VoiceCommandExample.verb(for: candidate)
+        let others = commands.map(\.candidate)
+            .filter { $0.identity != candidate.identity && VoiceCommandExample.verb(for: $0) == verb }
+        return [Self.duplicate(candidate, verb: verb, among: others), Self.longer(candidate, verb: verb, among: others),
+                Self.shorter(candidate, verb: verb, among: others)]
+            .compactMap { $0 }
     }
 
     public static func hiddenApps(by candidate: VoiceCommandCandidate, installed: [VoiceCommandCatalog.App]) -> [String] {
@@ -510,11 +513,13 @@ extension VoiceCommandConfig {
         return !short.isEmpty && long.count > short.count && Array(long.prefix(short.count)) == short
     }
 
-    private static func duplicate(_ candidate: VoiceCommandCandidate, among others: [VoiceCommandCandidate]) -> String? {
+    private static func duplicate(_ candidate: VoiceCommandCandidate, verb: String, among others: [VoiceCommandCandidate]) -> String? {
+        func same(_ form: String, _ other: String) -> Bool {
+            verb == VoiceCommandGrammar.run ? VoiceCommandText.key(form) == VoiceCommandText.key(other) : SpokenNameMatch.exact.matches(form, other)
+        }
         for form in candidate.spokenForms {
-            let spoken = VoiceCommandText.key(form)
-            guard !spoken.isEmpty else { continue }
-            let sharers = others.filter { $0.spokenForms.contains { VoiceCommandText.key($0) == spoken } }.map(\.name)
+            guard !VoiceCommandText.key(form).isEmpty else { continue }
+            let sharers = others.filter { $0.spokenForms.contains { same(form, $0) } }.map(\.name)
             guard !sharers.isEmpty else { continue }
             guard sharers.count < VoiceCommandChoice.displayLimit else {
                 return "\(sharers.count + 1) commands answer to \u{201C}\(form)\u{201D}, too many to choose from. Give this one a name of its own."
@@ -524,49 +529,26 @@ extension VoiceCommandConfig {
         return nil
     }
 
-    private static func longer(_ candidate: VoiceCommandCandidate, among others: [VoiceCommandCandidate]) -> String? {
+    private static func longer(_ candidate: VoiceCommandCandidate, verb: String, among others: [VoiceCommandCandidate]) -> String? {
         guard candidate.takesWords else { return nil }
         for form in candidate.spokenForms {
             for other in others {
                 guard let phrase = other.spokenForms.first(where: { starts($0, with: form) }) else { continue }
-                return "\u{201C}\(phrase)\u{201D} runs \(other.name) instead, because its name is longer."
+                return "\u{201C}\(verb) \(phrase)\u{201D} reaches \(other.name) instead, because its name is longer."
             }
         }
         return nil
     }
 
-    private static func shorter(_ candidate: VoiceCommandCandidate, among others: [VoiceCommandCandidate]) -> String? {
+    private static func shorter(_ candidate: VoiceCommandCandidate, verb: String, among others: [VoiceCommandCandidate]) -> String? {
         for form in candidate.spokenForms {
             for other in others where other.takesWords {
                 guard other.spokenForms.contains(where: { starts(form, with: $0) }) else { continue }
                 let said = candidate.takesWords ? "\(form) \u{2026}" : form
-                return "Saying \u{201C}\(said)\u{201D} will run this command instead of \(other.name), because its name is longer."
+                return "Saying \u{201C}\(verb) \(said)\u{201D} will reach this command instead of \(other.name), because its name is longer."
             }
         }
         return nil
-    }
-
-    private static func builtInConflict(_ form: String) -> String? {
-        let spoken = words(form)
-        guard !spoken.isEmpty else { return nil }
-        func covers(_ phrase: String) -> Bool {
-            let builtIn = words(phrase)
-            return builtIn.count >= spoken.count && Array(builtIn.prefix(spoken.count)) == spoken
-        }
-        if covers(VoiceCommandGrammar.goBack) {
-            return "Saying \u{201C}\(VoiceCommandGrammar.goBack)\u{201D} will run this command instead of returning to the previous window."
-        }
-        if let phrase = VoiceCommandGrammar.repeatSummary.first(where: covers) {
-            return "Saying \u{201C}\(phrase)\u{201D} will run this command instead of repeating the last spoken reply."
-        }
-        if covers(VoiceCommandGrammar.run) {
-            return "Saying \u{201C}\(VoiceCommandGrammar.run) \u{2026}\u{201D} will reach this command instead of your other actions."
-        }
-        if let verb = VoiceCommandGrammar.openingVerbs.first(where: covers) {
-            return "Saying \u{201C}\(verb) \u{2026}\u{201D} will reach this command instead of opening an app or place."
-        }
-        guard let verb = VoiceCommandGrammar.runningVerbs.first(where: covers) else { return nil }
-        return "Saying \u{201C}\(verb) \u{2026}\u{201D} will reach this command instead of switching to an open app or place."
     }
 
     private static func list(_ names: [String]) -> String {

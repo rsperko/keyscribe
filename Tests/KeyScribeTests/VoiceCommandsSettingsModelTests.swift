@@ -148,7 +148,7 @@ struct VoiceCommandsSettingsModelTests {
         let model = isolatedModel(repository)
         let inbox = VoiceCommandScript(name: "Inbox", run: ["/usr/bin/true"])
         #expect(model.example(for: .script(inbox)).conflict
-                == "Your replacements read \u{201C}inbox\u{201D} as \u{201C}switch to inbox\u{201D}, so it does not run this command.")
+                == "Your replacements read \u{201C}run inbox\u{201D} as \u{201C}run switch to inbox\u{201D}, so it does not run this command.")
     }
 
     @Test func anOtherNameAReplacementTakesAwayIsFlaggedOnceInTheEditor() throws {
@@ -162,7 +162,7 @@ struct VoiceCommandsSettingsModelTests {
         try repository.writeMode(commands)
         let model = isolatedModel(repository)
         let mail = VoiceCommandScript(name: "Mail", say: ["inbox"], run: ["/usr/bin/true"])
-        let lost = "Your replacements read \u{201C}inbox\u{201D} as \u{201C}switch to inbox\u{201D}, so it does not run this command."
+        let lost = "Your replacements read \u{201C}run inbox\u{201D} as \u{201C}run switch to inbox\u{201D}, so it does not run this command."
         #expect(model.example(for: .script(mail)).conflict == nil)
         #expect(model.namesLostToReplacements(for: .script(mail)) == [lost])
         #expect(model.conflicts(for: .script(mail)) == [lost])
@@ -252,9 +252,9 @@ struct VoiceCommandsSettingsModelTests {
     }
 
     @Test func aCommandRowShowsPhrasesThatActuallyWork() {
-        #expect(VoiceCommandExample.phrases(for: .place(mail)) == ["Mail", "inbox"])
+        #expect(VoiceCommandExample.phrases(for: .place(mail)) == ["open Mail", "open inbox"])
         let log = VoiceCommandScript(name: "Log", say: ["note"], run: ["/usr/bin/printf", "{text}"])
-        #expect(VoiceCommandExample.phrases(for: .script(log)) == ["Log \u{2026}", "note \u{2026}"])
+        #expect(VoiceCommandExample.phrases(for: .script(log)) == ["run Log \u{2026}", "run note \u{2026}"])
     }
 
     @Test func choosingAnAppSuggestsItsNameUntilTheUserTypesOne() {
@@ -281,7 +281,7 @@ struct VoiceCommandsSettingsModelTests {
     @Test func aPlacePreviewFollowsTheDraft() {
         let draft = PlaceDraft(name: "Mail", kind: .app, bundleId: "com.apple.mail")
         #expect(VoiceCommandExample.make(for: .place(draft.place), appName: { _ in "Mail" })
-                == VoiceCommandExample(heard: "mail", result: "Brings Mail to the front, opening it if needed."))
+                == VoiceCommandExample(heard: "open mail", result: "Brings Mail to the front, opening it if needed."))
         let search = PlaceDraft(name: "Chrome", kind: .tabSearch, browser: "com.google.Chrome")
         #expect(search.place == VoiceCommandPlace(id: search.commandId, name: "Chrome", target: .tabSearch, browser: "com.google.Chrome"))
     }
@@ -310,8 +310,7 @@ struct VoiceCommandsSettingsModelTests {
         let clash = VoiceCommandScript(name: "Mail it", say: ["inbox"], run: ["/usr/bin/true"])
         #expect(model.example(for: .script(clash)).conflict == nil)
         let same = VoiceCommandScript(name: "Inbox", run: ["/usr/bin/true"])
-        #expect(model.example(for: .script(same)).conflict
-                == "Saying \u{201C}inbox\u{201D} would ask you to choose between this command and Mail.")
+        #expect(model.example(for: .script(same)).conflict == nil)
         #expect(model.example(for: .place(mail)).conflict == nil)
     }
 
@@ -322,10 +321,10 @@ struct VoiceCommandsSettingsModelTests {
         draft.arguments = "%s\nNote: {text}"
         draft.say = "remember"
         #expect(VoiceCommandExample.make(for: .script(draft.script))
-                == VoiceCommandExample(heard: "log note buy milk", result: "Runs /usr/bin/printf %s 'Note: buy milk' in the background."))
+                == VoiceCommandExample(heard: "run log note buy milk", result: "Runs /usr/bin/printf %s 'Note: buy milk' in the background."))
         draft.arguments = "Daily check-in"
         #expect(VoiceCommandExample.make(for: .script(draft.script))
-                == VoiceCommandExample(heard: "log note", result: "Runs /usr/bin/printf 'Daily check-in' in the background."))
+                == VoiceCommandExample(heard: "run log note", result: "Runs /usr/bin/printf 'Daily check-in' in the background."))
     }
 
     @Test func theScriptPreviewPreservesArgumentsTheEditorCannotRepresent() {
@@ -518,10 +517,10 @@ struct VoiceCommandsSettingsModelTests {
         var draft = ShortcutDraft()
         draft.choose(VoiceCommandShortcut(name: "Journal Entry"))
         #expect(VoiceCommandExample.make(for: .script(draft.script))
-                == VoiceCommandExample(heard: "journal entry", result: "Runs the shortcut \u{201C}Journal Entry\u{201D}."))
+                == VoiceCommandExample(heard: "run journal entry", result: "Runs the shortcut \u{201C}Journal Entry\u{201D}."))
         draft.name = "journal"
         draft.input = "Note: {text}"
         #expect(VoiceCommandExample.make(for: .script(draft.script))
-                == VoiceCommandExample(heard: "journal buy milk", result: "Runs the shortcut \u{201C}Journal Entry\u{201D} with \u{201C}Note: buy milk\u{201D} as its input."))
+                == VoiceCommandExample(heard: "run journal buy milk", result: "Runs the shortcut \u{201C}Journal Entry\u{201D} with \u{201C}Note: buy milk\u{201D} as its input."))
     }
 }

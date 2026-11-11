@@ -66,6 +66,15 @@ struct StarterModeReplacementsTests {
         #expect(run(msg, on: "i mean shrug emoji whatever") == #"i mean ¯\_(ツ)_/¯ whatever"#)
     }
 
+    @Test func messageInsertShrugEmojiIsTheTaughtForm() {
+        let msg = rules("message")
+        #expect(run(msg, on: "i mean insert shrug emoji whatever") == #"i mean ¯\_(ツ)_/¯ whatever"#)
+        #expect(run(msg, on: "Insert shrug emoji, then lunch") == #"¯\_(ツ)_/¯, then lunch"#)
+        var ctx = PipelineContext(text: "Insert shrug emoji.")
+        ReplacementsStage(rules: msg).apply(&ctx)
+        #expect(ctx.bareReplacement?.text == #"¯\_(ツ)_/¯"#)
+    }
+
     @Test func messageShrugEmojiAloneClampsToTheBareEmoticon() {
         var ctx = PipelineContext(text: "Shrug emoji.")
         ReplacementsStage(rules: rules("message")).apply(&ctx)
@@ -77,6 +86,12 @@ struct StarterModeReplacementsTests {
         #expect(run(email, on: "let me know if thursday works. my sign off")
             == "let me know if thursday works.\n\nBest,")
         #expect(run(email, on: "talk soon, my sign-off") == "talk soon\n\nBest,")
+    }
+
+    @Test func emailInsertSignOffIsTheTaughtForm() {
+        let email = rules("email")
+        #expect(run(email, on: "let me know if thursday works. Insert sign off.") == "let me know if thursday works.\n\nBest,")
+        #expect(run(email, on: "talk soon, insert sign-off") == "talk soon\n\nBest,")
     }
 
     @Test func markdownPromptDelegatesSpokenMarkersToTheSeededRules() {

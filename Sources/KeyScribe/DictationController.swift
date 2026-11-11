@@ -1063,6 +1063,9 @@ final class DictationController {
         switch outcome {
         case .done, .started, .failed:
             break
+        case .cancelled:
+            finish(machine: .finish(.noSpeech), cue: .cancel, state: .advisory(message: VoiceCommandRunner.cancelledMessage),
+                   hideAfter: 2, record: (.noSpeech, nil))
         case .abandoned:
             if captureWasLost {
                 finishCommandCaptureLost()
@@ -1140,13 +1143,13 @@ final class DictationController {
     }
 
     // The user threw the take away by voice: nothing is inserted or kept in History, like a cancel.
-    func finishDiscarded() {
+    func finishDiscarded(message: String = discardedMessage) {
         guard machine.beginInserting() else { return }
         hud.relinquishKeyFocus()
         let completion = DictationCompletion(
             outcome: .noSpeech, modeId: activeMode?.id, heard: "", finalText: "")
         finish(machine: .finish(.noSpeech), cue: .cancel,
-               state: .advisory(message: Self.discardedMessage),
+               state: .advisory(message: message),
                hideAfter: 2, record: (.noSpeech, nil), completion: completion)
     }
 

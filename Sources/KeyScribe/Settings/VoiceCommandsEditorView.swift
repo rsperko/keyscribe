@@ -60,7 +60,7 @@ struct VoiceCommandsEditorView: View {
                 }
                 Text(Self.switchingNote)
                     .font(.caption).foregroundStyle(.secondary)
-                Text("You can also say the name of any command you save below.")
+                Text("For a command you save below, say \u{201C}open\u{201D} and its name for a place, or \u{201C}run\u{201D} and its name for a script or shortcut.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -483,10 +483,10 @@ private struct PlaceEditorSheet: View {
                 Section("What will you say?") {
                     CommandPhraseFields(
                         name: $draft.name, say: $draft.say,
-                        caption: draft.kind == .tabSearch ? "Say this name, then words from the tab\u{2019}s title."
+                        caption: draft.kind == .tabSearch ? "Say \u{201C}open\u{201D} and this name, then words from the tab\u{2019}s title."
                             : draft.kind == .app && model.findsInApps
-                                ? "Say this name to open the app. Add more words to find a tab, channel, mailbox, or other item in it."
-                            : "Say this name to open it.",
+                                ? "Say \u{201C}open\u{201D} and this name to open the app. Add more words to find a tab, channel, mailbox, or other item in it."
+                            : "Say \u{201C}open\u{201D} and this name to open it.",
                         namePrompt: draft.kind == .tabSearch ? "tabs" : "What would you like to call it?",
                         sayPrompt: "Optional, such as inbox, email",
                         nameIssue: nameIssue,
@@ -581,7 +581,7 @@ private struct PlaceEditorSheet: View {
                 }
                 if !isAppLink { browserChoice }
             case .tabSearch:
-                Text("Say the name, then words from the tab\u{2019}s title or site, such as github. It switches to the open tab that best matches them; when several match equally, the frontmost one.")
+                Text("Say \u{201C}open\u{201D} and the name, then words from the tab\u{2019}s title or site, such as github. It switches to the open tab that best matches them; when several match equally, the frontmost one.")
                     .font(.caption).foregroundStyle(.secondary)
                 browserChoice
             }
@@ -774,7 +774,7 @@ private struct ScriptEditorSheet: View {
                     }
                     Section("What will you say?") {
                         CommandPhraseFields(
-                            name: $draft.name, say: $draft.say, caption: "Say this name to run the script.",
+                            name: $draft.name, say: $draft.say, caption: "Say \u{201C}run\u{201D} and this name to run the script.",
                             namePrompt: "deploy", sayPrompt: "ship, release", nameIssue: nil,
                             advisories: model.conflicts(for: .script(draft.script)),
                             ids: .init(
@@ -866,7 +866,7 @@ private struct ScriptEditorSheet: View {
             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptDeleteConfirm)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Saying its name will no longer run it. The program itself is not deleted.")
+            Text("Saying \u{201C}run\u{201D} and its name will no longer run it. The program itself is not deleted.")
         }
     }
 
@@ -1009,7 +1009,7 @@ private struct ShortcutEditorSheet: View {
                 }
                 Section("What will you say?") {
                     CommandPhraseFields(
-                        name: $draft.name, say: $draft.say, caption: "Say this name to run the shortcut.",
+                        name: $draft.name, say: $draft.say, caption: "Say \u{201C}run\u{201D} and this name to run the shortcut.",
                         namePrompt: "What would you like to call it?", sayPrompt: "Optional, such as log, note",
                         nameIssue: nil,
                         advisories: model.conflicts(for: .script(draft.script)),
@@ -1080,7 +1080,7 @@ private struct ShortcutEditorSheet: View {
             .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutDeleteConfirm)
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Saying its name will no longer run it. The shortcut itself stays in Shortcuts.")
+            Text("Saying \u{201C}run\u{201D} and its name will no longer run it. The shortcut itself stays in Shortcuts.")
         }
     }
 

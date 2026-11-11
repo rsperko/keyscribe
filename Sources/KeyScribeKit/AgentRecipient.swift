@@ -76,6 +76,7 @@ public enum AgentRecipient {
         case soundsLike(String, name: String)
         case noBreak(String)
         case shownOn(String, name: String, as: String)
+        case sayToSelect(String)
     }
 
     public enum Resolution: Equatable, Sendable {
@@ -106,7 +107,7 @@ public enum AgentRecipient {
     public static func usesDefault(_ address: AgentAddress) -> Bool {
         switch address {
         case .none, .nearMiss: true
-        case .open(let target): usesDefault(target)
+        case .open(let target), .select(let target): usesDefault(target)
         case .unbroken: true
         case .name, .row, .unresolved, .ambiguous: false
         }
@@ -114,6 +115,25 @@ public enum AgentRecipient {
 
     public static func resolve(
         _ address: AgentAddress, frozen: Frozen?, rows: [String], names: [String: String], shared: [String: SharedName] = [:]
+    ) -> Resolution {
+        let resolution = resolveAddressed(address, frozen: frozen, rows: rows, names: names, shared: shared)
+        switch (address, resolution) {
+        case (.open, _), (.select, _): return resolution
+        case (_, .select): return .ask(body: "", reason: .sayToSelect(said(address)))
+        case (_, .deliver(_, let body, .spoken)) where AgentHandles.normalize(body) == "please":
+            return .ask(body: "", reason: .sayToSelect(said(address)))
+        default: return resolution
+        }
+    }
+
+    public static func conversation(
+        _ address: AgentAddress, frozen: Frozen?, rows: [String], names: [String: String], shared: [String: SharedName] = [:]
+    ) -> Resolution {
+        resolveAddressed(address, frozen: frozen, rows: rows, names: names, shared: shared)
+    }
+
+    private static func resolveAddressed(
+        _ address: AgentAddress, frozen: Frozen?, rows: [String], names: [String: String], shared: [String: SharedName]
     ) -> Resolution {
         func sharedAsk(_ spoken: String, body: String) -> Resolution? {
             guard id(named: spoken, in: names) == nil,
@@ -126,15 +146,20 @@ public enum AgentRecipient {
             return .ask(body: body, reason: .sharedName(place.key, matches: place.value.names, tellApartIn: place.value.tellApartIn))
         }
         switch address {
-        case .open(.unresolved(let spoken, _)):
+        case .open(.unresolved(let spoken, _)), .select(.unresolved(let spoken, _)):
             return .ask(body: "", reason: suggestion(for: spoken, among: Array(names.keys)))
         case .open(let target):
-            switch resolve(target, frozen: frozen, rows: rows, names: names, shared: shared) {
+            switch resolveAddressed(target, frozen: frozen, rows: rows, names: names, shared: shared) {
             case .select(let id), .open(let id), .deliver(let id, _, _): return .open(id: id)
             case .ask(_, let reason): return .ask(body: "", reason: reason)
             }
+        case .select(let target):
+            switch resolveAddressed(target, frozen: frozen, rows: rows, names: names, shared: shared) {
+            case .select(let id), .open(let id), .deliver(let id, _, _): return .select(id: id)
+            case .ask(_, let reason): return .ask(body: "", reason: reason)
+            }
         case .unbroken(let target, let unaddressed):
-            switch resolve(target, frozen: frozen, rows: rows, names: names, shared: shared) {
+            switch resolveAddressed(target, frozen: frozen, rows: rows, names: names, shared: shared) {
             case .deliver(let id, _, _), .select(let id), .open(let id):
                 if let frozen, frozen.id == id { return .deliver(id: id, body: unaddressed, source: frozen.source) }
                 return .ask(body: unaddressed, reason: .noBreak(said(target)))
@@ -171,10 +196,10 @@ public enum AgentRecipient {
     private static func said(_ address: AgentAddress) -> String {
         switch address {
         case .name(let name, _), .nearMiss(_, let name, _, _): name
-        case .row(let row, _): "session \(row)"
+        case .row(let row, _): "conversation \(row)"
         case .ambiguous(_, let matches, _): matches.sorted().first ?? ""
         case .unresolved(let spoken, _): spoken
-        case .open(let inner), .unbroken(let inner, _): said(inner)
+        case .open(let inner), .select(let inner), .unbroken(let inner, _): said(inner)
         case .none: ""
         }
     }

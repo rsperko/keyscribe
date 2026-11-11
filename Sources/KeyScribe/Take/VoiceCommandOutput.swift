@@ -248,7 +248,7 @@ final class VoiceCommandOutput {
         switch outcome {
         case .failed(let message, _, _, _): (failure, report, summary) = (message, nil, "")
         case .done(let name, _, let message): (failure, report, summary) = (nil, message, name)
-        case .started, .needsChoice, .abandoned: return
+        case .started, .needsChoice, .cancelled, .abandoned: return
         }
         if let entry = late.entry {
             var updated = entry
@@ -297,7 +297,7 @@ final class VoiceCommandOutput {
                                        action: action, heard: kind == .other ? nil : excerpt),
                          cue: .error, hideAfter: 3,
                          outcome: .commandFailed, result: resultPrefix + (command ?? ""), failure: message)
-        case .needsChoice, .abandoned:
+        case .needsChoice, .cancelled, .abandoned:
             nil
         }
     }
@@ -321,7 +321,7 @@ final class VoiceCommandOutput {
         }
         switch outcome {
         case .done, .started: return true
-        case .failed, .needsChoice, .abandoned: return false
+        case .failed, .needsChoice, .cancelled, .abandoned: return false
         }
     }
 }

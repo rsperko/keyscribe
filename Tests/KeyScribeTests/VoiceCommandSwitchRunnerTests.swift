@@ -179,10 +179,10 @@ struct VoiceCommandSwitchRunnerTests {
         expectNothingStarted(system)
     }
 
-    @Test func aSavedNameKeepsItsConfiguredOpeningWithoutAVerb() async {
+    @Test func aSavedNameOpensAfterOpen() async {
         let (runner, system) = make()
         let work = VoiceCommandPlace(name: "Work", target: .app(bundleId: slack.bundleId))
-        #expect(await runner.run(transcript: "work", places: [work], origin: nil)
+        #expect(await runner.run(transcript: "open work", places: [work], origin: nil)
                 == .done(summary: "Work", command: "Brings Slack to the front, opening it if needed."))
         #expect(system.opened == [slack.bundleId])
     }

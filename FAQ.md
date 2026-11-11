@@ -185,29 +185,32 @@ Experimental features** (under **Voice Commands**) and say the app, then what yo
 - **“open Chrome github”**: switches to the Chrome tab whose title or site best matches.
 
 With “open”, an app that isn't running is started first. For anything else, save a command under **Commands ▸ Add
-Command…** and say its name:
+Command…**, then say “open” and its name for a place, or “run” and its name for a script or shortcut:
 
-- **“work general”**: choose **Open an App**, pick Slack, and name it `work`. A saved app name works like
+- **“open work general”**: choose **Open an App**, pick Slack, and name it `work`. A saved app name works like
   the app's own, with or without words after it.
-- **“web hooks”** for a chat channel: choose **Open a Link** and paste the
+- **“open web hooks”** for a chat channel: choose **Open a Link** and paste the
   channel's app link (for one chat app, `slack://channel?team=…&id=…`, built from the IDs in the channel's
   details). Name it `web hooks`; the link opens in the chat app.
-- **“note buy milk”**: choose **Run a Script** or **Run a Shortcut**, name it `note`, and give it
+- **“run note buy milk”**: choose **Run a Script** or **Run a Shortcut**, name it `note`, and give it
   `{text}`. The words after the name are passed to it.
-- **“tabs github”**: choose **Find a Browser Tab** and name it `tabs` to search the tabs of every
+- **“open tabs github”**: choose **Find a Browser Tab** and name it `tabs` to search the tabs of every
   browser at once. When several tabs in one browser match equally, it goes to the frontmost one; matches in
   different browsers ask which one you meant.
-- **“go home”**, **“open notes”**, **“focus mode”**: any natural phrase can be a name, including one
-  that starts like a built-in command below. A saved name is checked first.
+- **“open go home”**, **“run focus mode”**: any natural phrase can be a name. Because a saved name always
+  follows “open”, “switch to”, or “run”, it never takes over a built-in command.
+
+A saved name said on its own does nothing and tells you what to say instead (“Say “run note buy milk” to
+run it.”), so ordinary speech that happens to start with a name never runs anything.
 
 When names start the same way, the longest one that matches what you said is used, whatever their
-order in the list: with `note` and `note work`, “note work buy milk” runs `note work`. Then the words
+order in the list: with `note` and `note work`, “run note work buy milk” runs `note work`. Then the words
 after it are checked. If that command needs words and you gave none, or takes none and you gave some,
 you are told so; a shorter command is never run instead. Names match exactly, never by a near-miss; add
 an **Other names** entry for a word that is often misheard. A misheard name can still run the wrong
 command, so keep names distinct, and add a confirmation step to anything you cannot undo. The editor
-points out a name another command already uses, a longer name that will take over some of what you
-say, and a name that will catch a built-in command, before you save.
+points out a name another command already uses and a longer name that will take over some of what you
+say, before you save.
 
 These also work without saving anything:
 
@@ -216,19 +219,21 @@ These also work without saving anything:
   “focus” work like “switch to”; “launch” works like “open”. App names work without setup, and so does
   the name in an app's menu bar when it differs from the one in the Applications folder (“open Code” for
   Visual Studio Code). Saved apps and links work after either word and follow it: “switch to” uses a
-  saved link only when a matching tab is already open, and “open” loads the link when none is. A saved
-  name said on its own does what you saved it to do.
+  saved link only when a matching tab is already open, and “open” loads the link when none is.
 - **“switch to budget”** brings forward an open window whose title says Budget. With two editor
   windows or two terminals open, say a word from the title of the one you want. Only windows on the
   current desktop can be found. **“switch to home assistant”** also finds an open browser tab by its
   title, including tabs in the background. Titles do not have to be said exactly: the words can come in
   any order, and a close mishearing still finds the window or tab.
-- **“run journal buy milk”** runs a saved script or shortcut, the same as saying its name.
+- **“run journal buy milk”** runs a saved script or shortcut.
 - **“go back”** returns to the window you were using before your last switch by voice, even in the
   same app. Say it again to switch back. It never starts an app that has since quit. Running an action
   does not change that destination.
 - **“repeat that”** or **“say that again”** replays the last spoken reply from a coding agent (see
   [Can KeyScribe read an agent's reply aloud?](#can-keyscribe-read-an-agents-reply-aloud)).
+- **“cancel”** or **“never mind”** on its own runs nothing. A “please” before or after a command is fine
+  (“please open Mail”), except that for a script or shortcut that takes your words, a closing “please” is
+  passed along as one of them.
 
 Commands never type your words. An unrecognized command shows an explanation and runs nothing, and a
 command that matches more than one saved command, app, or window asks which one (below). **Preview a command** previews
@@ -246,13 +251,13 @@ your answer your keystrokes keep going to the app you were in.
 
 Say you have two saved web pages, **Personal Mail** and **Work Mail**, each with `mail` under **Other names**:
 
-1. Say **“mail”** with your Voice Commands shortcut. A list of both appears.
+1. Say **“open mail”** with your Voice Commands shortcut. A list of both appears.
 2. Use the same shortcut again and say **“two”**, **“number two”**, **“the second one”**, or
    **“the last one”**. The list stays visible while you speak.
 3. Work Mail opens. **“go back”** later returns to the app you were in when you gave the first
    command.
 
-Actions work the same way. If two actions answer to `ship`, **“ship staging”** asks **Which
+Actions work the same way. If two actions answer to `ship`, **“run ship staging”** asks **Which
 action?**, and answering **“two”** runs the second one with `staging`, the words from your original
 command. The number you answer with is never passed to the action.
 
@@ -327,17 +332,17 @@ Global replacement for a common word such as `male` would also change ordinary d
 Yes, with the experimental voice commands. In **Settings ▸ Modes ▸ Voice Commands ▸ Commands**, choose
 **Add Command ▸ Run a Script**, give it a name to say, and pick the program. Arguments go one per line, and `{text}`
 stands for whatever you say after the name: a script named "deploy" with the arguments `--env` and
-`{text}` turns "deploy staging" into `deploy --env staging`. "run deploy staging" works too. A script
-runs whenever what you say starts with one of its names, so a script named "open notes" runs when you
-say that. "switch to" or "open" with anything else never runs a script. If a replacement only gives a fixed
+`{text}` turns "run deploy staging" into `deploy --env staging`. A script runs only when what you say
+starts with "run" and one of its names; "deploy staging" on its own runs nothing and tells you to say
+"run deploy staging". "switch to" or "open" never runs a script. If a replacement only gives a fixed
 phrase another name for a script, you can add that phrase as one of the script's **Other names** instead.
 A script that controls another app may need Automation permission, and macOS may ask on KeyScribe's behalf
 (see [Which permissions does KeyScribe need](#which-permissions-does-keyscribe-need-and-why)).
 To check a script before relying on it, use **Run Once** under **Try it** in its editor. It runs the
-program the way saying its name would, with sample words in place of what you say, and shows the result,
+program the way saying "run" and its name would, with sample words in place of what you say, and shows the result,
 the script's output, and the PATH it ran with, which helps when a tool works in Terminal but not when spoken.
 It really runs the script, so it can do anything the script does. Keep replacements that capture variable input, as in the recipe below. The spoken
-name can differ from the file name: a script named "foo" can run `~/bin/bar.sh` when you say "foo".
+name can differ from the file name: a script named "foo" can run `~/bin/bar.sh` when you say "run foo".
 
 For example, save this as `~/bin/note` and run `chmod +x ~/bin/note` so it can run:
 
@@ -404,7 +409,7 @@ when part of the phrase supplies variable input.
 
 Yes. Choose **Add Command ▸ Run a Shortcut…**, pick one of your shortcuts, and give it a name to say. To hand it
 what you say after the name, set **Input** to `{text}`: a shortcut named "journal" with that input turns
-"journal buy milk" into the shortcut receiving "buy milk" as text. It runs in the background like a
+"run journal buy milk" into the shortcut receiving "buy milk" as text. It runs in the background like a
 script. A shortcut that asks you something, such as Ask for Input or Choose from Menu, waits for your
 answer; KeyScribe shows it as started and records its final result when History is on. A shortcut may
 also open another app.
@@ -479,10 +484,21 @@ If a conversation is not listed, open **Conversation missing?** below the list: 
 and **Choose Setup Folder…** lets you pick the agent's folder yourself. KeyScribe can miss an agent started
 through an unusual wrapper or hosted inside another program.
 
+### How do I choose which conversation hears me?
+
+In the Coding agent mode, say **“tell”** and the conversation's name with your instruction, such as “tell
+docs run the tests”; later dictation without a name goes there too. To choose a conversation without sending
+anything, say **“select docs”** (or “choose docs”); **“open docs”** also brings its terminal forward. While
+recording, conversations are numbered, so “tell conversation two …” and “select conversation two” work too,
+and “session” means the same as “conversation”. A name said on its own sends nothing and the panel tells you
+to say “select” first. **“Cancel”** or **“never mind”** on its own sends nothing; to send that word to an
+agent, for example to answer its prompt, say “tell docs cancel”.
+
 ### How do I rename a conversation?
 
-In the Coding agent mode, switch to the conversation, then say **“rename this session to”** and the new
-name, such as “rename this session to auth refactor”, as the whole dictation. Only the conversation you are
+In the Coding agent mode, switch to the conversation, then say **“rename this conversation to”** and the new
+name, such as “rename this conversation to auth refactor”, as the whole dictation (“session” works in place of
+“conversation”). Only the conversation you are
 talking to is renamed; the panel shows the new name, and you say that name from then on. The name can be up
 to four words, and it can't be one another conversation already has. Say the name on its own: if anything
 follows it, nothing is renamed or sent, and the panel says why. You can also choose **Rename…** beside a conversation
@@ -517,14 +533,13 @@ reading has failed.
 ### How do I ask what a conversation needs?
 
 In the Coding agent mode, ask as the whole dictation: **“what is docs waiting for?”**, **“what does docs
-need from me?”**, **“ask the docs what it is waiting for”**, or **“what are you waiting for?”** for the
-conversation you are talking to. KeyScribe answers from what the agent reports and sends nothing: the
+need from me?”**, or **“what are you waiting for?”** for the conversation you are talking to. To put the
+question to the agent itself, start with “ask” or “tell”: “ask docs what it needs from me” is sent to docs. KeyScribe answers from what the agent reports and sends nothing: the
 question it is asking when it is short, else a description (with an AI service chosen under Spoken replies),
 else that it is waiting for approval or an answer, with “open docs” to bring it forward. When nothing is
 pending, the same question tells you whether it is working or ready for another message. Ask only the
 question: “what does docs need from me to continue” sends nothing, and the panel says what to say instead.
-After “ask” and a name, more words make it a message to that conversation instead, so “ask docs what it
-needs, then review the changes” is sent to docs. **“Who needs me?”** names every
+**“Who needs me?”** names every
 conversation waiting for you. The answer is shown, and read aloud when Read replies aloud is on. To put the question to the
 agent itself, start with **“tell”**: “tell docs what you still need”. “Ask docs to review the changes” sends
 that instruction to docs, while “ask clarifying questions first” goes to the conversation you are talking to.

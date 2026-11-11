@@ -195,7 +195,7 @@ struct VoiceCommandSharedNameTests {
     @Test func aSharedNameExplainsTheQuestionItWillAsk() {
         let config = VoiceCommandConfig(places: [personal], scripts: [deploy])
         #expect(config.conflicts(for: .place(work))
-                == ["\u{201C}mail\u{201D} is also a name for Personal Mail and Deploy, so saying it will ask you to choose. Give this one a name of its own."])
+                == ["\u{201C}mail\u{201D} is also a name for Personal Mail, so saying it will ask you to choose. Give this one a name of its own."])
     }
 
     @Test func editingAnEntryDoesNotCollideWithItsSavedSelf() {
@@ -218,14 +218,15 @@ struct VoiceCommandSharedNameTests {
         let backUp = VoiceCommandScript(name: "Back up", run: ["/bin/a"])
         let backup = VoiceCommandScript(name: "Backup", run: ["/bin/b"])
         #expect(VoiceCommandConfig(scripts: [backUp]).conflicts(for: .script(backup)).isEmpty)
-        #expect(VoiceCommandResolver.resolve("backup", catalog: VoiceCommandCatalog(scripts: [backUp, backup]))
+        #expect(VoiceCommandResolver.resolve("run backup", catalog: VoiceCommandCatalog(scripts: [backUp, backup]))
                 == .action(.script(backup, arguments: [])))
 
         let spaced = VoiceCommandPlace(name: "Work Mail", target: .url("https://a.example/"))
         let joined = VoiceCommandPlace(name: "Workmail", target: .url("https://b.example/"))
-        #expect(VoiceCommandConfig(places: [spaced]).conflicts(for: .place(joined)).isEmpty)
-        #expect(VoiceCommandResolver.resolve("workmail", catalog: VoiceCommandCatalog(places: [spaced, joined], tabs: []))
-                == .action(.place(joined, .openURL("https://b.example/", browser: nil))))
+        #expect(VoiceCommandConfig(places: [spaced]).conflicts(for: .place(joined))
+                == ["\u{201C}Workmail\u{201D} is also a name for Work Mail, so saying it will ask you to choose. Give this one a name of its own."])
+        #expect(ambiguousNames(VoiceCommandResolver.resolve(
+            "open workmail", catalog: VoiceCommandCatalog(places: [spaced, joined], tabs: []))) == ["Work Mail", "Workmail"])
         #expect(ambiguousNames(VoiceCommandResolver.resolve(
             "switch to workmail", catalog: VoiceCommandCatalog(places: [spaced, joined]))) == ["Work Mail", "Workmail"])
     }

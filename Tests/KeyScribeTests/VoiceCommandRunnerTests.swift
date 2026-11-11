@@ -454,7 +454,7 @@ struct VoiceCommandRunnerTests {
         let other = VoiceCommandCatalog.Tab(browserBundleId: "com.brave.Browser", window: 1, tab: 1, url: "https://x.example/", title: "Gmail")
         system.tabs = [other, inbox]
         let search = VoiceCommandPlace(name: "Chrome", target: .tabSearch, browser: chrome.bundleId)
-        #expect(await runner.run(transcript: "chrome gmail", places: [search], origin: nil)
+        #expect(await runner.run(transcript: "switch to chrome gmail", places: [search], origin: nil)
                 == .done(summary: "Inbox - Gmail · Google Chrome", command: "Focuses the open tab \u{201C}Inbox - Gmail\u{201D} in Google Chrome."))
         #expect(system.tabReads == [chrome.bundleId])
         #expect(system.focused == [inbox])
@@ -462,13 +462,12 @@ struct VoiceCommandRunnerTests {
         #expect(system.activatedPids == [system.runningPid(bundleId: chrome.bundleId)])
     }
 
-    @Test func aSavedPlaceOpensWithoutAVerb() async {
+    @Test func aSavedPlaceOpensAfterOpen() async {
         let (runner, system) = make()
         let editor = VoiceCommandPlace(name: "Editor", target: .app(bundleId: textEdit.bundleId))
-        #expect(await runner.run(transcript: "Editor.", places: [editor], origin: nil)
+        #expect(await runner.run(transcript: "Open editor.", places: [editor], origin: nil)
                 == .done(summary: "Editor", command: "Brings TextEdit to the front, opening it if needed."))
         #expect(system.opened == [textEdit.bundleId])
-        #expect(system.installedScans == 0)
     }
 
     @Test func anAppLinkPlaceOpensInItsAppWithoutReadingTabs() async {
@@ -690,10 +689,31 @@ struct VoiceCommandRunnerTests {
         #expect(system.installedScans == 0)
     }
 
+    @Test(arguments: ["cancel", "Never mind.", "please cancel"])
+    func cancelAloneRunsNothing(transcript: String) async {
+        let (runner, system) = make()
+        let note = VoiceCommandScript(name: "Cancel", run: ["/bin/cancel"])
+        #expect(await runner.run(transcript: transcript, places: [gmail], scripts: [note], origin: nil) == .cancelled)
+        #expect(system.scriptRuns.isEmpty)
+        #expect(system.opened.isEmpty)
+    }
+
+    @Test func aSavedNameAloneTeachesItsVerbAndRunsNothing() async {
+        let (runner, system) = make()
+        let note = VoiceCommandScript(name: "New note", run: ["/bin/note", "{text}"])
+        #expect(await runner.run(transcript: "new note buy milk", places: [], scripts: [note], origin: nil)
+                == .failed(message: "Say \u{201C}run new note buy milk\u{201D} to run it."))
+        #expect(await runner.run(transcript: "Gmail.", places: [gmail], origin: nil)
+                == .failed(message: "Say \u{201C}open gmail\u{201D} to open it."))
+        #expect(system.scriptRuns.isEmpty)
+        #expect(system.opened.isEmpty)
+        #expect(system.installedScans == 0)
+    }
+
     @Test func failuresExplainThemselves() async {
         let (runner, _) = make()
         #expect(await runner.run(transcript: "hello", places: [], origin: nil)
-                == .failed(message: "Not a command. Say the name of a saved command. You can also say \u{201C}open\u{201D} an app or place, \u{201C}switch to\u{201D} one that\u{2019}s already open, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}.",
+                == .failed(message: "Not a command. Say \u{201C}open\u{201D} an app or place, \u{201C}switch to\u{201D} one that\u{2019}s already open, \u{201C}run\u{201D} a script or shortcut, or \u{201C}go back\u{201D}.",
                            kind: .unrecognizedCommand))
         #expect(await runner.run(transcript: "switch to banana", places: [], origin: nil)
                 == .failed(message: "No matching app, place, or window found for \u{201C}banana\u{201D}.", kind: .nothingMatched))

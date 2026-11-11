@@ -126,7 +126,7 @@ struct VoiceCommandReachTests {
         let saved = catalog(places: [notebook], installed: [notes])
         #expect(resolve("switch to notebook", saved) == .closed(.app(bundleId: notes.bundleId, say: "open Notebook", find: nil)))
         #expect(resolve("open notebook", saved) == .action(.place(notebook, .app(bundleId: notes.bundleId))))
-        #expect(resolve("notebook", saved) == .action(.place(notebook, .app(bundleId: notes.bundleId))))
+        #expect(resolve("notebook", saved) == .needsVerb(open: "open notebook", run: nil))
         let running = catalog(places: [notebook], running: [notes], installed: [notes])
         #expect(resolve("switch to notebook", running) == .action(.place(notebook, .app(bundleId: notes.bundleId))))
     }
@@ -152,8 +152,7 @@ struct VoiceCommandReachTests {
                 == .closed(.link(say: "open Dashboard", checkedTabs: true)))
         #expect(resolve("open dashboard", catalog(places: [dashboard], tabs: []))
                 == .action(.place(dashboard, .openURL("https://dash.example.com/", browser: nil))))
-        #expect(resolve("dashboard", catalog(places: [dashboard], tabs: []))
-                == .action(.place(dashboard, .openURL("https://dash.example.com/", browser: nil))))
+        #expect(resolve("dashboard", catalog(places: [dashboard], tabs: [])) == .needsVerb(open: "open dashboard", run: nil))
     }
 
     @Test func aTabSearchDoesNotStartItsClosedBrowserWhenSwitching() {
@@ -167,10 +166,11 @@ struct VoiceCommandReachTests {
                 == .needsTabs(browser: chrome.bundleId))
     }
 
-    @Test func aCompleteSavedPhraseStillOverridesTheBuiltInVerb() {
+    @Test func aSavedActionNamedLikeAVerbRunsOnlyAfterRun() {
         let work = VoiceCommandScript(name: "switch to work", run: ["/bin/work"])
-        #expect(resolve("switch to work", catalog(scripts: [work], installed: [slack])) == .action(.script(work, arguments: [])))
-        #expect(VoiceCommandResolver.reach("switch to work", catalog: catalog(scripts: [work])) == .opening)
+        #expect(resolve("run switch to work", catalog(scripts: [work], installed: [slack])) == .action(.script(work, arguments: [])))
+        #expect(VoiceCommandResolver.reach("run switch to work", catalog: catalog(scripts: [work])) == .opening)
+        #expect(VoiceCommandResolver.reach("switch to work", catalog: catalog(scripts: [work])) == .running)
         #expect(VoiceCommandResolver.reach("switch to slack", catalog: catalog(scripts: [work])) == .running)
     }
 

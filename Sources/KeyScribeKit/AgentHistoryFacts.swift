@@ -88,9 +88,9 @@ public enum AgentHistoryFacts {
 
     private static func spokenAddress(_ address: AgentAddress) -> Spoken {
         switch address {
-        case .open(let inner), .unbroken(let inner, _): spokenAddress(inner)
+        case .open(let inner), .select(let inner), .unbroken(let inner, _): spokenAddress(inner)
         case .name(let name, _): Spoken(said: name, how: "Its name")
-        case .row(let row, _): Spoken(said: "Session \(row)", how: "Its session number")
+        case .row(let row, _): Spoken(said: "Conversation \(row)", how: "Its conversation number")
         case .unresolved(let spoken, _): Spoken(said: spoken)
         case .ambiguous(let spoken, let names, _): Spoken(said: spoken, how: "Its name", candidates: names)
         case .nearMiss(let spoken, let name, _, _): Spoken(said: spoken, how: "Sounded like its name", closest: name)

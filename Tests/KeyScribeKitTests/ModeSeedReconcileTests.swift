@@ -215,6 +215,52 @@ struct ModeSeedReconcileTests {
         #expect(after.aiRewrite?.prompt == "my own edited message prompt")
     }
 
+    @Test(arguments: ["message", "email", "ai-prompt"])
+    func aSeedWhoseVocabularyOrPhraseWasEditedKeepsItThroughTheCurrentBump(id: String) throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        let template = try #require(ModeStore.templates().first { $0.id == id })
+        guard case .seed(var mode) = ModeTemplateInstantiation.materialize(template: template, existing: [], connections: []) else {
+            Issue.record("expected .seed"); return
+        }
+        mode.seedVersion = (mode.seedVersion ?? 1) - 1
+        try ModeStore.write(mode, to: d.modes)
+        ModeStore.recordMaterializedSeed(mode, ledgerDir: d.ledger)
+        mode.replacements.rules = [.init(heard: "my sign off", replace: "Cheers, Rick", regex: false)]
+        mode.triggerPhrases = ["as my own"]
+        try ModeStore.write(mode, to: d.modes)
+
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+
+        #expect(!outcome.updated.contains(id))
+        let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == id })
+        #expect(after.replacements.rules == [.init(heard: "my sign off", replace: "Cheers, Rick", regex: false)])
+        #expect(after.triggerPhrases == ["as my own"])
+    }
+
+    @Test(arguments: ["message", "email", "ai-prompt"])
+    func anUneditedSeedPicksUpTheCurrentBump(id: String) throws {
+        let d = tempDirs()
+        defer { try? FileManager.default.removeItem(at: d.support) }
+        let template = try #require(ModeStore.templates().first { $0.id == id })
+        guard case .seed(var mode) = ModeTemplateInstantiation.materialize(template: template, existing: [], connections: []) else {
+            Issue.record("expected .seed"); return
+        }
+        let current = try #require(ModeStore.starterModes().first { $0.id == id })
+        mode.seedVersion = (mode.seedVersion ?? 1) - 1
+        mode.replacements.rules = []
+        mode.triggerPhrases = id == "ai-prompt" ? ["as prompt"] : mode.triggerPhrases
+        try ModeStore.write(mode, to: d.modes)
+        ModeStore.recordMaterializedSeed(mode, ledgerDir: d.ledger)
+
+        let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
+
+        #expect(outcome.updated.contains(id))
+        let after = try #require(ModeStore.loadAll(in: d.modes).first { $0.id == id })
+        #expect(after.replacements.rules == current.replacements.rules)
+        #expect(after.triggerPhrases == current.triggerPhrases)
+    }
+
     @Test func preLedgerDeletedModesAreNotResurrected() throws {
         let d = tempDirs()
         defer { try? FileManager.default.removeItem(at: d.support) }
@@ -476,10 +522,10 @@ struct ModeSeedReconcileTests {
     @Test func revisingAStarterTemplateRequiresAVersionBump() throws {
         let pinned: [String: (version: Int, fingerprint: String)] = [
             "polish": (5, "f69ef368dd964eed"),
-            "message": (4, "4ed26688a8e2db27"),
-            "email": (4, "1adad971c4148aae"),
+            "message": (5, "6686acaf8f8dd933"),
+            "email": (5, "3ba3856ebefd8f42"),
             "edit-selection": (4, "8a301c3a95672266"),
-            "ai-prompt": (5, "bce63766ad4c94fd"),
+            "ai-prompt": (6, "ce10bce9887f602d"),
             "code": (4, "cf077d166866bfc"),
             "markdown": (4, "a55b54483bc21549"),
             "shell": (1, "debf79feb745f80b"),

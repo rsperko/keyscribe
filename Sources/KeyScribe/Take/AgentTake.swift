@@ -49,7 +49,7 @@ protocol AgentTakeHost: AnyObject {
     func clearRewriteEscapeHatch()
     func finishError(_ message: String, action: HUDErrorAction?)
     func finishNoSpeech()
-    func finishDiscarded()
+    func finishDiscarded(message: String)
     func finishCommandCaptureLost()
     func finishTruncatedCapture(transcript: String)
     func cancelQuietly()
@@ -162,6 +162,10 @@ final class AgentTake {
             await builtInFromAgent(
                 VoiceCommandGrammar.goBack, heard: heard, facts: AgentHistoryFacts.goBack(frozen: recipient(in: pressed), conversations: pressed.conversations))
             return
+        case .cancel:
+            host.agentFrontTask?.cancel()
+            host.finishDiscarded(message: AgentOutput.cancelledLine)
+            return
         case .repeatSummary:
             host.agentFrontTask?.cancel()
             await builtInFromAgent(
@@ -211,7 +215,7 @@ final class AgentTake {
             return
         }
         if !namesSettled, AgentRecipient.usesDefault(address), case .deliver(_, let body, _) = resolution {
-            finishAgent(state: .error(message: "Not sent: couldn\u{2019}t check conversation names yet. Say it again, or start with a name or session number.", action: nil, heard: HeardExcerpt(heard: body)),
+            finishAgent(state: .error(message: "Not sent: couldn\u{2019}t check conversation names yet. Say it again, or start with \u{201C}tell\u{201D} and a name or conversation number.", action: nil, heard: HeardExcerpt(heard: body)),
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, facts: facts)
             return
         }
@@ -226,7 +230,7 @@ final class AgentTake {
 
         switch resolution {
         case .select(let id):
-            finishAgent(state: .commandDone(summary: "Talking to \(agents.handle(of: id) ?? "it")", detail: mode.name),
+            finishAgent(state: .commandDone(summary: "Recipient: \(agents.handle(of: id) ?? "it")", detail: mode.name),
                         outcome: .inserted, heard: heard, body: "", transformed: nil, rewrite: nil, facts: facts)
         case .open(let id):
             let handle = agents.handle(of: id) ?? "it"
@@ -304,7 +308,7 @@ final class AgentTake {
         case .failure(let problem):
             guard !edited(transcript).discarded else {
                 host.agentFrontTask?.cancel()
-                host.finishDiscarded()
+                host.finishDiscarded(message: DictationController.discardedMessage)
                 return
             }
             rename = .invalid(problem)
@@ -313,7 +317,7 @@ final class AgentTake {
             host.spokenEdits = SpokenEdit.summary(edited.payload.spokenEdits)
             if edited.discarded {
                 host.agentFrontTask?.cancel()
-                host.finishDiscarded()
+                host.finishDiscarded(message: DictationController.discardedMessage)
                 return
             }
             let name = edited.isBlank ? "" : edited.localText
@@ -398,7 +402,8 @@ final class AgentTake {
         if let address {
             host.agentFrontTask?.cancel()
             frozen = recipient()
-            resolution = AgentRecipient.resolve(address, frozen: frozen, rows: snapshot.rows, names: snapshot.addressable, shared: snapshot.sharedNames)
+            resolution = AgentRecipient.conversation(
+                address, frozen: frozen, rows: snapshot.rows, names: snapshot.addressable, shared: snapshot.sharedNames)
         } else {
             await settleAgentInFront()
             if Task.isCancelled { return }
@@ -467,9 +472,9 @@ final class AgentTake {
 
     private static func renameProblem(_ problem: AgentRename.Problem) -> String {
         switch problem {
-        case .noName: "Say \u{201C}rename this session to\u{201D} and the new name. Nothing was sent"
+        case .noName: "Say \u{201C}rename this conversation to\u{201D} and the new name. Nothing was sent"
         case .tooLong: "A name can be up to \(AgentRename.nameWords) words. Nothing was sent"
-        case .moreAfterName: "Say only the new name after \u{201C}rename this session to\u{201D}. Nothing was sent"
+        case .moreAfterName: "Say only the new name after \u{201C}rename this conversation to\u{201D}. Nothing was sent"
         }
     }
 
@@ -477,7 +482,7 @@ final class AgentTake {
         switch error {
         case .empty: renameProblem(.noName)
         case .taken: "Another conversation is already called \u{201C}\(name)\u{201D}"
-        case .reserved: "\u{201C}Session\u{201D} followed by a number is how you say a row, so it cannot be a name"
+        case .reserved: "\u{201C}Conversation\u{201D} or \u{201C}session\u{201D} followed by a number is how you say a row, so it cannot be a name"
         }
     }
 

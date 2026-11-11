@@ -286,7 +286,7 @@ struct VoiceCommandChoiceWiringTests {
         h.system.sidebar = .unreadable(.notRunning)
         let general = VoiceCommandCatalog.SidebarItem(bundleId: slackId, pid: 4, name: "general", section: nil, path: [0])
         h.system.sidebarOnceOpened = .listing(SidebarListing(items: [general], isComplete: true))
-        await h.dictate("work general")
+        await h.dictate("open work general")
         let statuses = h.hud.states.compactMap { state -> String? in
             if case .transcribing(_, let status?) = state { return status }
             return nil
@@ -624,7 +624,7 @@ struct VoiceCommandChoiceWiringTests {
     @Test func aScriptsOptionsAreAnsweredByVoiceAndHandedBackToIt() async throws {
         let h = try Harness(places: [], scripts: [channel])
         h.system.scriptResult = offering("#general", "#random")
-        await h.dictate("channel gen")
+        await h.dictate("run channel gen")
         let prompt = try #require(waiting(h.hud.last))
         #expect(prompt.title == "Which one?")
         #expect(prompt.rows.map(\.name) == ["#general", "#random"])
@@ -640,7 +640,7 @@ struct VoiceCommandChoiceWiringTests {
     @Test func aClickedOptionThatAsksAgainShowsTheNewQuestion() async throws {
         let h = try Harness(places: [], scripts: [channel])
         h.system.scriptResult = offering("#general", "#random")
-        await h.dictate("channel gen")
+        await h.dictate("run channel gen")
         let first = try #require(h.prompt)
         h.system.scriptResult = offering("#random-dev", "#random-ops")
         h.controller.chooseVoiceCommand(choice: first.id, candidate: first.rows[1].identity)
@@ -651,7 +651,7 @@ struct VoiceCommandChoiceWiringTests {
         #expect(h.prompt?.id == second.id)
         let entries = h.history.entries()
         #expect(entries.count == 1)
-        #expect(entries.first?.result.hasPrefix("Selected #random for \u{201C}channel gen\u{201D}: Asked to choose: ") == true)
+        #expect(entries.first?.result.hasPrefix("Selected #random for \u{201C}run channel gen\u{201D}: Asked to choose: ") == true)
     }
 
     enum ScriptStop: CaseIterable { case turnOff, lockScreen }
@@ -672,7 +672,7 @@ struct VoiceCommandChoiceWiringTests {
         let h = try Harness(places: [], scripts: [channel])
         h.system.scriptResult = offering("#general", "#random")
         h.system.whileRunningScript = { [h] in stop(how, h) }
-        await h.dictate("channel gen")
+        await h.dictate("run channel gen")
         try await h.settle()
         #expect(h.prompt == nil)
         #expect(h.runner.pendingChoice == nil)
@@ -683,7 +683,7 @@ struct VoiceCommandChoiceWiringTests {
     func aClickedRerunDoesNotAskAgainWhenVoiceCommandsStopWhileItRuns(_ how: ScriptStop) async throws {
         let h = try Harness(places: [], scripts: [channel])
         h.system.scriptResult = offering("#general", "#random")
-        await h.dictate("channel gen")
+        await h.dictate("run channel gen")
         let first = try #require(h.prompt)
         h.system.scriptResult = offering("#random-dev", "#random-ops")
         h.system.whileRunningScript = { [h] in stop(how, h) }
@@ -722,7 +722,7 @@ struct VoiceCommandChoiceWiringTests {
         #expect(h.runner.backTarget == VoiceCommandOrigin(bundleId: "com.apple.TextEdit", pid: 1))
     }
 
-    private static let notACommand = "Not a command. Say the name of a saved command. You can also say \u{201C}open\u{201D} "
+    private static let notACommand = "Not a command. Say \u{201C}open\u{201D} "
         + "an app or place, \u{201C}switch to\u{201D} one that\u{2019}s already open, \u{201C}run\u{201D} a script or shortcut, "
         + "or \u{201C}go back\u{201D}."
     private static let retryNote = "Choose 1\u{2013}2, say \u{201C}cancel\u{201D}, or give a new command."

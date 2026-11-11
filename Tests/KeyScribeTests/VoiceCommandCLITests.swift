@@ -19,7 +19,7 @@ struct VoiceCommandCLITests {
     @Test func theCommandLineNeverRunsAScriptEvenWithVoiceCommandsOn() async throws {
         let system = VoiceCommandRunnerTests.FakeSystem()
         let status = await VoiceCommandCLI.run(
-            transcript: "note hello", supportDir: try supportDir(voiceCommandsOn: true), system: system)
+            transcript: "run note hello", supportDir: try supportDir(voiceCommandsOn: true), system: system)
         #expect(status == 0)
         #expect(system.scriptRuns.isEmpty)
     }
@@ -37,7 +37,7 @@ struct VoiceCommandCLITests {
     @Test func aPhraseStillResolvesWhileVoiceCommandsIsOff() async throws {
         let system = VoiceCommandRunnerTests.FakeSystem()
         let status = await VoiceCommandCLI.run(
-            transcript: "note hello", supportDir: try supportDir(voiceCommandsOn: false), system: system)
+            transcript: "run note hello", supportDir: try supportDir(voiceCommandsOn: false), system: system)
         #expect(status == 0)
         #expect(system.scriptRuns.isEmpty)
     }
@@ -57,7 +57,7 @@ struct VoiceCommandCLITests {
             to: modesDir.appendingPathComponent("broken.toml"), atomically: true, encoding: .utf8)
         var lines: [String] = []
         _ = await VoiceCommandCLI.run(
-            transcript: "note hello", supportDir: dir, system: VoiceCommandRunnerTests.FakeSystem()) { lines.append($0) }
+            transcript: "run note hello", supportDir: dir, system: VoiceCommandRunnerTests.FakeSystem()) { lines.append($0) }
         let ignored = lines.filter { $0.hasPrefix("ignored:") }
         #expect(ignored.count == 1)
         #expect(ignored.first?.contains("replacements.toml") == true)
@@ -73,7 +73,7 @@ struct VoiceCommandCLITests {
         try ModeStore.write(mode, to: modesDir)
         var lines: [String] = []
         _ = await VoiceCommandCLI.run(
-            transcript: "note hello", supportDir: dir, system: VoiceCommandRunnerTests.FakeSystem()) { lines.append($0) }
+            transcript: "run note hello", supportDir: dir, system: VoiceCommandRunnerTests.FakeSystem()) { lines.append($0) }
         let ignored = lines.filter { $0.hasPrefix("ignored:") }
         #expect(ignored.count == 1)
         #expect(ignored.first?.contains("\(Mode.voiceCommandsId).toml — \u{201C}(o+)+\u{201D}") == true)

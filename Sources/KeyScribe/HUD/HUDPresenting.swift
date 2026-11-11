@@ -382,11 +382,11 @@ extension HUDState {
     }
 
     private static func rowExample(_ row: AgentRoster.Row) -> String {
-        "\u{201C}session \(row.number) \u{2026}\u{201D}"
+        "\u{201C}tell conversation \(row.number) \u{2026}\u{201D}"
     }
 
     private static func addressExample(_ row: AgentRoster.Row) -> String {
-        "\u{201C}\(row.name) \u{2026}\u{201D} or \u{201C}session \(row.number) \u{2026}\u{201D}"
+        "\u{201C}tell \(row.name) \u{2026}\u{201D} or \u{201C}tell conversation \(row.number) \u{2026}\u{201D}"
     }
 
     static let agentRowHeight: CGFloat = 40

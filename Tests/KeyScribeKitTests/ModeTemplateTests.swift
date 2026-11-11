@@ -16,7 +16,7 @@ struct ModeTemplateTests {
 
     @Test func templateSummariesNamePhrasesForPhraseCarryingModes() {
         #expect(ModeStore.templateSummary(for: "email").contains("as an email"))
-        #expect(ModeStore.templateSummary(for: "ai-prompt").contains("as prompt"))
+        #expect(ModeStore.templateSummary(for: "ai-prompt").contains("as a prompt"))
         #expect(!ModeStore.templateSummary(for: "polish").isEmpty)
     }
 

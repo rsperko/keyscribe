@@ -26,8 +26,9 @@ struct VoiceCommandSidebarRunnerTests {
 
     @Test func nothingIsReadOrOpenedWhileFindingInAppsIsOff() async {
         let (runner, system) = make(findsInApps: false)
-        #expect(await runner.run(transcript: "work general", places: [work], origin: nil)
-                == .failed(message: VoiceCommandRunner.takesNoTextMessage("Work")))
+        guard case .failed = await runner.run(transcript: "open work general", places: [work], origin: nil) else {
+            Issue.record("expected nothing to open"); return
+        }
         _ = await runner.run(transcript: "open slack general", places: [], origin: nil)
         #expect(system.sidebarReads.isEmpty)
         #expect(await runner.run(.action(.sidebarItem(general)), origin: nil)
@@ -46,7 +47,7 @@ struct VoiceCommandSidebarRunnerTests {
 
     @Test func aSavedNicknameAndAnItemOpenTheItem() async {
         let (runner, system) = make()
-        _ = await runner.run(transcript: "work general", places: [work], origin: nil)
+        _ = await runner.run(transcript: "open work general", places: [work], origin: nil)
         #expect(system.openedSidebarItems == [general])
     }
 
@@ -66,7 +67,7 @@ struct VoiceCommandSidebarRunnerTests {
     @Test func otherCommandsNeverReadASidebar() async {
         let (runner, system) = make()
         _ = await runner.run(transcript: "switch to slack", places: [work], origin: nil)
-        _ = await runner.run(transcript: "work", places: [work], origin: nil)
+        _ = await runner.run(transcript: "open work", places: [work], origin: nil)
         #expect(system.sidebarReads.isEmpty)
         #expect(system.activatedPids == [system.runningPid(bundleId: slackId)])
         #expect(system.opened == [slackId])
@@ -76,7 +77,7 @@ struct VoiceCommandSidebarRunnerTests {
         let (runner, system) = make()
         system.sidebar = .unreadable(.notRunning)
         system.sidebarOnceOpened = .listing(SidebarListing(items: [general], isComplete: true))
-        _ = await runner.run(transcript: "work general", places: [work], origin: nil)
+        _ = await runner.run(transcript: "open work general", places: [work], origin: nil)
         #expect(system.opened.first == slackId)
         #expect(system.openedSidebarItems == [general])
     }
@@ -85,7 +86,7 @@ struct VoiceCommandSidebarRunnerTests {
         let (runner, system) = make()
         system.sidebar = .unreadable(.notRunning)
         system.sidebarOnceOpened = .listing(SidebarListing(items: [], isComplete: true))
-        #expect(await runner.run(transcript: "work general", places: [work], origin: nil)
+        #expect(await runner.run(transcript: "open work general", places: [work], origin: nil)
                 == .failed(message: VoiceCommandRunner.noSidebarMatchMessage("general", app: "Slack")))
         #expect(system.sidebarReads.count == 1 + VoiceCommandRunner.emptySidebarSettleReads)
     }
@@ -96,7 +97,7 @@ struct VoiceCommandSidebarRunnerTests {
         system.sidebarOnceOpened = .listing(SidebarListing(items: [general], isComplete: true))
         var progress: [VoiceCommandProgress] = []
         runner.onProgress = { progress.append($0) }
-        _ = await runner.run(transcript: "work general", places: [work], origin: nil)
+        _ = await runner.run(transcript: "open work general", places: [work], origin: nil)
         #expect(progress == [.opening("Slack"), .looking("Slack")])
         #expect(VoiceCommandProgress.opening("Slack").text == "Opening Slack\u{2026}")
     }
@@ -105,7 +106,7 @@ struct VoiceCommandSidebarRunnerTests {
         let (runner, _) = make()
         var progress: [VoiceCommandProgress] = []
         runner.onProgress = { progress.append($0) }
-        _ = await runner.run(transcript: "work general", places: [work], origin: nil)
+        _ = await runner.run(transcript: "open work general", places: [work], origin: nil)
         #expect(progress.isEmpty)
     }
 
@@ -113,7 +114,7 @@ struct VoiceCommandSidebarRunnerTests {
         let (runner, system) = make()
         system.sidebar = .unreadable(.notRunning)
         system.sidebarOnceOpened = .unreadable(.noSidebar)
-        #expect(await runner.run(transcript: "work general", places: [work], origin: nil)
+        #expect(await runner.run(transcript: "open work general", places: [work], origin: nil)
                 == .failed(message: "Opened Slack, but its sidebar isn\u{2019}t ready yet. Try again."))
         #expect(clock.now <= VoiceCommandRunner.launchWaitSeconds + 1)
         #expect(system.openedSidebarItems.isEmpty)
@@ -125,7 +126,7 @@ struct VoiceCommandSidebarRunnerTests {
         system.sidebar = .unreadable(.notRunning)
         system.sidebarOnceOpened = .unreadable(.noSidebar)
         system.whileReadingSidebar = { clock.now += 2 }
-        #expect(await runner.run(transcript: "work general", places: [work], origin: nil)
+        #expect(await runner.run(transcript: "open work general", places: [work], origin: nil)
                 == .failed(message: "Opened Slack, but its sidebar isn\u{2019}t ready yet. Try again."))
         #expect(system.sidebarReads.count == 4)
     }
@@ -134,7 +135,7 @@ struct VoiceCommandSidebarRunnerTests {
         let (runner, system) = make()
         system.sidebar = .unreadable(.notRunning)
         system.sidebarOnceOpened = .listing(SidebarListing(items: [general], isComplete: true))
-        #expect(await runner.run(transcript: "work general", places: [work], origin: nil, stillWanted: { false }) == .abandoned)
+        #expect(await runner.run(transcript: "open work general", places: [work], origin: nil, stillWanted: { false }) == .abandoned)
         #expect(system.opened.isEmpty)
         #expect(system.openedSidebarItems.isEmpty)
     }
@@ -144,7 +145,7 @@ struct VoiceCommandSidebarRunnerTests {
         system.sidebar = .unreadable(.notRunning)
         system.sidebarOnceOpened = .unreadable(.noSidebar)
         #expect(await runner.run(
-            transcript: "work general", places: [work], origin: nil, stillWanted: { system.opened.isEmpty }) == .abandoned)
+            transcript: "open work general", places: [work], origin: nil, stillWanted: { system.opened.isEmpty }) == .abandoned)
         #expect(system.sidebarReads == [slackId])
     }
 
@@ -215,20 +216,20 @@ struct VoiceCommandSidebarRunnerTests {
     func anUnreadableSidebarSaysWhy(problem: SidebarProblem, message: String) async {
         let (runner, system) = make()
         system.sidebar = .unreadable(problem)
-        #expect(await runner.run(transcript: "work general", places: [work], origin: nil) == .failed(message: message))
+        #expect(await runner.run(transcript: "open work general", places: [work], origin: nil) == .failed(message: message))
         #expect(system.openedSidebarItems.isEmpty)
     }
 
     @Test func missingAccessibilityOffersItsSettings() async {
         let (runner, system) = make()
         system.sidebar = .unreadable(.needsAccessibility)
-        #expect(await runner.run(transcript: "work general", places: [work], origin: nil)
+        #expect(await runner.run(transcript: "open work general", places: [work], origin: nil)
                 == .failed(message: VoiceCommandRunner.sidebarNeedsAccessibilityMessage("Slack"), action: .openAccessibilitySettings))
     }
 
     @Test func noMatchingEntryOpensNothing() async {
         let (runner, system) = make()
-        #expect(await runner.run(transcript: "work payroll", places: [work], origin: nil)
+        #expect(await runner.run(transcript: "open work payroll", places: [work], origin: nil)
                 == .failed(message: "Nothing shown in Slack\u{2019}s sidebar matches \u{201C}payroll\u{201D}. Only items the sidebar shows can be found; expand a section or scroll the sidebar, then try again."))
         #expect(system.openedSidebarItems.isEmpty)
     }
@@ -236,7 +237,7 @@ struct VoiceCommandSidebarRunnerTests {
     @Test func anOpenThatCannotBeConfirmedSaysSo() async {
         let (runner, system) = make()
         system.sidebarOpenResult = .unconfirmed
-        #expect(await runner.run(transcript: "work general", places: [work], origin: nil)
+        #expect(await runner.run(transcript: "open work general", places: [work], origin: nil)
                 == .done(summary: "general \u{00B7} Slack",
                          command: "Pressed \u{201C}general\u{201D} in Slack\u{2019}s sidebar, but could not confirm that it opened.",
                          report: ScriptReport.Message(
@@ -246,7 +247,7 @@ struct VoiceCommandSidebarRunnerTests {
     @Test func anEntryThatMovedIsReported() async {
         let (runner, system) = make()
         system.sidebarOpenResult = .gone
-        guard case .failed(let message, _, _, _) = await runner.run(transcript: "work general", places: [work], origin: nil) else {
+        guard case .failed(let message, _, _, _) = await runner.run(transcript: "open work general", places: [work], origin: nil) else {
             Issue.record("expected a failure"); return
         }
         #expect(message == "general is no longer in Slack\u{2019}s sidebar, so nothing was opened.")
@@ -255,7 +256,7 @@ struct VoiceCommandSidebarRunnerTests {
     @Test func aMatchFromAnIncompleteReadOpensWithoutAsking() async {
         let (runner, system) = make()
         system.sidebar = .listing(SidebarListing(items: [general], isComplete: false))
-        guard case .done = await runner.run(transcript: "work general", places: [work], origin: nil) else {
+        guard case .done = await runner.run(transcript: "open work general", places: [work], origin: nil) else {
             Issue.record("expected the item to open"); return
         }
         #expect(system.openedSidebarItems == [general])
@@ -275,7 +276,7 @@ struct VoiceCommandSidebarRunnerTests {
     @Test func anUnidentifiedWindowSaysWhy() async {
         let (runner, system) = make()
         system.sidebar = .unreadable(.windowUnknown)
-        #expect(await runner.run(transcript: "work general", places: [work], origin: nil)
+        #expect(await runner.run(transcript: "open work general", places: [work], origin: nil)
                 == .failed(message: "Slack\u{2019}s front window could not be identified, so nothing was opened."))
     }
 
@@ -313,7 +314,7 @@ struct VoiceCommandSidebarRunnerTests {
         let person = VoiceCommandCatalog.SidebarItem(bundleId: slackId, pid: 42, name: "design", section: "Direct Messages", path: [2, 0, 0])
         let channel = VoiceCommandCatalog.SidebarItem(bundleId: slackId, pid: 42, name: "design", section: "Channels", path: [1, 0, 1])
         system.sidebar = .listing(SidebarListing(items: [channel, person], isComplete: true))
-        _ = await runner.run(transcript: "work design", places: [work], origin: nil)
+        _ = await runner.run(transcript: "open work design", places: [work], origin: nil)
         #expect(system.openedSidebarItems == [channel])
     }
 }

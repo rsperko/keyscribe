@@ -65,15 +65,14 @@ struct VoiceCommandSidebarTests {
     @Test func nothingIsSearchedInsideAppsWhileTheFeatureIsOff() {
         #expect(VoiceCommandResolver.resolve("open slack general", catalog: catalog(tabs: [], findsInApps: false))
                 == .noMatch("slack general"))
-        #expect(resolve("work general", places: [work], items: nil, findsInApps: false) == .takesNoText("Work"))
+        #expect(resolve("work general", places: [work], items: nil, findsInApps: false) == .needsVerb(open: "open work general", run: nil))
     }
 
     @Test func aSavedAppNicknameSearchesThatApp() {
         let general = item("general")
-        #expect(resolve("work general", places: [work], items: nil) == .needsSidebar(slackId))
-        #expect(resolve("work general", places: [work], items: [general]) == .action(.sidebarItem(general)))
+        #expect(resolve("open work general", places: [work], items: nil) == .needsSidebar(slackId))
         #expect(resolve("open work general", places: [work], items: [general]) == .action(.sidebarItem(general)))
-        #expect(resolve("work", places: [work], items: nil) == .action(.place(work, .app(bundleId: slackId))))
+        #expect(resolve("open work", places: [work], items: nil) == .action(.place(work, .app(bundleId: slackId))))
     }
 
     @Test func aNicknameWinsOverAnInstalledAppWithTheSameName() {

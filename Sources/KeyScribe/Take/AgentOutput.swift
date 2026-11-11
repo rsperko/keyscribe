@@ -213,10 +213,11 @@ final class AgentOutput {
     }
 
     enum Retry {
-        case tell, ask, open
+        case tell, ask, open, select
 
         func phrase(_ name: String) -> String {
             switch self {
+            case .select: "select \(name)"
             case .tell: "tell \(name), \u{2026}"
             case .ask: "ask \(name), \u{2026}"
             case .open: "open \(name)"
@@ -225,18 +226,27 @@ final class AgentOutput {
 
         static func matching(_ text: String, _ address: AgentAddress) -> Retry {
             if case .open = address { return .open }
+            if case .select = address { return .select }
             return AgentAddress.asks(text) ? .ask : .tell
         }
     }
 
     static func openAskLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:], current: String? = nil) -> String {
+        if case .sayToSelect(let name) = reason { return selectHint(name) }
         let problem = askProblem(reason) + retryHint(reason, retry: retry, names: names, current: current)
         return problem.prefix(1).uppercased() + problem.dropFirst()
     }
 
     static func askLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:], current: String? = nil) -> String {
-        "Not sent: " + askProblem(reason) + retryHint(reason, retry: retry, names: names, current: current)
+        if case .sayToSelect(let name) = reason { return selectHint(name) }
+        return "Not sent: " + askProblem(reason) + retryHint(reason, retry: retry, names: names, current: current)
     }
+
+    private static func selectHint(_ name: String) -> String {
+        "Say \u{201C}select \(name)\u{201D} to choose it. Nothing sent."
+    }
+
+    static let cancelledLine = "Cancelled. Nothing sent."
 
     static let unconnectedShown = 2
 
@@ -265,7 +275,8 @@ final class AgentOutput {
     private static func askProblem(_ reason: AgentRecipient.AskReason) -> String {
         switch reason {
         case .noRecipient: "start with a conversation\u{2019}s name"
-        case .noSuchRow(let row): "there is no session \(row)"
+        case .noSuchRow(let row): "there is no conversation \(row)"
+        case .sayToSelect(let name): "say \u{201C}select \(name)\u{201D} to choose it"
         case .unknownName(let name): "no conversation named \u{201C}\(name)\u{201D}"
         case .shownOn(let word, let name, let seenAs): "\u{201C}\(word)\u{201D} is the \(seenAs) of \u{201C}\(name)\u{201D}"
         case .soundsLike(let spoken, let name): "\u{201C}\(spoken)\u{201D} sounded like \u{201C}\(name)\u{201D}"

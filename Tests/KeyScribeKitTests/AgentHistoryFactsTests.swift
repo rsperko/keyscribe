@@ -84,8 +84,8 @@ struct AgentHistoryFactsTests {
     @Test func choosingARecipientBySessionNumberIsNotAMessage() {
         let recorded = facts(.row(2, body: ""), .select(id: "s-docs"))
         #expect(recorded["Command"] == "Choose recipient")
-        #expect(recorded["Spoken address"] == "Session 2")
-        #expect(recorded["Chosen by"] == "Its session number")
+        #expect(recorded["Spoken address"] == "Conversation 2")
+        #expect(recorded["Chosen by"] == "Its conversation number")
     }
 
     @Test func anUnresolvedAddressKeepsWhatWasSaidAndSaysNoConversationWasResolved() {

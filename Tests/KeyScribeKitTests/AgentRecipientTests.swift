@@ -123,10 +123,10 @@ struct AgentRecipientTests {
         #expect(resolution == .ask(body: "the dependencies", reason: .soundsLike("update", name: "updates")))
     }
 
-    @Test func anAddressWithoutAMessageSelectsWithoutSending() {
+    @Test func anAddressWithoutAMessageHoldsWithoutSending() {
         let resolution = resolve("Tell backend.")
-        #expect(resolution == .select(id: "c"))
-        #expect(resolution.makesCurrent == "c")
+        #expect(resolution == .ask(body: "", reason: .sayToSelect("backend")))
+        #expect(resolution.makesCurrent == nil)
     }
 
     @Test func openingAConversationMakesItCurrentWithoutSending() {
@@ -216,7 +216,7 @@ struct AgentRecipientTests {
             == .deliver(id: "c", body: said, source: .current))
         let row = AgentAddress.unbroken(.row(2, body: "run the tests"), unaddressed: said)
         #expect(AgentRecipient.resolve(row, frozen: .init(id: "a", source: .current), rows: ["a", "b", "c"], names: names)
-            == .ask(body: said, reason: .noBreak("session 2")))
+            == .ask(body: said, reason: .noBreak("conversation 2")))
         #expect(AgentRecipient.resolve(row, frozen: nil, rows: ["a"], names: names) == .ask(body: said, reason: .noSuchRow(2)))
         #expect(AgentRecipient.usesDefault(address))
     }

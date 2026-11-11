@@ -35,7 +35,20 @@ struct AgentAskLineTests {
     }
 
     @Test func otherReasonsOfferNoRetry() {
-        #expect(AgentOutput.askLine(.noSuchRow(4), retry: .tell, names: names, current: nil) == "Not sent: there is no session 4")
+        #expect(AgentOutput.askLine(.noSuchRow(4), retry: .tell, names: names, current: nil) == "Not sent: there is no conversation 4")
+    }
+
+    @Test func aRecipientSaidAloneTeachesSelect() {
+        let line = "Say \u{201C}select backend\u{201D} to choose it. Nothing sent."
+        #expect(AgentOutput.askLine(.sayToSelect("backend"), retry: .tell, names: names, current: nil) == line)
+        #expect(AgentOutput.openAskLine(.sayToSelect("backend")) == line)
+    }
+
+    @Test func aSelectRetryRepeatsSelect() {
+        let text = "select frontend"
+        #expect(AgentOutput.Retry.matching(text, AgentAddress.parse(text, names: ["chief"])) == .select)
+        #expect(AgentOutput.askLine(.unknownName("frontend"), retry: .select, names: ["chief": "a"], current: nil)
+            == "Not sent: no conversation named \u{201C}frontend\u{201D}. Try \u{201C}select chief\u{201D}")
     }
 
     @Test(arguments: ["two", "api", "web blue"])

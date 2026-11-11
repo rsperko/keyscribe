@@ -34,31 +34,31 @@ struct VoiceCommandTabSiteTests {
     @Test func aGenericTitleIsFoundByItsSite() {
         let grafana = tab("Dashboard", at: "https://grafana.example.com/d/abc", tab: 2)
         let other = tab("Dashboard", at: "https://status.example.net/", tab: 3)
-        #expect(resolve("chrome grafana", places: [chrome], tabs: [other, grafana]) == .action(.tab(grafana)))
+        #expect(resolve("open chrome grafana", places: [chrome], tabs: [other, grafana]) == .action(.tab(grafana)))
         #expect(resolve("switch to grafana", tabs: [other, grafana]) == .action(.tab(grafana)))
     }
 
     @Test func aMisheardSiteStillMatches() {
         let grafana = tab("Dashboard", at: "https://grafana.example.com/d/abc")
-        #expect(resolve("chrome graffana", places: [chrome], tabs: [tab("Inbox", at: "https://mail.example.org/"), grafana])
+        #expect(resolve("open chrome graffana", places: [chrome], tabs: [tab("Inbox", at: "https://mail.example.org/"), grafana])
             == .action(.tab(grafana)))
     }
 
     @Test func aSiteSpellingDoesNotBlockCorrectingTheTitle() {
         let notes = tab("Ghostty Notes", at: "https://ghosty.example.com/")
-        #expect(resolve("chrome ghosty notes", places: [chrome], tabs: [notes]) == .action(.tab(notes)))
+        #expect(resolve("open chrome ghosty notes", places: [chrome], tabs: [notes]) == .action(.tab(notes)))
     }
 
     @Test func aTitleMatchWinsOverASiteMatch() {
         let named = tab("GitHub Status", at: "https://www.githubstatus.com/", tab: 1)
         let onSite = tab("Pull requests", at: "https://github.com/pulls", tab: 2)
-        #expect(resolve("chrome github status", places: [chrome], tabs: [onSite, named]) == .action(.tab(named)))
-        #expect(resolve("chrome github", places: [chrome], tabs: [onSite]) == .action(.tab(onSite)))
+        #expect(resolve("open chrome github status", places: [chrome], tabs: [onSite, named]) == .action(.tab(named)))
+        #expect(resolve("open chrome github", places: [chrome], tabs: [onSite]) == .action(.tab(onSite)))
     }
 
     @Test func severalTabsOnOneSiteGoToTheLeftmost() {
         let pulls = tab("Pull requests", at: "https://github.com/pulls", tab: 1)
         let issues = tab("Issues", at: "https://github.com/issues", tab: 2)
-        #expect(resolve("chrome github", places: [chrome], tabs: [issues, pulls]) == .action(.tab(pulls)))
+        #expect(resolve("open chrome github", places: [chrome], tabs: [issues, pulls]) == .action(.tab(pulls)))
     }
 }

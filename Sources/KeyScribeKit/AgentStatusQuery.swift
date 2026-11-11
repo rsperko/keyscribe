@@ -12,14 +12,10 @@ public enum AgentStatusQuery: Equatable, Sendable {
     private static let now = "(?: right now| now)?"
     private static let still = "(?: currently| still)?"
     private static let waits = "(?:waiting (?:for|on)|blocked on|stuck on)"
-    private static let itWaits = "(?:(?:it|he|she|they) (?:is|are)|(?:is|are) (?:it|he|she|they))\(still) \(waits)"
-    private static let itNeeds = "(?:it|he|she|they) (?:needs|need|wants|want)"
     private static let waitingSubjects = [
         "^what (?:is|are) (.+?)\(still) \(waits)\(fromMe)\(now)$",
         "^what (?:does|do) (.+?)\(still) (?:need|want)\(fromMe)\(now)$",
         "^(?:does|do) (.+?)\(still) need anything\(fromMe)\(now)$",
-        "^ask (.+?) what \(itWaits)\(fromMe)\(now)$",
-        "^ask (.+?) what \(itNeeds)\(fromMe)\(now)$",
         "^(?:is|are) (.+?)\(still) waiting\(fromMe)\(now)$",
         "^why (?:is|are) (.+?)\(still) (?:waiting|stuck|blocked)\(now)$",
         "^what is blocking (.+?)\(now)$",

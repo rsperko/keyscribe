@@ -1511,9 +1511,10 @@ struct AgentHubTests {
         #expect(hub.directory.conversations.map(\.id) == ["fake:f1"])
         #expect(hub.discoveryProblems == ["fake": "Fake\u{2019}s session list is not answering, so these are the sessions last seen."])
         fake.blocked = false
-        await hub.rescan()
+        for _ in 0..<100 where !hub.directory.conversations.isEmpty { await hub.rescan() }
         #expect(hub.directory.conversations.isEmpty)
         #expect(hub.discoveryProblems.isEmpty)
+        #expect(fake.scans <= 102)
     }
 
     @Test func aScanThatNeverAnswersIsNotStartedAgainUntilItSettles() async {

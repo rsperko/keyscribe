@@ -375,6 +375,17 @@ struct ModeResolverTests {
         #expect(r.transcript == "summarize this thread")
     }
 
+    @Test(arguments: ["summarize this thread as a prompt.", "summarize this thread as prompt", "Summarize this thread, as a prompt"])
+    func theSeededPromptModeTakesBothSuffixes(_ transcript: String) throws {
+        let seeded = try #require(ModeStore.starterModes().first { $0.id == "ai-prompt" })
+        var ai = mode("ai-prompt", phrases: seeded.triggerPhrases)
+        ai.enabled = true
+        let r = ModeResolver.resolvePhaseB(eligibleModes: [ai], transcript: transcript)
+        #expect(r.routedModeId == "ai-prompt")
+        #expect(r.transcript.lowercased().hasPrefix("summarize this thread"))
+        #expect(!r.transcript.lowercased().contains("prompt"))
+    }
+
     @Test func bareLiteralPhraseHonorsLeadingWordBoundary() {
         let ai = mode("ai-prompt", phrases: ["as prompt"])
         #expect(ModeResolver.resolvePhaseB(eligibleModes: [ai], transcript: "this has prompt").routedModeId == nil)

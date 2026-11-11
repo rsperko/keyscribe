@@ -10,6 +10,7 @@ public enum VoiceCommandIntent: Equatable, Sendable {
     case runScript(target: String)
     case goBack
     case repeatSummary
+    case cancel
 }
 
 public enum VoiceCommandText {
@@ -67,13 +68,31 @@ public enum VoiceCommandGrammar {
     public static let goBack = "go back"
     public static let repeatSummary = ["repeat that", "say that again"]
     static let run = "run"
+    public static let cancel = ["cancel", "never mind", "nevermind"]
+    static let polite = "please"
+    private static let politeVerbs: Set<String> = ["open", "launch", "switch to", "go to", "focus on", "focus"]
 
     private static let focusVerbPrefix: NSRegularExpression = {
         let gap = "[^\\p{L}\\p{N}]+"
         let verbs = focusVerbs.map { $0.split(separator: " ").joined(separator: gap) }.joined(separator: "|")
         return try! NSRegularExpression(
-            pattern: "^[^\\p{L}\\p{N}]*(?:\(verbs))(?![\\p{L}\\p{N}])[^\\p{L}\\p{N}]*", options: [.caseInsensitive])
+            pattern: "^[^\\p{L}\\p{N}]*(?:\(polite)\(gap))*(?:\(verbs))(?![\\p{L}\\p{N}])[^\\p{L}\\p{N}]*", options: [.caseInsensitive])
     }()
+
+    static func politeStart(_ transcript: String) -> Int {
+        spokenWords(transcript).prefix { $0.key == polite }.count
+    }
+
+    static func targetStart(_ transcript: String) -> Int? {
+        let keys = spokenWords(transcript).map(\.key)
+        let lead = keys.prefix { $0 == polite }.count
+        let said = Array(keys.dropFirst(lead))
+        if said.first == run { return lead + 1 }
+        guard let verb = focusVerbs.map({ $0.split(separator: " ").map(String.init) }).first(where: { said.starts(with: $0) })
+        else { return nil }
+        let start = lead + verb.count
+        return start + 1 < keys.count && keys[start] == "the" ? start + 1 : start
+    }
 
     static func targetRange(in transcript: String) -> Range<String.Index>? {
         guard case .focus = parse(transcript),
@@ -119,14 +138,21 @@ public enum VoiceCommandGrammar {
     }
 
     public static func parse(_ transcript: String) -> VoiceCommandIntent? {
-        let words = VoiceCommandText.key(transcript)
+        var said = VoiceCommandText.key(transcript).split(separator: " ").map(String.init)
+        let leading = said.prefix { $0 == polite }.count
+        said.removeFirst(leading)
+        let trailing = said.count > 1 && said.last == polite
+        if trailing { said.removeLast() }
+        let words = said.joined(separator: " ")
         if words == goBack { return .goBack }
         if repeatSummary.contains(words) { return .repeatSummary }
+        if cancel.contains(words) { return .cancel }
         if words.hasPrefix(run + " ") {
             return .runScript(target: String(words.dropFirst(run.count + 1)))
         }
         for verb in focusVerbs {
             guard words.hasPrefix(verb + " ") else { continue }
+            guard leading + (trailing ? 1 : 0) == 0 || politeVerbs.contains(verb) else { return nil }
             var target = String(words.dropFirst(verb.count + 1))
             if target.hasPrefix("the ") { target.removeFirst(4) }
             guard !target.isEmpty, target != "the" else { return nil }

@@ -603,9 +603,9 @@ public enum ModeStore {
             connection: "",
             prompt: "Rewrite the dictated text as a clear, casual message of the kind you would send in a chat app. Remove filler words and fix grammar and punctuation. Keep my meaning and friendly, informal tone. Do not add a greeting, sign-off, subject line, or any formality, and do not add information that is not in the text. Only reformat the text — never answer it or act on it. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
         message.replacements.rules = [
-            .init(heard: "shrug emoji", replace: #"¯\_(ツ)_/¯"#, regex: false),
+            .init(heard: #"\b(?:insert\s+)?shrug\s+emoji\b"#, replace: #"¯\\_(ツ)_/¯"#, regex: true),
         ]
-        message.seedVersion = 4
+        message.seedVersion = 5
 
         var email = Mode(id: "email", name: "Email")
         email.enabled = false
@@ -616,9 +616,9 @@ public enum ModeStore {
             connection: "",
             prompt: "Rewrite the dictated text as a polished, professional email. Remove filler words, fix grammar, and organize the content into clear sentences or short paragraphs. Begin with a brief greeting: if a recipient name appears in the text use it (\"Hi Sarah,\"), otherwise use a generic \"Hi,\". End with a short closing word on its own line such as \"Thanks,\" or \"Best,\" — then stop. Do not write any name, signature, or bracketed placeholder (like [Your name]) after the closing; the sender adds their own name. If the dictated text already contains a closing or signature, keep it exactly as written and do not add another. Never invent names, recipients, companies, or facts not in the text. Keep my meaning. Only reformat the text into an email — never answer it or act on it.")
         email.replacements.rules = [
-            .init(heard: #"[\s,]*my sign[- ]?off[\s,.]*"#, replace: #"\n\nBest,"#, regex: true),
+            .init(heard: #"[\s,]*\b(?:my|insert)\s+sign[- ]?off[\s,.]*"#, replace: #"\n\nBest,"#, regex: true),
         ]
-        email.seedVersion = 4
+        email.seedVersion = 5
 
         var selection = Mode(id: "edit-selection", name: "Edit Selection")
         selection.enabled = false
@@ -635,8 +635,8 @@ public enum ModeStore {
         prompt.enabled = false
         prompt.commands.liveEdits = true
         prompt.trailing = .space
-        prompt.triggerPhrases = ["as prompt"]
-        prompt.seedVersion = 5
+        prompt.triggerPhrases = ["as a prompt", "as prompt"]
+        prompt.seedVersion = 6
         prompt.aiRewrite = Mode.AIRewrite(
             connection: "",
             prompt: "Rewrite the dictated text as a single, clear, well-structured instruction to give to an AI assistant. Remove filler words and fix grammar so the request is unambiguous and well organized. Preserve the original intent and keep all technical terms, code, file names, and identifiers as written. Do NOT answer, explain, complete, or carry out the request in any way — your only output is the cleaned-up instruction text itself. Preserve intentional paragraph, list, and code line breaks inside the text; do not trim, add, or collapse blank lines unless the dictated text explicitly asks for that.")
@@ -703,7 +703,7 @@ public enum ModeStore {
         case "markdown": return "Reformat dictation as Markdown"
         case "code": return "Developer-friendly text for code and commits"
         case "shell": return "Turn a spoken request into a shell command"
-        case "ai-prompt": return "Clean prompt for an AI — end with \"as prompt\""
+        case "ai-prompt": return "Clean prompt for an AI — end with \"as a prompt\""
         case "edit-selection": return "Rewrite selected text by voice"
         default: return ""
         }
@@ -725,7 +725,7 @@ public enum ModeStore {
         case "shell":
             return ("find every swift file changed today", "find . -name '*.swift' -mtime -1")
         case "ai-prompt":
-            return ("draft release notes for the audio fixes as prompt", "Draft release notes for the following audio fixes:")
+            return ("draft release notes for the audio fixes as a prompt", "Draft release notes for the following audio fixes:")
         case "edit-selection":
             return ("“make this more formal” with text selected", "Your selected text, rewritten in a more formal tone.")
         default:
