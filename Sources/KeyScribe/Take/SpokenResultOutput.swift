@@ -396,6 +396,9 @@ final class SpokenResultOutput {
         return text.isEmpty ? nil : (text, connection.name)
     }
 
+    var readsReplies: Bool { settings().enabled }
+    var hasReplyToRepeat: Bool { heard != nil }
+
     func repeatLast() -> Replay {
         guard settings().enabled else { return .off }
         guard let heard else { return .nothingHeard }

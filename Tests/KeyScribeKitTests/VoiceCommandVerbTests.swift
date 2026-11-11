@@ -125,3 +125,37 @@ struct VoiceCommandVerbTests {
         #expect(VoiceCommandResolver.savedTextRange("new note buy milk", places: [], scripts: [note]) == nil)
     }
 }
+
+struct SpokenHelpRequestTests {
+    @Test(arguments: [
+        "what can I say", "What can I say?", "what can i say.", "Show commands", "show commands!", "please show commands",
+        "What can I say, please?",
+    ])
+    func aWholeHelpRequestIsHelp(transcript: String) {
+        #expect(VoiceCommandGrammar.parse(transcript) == .help)
+    }
+
+    @Test(arguments: [
+        "Tell backend what can I say?", "I wonder what I can say about this", "what can I say about the release",
+        "show commands for git", "what can I see", "commands",
+    ])
+    func anythingLongerOrDifferentIsNotHelp(transcript: String) {
+        #expect(VoiceCommandGrammar.parse(transcript) != .help)
+    }
+
+    @Test func aSavedCommandNamedLikeHelpIsStillReachedByItsVerb() {
+        let script = VoiceCommandScript(name: "What can I say", run: ["/bin/what"])
+        let place = VoiceCommandPlace(name: "Show commands", target: .url("https://example.com/commands"))
+        let catalog = VoiceCommandCatalog(places: [place], scripts: [script], tabs: [], windows: .complete([]))
+        #expect(VoiceCommandGrammar.parse("run what can I say") != .help)
+        #expect(VoiceCommandResolver.resolve("run what can I say", catalog: catalog) == .action(.script(script, arguments: [])))
+        #expect(VoiceCommandGrammar.parse("open show commands") != .help)
+        #expect(VoiceCommandResolver.resolve("open show commands", catalog: catalog)
+                == .action(.place(place, .openURL("https://example.com/commands", browser: nil))))
+    }
+
+    @Test func aHelpRequestRunsNothingInVoiceCommands() {
+        let note = VoiceCommandScript(name: "What can I say", run: ["/bin/note"])
+        #expect(VoiceCommandResolver.resolve("what can I say", catalog: VoiceCommandCatalog(scripts: [note])) == .help)
+    }
+}

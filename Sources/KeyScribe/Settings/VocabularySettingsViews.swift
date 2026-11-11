@@ -187,6 +187,9 @@ struct ReplacementRows: View {
                 if let advisory = ReplacementAuthoring.placeholderAdvisory(heard: rule.heard, replace: rule.replace, regex: rule.regex) {
                     IssueText(advisory, severity: .advisory, font: .caption)
                 }
+                if let advisory = ReplacementAuthoring.helpAdvisory(heard: rule.heard, replace: rule.replace, regex: rule.regex) {
+                    IssueText(advisory, severity: .advisory, font: .caption)
+                }
                 ForEach(usageHealth(rule), id: \.self) { line in
                     IssueText(line, severity: .advisory, font: .caption)
                 }

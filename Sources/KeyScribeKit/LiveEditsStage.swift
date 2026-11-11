@@ -70,8 +70,10 @@ public struct LiveEditsStage: PipelineStage {
 
     private enum Action { case newline, paragraph, tab, scratch, discard }
     private let phrases: [(words: [String], action: Action)]
+    public let commands: Commands
 
     public init(commands: Commands = .default) {
+        self.commands = commands
         var list: [(words: [String], action: Action)] = []
         func add(_ raw: [String], _ action: Action) {
             for phrase in raw {

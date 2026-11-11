@@ -38,9 +38,12 @@ final class HUDChannel {
         }
     }
 
+    var onDraw: ((HUDState) -> Void)?
+
     private func draw(_ state: HUDState) {
         lastPresented = state
         hud?.render(state)
+        onDraw?(state)
     }
 
     func relinquishKeyFocus() {

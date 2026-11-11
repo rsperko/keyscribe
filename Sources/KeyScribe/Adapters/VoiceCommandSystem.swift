@@ -500,6 +500,9 @@ final class VoiceCommandRunner: VoiceCommandRunning {
                                       stillWanted: stillWanted, onLateResult: onLateResult))
         }
         let pending = live.choice
+        if VoiceCommandGrammar.parse(transcript) == .help {
+            return .retry(message: Self.choiceHelp, reason: .invalidSelection)
+        }
         switch VoiceCommandChoiceAnswer.parse(transcript, count: pending.rows.count) {
         case .select(let index):
             self.live = nil
@@ -561,6 +564,8 @@ final class VoiceCommandRunner: VoiceCommandRunning {
             return .failed(message: Self.needsVerbMessage(open: open, run: run))
         case .cancelled:
             return .cancelled
+        case .help:
+            return .abandoned
         case .noMatch(let target):
             return .failed(message: Self.noMatchMessage(target), kind: .nothingMatched)
         case .closed(let closed):
@@ -933,6 +938,7 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     }
 
     static let cancelledMessage = "Cancelled. Nothing ran."
+    static let choiceHelp = "Say a number, like \u{201C}two\u{201D} or \u{201C}the second one\u{201D}, or say \u{201C}cancel\u{201D}."
 
     static func notFoundMessage(_ target: String) -> String {
         "No script or shortcut is called \u{201C}\(target)\u{201D}."

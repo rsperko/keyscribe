@@ -79,6 +79,7 @@ enum HUDState: Equatable {
     case error(message: String, action: HUDErrorAction?, heard: HeardExcerpt? = nil)
     case advisory(message: String)
     case choice(VoiceCommandChoicePrompt, status: VoiceCommandChoiceStatus, level: Float = 0)
+    case help(SpokenHelp)
 }
 
 enum HUDIndicator: Equatable {
@@ -94,6 +95,7 @@ enum HUDIndicator: Equatable {
     case skipped
     case error
     case advisory
+    case help
 }
 
 extension HUDState {
@@ -129,6 +131,8 @@ extension HUDState {
             return .recording
         case .choice(_, .working, _):
             return .processing
+        case .help:
+            return .help
         }
     }
 
@@ -163,6 +167,8 @@ extension HUDState {
             return message
         case .choice(let prompt, _, _):
             return prompt.title
+        case .help(let help):
+            return help.title
         }
     }
 
@@ -220,6 +226,8 @@ extension HUDState {
             return heard?.text
         case .advisory:
             return nil
+        case .help:
+            return Self.helpHeading
         case .hidden:
             return nil
         }
@@ -266,6 +274,14 @@ extension HUDState {
         case .appChanged, .focusChanged, .unknownTarget:
             return "Focus changed while \(Branding.appName) was working"
         }
+    }
+
+    static let helpHeading = "What you can say"
+    static let helpRowsShown = 6
+
+    var spokenHelp: SpokenHelp? {
+        if case .help(let help) = self { return help }
+        return nil
     }
 
     var recordingCountdown: RecordingCountdown? {
@@ -332,6 +348,8 @@ extension HUDState {
             return [primaryText, secondaryText].compactMap { $0 }.joined(separator: ". ")
         case .choice(let prompt, _, _):
             return prompt.announcement
+        case .help(let help):
+            return [help.title, Self.helpHeading, help.status].compactMap { $0 }.joined(separator: ". ")
         }
     }
 
@@ -394,6 +412,16 @@ extension HUDState {
     static let agentRowStep: CGFloat = agentRowHeight + 2
     static let agentListChrome: CGFloat = 160
     static let agentListVisibleRows = 8
+
+    static func helpListHeight(rows: [SpokenHelp.Row], screenHeight: CGFloat) -> CGFloat? {
+        func lines(_ text: String, perLine: Int) -> CGFloat { CGFloat(max(1, (text.count + perLine - 1) / perLine)) }
+        let estimated = rows.reduce(CGFloat(0)) { total, row in
+            let detail = [row.effect, row.note].compactMap { $0 }.joined(separator: " \u{00B7} ")
+            return total + lines(row.said, perLine: 34) * 17 + lines(detail, perLine: 40) * 14 + 6
+        }
+        let cap = min(300, max(120, (screenHeight - agentListChrome) / 2))
+        return estimated > cap ? cap : nil
+    }
 
     static func agentListHeight(rows: Int, screenHeight: CGFloat) -> CGFloat? {
         let fitting = max(1, Int((screenHeight - agentListChrome) / agentRowStep))

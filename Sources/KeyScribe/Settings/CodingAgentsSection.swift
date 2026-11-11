@@ -401,18 +401,8 @@ struct CodingAgentPhrasesSection: View {
 
     static let renameExample = "\u{201C}rename this conversation to API\u{201D}"
 
-    static func examples(name: String, readsReplies: Bool) -> [(phrase: String, meaning: String)] {
-        var examples = [
-            ("\u{201C}tell \(name) run the unit tests\u{201D}", "Sends the instruction to \(name). Later instructions go there too."),
-            ("\u{201C}select \(name)\u{201D}", "Makes \(name) the recipient. Nothing is sent."),
-            ("\u{201C}open \(name)\u{201D}", "Brings \(name) to the front and makes it the recipient. Nothing is sent."),
-            ("\u{201C}what is \(name) waiting for?\u{201D}", "Tells you what \(name) needs from you. Nothing is sent."),
-            ("\u{201C}who needs me?\u{201D}", "Names the conversations waiting for you."),
-            ("\u{201C}go back\u{201D}", "Returns to where you were."),
-            ("\u{201C}cancel\u{201D}", "Stops this recording. Nothing is sent."),
-        ]
-        if readsReplies { examples.append(("\u{201C}repeat that\u{201D}", "Reads the last spoken reply again.")) }
-        return examples
+    nonisolated static func examples(name: String, readsReplies: Bool) -> [(phrase: String, meaning: String)] {
+        SpokenHelp.codingAgentPhrases(name: name, readsReplies: readsReplies).map { ("\u{201C}\($0.said)\u{201D}", $0.effect) }
     }
 
     private var exampleName: String {

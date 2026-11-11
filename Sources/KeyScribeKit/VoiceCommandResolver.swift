@@ -246,6 +246,7 @@ public enum VoiceCommandResolution: Equatable, Sendable {
     case scriptNotFound(String)
     case needsVerb(open: String?, run: String?)
     case cancelled
+    case help
 }
 
 public enum VoiceCommandResolver {
@@ -255,6 +256,7 @@ public enum VoiceCommandResolver {
         case goBack
         case repeatSummary
         case cancel
+        case help
         case focus(String, VoiceCommandReach)
         case scriptNotFound(String)
         case notACommand
@@ -269,6 +271,7 @@ public enum VoiceCommandResolver {
         case .goBack: return .goBack
         case .repeatSummary: return .repeatSummary
         case .cancel: return .cancel
+        case .help: return .help
         case .focus(let target, let reach):
             guard var saved = savedCommand(transcript, places: catalog.places, scripts: [])?.match else { return .focus(target, reach) }
             saved.reach = reach
@@ -285,6 +288,7 @@ public enum VoiceCommandResolver {
         case .goBack: return .action(.goBack)
         case .repeatSummary: return .action(.repeatSummary)
         case .cancel: return .cancelled
+        case .help: return .help
         case .focus(let target, let reach): return resolve(target: target, reach: reach, catalog: catalog)
         case .scriptNotFound(let target): return .scriptNotFound(target)
         case .notACommand: return .notACommand

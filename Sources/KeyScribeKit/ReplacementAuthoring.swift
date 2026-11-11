@@ -32,6 +32,12 @@ public enum ReplacementAuthoring {
         return "Still inserts the placeholder “Your Name”. Edit it into your own sign-off."
     }
 
+    public static func helpAdvisory(heard: String, replace: String, regex: Bool) -> String? {
+        let rule = ReplacementRule(heard: heard, replace: replace, isRegex: regex)
+        guard let phrase = VoiceCommandGrammar.help.first(where: { RuleExample.matchesCompletely(rule, $0) }) else { return nil }
+        return "Saying \u{201C}\(phrase)\u{201D} on its own shows what you can say instead."
+    }
+
     // Wraps a pattern so neither end of a match can split a word, using the same regex `\w` that flags a match
     // as inside a word. An edge that is itself punctuation or space still matches beside a word. nil where the
     // wrap could change what the pattern means: free-spacing mode (a trailing comment would swallow the

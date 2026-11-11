@@ -15,11 +15,25 @@ struct HUDStateTests {
             "microphone-error", "command-not-recognized", "command-not-recognized-long", "accessibility-error",
             "recording-countdown", "stopped-at-limit", "stopped-at-limit-local", "choice", "choice-five",
             "choice-listening", "choice-retry", "choice-heard", "choice-heard-long", "recording-agents", "recording-agents-long",
+            "help-agent", "help-dictation",
         ])
         for name in HUDPreview.names {
             #expect(HUDPreview.state(named: name) != nil)
         }
         #expect(HUDPreview.state(named: "unknown") == nil)
+    }
+
+    @Test func helpKeepsTheHUDWidthAndScrollsALongListFromTheStart() {
+        let short = (1...3).map { SpokenHelp.Row(said: "phrase \($0)", effect: "Does a thing") }
+        #expect(HUDState.helpListHeight(rows: short, screenHeight: 900) == nil)
+        let long = (1...6).map {
+            SpokenHelp.Row(said: "a long spoken phrase number \($0) that wraps", effect: String(repeating: "New paragraph + Best, ", count: 6))
+        }
+        let height = HUDState.helpListHeight(rows: long, screenHeight: 900)
+        #expect(height != nil)
+        #expect(height.map { $0 <= 300 } == true)
+        #expect(HUDState.help(SpokenHelp(title: "Email", rows: long)).panelWidth == HUDState.recording(
+            mode: "Email", level: 0, latchedTrigger: nil).panelWidth)
     }
 
     @Test func previewLaunchIsUnavailableOutsideDevelopmentBuilds() {

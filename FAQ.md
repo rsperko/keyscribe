@@ -165,6 +165,15 @@ letters or fewer is left as heard. A dictionaried compound also snaps its spoken
 dictionary terms are shared with your own AI service — marked as intended spellings, not typos, so it
 does not "fix" them — including in privacy modes, which turn context off but still send that term hint.
 
+### How do I see what I can say?
+
+Start a recording in any mode and say **“what can I say?”** or **“show commands”** as the whole
+dictation. Nothing is typed or sent: the panel lists the phrases that work in that mode, using your own
+conversation names, saved commands, and replacement rules, with what each does. It closes by itself after
+a short while (not while the pointer is over it), with Escape or its close button, or when you start the
+next recording. If a voice command is asking which one you meant, the answer is how to choose instead.
+To type the words themselves, say them as part of a longer sentence.
+
 ### Can I switch apps or run actions by voice?
 
 Yes, with the experimental **Voice Commands** mode. Turn it on in **Settings ▸ Maintenance ▸

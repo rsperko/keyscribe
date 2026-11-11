@@ -379,6 +379,9 @@ final class DictationController {
         self.audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         installMemoryPressureHandler()
         self.voiceCommands.onProgress = { [weak self] progress in self?.showCommandProgress(progress) }
+        self.hud.onDraw = { [weak self] state in
+            if state.spokenHelp == nil { self?.releaseHelp() }
+        }
         self.hud.choices = { [weak self] in
             HUDChannel.Choices(answering: self?.answeringChoicePrompt, pending: self?.pendingVoiceCommandChoice)
         }
@@ -552,6 +555,16 @@ final class DictationController {
     }
 
     var pressConfirmationBackstop: Duration = .seconds(1)
+    lazy var helpEscape: any ChordRegistering = CarbonHotKeys()
+    var helpSeconds: Double = 15
+    var runningAppNames: () -> [String] = {
+        NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != Bundle.main.bundleIdentifier }
+            .compactMap(\.localizedName)
+    }
+    var voiceOverRunning: () -> Bool = { NSWorkspace.shared.isVoiceOverEnabled }
+    private var showingHelp = false
+    private var helpTask: Task<Void, Never>?
 
     func handleEngage(triggerKey: String?) {
         guard !isSessionLocked(), machine.state == .idle, micStatus() != .denied, !audio.inputIsBluetooth else { return }
@@ -619,6 +632,7 @@ final class DictationController {
         latchedTriggerName = (pressStyle == .tapToToggle)
             ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
         hideTask?.cancel()
+        releaseHelp()
         if let engaged {
             session?.pendingPress = nil
             session?.voiceCommandStopsAtPress = commandOutput.stops
@@ -1548,6 +1562,10 @@ final class DictationController {
             capturedSnapshot?.isSecureField = true
         }
 
+        if VoiceCommandGrammar.parse(raw) == .help, !(activeMode?.runsVoiceCommands == true && session?.choiceId != nil) {
+            finishHelp(mode: activeMode)
+            return
+        }
         if activeMode?.runsVoiceCommands == true {
             await finishVoiceCommand(heard: raw)
             return
@@ -2421,6 +2439,67 @@ final class DictationController {
         // timeout would pin the model resident until quit (no other terminal re-arms the idle check).
         finish(machine: .finish(.failed), cue: .error, state: .error(message: message, action: action),
                hideAfter: action == nil ? 2 : 8, record: (.failed, message))
+    }
+
+    private func finishHelp(mode: Mode?) {
+        finish(machine: .finish(.inserted), cue: nil, endsQuietly: true, state: .help(spokenHelp(for: mode)), record: (.command, nil))
+        guard hud.lastPresented?.spokenHelp != nil else { return }
+        showingHelp = true
+        helpEscape.update([CarbonHotKeys.Registration(
+            keyCode: SpeakingHUDController.escapeKeyCode, modifiers: [], onPressed: { [weak self] in self?.dismissHelp() },
+            onReleased: nil)])
+        scheduleHelpHide()
+    }
+
+    private func spokenHelp(for mode: Mode?) -> SpokenHelp {
+        let stages = plan.postSTTTextStages(for: mode)
+        let title = mode?.name ?? currentModeName ?? "Dictation"
+        if mode?.source == .selection { return .selection(title: title) }
+        if mode?.runsVoiceCommands == true {
+            let commands = config.voiceCommands
+            return SpokenHelp.voiceCommands(
+                title: title, apps: runningAppNames(), places: commands.places, scripts: commands.scripts, stages: stages)
+        }
+        if mode?.output == .agent {
+            let id = session?.agentRecipient?.id ?? agents?.current
+            return SpokenHelp.codingAgent(
+                title: title, recipient: id.flatMap { agents?.handle(of: $0) }, example: agents?.recordingOrder.first?.handle,
+                readsReplies: spokenUpdates?.readsReplies == true, canRepeat: spokenUpdates?.hasReplyToRepeat == true,
+                stages: stages)
+        }
+        let suffixes = (session?.eligibleModes ?? []).filter { $0.id != mode?.id }.flatMap { other in
+            other.triggerPhrases.filter { $0.allSatisfy { $0.isLetter || $0 == " " } }.map { (said: $0, mode: other.name) }
+        }
+        return SpokenHelp.dictation(title: title, stages: stages, suffixes: suffixes)
+    }
+
+    func helpHover(_ hovering: Bool) {
+        guard showingHelp else { return }
+        if hovering { helpTask?.cancel() } else { scheduleHelpHide() }
+    }
+
+    func dismissHelp() {
+        guard showingHelp else { return }
+        releaseHelp()
+        hud.present(.hidden)
+    }
+
+    private func releaseHelp() {
+        guard showingHelp else { return }
+        showingHelp = false
+        helpTask?.cancel()
+        helpEscape.update([])
+    }
+
+    private func scheduleHelpHide() {
+        helpTask?.cancel()
+        guard !voiceOverRunning() else { return }
+        let seconds = helpSeconds
+        helpTask = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            dismissHelp()
+        }
     }
 
     private func scheduleHide(after seconds: Double = 2) {

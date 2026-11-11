@@ -10,6 +10,7 @@ enum HUDPreview {
         "microphone-error", "command-not-recognized", "command-not-recognized-long", "accessibility-error",
         "recording-countdown", "stopped-at-limit", "stopped-at-limit-local", "choice", "choice-five",
         "choice-listening", "choice-retry", "choice-heard", "choice-heard-long", "recording-agents", "recording-agents-long",
+        "help-agent", "help-dictation",
     ]
 
     static let reasoningLimitReason = ProviderTransportError.limitBeforeAnswer(reasoningEvidence: true).rewriteFailureReason
@@ -163,6 +164,19 @@ enum HUDPreview {
         case "recording-agents-long":
             .recording(mode: "Coding agent", level: 0.7, latchedTrigger: nil, agents: AgentRoster(
                 frozen: longAgentConversations, live: longAgentConversations, recipient: .init(id: "web", source: .current)))
+        case "help-agent":
+            .help(SpokenHelp.codingAgent(
+                title: "Coding agent", recipient: "backend", example: nil, readsReplies: true, canRepeat: false,
+                stages: TakeStages.text(liveEdits: false, rules: [
+                    ReplacementRule(heard: "slash resume", replace: "/resume", isRegex: false, wholeDictation: true),
+                ], numbers: false, dictionary: [])))
+        case "help-dictation":
+            .help(SpokenHelp.dictation(
+                title: "Email",
+                stages: TakeStages.text(liveEdits: true, rules: ModeStore.starterModes().first { $0.id == "email" }.map { mode in
+                    mode.replacements.rules.map { ReplacementRule(heard: $0.heard, replace: $0.replace, isRegex: $0.regex) }
+                } ?? [], numbers: false, dictionary: []),
+                suffixes: [(said: "as a prompt", mode: "AI Prompt")]))
         default:
             nil
         }

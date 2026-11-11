@@ -139,11 +139,8 @@ struct VoiceCommandsEditorView: View {
 
     static let switchingNote = "\u{201C}Open\u{201D} can start an app. Use \u{201C}switch to\u{201D} to stay with what\u{2019}s already running."
 
-    static func examples(findsInApps: Bool) -> [(phrase: String, meaning: String)] {
-        let open = ("\u{201C}open Mail\u{201D}", "Opens Mail or brings it forward.")
-        let inside = ("\u{201C}open Slack general\u{201D}", "Opens general in Slack.")
-        let back = ("\u{201C}go back\u{201D}", "Returns to where you were.")
-        return findsInApps ? [open, inside, back] : [open, back]
+    nonisolated static func examples(findsInApps: Bool) -> [(phrase: String, meaning: String)] {
+        SpokenHelp.voiceCommandPhrases(findsInApps: findsInApps).map { ("\u{201C}\($0.said)\u{201D}", $0.effect) }
     }
 
     private func phraseRow(_ phrase: String, _ meaning: String) -> some View {

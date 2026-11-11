@@ -302,6 +302,8 @@ final class VoiceCommandsSettingsModel: ObservableObject {
             return TryResult(heard: heard, summary: "Not a command", detail: VoiceCommandRunner.needsVerbMessage(open: open, run: run), resolved: false)
         case .cancelled:
             return TryResult(heard: heard, summary: "Cancel", detail: VoiceCommandRunner.cancelledMessage, resolved: true)
+        case .help:
+            return TryResult(heard: heard, summary: "Show what you can say", detail: "Lists the phrases for this mode. Nothing runs.", resolved: true)
         case .noMatch(let target):
             return TryResult(heard: heard, summary: "No match", detail: VoiceCommandRunner.noMatchMessage(target), resolved: false)
         case .uncheckedUntilOpened(let app, let find):

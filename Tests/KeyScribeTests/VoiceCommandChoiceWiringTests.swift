@@ -148,6 +148,8 @@ struct VoiceCommandChoiceWiringTests {
                 accessibilityGranted: { true },
                 voiceCommands: runner)
             controller.choiceExpirySleep = { await timer.sleep($0) }
+            controller.helpEscape = FakeChordRegistrar()
+            controller.runningAppNames = { ["Safari", "Ghostty"] }
         }
 
         func press(_ trigger: String = "right_option") async {
@@ -720,6 +722,108 @@ struct VoiceCommandChoiceWiringTests {
         await h.dictate("open mail")
         await h.dictate("two")
         #expect(h.runner.backTarget == VoiceCommandOrigin(bundleId: "com.apple.TextEdit", pid: 1))
+    }
+
+    private func help(_ state: HUDState?) -> SpokenHelp? {
+        if case .help(let help) = state { return help }
+        return nil
+    }
+
+    @Test(arguments: ["What can I say?", "please show commands"])
+    func askingForHelpInDictationShowsItAndInsertsNothing(text: String) async throws {
+        let h = try Harness(places: [])
+        let escape = FakeChordRegistrar()
+        h.controller.helpEscape = escape
+        await h.dictate(text, trigger: "right_command")
+        let shown = try #require(help(h.hud.last))
+        #expect(shown.title == "Email")
+        #expect(h.captured.inserted.isEmpty)
+        #expect(h.history.entries().isEmpty)
+        #expect(escape.lastRegistrations.map(\.keyCode) == [53])
+    }
+
+    @Test func aLongerSentenceAboutHelpIsDictatedAsUsual() async throws {
+        let h = try Harness(places: [])
+        await h.dictate("I wonder what I can say about this", trigger: "right_command")
+        #expect(h.captured.inserted.count == 1)
+        #expect(!h.hud.states.contains { help($0) != nil })
+    }
+
+    @Test func askingForHelpInVoiceCommandsRunsNothing() async throws {
+        let h = try Harness(places: [personal, work])
+        await h.dictate("show commands")
+        let shown = try #require(help(h.hud.last))
+        #expect(shown.title == Mode.voiceCommands.name)
+        #expect(shown.rows.contains { $0.said == "open personal mail" })
+        #expect(shown.rows.contains { $0.said == "open Safari" } && shown.rows.contains { $0.said == "switch to Ghostty" })
+        #expect(shown.rows.map(\.said) == shown.rows.map(\.said).sorted { $0.localizedStandardCompare($1) == .orderedAscending })
+        #expect(h.system.openedURLs.isEmpty && h.system.opened.isEmpty)
+    }
+
+    @Test func escapeOrTheNextRecordingClosesHelpAndReleasesEscape() async throws {
+        let h = try Harness(places: [])
+        let escape = FakeChordRegistrar()
+        h.controller.helpEscape = escape
+        await h.dictate("what can I say", trigger: "right_command")
+        try #require(escape.lastRegistrations.first).onPressed()
+        #expect(h.hud.last == .hidden)
+        #expect(escape.lastRegistrations.isEmpty)
+
+        await h.dictate("what can I say", trigger: "right_command")
+        #expect(escape.lastRegistrations.count == 1)
+        h.engine.text = "hello"
+        await h.press("right_command")
+        #expect(escape.lastRegistrations.isEmpty)
+        #expect(help(h.hud.last) == nil)
+    }
+
+    @Test func helpClosesOnItsOwnUnlessThePointerIsOverIt() async throws {
+        let h = try Harness(places: [])
+        h.controller.helpSeconds = 0.05
+        await h.dictate("what can I say", trigger: "right_command")
+        h.controller.helpHover(true)
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(help(h.hud.last) != nil)
+        h.controller.helpHover(false)
+        for _ in 0..<100 where h.hud.last != .hidden { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(h.hud.last == .hidden)
+    }
+
+    @Test func anotherMessageOverHelpReleasesEscapeAndKeepsItsOwnTimer() async throws {
+        let h = try Harness(places: [])
+        let escape = FakeChordRegistrar()
+        h.controller.helpEscape = escape
+        h.controller.helpSeconds = 0.05
+        await h.dictate("what can I say", trigger: "right_command")
+        #expect(escape.lastRegistrations.count == 1)
+        h.controller.announceConfigProblems([.unusedKeys("settings.toml", [])])
+        #expect(escape.lastRegistrations.isEmpty)
+        try await Task.sleep(for: .milliseconds(200))
+        guard case .advisory = h.hud.last else {
+            Issue.record("help's timer hid the newer message, got \(String(describing: h.hud.last))"); return
+        }
+    }
+
+    @Test func helpStaysWhileVoiceOverIsRunning() async throws {
+        let h = try Harness(places: [])
+        h.controller.helpSeconds = 0.05
+        h.controller.voiceOverRunning = { true }
+        await h.dictate("what can I say", trigger: "right_command")
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(help(h.hud.last) != nil)
+    }
+
+    @Test func askingForHelpAtAChoiceKeepsTheChoiceAndSaysHowToAnswer() async throws {
+        let h = try Harness(places: [personal, work])
+        await h.dictate("open mail")
+        let prompt = try #require(h.prompt)
+        await h.dictate("what can I say")
+        #expect(h.prompt?.id == prompt.id)
+        guard case .choice(_, .waiting(let note?, _, _), _) = h.hud.last else {
+            Issue.record("expected the choice with a note, got \(String(describing: h.hud.last))"); return
+        }
+        #expect(note == VoiceCommandRunner.choiceHelp)
+        #expect(h.system.openedURLs.isEmpty)
     }
 
     private static let notACommand = "Not a command. Say \u{201C}open\u{201D} "

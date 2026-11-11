@@ -13,8 +13,10 @@ final class HUDModel: ObservableObject {
             default: break
             }
             if state != .hidden { shown = state }
+            if case .help = state, oldValue.spokenHelp == nil { helpExpanded = false }
         }
     }
+    @Published var helpExpanded = false
     @Published private(set) var recordingAdmission = 0
     // What the card draws. Hiding keeps the last card so the panel fades out whole; redrawing it as hidden
     // mid-fade dropped the card's background while the buttons' bezels lingered.
@@ -54,6 +56,8 @@ final class HUDController: HUDPresenting {
     var onEscapeCancel: (() -> Void)?
     var onChooseVoiceCommand: ((Int, String) -> Void)?
     var onCancelVoiceCommandChoice: ((Int) -> Void)?
+    var onCloseHelp: (() -> Void)?
+    var onHelpHover: ((Bool) -> Void)?
     var canCancel: (() -> Bool)?
     var onVisibilityChange: ((Bool) -> Void)?
     private var localKeyMonitor: Any?
@@ -127,6 +131,11 @@ final class HUDController: HUDPresenting {
         }
     }
 
+    private func expandHelp() {
+        model.helpExpanded = true
+        if let panel { resize(panel, to: model.state) }
+    }
+
     // Realizes the panel ahead of the first dictation so the first `.recording` render is instant. Never
     // orders it on screen — render() does that once state leaves .hidden.
     func prewarm() {
@@ -153,7 +162,10 @@ final class HUDController: HUDPresenting {
                 }
             },
             onChoose: { [weak self] id, identity in self?.onChooseVoiceCommand?(id, identity) },
-            onCancelChoice: { [weak self] id in self?.onCancelVoiceCommandChoice?(id) }))
+            onCancelChoice: { [weak self] id in self?.onCancelVoiceCommandChoice?(id) },
+            onCloseHelp: { [weak self] in self?.onCloseHelp?() },
+            onHelpHover: { [weak self] hovering in self?.onHelpHover?(hovering) },
+            onExpandHelp: { [weak self] in self?.expandHelp() }))
         // Let the panel grow to the content's intrinsic height (badges wrap, text never ellipsizes); the
         // width comes from the state. `resize` reads fittingSize and grows upward.
         hosting.sizingOptions = [.intrinsicContentSize]
@@ -431,10 +443,15 @@ private struct HUDView: View {
     let onErrorAction: (HUDErrorAction) -> Void
     let onChoose: (Int, String) -> Void
     let onCancelChoice: (Int) -> Void
+    let onCloseHelp: () -> Void
+    let onHelpHover: (Bool) -> Void
+    let onExpandHelp: () -> Void
 
     var body: some View {
         if case .choice(let prompt, _, _) = model.shown {
             card(choiceBody(prompt))
+        } else if let help = model.shown.spokenHelp {
+            card(helpBody(help)).onHover(perform: onHelpHover)
         } else {
             card(standardBody)
         }
@@ -492,6 +509,57 @@ private struct HUDView: View {
             }
             .buttonStyle(HUDActionButtonStyle())
         }
+    }
+
+    private func helpBody(_ help: SpokenHelp) -> some View {
+        VerticalStack(spacing: 8, reversed: model.listAbove) {
+            HStack(spacing: 10) {
+                icon
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(primary).font(.system(size: 13, weight: .semibold))
+                    if let secondary { secondaryText(secondary) }
+                }
+                Spacer(minLength: 0)
+                Button(action: onCloseHelp) { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Close")
+                    .accessibilityIdentifier(AccessibilityID.HUD.helpClose)
+            }
+            helpList(help)
+        }
+    }
+
+    private func helpList(_ help: SpokenHelp) -> some View {
+        let rows = model.helpExpanded ? help.rows : Array(help.rows.prefix(HUDState.helpRowsShown))
+        let list = VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(row.said).font(.system(size: 13, weight: .medium))
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text([row.effect, row.note].compactMap { $0 }.joined(separator: " \u{00B7} "))
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier(AccessibilityID.HUD.helpRow)
+            }
+        }
+        return VStack(alignment: .leading, spacing: 6) {
+            if let status = help.status {
+                Text(status).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+            }
+            if let height = HUDState.helpListHeight(rows: rows, screenHeight: model.screenHeight) {
+                ScrollView(.vertical) { list }.frame(height: height)
+            } else {
+                list
+            }
+            if !model.helpExpanded, help.rows.count > HUDState.helpRowsShown {
+                Button("Show \(help.rows.count - HUDState.helpRowsShown) more", action: onExpandHelp)
+                    .buttonStyle(HUDActionButtonStyle())
+                    .accessibilityIdentifier(AccessibilityID.HUD.helpMore)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var header: some View {
@@ -668,6 +736,11 @@ private struct HUDView: View {
             Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
         case .advisory:
             Image(systemName: "info.circle").foregroundStyle(.secondary)
+        case .help:
+            Image(systemName: "info.circle")
+                .font(.system(size: 20))
+                .foregroundStyle(.secondary)
+                .frame(width: 30, height: 30)
         case .none:
             EmptyView()
         case .warning:
