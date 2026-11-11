@@ -264,4 +264,157 @@ struct ScratchPasteRestoreTests {
         await TextInserter.drainPendingRestore()
         #expect(pb.string(forType: .string) == "USER_ORIGINAL")
     }
+
+    private func pasteCountingCaptures(_ text: String, on pb: NSPasteboard) async -> (TextInserter.ScratchPaste?, Int) {
+        var captures = 0
+        let scratch = await TextInserter.beginScratchPaste(text, on: pb, afterCapture: { captures += 1 })
+        return (scratch, captures)
+    }
+
+    @Test func aClipboardSnapshotTakenDuringTranscriptionIsUsedForThePaste() async {
+        let pb = makePasteboard()
+        pb.clearContents()
+        pb.setString("USER_ORIGINAL", forType: .string)
+
+        TextInserter.prefetchSnapshot(on: pb)
+        let (scratch, captures) = await pasteCountingCaptures("dictation", on: pb)
+        #expect(captures == 0)
+        await TextInserter.settleScratch(scratch!, awaitSettle: true)
+        await TextInserter.drainPendingRestore()
+        #expect(pb.string(forType: .string) == "USER_ORIGINAL")
+    }
+
+    @Test func aCopyAfterTheEarlySnapshotForcesAFreshOne() async {
+        let pb = makePasteboard()
+        pb.clearContents()
+        pb.setString("USER_ORIGINAL", forType: .string)
+
+        TextInserter.prefetchSnapshot(on: pb)
+        pb.clearContents()
+        pb.setString("USER_COPIED_LATER", forType: .string)
+        let (scratch, captures) = await pasteCountingCaptures("dictation", on: pb)
+        #expect(captures == 1)
+        await TextInserter.settleScratch(scratch!, awaitSettle: true)
+        await TextInserter.drainPendingRestore()
+        #expect(pb.string(forType: .string) == "USER_COPIED_LATER")
+    }
+
+    @Test func theEarlySnapshotDrainsTheLastPastesPendingRestoreFirst() async {
+        let pb = makePasteboard()
+        pb.clearContents()
+        pb.setString("USER_ORIGINAL", forType: .string)
+        let first = await TextInserter.beginScratchPaste("dictationA", on: pb)
+        await TextInserter.settleScratch(first!, awaitSettle: false)
+
+        TextInserter.prefetchSnapshot(on: pb)
+        let (second, _) = await pasteCountingCaptures("dictationB", on: pb)
+        await TextInserter.settleScratch(second!, awaitSettle: true)
+        await TextInserter.drainPendingRestore()
+        #expect(pb.string(forType: .string) == "USER_ORIGINAL")
+    }
+
+    @Test func anEarlySnapshotServesOnePasteOnly() async {
+        let pb = makePasteboard()
+        pb.clearContents()
+        pb.setString("USER_ORIGINAL", forType: .string)
+
+        TextInserter.prefetchSnapshot(on: pb)
+        let (first, _) = await pasteCountingCaptures("dictationA", on: pb)
+        await TextInserter.settleScratch(first!, awaitSettle: true)
+        await TextInserter.drainPendingRestore()
+        let (second, captures) = await pasteCountingCaptures("dictationB", on: pb)
+        #expect(captures == 1)
+        await TextInserter.settleScratch(second!, awaitSettle: true)
+        await TextInserter.drainPendingRestore()
+    }
+
+    @Test func anEarlySnapshotOfAnotherPasteboardIsNotUsed() async {
+        let other = makePasteboard()
+        other.clearContents()
+        other.setString("OTHER", forType: .string)
+        let pb = makePasteboard()
+        pb.clearContents()
+        pb.setString("USER_ORIGINAL", forType: .string)
+
+        TextInserter.prefetchSnapshot(on: other)
+        let (scratch, captures) = await pasteCountingCaptures("dictation", on: pb)
+        #expect(captures == 1)
+        await TextInserter.settleScratch(scratch!, awaitSettle: true)
+        await TextInserter.drainPendingRestore()
+        #expect(pb.string(forType: .string) == "USER_ORIGINAL")
+        TextInserter.discardPrefetchedSnapshot()
+    }
+
+    @Test func aDiscardedEarlySnapshotIsNotUsed() async {
+        let pb = makePasteboard()
+        pb.clearContents()
+        pb.setString("USER_ORIGINAL", forType: .string)
+
+        TextInserter.prefetchSnapshot(on: pb)
+        TextInserter.discardPrefetchedSnapshot()
+        let (scratch, captures) = await pasteCountingCaptures("dictation", on: pb)
+        #expect(captures == 1)
+        await TextInserter.settleScratch(scratch!, awaitSettle: true)
+        await TextInserter.drainPendingRestore()
+    }
+
+    private final class OneLineEngine: SpeechEngine, @unchecked Sendable {
+        let id = "fixed"
+        let displayName = "Fixed"
+        let supportsRecognitionBias = false
+        func loadIfNeeded() async throws {}
+        func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
+            try await Task.sleep(for: .milliseconds(50))
+            return "hello there"
+        }
+        func evict() async {}
+    }
+
+    private final class SilentAudio: AudioCapturing, @unchecked Sendable {
+        private let url: URL
+        init(url: URL) { self.url = url }
+        func start(sampleRate: Int) async throws -> URL { url }
+        func stop() -> URL? { url }
+    }
+
+    @Test func aTakesEarlySnapshotReachesItsPasteThroughTheController() async throws {
+        let pb = makePasteboard()
+        pb.clearContents()
+        pb.setString("USER_ORIGINAL", forType: .string)
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-prefetch-take-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: dir.appendingPathComponent("modes", isDirectory: true), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "fixed", eviction: .frugal)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
+        var captures = 0
+        var pasted: String?
+        let controller = DictationController(
+            settings: settings, provider: try SpeechEngineProvider(engines: [OneLineEngine()], activeId: "fixed"),
+            config: ConfigCache(supportDir: dir), history: HistoryStore(supportDir: dir), hud: nil,
+            permits: { _ in true }, audio: SilentAudio(url: dir.appendingPathComponent("capture.wav")),
+            insert: { _, _, _, text, _ in
+                guard let scratch = await TextInserter.beginScratchPaste(text, on: pb, afterCapture: { captures += 1 })
+                else { return false }
+                pasted = pb.string(forType: .string)
+                await TextInserter.settleScratch(scratch, awaitSettle: true)
+                return true
+            },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle", pid: 100) },
+            micStatus: { .granted },
+            accessibilityGranted: { true },
+            prefetchClipboard: { TextInserter.prefetchSnapshot(on: pb) },
+            discardPrefetchedClipboard: { TextInserter.discardPrefetchedSnapshot() })
+
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.handleCommit()
+        await controller.dictationTask?.value
+        await TextInserter.drainPendingRestore()
+        #expect(pasted?.trimmingCharacters(in: .whitespaces) == "hello there")
+        #expect(captures == 0)
+        #expect(pb.string(forType: .string) == "USER_ORIGINAL")
+    }
 }

@@ -52,3 +52,11 @@ Read before changing text insertion, pasteboard capture or restore, selection ca
   enum TextInserter` yet its members are nonisolated unless annotated — `capture`/`restore`/`restoreFull` each
   say so explicitly); and a `SlowDataProvider`-style test now sleeps **on the main actor**, so keep such
   delays just over the budget (~0.3 s, never seconds) or it starves every other `@MainActor` test in the suite.
+- **A take snapshots the clipboard while the engine transcribes, not between the transcript and ⌘V.**
+  `TextInserter.prefetchSnapshot` is an ordinary synchronous main-actor `capture`, run from a main-actor
+  task while the take is suspended on the engine, so the render costs no time after the transcript unless
+  inference finishes first. It drains a pending restore before it captures, for the same reason
+  `beginScratchPaste` does. `beginScratchPaste` uses a prefetched snapshot once, only for the same
+  pasteboard and only when `changeCount` has not moved; anything else is a fresh capture. The take awaits
+  its prefetch before anything can paste, a prefetch for a take that already ended does nothing, and every
+  terminal discards the slot.

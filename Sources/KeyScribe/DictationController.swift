@@ -39,6 +39,8 @@ final class DictationController {
     private let accessibilityGranted: @MainActor () -> Bool
     private let frontmostBundleId: @MainActor () -> String?
     private let precedingTextProbe: @MainActor (pid_t, String?) async -> String?
+    private let prefetchClipboard: @MainActor () -> Void
+    private let discardPrefetchedClipboard: @MainActor () -> Void
     private let activeEngineUsable: @MainActor (any SpeechEngine) -> Bool
     private let isSessionLocked: @MainActor () -> Bool
     private let llmClient: any LLMClient
@@ -307,6 +309,8 @@ final class DictationController {
         snapshotAsync: (@MainActor () async -> TargetSnapshot)? = nil,
         micStatus: @escaping @MainActor () -> PermissionStatus = { Permissions.microphoneStatus() },
         accessibilityGranted: @escaping @MainActor () -> Bool = { Permissions.accessibilityStatus() == .granted },
+        prefetchClipboard: @escaping @MainActor () -> Void = {},
+        discardPrefetchedClipboard: @escaping @MainActor () -> Void = {},
         frontmostBundleId: @escaping @MainActor () -> String? = { NSWorkspace.shared.frontmostApplication?.bundleIdentifier },
         precedingTextProbe: @escaping @MainActor (pid_t, String?) async -> String? = { await ContextProbe.precedingText(pid: $0, windowId: $1) },
         activeEngineUsable: @escaping @MainActor (any SpeechEngine) -> Bool = { engine in
@@ -349,6 +353,8 @@ final class DictationController {
         self.accessibilityGranted = accessibilityGranted
         self.frontmostBundleId = frontmostBundleId
         self.precedingTextProbe = precedingTextProbe
+        self.prefetchClipboard = prefetchClipboard
+        self.discardPrefetchedClipboard = discardPrefetchedClipboard
         self.activeEngineUsable = activeEngineUsable
         self.isSessionLocked = isSessionLocked
         self.llmClient = llmClient
@@ -597,6 +603,8 @@ final class DictationController {
                 // A late resolution must not show the HUD before admission opens.
                 if self.machine.state == .recording {
                     self.hud.present(self.recordingHUD(level: max(0, self.lastRenderedLevel)))
+                } else if self.machine.state == .transcribing {
+                    self.renameTranscribingHUD()
                 }
             }
         } else {
@@ -806,6 +814,7 @@ final class DictationController {
         // an aborted dictation with a live session gets its lock freed here (else the engine wedges).
         if let teardown = session?.recorder.tearDown() { streamingCancelTask = teardown }
         engines.releaseProtection()
+        discardPrefetchedClipboard()
         session = nil
         activeStartTrigger = nil
         scheduleCaptureRefresh()
@@ -1342,6 +1351,30 @@ final class DictationController {
         applyResolvedMode(triggerKey: triggerKey, url: url, windowTitle: windowTitle)
     }
 
+    private func renameTranscribingHUD() {
+        switch hud.lastPresented {
+        case .transcribing(_, let status)?: hud.present(.transcribing(mode: currentModeName, status: status))
+        case .loadingModel?: hud.present(.loadingModel(mode: currentModeName))
+        default: break
+        }
+    }
+
+    func startClipboardPrefetch() -> Task<Void, Never>? {
+        guard let identity = session?.identity else { return nil }
+        return Task { @MainActor [weak self] in
+            guard let self, self.session?.identity === identity else { return }
+            self.prefetchClipboard()
+        }
+    }
+
+    // The secure-aware snapshot decides whether the mode is neutered (secure/unconfirmed target). Settle it
+    // before any cloud rewrite reads activeMode, so a target that couldn't be confirmed can't leak (KS-01).
+    // Adoption is not cancelled on commit, so this observes the real result.
+    private func settleModeAndTarget() async {
+        await session?.modeResolveTask?.value
+        await session?.snapshotAdoptionTask?.value
+    }
+
     // Dictionary terms fed to recognition bias before STT. Only the Phase-A mode's dictionary (⊕ global) is
     // known here — a Phase-B route resolves post-STT and can't bias recognition (design.md §4.3). Normalized
     // once (trims, drops blanks). Engines without bias ignore these.
@@ -1370,11 +1403,8 @@ final class DictationController {
     }
 
     private func transcribeAndInsert(url: URL, audioSeconds: Double?, samples: [Float]? = nil, reading: SpeechPresenceReading? = nil, streamedTranscript: String? = nil) async {
-        await session?.modeResolveTask?.value
-        // The secure-aware snapshot decides whether the mode is neutered (secure/unconfirmed target). Settle
-        // it before any cloud rewrite reads activeMode, so a target that couldn't be confirmed can't leak
-        // (KS-01). Adoption is not cancelled on commit, so this observes the real result.
-        await session?.snapshotAdoptionTask?.value
+        let transcribesWithoutTheMode = session?.capturedRecognitionBias == false
+        if !transcribesWithoutTheMode { await settleModeAndTarget() }
         // A password field can steal focus AFTER adoption settled (autofill, a manager prompt, the user
         // clicking a login form mid-recording). The press/adoption snapshots cannot see that, so re-probe at
         // commit and fold the result in before the rewrite and history read it (X-1). Started here so the AX
@@ -1409,12 +1439,17 @@ final class DictationController {
                     try await task.value
                 }
             }
-            func failModelLoadTerminal(_ error: Error) {
+            func settledBeforeFailing() async -> Bool {
+                if transcribesWithoutTheMode { await settleModeAndTarget() }
+                return !Task.isCancelled
+            }
+            func failModelLoadTerminal(_ error: Error) async {
                 try? FileManager.default.removeItem(at: url)
                 engines.invalidateWarm(engine.id)
                 let timedOut = error is DeadlineExceeded
                 recordModelLoadFailure(engine.id, timedOut, String(describing: error))
                 log.error("model load \(timedOut ? "timed out" : "failed", privacy: .public) (\(engine.id, privacy: .public)): \(error, privacy: .public)")
+                guard await settledBeforeFailing() else { return }
                 finishError(timedOut ? "Loading the speech model timed out" : "Could not load the speech model")
             }
             let modelWaitStart = DispatchTime.now()
@@ -1427,7 +1462,7 @@ final class DictationController {
             } catch {
                 if Task.isCancelled { loadingHUD.cancel(); try? FileManager.default.removeItem(at: url); return }
                 // A genuine 300 s hang is not retried — a second wait is worse than surfacing.
-                if error is DeadlineExceeded { loadingHUD.cancel(); failModelLoadTerminal(error); return }
+                if error is DeadlineExceeded { loadingHUD.cancel(); await failModelLoadTerminal(error); return }
                 // One automatic retry: a cold CoreML/MLX compile can fail transiently right after launch; a
                 // fresh reload usually succeeds. invalidateWarm drops the failed task so warm(engine) builds a
                 // new one; the HUD stays on `transcribing`, so a recovered transient is invisible. Mirrors the
@@ -1439,7 +1474,7 @@ final class DictationController {
                 } catch {
                     loadingHUD.cancel()
                     if Task.isCancelled { try? FileManager.default.removeItem(at: url); return }
-                    failModelLoadTerminal(error)
+                    await failModelLoadTerminal(error)
                     return
                 }
             }
@@ -1454,6 +1489,7 @@ final class DictationController {
             building.stageMillis[.modelWait] = elapsedMs(since: modelWaitStart)
 
             let transcribeStart = DispatchTime.now()
+            let clipboardSnapshot = startClipboardPrefetch()
             do {
                 await awaitSelfTestClearance()
                 rawFromEngine = try await transcriber.transcribe(
@@ -1465,6 +1501,7 @@ final class DictationController {
                 transcriber.noteBusyRejection()
                 if Task.isCancelled { return }
                 log.error("transcribe rejected — previous transcription still running (\(engine.id, privacy: .public))")
+                guard await settledBeforeFailing() else { return }
                 finishError("Still finishing the previous dictation")
                 return
             } catch is DeadlineExceeded {
@@ -1480,21 +1517,29 @@ final class DictationController {
                         engine: engine, audioSeconds: audioSeconds ?? 0, reading: reading,
                         decision: Transcriber.RecoveryDecision(
                             attempted: true, outcome: "retry-deadline", trimmedSeconds: trimmedSeconds))
+                    guard await settledBeforeFailing() else { return }
                     finishHeardButNoText(engine: engine)
                     return
                 }
                 log.error("transcribe timed out (\(engine.id, privacy: .public))")
+                guard await settledBeforeFailing() else { return }
                 finishError("Transcription timed out")
                 return
             } catch {
                 try? FileManager.default.removeItem(at: url)
                 if Task.isCancelled { return }
                 log.error("transcribe failed (\(engine.id, privacy: .public)): \(error, privacy: .public)")
+                guard await settledBeforeFailing() else { return }
                 finishError("Transcription failed")
                 return
             }
             try? FileManager.default.removeItem(at: url)
             building.stageMillis[.transcribe] = elapsedMs(since: transcribeStart)
+            await clipboardSnapshot?.value
+        }
+        if transcribesWithoutTheMode {
+            if Task.isCancelled { return }
+            await settleModeAndTarget()
         }
         // A no-speech clip an engine renders as a whole-utterance annotation (Whisper's `[BLANK_AUDIO]` /
         // `(water running)`) collapses to "" here, so routing/history/outcome see empty and short-circuit to

@@ -10,6 +10,7 @@ enum TextInserter {
     private static var pendingRestore: ScratchPaste?
     private static var pendingRestoreBackstop: Task<Void, Never>?
     private static var pendingRestoreGeneration = 0
+    private static var prefetched: (pb: NSPasteboard, snapshot: PasteboardSnapshot)?
 
     // Reads the target app's current selection. Native apps expose it via AX, read directly (no ⌘C, so an
     // empty selection can't beep or grab the current line). AX-unavailable (Electron/Chromium) falls back to
@@ -206,17 +207,33 @@ enum TextInserter {
         let provider: ScratchProvider?
     }
 
+    static func prefetchSnapshot(on pb: NSPasteboard = .general) {
+        drainPendingRestoreNow()
+        prefetched = (pb, PasteboardSnapshot.capture(from: pb))
+    }
+
+    static func discardPrefetchedSnapshot() {
+        prefetched = nil
+    }
+
     // Snapshots the clipboard and writes the scratch value ⌘V will paste. Drains any in-flight detached
     // restore first so the snapshot is the user's real clipboard, not a prior paste's scratch text
     // (restoring that would leak dictated content). nil ⇒ scratch write unverified, caller must not ⌘V.
     static func beginScratchPaste(_ text: String, on pb: NSPasteboard, concealed: Bool = true, lazy: Bool = false, afterCapture: (() -> Void)? = nil) async -> ScratchPaste? {
         await drainPendingRestore()
+        let early = prefetched.flatMap { $0.pb === pb && $0.snapshot.changeCount == pb.changeCount ? $0.snapshot : nil }
+        prefetched = nil
         // ONE deadline across every capture below: each renders on the main thread, so a per-capture budget
         // would let a promised-flavor clipboard stall main for up to 4x the bound. A retry that finds it spent
         // degrades to a plain-text snapshot, which is the safe direction — restore still clears the scratch.
         let renderDeadline = PasteboardSnapshot.renderDeadline()
-        var snapshot = PasteboardSnapshot.capture(from: pb, renderDeadline: renderDeadline)
-        afterCapture?()
+        var snapshot: PasteboardSnapshot
+        if let early {
+            snapshot = early
+        } else {
+            snapshot = PasteboardSnapshot.capture(from: pb, renderDeadline: renderDeadline)
+            afterCapture?()
+        }
         // Re-capture until a snapshot spans no concurrent copy, so the scratch write can't clobber a copy
         // that landed mid-capture. If it never stabilizes within the cap, fail closed below rather than
         // clobber an actively-changing clipboard.
