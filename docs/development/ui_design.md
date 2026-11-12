@@ -1692,7 +1692,15 @@ sections:
    reduced, mostly-locked form: shortcut + result handling only.)
 2. **How to start this mode** — keeps the shortcut and **Press behavior** together, followed by an
    optional **Spoken phrase**. The combined press behavior is titled **Hold to talk; tap to toggle**,
-   presenting the two supported actions in parallel. The phrase explanation says what the feature does
+   presenting the two supported actions in parallel. **Double-tap to start** is selectable only while the
+   shortcut is a single modifier key; for any other shortcut it stays listed but disabled, labeled
+   **(single modifier keys only)**, and changing the shortcut to such a key returns the press behavior to
+   the default. A mode file pairing it with another key shows the default behavior in the picker, with an
+   advisory caption naming the requirement and a **Use Hold to talk; tap to toggle** button that writes the
+   default. While the press behavior is double-tap, the shortcut menu adds **Either ⌘**, **Left-⌘**,
+   **Either ⌃** and **Left-⌃** (a lone tap of these does nothing under double-tap, so they are safe only
+   there) and drops ⌃⌥⇧⌘, which double-tap cannot use. During a double-tap take the recording HUD does
+   not take key focus; typing reaches the app, and Escape still cancels. The phrase explanation says what the feature does
    and that the phrase is removed from the result. Add controls precede saved phrases. Plain Dictation
    uses the same shortcut structure and adds one concise explanation of its special fallback role.
    The shortcut well edits the mode's **first** shortcut and preserves any others. Additional

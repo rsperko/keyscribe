@@ -207,6 +207,33 @@ a listen-only tap is delivered async, so the window server does NOT block the sy
 our callback — a busy/wedged main thread can never hold global input hostage, it only delays our own
 observation.
 
+### Double-tap
+
+`PressStyle.doubleTap` is limited to a single-member modifier set (`PressStyle.supports`). Where it differs
+from the other styles, each rule is load-bearing:
+
+- **One resolution.** `Mode.TriggerKey.effectivePressStyle` is what every reader uses — the bindings, the
+  picker, the summaries, first run — so a file pairing double-tap with another key runs, and shows, the
+  default style. `Mode.setPrimaryTriggerKey` resets it when the shortcut changes.
+- **It starts on the second RELEASE, not a press.** The down skips the chord grace and never calls
+  `onEngage`: a first tap opens no mic, and a press is only known to be a standalone tap once it ends. Any
+  later lone press-and-release stops the take, however long it was held, like the other latched styles.
+- **Interruption is `PressGesture.interrupt()`, never `abort()`.** A key, click, user-driven scroll, or
+  foreign modifier (including both sides of a sideless member) ends the current press and the pending
+  first tap but leaves a recording running, so ⌘C mid-take neither stops nor cancels it. Routing it
+  through `abort` would fire `onCancel` and throw the take away.
+- **Both starting taps come from the same physical key.** The monitor keeps the side of a sideless
+  member's last press (`Binding.lastPressSide`, from `ModifierMatcher.pressedSide`) and interrupts when it
+  changes, so left ⌘ then right ⌘ is not a double-tap.
+- **The recording HUD never takes key focus for a double-tap take.** Typing during the take goes to the
+  app untouched, so shortcuts, input methods, and secure fields behave as they do without us. Escape is
+  claimed instead as a Carbon hot key while the HUD is cancellable (`HUDController.setKeyFocusFree`, the
+  same `EscapeClaim` the speaking panel uses). Focus is given up only while that claim holds: if the
+  registration is refused, the HUD takes key focus like any other take, so Escape still cancels and only
+  typing during that take is lost to the panel. Do not reintroduce re-sending the keys the panel took:
+  posting each key to "the frontmost app" lost keys aimed at another process's panel and doubled keys in
+  our own windows.
+
 ### Tap authorization
 
 **Footgun — the authorization is one-directional, so `start()` gates `tapCreate` on
@@ -312,7 +339,8 @@ the HUD is visible and cancellable (see the HUD-is-key footgun in `insertion-and
 ESC does not apply there; the trigger cancels instead). A local `NSEvent` monitor needs no
 permission, but it only sees keys routed to a key window of THIS process.
 
-**ESC-to-stop a spoken reply** is the one exception, because the speaking panel never takes key focus:
+**ESC-to-stop a spoken reply** is an exception, because the speaking panel never takes key focus (a
+double-tap take's recording HUD claims Escape the same way, through `EscapeClaim`):
 `SpeakingHUDController` registers a bare Escape (key code 53, layout-independent) as a Carbon hot key on its
 own `CarbonHotKeys` **only while the panel shows**, and unregisters it when the panel hides, so Escape is
 consumed then and reaches the foreground app at every other time. This does not loosen the bare-key rule

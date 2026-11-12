@@ -114,4 +114,140 @@ struct PressGestureTests {
         g.cancel()
         #expect(g.handle(.down, at: 1.0) == .start)
     }
+
+    @Test func doubleTapExplainsItself() {
+        #expect(PressStyle(rawValue: "double-tap") == .doubleTap)
+        #expect(PressStyle.doubleTap.title == "Double-tap to start")
+        #expect(PressStyle.doubleTap.instruction == "Tap twice to start, then once to stop. Escape cancels.")
+    }
+
+    @Test func everyStyleSaysHowToStartAroundTheKey() {
+        #expect(PressStyle.holdOrTap.invocation == .init(lead: "Hold", trail: "and speak"))
+        #expect(PressStyle.holdOnly.invocation == .init(lead: "Hold", trail: "and speak"))
+        #expect(PressStyle.tapToToggle.invocation == .init(lead: "Tap", trail: "and speak, then tap it again to stop"))
+        #expect(PressStyle.doubleTap.invocation == .init(lead: "Double-tap", trail: "and speak, then tap it again to stop"))
+        #expect(PressStyle.startOnly.invocation == .init(lead: "Press", trail: "and speak"))
+        #expect(PressStyle.stopOnly.invocation == .init(lead: "Press", trail: "to stop"))
+        #expect(PressStyle.doubleTap.invocation.sentence(key: "Right-⌘")
+            == "Double-tap Right-⌘ and speak, then tap it again to stop")
+    }
+
+    @Test func doubleTapSupportsOnlyASingleModifierKey() throws {
+        for key in ["fn", "right_command", "left_command", "command", "control", "option", "left_shift"] {
+            #expect(PressStyle.doubleTap.supports(try KeyDescriptor(parsing: key)), "\(key)")
+        }
+        for key in ["hyper", "left_command+left_control", "option+command+k", "mouse4"] {
+            #expect(!PressStyle.doubleTap.supports(try KeyDescriptor(parsing: key)), "\(key)")
+        }
+        #expect(PressStyle.holdOrTap.supports(try KeyDescriptor(parsing: "option+command+k")))
+    }
+
+    private func doubleTap() -> PressGesture {
+        PressGesture(style: .doubleTap, tapThreshold: 0.25)
+    }
+
+    private func tap(_ g: inout PressGesture, at t: Double, length: Double = 0.08) -> DictationCommand {
+        let down = g.handle(.down, at: t)
+        #expect(down == .none)
+        return g.handle(.up, at: t + length)
+    }
+
+    @Test func doubleTapStartsOnTheSecondReleaseAndATapFinishes() {
+        var g = doubleTap()
+        #expect(tap(&g, at: 0.0) == .none)
+        #expect(tap(&g, at: 0.2) == .start)
+        #expect(tap(&g, at: 3.0) == .commit)
+    }
+
+    @Test func doubleTapIgnoresALoneTap() {
+        var g = doubleTap()
+        #expect(tap(&g, at: 0.0) == .none)
+        #expect(tap(&g, at: 5.0) == .none)
+    }
+
+    @Test func doubleTapNeverStartsFromAHold() {
+        var g = doubleTap()
+        #expect(tap(&g, at: 0.0, length: 1.0) == .none)
+        #expect(tap(&g, at: 1.2) == .none)
+        #expect(tap(&g, at: 1.4) == .start)
+    }
+
+    @Test func doubleTapIgnoresAHeldSecondPress() {
+        var g = doubleTap()
+        #expect(tap(&g, at: 0.0) == .none)
+        #expect(tap(&g, at: 0.2, length: 1.0) == .none)
+        #expect(tap(&g, at: 1.4) == .none)
+    }
+
+    @Test func doubleTapIgnoresASlowPair() {
+        var g = doubleTap()
+        #expect(tap(&g, at: 0.0) == .none)
+        #expect(tap(&g, at: 0.6) == .none)
+        #expect(tap(&g, at: 0.8) == .start)
+    }
+
+    @Test func doubleTapIgnoresAutoRepeatDowns() {
+        var g = doubleTap()
+        #expect(tap(&g, at: 0.0) == .none)
+        #expect(g.handle(.down, at: 0.2) == .none)
+        #expect(g.handle(.down, at: 0.25) == .none)
+        #expect(g.handle(.up, at: 0.3) == .start)
+    }
+
+    @Test func anInterruptionBetweenTapsResetsTheSequence() {
+        var g = doubleTap()
+        #expect(tap(&g, at: 0.0) == .none)
+        g.interrupt()
+        #expect(tap(&g, at: 0.2) == .none)
+        #expect(tap(&g, at: 0.4) == .start)
+    }
+
+    @Test func anInterruptedSecondPressDoesNotStart() {
+        var g = doubleTap()
+        #expect(tap(&g, at: 0.0) == .none)
+        _ = g.handle(.down, at: 0.2)
+        g.interrupt()
+        #expect(g.handle(.up, at: 0.25) == .none)
+        #expect(tap(&g, at: 0.4) == .none)
+    }
+
+    @Test func aShortcutDuringATakeNeitherFinishesNorEndsIt() {
+        var g = doubleTap()
+        _ = tap(&g, at: 0.0)
+        #expect(tap(&g, at: 0.2) == .start)
+        _ = g.handle(.down, at: 2.0)
+        g.interrupt()
+        #expect(g.handle(.up, at: 2.1) == .none)
+        #expect(tap(&g, at: 3.0) == .commit)
+    }
+
+    @Test func anyLonePressDuringATakeFinishesIt() {
+        var g = doubleTap()
+        _ = tap(&g, at: 0.0)
+        #expect(tap(&g, at: 0.2) == .start)
+        #expect(tap(&g, at: 2.0, length: 1.0) == .commit)
+    }
+
+    @Test func aRapidThirdTapDoesNotFinishTheNewTake() {
+        var g = doubleTap()
+        _ = tap(&g, at: 0.0)
+        #expect(tap(&g, at: 0.2) == .start)
+        #expect(tap(&g, at: 0.4) == .none)
+        #expect(tap(&g, at: 2.0) == .commit)
+    }
+
+    @Test func cancelClearsAPendingFirstTap() {
+        var g = doubleTap()
+        _ = tap(&g, at: 0.0)
+        g.cancel()
+        #expect(tap(&g, at: 0.2) == .none)
+        #expect(tap(&g, at: 0.4) == .start)
+    }
+
+    @Test func otherStylesIgnoreInterrupt() {
+        var g = PressGesture(style: .holdOnly, tapThreshold: 0.3)
+        #expect(g.handle(.down, at: 0.0) == .start)
+        g.interrupt()
+        #expect(g.handle(.up, at: 1.0) == .commit)
+    }
 }

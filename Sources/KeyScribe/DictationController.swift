@@ -637,7 +637,8 @@ final class DictationController {
         answers?.close()
         silencer.recordingStarted()
         activeStartTrigger = triggerKey
-        latchedTriggerName = (pressStyle == .tapToToggle)
+        hud.setKeyFocusFree(pressStyle == .doubleTap)
+        latchedTriggerName = [.tapToToggle, .doubleTap].contains(pressStyle)
             ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
         hideTask?.cancel()
         help.release()

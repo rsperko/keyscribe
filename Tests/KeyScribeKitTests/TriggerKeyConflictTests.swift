@@ -30,6 +30,16 @@ struct TriggerKeyConflictTests {
         #expect(TriggerKeyConflicts.conflict(for: mail, in: [textEdit, mail]) == nil)
     }
 
+    @Test func aSingleTapAndADoubleTapOnOverlappingKeysNeverBothRegister() {
+        let single = mode("single", key: "command")
+        var double = mode("double", key: "right_command")
+        double.triggerKeys[0].pressStyle = "double-tap"
+        #expect(TriggerKeyConflicts.conflict(for: double, in: [single, double])?.kind == .unreachable)
+        #expect(TriggerKeyConflicts.conflict(for: single, in: [single, double])?.kind == .collision)
+        let shadowed = HotkeyConflicts.shadowed(HotkeyConflicts.modeRegistrants([single, double]))
+        #expect(shadowed == [HotkeyConflicts.registrantId(mode: double, index: 0)])
+    }
+
     @Test func sharedStopShortcutsDoNotReportOpposingActions() {
         var first = mode("first", key: "option+command+k")
         var second = mode("second", key: "option+command+k")

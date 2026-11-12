@@ -144,6 +144,18 @@ If a trigger records but never fires, check that you are pressing the side you r
 means the left ⌘ specifically. Record it again to change sides, or edit that mode's file under
 `modes/` to the sideless `command`, which matches either key.
 
+With **Double-tap to start**, both taps must be quick, close together, and on the same key: left ⌘
+then right ⌘ does not count, even when the shortcut is either ⌘. Typing, clicking, scrolling, or
+another modifier between the taps starts the count over. While recording, a shortcut such as ⌘C uses
+the key without stopping the dictation, and the keys you type go to the app you are dictating into;
+press the key on its own to stop.
+
+macOS Dictation can be set to the same double-tap (System Settings > Keyboard > Dictation >
+Shortcut). KeyScribe only listens to keys and does not block them, so if both use the same key, both
+start. KeyScribe does not detect this; change one of the two shortcuts. For Fn, also check **Press 🌐
+key to** in System Settings > Keyboard, since a single Fn press there can show emoji or switch input
+sources.
+
 If two modes are set to shortcuts that overlap without being the same — one `command` and one
 `right_command`, say, where pressing the right ⌘ satisfies both — only one of them can fire. Settings
 flags the mode that loses, in its trigger row and in the Modes list, and the menu-bar icon carries the

@@ -5,11 +5,15 @@ import Testing
 
 @MainActor
 struct FirstRunPlaygroundTests {
-    private func connectedModel() async -> (FirstRunModel, URL) {
+    private func connectedModel(polishPressStyle: PressStyle? = nil) async -> (FirstRunModel, URL) {
         let supportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-first-run-playground-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         ModeStore.seedStarterFilesForTesting(in: modesDir)
+        if let polishPressStyle, var polish = ModeStore.starterModes().first(where: { $0.id == "polish" }) {
+            polish.setPrimaryPressStyle(polishPressStyle.rawValue)
+            try? ModeStore.write(polish, to: modesDir)
+        }
         let model = FirstRunModel(
             download: { _, _ in },
             selectEngine: { _ in },
@@ -39,6 +43,20 @@ struct FirstRunPlaygroundTests {
         let selection = model.playgroundLessons.first { $0.modeId == "edit-selection" }
         #expect(selection?.invocation.contains("⌘") == true)
         #expect(selection?.hint.contains("Right-⌘") == true)
+    }
+
+    @Test func aLessonSaysHowItsOwnPressBehaviorStarts() async {
+        let (model, supportDir) = await connectedModel(polishPressStyle: .doubleTap)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+
+        model.enterPlayground()
+
+        let polish = model.playgroundLessons.first { $0.modeId == "polish" }
+        #expect(polish?.invocation == "Double-tap Right-⌥ and speak, then tap it again to stop")
+        #expect(polish?.pressStyle == .doubleTap)
+        #expect(polish?.hint.contains("double-tap Right-⌥") == true)
+        let selection = model.playgroundLessons.first { $0.modeId == "edit-selection" }
+        #expect(selection?.invocation.hasPrefix("Hold ") == true)
     }
 
     @Test func enteringPlaygroundSeedsAnImmediatelyPolishableExample() async {

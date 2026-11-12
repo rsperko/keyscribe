@@ -530,10 +530,12 @@ extension HUDState {
 protocol HUDPresenting: AnyObject {
     func render(_ state: HUDState)
     func relinquishKeyFocus()
+    func setKeyFocusFree(_ free: Bool)
 }
 
 extension HUDPresenting {
     func relinquishKeyFocus() {}
+    func setKeyFocusFree(_ free: Bool) {}
 }
 
 extension HUDState {

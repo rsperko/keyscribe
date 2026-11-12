@@ -96,6 +96,21 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         }
         public var startsDictation: Bool { pressStyle != PressStyle.stopOnly.rawValue }
 
+        public var effectivePressStyle: PressStyle {
+            guard let style = PressStyle(rawValue: pressStyle), Self.key(key, allows: style) else { return .holdOrTap }
+            return style
+        }
+
+        public var unsupportedPressStyle: PressStyle? {
+            guard let style = PressStyle(rawValue: pressStyle), !Self.key(key, allows: style) else { return nil }
+            return style
+        }
+
+        public static func key(_ key: String, allows style: PressStyle) -> Bool {
+            guard let descriptor = try? KeyDescriptor(parsing: key) else { return true }
+            return style.supports(descriptor)
+        }
+
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             key = try c.decode(String.self, forKey: .key)
@@ -116,6 +131,9 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
                 tapThresholdMs: remembered?.tapThresholdMs ?? TriggerKey.defaultTapThresholdMs)]
         } else {
             triggerKeys[0].key = key
+        }
+        if triggerKeys[0].unsupportedPressStyle != nil {
+            triggerKeys[0].pressStyle = TriggerKey.defaultPressStyle
         }
         return nil
     }

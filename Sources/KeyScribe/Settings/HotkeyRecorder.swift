@@ -43,7 +43,7 @@ struct ShortcutWell: View {
                     Picker(selection: namedSelection, label: EmptyView()) {
                         Text("None").tag(noneMenuTag)
                         ForEach(profile.suggestedModifierTriggers, id: \.canonical) { suggestion in
-                            Text(suggestion.displayString).tag(suggestion.canonical)
+                            Text(suggestion.suggestionTitle).tag(suggestion.canonical)
                         }
                         if isUnlisted(descriptor) { Text("Custom").tag(unlistedMenuTag) }
                     }

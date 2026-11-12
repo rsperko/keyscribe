@@ -353,9 +353,20 @@ import Testing
         #expect(model.hint == nil)
     }
 
+    @Test func eitherSideSuggestionsSayEither() throws {
+        #expect(try KeyDescriptor(parsing: "command").suggestionTitle == "Either ⌘")
+        #expect(try KeyDescriptor(parsing: "control").suggestionTitle == "Either ⌃")
+        #expect(try KeyDescriptor(parsing: "right_command").suggestionTitle == "Right-⌘")
+        #expect(try KeyDescriptor(parsing: "fn").suggestionTitle == "Fn (Globe)")
+        #expect(try KeyDescriptor(parsing: "hyper").suggestionTitle == "⌃⌥⇧⌘")
+    }
+
     @Test func actionChordProfileOffersNoModifierOnlyTriggers() {
         #expect(ShortcutProfile.actionChord.suggestedModifierTriggers.isEmpty)
         #expect(ShortcutProfile.modeTrigger.suggestedModifierTriggers.map(\.canonical)
             == ["fn", "right_option", "right_command", "right_control", "control+option+shift+command"])
+        #expect(ShortcutProfile.doubleTapTrigger.suggestedModifierTriggers.map(\.canonical) == [
+            "fn", "command", "left_command", "right_command", "control", "left_control", "right_control", "right_option",
+        ])
     }
 }

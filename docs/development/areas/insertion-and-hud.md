@@ -14,7 +14,9 @@ Read before changing text insertion, pasteboard capture or restore, selection ca
 
 ## Invariants
 
-- **The recording HUD is key ⟺ the HUD is visible and cancellable** (`HUDState.holdsKeyFocus`).
+- **The recording HUD is key ⟺ the HUD is visible and cancellable** (`HUDState.holdsKeyFocus`), except
+  during a take started by a double-tap trigger, which leaves focus with the app and claims Escape as a
+  Carbon hot key instead (`HUDController.takesKeyFocus`) — and takes focus anyway if that claim is refused.
   Synthesized ⌘C/⌘V/Return go to the key window, so the
   HUD (`HUDPanel`) must relinquish key focus before any selection-capture ⌘C or paste ⌘V —
   `HUDController.relinquishKeyFocus()` runs when a take begins acting (an insert's `TakeLease.beginActing`,

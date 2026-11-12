@@ -71,6 +71,8 @@ Recommended setup:
    modifier such as `Left-⌘`, a pair such as `Left-⌘ + Left-⌃`, a custom shortcut, or an extra
    mouse button.
 3. Choose how the shortcut works: **Hold to talk; tap to toggle**, **Hold to talk**, or **Tap to toggle**.
+   With a single modifier key such as `Fn (Globe)` or `Right-⌘`, you can also choose
+   **Double-tap to start**: tap twice to start, then once to stop.
 4. Open KeyScribe > Settings > General and optionally assign a shortcut for `Paste Last Dictation`.
 
 Checkpoint: dictate into three apps you use every day. If one app behaves strangely, keep using

@@ -130,6 +130,7 @@ final class FirstRunModel: ObservableObject {
         let invocation: String
         let hint: String
         var triggerKey: String?
+        var pressStyle: PressStyle = .holdOrTap
         var id: String { modeId }
     }
 
@@ -383,7 +384,8 @@ final class FirstRunModel: ObservableObject {
                   let invocation = Self.invocation(for: mode) else { return nil }
             return PlaygroundLesson(
                 modeId: mode.id, title: mode.name, invocation: invocation,
-                hint: Self.playgroundHint(for: mode), triggerKey: mode.triggerKeys.first?.key)
+                hint: Self.playgroundHint(for: mode), triggerKey: mode.triggerKeys.first?.key,
+                pressStyle: mode.triggerKeys.first?.effectivePressStyle ?? .holdOrTap)
         }
     }
 
@@ -432,8 +434,8 @@ final class FirstRunModel: ObservableObject {
 
     private static func playgroundHint(for mode: Mode) -> String {
         let start: String
-        if let key = mode.triggerKeys.first?.key, let descriptor = try? KeyDescriptor(parsing: key) {
-            start = "hold \(descriptor.displayString)"
+        if let trigger = mode.triggerKeys.first, let descriptor = try? KeyDescriptor(parsing: trigger.key) {
+            start = "\(trigger.effectivePressStyle.invocation.lead.lowercased()) \(descriptor.displayString)"
         } else if let phrase = mode.triggerPhrases.first {
             start = "end your sentence with \"\(phrase)\""
         } else {
@@ -457,8 +459,8 @@ final class FirstRunModel: ObservableObject {
     }
 
     private static func invocation(for mode: Mode) -> String? {
-        if let key = mode.triggerKeys.first?.key, let descriptor = try? KeyDescriptor(parsing: key) {
-            return "Hold \(descriptor.displayString) and speak"
+        if let trigger = mode.triggerKeys.first, let descriptor = try? KeyDescriptor(parsing: trigger.key) {
+            return trigger.effectivePressStyle.invocation.sentence(key: descriptor.displayString)
         }
         if let phrase = mode.triggerPhrases.first {
             return "End your sentence with \"\(phrase)\""
@@ -550,7 +552,7 @@ final class FirstRunModel: ObservableObject {
         } else {
             directTrigger = nil
         }
-        directTriggerStyle = trigger?.pressStyle
+        directTriggerStyle = trigger?.effectivePressStyle.rawValue
     }
 
     var directTriggerBinding: Binding<String> {

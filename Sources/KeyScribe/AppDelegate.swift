@@ -571,7 +571,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let desc = try? KeyDescriptor(parsing: tk.key) else { return nil }
                 return .init(
                     triggerKey: tk.key, descriptor: desc,
-                    style: PressStyle(rawValue: tk.pressStyle) ?? .holdOrTap,
+                    style: tk.effectivePressStyle,
                     tapThreshold: Double(tk.tapThresholdMs) / 1000)
             }
         registeredClaimIds = claimable.map(\.id)

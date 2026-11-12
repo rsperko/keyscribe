@@ -63,9 +63,34 @@ final class HUDController: HUDPresenting {
     private var anchor: HUDAnchor
     var currentAnchor: HUDAnchor { anchor }
 
-    init(defaults: UserDefaults = .standard) {
+    private let escape: EscapeClaim
+    private var keyFocusFree = false
+    private var escapeClaimed = false
+
+    init(defaults: UserDefaults = .standard, escape: any ChordRegistering = CarbonHotKeys()) {
         self.defaults = defaults
+        self.escape = EscapeClaim(registrar: escape)
         anchor = HUDAnchorStore.load(defaults)
+    }
+
+    var takesKeyFocus: Bool { model.state.holdsKeyFocus && !(keyFocusFree && escapeClaimed) }
+
+    func setKeyFocusFree(_ free: Bool) {
+        keyFocusFree = free
+        syncEscapeClaim()
+    }
+
+    private func syncEscapeClaim() {
+        let wanted = keyFocusFree && model.state.holdsKeyFocus
+        if wanted, !escapeClaimed {
+            escapeClaimed = escape.claim { [weak self] in
+                guard let self, self.canCancel?() == true else { return }
+                self.onEscapeCancel?()
+            }
+        } else if !wanted, escapeClaimed {
+            escape.release()
+            escapeClaimed = false
+        }
     }
     private var dragSnap: HUDDragSnap?
 
@@ -99,6 +124,7 @@ final class HUDController: HUDPresenting {
             levelModel.level = level
         }
         model.state = state
+        syncEscapeClaim()
         announce(state, after: previous)
         let isHidden: Bool = { if case .hidden = state { return true } else { return false } }()
         if isHidden != wasHidden { onVisibilityChange?(!isHidden) }
@@ -122,7 +148,7 @@ final class HUDController: HUDPresenting {
             // The HUD must hold key focus in every cancellable state so ESC-to-cancel reaches it as a local
             // keystroke — but synthesized ⌘C/⌘V/Return target whatever window IS key, so the controller
             // relinquishes focus momentarily around each one (see relinquishKeyFocus()).
-            if state.holdsKeyFocus {
+            if takesKeyFocus {
                 panel?.makeKeyAndOrderFront(nil)
             } else if panel?.isKeyWindow == true {
                 relinquishKeyFocus()
@@ -167,7 +193,7 @@ final class HUDController: HUDPresenting {
         let panel = HUDPanel.make(
             content: hosting, size: NSSize(width: HUDState.hidden.panelWidth, height: HUDState.hidden.contentHeight))
         // Only a recording or cancellable HUD may be key, even when clicked.
-        panel.allowsKey = { [weak self] in self?.model.state.holdsKeyFocus == true }
+        panel.allowsKey = { [weak self] in self?.takesKeyFocus == true }
         self.panel = panel
         dragSnap = HUDDragSnap(panel: panel) { [weak self] _ in self?.snapToNearestAnchor() }
         reposition(panel)
@@ -262,17 +288,24 @@ final class HUDController: HUDPresenting {
 
     private func installLocalKeyMonitor() {
         guard localKeyMonitor == nil else { return }
-        localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
-            guard let self else { return event }
-            if event.type == .keyDown, event.keyCode == 53, self.canCancel?() == true {
-                self.onEscapeCancel?()
-                return nil
-            }
-            if Self.tookKey(eventWindow: event.window, panel: self.panel), let cgEvent = event.cgEvent {
-                self.onKeyTaken?(cgEvent)
-            }
-            return event
+        localKeyMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.keyDown, .keyUp], handler: localKeyMonitorHandler)
+    }
+
+    private(set) lazy var localKeyMonitorHandler: (NSEvent) -> NSEvent? = { [weak self] event in
+        guard let self else { return event }
+        return self.routeLocalKey(event)
+    }
+
+    private func routeLocalKey(_ event: NSEvent) -> NSEvent? {
+        if event.type == .keyDown, event.keyCode == 53, canCancel?() == true {
+            onEscapeCancel?()
+            return nil
         }
+        if Self.tookKey(eventWindow: event.window, panel: panel), let cgEvent = event.cgEvent {
+            onKeyTaken?(cgEvent)
+        }
+        return event
     }
 
     // Anchors are resolution-independent — recomputed from visibleFrame each time — so a saved spot lands

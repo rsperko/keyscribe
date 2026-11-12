@@ -47,7 +47,7 @@ struct ModeEditorView: View {
 
             Section("How to start \(mode.name)") {
                 ModeTriggerRow(mode: mode, onUpdate: onUpdate, label: "Shortcut")
-                PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
+                PressStyleRow(trigger: trigger)
                 TriggerConflictLabel(conflict: trigger.conflict, mode: mode)
                 ExtraTriggersNote(mode: mode)
             }
@@ -114,7 +114,7 @@ struct ModeEditorView: View {
 
             Section("How to start Plain Dictation") {
                 ModeTriggerRow(mode: mode, onUpdate: onUpdate, label: "Shortcut")
-                PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
+                PressStyleRow(trigger: trigger)
                 TriggerConflictLabel(conflict: trigger.conflict, mode: mode)
                 ExtraTriggersNote(mode: mode)
                 if trigger.usesMouseShortcut {

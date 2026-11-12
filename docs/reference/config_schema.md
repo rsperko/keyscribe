@@ -455,8 +455,11 @@ trim_trailing_punctuation = false  # strip a final . ! ? (and trailing whitespac
 exclude_from_history = false
 
 # ── When it runs ─────────────────────────────────────────────────────────────
-# Trigger keys. Each has a press style: "hold-or-tap" | "hold-only" | "tap-to-toggle" | "start" | "stop".
+# Trigger keys. Each has a press style: "hold-or-tap" | "hold-only" | "tap-to-toggle" | "double-tap" |
+# "start" | "stop".
 # "hold-or-tap" = push-to-talk while held, OR fires on a quick tap.
+# "double-tap" = two quick taps start, one more press stops; single modifier keys only (e.g. "fn",
+# "right_command", "command"). On any other key it acts as the default style.
 # "start" starts a dictation; another press while busy is ignored. "stop" finishes the current
 # recording, regardless of which mode started it. Releasing either key does nothing. TOML-only for now.
 # Use distinct keys for the two actions; their scope and idle behavior are described below.
@@ -547,7 +550,7 @@ context = { app = true, preceding_text = false }
 | `schema_version` | int | Required. Current: `2`. Older versions are normalized on read; v1→v2 migrates the retired `clipboard_modifier` key (`"control"` → `paste_key = "control+v"` + `copy_key = "control+c"`; `"command"` was the default and just drops). |
 | `name` | string | Display label. |
 | `enabled` | bool | Disabled modes are ignored by the resolver. |
-| `trigger_keys[]` | table[] | `key` (canonical descriptor) + `press_style` + `tap_threshold_ms` (default 250). Zero or more; every entry starts the mode except a `stop` entry, which only stops the recording dictation. Settings edits the **first** entry and preserves the rest; the `start` and `stop` styles are TOML-only. Further entries are TOML-only and appear in the mode editor as a read-only "Also starts with" / "Stops with" note; a later entry that is the same press as an earlier one (`command` after `right_command`, or the same key twice) is ignored at runtime, the note says so, and it is left out wherever the mode's shortcuts are listed. There is no separate global hotkey — whichever mode owns Fn (the Direct floor by default) is "the global hotkey". |
+| `trigger_keys[]` | table[] | `key` (canonical descriptor) + `press_style` + `tap_threshold_ms` (default 250). Zero or more; every entry starts the mode except a `stop` entry, which only stops the recording dictation. `double-tap` applies only to a single modifier key; both starting taps must be the same physical key (a sideless `command` accepts either side, but not left then right), and a key, click, scroll, or other modifier between or during taps cancels that tap without stopping a recording in progress. Settings edits the **first** entry and preserves the rest; the `start` and `stop` styles are TOML-only. Further entries are TOML-only and appear in the mode editor as a read-only "Also starts with" / "Stops with" note; a later entry that is the same press as an earlier one (`command` after `right_command`, or the same key twice) is ignored at runtime, the note says so, and it is left out wherever the mode's shortcuts are listed. There is no separate global hotkey — whichever mode owns Fn (the Direct floor by default) is "the global hotkey". |
 | `trigger_phrases` | string[] | Spoken phrases matched at the transcript end post-STT — case-insensitive, word-boundary-honored, trailing punctuation/space tolerated. Each is a regex, so power users can write one (`(?-i)` opts back into case-sensitivity). Zero or more. |
 | `constraints[]` | table[] | Any of `bundle_id`, `bundle_prefix`, `url_pattern`, `window_title` (ANDed). Empty ⇒ eligible everywhere. |
 | `source` | enum | `dictation` \| `selection`. |

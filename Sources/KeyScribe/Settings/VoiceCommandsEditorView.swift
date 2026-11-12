@@ -37,7 +37,7 @@ struct VoiceCommandsEditorView: View {
 
             Section("Start with a shortcut") {
                 ModeTriggerRow(mode: mode, onUpdate: updateShortcut, label: "Start shortcut")
-                PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
+                PressStyleRow(trigger: trigger)
                 if let clash = VoiceCommandTriggers.clash(for: mode, in: trigger.allModes) {
                     IssueText("\(clash.name) also uses this shortcut, so it does not start \(mode.name). Choose one no other mode uses, or move it here.")
                     Button("Move Shortcut to \(mode.name)\u{2026}") { onMoveShortcut(mode) }

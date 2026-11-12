@@ -439,9 +439,9 @@ struct FirstRunView: View {
         if let key = lesson.triggerKey, let descriptor = try? KeyDescriptor(parsing: key),
            !descriptor.keycapTokens.isEmpty {
             HStack(spacing: 4) {
-                Text("Hold").font(.caption).foregroundStyle(.secondary)
+                Text(lesson.pressStyle.invocation.lead).font(.caption).foregroundStyle(.secondary)
                 KeycapView(descriptor: descriptor)
-                Text("and speak").font(.caption).foregroundStyle(.secondary)
+                Text(lesson.pressStyle.invocation.trail).font(.caption).foregroundStyle(.secondary)
             }
         } else {
             Text(lesson.invocation).font(.caption).foregroundStyle(.secondary)

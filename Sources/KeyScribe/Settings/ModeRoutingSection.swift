@@ -23,7 +23,7 @@ struct ModeRoutingSection: View {
     var body: some View {
         Section("How to start this mode") {
             ModeTriggerRow(mode: mode, onUpdate: onUpdate, label: "Shortcut")
-            PressStyleRow(selection: trigger.pressStyle, disabled: mode.triggerKeys.isEmpty)
+            PressStyleRow(trigger: trigger)
             TriggerConflictLabel(conflict: trigger.conflict, mode: mode)
             ExtraTriggersNote(mode: mode)
             if trigger.usesMouseShortcut {

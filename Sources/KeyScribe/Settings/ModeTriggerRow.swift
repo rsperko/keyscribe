@@ -11,7 +11,10 @@ struct ModeTriggerRow: View {
 
     var body: some View {
         LabeledContent(label) {
-            ShortcutWell(key: triggerKey, profile: .modeTrigger, accessibilityID: accessibilityID)
+            ShortcutWell(
+                key: triggerKey,
+                profile: mode.triggerKeys.first?.effectivePressStyle == .doubleTap ? .doubleTapTrigger : .modeTrigger,
+                accessibilityID: accessibilityID)
         }
     }
 
@@ -29,8 +32,10 @@ struct ModeTriggerRow: View {
 // Pairs with the recorder row but sits in a different container per editor (top-level in the system
 // editor, inside the routing disclosure in a normal mode), so callers compose it themselves.
 struct PressStyleRow: View {
-    let selection: Binding<String>
-    let disabled: Bool
+    let trigger: ModeTrigger
+
+    private var selection: Binding<String> { trigger.pressStyle }
+    private var disabled: Bool { trigger.mode.triggerKeys.isEmpty }
 
     var body: some View {
         if let fileOnly = PressStyle(rawValue: selection.wrappedValue), [.startOnly, .stopOnly].contains(fileOnly) {
@@ -44,9 +49,21 @@ struct PressStyleRow: View {
                 Text(PressStyle.holdOrTap.title).tag(PressStyle.holdOrTap.rawValue)
                 Text(PressStyle.holdOnly.title).tag(PressStyle.holdOnly.rawValue)
                 Text(PressStyle.tapToToggle.title).tag(PressStyle.tapToToggle.rawValue)
+                Text(trigger.allowsDoubleTap
+                     ? PressStyle.doubleTap.title
+                     : "\(PressStyle.doubleTap.title) (single modifier keys only)")
+                    .tag(PressStyle.doubleTap.rawValue)
+                    .selectionDisabled(!trigger.allowsDoubleTap)
             }
             .disabled(disabled)
             .accessibilityIdentifier(AccessibilityID.Mode.Editor.pressStyle)
+        }
+        if let unsupported = trigger.mode.triggerKeys.first?.unsupportedPressStyle {
+            IssueText(
+                "\(unsupported.title) needs a single modifier key, such as Fn or Right-⌘, so this shortcut uses \(PressStyle.holdOrTap.title).",
+                severity: .advisory)
+            Button("Use \(PressStyle.holdOrTap.title)") { selection.wrappedValue = PressStyle.holdOrTap.rawValue }
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.usePressStyleDefault)
         }
         Text(disabled
             ? "Add a shortcut to choose how it starts."
@@ -126,11 +143,16 @@ struct ModeTrigger {
         }
     }
 
+    var allowsDoubleTap: Bool {
+        guard let key = mode.triggerKeys.first?.key else { return false }
+        return Mode.TriggerKey.key(key, allows: .doubleTap)
+    }
+
     var pressStyle: Binding<String> {
         Binding(
-            get: { mode.triggerKeys.first?.pressStyle ?? Mode.TriggerKey.defaultPressStyle },
+            get: { mode.triggerKeys.first?.effectivePressStyle.rawValue ?? Mode.TriggerKey.defaultPressStyle },
             set: { style in
-                guard !mode.triggerKeys.isEmpty else { return }
+                guard !mode.triggerKeys.isEmpty, style != PressStyle.doubleTap.rawValue || allowsDoubleTap else { return }
                 var updated = mode
                 updated.setPrimaryPressStyle(style)
                 onUpdate(updated)

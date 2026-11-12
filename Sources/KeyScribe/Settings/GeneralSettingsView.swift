@@ -14,9 +14,9 @@ struct GeneralSettingsView: View {
         return directMode.triggerKeys.enumerated().filter { !ignored.contains($0.offset) }.map(\.element)
     }
     private var sharedPressStyle: PressStyle? {
-        let styles = Set(directTriggers.map(\.pressStyle))
-        guard styles.count == 1, let style = styles.first else { return nil }
-        return PressStyle(rawValue: style) ?? .holdOrTap
+        let styles = Set(directTriggers.map(\.effectivePressStyle))
+        guard styles.count == 1 else { return nil }
+        return styles.first
     }
 
     var body: some View {

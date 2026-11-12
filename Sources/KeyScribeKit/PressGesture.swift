@@ -4,6 +4,7 @@ public enum PressStyle: String, Sendable {
     case tapToToggle = "tap-to-toggle"
     case startOnly = "start"
     case stopOnly = "stop"
+    case doubleTap = "double-tap"
 
     public var title: String {
         switch self {
@@ -12,6 +13,7 @@ public enum PressStyle: String, Sendable {
         case .holdOrTap: "Hold to talk; tap to toggle"
         case .startOnly: "Start only"
         case .stopOnly: "Stop only"
+        case .doubleTap: "Double-tap to start"
         }
     }
 
@@ -22,7 +24,31 @@ public enum PressStyle: String, Sendable {
         case .holdOrTap: "Hold and release, or tap to start and tap again to stop."
         case .startOnly: "Press to start; does nothing while a dictation is in progress."
         case .stopOnly: "Press to stop; does nothing when no dictation is recording."
+        case .doubleTap: "Tap twice to start, then once to stop. Escape cancels."
         }
+    }
+
+    public struct Invocation: Equatable, Sendable {
+        public let lead: String
+        public let trail: String
+
+        public func sentence(key: String) -> String { "\(lead) \(key) \(trail)" }
+    }
+
+    public var invocation: Invocation {
+        switch self {
+        case .holdOrTap, .holdOnly: Invocation(lead: "Hold", trail: "and speak")
+        case .tapToToggle: Invocation(lead: "Tap", trail: "and speak, then tap it again to stop")
+        case .doubleTap: Invocation(lead: "Double-tap", trail: "and speak, then tap it again to stop")
+        case .startOnly: Invocation(lead: "Press", trail: "and speak")
+        case .stopOnly: Invocation(lead: "Press", trail: "to stop")
+        }
+    }
+
+    public func supports(_ descriptor: KeyDescriptor) -> Bool {
+        guard self == .doubleTap else { return true }
+        if case .modifiers(let set) = descriptor { return set.members.count == 1 }
+        return false
     }
 }
 
@@ -39,12 +65,16 @@ public enum DictationCommand: Equatable, Sendable {
 public struct PressGesture: Sendable {
     public let style: PressStyle
     public let tapThreshold: Double
+    public static let doubleTapWindow = 0.4
 
     private var recording = false
     private var latched = false
     private var downAt: Double?
     private var physicallyDown = false
     public var isPhysicallyDown: Bool { physicallyDown }
+    private var pressSpent = false
+    private var firstTapUpAt: Double?
+    private var startedAt: Double?
 
     public init(style: PressStyle, tapThreshold: Double) {
         self.style = style
@@ -56,6 +86,16 @@ public struct PressGesture: Sendable {
         latched = false
         downAt = nil
         physicallyDown = false
+        pressSpent = false
+        firstTapUpAt = nil
+        startedAt = nil
+    }
+
+    public mutating func interrupt() {
+        guard style == .doubleTap else { return }
+        physicallyDown = false
+        downAt = nil
+        firstTapUpAt = nil
     }
 
     public mutating func handle(_ edge: TriggerEdge, at time: Double) -> DictationCommand {
@@ -67,6 +107,9 @@ public struct PressGesture: Sendable {
             physicallyDown = false
         }
         switch style {
+        case .doubleTap:
+            return handleDoubleTap(edge, at: time)
+
         case .startOnly:
             return edge == .down ? .start : .none
 
@@ -109,6 +152,35 @@ public struct PressGesture: Sendable {
                 self.downAt = nil
                 return .commit
             }
+        }
+    }
+
+    private mutating func handleDoubleTap(_ edge: TriggerEdge, at time: Double) -> DictationCommand {
+        switch edge {
+        case .down:
+            downAt = time
+            pressSpent = recording && startedAt.map { time - $0 < PressGesture.doubleTapWindow } ?? false
+            return .none
+        case .up:
+            guard let pressedAt = downAt else { return .none }
+            downAt = nil
+            let spent = pressSpent
+            pressSpent = false
+            if recording {
+                guard !spent else { return .none }
+                recording = false
+                startedAt = nil
+                return .commit
+            }
+            guard !spent, time - pressedAt <= tapThreshold else { firstTapUpAt = nil; return .none }
+            if let upAt = firstTapUpAt, pressedAt - upAt <= PressGesture.doubleTapWindow {
+                firstTapUpAt = nil
+                recording = true
+                startedAt = time
+                return .start
+            }
+            firstTapUpAt = time
+            return .none
         }
     }
 }

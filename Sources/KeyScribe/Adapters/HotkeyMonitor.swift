@@ -30,6 +30,7 @@ final class HotkeyMonitor {
         var pendingArm = false
         var armGeneration = 0
         var engagedAt: TimeInterval?
+        var lastPressSide = 0
 
         init(triggerKey: String?, descriptor: KeyDescriptor, style: PressStyle, tapThreshold: Double) {
             self.triggerKey = triggerKey
@@ -61,6 +62,7 @@ final class HotkeyMonitor {
     // keyDown abort, cues and all.
     private let chordGraceSeconds: TimeInterval
     private let schedule: (TimeInterval, @escaping @MainActor () -> Void) -> Void
+    private let clock: () -> TimeInterval
 
     // The DispatchTime is the physical press, which precedes the call by the chord grace and a main-queue hop.
     let onStart: (String?, PressStyle, DispatchTime) -> Void
@@ -87,10 +89,12 @@ final class HotkeyMonitor {
         chordGraceSeconds: TimeInterval = 0.15,
         schedule: @escaping (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, work in
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated(work) }
-        }
+        },
+        clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     ) {
         self.chordGraceSeconds = chordGraceSeconds
         self.schedule = schedule
+        self.clock = clock
         self.bindings = bindings
         self.actionBindings = actionBindings
         self.onStart = onStart
@@ -123,6 +127,7 @@ final class HotkeyMonitor {
             carried.pendingArm = match.pendingArm
             carried.armGeneration = match.armGeneration
             carried.engagedAt = match.engagedAt
+            carried.lastPressSide = match.lastPressSide
             return carried
         }
         self.actionBindings = actionBindings
@@ -258,7 +263,7 @@ final class HotkeyMonitor {
         type: CGEventType, keyCode: Int64, flags: CGEventFlags, scrollIsUserDriven: Bool = true
     ) {
         guard !isSuspended else { return }
-        let now = ProcessInfo.processInfo.systemUptime
+        let now = clock()
         switch type {
         case .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown:
             // A click carries the generic modifier flags and nothing else, so a set of only Fn can never be
@@ -266,7 +271,9 @@ final class HotkeyMonitor {
             // caret is pure loss. A key still aborts any set: fn+delete is the whole point of "chord wins".
             let click = type != .keyDown
             for i in bindings.indices where bindings[i].descriptor.isModifierSet {
-                if bindings[i].pendingArm {
+                if bindings[i].gesture.style == .doubleTap {
+                    bindings[i].gesture.interrupt()
+                } else if bindings[i].pendingArm {
                     logChordGap(index: i, via: click ? "click" : "key", now: now)
                     cancelPendingArm(index: i)
                 } else if bindings[i].gesture.isPhysicallyDown,
@@ -282,6 +289,7 @@ final class HotkeyMonitor {
             // outright, not merely delayed.
             guard scrollIsUserDriven else { return }
             for i in bindings.indices where bindings[i].descriptor.isModifierSet {
+                if bindings[i].gesture.style == .doubleTap { bindings[i].gesture.interrupt() }
                 if bindings[i].pendingArm { cancelPendingArm(index: i) }
             }
         case .flagsChanged:
@@ -332,7 +340,7 @@ final class HotkeyMonitor {
 
     private func carbonEdge(index: Int, edge: TriggerEdge) {
         guard bindings.indices.contains(index) else { return }
-        fire(index: index, edge: edge, now: ProcessInfo.processInfo.systemUptime)
+        fire(index: index, edge: edge, now: clock())
     }
 
     // Mouse-button triggers ride a separate consuming tap (`MouseEventTap`), not the modifier tap or
@@ -352,7 +360,7 @@ final class HotkeyMonitor {
             if case .mouseButton(let n) = $0.descriptor { return n == button }
             return false
         }) else { return }
-        fire(index: index, edge: edge, now: ProcessInfo.processInfo.systemUptime)
+        fire(index: index, edge: edge, now: clock())
     }
 
     private func fire(index: Int, edge: TriggerEdge, now: TimeInterval, pressedAt: DispatchTime = .now()) {
@@ -390,13 +398,24 @@ final class HotkeyMonitor {
 
         let wasEngaged = bindings[i].engaged
         bindings[i].engaged = engaged
+        let side = ModifierMatcher.pressedSide(set, in: flags)
+        let doubleTap = bindings[i].gesture.style == .doubleTap
+        if doubleTap, ModifierMatcher.foreignModifierHeld(set, in: flags) || side == ModifierMatcher.bothSides {
+            bindings[i].gesture.interrupt()
+        }
 
         if engaged {
             // Arm on the TRANSITION only. Re-arming off an already-engaged set is how an aborted chord
             // re-fired on every later flagsChanged while its modifiers stayed held.
             guard !wasEngaged, !bindings[i].suppressedUntilRelease else { return }
             guard !bindings[i].gesture.isPhysicallyDown, !bindings[i].pendingArm else { return }
-            beginArm(index: i, now: now)
+            if doubleTap {
+                if side != bindings[i].lastPressSide { bindings[i].gesture.interrupt() }
+                bindings[i].lastPressSide = side
+                fire(index: i, edge: .down, now: now)
+            } else {
+                beginArm(index: i, now: now)
+            }
             return
         }
 
@@ -445,7 +464,7 @@ final class HotkeyMonitor {
             }
             guard self.bindings[index].pendingArm, self.bindings[index].armGeneration == generation else { return }
             self.bindings[index].pendingArm = false
-            self.fire(index: index, edge: .down, now: ProcessInfo.processInfo.systemUptime, pressedAt: pressedAt)
+            self.fire(index: index, edge: .down, now: self.clock(), pressedAt: pressedAt)
         }
     }
 
@@ -519,6 +538,15 @@ private enum ModifierMatcher {
             guard let bit = deviceBit(member), let opposite = deviceBit(member.flipped) else { return true }
             return flags.rawValue & bit != 0 && flags.rawValue & opposite == 0
         }
+    }
+
+    static let bothSides = 3
+
+    static func pressedSide(_ set: ModifierKeySet, in flags: CGEventFlags) -> Int {
+        guard set.members.count == 1, let member = set.members.first, member.side == nil,
+              let left = deviceBit(SidedModifier(member.modifier, .left)),
+              let right = deviceBit(SidedModifier(member.modifier, .right)) else { return 0 }
+        return (flags.rawValue & left != 0 ? 1 : 0) | (flags.rawValue & right != 0 ? 2 : 0)
     }
 
     /// Every member still physically down. A disengaged-but-whole set means a foreign modifier joined.

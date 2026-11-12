@@ -472,6 +472,70 @@ struct HUDStateTests {
         #expect(hud.panelCanBecomeKey == true)
     }
 
+    @Test func aDoubleTapTakeLeavesKeyFocusWithTheAppAndClaimsEscapeInstead() {
+        let escape = FakeChordRegistrar()
+        let hud = HUDController(defaults: UserDefaults(suiteName: "hud-\(UUID().uuidString)")!, escape: escape)
+        defer { hud.render(.hidden) }
+        var cancels = 0
+        hud.canCancel = { true }
+        hud.onEscapeCancel = { cancels += 1 }
+
+        hud.setKeyFocusFree(true)
+        #expect(escape.lastRegistrations.isEmpty)
+        hud.render(.recording(mode: "Polish", level: 0, latchedTrigger: "⌘"))
+        #expect(hud.panelCanBecomeKey == false)
+        #expect(escape.lastRegistrations.map(\.keyCode) == [EscapeClaim.keyCode])
+        #expect(escape.lastRegistrations.first?.modifiers.isEmpty == true)
+
+        escape.lastRegistrations.first?.onPressed()
+        #expect(cancels == 1)
+
+        hud.render(.complete(outcome: .inserted, mode: "Polish"))
+        #expect(escape.lastRegistrations.isEmpty)
+    }
+
+    @Test func aRefusedEscapeClaimFallsBackToKeyFocusSoEscapeStillCancels() {
+        let escape = FakeChordRegistrar()
+        escape.refuses = true
+        let hud = HUDController(defaults: UserDefaults(suiteName: "hud-\(UUID().uuidString)")!, escape: escape)
+        defer { hud.render(.hidden) }
+        var cancels = 0
+        hud.canCancel = { true }
+        hud.onEscapeCancel = { cancels += 1 }
+        hud.setKeyFocusFree(true)
+        hud.render(.recording(mode: "Polish", level: 0, latchedTrigger: "⌘"))
+        #expect(hud.panelCanBecomeKey == true)
+        let escapeKey = NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+            characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53)!
+        #expect(hud.localKeyMonitorHandler(escapeKey) == nil)
+        #expect(cancels == 1)
+    }
+
+    @Test func otherTakesKeepKeyFocusAndLeaveEscapeAlone() {
+        let escape = FakeChordRegistrar()
+        let hud = HUDController(defaults: UserDefaults(suiteName: "hud-\(UUID().uuidString)")!, escape: escape)
+        defer { hud.render(.hidden) }
+        hud.setKeyFocusFree(true)
+        hud.setKeyFocusFree(false)
+        hud.render(.recording(mode: "Polish", level: 0, latchedTrigger: nil))
+        #expect(hud.panelCanBecomeKey == true)
+        #expect(escape.lastRegistrations.isEmpty)
+    }
+
+    @Test func aClaimedEscapeWithNothingToCancelDoesNothing() {
+        let escape = FakeChordRegistrar()
+        let hud = HUDController(defaults: UserDefaults(suiteName: "hud-\(UUID().uuidString)")!, escape: escape)
+        defer { hud.render(.hidden) }
+        var cancels = 0
+        hud.canCancel = { false }
+        hud.onEscapeCancel = { cancels += 1 }
+        hud.setKeyFocusFree(true)
+        hud.render(.recording(mode: "Polish", level: 0, latchedTrigger: "⌘"))
+        escape.lastRegistrations.first?.onPressed()
+        #expect(cancels == 0)
+    }
+
     @Test func aQuestionRendersEveryRowWithinTheScreen() {
         let hud = HUDController()
         hud.render(HUDPreview.state(named: "choice-five")!)

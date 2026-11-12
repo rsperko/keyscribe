@@ -50,6 +50,10 @@ final class HUDChannel {
         hud?.relinquishKeyFocus()
     }
 
+    func setKeyFocusFree(_ free: Bool) {
+        hud?.setKeyFocusFree(free)
+    }
+
     func shown(_ state: HUDState) -> HUDState {
         let choices = choices()
         if let prompt = choices.answering {

@@ -531,6 +531,37 @@ struct ModeTests {
         #expect(m.triggerKeys.map(\.pressStyle) == ["hold-or-tap", "tap-to-toggle"])
     }
 
+    @Test func doubleTapFallsBackToTheDefaultWhenTheShortcutStopsBeingOneModifierKey() {
+        var m = triggers([("right_command", "double-tap")])
+        m.setPrimaryTriggerKey("left_command", restoring: nil)
+        #expect(m.triggerKeys.first?.pressStyle == "double-tap")
+        m.setPrimaryTriggerKey("option+command+k", restoring: nil)
+        #expect(m.triggerKeys.first?.pressStyle == Mode.TriggerKey.defaultPressStyle)
+
+        var empty = triggers([])
+        empty.setPrimaryTriggerKey("mouse4", restoring: .init(key: "fn", pressStyle: "double-tap"))
+        #expect(empty.triggerKeys.first?.pressStyle == Mode.TriggerKey.defaultPressStyle)
+    }
+
+    @Test func theEffectivePressStyleFallsBackWhereDoubleTapCannotApply() {
+        let single = Mode.TriggerKey(key: "right_command", pressStyle: "double-tap")
+        #expect(single.effectivePressStyle == .doubleTap)
+        #expect(single.unsupportedPressStyle == nil)
+
+        let chord = Mode.TriggerKey(key: "option+command+k", pressStyle: "double-tap")
+        #expect(chord.effectivePressStyle == .holdOrTap)
+        #expect(chord.unsupportedPressStyle == .doubleTap)
+
+        #expect(Mode.TriggerKey(key: "fn", pressStyle: "nonsense").effectivePressStyle == .holdOrTap)
+        #expect(Mode.TriggerKey(key: "mouse4", pressStyle: "tap-to-toggle").effectivePressStyle == .tapToToggle)
+    }
+
+    @Test func doubleTapRoundTripsThroughTheModeFile() throws {
+        let m = triggers([("right_command", "double-tap")])
+        let decoded = try ModeStore.decode(from: try ModeStore.encode(m), id: "m")
+        #expect(decoded.triggerKeys == m.triggerKeys)
+    }
+
     @Test func settingThePrimaryPressStyleOnAnEmptyListIsANoOp() {
         var m = triggers([])
         m.setPrimaryPressStyle("hold-only")

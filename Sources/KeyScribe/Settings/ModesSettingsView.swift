@@ -427,15 +427,15 @@ enum ModeSummary {
 
     static func extraTriggersNote(_ mode: Mode) -> String? {
         let parsed = TriggerKeyConflicts.parsedTriggers(in: mode)
-        let primaryStyle = mode.triggerKeys.first?.pressStyle
+        let primaryStyle = mode.triggerKeys.first?.effectivePressStyle
         let live = parsed.filter { $0.index > 0 && $0.sameAs == nil }
         let isStop = { (entry: TriggerKeyConflicts.ParsedTrigger) in
             mode.triggerKeys[entry.index].pressStyle == PressStyle.stopOnly.rawValue
         }
         let extras = live.filter { !isStop($0) }.map { entry in
-            let style = mode.triggerKeys[entry.index].pressStyle
+            let style = mode.triggerKeys[entry.index].effectivePressStyle
             guard style != primaryStyle else { return entry.descriptor.displayString }
-            return "\(entry.descriptor.displayString) (\((PressStyle(rawValue: style) ?? .holdOrTap).title))"
+            return "\(entry.descriptor.displayString) (\(style.title))"
         }
         let stops = live.filter(isStop).map(\.descriptor.displayString)
         var sentences: [String] = []

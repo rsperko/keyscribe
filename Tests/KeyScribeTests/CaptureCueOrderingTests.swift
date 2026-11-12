@@ -22,6 +22,8 @@ struct CaptureCueOrderingTests {
 
     private final class RecordingHUD: HUDPresenting {
         var states: [HUDState] = []
+        var keyFocusFree: [Bool] = []
+        func setKeyFocusFree(_ free: Bool) { keyFocusFree.append(free) }
         private(set) var firstVisibleAt: UInt64?
         func render(_ state: HUDState) {
             if state != .hidden, firstVisibleAt == nil { firstVisibleAt = mach_absolute_time() }
@@ -431,13 +433,15 @@ struct CaptureCueOrderingTests {
         return event
     }
 
-    private func recordingController(_ replayed: Replayed) async -> (DictationController, GatedAudio, RecordingHUD) {
+    private func recordingController(
+        _ replayed: Replayed, style: PressStyle = .holdOrTap
+    ) async -> (DictationController, GatedAudio, RecordingHUD) {
         let ready = SignalLatch()
         let audio = GatedAudio(url: URL(fileURLWithPath: "/dev/null"), ready: ready)
         let hud = RecordingHUD()
         let controller = makeController(audio: audio, hud: hud, cueSeconds: 0.01)
         controller.replayKeys = { replayed.events += $0 }
-        controller.handleStart(triggerKey: "right_option")
+        controller.handleStart(triggerKey: "right_option", pressStyle: style)
         ready.signal()
         await poll { hud.sawRecording }
         return (controller, audio, hud)
@@ -460,6 +464,20 @@ struct CaptureCueOrderingTests {
         controller.noteKeyReceivedByHUD(optionC())
         await poll { !replayed.events.isEmpty }
         #expect(replayed.events.count == 1)
+    }
+
+    @Test func aDoubleTapTakeAsksTheHUDToLeaveKeyFocusWithTheApp() async {
+        let replayed = Replayed()
+        let (controller, _, hud) = await recordingController(replayed, style: .doubleTap)
+        #expect(hud.keyFocusFree == [true])
+        controller.cancel()
+    }
+
+    @Test func otherTakesLetTheHUDTakeKeyFocus() async {
+        let replayed = Replayed()
+        let (controller, _, hud) = await recordingController(replayed, style: .tapToToggle)
+        #expect(hud.keyFocusFree == [false])
+        controller.cancel()
     }
 
     @Test func keysAreNotReplayedWhenTheTakeEndsAnyOtherWay() async {

@@ -1,22 +1,39 @@
 public struct ShortcutProfile: Equatable, Sendable {
     public let allowsModifierOnly: Bool
     public let allowsMouseButtons: Bool
+    public let offersEverySideOfAModifier: Bool
 
-    public init(allowsModifierOnly: Bool, allowsMouseButtons: Bool) {
+    public init(allowsModifierOnly: Bool, allowsMouseButtons: Bool, offersEverySideOfAModifier: Bool = false) {
         self.allowsModifierOnly = allowsModifierOnly
         self.allowsMouseButtons = allowsMouseButtons
+        self.offersEverySideOfAModifier = offersEverySideOfAModifier
     }
 
     public static let modeTrigger = ShortcutProfile(allowsModifierOnly: true, allowsMouseButtons: true)
+    public static let doubleTapTrigger = ShortcutProfile(
+        allowsModifierOnly: true, allowsMouseButtons: true, offersEverySideOfAModifier: true)
     public static let actionChord = ShortcutProfile(allowsModifierOnly: false, allowsMouseButtons: false)
 
     public var suggestedModifierTriggers: [KeyDescriptor] {
-        allowsModifierOnly ? ShortcutProfile.modifierTriggerMenu : []
+        guard allowsModifierOnly else { return [] }
+        return offersEverySideOfAModifier ? ShortcutProfile.doubleTapMenu : ShortcutProfile.modifierTriggerMenu
     }
 
     private static let modifierTriggerMenu: [KeyDescriptor] =
         ["fn", "right_option", "right_command", "right_control", "hyper"]
             .compactMap { try? KeyDescriptor(parsing: $0) }
+
+    private static let doubleTapMenu: [KeyDescriptor] =
+        ["fn", "command", "left_command", "right_command", "control", "left_control", "right_control", "right_option"]
+            .compactMap { try? KeyDescriptor(parsing: $0) }
+}
+
+extension KeyDescriptor {
+    public var suggestionTitle: String {
+        guard case .modifiers(let set) = self, set.members.count == 1, let member = set.members.first,
+              member.side == nil, member.modifier != .fn else { return displayString }
+        return "Either \(displayString)"
+    }
 }
 
 public struct ShortcutCaptureModel: Equatable, Sendable {
