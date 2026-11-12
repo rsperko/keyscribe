@@ -734,7 +734,9 @@ report includes what you said, so check it before sending.
 ### Background audio changes while I dictate.
 
 **Settings ▸ General ▸ Other audio** decides what happens to other playback while you dictate:
-**Quiet** (the default) turns it down, **Mute** silences it, and **Unchanged** leaves it alone. If
+**Quiet** (the default) turns it down, **Mute** silences it, and **Unchanged** leaves it alone. The same
+choice applies while **Read replies aloud** speaks (replies, notices, answers, and "repeat that"); the
+voice itself stays at full level. If
 start/end sounds are also on, the change begins *after* the start sound so the cue isn't swallowed —
 turn the start sound off if you want it to take effect instantly.
 

@@ -77,14 +77,15 @@ struct SpokenResultOutputTests {
     private func make(
         settings: SpokenResultSettings = SpokenResultSettings(connection: "omlx"), llm: FakeLLM = FakeLLM(), permits: Bool = true,
         silencer: SpeechSilencer = SpeechSilencer(), deadlineSeconds: Double = 30, describeDeadlineSeconds: Double = 30,
-        inFront: @escaping @MainActor (String) async -> Bool = { _ in false }
+        inFront: @escaping @MainActor (String) async -> Bool = { _ in false }, duck: @escaping (Bool) -> Void = { _ in },
+        duckGrace: Duration = .seconds(60)
     ) -> (SpokenResultOutput, FakeSpeech, FakeLLM) {
         let speech = FakeSpeech()
         let connection = connection
         let output = SpokenResultOutput(
             client: llm, permits: { _ in permits }, speech: speech, silencer: silencer, settings: { settings },
             connection: { $0 == connection.id ? connection : nil }, deadlineSeconds: deadlineSeconds,
-            describeDeadlineSeconds: describeDeadlineSeconds, inFront: inFront)
+            describeDeadlineSeconds: describeDeadlineSeconds, inFront: inFront, duck: duck, duckGrace: duckGrace)
         return (output, speech, llm)
     }
 
@@ -595,6 +596,113 @@ struct SpokenResultOutputTests {
         #expect(!speech.isSpeaking)
         speech.start()
         #expect(shown.isEmpty)
+    }
+
+    private func waitFor(_ condition: () -> Bool) async {
+        for _ in 0..<200 where !condition() { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+
+    @Test func otherAudioIsLoweredOnceAReplyIsAudibleAndRestoredAShortGraceAfterTheLastReply() async {
+        let silencer = SpeechSilencer()
+        var ducks: [Bool] = []
+        let (output, speech, _) = make(silencer: silencer, duck: { ducks.append($0) }, duckGrace: .milliseconds(20))
+        silencer.recordingStarted()
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "Updated.")
+        await settled()
+        silencer.recordingEnded()
+        #expect(speech.spoken.count == 1)
+        #expect(ducks.isEmpty)
+        speech.start()
+        #expect(ducks == [true])
+        speech.finish()
+        #expect(speech.spoken.count == 2)
+        speech.start()
+        speech.finish()
+        #expect(ducks == [true])
+        await waitFor { ducks.count == 2 }
+        #expect(ducks == [true, false])
+    }
+
+    @Test func aReplyThatArrivesWithinTheGraceDoesNotPumpOtherAudio() async {
+        var ducks: [Bool] = []
+        let (output, speech, _) = make(duck: { ducks.append($0) })
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        speech.start()
+        speech.finish()
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "Updated.")
+        await settled()
+        speech.start()
+        #expect(ducks == [true])
+    }
+
+    @Test func otherAudioComesBackWhileTheNextReplyIsStillBeingPreparedAndDropsAgainWhenItSpeaks() async {
+        let silencer = SpeechSilencer()
+        var ducks: [Bool] = []
+        let (output, speech, _) = make(silencer: silencer, duck: { ducks.append($0) }, duckGrace: .milliseconds(20))
+        silencer.recordingStarted()
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "Updated.")
+        await settled()
+        silencer.recordingEnded()
+        speech.start()
+        speech.finish()
+        #expect(speech.spoken.count == 2)
+        #expect(ducks == [true])
+        await waitFor { ducks.count == 2 }
+        #expect(ducks == [true, false])
+        speech.start()
+        #expect(ducks == [true, false, true])
+    }
+
+    @Test func aGraceThatRunsOutAfterTheNextReplyBecameAudibleLeavesOtherAudioDown() async {
+        let silencer = SpeechSilencer()
+        var ducks: [Bool] = []
+        let (output, speech, _) = make(silencer: silencer, duck: { ducks.append($0) }, duckGrace: .milliseconds(20))
+        silencer.recordingStarted()
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        output.finished(conversation: "pi:s2", handle: "docs", answer: "Updated.")
+        await settled()
+        silencer.recordingEnded()
+        speech.start()
+        speech.finish()
+        speech.start()
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(ducks == [true])
+    }
+
+    @Test func stoppingAReplyGivesOtherAudioBackAtOnce() async {
+        var ducks: [Bool] = []
+        let (output, speech, _) = make(duck: { ducks.append($0) })
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        speech.start()
+        output.stop()
+        #expect(ducks == [true, false])
+    }
+
+    @Test func aRecordingThatCutsAReplyOffLeavesOtherAudioToTheGrace() async {
+        let silencer = SpeechSilencer()
+        var ducks: [Bool] = []
+        let (output, speech, _) = make(silencer: silencer, duck: { ducks.append($0) }, duckGrace: .milliseconds(20))
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        speech.start()
+        silencer.recordingStarted()
+        #expect(ducks == [true])
+        await waitFor { ducks.count == 2 }
+        #expect(ducks == [true, false])
+    }
+
+    @Test func aReplyStoppedBeforeItIsAudibleNeverLowersOtherAudio() async {
+        var ducks: [Bool] = []
+        let (output, speech, _) = make(duck: { ducks.append($0) })
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        #expect(speech.isSpeaking)
+        output.stop()
+        #expect(ducks.isEmpty)
     }
 
     @Test func aRequestedResultStaysPendingUntilItPlaysAndALaterReplyNeverErasesIt() async {

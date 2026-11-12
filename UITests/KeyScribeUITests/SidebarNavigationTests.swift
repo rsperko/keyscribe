@@ -91,9 +91,11 @@ final class SidebarNavigationTests: XCTestCase {
         let (_, window) = launchIntoSettings()
 
         XCTAssertTrue(window.staticTexts["During dictation"].waitForExistence(timeout: 8),
-                      "the audio and system options should say that they apply only during dictation")
-        XCTAssertTrue(window.staticTexts["These settings apply only while you dictate."].exists,
-                      "the audio and system options should explain their scope")
+                      "the audio and system options should say that they apply during dictation")
+        let footer = window.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "These settings apply while you dictate.", "reads coding agent replies aloud"))
+        XCTAssertTrue(footer.firstMatch.exists,
+                      "the audio and system options should explain their scope, including reading a reply aloud")
     }
 
     func testCueVolumeAppearsOnlyWhileSoundsAreEnabled() throws {

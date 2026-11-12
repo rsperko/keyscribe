@@ -68,6 +68,10 @@ final class SpokenResultOutput {
     private var releasing: (task: Task<Void, Never>, eviction: Eviction, idleSeconds: Double?)?
     private let wait: @MainActor (Duration) async -> Void
     private let inFront: @MainActor (String) async -> Bool
+    private let duck: (Bool) -> Void
+    private let duckGrace: Duration
+    private var ducked = false
+    private var duckGraceTask: Task<Void, Never>?
     private var nextOrder = 0
     private(set) var queued: [Queued] = []
     private var generating: [String: Task<Void, Never>] = [:]
@@ -96,7 +100,9 @@ final class SpokenResultOutput {
         release: @escaping () -> Void = {},
         residency: @escaping () -> (eviction: Eviction, idleSeconds: Double?) = { (.fastest, nil) },
         wait: @escaping @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) },
-        inFront: @escaping @MainActor (String) async -> Bool = { _ in false }
+        inFront: @escaping @MainActor (String) async -> Bool = { _ in false },
+        duck: @escaping (Bool) -> Void = { _ in },
+        duckGrace: Duration = .seconds(1)
     ) {
         self.client = client
         self.permits = permits
@@ -111,6 +117,8 @@ final class SpokenResultOutput {
         self.residency = residency
         self.wait = wait
         self.inFront = inFront
+        self.duck = duck
+        self.duckGrace = duckGrace
         speech.onStarted = { [weak self] in self?.started() }
         speech.onFinished = { [weak self] in self?.ended() }
         silencer.register(speech)
@@ -186,7 +194,10 @@ final class SpokenResultOutput {
     }
 
     func stop() {
-        defer { settle() }
+        defer {
+            settle()
+            setDucked(false)
+        }
         for task in generating.values { task.cancel() }
         generating = [:]
         for task in checkingNotice.values { task.cancel() }
@@ -430,6 +441,7 @@ final class SpokenResultOutput {
         pendingRequested.subtract(playingRequested)
         playingRequested = []
         heard = playing
+        syncDuck()
         onSpeaking?(Speaking(name: playing.name, text: playing.body))
         if !playing.replayed, !playing.standalone, !playing.notice {
             let origins = playing.mergedOrigins.isEmpty ? [playing.origin] : playing.mergedOrigins.compactMap { $0 }
@@ -455,6 +467,33 @@ final class SpokenResultOutput {
     }
 
     private func playNext() {
+        advance()
+        syncDuck()
+    }
+
+    // Held while a reply is audible and for a short grace after it, so a next reply that speaks within the
+    // grace does not pump the other audio; one still being prepared past it gets the audio back until it speaks.
+    private func syncDuck() {
+        if announced { return setDucked(true) }
+        guard ducked, duckGraceTask == nil else { return }
+        let grace = duckGrace
+        duckGraceTask = Task { [weak self] in
+            try? await Task.sleep(for: grace)
+            guard !Task.isCancelled, let self else { return }
+            self.duckGraceTask = nil
+            if !self.announced { self.setDucked(false) }
+        }
+    }
+
+    private func setDucked(_ wanted: Bool) {
+        duckGraceTask?.cancel()
+        duckGraceTask = nil
+        guard wanted != ducked else { return }
+        ducked = wanted
+        duck(wanted)
+    }
+
+    private func advance() {
         guard settings().enabled else {
             queued = []
             pendingRequested = []
@@ -465,7 +504,7 @@ final class SpokenResultOutput {
         guard playing == nil, silencer.isAvailable(for: speech), !speech.isSpeaking else { return }
         if let answering {
             self.answering = nil
-            guard answering.stillTrue() else { return playNext() }
+            guard answering.stillTrue() else { return advance() }
             return play(answering.item, while: answering.stillTrue)
         }
         if let replay {

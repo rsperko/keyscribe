@@ -125,7 +125,7 @@ struct GeneralSettingsView: View {
             } header: {
                 Text("During dictation")
             } footer: {
-                Text("These settings apply only while you dictate. Quiet turns other audio down instead of silencing it, so you can still hear a call or a video.")
+                Text("These settings apply while you dictate. Quiet turns other audio down instead of silencing it, so you can still hear a call or a video. Other audio also applies while \(Branding.appName) reads coding agent replies aloud; its own voice stays at full level.")
             }
 
             Section {

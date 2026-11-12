@@ -103,6 +103,55 @@ struct CaptureCueOrderingTests {
         controller.cancel()
     }
 
+    @Test func changingOtherAudioInSettingsReachesSpeechAlreadyPlaying() {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-cue-order-\(UUID().uuidString)", isDirectory: true)
+        var level: Float32 = 1
+        var settings = Settings.defaults
+        settings.duringDictation.otherAudio = .mute
+        let controller = DictationController(
+            settings: settings,
+            provider: try! SpeechEngineProvider(engines: [TinyEngine()], activeId: "tiny"),
+            config: ConfigCache(supportDir: dir), history: nil, hud: RecordingHUD(), permits: { _ in true },
+            audio: StartMarkingAudio(url: dir.appendingPathComponent("capture.wav")),
+            effects: DuringDictationEffects(
+                defaultOutputDeviceID: { 42 }, setDuck: { value, _ in level = value; return true }, reapplyDelays: [],
+                duckFollowInterval: 100, startCueDurationOverride: 0),
+            micStatus: { .granted })
+
+        controller.lowerOtherAudioForSpeech(true)
+        #expect(level == 0)
+        settings.duringDictation.otherAudio = .unchanged
+        controller.updateSettings(settings)
+        #expect(level == 1)
+    }
+
+    @Test func pressingToDictateOverSpeechKeepsOtherAudioDownUntilTheTakeEnds() async {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-cue-order-\(UUID().uuidString)", isDirectory: true)
+        var level: Float32 = 1
+        var settings = Settings.defaults
+        settings.duringDictation.otherAudio = .mute
+        let controller = DictationController(
+            settings: settings,
+            provider: try! SpeechEngineProvider(engines: [TinyEngine()], activeId: "tiny"),
+            config: ConfigCache(supportDir: dir), history: nil, hud: RecordingHUD(), permits: { _ in true },
+            audio: StartMarkingAudio(url: dir.appendingPathComponent("capture.wav")),
+            effects: DuringDictationEffects(
+                defaultOutputDeviceID: { 42 }, setDuck: { value, _ in level = value; return true }, reapplyDelays: [],
+                duckFollowInterval: 100, startCueDurationOverride: 0),
+            micStatus: { .granted }, silencer: SpeechSilencer())
+
+        controller.lowerOtherAudioForSpeech(true)
+        controller.handleStart()
+        controller.lowerOtherAudioForSpeech(false)
+        #expect(level == 0)
+        controller.cancel()
+        await controller.captureBringUpTask?.value
+        await poll { level == 1 }
+        #expect(level == 1)
+    }
+
     @MainActor private final class Sounds { var played = 0 }
 
     private func makeController(

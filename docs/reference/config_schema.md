@@ -1434,7 +1434,8 @@ eviction = "fastest"            # "fastest" | "balanced" | "frugal" (default: fa
 #  dictionary_recovery_engines keys are obsolete: ignored on read and dropped on the next write.)
 
 [during_dictation]
-other_audio = "quiet"           # what happens to other audio while you dictate: "quiet" (default, turned
+other_audio = "quiet"           # what happens to other audio while you dictate or Read replies aloud
+                                #   speaks: "quiet" (default, turned
                                 #   down but still audible), "mute" (silenced), "unchanged" (left alone).
                                 #   Ducks (FaceTime-style, cannot strand); lands after the start sound,
                                 #   instant when sounds = false

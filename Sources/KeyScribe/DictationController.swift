@@ -437,7 +437,9 @@ final class DictationController {
 
     func updateSettings(_ settings: Settings) {
         let previousEviction = self.settings.stt.eviction
+        let previousOtherAudio = self.settings.duringDictation.otherAudio
         self.settings = settings
+        if settings.duringDictation.otherAudio != previousOtherAudio { effects.otherAudioChanged(settings.duringDictation.otherAudio) }
         if !settings.features.isEnabled(.voiceCommands) { stopVoiceCommandChoice() }
         if !settings.features.isEnabled(.codingAgents) { StopGate.closeAll() }
         audio.setPreferredInputUID(settings.audio.inputDeviceUID)
@@ -448,6 +450,10 @@ final class DictationController {
     func previewStartCue(volumePercent: Int) {
         guard !isBusy else { return }
         effects.previewStartCue(volumePercent: volumePercent)
+    }
+
+    func lowerOtherAudioForSpeech(_ lower: Bool) {
+        if lower { effects.speechStarted(settings.duringDictation.otherAudio) } else { effects.speechEnded() }
     }
 
     private func reconcileCaptureWarmth() {
@@ -627,6 +633,7 @@ final class DictationController {
         }
         dictationStarts += 1
         if !replayingKeys { keysTakenByHUD = [] }
+        effects.pressBegan()
         silencer.recordingStarted()
         activeStartTrigger = triggerKey
         latchedTriggerName = (pressStyle == .tapToToggle)
@@ -2372,6 +2379,7 @@ final class DictationController {
         completion: DictationCompletion? = nil
     ) {
         silencer.recordingEnded()
+        effects.pressEnded()
         switch terminal {
         case .cancel: machine.cancel()
         case .finish(let outcome): machine.finish(outcome)

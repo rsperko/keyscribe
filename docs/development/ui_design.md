@@ -219,6 +219,14 @@ the only signal.
   which routes through the same output). So with the start sound **off** the change is instant — pick that
   for a dictation that feels immediate. The output device that was ducked is the one restored on
   completion, even if the default output changed mid-dictation.
+- The same "Other audio" choice applies to everything Read replies aloud speaks (replies, notices, answers,
+  "repeat that"; not the voice sample in Settings): the duck lands when the voice becomes audible and lifts
+  a short grace after it stops, so a next reply that speaks within the grace does not pump the audio, while
+  one still being prepared past it gets the audio back until it speaks. Stop gives the audio back at once.
+  Changing the choice while a reply plays applies at once. The duck spares KeyScribe's own process, so the
+  voice stays at full level. Dictation and reading aloud each hold the duck, and the output comes back up
+  only once neither does; a dictation pressed over a reply carries the reply's duck until its own lands or
+  the take ends, so the audio does not rise and fall in between.
 
 ---
 
@@ -1109,7 +1117,7 @@ Show the few choices a new user is most likely to need:
 - **HUD** holds the HUD appearance picker (Match System, Opposite of System, Light, Dark). Its footer
   says that every window, Settings included, still follows the Mac.
 - **During dictation** groups keeping the Mac awake and muting other audio. Its footer makes clear that
-  both apply only while the user dictates.
+  both apply while the user dictates, and that other audio also applies while Read replies aloud speaks.
 - Microphone choice, with a short explanation of following the Mac’s current input
 - Open at login
 - (History enable and retention live in the **History** pane, not here.)

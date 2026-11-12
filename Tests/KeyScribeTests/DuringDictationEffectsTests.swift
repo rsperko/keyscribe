@@ -159,6 +159,167 @@ struct DuringDictationEffectsTests {
         #expect(level == 0)
     }
 
+    @Test func readingAloudDucksOtherAudioAtTheChosenLevelUntilItEnds() {
+        var writes: [Float32] = []
+        let effects = DuringDictationEffects(
+            defaultOutputDeviceID: { 42 },
+            setDuck: { value, _ in writes.append(value); return true },
+            reapplyDelays: [], duckFollowInterval: 100)
+
+        effects.speechStarted(.quiet)
+        #expect(writes == [0.25])
+        effects.speechEnded()
+        #expect(writes == [0.25, 1])
+        effects.speechStarted(.mute)
+        #expect(writes == [0.25, 1, 0])
+        effects.speechEnded()
+        #expect(writes == [0.25, 1, 0, 1])
+    }
+
+    @Test func readingAloudLeavesOtherAudioAloneWhenItIsUnchanged() {
+        var writes: [Float32] = []
+        let effects = DuringDictationEffects(
+            defaultOutputDeviceID: { 42 },
+            setDuck: { value, _ in writes.append(value); return true },
+            reapplyDelays: [], duckFollowInterval: 100)
+
+        effects.speechStarted(.unchanged)
+        effects.speechEnded()
+        #expect(writes.isEmpty)
+    }
+
+    @Test func changingOtherAudioWhileSpeakingAppliesAtOnce() {
+        var level: Float32 = 1
+        let effects = DuringDictationEffects(
+            defaultOutputDeviceID: { 42 },
+            setDuck: { value, _ in level = value; return true },
+            reapplyDelays: [], duckFollowInterval: 100)
+
+        effects.speechStarted(.mute)
+        #expect(level == 0)
+        effects.otherAudioChanged(.quiet)
+        #expect(level == 0.25)
+        effects.otherAudioChanged(.unchanged)
+        #expect(level == 1)
+        effects.otherAudioChanged(.mute)
+        #expect(level == 0)
+        effects.speechEnded()
+        #expect(level == 1)
+    }
+
+    @Test func choosingToLowerOtherAudioMidSpeechLowersItAndAfterSpeechDoesNothing() {
+        var writes: [Float32] = []
+        let effects = DuringDictationEffects(
+            defaultOutputDeviceID: { 42 },
+            setDuck: { value, _ in writes.append(value); return true },
+            reapplyDelays: [], duckFollowInterval: 100)
+
+        effects.speechStarted(.unchanged)
+        #expect(writes.isEmpty)
+        effects.otherAudioChanged(.quiet)
+        #expect(writes == [0.25])
+        effects.speechEnded()
+        #expect(writes == [0.25, 1])
+        effects.otherAudioChanged(.mute)
+        #expect(writes == [0.25, 1])
+    }
+
+    @Test func aDictationPressedOverSpeechKeepsOtherAudioDownUntilItTakesTheDuckOver() {
+        var writes: [Float32] = []
+        let effects = DuringDictationEffects(
+            defaultOutputDeviceID: { 42 },
+            setDuck: { value, _ in writes.append(value); return true },
+            reapplyDelays: [], duckFollowInterval: 100)
+
+        effects.speechStarted(.mute)
+        effects.pressBegan()
+        effects.speechEnded()
+        #expect(writes == [0])
+        effects.begin(duckConfig)
+        effects.activateDuck()
+        #expect(writes == [0])
+        effects.restoreAudio()
+        effects.pressEnded()
+        #expect(writes == [0, 1])
+    }
+
+    @Test func aPressOverSpeechThatNeverRecordsGivesOtherAudioBackWhenItEnds() {
+        var writes: [Float32] = []
+        let effects = DuringDictationEffects(
+            defaultOutputDeviceID: { 42 },
+            setDuck: { value, _ in writes.append(value); return true },
+            reapplyDelays: [], duckFollowInterval: 100)
+
+        effects.speechStarted(.quiet)
+        effects.pressBegan()
+        effects.speechEnded()
+        effects.pressEnded()
+        #expect(writes == [0.25, 1])
+    }
+
+    @Test func aPressWithNothingSpeakingHoldsNothing() {
+        var writes: [Float32] = []
+        let effects = DuringDictationEffects(
+            defaultOutputDeviceID: { 42 },
+            setDuck: { value, _ in writes.append(value); return true },
+            reapplyDelays: [], duckFollowInterval: 100)
+
+        effects.pressBegan()
+        effects.pressEnded()
+        effects.speechStarted(.quiet)
+        effects.speechEnded()
+        #expect(writes == [0.25, 1])
+    }
+
+    @Test func aDictationEndingWhileSpeechStillPlaysKeepsOtherAudioDown() {
+        var level: Float32 = 1
+        let effects = DuringDictationEffects(
+            defaultOutputDeviceID: { 42 },
+            setDuck: { value, _ in level = value; return true },
+            reapplyDelays: [], duckFollowInterval: 100)
+
+        effects.begin(quietConfig)
+        effects.activateDuck()
+        effects.speechStarted(.quiet)
+        effects.restoreAudio()
+        effects.end(quietConfig)
+        #expect(level == 0.25)
+        effects.speechEnded()
+        #expect(level == 1)
+    }
+
+    @Test func speechEndingDuringADictationKeepsTheDictationsDuck() {
+        var level: Float32 = 1
+        let effects = DuringDictationEffects(
+            defaultOutputDeviceID: { 42 },
+            setDuck: { value, _ in level = value; return true },
+            reapplyDelays: [], duckFollowInterval: 100)
+
+        effects.speechStarted(.mute)
+        effects.begin(duckConfig)
+        effects.activateDuck()
+        effects.speechEnded()
+        #expect(level == 0)
+        effects.end(duckConfig)
+        #expect(level == 1)
+    }
+
+    @Test func aRestoreReapplyAfterSpeechDoesNotLiftADictationsDuck() async {
+        var level: Float32 = 1
+        let effects = DuringDictationEffects(
+            defaultOutputDeviceID: { 42 },
+            setDuck: { value, _ in level = value; return true },
+            reapplyDelays: [0.05], duckFollowInterval: 100)
+
+        effects.speechStarted(.mute)
+        effects.speechEnded()
+        effects.begin(duckConfig)
+        effects.activateDuck()
+        try? await Task.sleep(for: .seconds(0.12))
+
+        #expect(level == 0)
+    }
+
     @Test func configuredVolumeIsAppliedToEveryDictationSound() {
         var volumes: [Float] = []
         let effects = DuringDictationEffects(

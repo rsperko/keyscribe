@@ -37,6 +37,14 @@ final class DuringDictationEffects {
     // output it lands after the A2DP->HFP route switch settles. Cleared on apply or cancel.
     private var pendingDuck: (generation: Int, level: Float32)?
     private var activeDuckLevel: Float32 = 0
+    // Dictation and spoken output each hold the duck; the output comes back up only once neither does, so one
+    // ending never lifts the other's.
+    private var dictationHoldsDuck = false
+    private var speechHoldsDuck = false
+    private var speechActive = false
+    // A press over speech stops the voice well before the dictation's own duck lands; this carries the speech's
+    // duck across that gap so the other audio does not rise and fall again.
+    private var pressHoldsDuck = false
     private let defaultOutputDeviceID: () -> AudioDeviceID?
     private let setDuck: (Float32, AudioDeviceID) -> Bool
     private let reapplyDelays: [Double]
@@ -142,7 +150,62 @@ final class DuringDictationEffects {
     func activateDuck() {
         guard let armed = pendingDuck, armed.generation == generation else { return }
         pendingDuck = nil
+        dictationHoldsDuck = true
+        pressHoldsDuck = false
         startDucking(level: armed.level)
+    }
+
+    func pressBegan() {
+        if speechHoldsDuck { pressHoldsDuck = true }
+    }
+
+    func pressEnded() {
+        guard pressHoldsDuck else { return }
+        pressHoldsDuck = false
+        restoreIfUnheld()
+    }
+
+    // AudioDeviceDuck spares the calling process, so the voice stays at full level while everything else drops.
+    func speechStarted(_ otherAudio: OtherAudio) {
+        speechActive = true
+        applySpeechDuck(otherAudio)
+    }
+
+    func speechEnded() {
+        speechActive = false
+        releaseSpeechDuck()
+    }
+
+    func otherAudioChanged(_ otherAudio: OtherAudio) {
+        guard speechActive else { return }
+        applySpeechDuck(otherAudio)
+    }
+
+    private func applySpeechDuck(_ otherAudio: OtherAudio) {
+        guard let level = Self.duckLevel(for: otherAudio) else { return releaseSpeechDuck() }
+        speechHoldsDuck = true
+        guard ducking else { return startDucking(level: level) }
+        guard !dictationHoldsDuck, !pressHoldsDuck, level != activeDuckLevel else { return }
+        activeDuckLevel = level
+        for device in duckedDevices { _ = setDuck(level, device) }
+        duckCurrentDefault()
+    }
+
+    private func releaseSpeechDuck() {
+        guard speechHoldsDuck else { return }
+        speechHoldsDuck = false
+        restoreIfUnheld()
+    }
+
+    private func releaseDictationDuck() {
+        dictationHoldsDuck = false
+        pressHoldsDuck = false
+        restoreIfUnheld()
+    }
+
+    private func restoreIfUnheld() {
+        guard !dictationHoldsDuck, !speechHoldsDuck, !pressHoldsDuck else { return }
+        restoreOutput()
     }
 
     private static func duckLevel(for behavior: OtherAudio) -> Float32? {
@@ -158,7 +221,7 @@ final class DuringDictationEffects {
     // sub-cue-length press can't re-duck after this. Idempotent, so a later end(...) is a no-op.
     func restoreAudio() {
         generation &+= 1
-        restoreOutput()
+        releaseDictationDuck()
     }
 
     // Sound only, for a trigger rejected while a dictation is still running: end(_:cue:) would release that
@@ -172,7 +235,7 @@ final class DuringDictationEffects {
         generation &+= 1
         pendingDuck = nil
         releaseDisplayAssertion()
-        restoreOutput()
+        releaseDictationDuck()
         if config.sounds, let cue { play(sound(named: cue.soundName), volumePercent: config.soundVolumePercent) }
     }
 

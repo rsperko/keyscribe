@@ -811,7 +811,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     inFront: { [weak hub = runtime.hub] id in
                         guard let candidates = hub?.frontCandidates else { return false }
                         return await AgentFront.withoutAsking.shown(among: candidates) { _ in }?.id == id
-                    })
+                    },
+                    duck: { [weak controller = self.controller] in controller?.lowerOtherAudioForSpeech($0) })
                 runtime.hub.onResult = { [weak spoken] in spoken?.finished(conversation: $0, handle: $1, answer: $2, requested: $3, origin: $4) }
                 runtime.hub.onEnded = { [weak spoken] in spoken?.ended(conversation: $0, handle: $1, body: $2, requested: $3, origin: $4) }
                 runtime.hub.onAttention = { [weak spoken] in spoken?.attention(conversation: $0, handle: $1, $2, requested: $3) }
