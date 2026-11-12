@@ -1499,9 +1499,10 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 > `connection` that names no saved service speaks it as unavailable. A redacted span is never
 > restored into speech: the summary says "a hidden value" in its place. Every result starts with the name of
 > the conversation that produced it, and a summary that fails, times out or comes back empty is spoken as that
-> name followed by "The spoken summary is unavailable." Unavailable summaries waiting together are spoken as one
-> notice naming each conversation, followed by "The spoken summaries are unavailable." A summary longer than
-> `SpokenResult.summaryWordLimit` words is requested once more, shorter; a second overlong one is unavailable. Turning `enabled` off keeps `connection`, `prompt` and
+> name followed by "No summary of the long reply. Open the conversation for the result." Unavailable summaries waiting
+> together are spoken as one notice naming each conversation, followed by "No summaries of the long replies. Open the
+> conversations for the results." The `prompt` alone sets a summary's length: it is requested once and read as returned,
+> except that one over `SpokenResult.runawayWordLimit` words is cut short, with History keeping the full text. Turning `enabled` off keeps `connection`, `prompt` and
 > `voice`, and so does `text_only`. `text_only` is an output choice, not a speaker: it changes only how an update or
 > answer is delivered (shown on the panel instead of read aloud, with no voice loaded and no audio lowered), never which
 > updates are given or in what order, and turning it off returns to the saved `voice`. It also applies to Ask modes

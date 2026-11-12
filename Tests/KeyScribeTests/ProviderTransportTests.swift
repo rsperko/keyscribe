@@ -332,3 +332,11 @@ struct ProviderTransportRetryTests {
         #expect(out.waits.isEmpty)
     }
 }
+
+struct TransportFailureReasonTests {
+    @Test func aTransportErrorCarryingItsOwnDescriptionIsReportedFromItsCodeAlone() {
+        let echoing = URLError(.badServerResponse, userInfo: [NSLocalizedDescriptionKey: "upstream echoed the request: password hunter2"])
+        #expect(echoing.rewriteFailureReason == URLError(.badServerResponse).localizedDescription)
+        #expect(!echoing.rewriteFailureReason.contains("hunter2"))
+    }
+}

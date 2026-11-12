@@ -17,10 +17,17 @@ final class SpokenResultOutput {
         var connection: String?
         var origin: String?
         var refusal = false
-        var mergedOrigins: [String?] = []
+        var merged: [Source] = []
         var shownOnly = false
         var heardAlready = false
+        var returned: String?
+        var failure: String?
         var text: String { standalone ? body : SpokenResult.prefaced(body, name: name) }
+    }
+
+    struct Source: Equatable {
+        let origin: String?
+        let failure: String?
     }
 
     struct Heard: Equatable {
@@ -32,6 +39,8 @@ final class SpokenResultOutput {
         var attempt: String? = nil
         var reader: SpokenAttempt.Reader? = nil
         var reason: String? = nil
+        var returned: String? = nil
+        var failure: String? = nil
     }
 
     enum Unread: Equatable {
@@ -311,45 +320,52 @@ final class SpokenResultOutput {
                 if let origin { self.onUnread?(.inFront(name: handle), origin) }
                 return self.settle()
             }
-            var text = ""
+            var summary = Summary()
             var summarizedBy: String?
             switch plan {
             case .nothing: return
-            case .speak(let spoken): text = spoken
+            case .speak(let spoken): summary.text = spoken
             case .summarize(let input):
-                guard let usable else { break }
+                guard let usable else {
+                    summary.failure = Summary.unusable
+                    break
+                }
                 let request = SpokenResult.request(answer: input, prompt: settings.effectivePrompt, tokenizer: Tokenizer())
-                text = await self.summary(of: request, connection: usable, handle: handle, deadline: self.deadlineSeconds)
+                summary = await self.summary(of: request, connection: usable, handle: handle, deadline: self.deadlineSeconds)
                 summarizedBy = usable.name
             }
             guard !Task.isCancelled, self.settings().enabled else { return }
             self.generating.removeValue(forKey: key)
-            self.enqueue(text.isEmpty
+            self.enqueue(summary.text.isEmpty
                 ? Queued(
                     conversation: conversation, name: handle, body: SpokenResult.unavailableBody, unavailable: true, requested: requested,
-                    order: order, origin: origin)
+                    order: order, origin: origin, failure: summary.failure)
                 : Queued(
-                    conversation: conversation, name: handle, body: text, requested: requested, order: order, connection: summarizedBy,
-                    origin: origin))
+                    conversation: conversation, name: handle, body: summary.text, requested: requested, order: order, connection: summarizedBy,
+                    origin: origin, returned: summary.returned))
         }
     }
 
-    private func summary(of request: SpokenResult.Request, connection: Connection, handle: String, deadline: Double) async -> String {
+    struct Summary {
+        static let unusable = "The AI service for summaries can\u{2019}t be used."
+        var text = ""
+        var returned: String?
+        var failure: String?
+    }
+
+    private func summary(of request: SpokenResult.Request, connection: Connection, handle: String, deadline: Double) async -> Summary {
         let client = client
         do {
-            return try await runWithDeadline(seconds: deadline) {
-                let first = SpokenResult.spoken(
-                    summary: try await client.complete(system: request.system, user: request.user, connection: connection))
-                if SpokenResult.fits(first) { return first }
-                try Task.checkCancellation()
-                let second = SpokenResult.spoken(
-                    summary: try await client.complete(
-                        system: SpokenResult.shorter(system: request.system), user: request.user, connection: connection))
-                return SpokenResult.fits(second) ? second : ""
-            }
+            let returned = SpokenResult.spoken(summary: try await runWithDeadline(seconds: deadline) {
+                try await client.complete(system: request.system, user: request.user, connection: connection)
+            })
+            guard !returned.isEmpty else { return Summary(failure: "The AI service returned no text.") }
+            let held = SpokenResult.held(returned)
+            return Summary(text: held.text, returned: held.shortened ? returned : nil)
         } catch {
-            Log.agents.info("spoken result not generated for \(handle, privacy: .public): \(((error as? RewriteFailureReporting)?.rewriteFailureReason ?? "unavailable"), privacy: .public)")
-            return ""
+            let reason = error is DeadlineExceeded ? "The summary took too long." : RewriteService.sanitizedReason(for: error)
+            Log.agents.info("spoken result not generated for \(handle, privacy: .public): \(reason, privacy: .public)")
+            return Summary(failure: reason)
         }
     }
 
@@ -416,7 +432,7 @@ final class SpokenResultOutput {
         guard settings.isOn, let connection = connection(settings.connection), permits(connection),
               let request = SpokenResult.waitingRequest(prompt, tokenizer: Tokenizer())
         else { return nil }
-        let text = await summary(of: request, connection: connection, handle: handle, deadline: describeDeadlineSeconds)
+        let text = await summary(of: request, connection: connection, handle: handle, deadline: describeDeadlineSeconds).text
         return text.isEmpty ? nil : (text, connection.name)
     }
 
@@ -493,13 +509,15 @@ final class SpokenResultOutput {
         syncDuck()
         onSpeaking?(Speaking(name: playing.name, text: playing.body, textOnly: playing.shownOnly))
         if !playing.replayed, !playing.standalone, !playing.notice, !playing.heardAlready {
-            let origins = playing.mergedOrigins.isEmpty ? [playing.origin] : playing.mergedOrigins.compactMap { $0 }
-            for origin in origins {
+            let sources = playing.merged.isEmpty
+                ? [Source(origin: playing.origin, failure: playing.failure)] : playing.merged.filter { $0.origin != nil }
+            for source in sources {
                 onHeard?(Heard(
                     conversation: playing.conversation, name: playing.name, text: playing.text,
-                    connection: playing.connection, origin: origin,
+                    connection: playing.connection, origin: source.origin,
                     attempt: playing.shownOnly ? nil : speech.attempt, reader: playing.shownOnly ? nil : speech.reader,
-                    reason: !playing.shownOnly && speech.reader == .macOS ? speech.macOSReason : nil))
+                    reason: !playing.shownOnly && speech.reader == .macOS ? speech.macOSReason : nil,
+                    returned: playing.returned, failure: source.failure))
             }
         }
     }
@@ -576,7 +594,8 @@ final class SpokenResultOutput {
             queued.removeAll { $0.unavailable && !$0.requested }
             next = Queued(
                 conversation: next.conversation, name: notice.name, body: notice.body, unavailable: true, origin: next.origin,
-                mergedOrigins: merged.isEmpty ? [] : [next.origin] + merged.map(\.origin))
+                merged: merged.isEmpty ? [] : ([next] + merged).map { Source(origin: $0.origin, failure: $0.failure) },
+                failure: next.failure)
         }
         play(next, requested: next.requested ? [next.conversation] : [])
     }

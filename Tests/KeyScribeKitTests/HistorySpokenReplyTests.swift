@@ -22,6 +22,20 @@ struct HistorySpokenReplyTests {
         #expect(try HistoryEntry(jsonLine: line) == original)
     }
 
+    @Test func aShortenedOrMissingSummaryKeepsWhatTheModelReturnedAndWhy() throws {
+        let shortened = entry(reply: .init(
+            at: at, conversation: "docs", text: "docs: The suite passed.", connection: "fast",
+            returned: "The suite passed. And then a great deal more."))
+        let missing = entry(reply: .init(
+            at: at, conversation: "docs", text: "docs: No summary of the long reply. Open the conversation for the result.",
+            failure: "the summary took too long"))
+        let shortenedLine = try shortened.jsonLine()
+        #expect(shortenedLine.contains("\"returned\""))
+        #expect(try missing.jsonLine().contains("\"failure\""))
+        #expect(try HistoryEntry(jsonLine: shortenedLine) == shortened)
+        #expect(try HistoryEntry(jsonLine: missing.jsonLine()) == missing)
+    }
+
     @Test func theVoiceThatReadAReplySurvivesTheStoreAsAStableIdentifier() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("spoken-voice-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -70,6 +84,22 @@ struct HistorySpokenReplyTests {
     @Test func searchFindsWhatWasSpoken() {
         let spoken = entry(heard: "run the tests", result: "run the tests", reply: .init(at: at, conversation: "docs", text: "docs: Two tests failed."))
         #expect(HistorySearch.matches(spoken, query: "two tests failed"))
+    }
+
+    @Test func searchAndExportsCarryAShortenedOrMissingSummarysDetails() {
+        let shortened = entry(reply: .init(
+            at: at, conversation: "docs", text: "docs: The suite passed.", connection: "fast",
+            returned: "The suite passed. Then it rewrote the parser."))
+        let missing = entry(reply: .init(
+            at: at, conversation: "docs", text: "docs: No summary.", failure: "The summary took too long."))
+        #expect(HistorySearch.matches(shortened, query: "rewrote the parser"))
+        #expect(HistorySearch.matches(missing, query: "took too long"))
+        let formatting = HistoryExport.Formatting(day: { _ in "day" }, time: { _ in "12:00" })
+        for format in [HistoryExport.Format.markdown, .text] {
+            let out = HistoryExport.export([shortened, missing], format: format, formatting: formatting, appName: "KeyScribe")
+            #expect(out.contains("Summary shortened from: The suite passed. Then it rewrote the parser."), "\(format)")
+            #expect(out.contains("No summary: The summary took too long."), "\(format)")
+        }
     }
 
     @Test func exportsSayWhatWasSpokenAndWhoSummarizedIt() {

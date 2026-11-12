@@ -96,8 +96,9 @@ public actor RewriteService {
 
     static let genericFailureReason = "The AI service could not be reached."
 
-    static func sanitizedReason(for error: Error) -> String {
-        (error as? RewriteFailureReporting)?.rewriteFailureReason ?? genericFailureReason
+    public static func sanitizedReason(for error: Error) -> String {
+        if let transport = error as? URLError { return URLError(transport.code).localizedDescription }
+        return (error as? RewriteFailureReporting)?.rewriteFailureReason ?? genericFailureReason
     }
 
     public func rewrite(

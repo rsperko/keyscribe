@@ -523,6 +523,7 @@ enum AccessibilityID {
         static let stagePicker = "history.detail.stagePicker"
         static let whatHappened = "history.detail.whatHappened"
         static let spokenReply = "history.detail.spokenReply"
+        static let fullSummary = "history.detail.fullSummary"
         static let actionOutcome = "history.detail.actionOutcome"
         static let rewriteComparison = "history.detail.rewriteComparison"
         static let comparisonPicker = "history.detail.comparisonPicker"

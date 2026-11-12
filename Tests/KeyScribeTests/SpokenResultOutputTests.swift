@@ -13,11 +13,13 @@ struct SpokenResultOutputTests {
         var replies: [String] = []
         var fails = false
         var holds = false
+        var outcomes: [Result<String, any Error>] = []
         var requests: [(system: String, user: String)] { lock.withLock { _requests } }
         func complete(system: String, user: String, connection: Connection) async throws -> String {
             lock.withLock { _requests.append((system, user)) }
             if holds { await withCheckedContinuation { continuation in lock.withLock { held = continuation } } }
             if fails { throw URLError(.notConnectedToInternet) }
+            if let outcome = lock.withLock({ outcomes.isEmpty ? nil : outcomes.removeFirst() }) { return try outcome.get() }
             return lock.withLock { replies.isEmpty ? reply : replies.removeFirst() }
         }
         var holding: Bool { lock.withLock { held != nil } }
@@ -350,8 +352,8 @@ struct SpokenResultOutputTests {
         silencer.recordingEnded()
         speech.finish()
         #expect(speech.spoken.map(\.text) == [
-            "api and docs: The spoken summaries are unavailable.", "api and docs: The spoken summaries are unavailable.",
-            "web: The spoken summary is unavailable.",
+            "api and docs: No summaries of the long replies. Open the conversations for the results.", "api and docs: No summaries of the long replies. Open the conversations for the results.",
+            "web: No summary of the long reply. Open the conversation for the result.",
         ])
     }
 
@@ -992,7 +994,7 @@ struct SpokenResultOutputTests {
             longer.0.finished(conversation: "pi:s1", handle: "api", answer: long)
             await settled()
             #expect(short.1.spoken.map(\.text) == ["api: Done."])
-            #expect(longer.1.spoken.map(\.text) == ["api: The spoken summary is unavailable."])
+            #expect(longer.1.spoken.map(\.text) == ["api: No summary of the long reply. Open the conversation for the result."])
             #expect(short.2.requests.isEmpty && longer.2.requests.isEmpty)
         }
     }
@@ -1019,7 +1021,7 @@ struct SpokenResultOutputTests {
         await settled()
         slow.release()
         for speech in [broken.1, blank.1, late.1] {
-            #expect(speech.spoken.map(\.text) == ["keyscribe blue: The spoken summary is unavailable."])
+            #expect(speech.spoken.map(\.text) == ["keyscribe blue: No summary of the long reply. Open the conversation for the result."])
         }
     }
 
@@ -1042,11 +1044,11 @@ struct SpokenResultOutputTests {
         await settled()
         silencer.recordingEnded()
         speech.start()
-        #expect(shown == [SpokenResultOutput.Speaking(name: "api and web", text: "The spoken summaries are unavailable.")])
+        #expect(shown == [SpokenResultOutput.Speaking(name: "api and web", text: "No summaries of the long replies. Open the conversations for the results.")])
         speech.finish()
         speech.finish()
         speech.finish()
-        #expect(speech.spoken.map(\.text) == ["api and web: The spoken summaries are unavailable.", "docs: Docs done.", "cli: Cli done."])
+        #expect(speech.spoken.map(\.text) == ["api and web: No summaries of the long replies. Open the conversations for the results.", "docs: Docs done.", "cli: Cli done."])
     }
 
     @Test func mergedUnavailableNoticesAreReportedForEachTakeThatAskedAndNeverOnTheirOwn() async {
@@ -1062,7 +1064,7 @@ struct SpokenResultOutputTests {
         silencer.recordingEnded()
         speech.start()
         #expect(heard().map(\.origin) == ["r1", "r3"])
-        #expect(Set(heard().map(\.text)) == ["api and web: The spoken summaries are unavailable."])
+        #expect(Set(heard().map(\.text)) == ["api and web: No summaries of the long replies. Open the conversations for the results."])
     }
 
     @Test func resultsWaitWhileRecordingAndANewerOneForTheSameConversationReplacesTheOlder() async {
@@ -1152,49 +1154,86 @@ struct SpokenResultOutputTests {
         #expect(speech.spoken.map(\.text) == ["api: The newer result."])
     }
 
-    @Test func anOverlongSummaryIsAskedForOnceMoreAndASecondOneSaysItIsUnavailable() async {
+    @Test func aLongSummaryIsReadAsTheModelWroteItAfterOneRequest() async {
         let rambling = Array(repeating: "and then it changed another thing", count: 10).joined(separator: " ")
-        let recovering = FakeLLM()
-        recovering.replies = [rambling, "The suite passed; one question is waiting."]
-        let fixed = make(llm: recovering)
-        fixed.0.finished(conversation: "pi:s1", handle: "api", answer: long)
+        let llm = FakeLLM()
+        llm.reply = rambling
+        let (output, speech, _) = make(llm: llm)
+        let heard = listening(output)
+        output.finished(conversation: "pi:s1", handle: "api", answer: long, origin: "r1")
         await settled()
-        let stubborn = FakeLLM()
-        stubborn.reply = rambling
-        let failed = make(llm: stubborn)
-        failed.0.finished(conversation: "pi:s1", handle: "api", answer: long)
-        await settled()
-        #expect(recovering.requests.count == 2)
-        #expect(recovering.requests[1].system.contains("\(SpokenResult.summaryWordLimit) words"))
-        #expect(fixed.1.spoken.map(\.text) == ["api: The suite passed; one question is waiting."])
-        #expect(stubborn.requests.count == 2)
-        #expect(failed.1.spoken.map(\.text) == ["api: The spoken summary is unavailable."])
+        speech.start()
+        #expect(llm.requests.count == 1)
+        #expect(speech.spoken.map(\.text) == ["api: \(rambling)"])
+        #expect(heard().map(\.returned) == [nil])
     }
 
-    @Test func anOverlongSummaryArrivingAfterStopOrTimeoutIsNotAskedForAgain() async {
-        let rambling = Array(repeating: "and then it changed another thing", count: 10).joined(separator: " ")
-        let stopped = FakeLLM()
-        stopped.holds = true
-        stopped.reply = rambling
-        let interrupted = make(llm: stopped)
-        interrupted.0.finished(conversation: "pi:s1", handle: "api", answer: long)
+    @Test func aRunawaySummaryIsReadShortenedAndHistoryKeepsWhatTheModelReturned() async {
+        let runaway = "The suite passed. " + Array(repeating: "and then it changed another thing.", count: 40).joined(separator: " ")
+        let llm = FakeLLM()
+        llm.reply = runaway
+        let (output, speech, _) = make(llm: llm)
+        let heard = listening(output)
+        output.finished(conversation: "pi:s1", handle: "api", answer: long, origin: "r1")
         await settled()
+        speech.start()
+        let held = SpokenResult.held(runaway)
+        #expect(held.shortened)
+        #expect(llm.requests.count == 1)
+        #expect(speech.spoken.map(\.text) == ["api: \(held.text)"])
+        #expect(heard().map(\.returned) == [runaway])
+        #expect(heard().map(\.failure) == [nil])
+    }
+
+    @Test func aMissingSummaryTellsHistoryWhy() async {
+        func failure(_ llm: FakeLLM, settings: SpokenResultSettings? = nil, deadline: Double = 30) async -> String? {
+            let (output, speech, _) = settings.map { make(settings: $0, llm: llm) } ?? make(llm: llm, deadlineSeconds: deadline)
+            let heard = listening(output)
+            output.finished(conversation: "pi:s1", handle: "api", answer: long, origin: "r1")
+            await settled()
+            try? await Task.sleep(for: .milliseconds(deadline < 1 ? 300 : 0))
+            await settled()
+            llm.release()
+            speech.start()
+            #expect(speech.spoken.map(\.text) == ["api: \(SpokenResult.unavailableBody)"])
+            return heard().first?.failure
+        }
+        let failing = FakeLLM()
+        failing.fails = true
+        let empty = FakeLLM()
+        empty.reply = "  "
         let slow = FakeLLM()
         slow.holds = true
-        slow.reply = rambling
-        let expired = make(llm: slow, deadlineSeconds: 0.05)
-        expired.0.finished(conversation: "pi:s1", handle: "api", answer: long)
+        #expect(await failure(failing) == URLError(.notConnectedToInternet).localizedDescription)
+        #expect(await failure(empty) == "The AI service returned no text.")
+        #expect(await failure(slow, deadline: 0.05) == "The summary took too long.")
+        #expect(await failure(FakeLLM(), settings: SpokenResultSettings(enabled: true, connection: "gone"))
+            == "The AI service for summaries can\u{2019}t be used.")
+        let leaking = FakeLLM()
+        leaking.outcomes = [.failure(EchoingError())]
+        #expect(await failure(leaking) == "The AI service could not be reached.")
+    }
+
+    struct EchoingError: LocalizedError {
+        var errorDescription: String? { "upstream echoed the request: password hunter2" }
+    }
+
+    @Test func mergedUnavailableNoticesKeepEachConversationsOwnReason() async {
+        let silencer = SpeechSilencer()
+        let llm = FakeLLM()
+        llm.outcomes = [.failure(URLError(.timedOut)), .success("  ")]
+        let (output, speech, _) = make(llm: llm, silencer: silencer)
+        let heard = listening(output)
+        silencer.recordingStarted()
+        output.finished(conversation: "pi:s1", handle: "api", answer: long, origin: "r1")
         await settled()
-        interrupted.0.stop()
-        try? await Task.sleep(for: .milliseconds(300))
+        output.finished(conversation: "pi:s3", handle: "docs", answer: long, origin: "r3")
         await settled()
-        stopped.release()
-        slow.release()
-        await settled()
-        #expect(stopped.requests.count == 1)
-        #expect(slow.requests.count == 1)
-        stopped.release()
-        slow.release()
+        silencer.recordingEnded()
+        speech.start()
+        #expect(speech.spoken.count == 1)
+        #expect(heard().map(\.origin) == ["r1", "r3"])
+        #expect(heard().map(\.failure) == [URLError(.timedOut).localizedDescription, "The AI service returned no text."])
     }
 
     @Test func aWaitingSummaryStartsOnlyOnceTheDictationHUDHasGone() async {

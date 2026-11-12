@@ -8,10 +8,10 @@ public struct SpokenResultSettings: Codable, Equatable, Sendable {
     public var textOnly: Bool
 
     public static let defaultPrompt = """
-    Summarize this reply from a coding agent in one or two short, natural sentences to be read aloud: aim for 15 \
-    to 25 words, never more than 40 words. Lead with any failure, unanswered question, or decision waiting on the \
-    developer, then what was done or found. Keep any uncertainty, anything unverified, and skipped tests. Plain \
-    text only: no markdown, code, file paths, URLs, markup or lists. Output only the words to speak.
+    The text below is a coding agent's reply to a developer. Tell the developer what they most need to know in one \
+    or two short spoken sentences, about 25 words in all. Anything that failed, is unverified, or waits on their \
+    answer or decision comes first; otherwise the main result. Leave out everything else, even if that drops \
+    several points. Speak plainly, as to a colleague, and output only what to say.
     """
 
     enum CodingKeys: String, CodingKey {
@@ -45,7 +45,7 @@ public struct SpokenResultSettings: Codable, Equatable, Sendable {
 
 public enum SpokenResult {
     public static let verbatimWordLimit = 40
-    public static let summaryWordLimit = 40
+    public static let runawayWordLimit = 120
     public static let inputCharacterLimit = 12_000
     private static let tokenNote = "Any ⟦SN:…⟧ token stands for text hidden from you: keep it exactly as written, or leave it out."
     private static let hiddenValue = "a hidden value"
@@ -76,19 +76,31 @@ public enum SpokenResult {
         }
     }
 
-    public static func fits(_ spoken: String) -> Bool {
-        spoken.split(whereSeparator: { $0.isWhitespace }).count <= summaryWordLimit
+    public struct Held: Equatable, Sendable {
+        public let text: String
+        public let shortened: Bool
+        public init(text: String, shortened: Bool) {
+            self.text = text
+            self.shortened = shortened
+        }
     }
 
-    public static func shorter(system: String) -> String {
-        system + "\n\nYour last answer was too long to read aloud. Answer again in at most \(summaryWordLimit) words, keeping any failure, open question or decision."
+    public static func held(_ spoken: String) -> Held {
+        let words = spoken.split(whereSeparator: { $0.isWhitespace })
+        guard words.count > runawayWordLimit else { return Held(text: spoken, shortened: false) }
+        let kept = words.prefix(runawayWordLimit)
+        if let end = kept.lastIndex(where: { $0.last.map { ".!?".contains($0) } ?? false }),
+           end - kept.startIndex + 1 >= runawayWordLimit / 2 {
+            return Held(text: kept[...end].joined(separator: " "), shortened: true)
+        }
+        return Held(text: kept.joined(separator: " ") + "…", shortened: true)
     }
 
     public static func prefaced(_ text: String, name: String) -> String {
         name.isEmpty ? text : "\(name): \(text)"
     }
 
-    public static let unavailableBody = "The spoken summary is unavailable."
+    public static let unavailableBody = "No summary of the long reply. Open the conversation for the result."
 
     public static func notice(_ attention: AgentAttention) -> String {
         switch attention {
@@ -104,7 +116,7 @@ public enum SpokenResult {
         for name in names where !name.isEmpty && !named.contains(name) { named.append(name) }
         let list = named.count > 1 ? named.dropLast().joined(separator: ", ") + " and " + named[named.count - 1] : named.first ?? ""
         let several = named.isEmpty ? names.count > 1 : named.count > 1
-        return (list, several ? "The spoken summaries are unavailable." : unavailableBody)
+        return (list, several ? "No summaries of the long replies. Open the conversations for the results." : unavailableBody)
     }
 
     public static func spokenForm(_ text: String) -> String {

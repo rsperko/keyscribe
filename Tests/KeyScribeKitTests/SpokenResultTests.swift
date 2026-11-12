@@ -127,7 +127,8 @@ struct SpokenResultTests {
         #expect(!settings.isOn)
         #expect(settings.effectivePrompt == SpokenResultSettings.defaultPrompt)
         #expect(SpokenResultSettings.defaultPrompt.contains("sentences"))
-        #expect(SpokenResultSettings.defaultPrompt.contains("40 words"))
+        #expect(SpokenResultSettings.defaultPrompt.contains("about 25 words"))
+        #expect(SpokenResultSettings.defaultPrompt.contains("Leave out everything else"))
         settings.enabled = true
         settings.connection = "omlx"
         settings.prompt = "Be brief."
@@ -197,24 +198,46 @@ struct SpokenResultEnablementTests {
             let merged = SpokenResult.unavailable(names: names)
             return SpokenResult.prefaced(merged.body, name: merged.name)
         }
-        #expect(notice(["keyscribe blue"]) == "keyscribe blue: The spoken summary is unavailable.")
-        #expect(notice([""]) == "The spoken summary is unavailable.")
-        #expect(notice(["api", "docs"]) == "api and docs: The spoken summaries are unavailable.")
-        #expect(notice(["api", "docs", "web"]) == "api, docs and web: The spoken summaries are unavailable.")
-        #expect(notice(["", ""]) == "The spoken summaries are unavailable.")
-        #expect(notice(["api", ""]) == "api: The spoken summary is unavailable.")
-        #expect(notice(["api", "docs", "api"]) == "api and docs: The spoken summaries are unavailable.")
-        #expect(notice(["api", "api"]) == "api: The spoken summary is unavailable.")
+        #expect(notice(["keyscribe blue"]) == "keyscribe blue: No summary of the long reply. Open the conversation for the result.")
+        #expect(notice([""]) == "No summary of the long reply. Open the conversation for the result.")
+        #expect(notice(["api", "docs"]) == "api and docs: No summaries of the long replies. Open the conversations for the results.")
+        #expect(notice(["api", "docs", "web"]) == "api, docs and web: No summaries of the long replies. Open the conversations for the results.")
+        #expect(notice(["", ""]) == "No summaries of the long replies. Open the conversations for the results.")
+        #expect(notice(["api", ""]) == "api: No summary of the long reply. Open the conversation for the result.")
+        #expect(notice(["api", "docs", "api"]) == "api and docs: No summaries of the long replies. Open the conversations for the results.")
+        #expect(notice(["api", "api"]) == "api: No summary of the long reply. Open the conversation for the result.")
     }
 }
 
 struct SpokenSummaryLengthTests {
-    @Test func aSummaryFitsOnlyWithinTheWordCeilingAndTheRetryAsksForIt() {
-        let atLimit = Array(repeating: "word", count: SpokenResult.summaryWordLimit).joined(separator: " ")
-        #expect(SpokenResult.fits(atLimit))
-        #expect(!SpokenResult.fits(atLimit + " more"))
-        let retry = SpokenResult.shorter(system: "Summarize.")
-        #expect(retry.hasPrefix("Summarize."))
-        #expect(retry.contains("\(SpokenResult.summaryWordLimit) words"))
+    private func words(_ count: Int, _ word: String = "word") -> String {
+        Array(repeating: word, count: count).joined(separator: " ")
+    }
+
+    @Test func aSummaryOfAnyReasonableLengthIsReadAsTheModelWroteIt() {
+        let summary = words(SpokenResult.runawayWordLimit)
+        #expect(SpokenResult.held(summary) == .init(text: summary, shortened: false))
+        #expect(SpokenResult.held("The suite passed.") == .init(text: "The suite passed.", shortened: false))
+    }
+
+    @Test func aRunawaySummaryIsCutAtTheLastSentenceThatFits() {
+        let opening = "The suite passed. " + words(SpokenResult.runawayWordLimit - 6) + " and one more."
+        let runaway = opening + " " + words(40, "extra")
+        let held = SpokenResult.held(runaway)
+        #expect(held.shortened)
+        #expect(held.text == opening)
+        #expect(held.text.split(separator: " ").count <= SpokenResult.runawayWordLimit)
+    }
+
+    @Test func aRunawaySummaryWithNoSentenceEndIsCutAtTheLimitAndMarked() {
+        let held = SpokenResult.held(words(SpokenResult.runawayWordLimit + 50))
+        #expect(held.shortened)
+        #expect(held.text == words(SpokenResult.runawayWordLimit) + "…")
+    }
+
+    @Test func aRunawaySummaryWhoseOnlySentenceEndIsVeryEarlyKeepsTheWordsThatFit() {
+        let held = SpokenResult.held("Done. " + words(SpokenResult.runawayWordLimit + 50))
+        #expect(held.shortened)
+        #expect(held.text == "Done. " + words(SpokenResult.runawayWordLimit - 1) + "…")
     }
 }

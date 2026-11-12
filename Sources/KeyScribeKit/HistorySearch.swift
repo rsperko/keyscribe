@@ -19,5 +19,7 @@ public enum HistorySearch {
             || entry.reported?.localizedCaseInsensitiveContains(q) == true
             || entry.summary?.localizedCaseInsensitiveContains(q) == true
             || entry.spokenReply?.text.localizedCaseInsensitiveContains(q) == true
+            || entry.spokenReply?.returned?.localizedCaseInsensitiveContains(q) == true
+            || entry.spokenReply?.failure?.localizedCaseInsensitiveContains(q) == true
     }
 }

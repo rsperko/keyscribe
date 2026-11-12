@@ -91,6 +91,8 @@ public enum HistoryExport {
         let kept = e.keptLocalText ? ["Why local was kept: \(e.fallbackReason ?? "the rewrite was skipped")"] : []
         let spoken = e.spokenReply.map { reply in
             ["Reply: \(reply.text)" + (reply.connection.map { " (summary by \($0))" } ?? "")]
+                + (reply.returned.map { ["Summary shortened from: \($0)"] } ?? [])
+                + (reply.failure.map { ["No summary: \($0)"] } ?? [])
         } ?? []
         return kept + (e.facts ?? []).map { "\($0.label): \($0.value)" } + (e.steps ?? []).map { "\(f.time($0.at)) \($0.text)" } + spoken
     }

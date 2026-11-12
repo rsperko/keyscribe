@@ -905,6 +905,7 @@ private struct HistoryDetailView: View {
     @State private var showDictionarySheet = false
     @State private var promptExpanded = false
     @State private var rewriteComparisonExpanded = false
+    @State private var fullSummaryExpanded = false
     @State private var receivedExpanded = false
     @State private var confirmingDelete = false
 
@@ -1032,7 +1033,17 @@ private struct HistoryDetailView: View {
             detailRow("From", reply.conversation)
             detailRow("At", reply.at.formatted(date: .omitted, time: .standard))
             if let connection = reply.connection { detailRow("Summarized by", connection) }
+            if let failure = reply.failure { detailRow("No summary", failure) }
+            if reply.returned != nil { detailRow("Summary", "Shortened: it ran too long to read in full.") }
             spokenAudio(reply)
+            if let returned = reply.returned {
+                DisclosureSection("Full summary", isExpanded: $fullSummaryExpanded) {
+                    Text(returned)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .accessibilityIdentifier(AccessibilityID.History.fullSummary)
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.History.spokenReply)

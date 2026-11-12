@@ -75,7 +75,7 @@ extension ProviderTransportError: RewriteFailureReporting {
 // URLError's copy is Foundation's own ("The Internet connection appears to be offline."), derived from the
 // transport state rather than from any response the endpoint controls.
 extension URLError: RewriteFailureReporting {
-    public var rewriteFailureReason: String { localizedDescription }
+    public var rewriteFailureReason: String { URLError(code).localizedDescription }
 }
 
 // Refuses any redirect that leaves the origin the request was aimed at. Attached PER TASK, not to the

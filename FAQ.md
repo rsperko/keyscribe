@@ -643,8 +643,10 @@ best-effort redaction, to be summarized; a reply of a few words is read as it is
 nothing is sent. A reply you asked to hear that has no written text is announced as "Finished without a
 written reply. Open the conversation for the result." A turn that ends with an error is announced as "Ended with an error."; one you interrupt
 yourself is not announced. If the
-summary can't be made, you hear that it is unavailable rather than a guess; several waiting at once are
-read as one notice that names each conversation, except replies you asked to hear, which are each read on their own. For a natural voice, choose
+summary can't be made, you hear "No summary of the long reply. Open the conversation for the result." rather than a
+guess, and History says why. The instruction alone sets a summary's length; only a runaway one, far longer than any
+instruction asks for, is cut short, and History keeps everything the service returned. Several missing summaries
+waiting at once are read as one notice that names each conversation, except replies you asked to hear, which are each read on their own. For a natural voice, choose
 **Download** beside **Voice**: it is a one-time download that runs on your Mac, and you can pick the speaker.
 Its speakers are English only. Until it is downloaded the macOS voice reads summaries, and **Preview Voice**
 lets you hear it first. The natural voice follows **Keep speech recognition ready** in Speech Models: Fastest keeps it

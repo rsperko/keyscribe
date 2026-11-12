@@ -2126,17 +2126,19 @@ Speech is made on this Mac; only summarizing may use the chosen service. The voi
 a non-English summary is read by an English speaker or the macOS default voice.
 
 Every summary starts with the exact name of the conversation that produced it, even with only one open, and
-the default instruction asks for 15 to 25 words and never more than 40, leading with failures, open questions
-and decisions and keeping uncertainty and skipped tests. A summary that cannot be made (the service fails,
-times out or returns nothing) is spoken as "{name}: The spoken summary is unavailable.", never a guess.
-Unavailable summaries waiting together are read as one notice naming each conversation ("{name} and {name}:
-The spoken summaries are unavailable.") in the place of the first, ahead of summaries that finished between
+the default instruction asks for one or two short sentences, about 25 words, leading with anything that failed, is
+unverified, or waits on the developer, else the main result, and leaving out everything else. It gives no example: a
+small model copies an example's facts into the summary. The instruction alone sets the length: there is one request
+and its summary is read as written. Only a runaway summary, over
+`SpokenResult.runawayWordLimit` words, is cut, at the last sentence end that keeps at least half of that, or at the limit
+with a trailing ellipsis, and History keeps the full text (§8). A summary that cannot be made (the service fails,
+times out, returns nothing or cannot be used) is spoken as "{name}: No summary of the long reply. Open the conversation
+for the result.", never a guess, and History says why. Unavailable summaries waiting together are read as one notice
+naming each conversation ("{name} and {name}: No summaries of the long replies. Open the conversations for the
+results.") in the place of the first, ahead of summaries that finished between
 them, so an outage does not repeat the same sentence once per result. A conversation named twice is named once,
 and one whose name is gone is left out of the list. A reply the user asked to hear is never merged:
-its notice is read on its own, so cancelling it stops only that conversation's notice. A
-summary over `SpokenResult.summaryWordLimit` words is asked for once more, shorter, within the same deadline;
-a second overlong one counts as unavailable rather than being cut off, since cutting could drop the failure or
-decision it ends with. One
+its notice is read on its own, so cancelling it stops only that conversation's notice. One
 summary plays at a time and only the latest waiting one per conversation is kept. Nothing plays while a
 recording is open or the dictation HUD shows: summaries wait and play once it has hidden, and starting a dictation stops playback and any audio
 being prepared; the interrupted summary is not resumed. While a summary is audible, the speaking panel (§5)
@@ -2464,7 +2466,10 @@ History is on and the mode is not left out of History. A notice (an approval or 
 session would fill History with them, and the agent's own screen already shows them. Either way a
 **Reply** section shows the line, selectable, with the conversation it came from (**From**), when it was
 given (**At**) and, for a summary, **Summarized by**
-and the service; the entry's badges add **Reply summary** and **Best-effort redaction**. The line is never
+and the service; a summary cut short also says **Summary**: Shortened, and below the playback controls a collapsed
+**Full summary** disclosure holds everything the service returned, selectable; a missing one shows **No summary** with
+a sanitized reason (the service failed, timed out, returned nothing, or could not be used), never the service's own
+error text. Search matches both, and the text and Markdown exports carry them; the entry's badges add **Reply summary** and **Best-effort redaction**. The line is never
 offered for corrections, since it is the agent's words, not the user's. Search finds it, and the exports carry it. An entry that is only a reply is not a dictation: the History stats, the mishearing search and its count, and
 the diagnostics report leave it out, and its export has no Result line. Its action bar offers **Copy Reply** in
 place of Copy Result and has no Copy Report. A dictation with a reply joined to it offers **Copy Reply** beside

@@ -221,3 +221,23 @@ struct RewriteServiceTests {
         #expect(await client.calls == 2)
     }
 }
+
+struct SanitizedFailureReasonTests {
+    struct EchoingError: LocalizedError {
+        var errorDescription: String? { "upstream echoed the request: password hunter2" }
+    }
+
+    @Test func aTransportErrorKeepsFoundationsOwnWordsAndAnythingElseIsGeneric() {
+        let offline: any Error = URLError(.notConnectedToInternet)
+        #expect(RewriteService.sanitizedReason(for: offline) == URLError(.notConnectedToInternet).localizedDescription)
+        #expect(RewriteService.sanitizedReason(for: EchoingError()) == "The AI service could not be reached.")
+    }
+
+    @Test func aTransportErrorCarryingItsOwnDescriptionIsReportedFromItsCodeAlone() {
+        let echoing: any Error = URLError(
+            .badServerResponse, userInfo: [NSLocalizedDescriptionKey: "upstream echoed the request: password hunter2"])
+        let reason = RewriteService.sanitizedReason(for: echoing)
+        #expect(!reason.contains("hunter2"))
+        #expect(reason == URLError(.badServerResponse).localizedDescription)
+    }
+}

@@ -44,8 +44,11 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         public var connection: String?
         public var voice: String?
         public var reason: String?
+        public var returned: String?
+        public var failure: String?
         public init(
-            at: Date, conversation: String, text: String, connection: String? = nil, voice: String? = nil, reason: String? = nil
+            at: Date, conversation: String, text: String, connection: String? = nil, voice: String? = nil, reason: String? = nil,
+            returned: String? = nil, failure: String? = nil
         ) {
             self.at = at
             self.conversation = conversation
@@ -53,6 +56,8 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
             self.connection = connection
             self.voice = voice
             self.reason = reason
+            self.returned = returned
+            self.failure = failure
         }
     }
 
