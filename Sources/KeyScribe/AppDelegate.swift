@@ -18,6 +18,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var speechModels: SpeechModelsModel!
     private let hud = HUDController()
     private let speakingHUD = SpeakingHUDController()
+    private lazy var positionPicker = HUDPositionPickerController(
+        currentAnchor: { [hud] in hud.currentAnchor },
+        select: { [hud] in hud.setAnchor($0) },
+        hudDisplay: { [hud] in hud.placementScreen().map(HUDPositionPickerController.Display.init) },
+        appearance: { [weak self] in self?.settings.hud.appearance ?? .system })
+    private var canMoveHUD: Bool {
+        controller.canClearHUD && speakingHUD.shownName == nil
+    }
     private var speakingPreview: SpeakingHUDController?
     private let menu = MenuBarController()
     private var hotkey: HotkeyMonitor!
@@ -255,7 +263,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
         hud.onKeyTaken = { [weak self] event in self?.controller.noteKeyReceivedByHUD(event) }
-        hud.onVisibilityChange = { SpeechSilencer.shared.dictationHUD(visible: $0) }
+        hud.onVisibilityChange = { [weak self] visible in
+            if visible { self?.positionPicker.cancel() }
+            SpeechSilencer.shared.dictationHUD(visible: visible)
+        }
         hud.onEscapeCancel = { [weak self] in
             self?.hotkey.cancelGestures()
             self?.controller.cancel()
@@ -295,9 +306,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.onOpenModes = { [weak self] in self?.settingsController.present(.modes) }
         menu.onOpenSettingsPane = { [weak self] in self?.settingsController.present($0) }
         menu.onOpenNotices = { [weak self] in self?.notices.present() }
+        menu.onMoveHUD = { [weak self] in
+            guard let self, self.canMoveHUD else { return }
+            self.controller.clearPassiveHUD()
+            self.positionPicker.open()
+        }
         menu.onMenuWillOpen = { [weak self] in
-            self?.rebuildMenuItems()
-            self?.refreshStatus()
+            guard let self else { return }
+            self.menu.setMoveHUD(enabled: self.canMoveHUD)
+            self.rebuildMenuItems()
+            self.refreshStatus()
         }
         menu.onSelectNextMode = { [weak self] id in
             self?.controller.setNextModeOverride(id: id)
@@ -312,6 +330,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.menu.setDictating(active)
             if !active { self?.updater?.dictationDidFinish() }
         }
+        controller.onPress = { [weak self] in self?.positionPicker.cancel() }
         controller.onBecameIdle = { [weak self] in
             guard let self else { return }
             // Resync gesture state on every return to idle. A controller-side end (the recording limit, a mic error,
@@ -876,6 +895,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showSpeaking(_ speaking: SpokenResultOutput.Speaking?) {
         guard let speaking else { return speakingHUD.hide() }
+        positionPicker.cancel()
         speakingHUD.appearance = settings.hud.appearance
         speakingHUD.show(name: speaking.name, summary: speaking.text)
     }

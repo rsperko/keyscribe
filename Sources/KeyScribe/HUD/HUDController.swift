@@ -59,8 +59,15 @@ final class HUDController: HUDPresenting {
     var canCancel: (() -> Bool)?
     var onVisibilityChange: ((Bool) -> Void)?
     private var localKeyMonitor: Any?
-    private var anchor: HUDAnchor = HUDAnchorStore.load() {
+    private let defaults: UserDefaults
+    private var anchor: HUDAnchor {
         didSet { model.listAbove = anchor.keepsBottomEdge }
+    }
+    var currentAnchor: HUDAnchor { anchor }
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        anchor = HUDAnchorStore.load(defaults)
     }
     private var moveObserver: NSObjectProtocol?
     private var snapWorkItem: DispatchWorkItem?
@@ -112,7 +119,7 @@ final class HUDController: HUDPresenting {
             }
             // Follow the focused window's screen only on hidden→visible, not on every level tick, so
             // recording never hops the HUD mid-dictation.
-            if wasHidden, let panel { reposition(panel, to: focusedWindowScreen()) }
+            if wasHidden, let panel { reposition(panel, to: placementScreen()) }
             // Re-resolved per appearance rather than observed, so Opposite tracks a system flip from the next
             // dictation on.
             if wasHidden { applyAppearance() }
@@ -315,15 +322,19 @@ final class HUDController: HUDPresenting {
         guard let panel, let screen = panel.screen ?? NSScreen.main else { return }
         let frame = panel.frame
         let center = CGPoint(x: frame.midX, y: frame.midY)
-        anchor = HUDAnchor.nearest(toCenter: center, in: screen.visibleFrame, size: frame.size)
-        HUDAnchorStore.save(anchor)
-        reposition(panel)
+        setAnchor(HUDAnchor.nearest(toCenter: center, in: screen.visibleFrame, size: frame.size))
     }
 
-    func resetAnchor() {
-        anchor = .default
-        HUDAnchorStore.save(.default)
+    func resetAnchor() { setAnchor(.default) }
+
+    func setAnchor(_ anchor: HUDAnchor) {
+        self.anchor = anchor
+        HUDAnchorStore.save(anchor, defaults)
         if let panel { reposition(panel) }
+    }
+
+    func placementScreen() -> NSScreen? {
+        focusedWindowScreen() ?? panel?.screen ?? NSScreen.main
     }
 
     // Reads window geometry from the window server (CGWindowList), not the target app's AX tree, so this

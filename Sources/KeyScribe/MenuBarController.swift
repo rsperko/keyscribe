@@ -74,6 +74,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private let addVocabularyItem = NSMenuItem(title: "Add to Vocabulary…", action: nil, keyEquivalent: "")
     private let spokenUpdatesItem = NSMenuItem(title: "Read Agent Replies Aloud", action: nil, keyEquivalent: "")
     private let lastReplyItem = NSMenuItem(title: "Last Reply in History\u{2026}", action: nil, keyEquivalent: "")
+    private let moveHUDItem = NSMenuItem(title: "Move HUD\u{2026}", action: nil, keyEquivalent: "")
     private let speechModelsMenu = NSMenu()
     private let modesMenu = NSMenu()
 
@@ -123,6 +124,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var onToggleSpokenUpdates: (() -> Void)?
     var onOpenHistory: (() -> Void)?
     var onOpenLastReply: (() -> Void)?
+    var onMoveHUD: (() -> Void)?
     var onOpenSettings: (() -> Void)?
     var onOpenSpeechModels: (() -> Void)?
     var onOpenModes: (() -> Void)?
@@ -204,6 +206,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(history)
 
         menu.addItem(.separator())
+        moveHUDItem.target = self
+        moveHUDItem.action = #selector(moveHUD)
+        menu.addItem(moveHUDItem)
         settingsItem.target = self
         settingsItem.action = #selector(openSettings)
         menu.addItem(settingsItem)
@@ -231,6 +236,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var pasteLastMenuItem: NSMenuItem { pasteLastItem }
     var spokenUpdatesMenuItem: NSMenuItem { spokenUpdatesItem }
     var lastReplyMenuItem: NSMenuItem { lastReplyItem }
+    var moveHUDMenuItem: NSMenuItem { moveHUDItem }
+
+    func setMoveHUD(enabled: Bool) { moveHUDItem.isEnabled = enabled }
 
     func setLastReply(available: Bool) { lastReplyItem.isHidden = !available }
     var modeMenuItems: [NSMenuItem] { modesMenu.items }
@@ -409,6 +417,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func toggleSpokenUpdates() { onToggleSpokenUpdates?() }
     @objc private func openHistory() { onOpenHistory?() }
     @objc private func openLastReply() { onOpenLastReply?() }
+    @objc private func moveHUD() { onMoveHUD?() }
     @objc private func openSettings() { onOpenSettings?() }
     @objc private func openSpeechModels() { onOpenSpeechModels?() }
     @objc private func openModes() { onOpenModes?() }

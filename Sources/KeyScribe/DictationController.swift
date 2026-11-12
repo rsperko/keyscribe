@@ -273,6 +273,7 @@ final class DictationController {
     var onRecordingChanged: ((Bool) -> Void)?
 
     var onBecameIdle: (() -> Void)?
+    var onPress: (() -> Void)?
 
     var onHistoryUpdated: (() -> Void)?
 
@@ -615,6 +616,7 @@ final class DictationController {
     ) {
         // A wake key can reach the tap while the login window still owns the console.
         guard !isSessionLocked() else { return }
+        onPress?()
         if droppingPress, machine.state == .cancellingBringUp {
             deferredPress = DeferredPress(triggerKey: triggerKey, pressStyle: pressStyle, pressedAt: pressedAt)
             return
@@ -2483,6 +2485,17 @@ final class DictationController {
     func helpHover(_ hovering: Bool) {
         guard showingHelp else { return }
         if hovering { helpTask?.cancel() } else { scheduleHelpHide() }
+    }
+
+    var canClearHUD: Bool {
+        !isBusy && voiceCommands.pendingChoice == nil && hud.lastPresented?.isPassive != false
+    }
+
+    func clearPassiveHUD() {
+        guard canClearHUD else { return }
+        hideTask?.cancel()
+        releaseHelp()
+        if let shown = hud.lastPresented, shown != .hidden { hud.present(.hidden) }
     }
 
     func dismissHelp() {

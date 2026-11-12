@@ -174,6 +174,16 @@ a short while (not while the pointer is over it), with Escape or its close butto
 next recording. If a voice command is asking which one you meant, the answer is how to choose instead.
 To type the words themselves, say them as part of a longer sentence.
 
+### How do I move the HUD?
+
+Choose **Move HUD…** from the KeyScribe menu, just above Settings, then click where you want it: a corner,
+or the middle of any screen edge. The position is saved at once and used from the next dictation on. Press
+Escape or click anywhere else to leave it where it is.
+
+You can also drag the HUD while it is showing; when you let go it snaps to the nearest of the same
+positions. One position is kept and used on every display, and the panel that shows a spoken reply follows
+it. **Reset HUD Position** under Settings ▸ Maintenance puts it back at the bottom center.
+
 ### Can I switch apps or run actions by voice?
 
 Yes, with the experimental **Voice Commands** mode. Turn it on in **Settings ▸ Maintenance ▸

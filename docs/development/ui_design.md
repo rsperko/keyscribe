@@ -235,6 +235,50 @@ the only signal.
 The HUD is a movable, transient status surface. It is not a transcript editor and it never
 becomes a second destination for configuration.
 
+### Moving the HUD
+
+The HUD sits at one of the anchors in `HUDAnchor`: the corners and the middle of each screen edge, never
+the middle of the screen. One anchor is saved and applied on whichever display the HUD appears, so the
+position is not per-display. The spoken-reply panel uses the same anchor. There are two ways to change it,
+and both write the same anchor:
+
+- **Drag** the HUD while it is showing. A moment after the drag ends it snaps to the anchor nearest where
+  it was dropped.
+- **Move HUD…** in the menu bar opens a picker without starting a dictation.
+
+**The picker.** The display the next HUD would use dims lightly and shows one marker at every anchor. That
+display is the one holding the frontmost app's window, decided before the picker appears and fixed while it
+is open; no other display dims or shows markers. A marker is a compact rounded button
+(`HUDPositionPickerLayout.markerSize`) named for its position (“Top left”, “Bottom center”). It marks a
+choice, not the HUD's size, and it reads as a button before the pointer reaches it: a material fill, a
+visible border, and a primary-colored label. Hover strengthens the fill and border, a press fills it with
+the accent color, and keyboard focus adds an accent ring outside the border. The saved position carries a
+checkmark, an accent border and tint, and is exposed to assistive technology as selected. Markers shrink
+on a small display so that none overlap and all stay inside the usable area. There is no animation.
+
+The middle of the screen holds the instructions, which are text and not a button or a card, so they cannot
+be mistaken for a ninth position: the heading “Move HUD”, then “Click a position around the screen.”, “You
+can also drag the HUD during dictation.”, and “Esc to cancel”. The drag line names dictation so that
+nothing in the picker reads as draggable. The text is white with a shadow over a soft dark gradient that
+is wider than the text block and fades out with no edge, so busy content behind it, such as terminal
+output, never runs through the lines.
+
+Clicking a marker saves that anchor and closes the picker at once; choosing the saved one just closes it.
+There is no confirmation, preview, or Done button, and the next HUD appears at the new anchor. Hover and
+keyboard focus change nothing. Escape, a click anywhere else (which is consumed, on any display), another
+app taking focus, and a display being connected, removed, or rearranged all close the picker and save
+nothing.
+
+**Move HUD…** is available whenever nothing is in progress, including while the HUD shows a finished
+dictation's message or “What you can say”, which is when a user notices the HUD is covering something.
+Opening the picker then closes that message the way its own timer or Escape would, so nothing of it is
+left behind. It is disabled while a dictation is arming, recording, transcribing, or being rewritten,
+while a voice-command question is waiting, and while a reply is being read aloud. The picker never delays
+work: pressing a dictation trigger, or anything else that shows the HUD or the spoken-reply panel, closes
+it without saving first. Opening it records nothing, plays no cue, and changes neither the frontmost app
+nor the next dictation's mode or recipient. **Reset HUD Position** (Settings ▸ Maintenance) returns the
+anchor to `HUDAnchor.default`.
+
 **Timing contract: the HUD never appears until speech spoken immediately after its appearance will
 be recorded.** The HUD is the visual half of the start cue (start/end sounds are optional and must
 have equivalent visual feedback), so it appears at the same instant the cue ends — never at the press.
@@ -929,6 +973,7 @@ Speech Model ▸
 History…
 
 ────────────────
+Move HUD…
 Settings…
 About & Notices…
 Quit KeyScribe
@@ -958,7 +1003,9 @@ Speech Models…` opens the full Speech Models settings pane for installs, delet
 
 The menu leads with actions around the next or most recent dictation. Vocabulary follows as an
 in-the-moment correction tool. Speech model selection and History are occasional management tasks,
-so they sit together above Settings instead of competing with the primary loop.
+so they sit together above Settings instead of competing with the primary loop. **Move HUD…** sits directly
+above Settings, with no separator between them, and opens the position picker (§5 Moving the HUD); it is
+disabled while it cannot open.
 
 > **`Add to Vocabulary…`** opens the standalone vocabulary panel; it is
 > always present here and is also bound to a global chord shortcut (default ⌃⌥⇧V, rebindable

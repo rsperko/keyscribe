@@ -17,8 +17,24 @@ struct MenuBarIconTests {
         #expect(titles == [
             "starting…", "Next Dictation", "Paste Last Dictation", "Read Agent Replies Aloud", "Last Reply in History…", "",
             "Add to Vocabulary…", "", "Speech Model", "History…", "",
-            "Settings…", "About & Notices…", "", "Quit \(Branding.appName)",
+            "Move HUD…", "Settings…", "About & Notices…", "", "Quit \(Branding.appName)",
         ])
+    }
+
+    @Test func moveHUDIsOfferedOnlyWhenTheAppSaysItCanOpen() {
+        let controller = MenuBarController()
+        controller.install()
+        var opened = 0
+        controller.onMoveHUD = { opened += 1 }
+
+        controller.setMoveHUD(enabled: false)
+        #expect(!controller.moveHUDMenuItem.isEnabled)
+        controller.setMoveHUD(enabled: true)
+        #expect(controller.moveHUDMenuItem.isEnabled)
+
+        let item = controller.moveHUDMenuItem
+        _ = item.target?.perform(item.action)
+        #expect(opened == 1)
     }
 
     @Test func modeItemTitleShowsAModifierOnlyShortcut() {

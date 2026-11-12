@@ -148,6 +148,23 @@ struct UnclaimedPressTests {
         #expect(h.inserts.count == 0)
     }
 
+    @Test func aPressIsAnnouncedBeforeAnythingElseEvenWhenNoHUDWillShow() async {
+        let h = harness(
+            modes: [scoped("vm", key: "fn", bundle: "com.vmware.fusion"),
+                    direct(owning: "right_option")],
+            bundleId: "com.apple.Notes")
+        defer { try? FileManager.default.removeItem(at: h.dir) }
+        var beginsAtPress: [Int] = []
+        h.controller.onPress = { beginsAtPress.append(h.audio.captureBegins) }
+
+        h.controller.handleStart(triggerKey: "fn")
+        #expect(beginsAtPress == [0])
+        await h.controller.captureBringUpTask?.value
+
+        #expect(beginsAtPress == [0])
+        #expect(h.hud.states.allSatisfy { $0 == HUDState.hidden })
+    }
+
     @Test func anUnclaimedPressWhoseMicIsAlreadyComingUpStaysSilent() async {
         let cues = CueCounter()
         let h = harness(

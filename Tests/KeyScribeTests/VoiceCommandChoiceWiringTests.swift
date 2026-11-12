@@ -777,6 +777,49 @@ struct VoiceCommandChoiceWiringTests {
         #expect(help(h.hud.last) == nil)
     }
 
+    @Test func helpGivesWayToAnotherSurfaceAndLeavesNothingBehind() async throws {
+        let h = try Harness(places: [])
+        let escape = FakeChordRegistrar()
+        h.controller.helpEscape = escape
+        h.controller.helpSeconds = 0.05
+        await h.dictate("what can I say", trigger: "right_command")
+        #expect(h.controller.canClearHUD)
+
+        h.controller.clearPassiveHUD()
+        #expect(h.hud.last == .hidden)
+        #expect(escape.lastRegistrations.isEmpty)
+        let drawn = h.hud.states.count
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(h.hud.states.count == drawn)
+    }
+
+    @Test func aFinishedDictationsMessageGivesWayToAnotherSurface() async throws {
+        let h = try Harness(places: [])
+        await h.dictate("hello there", trigger: "right_command")
+        #expect(h.hud.last != .hidden)
+        #expect(h.controller.canClearHUD)
+
+        h.controller.clearPassiveHUD()
+        #expect(h.hud.last == .hidden)
+    }
+
+    @Test func aQuestionOrARecordingNeverGivesWay() async throws {
+        let h = try Harness(places: [personal, work])
+        await h.dictate("open mail")
+        let question = try #require(h.hud.last)
+        #expect(!h.controller.canClearHUD)
+        h.controller.clearPassiveHUD()
+        #expect(h.hud.last == question)
+
+        let recording = try Harness(places: [])
+        await recording.press("right_command")
+        let shown = recording.hud.last
+        #expect(!recording.controller.canClearHUD)
+        recording.controller.clearPassiveHUD()
+        #expect(recording.hud.last == shown)
+        recording.controller.cancel()
+    }
+
     @Test func helpClosesOnItsOwnUnlessThePointerIsOverIt() async throws {
         let h = try Harness(places: [])
         h.controller.helpSeconds = 0.05

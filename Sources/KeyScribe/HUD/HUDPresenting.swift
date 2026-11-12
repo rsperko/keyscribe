@@ -369,6 +369,14 @@ extension HUDState {
         }
     }
 
+    var isPassive: Bool {
+        switch self {
+        case .recording, .loadingModel, .transcribing, .rewriting, .choice: false
+        case .hidden, .ready, .localFallback, .rewriteSkipped, .complete, .commandDone, .stoppedAtLimit,
+             .error, .advisory, .help: true
+        }
+    }
+
     var isWaitingForChoice: Bool {
         if case .choice(_, .waiting, _) = self { return true }
         return false
