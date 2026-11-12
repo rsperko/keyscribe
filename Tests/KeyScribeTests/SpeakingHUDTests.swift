@@ -153,6 +153,31 @@ struct SpeakingHUDTests {
         #expect(hud.shownName == nil)
     }
 
+    @Test func draggingSnapsToTheNearestAnchorAndSharesItWithoutTouchingPlayback() async throws {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let defaults = scratchDefaults()
+        HUDAnchorStore.save(.bottomCenter, defaults)
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults, visibleFrame: { _ in screen })
+        defer { hud.hide() }
+        var stops = 0
+        var anchors: [HUDAnchor] = []
+        hud.onStop = { stops += 1 }
+        hud.onAnchorChange = { anchors.append($0) }
+        hud.show(name: "keyscribe blue", summary: "Done.")
+        hud.toggleSummary()
+        let panel = try #require(hud.panel)
+        try await Task.sleep(for: .milliseconds(50))
+        panel.setFrameOrigin(NSPoint(x: 30, y: screen.maxY - panel.frame.height - 30))
+        try await Task.sleep(for: .seconds(HUDDragSnap.settle + 0.15))
+        #expect(anchors == [.topLeft])
+        #expect(HUDAnchorStore.load(defaults) == .topLeft)
+        #expect(stops == 0)
+        #expect(hud.showsSummary)
+        let placed = try #require(hud.panelFrame)
+        #expect(placed.minX == screen.minX + HUDAnchor.defaultMargin)
+        #expect(placed.maxY == screen.maxY - HUDAnchor.defaultMargin)
+    }
+
     @Test func itShowsTheExactConversationNameAndNeverTakesKeyFocus() {
         let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults())
         defer { hud.hide() }
@@ -203,52 +228,6 @@ struct SpokenUpdatesMenuAvailabilityTests {
         menu.install()
         menu.setSpokenUpdates(available: false, on: true)
         #expect(menu.spokenUpdatesMenuItem.isHidden)
-    }
-}
-
-@MainActor
-struct SpeakingHUDPlacementTests {
-    private let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
-    private let row = CGSize(width: SpeakingHUDLayout.width, height: 52)
-
-    @Test(arguments: HUDAnchor.allCases)
-    func expandingNeverMovesTheControlRow(_ anchor: HUDAnchor) {
-        let compact = SpeakingHUDLayout.placement(anchor: anchor, screen: screen, rowSize: row, captionHeight: nil)
-        let expanded = SpeakingHUDLayout.placement(anchor: anchor, screen: screen, rowSize: row, captionHeight: 90)
-        #expect(compact.panel == compact.row)
-        #expect(expanded.row == compact.row)
-        #expect(expanded.panel.width == SpeakingHUDLayout.width)
-        #expect(expanded.panel.height == row.height + 90)
-        #expect(screen.contains(expanded.panel))
-        #expect(expanded.panel.contains(expanded.row))
-    }
-
-    @Test(arguments: HUDAnchor.allCases)
-    func theCaptionOpensAwayFromTheAnchoredEdge(_ anchor: HUDAnchor) {
-        let expanded = SpeakingHUDLayout.placement(anchor: anchor, screen: screen, rowSize: row, captionHeight: 90)
-        #expect(expanded.captionAbove == anchor.keepsBottomEdge)
-    }
-
-    @Test func aCenterAnchorOpensAboveOnlyWhenBelowCannotFit() {
-        let short = CGRect(x: 0, y: 0, width: 1440, height: 200)
-        let fits = SpeakingHUDLayout.placement(anchor: .centerLeft, screen: screen, rowSize: row, captionHeight: 90)
-        #expect(!fits.captionAbove)
-        let tight = SpeakingHUDLayout.placement(anchor: .centerLeft, screen: short, rowSize: row, captionHeight: 90)
-        #expect(tight.captionAbove)
-        #expect(short.contains(tight.panel))
-    }
-
-    @Test func aCaptionTooTallForTheScreenScrollsAndKeepsStopOnScreen() {
-        let short = CGRect(x: 0, y: 0, width: 1440, height: 160)
-        let expanded = SpeakingHUDLayout.placement(anchor: .bottomLeft, screen: short, rowSize: row, captionHeight: 120)
-        #expect(short.contains(expanded.panel))
-        #expect(short.contains(expanded.row))
-        #expect(expanded.panel.contains(expanded.row))
-        #expect(expanded.captionHeight == short.height - row.height)
-        #expect(expanded.captionScrolls)
-        let fits = SpeakingHUDLayout.placement(anchor: .bottomLeft, screen: screen, rowSize: row, captionHeight: 120)
-        #expect(fits.captionHeight == 120)
-        #expect(!fits.captionScrolls)
     }
 }
 

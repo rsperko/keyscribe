@@ -60,18 +60,14 @@ final class HUDController: HUDPresenting {
     var onVisibilityChange: ((Bool) -> Void)?
     private var localKeyMonitor: Any?
     private let defaults: UserDefaults
-    private var anchor: HUDAnchor {
-        didSet { model.listAbove = anchor.keepsBottomEdge }
-    }
+    private var anchor: HUDAnchor
     var currentAnchor: HUDAnchor { anchor }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         anchor = HUDAnchorStore.load(defaults)
     }
-    private var moveObserver: NSObjectProtocol?
-    private var snapWorkItem: DispatchWorkItem?
-    private var isRepositioning = false
+    private var dragSnap: HUDDragSnap?
 
     func render(_ state: HUDState) {
         // Same mode/latch, only the level changed: push just the level so the card chrome isn't rebuilt
@@ -168,23 +164,12 @@ final class HUDController: HUDPresenting {
         // Let the panel grow to the content's intrinsic height (badges wrap, text never ellipsizes); the
         // width comes from the state. `resize` reads fittingSize and grows upward.
         hosting.sizingOptions = [.intrinsicContentSize]
-        let panel = KeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: HUDState.hidden.panelWidth, height: HUDState.hidden.contentHeight),
-            styleMask: [.nonactivatingPanel, .borderless],
-            backing: .buffered, defer: false)
-        panel.isFloatingPanel = true
-        panel.level = .floating
-        panel.hidesOnDeactivate = false
-        panel.isMovableByWindowBackground = true
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.hasShadow = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = hosting
-        // A waiting question must never take key focus, even when one of its rows is clicked.
-        panel.allowsKey = { [weak self] in self?.model.state.isWaitingForChoice != true }
+        let panel = HUDPanel.make(
+            content: hosting, size: NSSize(width: HUDState.hidden.panelWidth, height: HUDState.hidden.contentHeight))
+        // Only a recording or cancellable HUD may be key, even when clicked.
+        panel.allowsKey = { [weak self] in self?.model.state.holdsKeyFocus == true }
         self.panel = panel
-        observeMoves(panel)
+        dragSnap = HUDDragSnap(panel: panel) { [weak self] _ in self?.snapToNearestAnchor() }
         reposition(panel)
         applyAppearance()
         installLocalKeyMonitor()
@@ -207,13 +192,19 @@ final class HUDController: HUDPresenting {
         let height = max(state.contentHeight, fittingHeight)
         let size = CGSize(width: state.panelWidth, height: height)
         guard panel.frame.size != size else { return }
-        isRepositioning = true
-        let screen = panel.screen ?? NSScreen.main
-        let origin = screen.map { anchor.origin(in: $0.visibleFrame, size: size) } ?? panel.frame.origin
-        panel.setFrame(NSRect(origin: origin, size: size), display: true)
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated { self?.isRepositioning = false }
-        }
+        guard let screen = panel.screen ?? NSScreen.main else { return }
+        apply(Self.placement(of: state, size: size, in: screen.visibleFrame, anchor: anchor), to: panel)
+    }
+
+    static func placement(of state: HUDState, size: CGSize, in screen: CGRect, anchor: HUDAnchor) -> HUDPlacement {
+        guard state.hasList else { return anchor.placement(in: screen, header: size, body: nil) }
+        let header = CGSize(width: size.width, height: HUDState.listHeaderExtent)
+        return anchor.placement(in: screen, header: header, body: max(0, size.height - header.height))
+    }
+
+    private func apply(_ placement: HUDPlacement, to panel: NSPanel) {
+        if model.listAbove != placement.bodyAbove { model.listAbove = placement.bodyAbove }
+        place { panel.setFrame(placement.panel, display: true) }
     }
 
     // The HUD panel is non-activating and usually not the focused element, so a changed accessibilityLabel
@@ -289,40 +280,21 @@ final class HUDController: HUDPresenting {
     private func reposition(_ panel: NSPanel, to screen: NSScreen? = nil) {
         guard let screen = screen ?? panel.screen ?? NSScreen.main else { return }
         if model.screenHeight != screen.visibleFrame.height { model.screenHeight = screen.visibleFrame.height }
-        let origin = anchor.origin(in: screen.visibleFrame, size: panel.frame.size)
-        // Our own setFrameOrigin posts didMove; guard so it isn't mistaken for a user drag. Cleared a
-        // runloop tick later since the notification is delivered asynchronously.
-        isRepositioning = true
-        panel.setFrameOrigin(origin)
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated { self?.isRepositioning = false }
-        }
+        apply(Self.placement(of: model.state, size: panel.frame.size, in: screen.visibleFrame, anchor: anchor), to: panel)
     }
 
-    // Debounce until a drag settles, then snap to the nearest of the eight anchors and persist it.
-    private func observeMoves(_ panel: NSPanel) {
-        moveObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didMoveNotification, object: panel, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.handleDidMove() }
-        }
-    }
-
-    private func handleDidMove() {
-        guard !isRepositioning else { return }
-        snapWorkItem?.cancel()
-        let item = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated { self?.snapToNearestAnchor() }
-        }
-        snapWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: item)
+    private func place(_ change: () -> Void) {
+        if let dragSnap { dragSnap.place(change) } else { change() }
     }
 
     private func snapToNearestAnchor() {
         guard let panel, let screen = panel.screen ?? NSScreen.main else { return }
-        let frame = panel.frame
-        let center = CGPoint(x: frame.midX, y: frame.midY)
-        setAnchor(HUDAnchor.nearest(toCenter: center, in: screen.visibleFrame, size: frame.size))
+        var header = panel.frame
+        if model.state.hasList {
+            header.size.height = HUDState.listHeaderExtent
+            if !model.listAbove { header.origin.y = panel.frame.maxY - header.height }
+        }
+        setAnchor(HUDAnchor.nearest(toCenter: CGPoint(x: header.midX, y: header.midY), in: screen.visibleFrame, size: header.size))
     }
 
     func resetAnchor() { setAnchor(.default) }
@@ -370,11 +342,6 @@ final class HUDController: HUDPresenting {
     }
 
     private static func area(_ r: CGRect) -> CGFloat { r.isNull ? 0 : r.width * r.height }
-}
-
-private final class KeyablePanel: NSPanel {
-    var allowsKey: () -> Bool = { true }
-    override var canBecomeKey: Bool { allowsKey() }
 }
 
 // A minimal flow layout: wraps to a new row when the next subview would exceed the proposed width. Used
@@ -527,6 +494,7 @@ private struct HUDView: View {
                     .accessibilityLabel("Close")
                     .accessibilityIdentifier(AccessibilityID.HUD.helpClose)
             }
+            .frame(minHeight: HUDState.listHeaderHeight)
             helpList(help)
         }
     }
@@ -595,7 +563,7 @@ private struct HUDView: View {
         VStack(spacing: 8) {
             if let agents = model.shown.agentRoster {
                 VerticalStack(spacing: 8, reversed: model.listAbove) {
-                    standardHeader.frame(minHeight: HUDState.agentHeaderHeight)
+                    standardHeader.frame(minHeight: HUDState.listHeaderHeight)
                     agentList(agents)
                 }
             } else {

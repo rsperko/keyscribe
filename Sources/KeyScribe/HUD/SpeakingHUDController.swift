@@ -14,15 +14,16 @@ final class SpeakingHUDModel: ObservableObject {
 
 @MainActor
 final class SpeakingHUDController {
-    static let escapeKeyCode = 53
     static let showsSummaryKey = "speakingHUD.showsSummary"
 
-    private let escape: any ChordRegistering
+    private let escape: EscapeClaim
     private let defaults: UserDefaults
     private let model = SpeakingHUDModel()
-    private var panel: NSPanel?
+    private(set) var panel: HUDPanel?
+    private var dragSnap: HUDDragSnap?
     private(set) var shownName: String?
     var onStop: (() -> Void)?
+    var onAnchorChange: ((HUDAnchor) -> Void)?
     var appearance: HUDAppearance = .system
 
     private let visibleFrame: (NSPanel) -> CGRect?
@@ -31,7 +32,7 @@ final class SpeakingHUDController {
         escape: any ChordRegistering = CarbonHotKeys(), defaults: UserDefaults = .standard,
         visibleFrame: @escaping (NSPanel) -> CGRect? = { ($0.screen ?? NSScreen.main)?.visibleFrame }
     ) {
-        self.escape = escape
+        self.escape = EscapeClaim(registrar: escape)
         self.defaults = defaults
         self.visibleFrame = visibleFrame
         model.showsSummary = defaults.bool(forKey: Self.showsSummaryKey)
@@ -55,8 +56,7 @@ final class SpeakingHUDController {
         panel.alphaValue = 1
         panel.orderFrontRegardless()
         if wasHidden {
-            let claimed = escape.update([CarbonHotKeys.Registration(
-                keyCode: Self.escapeKeyCode, modifiers: [], onPressed: { [weak self] in self?.onStop?() }, onReleased: nil)])
+            let claimed = escape.claim { [weak self] in self?.onStop?() }
             model.status = claimed ? SpeakingHUDLayout.withEscape : SpeakingHUDLayout.withoutEscape
             place(panel)
             NSAccessibility.post(
@@ -74,7 +74,7 @@ final class SpeakingHUDController {
     func hide() {
         guard shownName != nil else { return }
         shownName = nil
-        escape.update([])
+        escape.release()
         panel?.orderOut(nil)
     }
 
@@ -82,19 +82,23 @@ final class SpeakingHUDController {
         let hosting = NSHostingView(rootView: SpeakingHUDView(
             model: model, onStop: { [weak self] in self?.onStop?() }, onToggleSummary: { [weak self] in self?.toggleSummary() }))
         hosting.sizingOptions = [.intrinsicContentSize]
-        let panel = UnkeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: SpeakingHUDLayout.width, height: 56),
-            styleMask: [.nonactivatingPanel, .borderless], backing: .buffered, defer: false)
-        panel.isFloatingPanel = true
-        panel.level = .floating
-        panel.hidesOnDeactivate = false
-        panel.backgroundColor = .clear
-        panel.isOpaque = false
-        panel.hasShadow = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        panel.contentView = hosting
+        let panel = HUDPanel.make(content: hosting, size: NSSize(width: SpeakingHUDLayout.width, height: 56))
+        panel.allowsKey = { false }
         self.panel = panel
+        dragSnap = HUDDragSnap(panel: panel) { [weak self] _ in self?.snapToNearestAnchor() }
         return panel
+    }
+
+    private func snapToNearestAnchor() {
+        guard let panel, let screen = visibleFrame(panel) else { return }
+        let rowHeight = NSHostingView(rootView: SpeakingRow(model: model, onStop: {}, onToggleSummary: {})).fittingSize.height
+        let frame = panel.frame
+        let rowCenterY = model.showsSummary && model.captionAbove ? frame.minY + rowHeight / 2 : frame.maxY - rowHeight / 2
+        let anchor = HUDAnchor.nearest(
+            toCenter: CGPoint(x: frame.midX, y: rowCenterY), in: screen, size: CGSize(width: frame.width, height: rowHeight))
+        HUDAnchorStore.save(anchor, defaults)
+        place(panel)
+        onAnchorChange?(anchor)
     }
 
     private func place(_ panel: NSPanel) {
@@ -103,28 +107,20 @@ final class SpeakingHUDController {
         let rowSize = NSHostingView(rootView: SpeakingRow(model: model, onStop: {}, onToggleSummary: {})).fittingSize
         let captionHeight = model.showsSummary
             ? NSHostingView(rootView: SpeakingCaption(text: model.caption, above: true)).fittingSize.height : nil
-        let placement = SpeakingHUDLayout.placement(anchor: anchor, screen: screen, rowSize: rowSize, captionHeight: captionHeight)
-        model.captionAbove = placement.captionAbove
-        model.captionLimit = placement.captionScrolls ? placement.captionHeight : nil
-        panel.setFrame(placement.panel, display: true)
+        let capped = captionHeight.map { min($0, HUDAnchor.listCap(screenHeight: screen.height)) }
+        let placement = anchor.placement(in: screen, header: rowSize, body: capped)
+        model.captionAbove = placement.bodyAbove
+        model.captionLimit = placement.body < (captionHeight ?? 0) ? placement.body : nil
+        if let dragSnap {
+            dragSnap.place { panel.setFrame(placement.panel, display: true) }
+        } else {
+            panel.setFrame(placement.panel, display: true)
+        }
     }
-}
-
-private final class UnkeyablePanel: NSPanel {
-    override var canBecomeKey: Bool { false }
-    override var canBecomeMain: Bool { false }
 }
 
 @MainActor
 enum SpeakingHUDLayout {
-    struct Placement: Equatable {
-        let panel: CGRect
-        let row: CGRect
-        let captionAbove: Bool
-        var captionHeight: CGFloat = 0
-        var captionScrolls = false
-    }
-
     static let width: CGFloat = 280
     static let padding: CGFloat = 14
     static let verticalPadding: CGFloat = 10
@@ -135,25 +131,6 @@ enum SpeakingHUDLayout {
     static let chevron: CGFloat = 16
     static let withEscape = "Speaking \u{00B7} Esc stops playback"
     static let withoutEscape = "Speaking"
-
-    static func placement(anchor: HUDAnchor, screen: CGRect, rowSize: CGSize, captionHeight: CGFloat?) -> Placement {
-        let row = CGRect(origin: anchor.origin(in: screen, size: rowSize), size: rowSize)
-        guard let captionHeight else { return Placement(panel: row, row: row, captionAbove: false) }
-        let shownCaption = min(captionHeight, max(0, screen.height - rowSize.height))
-        let height = rowSize.height + shownCaption
-        let above: Bool = switch anchor {
-        case .bottomLeft, .bottomCenter, .bottomRight: true
-        case .topLeft, .topCenter, .topRight: false
-        case .centerLeft, .centerRight: row.maxY - height < screen.minY
-        }
-        let preferredY = above ? row.minY : row.maxY - height
-        let y = min(max(preferredY, screen.minY), screen.maxY - height)
-        let panel = CGRect(x: row.minX, y: y, width: rowSize.width, height: height)
-        let rowY = above ? panel.minY : panel.maxY - rowSize.height
-        return Placement(
-            panel: panel, row: CGRect(x: row.minX, y: rowY, width: rowSize.width, height: rowSize.height), captionAbove: above,
-            captionHeight: shownCaption, captionScrolls: shownCaption < captionHeight)
-    }
 
     static func disclosureLabel(showsSummary: Bool) -> String { showsSummary ? "Hide spoken text" : "Show spoken text" }
     static func disclosureValue(showsSummary: Bool) -> String { showsSummary ? "Expanded" : "Collapsed" }

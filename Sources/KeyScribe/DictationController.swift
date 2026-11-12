@@ -381,7 +381,7 @@ final class DictationController {
         installMemoryPressureHandler()
         self.voiceCommands.onProgress = { [weak self] progress in self?.showCommandProgress(progress) }
         self.hud.onDraw = { [weak self] state in
-            if state.spokenHelp == nil { self?.releaseHelp() }
+            if state.spokenHelp == nil { self?.help.release() }
         }
         self.hud.choices = { [weak self] in
             HUDChannel.Choices(answering: self?.answeringChoicePrompt, pending: self?.pendingVoiceCommandChoice)
@@ -562,16 +562,12 @@ final class DictationController {
     }
 
     var pressConfirmationBackstop: Duration = .seconds(1)
-    lazy var helpEscape: any ChordRegistering = CarbonHotKeys()
-    var helpSeconds: Double = 15
+    lazy var help = HelpPresenter(escape: EscapeClaim()) { [weak self] in self?.hud.present(.hidden) }
     var runningAppNames: () -> [String] = {
         NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != Bundle.main.bundleIdentifier }
             .compactMap(\.localizedName)
     }
-    var voiceOverRunning: () -> Bool = { NSWorkspace.shared.isVoiceOverEnabled }
-    private var showingHelp = false
-    private var helpTask: Task<Void, Never>?
 
     func handleEngage(triggerKey: String?) {
         guard !isSessionLocked(), machine.state == .idle, micStatus() != .denied, !audio.inputIsBluetooth else { return }
@@ -641,7 +637,7 @@ final class DictationController {
         latchedTriggerName = (pressStyle == .tapToToggle)
             ? triggerKey.flatMap { try? KeyDescriptor(parsing: $0) }?.displayString : nil
         hideTask?.cancel()
-        releaseHelp()
+        help.release()
         if let engaged {
             session?.pendingPress = nil
             session?.voiceCommandStopsAtPress = commandOutput.stops
@@ -2454,11 +2450,7 @@ final class DictationController {
     private func finishHelp(mode: Mode?) {
         finish(machine: .finish(.inserted), cue: nil, endsQuietly: true, state: .help(spokenHelp(for: mode)), record: (.command, nil))
         guard hud.lastPresented?.spokenHelp != nil else { return }
-        showingHelp = true
-        helpEscape.update([CarbonHotKeys.Registration(
-            keyCode: SpeakingHUDController.escapeKeyCode, modifiers: [], onPressed: { [weak self] in self?.dismissHelp() },
-            onReleased: nil)])
-        scheduleHelpHide()
+        help.shown()
     }
 
     private func spokenHelp(for mode: Mode?) -> SpokenHelp {
@@ -2482,11 +2474,6 @@ final class DictationController {
             context: session?.routingContext ?? RoutingContext())
     }
 
-    func helpHover(_ hovering: Bool) {
-        guard showingHelp else { return }
-        if hovering { helpTask?.cancel() } else { scheduleHelpHide() }
-    }
-
     var canClearHUD: Bool {
         !isBusy && voiceCommands.pendingChoice == nil && hud.lastPresented?.isPassive != false
     }
@@ -2494,32 +2481,8 @@ final class DictationController {
     func clearPassiveHUD() {
         guard canClearHUD else { return }
         hideTask?.cancel()
-        releaseHelp()
+        help.release()
         if let shown = hud.lastPresented, shown != .hidden { hud.present(.hidden) }
-    }
-
-    func dismissHelp() {
-        guard showingHelp else { return }
-        releaseHelp()
-        hud.present(.hidden)
-    }
-
-    private func releaseHelp() {
-        guard showingHelp else { return }
-        showingHelp = false
-        helpTask?.cancel()
-        helpEscape.update([])
-    }
-
-    private func scheduleHelpHide() {
-        helpTask?.cancel()
-        guard !voiceOverRunning() else { return }
-        let seconds = helpSeconds
-        helpTask = Task { @MainActor in
-            try? await Task.sleep(for: .seconds(seconds))
-            guard !Task.isCancelled else { return }
-            dismissHelp()
-        }
     }
 
     private func scheduleHide(after seconds: Double = 2) {

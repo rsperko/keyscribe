@@ -148,7 +148,7 @@ struct VoiceCommandChoiceWiringTests {
                 accessibilityGranted: { true },
                 voiceCommands: runner)
             controller.choiceExpirySleep = { await timer.sleep($0) }
-            controller.helpEscape = FakeChordRegistrar()
+            controller.help.escape = EscapeClaim(registrar: FakeChordRegistrar())
             controller.runningAppNames = { ["Safari", "Ghostty"] }
         }
 
@@ -733,7 +733,7 @@ struct VoiceCommandChoiceWiringTests {
     func askingForHelpInDictationShowsItAndInsertsNothing(text: String) async throws {
         let h = try Harness(places: [])
         let escape = FakeChordRegistrar()
-        h.controller.helpEscape = escape
+        h.controller.help.escape = EscapeClaim(registrar: escape)
         await h.dictate(text, trigger: "right_command")
         let shown = try #require(help(h.hud.last))
         #expect(shown.title == "Email")
@@ -763,7 +763,7 @@ struct VoiceCommandChoiceWiringTests {
     @Test func escapeOrTheNextRecordingClosesHelpAndReleasesEscape() async throws {
         let h = try Harness(places: [])
         let escape = FakeChordRegistrar()
-        h.controller.helpEscape = escape
+        h.controller.help.escape = EscapeClaim(registrar: escape)
         await h.dictate("what can I say", trigger: "right_command")
         try #require(escape.lastRegistrations.first).onPressed()
         #expect(h.hud.last == .hidden)
@@ -780,8 +780,8 @@ struct VoiceCommandChoiceWiringTests {
     @Test func helpGivesWayToAnotherSurfaceAndLeavesNothingBehind() async throws {
         let h = try Harness(places: [])
         let escape = FakeChordRegistrar()
-        h.controller.helpEscape = escape
-        h.controller.helpSeconds = 0.05
+        h.controller.help.escape = EscapeClaim(registrar: escape)
+        h.controller.help.seconds = 0.05
         await h.dictate("what can I say", trigger: "right_command")
         #expect(h.controller.canClearHUD)
 
@@ -822,12 +822,12 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func helpClosesOnItsOwnUnlessThePointerIsOverIt() async throws {
         let h = try Harness(places: [])
-        h.controller.helpSeconds = 0.05
+        h.controller.help.seconds = 0.05
         await h.dictate("what can I say", trigger: "right_command")
-        h.controller.helpHover(true)
+        h.controller.help.hover(true)
         try await Task.sleep(for: .milliseconds(150))
         #expect(help(h.hud.last) != nil)
-        h.controller.helpHover(false)
+        h.controller.help.hover(false)
         for _ in 0..<100 where h.hud.last != .hidden { try await Task.sleep(for: .milliseconds(20)) }
         #expect(h.hud.last == .hidden)
     }
@@ -835,8 +835,8 @@ struct VoiceCommandChoiceWiringTests {
     @Test func anotherMessageOverHelpReleasesEscapeAndKeepsItsOwnTimer() async throws {
         let h = try Harness(places: [])
         let escape = FakeChordRegistrar()
-        h.controller.helpEscape = escape
-        h.controller.helpSeconds = 0.05
+        h.controller.help.escape = EscapeClaim(registrar: escape)
+        h.controller.help.seconds = 0.05
         await h.dictate("what can I say", trigger: "right_command")
         #expect(escape.lastRegistrations.count == 1)
         h.controller.announceConfigProblems([.unusedKeys("settings.toml", [])])
@@ -849,8 +849,8 @@ struct VoiceCommandChoiceWiringTests {
 
     @Test func helpStaysWhileVoiceOverIsRunning() async throws {
         let h = try Harness(places: [])
-        h.controller.helpSeconds = 0.05
-        h.controller.voiceOverRunning = { true }
+        h.controller.help.seconds = 0.05
+        h.controller.help.voiceOverRunning = { true }
         await h.dictate("what can I say", trigger: "right_command")
         try await Task.sleep(for: .milliseconds(150))
         #expect(help(h.hud.last) != nil)

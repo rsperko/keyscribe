@@ -1,3 +1,4 @@
+import CoreGraphics
 import Testing
 @testable import KeyScribeApp
 @testable import KeyScribeKit
@@ -80,8 +81,9 @@ struct AgentHUDTests {
         let tall = try? #require(HUDState.agentListHeight(rows: 40, screenHeight: 2000))
         #expect(tall == HUDState.agentListHeight(rows: 40, screenHeight: 3000))
         let short = try? #require(HUDState.agentListHeight(rows: 12, screenHeight: 500))
-        #expect((short ?? .infinity) + HUDState.agentListChrome <= 500)
+        #expect((short ?? .infinity) <= HUDAnchor.listCap(screenHeight: 500))
         #expect((short ?? 0) >= HUDState.agentRowStep)
+        #expect(tall == CGFloat(HUDState.agentRowsShown(screenHeight: 2000)) * HUDState.agentRowStep)
     }
 
     @Test func aRowReadsAsOneSentence() {
@@ -107,7 +109,7 @@ struct AgentHUDTests {
     @Test func theLongListPreviewPutsTheRecipientBelowTheInitialViewport() throws {
         let agents = try #require(HUDPreview.state(named: "recording-agents-long")?.agentRoster)
         let recipient = try #require(agents.rows.first(where: { $0.current }))
-        #expect(recipient.number > HUDState.agentListVisibleRows)
+        #expect(recipient.number > HUDState.agentRowsShown(screenHeight: 2000))
         #expect(agents.rows.map(\.number) == Array(1...agents.rows.count))
     }
 }

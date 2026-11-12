@@ -253,8 +253,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.controller.chooseVoiceCommand(choice: id, candidate: identity)
         }
         hud.onCancelVoiceCommandChoice = { [weak self] id in self?.controller.cancelVoiceCommandChoice(choice: id) }
-        hud.onCloseHelp = { [weak self] in self?.controller.dismissHelp() }
-        hud.onHelpHover = { [weak self] hovering in self?.controller.helpHover(hovering) }
+        hud.onCloseHelp = { [weak self] in self?.controller.help.dismiss() }
+        speakingHUD.onAnchorChange = { [weak self] in self?.hud.setAnchor($0) }
+        hud.onHelpHover = { [weak self] hovering in self?.controller.help.hover(hovering) }
         hud.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
         hud.onOpenAIService = { [weak self] id in self?.settingsController.presentAIService(id: id) }
         hud.onOpenCodingAgents = { [weak self] mode, rows in

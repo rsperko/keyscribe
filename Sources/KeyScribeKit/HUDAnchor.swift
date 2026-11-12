@@ -37,6 +37,33 @@ public enum HUDAnchor: String, CaseIterable, Sendable {
         return CGPoint(x: x, y: y)
     }
 
+    public static let listCapRange: ClosedRange<CGFloat> = 140...360
+
+    public static func listCap(screenHeight: CGFloat) -> CGFloat {
+        min(listCapRange.upperBound, max(listCapRange.lowerBound, (screenHeight - 160) / 2))
+    }
+
+    public func placement(
+        in screen: CGRect, header: CGSize, body: CGFloat?, margin: CGFloat = HUDAnchor.defaultMargin
+    ) -> HUDPlacement {
+        let anchored = CGRect(origin: origin(in: screen, size: header, margin: margin), size: header)
+        guard let body else { return HUDPlacement(panel: anchored, header: anchored, bodyAbove: false, body: 0, bodyScrolls: false) }
+        let shown = min(body, max(0, screen.height - header.height))
+        let height = header.height + shown
+        let above: Bool = switch self {
+        case .bottomLeft, .bottomCenter, .bottomRight: true
+        case .topLeft, .topCenter, .topRight: false
+        case .centerLeft, .centerRight: anchored.maxY - height < screen.minY
+        }
+        let preferredY = above ? anchored.minY : anchored.maxY - height
+        let y = min(max(preferredY, screen.minY), screen.maxY - height)
+        let panel = CGRect(x: anchored.minX, y: y, width: header.width, height: height)
+        let headerY = above ? panel.minY : panel.maxY - header.height
+        return HUDPlacement(
+            panel: panel, header: CGRect(x: anchored.minX, y: headerY, width: header.width, height: header.height),
+            bodyAbove: above, body: shown, bodyScrolls: shown < body)
+    }
+
     public static func nearest(
         toCenter center: CGPoint, in visibleFrame: CGRect,
         size: CGSize, margin: CGFloat = HUDAnchor.defaultMargin
@@ -56,4 +83,12 @@ public enum HUDAnchor: String, CaseIterable, Sendable {
         let dx = a.x - b.x, dy = a.y - b.y
         return dx * dx + dy * dy
     }
+}
+
+public struct HUDPlacement: Equatable, Sendable {
+    public let panel: CGRect
+    public let header: CGRect
+    public let bodyAbove: Bool
+    public let body: CGFloat
+    public let bodyScrolls: Bool
 }

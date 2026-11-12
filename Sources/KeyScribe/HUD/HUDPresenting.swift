@@ -416,23 +416,23 @@ extension HUDState {
     }
 
     static let agentRowHeight: CGFloat = 40
-    static let agentHeaderHeight: CGFloat = 44
+    static let listHeaderHeight: CGFloat = 44
+    static let listHeaderExtent: CGFloat = listHeaderHeight + 10
     static let agentRowStep: CGFloat = agentRowHeight + 2
-    static let agentListChrome: CGFloat = 160
-    static let agentListVisibleRows = 8
+
+    var hasList: Bool { spokenHelp != nil || agentRoster != nil }
 
     static let helpRowSpacing: CGFloat = 6
     static let helpGroupGap: CGFloat = 6
     static let helpScrollGutter: CGFloat = 14
     static let helpRowWidth: CGFloat = 252
-    static let helpListMaxHeight: CGFloat = 360
 
     static func helpDetail(_ row: SpokenHelp.Row) -> String {
         [row.effect, row.note].compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 
     static func helpListHeight(_ help: SpokenHelp, screenHeight: CGFloat) -> CGFloat? {
-        let cap = min(helpListMaxHeight, max(140, (screenHeight - agentListChrome) / 2))
+        let cap = HUDAnchor.listCap(screenHeight: screenHeight)
         return helpContentHeight(help) > cap ? cap : nil
     }
 
@@ -451,9 +451,12 @@ extension HUDState {
         return heights.reduce(0, +) + CGFloat(max(0, heights.count - 1)) * helpRowSpacing
     }
 
+    static func agentRowsShown(screenHeight: CGFloat) -> Int {
+        max(1, Int(HUDAnchor.listCap(screenHeight: screenHeight) / agentRowStep))
+    }
+
     static func agentListHeight(rows: Int, screenHeight: CGFloat) -> CGFloat? {
-        let fitting = max(1, Int((screenHeight - agentListChrome) / agentRowStep))
-        let visible = min(agentListVisibleRows, fitting)
+        let visible = agentRowsShown(screenHeight: screenHeight)
         guard rows > visible else { return nil }
         return CGFloat(visible) * agentRowStep
     }

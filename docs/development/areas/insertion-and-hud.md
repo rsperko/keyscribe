@@ -16,7 +16,7 @@ Read before changing text insertion, pasteboard capture or restore, selection ca
 
 - **The recording HUD is key ⟺ the HUD is visible and cancellable** (`HUDState.holdsKeyFocus`).
   Synthesized ⌘C/⌘V/Return go to the key window, so the
-  HUD (`KeyablePanel`) must relinquish key focus before any selection-capture ⌘C or paste ⌘V —
+  HUD (`HUDPanel`) must relinquish key focus before any selection-capture ⌘C or paste ⌘V —
   `HUDController.relinquishKeyFocus()` runs when a take begins acting (an insert's `TakeLease.beginActing`,
   an agent delivery, a voice command's first act), in `rewriteSelection`, in `pasteLast`, and on every
   non-recording `render`. Take code reaches the HUD only through `HUDChannel`, never `HUDPresenting` directly.

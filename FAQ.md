@@ -180,9 +180,9 @@ Choose **Move HUD…** from the KeyScribe menu, just above Settings, then click 
 or the middle of any screen edge. The position is saved at once and used from the next dictation on. Press
 Escape or click anywhere else to leave it where it is.
 
-You can also drag the HUD while it is showing; when you let go it snaps to the nearest of the same
-positions. One position is kept and used on every display, and the panel that shows a spoken reply follows
-it. **Reset HUD Position** under Settings ▸ Maintenance puts it back at the bottom center.
+You can also drag the HUD, or the panel that reads a reply aloud, while it is showing; when you let go it
+snaps to the nearest of the same positions. One position is kept and used on every display, and both panels
+use it. **Reset HUD Position** under Settings ▸ Maintenance puts it back at the bottom center.
 
 ### Can I switch apps or run actions by voice?
 

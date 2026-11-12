@@ -30,11 +30,28 @@ struct HUDStateTests {
             SpokenHelp.Row(said: "a long spoken phrase number \($0) that wraps", effect: String(repeating: "New paragraph + Best, ", count: 6))
         }
         let long = SpokenHelp(title: "Email", rows: rows)
-        #expect(HUDState.helpListHeight(long, screenHeight: 900) == HUDState.helpListMaxHeight)
-        let small = HUDState.helpListHeight(long, screenHeight: 500)
-        #expect(small.map { $0 < HUDState.helpListMaxHeight && $0 >= 140 } == true)
+        #expect(HUDState.helpListHeight(long, screenHeight: 900) == HUDAnchor.listCap(screenHeight: 900))
+        #expect(HUDState.helpListHeight(long, screenHeight: 500) == HUDAnchor.listCap(screenHeight: 500))
         #expect(HUDState.help(long).panelWidth == HUDState.recording(mode: "Email", level: 0, latchedTrigger: nil).panelWidth)
         #expect(HUDState.helpRowWidth == HUDState.help(long).panelWidth - 28)
+    }
+
+    @Test(arguments: HUDAnchor.allCases)
+    func aListNeverMovesTheHeaderAwayFromTheAnchor(_ anchor: HUDAnchor) {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let help = HUDState.help(SpokenHelp(title: "Email", rows: [SpokenHelp.Row(said: "insert new line", effect: "New line")]))
+        let header = CGSize(width: help.panelWidth, height: HUDState.listHeaderExtent)
+        let expected = CGRect(origin: anchor.origin(in: screen, size: header), size: header)
+        for height in [CGFloat(140), 300, 420] {
+            let placed = HUDController.placement(of: help, size: CGSize(width: help.panelWidth, height: height), in: screen, anchor: anchor)
+            #expect(placed.header == expected)
+            #expect(placed.panel.height == height)
+            #expect(placed.bodyAbove == anchor.keepsBottomEdge)
+        }
+        let plain = HUDState.complete(outcome: .inserted, mode: "Polish")
+        let size = CGSize(width: plain.panelWidth, height: 64)
+        #expect(HUDController.placement(of: plain, size: size, in: screen, anchor: anchor).panel
+            == CGRect(origin: anchor.origin(in: screen, size: size), size: size))
     }
 
     @Test func helpMeasuresTheSuffixGroupAndWrappedText() {
@@ -432,6 +449,17 @@ struct HUDStateTests {
         hud.render(.choice(HUDPreview.choicePrompt, status: .listening(latchedTrigger: nil)))
         #expect(hud.panelCanBecomeKey == true)
         hud.render(.hidden)
+    }
+
+    @Test func helpAndOtherPassiveCardsRefuseKeyFocusWhileRecordingTakesIt() throws {
+        let hud = HUDController()
+        defer { hud.render(.hidden) }
+        hud.render(try #require(HUDPreview.state(named: "help-dictation")))
+        #expect(hud.panelCanBecomeKey == false)
+        hud.render(.complete(outcome: .inserted, mode: "Polish"))
+        #expect(hud.panelCanBecomeKey == false)
+        hud.render(.recording(mode: "Polish", level: 0, latchedTrigger: nil))
+        #expect(hud.panelCanBecomeKey == true)
     }
 
     @Test func aQuestionRendersEveryRowWithinTheScreen() {
