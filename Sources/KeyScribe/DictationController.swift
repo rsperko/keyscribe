@@ -2475,10 +2475,9 @@ final class DictationController {
                 readsReplies: spokenUpdates?.readsReplies == true, canRepeat: spokenUpdates?.hasReplyToRepeat == true,
                 stages: stages)
         }
-        let suffixes = (session?.eligibleModes ?? []).filter { $0.id != mode?.id }.flatMap { other in
-            other.triggerPhrases.filter { $0.allSatisfy { $0.isLetter || $0 == " " } }.map { (said: $0, mode: other.name) }
-        }
-        return SpokenHelp.dictation(title: title, stages: stages, suffixes: suffixes)
+        return SpokenHelp.dictation(
+            title: title, stages: stages, current: mode?.id, eligible: session?.eligibleModes ?? [],
+            context: session?.routingContext ?? RoutingContext())
     }
 
     func helpHover(_ hovering: Bool) {

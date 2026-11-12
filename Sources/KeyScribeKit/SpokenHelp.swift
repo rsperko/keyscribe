@@ -16,11 +16,19 @@ public struct SpokenHelp: Equatable, Sendable {
     public let title: String
     public let status: String?
     public let rows: [Row]
+    public let suffixes: [Row]
 
-    public init(title: String, status: String? = nil, rows: [Row]) {
+    public static let suffixHeading = "End your dictation with"
+
+    public init(title: String, status: String? = nil, rows: [Row], suffixes: [Row] = []) {
         self.title = title
         self.status = status
-        self.rows = rows.sorted { $0.said.localizedStandardCompare($1.said) == .orderedAscending }
+        self.rows = Self.sorted(rows)
+        self.suffixes = Self.sorted(suffixes)
+    }
+
+    private static func sorted(_ rows: [Row]) -> [Row] {
+        rows.sorted { $0.said.localizedStandardCompare($1.said) == .orderedAscending }
     }
 
     public static func codingAgent(
@@ -36,7 +44,7 @@ public struct SpokenHelp: Equatable, Sendable {
         }
         return SpokenHelp(
             title: title, status: recipient.map { "Recipient: \($0)" } ?? "No recipient selected",
-            rows: rows + ruleRows(stages))
+            rows: rows + editRows(stages, forMessage: true) + ruleRows(stages))
     }
 
     public static func codingAgentPhrases(name: String, readsReplies: Bool) -> [Row] {
@@ -82,21 +90,49 @@ public struct SpokenHelp: Equatable, Sendable {
         return findsInApps ? [open, inside, back] : [open, back]
     }
 
-    public static func dictation(title: String, stages: [any PipelineStage], suffixes: [(said: String, mode: String)]) -> SpokenHelp {
-        var rows: [Row] = []
-        if let edits = stages.lazy.compactMap({ $0 as? LiveEditsStage }).first?.commands {
-            rows += [
-                edits.newLine.first.map { Row(said: $0, effect: "New line") },
-                edits.newParagraph.first.map { Row(said: $0, effect: "New paragraph") },
-                edits.tab.first.map { Row(said: $0, effect: "Tab") },
-                edits.scratchThat.first.map { Row(said: $0, effect: "Removes what you just said") },
-                edits.discard.first.map { Row(said: $0, effect: "Discards this take", note: "Say it last") },
-            ].compactMap { $0 }
-            rows.insert(Row(said: ClipboardTokenizer.defaultPhrases[0], effect: "Inserts what you copied"), at: min(rows.count, 4))
+    public static func dictation(
+        title: String, stages: [any PipelineStage], current: String? = nil, eligible: [Mode] = [], context: RoutingContext = .init()
+    ) -> SpokenHelp {
+        let rows = editRows(stages, forMessage: false) + ruleRows(stages)
+        let suffixes = suffixRows(current: current, eligible: eligible, context: context)
+        return SpokenHelp(title: title, status: rows.isEmpty && suffixes.isEmpty ? noCommands : nil, rows: rows, suffixes: suffixes)
+    }
+
+    static func editRows(_ stages: [any PipelineStage], forMessage: Bool) -> [Row] {
+        guard let edits = stages.lazy.compactMap({ $0 as? LiveEditsStage }).first?.commands else { return [] }
+        let place = forMessage ? " in the message" : ""
+        return [
+            edits.newLine.first.map { Row(said: $0, effect: "New line\(place)") },
+            edits.newParagraph.first.map { Row(said: $0, effect: "New paragraph\(place)") },
+            edits.tab.first.map { Row(said: $0, effect: "Tab\(place)") },
+            edits.scratchThat.first.map { Row(said: $0, effect: "Removes what you just said") },
+            edits.discard.first.map {
+                Row(said: $0, effect: forMessage ? "Discards this message. Nothing is sent." : "Discards this take", note: "Say it last")
+            },
+        ].compactMap { $0 } + [
+            Row(
+                said: ClipboardTokenizer.defaultPhrases[0],
+                effect: forMessage ? "Adds what you copied to the message" : "Inserts what you copied"),
+            Row(
+                said: ClipboardTokenizer.codePhrases[0],
+                effect: forMessage
+                    ? "Adds copied text to the message inside a Markdown code block" : "Inserts copied text inside a Markdown code block"),
+            Row(
+                said: "\(VerbatimTokenizer.beginPhrase) \u{2026} \(VerbatimTokenizer.endPhrase)",
+                effect: "Keeps those words literal, without edits or rewriting"),
+        ]
+    }
+
+    static func suffixRows(current: String?, eligible: [Mode], context: RoutingContext) -> [Row] {
+        let sample = "sample words"
+        return eligible.filter { $0.id != current }.compactMap { mode in
+            let phrase = mode.triggerPhrases.first { phrase in
+                guard phrase.allSatisfy({ $0.isLetter || $0 == " " }) else { return false }
+                let routed = ModeResolver.resolvePhaseB(eligibleModes: eligible, transcript: "\(sample) \(phrase)", context: context)
+                return routed.routedModeId == mode.id && routed.transcript == sample
+            }
+            return phrase.map { Row(said: "\u{2026} \($0)", effect: "Uses \(mode.name) for this take") }
         }
-        rows += suffixes.map { Row(said: "\u{2026} \($0.said)", effect: "Uses \($0.mode) for this take") }
-        rows += ruleRows(stages)
-        return SpokenHelp(title: title, status: rows.isEmpty ? noCommands : nil, rows: rows)
     }
 
     public static let noCommands = "No spoken commands in this mode. Turn on spoken edits in its settings to add some."

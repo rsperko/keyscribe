@@ -7,8 +7,10 @@ import Foundation
 public enum VerbatimTokenizer {
     // The spoken markers tolerate a pause-comma between their words ("begin, verbatim") via the shared
     // CommandPhrase joiner — the same `[,;:]?\s+` builder the clipboard command uses.
-    private static let beginTrigger = CommandPhrase.boundedTrigger("begin verbatim")
-    private static let endTrigger = CommandPhrase.boundedTrigger("end verbatim")
+    public static let beginPhrase = "begin verbatim"
+    public static let endPhrase = "end verbatim"
+    private static let beginTrigger = CommandPhrase.boundedTrigger(beginPhrase)
+    private static let endTrigger = CommandPhrase.boundedTrigger(endPhrase)
 
     public static func apply(_ text: String, into tokenizer: Tokenizer) -> String {
         let text = snapMarkerKeyword(text)

@@ -506,7 +506,6 @@ enum AccessibilityID {
         static let choiceCancel = "hud.choice.cancel"
         static let agentRow = "hud.agent.row"
         static let helpRow = "hud.help.row"
-        static let helpMore = "hud.help.more"
         static let helpClose = "hud.help.close"
     }
 
@@ -698,7 +697,7 @@ enum AccessibilityID {
         FirstRun.TryIt.changeTrigger, FirstRun.TryIt.shortcutWell,
         FirstRun.AI.connectionEditor, FirstRun.AI.connect, FirstRun.AI.skip, FirstRun.AI.offerConnect,
         FirstRun.Playground.field, FirstRun.Playground.next, FirstRun.Playground.done,
-        HUD.panel, HUD.insertWithoutRewriting, HUD.pasteLast, HUD.repairAction, HUD.helpMore, HUD.helpClose,
+        HUD.panel, HUD.insertWithoutRewriting, HUD.pasteLast, HUD.repairAction, HUD.helpClose,
         History.list, History.search, History.export, History.stagePicker, History.comparisonPicker, History.whatHappened, History.actionOutcome, History.rewriteComparison,
         History.promptDisclosure, History.receivedDisclosure, History.copyResult, History.copyReply, History.pasteResult, History.copyHeard, History.delete,
         History.rewriteAgain, History.copyUnsavedRewrite, History.mishearingHint,

@@ -15,7 +15,7 @@ struct HUDStateTests {
             "microphone-error", "command-not-recognized", "command-not-recognized-long", "accessibility-error",
             "recording-countdown", "stopped-at-limit", "stopped-at-limit-local", "choice", "choice-five",
             "choice-listening", "choice-retry", "choice-heard", "choice-heard-long", "recording-agents", "recording-agents-long",
-            "help-agent", "help-dictation",
+            "help-agent", "help-dictation", "help-short",
         ])
         for name in HUDPreview.names {
             #expect(HUDPreview.state(named: name) != nil)
@@ -23,17 +23,31 @@ struct HUDStateTests {
         #expect(HUDPreview.state(named: "unknown") == nil)
     }
 
-    @Test func helpKeepsTheHUDWidthAndScrollsALongListFromTheStart() {
-        let short = (1...3).map { SpokenHelp.Row(said: "phrase \($0)", effect: "Does a thing") }
-        #expect(HUDState.helpListHeight(rows: short, screenHeight: 900) == nil)
-        let long = (1...6).map {
+    @Test func helpKeepsTheHUDWidthAndScrollsOnlyAListTallerThanItsScreenAwareCap() {
+        let short = SpokenHelp(title: "Email", rows: (1...3).map { SpokenHelp.Row(said: "phrase \($0)", effect: "Does a thing") })
+        #expect(HUDState.helpListHeight(short, screenHeight: 900) == nil)
+        let rows = (1...12).map {
             SpokenHelp.Row(said: "a long spoken phrase number \($0) that wraps", effect: String(repeating: "New paragraph + Best, ", count: 6))
         }
-        let height = HUDState.helpListHeight(rows: long, screenHeight: 900)
-        #expect(height != nil)
-        #expect(height.map { $0 <= 300 } == true)
-        #expect(HUDState.help(SpokenHelp(title: "Email", rows: long)).panelWidth == HUDState.recording(
-            mode: "Email", level: 0, latchedTrigger: nil).panelWidth)
+        let long = SpokenHelp(title: "Email", rows: rows)
+        #expect(HUDState.helpListHeight(long, screenHeight: 900) == HUDState.helpListMaxHeight)
+        let small = HUDState.helpListHeight(long, screenHeight: 500)
+        #expect(small.map { $0 < HUDState.helpListMaxHeight && $0 >= 140 } == true)
+        #expect(HUDState.help(long).panelWidth == HUDState.recording(mode: "Email", level: 0, latchedTrigger: nil).panelWidth)
+        #expect(HUDState.helpRowWidth == HUDState.help(long).panelWidth - 28)
+    }
+
+    @Test func helpMeasuresTheSuffixGroupAndWrappedText() {
+        let row = SpokenHelp.Row(said: "insert new line", effect: "New line")
+        let one = HUDState.helpContentHeight(SpokenHelp(title: "", rows: [row]))
+        let two = HUDState.helpContentHeight(SpokenHelp(title: "", rows: [row, row]))
+        #expect(two == one * 2 + HUDState.helpRowSpacing)
+        let grouped = HUDState.helpContentHeight(SpokenHelp(title: "", rows: [row], suffixes: [row]))
+        #expect(grouped > two + HUDState.helpGroupGap)
+        let wrapped = HUDState.helpContentHeight(SpokenHelp(title: "", rows: [
+            SpokenHelp.Row(said: "insert new line", effect: String(repeating: "Wraps across several lines. ", count: 5)),
+        ]))
+        #expect(wrapped > one + 20)
     }
 
     @Test func previewLaunchIsUnavailableOutsideDevelopmentBuilds() {

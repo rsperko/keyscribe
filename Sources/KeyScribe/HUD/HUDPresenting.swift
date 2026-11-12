@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import KeyScribeKit
 
@@ -277,7 +278,6 @@ extension HUDState {
     }
 
     static let helpHeading = "What you can say"
-    static let helpRowsShown = 6
 
     var spokenHelp: SpokenHelp? {
         if case .help(let help) = self { return help }
@@ -413,14 +413,34 @@ extension HUDState {
     static let agentListChrome: CGFloat = 160
     static let agentListVisibleRows = 8
 
-    static func helpListHeight(rows: [SpokenHelp.Row], screenHeight: CGFloat) -> CGFloat? {
-        func lines(_ text: String, perLine: Int) -> CGFloat { CGFloat(max(1, (text.count + perLine - 1) / perLine)) }
-        let estimated = rows.reduce(CGFloat(0)) { total, row in
-            let detail = [row.effect, row.note].compactMap { $0 }.joined(separator: " \u{00B7} ")
-            return total + lines(row.said, perLine: 34) * 17 + lines(detail, perLine: 40) * 14 + 6
+    static let helpRowSpacing: CGFloat = 6
+    static let helpGroupGap: CGFloat = 6
+    static let helpScrollGutter: CGFloat = 14
+    static let helpRowWidth: CGFloat = 252
+    static let helpListMaxHeight: CGFloat = 360
+
+    static func helpDetail(_ row: SpokenHelp.Row) -> String {
+        [row.effect, row.note].compactMap { $0 }.joined(separator: " \u{00B7} ")
+    }
+
+    static func helpListHeight(_ help: SpokenHelp, screenHeight: CGFloat) -> CGFloat? {
+        let cap = min(helpListMaxHeight, max(140, (screenHeight - agentListChrome) / 2))
+        return helpContentHeight(help) > cap ? cap : nil
+    }
+
+    static func helpContentHeight(_ help: SpokenHelp) -> CGFloat {
+        func height(_ text: String, _ font: NSFont) -> CGFloat {
+            ceil(NSAttributedString(string: text, attributes: [.font: font]).boundingRect(
+                with: CGSize(width: helpRowWidth, height: .greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin, .usesFontLeading]).height)
         }
-        let cap = min(300, max(120, (screenHeight - agentListChrome) / 2))
-        return estimated > cap ? cap : nil
+        let said = NSFont.systemFont(ofSize: 13, weight: .medium)
+        let detail = NSFont.systemFont(ofSize: 11)
+        var heights = (help.rows + help.suffixes).map { height($0.said, said) + 1 + height(helpDetail($0), detail) }
+        if !help.suffixes.isEmpty {
+            heights.append(helpGroupGap + height(SpokenHelp.suffixHeading, NSFont.systemFont(ofSize: 11, weight: .semibold)))
+        }
+        return heights.reduce(0, +) + CGFloat(max(0, heights.count - 1)) * helpRowSpacing
     }
 
     static func agentListHeight(rows: Int, screenHeight: CGFloat) -> CGFloat? {
