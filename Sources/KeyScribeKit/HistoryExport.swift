@@ -90,7 +90,7 @@ public enum HistoryExport {
     private static func whatHappened(_ e: HistoryEntry, _ f: Formatting) -> [String] {
         let kept = e.keptLocalText ? ["Why local was kept: \(e.fallbackReason ?? "the rewrite was skipped")"] : []
         let spoken = e.spokenReply.map { reply in
-            ["Read aloud: \(reply.text)" + (reply.connection.map { " (summary by \($0))" } ?? "")]
+            ["Reply: \(reply.text)" + (reply.connection.map { " (summary by \($0))" } ?? "")]
         } ?? []
         return kept + (e.facts ?? []).map { "\($0.label): \($0.value)" } + (e.steps ?? []).map { "\(f.time($0.at)) \($0.text)" } + spoken
     }

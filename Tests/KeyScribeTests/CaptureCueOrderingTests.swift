@@ -511,7 +511,7 @@ struct CaptureCueOrderingTests {
         let connection = Connection(id: "omlx", name: "Local", provider: .openaiCompatible, model: "qwen", keyRef: "k")
         let output = SpokenResultOutput(
             client: SpokenResultOutputTests.FakeLLM(), permits: { _ in true }, speech: speech, silencer: silencer,
-            settings: { SpokenResultSettings(connection: "omlx") }, connection: { $0 == "omlx" ? connection : nil })
+            settings: { SpokenResultSettings(enabled: true, connection: "omlx") }, connection: { $0 == "omlx" ? connection : nil })
         let escape = FakeChordRegistrar()
         escape.onUpdate = { events.append($0.isEmpty ? "escape released" : "escape claimed") }
         let panel = SpeakingHUDController(escape: escape, defaults: UserDefaults(suiteName: UUID().uuidString)!)

@@ -1117,8 +1117,8 @@ test('the read-aloud tool asks for the running turn and tells the model only wha
   await $.turn.start({ text: 'work', turnId: 't1' })
   await h.answerEvents()
   const cases: Array<[string | null, RegExp]> = [
-    ['{"ok":true,"spoken":true}', /will read your final reply aloud/],
-    ['{"ok":true,"spoken":false}', /Spoken replies are off/],
+    ['{"ok":true,"spoken":true}', /will report your final reply/],
+    ['{"ok":true,"spoken":false}', /Reply updates are off/],
     ['{"ok":true,"quiet":true}', /disconnected/],
   ]
   for (const [answer, said] of cases) {
@@ -1160,7 +1160,7 @@ test('the command covers the running turn, the next one when idle, and cancels',
   const cancel = $.command.run({ command: readAloudCommand, args: 'cancel' } as any)
   const third = await askedToReadAloud(h, cancel, '{"ok":true,"spoken":true}')
   expect(third.body).toMatchObject({ op: 'notify', turn: 't2', on: false })
-  expect(h.logs.slice(-1)[0]).toMatch(/won’t read this reply/)
+  expect(h.logs.slice(-1)[0]).toMatch(/won’t report this reply/)
 })
 
 test('a read-aloud request that timed out behind other events is never delivered late', async ($, on) => {

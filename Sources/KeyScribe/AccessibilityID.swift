@@ -370,6 +370,7 @@ enum AccessibilityID {
             static let spokenResultPromptExpandDone = "mode.codingAgents.spokenResultPromptExpandDone"
             static let spokenResultReset = "mode.codingAgents.spokenResultReset"
             static let spokenResultVoice = "mode.codingAgents.spokenResultVoice"
+            static let spokenResultVoiceShared = "mode.codingAgents.spokenResultVoiceShared"
             static let spokenResultPreview = "mode.codingAgents.spokenResultPreview"
             static let spokenVoiceDownload = "mode.codingAgents.spokenVoiceDownload"
             static let spokenVoiceReinstall = "mode.codingAgents.spokenVoiceReinstall"

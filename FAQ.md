@@ -496,8 +496,18 @@ and give it a shortcut. Select text in any app, use the shortcut, and ask someth
 "what do I need to do?" The answer appears and is read aloud; your selected text is not changed. Only the
 selected text and your request are sent to the service, after best-effort redaction. The answer stays on
 screen for a few moments after it is read, longer for a long answer, with a button to copy it; hovering over
-it keeps it open. Press Escape once to stop the voice and again to close the answer. The voice is set in the mode's **Spoken answer** section and is the same one that reads
+it keeps it open. Press Escape once to stop the voice and again to close the answer. The voice is set in the mode's **Answer** section and is the same one that reads
 coding agent replies.
+
+### Can I get answers and agent updates without hearing them?
+
+Yes. Set **Voice** to **Off — text only**, either in an Ask mode's **Answer** section or under **Settings ▸ Modes ▸
+Coding agent ▸ Replies**. It is one shared choice, so it applies to both. Answers and agent updates then appear on
+screen with their text, a copy button and a close button, and close themselves after time to read them; hovering
+keeps one open, and Escape closes it. Nothing is spoken and other audio is left alone. Agent updates still arrive
+one at a time, in order: the next appears when the current one closes, and they wait while you dictate.
+Choosing Off — text only while something is being read stops the voice and leaves the text on screen. Choose a voice again to hear them; your
+earlier voice is remembered.
 
 ### How do I connect a coding agent conversation?
 
@@ -570,7 +580,7 @@ nothing: the question it is asking when it is short, else a description (with an
 Spoken replies), else that it is waiting for approval or an answer, with “open docs” to bring it forward.
 When nothing is pending, it tells you whether the agent is working or idle. Every answer starts with
 **Status** and says **Nothing sent.** **“Check on all conversations”** (or **“who needs me?”**) names
-every conversation waiting for you. The answer is shown, and read aloud when Read replies aloud is on.
+every conversation waiting for you. The answer is shown, and given as a reply update when Reply updates is on.
 
 Any question you say, such as “what are you waiting for?” or “do you need anything from me?”, is a message
 to the conversation you are talking to, like the rest of your dictation. “Tell docs check on the build”
@@ -617,7 +627,7 @@ keep the version they loaded, which keeps working, until you reload them; their 
 
 ### Can KeyScribe read an agent's reply aloud?
 
-Yes. In **Settings ▸ Modes ▸ Coding agent ▸ Spoken replies**, turn on **Read replies aloud**. For messages
+Yes. In **Settings ▸ Modes ▸ Coding agent ▸ Replies**, turn on **Reply updates**. For messages
 you dictate, KeyScribe reads short replies and can summarize longer ones. It also tells you when a
 conversation you spoke to is waiting for your approval or an answer: KeyScribe says its name and "Waiting for
 approval." or "Waiting for an answer."; if its connector goes away before it finishes, you hear
@@ -649,7 +659,7 @@ audible, Esc goes to KeyScribe instead of the app you're in, and reaches your ap
 another app already holds Esc, the panel says only "Speaking" and the stop button is the way to stop it.
 Starting a dictation also stops it, and waiting summaries play once the dictation's own panel has gone.
 Both only stop the speech: the agent keeps working. The
-**Read Agent Replies Aloud** item in the menu bar menu turns the feature off and on. Only instructions you dictated, and
+**Agent Reply Updates** item in the menu bar menu turns the feature off and on. Only instructions you dictated, and
 work you asked the agent to have KeyScribe read aloud (below), are spoken about. To hear the last one again, say **"repeat that"** or **"say that
 again"** as the whole dictation, with either the Coding agent or the Voice Commands shortcut; with the Coding
 agent shortcut, a longer dictation that starts that way is sent to the agent as usual. A conversation that is in front of you when it finishes is
@@ -665,7 +675,7 @@ KeyScribe does not save replies or summaries. A local service such as oMLX keeps
 
 ### Can I type to the agent and still hear when it's done?
 
-Yes, with **Read replies aloud** on. Ask the agent in your own words, for example "fix the tests, and have
+Yes, with **Reply updates** on. Ask the agent in your own words, for example "fix the tests, and have
 KeyScribe tell me when you're done", or "read your reply aloud when you finish". The agent tells KeyScribe, says
 whether KeyScribe accepted, and keeps working. When that reply ends you hear the conversation's name and its reply
 or a summary, the same as for a message you dictated, and you hear if it stops for your approval or an answer
@@ -676,14 +686,14 @@ A message you type while the agent is already working may only reach it once tha
 start, or while it works, run **/keyscribe** in the conversation: it covers the work running now, or your next
 reply when the agent is idle. **/keyscribe cancel** takes it back, including a reply to a message you dictated and
 one still being summarized or waiting to play; a reply you can already hear stops with Esc. Until you hear it, Settings
-shows "Reply will be read aloud." (or "Next reply will be read aloud.") on that conversation's row, with **Cancel**.
+shows "Reply will be reported." (or "Next reply will be reported.") on that conversation's row, with **Cancel**.
 In Claude Code the command runs while the agent works, and what it says is shown to you, not to the agent. A reply
 you asked for is never dropped in favor of a later reply from the same conversation.
 
-A request is kept in memory only: quitting KeyScribe, turning **Read replies aloud** off or disconnecting the
+A request is kept in memory only: quitting KeyScribe, turning **Reply updates** off or disconnecting the
 conversation drops it, and so does reloading the agent's plugins or extensions, for example after updating the
 connector; ask again after reloading. If the connection drops and the reply ends before it comes back, you hear "Replied. Open
-the conversation for the result." With spoken replies off, the agent says so and nothing is set to play later.
+the conversation for the result." With reply updates off, the agent says so and nothing is set to play later.
 
 ### Where are my settings and history stored?
 
@@ -756,7 +766,7 @@ report includes what you said, so check it before sending.
 
 **Settings ▸ General ▸ Other audio** decides what happens to other playback while you dictate:
 **Quiet** (the default) turns it down, **Mute** silences it, and **Unchanged** leaves it alone. The same
-choice applies while **Read replies aloud** speaks (replies, notices, answers, and "repeat that"); the
+choice applies while **Reply updates** speaks (replies, notices, answers, and "repeat that"); the
 voice itself stays at full level. If
 start/end sounds are also on, the change begins *after* the start sound so the cue isn't swallowed —
 turn the start sound off if you want it to take effect instantly.

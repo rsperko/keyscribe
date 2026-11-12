@@ -757,19 +757,19 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
 
   function toolAnswer(answer: ReadAloud): string {
     const app = appName()
-    if (answer === true) return `${app} will read your final reply aloud when this turn ends. Say so in one short sentence and continue.`
-    if (answer === false) return `Spoken replies are off in ${app}. Tell the user to turn on Read replies aloud in ${app}\u2019s Coding agent settings and ask again. Nothing will be read.`
-    if (answer === "quiet") return `This conversation is disconnected from ${app}. Tell the user to reconnect it in ${app}\u2019s Coding agent settings. Nothing will be read.`
+    if (answer === true) return `${app} will report your final reply when this turn ends. Say so in one short sentence and continue.`
+    if (answer === false) return `Reply updates are off in ${app}. Tell the user to turn on Reply updates in ${app}\u2019s Coding agent settings and ask again. Nothing will be reported.`
+    if (answer === "quiet") return `This conversation is disconnected from ${app}. Tell the user to reconnect it in ${app}\u2019s Coding agent settings. Nothing will be reported.`
     return `${app} didn\u2019t confirm the request, so a spoken reply can\u2019t be promised. Tell the user.`
   }
 
   function commandAnswer(cancelling: boolean, answer: ReadAloud, running: boolean): string {
     const app = appName()
     if (answer === "quiet") return `This conversation is disconnected from ${app}. Reconnect it in ${app}\u2019s Coding agent settings.`
-    if (answer === null) return cancelling ? `${app} didn\u2019t confirm the cancel.` : `${app} didn\u2019t confirm the request, so a spoken reply isn\u2019t certain.`
-    if (cancelling) return `${app} won\u2019t read this reply aloud.`
-    if (answer === false) return `Spoken replies are off. Turn on Read replies aloud in ${app}\u2019s Coding agent settings.`
-    return running ? `${app} will read the result of this work aloud.` : `${app} will read your next reply aloud.`
+    if (answer === null) return cancelling ? `${app} didn\u2019t confirm the cancel.` : `${app} didn\u2019t confirm the request, so a reply update isn\u2019t certain.`
+    if (cancelling) return `${app} won\u2019t report this reply.`
+    if (answer === false) return `Reply updates are off. Turn on Reply updates in ${app}\u2019s Coding agent settings.`
+    return running ? `${app} will report the result of this work.` : `${app} will report your next reply.`
   }
 
   function offerReadAloud(): void {
@@ -781,19 +781,19 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
       name: readAloudToolName(command),
       label: `Tell me when done (${app})`,
       description: `The user has ${app}, a voice app on this Mac. Call this only when the user explicitly asks ${app}, or asks to hear it out loud, ` +
-        `to report when the current work is done. Call it once, then keep working. When this turn ends, ${app} reads your final reply aloud. ` +
+        `to report when the current work is done. Call it once, then keep working. When this turn ends, ${app} reports your final reply. ` +
         `If the work is already finished, answer instead of calling it. Not for a plain "let me know".`,
-      promptSnippet: `Have ${app} read your final reply aloud when the user asks for it`,
+      promptSnippet: `Have ${app} report your final reply when the user asks for it`,
       parameters: { type: "object", properties: {}, additionalProperties: false } as any,
       async execute() {
         return { content: [{ type: "text", text: toolAnswer(await askToReadAloud(true)) }], details: undefined }
       },
     })
     pi.registerCommand(command, {
-      description: `Have ${app} read the reply aloud when this work is done, or cancel that`,
+      description: `Have ${app} report the reply when this work is done, or cancel that`,
       handler: async (args, context) => {
         const word = String(args || "").trim().toLowerCase()
-        if (word && word !== "cancel") return context.ui.notify(`Use /${command} to hear the reply aloud, or /${command} cancel.`, "info")
+        if (word && word !== "cancel") return context.ui.notify(`Use /${command} to get the reply when this work is done, or /${command} cancel.`, "info")
         const running = currentTurn !== null
         context.ui.notify(commandAnswer(word === "cancel", await askToReadAloud(word !== "cancel"), running), "info")
       },

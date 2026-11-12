@@ -10,6 +10,7 @@ final class SpeakingHUDModel: ObservableObject {
     @Published var answerMode = false
     @Published var answerOpen = true
     @Published var finished = false
+    @Published var textOnly = false
     var showsCaption: Bool { answerMode ? answerOpen : showsSummary }
     @Published var status = SpeakingHUDLayout.withEscape
     @Published var captionAbove = false
@@ -56,8 +57,17 @@ final class SpeakingHUDController {
     var status: String { model.status }
     var shownSummary: String? { shownName == nil ? nil : model.caption }
     var isFinished: Bool { model.finished }
+    var offersCopy: Bool { model.answerMode }
+
+    func showText(name: String, text: String) {
+        show(name: name, summary: text, answer: true, textOnly: true)
+    }
 
     func show(name: String, summary: String, answer: Bool = false, preparing: Bool = false) {
+        show(name: name, summary: summary, answer: answer, preparing: preparing, textOnly: false)
+    }
+
+    private func show(name: String, summary: String, answer: Bool, preparing: Bool = false, textOnly: Bool) {
         let wasHidden = shownName == nil
         shownName = name
         model.name = name
@@ -66,7 +76,8 @@ final class SpeakingHUDController {
         autoClose = nil
         if answer, !model.answerMode || model.finished { model.answerOpen = true }
         model.answerMode = answer
-        model.finished = false
+        model.finished = textOnly
+        model.textOnly = textOnly
         let panel = panel ?? makePanel()
         panel.appearance = appearance.nsAppearance()
         place(panel)
@@ -75,13 +86,19 @@ final class SpeakingHUDController {
         if !escapeClaimed {
             escapeClaimed = escape.claim { [weak self] in self?.escapePressed() }
         }
-        model.status = SpeakingHUDLayout.status(preparing: preparing, escape: escapeClaimed)
+        model.status = textOnly
+            ? (escapeClaimed ? SpeakingHUDLayout.textOnlyWithEscape : SpeakingHUDLayout.textOnlyStatus)
+            : SpeakingHUDLayout.status(preparing: preparing, escape: escapeClaimed)
         place(panel)
-        if wasHidden {
+        if wasHidden || textOnly {
             NSAccessibility.post(
                 element: panel, notification: .announcementRequested,
-                userInfo: [.announcement: "Speaking \(name)", .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+                userInfo: [
+                    .announcement: textOnly ? "\(name): \(summary)" : "Speaking \(name)",
+                    .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+                ])
         }
+        if textOnly { scheduleAutoClose() }
     }
 
     func speaking() {
@@ -148,6 +165,7 @@ final class SpeakingHUDController {
         hovering = false
         model.answerMode = false
         model.finished = false
+        model.textOnly = false
         panel?.orderOut(nil)
     }
 
@@ -210,6 +228,8 @@ enum SpeakingHUDLayout {
     static let preparingWithoutEscape = "Getting ready to speak"
     static let finishedStatus = "Finished speaking"
     static let finishedWithEscape = "Finished speaking \u{00B7} Esc closes"
+    static let textOnlyStatus = "Text only"
+    static let textOnlyWithEscape = "Text only \u{00B7} Esc closes"
 
     nonisolated static func readingTime(for text: String) -> Duration {
         let words = text.split(whereSeparator: { $0.isWhitespace }).count
@@ -225,7 +245,10 @@ enum SpeakingHUDLayout {
         }
     }
 
-    static func disclosureLabel(showsSummary: Bool) -> String { showsSummary ? "Hide spoken text" : "Show spoken text" }
+    static func disclosureLabel(showsSummary: Bool, textOnly: Bool = false) -> String {
+        let text = textOnly ? "text" : "spoken text"
+        return showsSummary ? "Hide \(text)" : "Show \(text)"
+    }
     static func disclosureValue(showsSummary: Bool) -> String { showsSummary ? "Expanded" : "Collapsed" }
 }
 
@@ -251,7 +274,7 @@ private struct SpeakingHUDView: View {
         .modifier(HUDCardBackground())
         .onHover(perform: onHover)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Speaking \(model.name)")
+        .accessibilityLabel(model.textOnly ? model.name : "Speaking \(model.name)")
         .accessibilityIdentifier(AccessibilityID.HUD.speaking)
     }
 }
@@ -338,7 +361,7 @@ struct SpeakingRow: View {
     }
 
     private var summaryToggle: some View {
-        let label = SpeakingHUDLayout.disclosureLabel(showsSummary: model.showsCaption)
+        let label = SpeakingHUDLayout.disclosureLabel(showsSummary: model.showsCaption, textOnly: model.textOnly)
         return Button(action: onToggleSummary) {
             Image(systemName: "chevron.right")
                 .font(.system(size: 11, weight: .semibold))
@@ -391,8 +414,8 @@ private struct SpeakingCopyButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(copied ? "Copied answer" : "Copy answer")
-        .accessibilityLabel("Copy answer")
+        .help(copied ? "Copied" : "Copy text")
+        .accessibilityLabel("Copy text")
         .accessibilityValue(copied ? "Copied" : "")
         .accessibilityIdentifier(AccessibilityID.HUD.copySpeaking)
         .task(id: copied) {

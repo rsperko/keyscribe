@@ -209,6 +209,8 @@ struct SpeakingHUDTests {
         #expect(SpeakingHUDLayout.disclosureLabel(showsSummary: true) == "Hide spoken text")
         #expect(SpeakingHUDLayout.disclosureValue(showsSummary: false) == "Collapsed")
         #expect(SpeakingHUDLayout.disclosureValue(showsSummary: true) == "Expanded")
+        #expect(SpeakingHUDLayout.disclosureLabel(showsSummary: true, textOnly: true) == "Hide text")
+        #expect(SpeakingHUDLayout.disclosureLabel(showsSummary: false, textOnly: true) == "Show text")
     }
 
     @Test func whenEscapeCannotBeClaimedThePanelDoesNotOfferIt() {
@@ -342,7 +344,7 @@ struct SpokenUpdatesMenuTests {
         menu.install()
         let item = menu.spokenUpdatesMenuItem
         #expect(item.isHidden)
-        #expect(item.title == "Read Agent Replies Aloud")
+        #expect(item.title == "Agent Reply Updates")
         menu.setSpokenUpdates(available: true, on: true)
         #expect(!item.isHidden)
         #expect(item.isEnabled)

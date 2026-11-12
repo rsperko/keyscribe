@@ -15,7 +15,7 @@ struct SpokenAnswerOutputTests {
         let output = SpokenAnswerOutput(
             speech: speech, silencer: silencer, voice: { voice }, warm: { log.events.append("warm") },
             release: { log.releases += 1 }, duck: { log.events.append($0 ? "duck" : "unduck") })
-        output.onShow = { log.events.append("show \($0): \($1)") }
+        output.onShow = { name, text, _ in log.events.append("show \(name): \(text)") }
         output.onSpeaking = { log.events.append("speaking") }
         output.onEnded = { log.events.append("ended") }
         output.onClosed = { log.events.append("closed") }

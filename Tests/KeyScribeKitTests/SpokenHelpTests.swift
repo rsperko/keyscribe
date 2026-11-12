@@ -207,6 +207,12 @@ struct SpokenHelpTests {
         #expect(help.rows.isEmpty)
         #expect(help.status == SpokenHelp.answerGuidance)
         #expect(SpokenHelp.answerGuidance.contains("what do I need to do"))
+        #expect(SpokenHelp.answerGuidance.hasSuffix("The answer appears here, and is read aloud unless the voice is off."))
+    }
+
+    @Test func repeatHelpHoldsWhetherTheLastReplyWasSpokenOrShown() {
+        let row = SpokenHelp.codingAgentPhrases(name: "api", readsReplies: true).first { $0.said == VoiceCommandGrammar.repeatSummary[0] }
+        #expect(row?.effect == "Gives the last reply update again.")
     }
 
     @Test func voiceCommandHelpWithNoAppsInventsNone() {

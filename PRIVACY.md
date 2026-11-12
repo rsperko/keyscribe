@@ -44,7 +44,7 @@ LLM calls** to a service you configured, and all off unless you turn them on:
   for a mode you enabled it for. When a rewrite falls back, **Rewrite Again** in History sends that
   dictation's transcript to the mode's service once more, with no context. It is redacted if the original
   dictation was or the mode is now, so turning redaction off later never sends that dictation unredacted.
-- **Spoken replies**, in the experimental Coding agent feature. Notices that a conversation is waiting for you or
+- **Reply updates**, in the experimental Coding agent feature. Notices that a conversation is waiting for you or
   lost its connector are fixed sentences and send nothing, with one exception: when a Pi conversation you
   dictated to opens a prompt, or you check on a Pi conversation and its prompt has no short
   question to read as it is (whoever started that turn, you typing included), the prompt's kind and title, the tool call it seems to be about (its name and up
@@ -52,12 +52,13 @@ LLM calls** to a service you configured, and all off unless you turn them on:
   words before it asked are sent to the service you chose, after best-effort redaction, to say in a sentence
   what it asks. Which tool call a prompt belongs to is a best guess, so another tool's arguments can be sent. When an agent finishes an instruction you
   dictated, or work you asked it to have KeyScribe read aloud, a longer final reply is sent to the service you chose
-  under Spoken replies, only to be summarized into a sentence or two to read aloud; a short reply is read without it,
+  under Replies, only to be summarized into a sentence or two to read aloud or show; a short reply is read without it,
   a longer one is only announced when no service is chosen, and nothing is sent for a dictated reply's
   conversation KeyScribe can confirm is in front of you when it finishes. When it can't confirm that, such as
   in a terminal it can't read, the reply is sent as usual. Agent replies often contain code and command output, and the
   redaction described below is tuned to dictated speech, so it catches less there. Choose a local service
-  such as oMLX if replies must stay on your Mac.
+  such as oMLX if replies must stay on your Mac. Choosing **Off — text only** as the voice changes only how an
+  update or answer reaches you (shown instead of read aloud); what is sent, and when, stays the same.
 - **Answers about selected text**, in the experimental Ask About Selection feature. When you use a mode that
   answers, the text you selected and the request you spoke are sent to that mode's service, after best-effort
   redaction when the mode has it on (the starter mode does). Nothing else from your screen is sent, and the
@@ -227,12 +228,12 @@ in the same `Application Support` folder:
   do so, and the answer stays on your Mac and is not stored. To bring a
   conversation's terminal forward, KeyScribe reads a few terminal and multiplexer variables (such as a
   pane id) from the environment of the processes that hold it; the rest of their environment is ignored.
-  If you turn on **Read replies aloud** and choose an AI service for it, a longer final reply to an
+  If you turn on **Reply updates** and choose an AI service for it, a longer final reply to an
   instruction you dictated, or to work you asked the agent to have KeyScribe read aloud, is sent to that service, after best-effort redaction, only to be summarized
   into a sentence or two; a reply of a few words is read as it is without any service. KeyScribe keeps
   the full reply in memory only and never writes it to History or logs; what the service you chose keeps
-  is up to that service. What KeyScribe actually reads aloud as a reply or a summary is saved in
-  History exactly as you heard it, with the service that summarized it, when History is on and the Coding
+  is up to that service. What KeyScribe actually reads aloud as a reply or a summary, or shows with the voice set
+  to Off — text only, is saved in History exactly as you heard or saw it, with the service that summarized it, when History is on and the Coding
   agent mode is not left out of History. A reply to an instruction you dictated is saved with that
   dictation, and only when the dictation itself was saved. While KeyScribe is running it also holds, in memory
   only, the audio the natural voice generated for each reply History saved, so you can play it again or save it to

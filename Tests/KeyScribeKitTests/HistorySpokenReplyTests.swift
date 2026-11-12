@@ -58,13 +58,13 @@ struct HistorySpokenReplyTests {
 
     @Test func aSummarizedReplyNamesWhereItsTextWent() {
         let summarized = entry(reply: .init(at: at, conversation: "docs", text: "docs: Done.", connection: "Local oMLX"))
-        #expect(summarized.dataBoundaryLabels == ["Spoken summary", "Best-effort redaction"])
+        #expect(summarized.dataBoundaryLabels == ["Reply summary", "Best-effort redaction"])
         let readAsIs = entry(reply: .init(at: at, conversation: "docs", text: "docs: Done."))
         #expect(readAsIs.dataBoundaryLabels == ["On this Mac"])
         var rewritten = summarized
         rewritten.cloudInvolved = true
         rewritten.redaction = true
-        #expect(rewritten.dataBoundaryLabels == ["Cloud rewrite", "Best-effort redaction", "Spoken summary"])
+        #expect(rewritten.dataBoundaryLabels == ["Cloud rewrite", "Best-effort redaction", "Reply summary"])
     }
 
     @Test func searchFindsWhatWasSpoken() {
@@ -77,7 +77,7 @@ struct HistorySpokenReplyTests {
         let formatting = HistoryExport.Formatting(day: { _ in "day" }, time: { _ in "12:00" })
         for format in [HistoryExport.Format.markdown, .text] {
             let out = HistoryExport.export([spoken], format: format, formatting: formatting, appName: "KeyScribe")
-            #expect(out.contains("Read aloud: docs: Two tests failed. (summary by Local oMLX)"), "\(format)")
+            #expect(out.contains("Reply: docs: Two tests failed. (summary by Local oMLX)"), "\(format)")
         }
     }
 
@@ -98,11 +98,11 @@ struct HistorySpokenReplyTests {
         for format in [HistoryExport.Format.markdown, .text] {
             let out = HistoryExport.export([alone], format: format, formatting: formatting, appName: "KeyScribe")
             #expect(!out.contains("Result:"), "\(format)")
-            #expect(out.contains("Read aloud: docs: Done."), "\(format)")
+            #expect(out.contains("Reply: docs: Done."), "\(format)")
         }
     }
 
-    @Test func theSupportReportWarningMentionsWhatWasReadAloud() {
-        #expect(SupportReport.warning.contains("read aloud"))
+    @Test func theSupportReportWarningMentionsTheReplyUpdate() {
+        #expect(SupportReport.warning.contains("for a coding agent its reply update"))
     }
 }

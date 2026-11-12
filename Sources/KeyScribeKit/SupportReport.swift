@@ -7,8 +7,8 @@ public enum SupportReport {
     public static let warning = """
         This report includes what you said, the text that was inserted, the app you were typing in, your \
         microphone's name, for an AI mode the full AI request and reply, which can hold your dictionary \
-        words, text you selected, or text from the app you were typing in, and for a coding agent what was \
-        read aloud from its reply. Remove anything private before sending it.
+        words, text you selected, or text from the app you were typing in, and for a coding agent its reply \
+        update. Remove anything private before sending it.
         """
 
     private static let encoder: JSONEncoder = {

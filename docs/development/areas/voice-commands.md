@@ -107,10 +107,18 @@ every rule above applies to it, with these sharpenings:
 - **Reply text is in memory only.** A turn's final reply crosses the bridge bounded, for the spoken result of a
   turn the user's dictation started or that the user asked from inside the agent to hear; it is never written to History or logs, and the only place it may go is
   the AI service the user chose for summaries, after redaction. What was read aloud is the one exception, and only
-  once it is audible (`SpokenResultOutput.onHeard`): History keeps that line as heard, in its own field
+  once it is audible, or once it is shown when the voice is Off — text only (`SpokenResultOutput.onHeard`; a shown one has no
+  reader): History keeps that line as heard, in its own field
   (`HistoryEntry.spokenReply`), never in `heard`, `transformed` or `result`, so nothing that learns from the user's
   speech reads it. It joins the dictation that asked for it only when that dictation was kept, and otherwise stands
   alone only under the Coding agent mode's History choice. It is still never logged.
+- **Text only changes delivery, never the queue.** With `text_only` on, `SpokenResultOutput.play` shows an item instead
+  of speaking it and holds it as the playing item until the panel reports it closed (`dismissed()`), so relevance,
+  order, supersession, the in-front skip and stop all stay the code paths a spoken reply takes. A shown item waits
+  while dictation is busy (`SpeechSilencer.isBusy`) or the panel is taken (`mayShow`), and the silencer's `onBusy`
+  closes the one shown, because there is no synthesizer to stop. When an answer takes the panel, `yieldPanel`
+  puts the shown item back at the front, so an item is never left playing where nothing shows it. Never advance the queue on a timer of its own, and
+  never load the voice or lower other audio for a shown item.
 - **Spoken audio is in memory only, and follows History.** Each reply the natural voice makes is one
   `SpokenAttempt` in `SpokenAttempts`: the text sent to the voice, the exact WAV handed to the player, the voice's
   details, and how playback ended. `DictationController.recordSpokenReply` holds the attempt while its History write

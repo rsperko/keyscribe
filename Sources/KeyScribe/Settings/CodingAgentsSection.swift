@@ -135,7 +135,7 @@ struct CodingAgentRecipientSection: View {
                     Text(readAloud.note).font(.caption).foregroundStyle(.secondary)
                     Button("Cancel") { model.cancelReadAloud(row) }
                         .buttonStyle(.link).controlSize(.small).font(.caption)
-                        .accessibilityLabel("Don\u{2019}t read \(row.name)\u{2019}s reply aloud")
+                        .accessibilityLabel("Don\u{2019}t report \(row.name)\u{2019}s reply")
                         .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.cancelReadAloud)
                 }
             }

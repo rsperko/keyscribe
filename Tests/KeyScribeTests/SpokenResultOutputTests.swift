@@ -75,7 +75,7 @@ struct SpokenResultOutputTests {
     private let connection = Connection(id: "omlx", name: "Local", provider: .openaiCompatible, model: "qwen", keyRef: "k")
 
     private func make(
-        settings: SpokenResultSettings = SpokenResultSettings(connection: "omlx"), llm: FakeLLM = FakeLLM(), permits: Bool = true,
+        settings: SpokenResultSettings = SpokenResultSettings(enabled: true, connection: "omlx"), llm: FakeLLM = FakeLLM(), permits: Bool = true,
         silencer: SpeechSilencer = SpeechSilencer(), deadlineSeconds: Double = 30, describeDeadlineSeconds: Double = 30,
         inFront: @escaping @MainActor (String) async -> Bool = { _ in false }, duck: @escaping (Bool) -> Void = { _ in },
         duckGrace: Duration = .seconds(60)
@@ -94,7 +94,7 @@ struct SpokenResultOutputTests {
     }
 
     @Test func aShortReplyIsSpokenAtOnceInTheChosenVoiceWithoutAskingTheModel() async {
-        let (output, speech, llm) = make(settings: SpokenResultSettings(connection: "omlx", voice: "voice.one"))
+        let (output, speech, llm) = make(settings: SpokenResultSettings(enabled: true, connection: "omlx", voice: "voice.one"))
         output.finished(conversation: "pi:s1", handle: "api", answer: "Done. `make test` passes.")
         await settled()
         #expect(speech.spoken.map { "\($0.text)|\($0.voice ?? "-")" } == ["api: Done. make test passes.|voice.one"])
@@ -102,7 +102,7 @@ struct SpokenResultOutputTests {
     }
 
     @Test func aLongReplyIsSummarizedWithTheInstructionAndRedactedFirst() async {
-        let (output, speech, llm) = make(settings: SpokenResultSettings(connection: "omlx", prompt: "Two sentences."))
+        let (output, speech, llm) = make(settings: SpokenResultSettings(enabled: true, connection: "omlx", prompt: "Two sentences."))
         let long = "I set the token to sk-abcdefghijklmnopqrstuvwxyz1234 in the config. " + Array(repeating: "Then more words.", count: 20).joined(separator: " ")
         llm.reply = "It set the token to ⟦SN:REDACT:1⟧ and went on."
         output.finished(conversation: "pi:s1", handle: "api", answer: long)
@@ -356,7 +356,7 @@ struct SpokenResultOutputTests {
     }
 
     @Test func repeatSaysSummariesAreOffAndPlaysNothingWhileTheyAre() async {
-        let box = SettingsBox(SpokenResultSettings(connection: "omlx"))
+        let box = SettingsBox(SpokenResultSettings(enabled: true, connection: "omlx"))
         let speech = FakeSpeech()
         let output = SpokenResultOutput(
             client: FakeLLM(), permits: { _ in true }, speech: speech, silencer: SpeechSilencer(), settings: { box.value },
@@ -984,7 +984,7 @@ struct SpokenResultOutputTests {
     }
 
     @Test func aChosenServiceThatIsGoneOrRefusedStillReadsAShortReplyAndSaysTheSummaryIsUnavailable() async {
-        for (settings, permits) in [(SpokenResultSettings(connection: "gone"), true), (SpokenResultSettings(connection: "omlx"), false)] {
+        for (settings, permits) in [(SpokenResultSettings(enabled: true, connection: "gone"), true), (SpokenResultSettings(enabled: true, connection: "omlx"), false)] {
             let short = make(settings: settings, permits: permits)
             short.0.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
             await settled()
@@ -1096,7 +1096,7 @@ struct SpokenResultOutputTests {
     }
 
     @Test func turningItOffStopsPlaybackDropsWhatWaitsAndWhatIsBeingSummarized() async {
-        let box = SettingsBox(SpokenResultSettings(connection: "omlx"))
+        let box = SettingsBox(SpokenResultSettings(enabled: true, connection: "omlx"))
         let llm = FakeLLM()
         let speech = FakeSpeech()
         let connection = connection
@@ -1263,7 +1263,7 @@ struct SpokenResultOutputTests {
         let connection = connection
         _ = SpokenResultOutput(
             client: FakeLLM(), permits: { _ in true }, speech: FakeSpeech(), silencer: SpeechSilencer(),
-            settings: { SpokenResultSettings(connection: "omlx") }, connection: { $0 == connection.id ? connection : nil },
+            settings: { SpokenResultSettings(enabled: true, connection: "omlx") }, connection: { $0 == connection.id ? connection : nil },
             warm: { warmed += 1 })
         #expect(warmed == 1)
     }
@@ -1296,7 +1296,7 @@ struct SpokenResultOutputTests {
     }
 
     private func residing(
-        _ voice: VoiceBox, settings box: SettingsBox = SettingsBox(SpokenResultSettings(connection: "omlx")), sleeper: Sleeper = Sleeper()
+        _ voice: VoiceBox, settings box: SettingsBox = SettingsBox(SpokenResultSettings(enabled: true, connection: "omlx")), sleeper: Sleeper = Sleeper()
     ) -> (SpokenResultOutput, FakeSpeech) {
         let speech = FakeSpeech()
         let connection = connection
@@ -1454,7 +1454,7 @@ struct SpokenResultOutputTests {
 
     @Test func turningSpokenRepliesOffReleasesTheVoice() {
         let voice = VoiceBox(.fastest)
-        let box = SettingsBox(SpokenResultSettings(connection: "omlx"))
+        let box = SettingsBox(SpokenResultSettings(enabled: true, connection: "omlx"))
         let (output, _) = residing(voice, settings: box)
         box.value.enabled = false
         output.settingsChanged()
@@ -1605,7 +1605,7 @@ struct SpokenResultOutputTests {
     }
 
     @Test func turningItBackOnDoesNotReplayEarlierResults() async {
-        let box = SettingsBox(SpokenResultSettings(connection: "omlx"))
+        let box = SettingsBox(SpokenResultSettings(enabled: true, connection: "omlx"))
         let speech = FakeSpeech()
         let connection = connection
         let output = SpokenResultOutput(
@@ -1685,12 +1685,12 @@ struct SpokenResultSettingsWiringTests {
         let model = SettingsModel(settings: .defaults, onChange: { saved.append($0.codingAgents.spokenResult) }, onReload: {}, onResetHUDPosition: {})
         let agents = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: FileManager.default.temporaryDirectory, connectors: [])
         agents.onSpokenResultChange = { model.setSpokenResult($0) }
-        agents.load(spokenResult: SpokenResultSettings(connection: "omlx"))
+        agents.load(spokenResult: SpokenResultSettings(enabled: true, connection: "omlx"))
         #expect(saved.isEmpty)
         agents.spokenResult.voice = "voice.one"
         agents.spokenResult.enabled = false
         #expect(saved == [
-            SpokenResultSettings(connection: "omlx", voice: "voice.one"),
+            SpokenResultSettings(enabled: true, connection: "omlx", voice: "voice.one"),
             SpokenResultSettings(enabled: false, connection: "omlx", voice: "voice.one"),
         ])
     }

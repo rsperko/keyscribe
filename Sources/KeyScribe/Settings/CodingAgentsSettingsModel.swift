@@ -41,8 +41,8 @@ final class CodingAgentsSettingsModel: ObservableObject {
 
         var note: String {
             switch self {
-            case .thisReply: "Reply will be read aloud."
-            case .nextReply: "Next reply will be read aloud."
+            case .thisReply: "Reply will be reported."
+            case .nextReply: "Next reply will be reported."
             }
         }
     }
@@ -84,6 +84,17 @@ final class CodingAgentsSettingsModel: ObservableObject {
     var chosenVoice: String {
         get { SpokenVoices.resolved(spokenResult.voice) }
         set { spokenResult.voice = newValue == SpokenVoices.recommended ? nil : newValue }
+    }
+    static let textOnlyChoice = ""
+    var voiceChoice: String {
+        get { spokenResult.textOnly ? Self.textOnlyChoice : chosenVoice }
+        set {
+            guard newValue != Self.textOnlyChoice else { return spokenResult.textOnly = true }
+            var updated = spokenResult
+            updated.textOnly = false
+            updated.voice = newValue == SpokenVoices.recommended ? nil : newValue
+            spokenResult = updated
+        }
     }
     var onOpenAIServices: (() -> Void)?
     var voice: SpokenVoiceModel?

@@ -7,10 +7,10 @@ struct SpokenResultSection: View {
     @State private var advancedExpanded = false
 
     var body: some View {
-        Section("Spoken replies") {
+        Section("Replies") {
             SettingRow(
-                title: "Read replies aloud", result: "Hear replies to messages you dictate or ask the agent to read aloud, and know when it needs you.",
-                help: "For messages you dictate, and for work you type when you ask the agent to have \(Branding.appName) tell you when it\u{2019}s done (or run /\(KeyScribePaths.variant.connectorSlug) in the conversation). Replies to dictation aren\u{2019}t read while you\u{2019}re viewing the conversation. A short reply is read as it is; a longer one is summarized by the AI service you choose, or announced without one. You also hear when the agent needs approval or disconnects before finishing. When \(Branding.appName) can\u{2019}t confirm the conversation is in front, it reads the reply aloud.")
+                title: "Reply updates", result: "Get replies to messages you dictate or ask the agent to report, and know when it needs you.",
+                help: "For messages you dictate, and for work you type when you ask the agent to have \(Branding.appName) tell you when it\u{2019}s done (or run /\(KeyScribePaths.variant.connectorSlug) in the conversation). Each update is shown, and read aloud unless Voice is \(SpokenVoiceRows.textOnlyLabel). Replies to dictation are skipped while you\u{2019}re viewing the conversation. A short reply is given as it is; a longer one is summarized by the AI service you choose, or announced without one. You also get an update when the agent needs approval or disconnects before finishing. When \(Branding.appName) can\u{2019}t confirm the conversation is in front, it gives the update.")
             {
                 Toggle("", isOn: enabled)
                     .labelsHidden().toggleStyle(.switch)
@@ -19,7 +19,9 @@ struct SpokenResultSection: View {
             if model.spokenResult.enabled {
                 serviceRows
                 if let voice = model.voice {
-                    SpokenVoiceRows(voice: voice, selection: self.voice)
+                    SpokenVoiceRows(
+                        voice: voice, selection: $model.voiceChoice, spokenVoice: model.chosenVoice,
+                        sharedNote: "This choice also applies to Ask modes\u{2019} answers.")
                 }
                 DisclosureSection(isExpanded: $advancedExpanded, headerID: AccessibilityID.Mode.CodingAgents.spokenResultAdvanced) {
                     DisclosureSummaryLabel(title: "Advanced", summary: "Summary instruction and voice files")
@@ -98,20 +100,28 @@ struct SpokenResultSection: View {
         Binding(get: { model.spokenResult.connection }, set: { model.spokenResult.connection = $0 })
     }
 
-    private var voice: Binding<String> { $model.chosenVoice }
 }
 
 struct SpokenVoiceRows: View {
     @ObservedObject var voice: SpokenVoiceModel
     let selection: Binding<String>
+    let spokenVoice: String
+    let sharedNote: String
     @State private var preview: NaturalSpeech?
 
-    private static let help = "Speech is made on this Mac; what it reads is never sent anywhere."
+    private static let help = "Speech is made on this Mac; what it reads is never sent anywhere. With Off \u{2014} text only, results are shown without being read aloud."
+    static let textOnlyLabel = "Off \u{2014} text only"
     private var size: String { ByteCountFormatter.fileStyle.string(fromByteCount: SpokenVoiceModel.approxDownloadBytes) }
+    private var textOnly: Bool { selection.wrappedValue == CodingAgentsSettingsModel.textOnlyChoice }
 
     var body: some View {
         voiceRow
-        if let error = voice.error {
+        Text(sharedNote)
+            .font(.caption).foregroundStyle(.secondary)
+            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenResultVoiceShared)
+        if textOnly {
+            EmptyView()
+        } else if let error = voice.error {
             IssueText(error, severity: voice.status == .needsAttention ? .failure : .advisory)
         } else if voice.status == .ready, let reason = voice.fallbackReason {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -123,7 +133,7 @@ struct SpokenVoiceRows: View {
                 }
             }
         }
-        if voice.status == .ready, let reason = voice.previewFallbackReason {
+        if !textOnly, voice.status == .ready, let reason = voice.previewFallbackReason {
             IssueText("The preview used the macOS voice because \(reason).", severity: .advisory)
         }
     }
@@ -133,23 +143,19 @@ struct SpokenVoiceRows: View {
         case .ready:
             SettingRow(title: "Voice", help: Self.help, combinesAccessibilityChildren: false) {
                 wrapping {
-                    Picker("Voice", selection: selection) {
-                        ForEach(SpokenVoices.all) { option in
-                            Text(option.label).tag(option.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenResultVoice)
-                    previewButton
+                    picker
+                    if !textOnly { previewButton }
                 }
             }
         case .notInstalled:
             SettingRow(
-                title: "Voice", result: "Using the macOS voice. Download the natural voice for better speech.",
+                title: "Voice",
+                result: textOnly ? nil : "Using the macOS voice. Download the natural voice for better speech.",
                 help: Self.help, combinesAccessibilityChildren: false)
             {
                 wrapping {
-                    previewButton
+                    picker
+                    if !textOnly { previewButton }
                     Button("Download English \u{00B7} \(size)") { voice.download() }
                         .buttonStyle(.borderedProminent)
                         .accessibilityLabel("Download the English voice, \(size)")
@@ -164,10 +170,25 @@ struct SpokenVoiceRows: View {
             SettingRow(title: "Voice", result: "Removing\u{2026}", help: Self.help) { progress("Removing\u{2026}") }
         case .needsAttention:
             SettingRow(title: "Voice", result: "Needs attention", help: Self.help, combinesAccessibilityChildren: false) {
-                Button("Reinstall voice") { voice.reinstall() }
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenVoiceReinstall)
+                wrapping {
+                    picker
+                    Button("Reinstall voice") { voice.reinstall() }
+                        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenVoiceReinstall)
+                }
             }
         }
+    }
+
+    private var picker: some View {
+        Picker("Voice", selection: selection) {
+            Text(Self.textOnlyLabel).tag(CodingAgentsSettingsModel.textOnlyChoice)
+            Divider()
+            ForEach(SpokenVoices.all) { option in
+                Text(option.label).tag(option.id)
+            }
+        }
+        .labelsHidden()
+        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenResultVoice)
     }
 
     private func wrapping(@ViewBuilder _ content: () -> some View) -> some View {
@@ -186,7 +207,7 @@ struct SpokenVoiceRows: View {
     private func playPreview() {
         let speech = preview ?? makePreview()
         preview = speech
-        SpeechSilencer.shared.speak(SpokenVoices.sample, voice: selection.wrappedValue, with: speech)
+        SpeechSilencer.shared.speak(SpokenVoices.sample, voice: spokenVoice, with: speech)
     }
 
     private func makePreview() -> NaturalSpeech {

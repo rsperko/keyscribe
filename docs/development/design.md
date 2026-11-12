@@ -794,7 +794,7 @@ Silence-based auto-stop is a non-goal (§1) and stays one: the limit is the only
   Apple; **speech-swift / Qwen3ASR** (MLX) for Qwen3-ASR.
   (Fork/pin details in `docs/development/areas/dependencies.md`.)
 - **Audio:** a device-pinned AUHAL input unit (`HALInputUnit`) for capture — it never changes the
-  macOS default input; other audio is ducked while dictating and while Read replies aloud speaks
+  macOS default input; other audio is ducked while dictating and while reply updates or answers are read aloud
   (`other_audio` = quiet / mute / unchanged, quiet by default) via Core Audio.
 - **Global hotkeys / insertion:** CGEvent (`kTCCServicePostEvent`) for paste keystroke; Accessibility
   (`kTCCServiceAccessibility`) for context reading and optional AX insert; `RegisterEventHotKey`

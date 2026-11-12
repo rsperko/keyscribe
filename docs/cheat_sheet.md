@@ -72,7 +72,7 @@ Say one command per recording. A saved command's name works only after its verb.
 | `run [saved action] [input]`<br>Example: `run new note buy milk` | Saved script or Shortcut | Runs that action, passing the words after its name if it takes them. |
 | `open [tab search] [title or site]`<br>Example: `open browser inbox` | Saved **Find a Browser Tab** | Finds the open tab that best matches. |
 | `go back` | After a switch | Returns to the window or app you were in before. |
-| `repeat that` | Spoken replies on | Replays the last spoken reply. |
+| `repeat that` | Reply updates on | Replays the last spoken reply. |
 | `cancel`<br>Also: `never mind` | Said alone | Runs nothing. |
 | `what can I say?` | Said alone | Shows your apps and saved commands with their verbs. |
 
@@ -106,7 +106,7 @@ the agent in Settings > Modes > Coding agent). [Name] is a conversation name sho
 | `check on [name]` | Known conversation | Reports its status. Sends nothing; the recipient stays the same. |
 | `check on all conversations` | Coding agent mode | Names the conversations waiting for you. Sends nothing. |
 | `rename this conversation to [name]` | The current conversation | Renames it. Say only the rename. |
-| `repeat that` | Spoken replies on | Replays the last spoken reply and names its conversation. |
+| `repeat that` | Reply updates on | Replays the last spoken reply and names its conversation. |
 | `cancel`<br>Also: `never mind` | Said alone | Sends nothing. To send the word, say `tell [name] cancel`. |
 | `what can I say?` | Said alone | Shows these phrases with your conversation names. |
 
@@ -142,7 +142,7 @@ These work too. The phrases on the earlier pages are the ones worth remembering.
 | --- | --- | --- |
 | `launch [app]` | Any installed app | Same as `open`. |
 | `go to [app or window]`<br>Also: `focus [app or window]`, `focus on [app or window]` | Already open | Same as `switch to`. |
-| `say that again` | Spoken replies on | Same as `repeat that`. |
+| `say that again` | Reply updates on | Same as `repeat that`. |
 | `number two`<br>Also: `second` | Numbered choice | Same as `two`. |
 | `please open Mail`<br>Also: `open Mail, please` | Any command | A "please" before or after a command changes nothing. |
 

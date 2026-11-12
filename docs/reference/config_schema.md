@@ -117,8 +117,9 @@
   the coarse `inserted` or `failed` that the rest of History keys on; read `summary` for what reached the
   agent. These fields hold fixed local wording and names, never an agent's reply, a credential, or an
   environment value, and they follow the same History setting and per-mode exclusion as everything else.
-  The optional `spoken_reply` is what a Coding agent spoken reply read aloud, written once it became audible:
-  `{at, conversation, text, connection, voice, reason}`, where `text` is the line exactly as heard (a reply, a summary, or how
+  The optional `spoken_reply` is what a Coding agent reply update gave, written once it became audible, or, with the
+  voice set to Off — text only, once it was shown: `{at, conversation, text, connection, voice, reason, shown}`, where
+  `shown` is `true` only for an update shown without speech (absent otherwise, and then `voice` is absent too), where `text` is the line exactly as heard (a reply, a summary, or how
   a turn ended; a notice is never written), `connection` names the service that wrote the
   line, absent when it was read as written, and `voice` is which voice was speaking when the line became audible:
   `"natural"` (the downloaded voice) or `"macos"` (the macOS voice), absent in entries written before it existed.
@@ -1436,7 +1437,7 @@ eviction = "fastest"            # "fastest" | "balanced" | "frugal" (default: fa
 #  dictionary_recovery_engines keys are obsolete: ignored on read and dropped on the next write.)
 
 [during_dictation]
-other_audio = "quiet"           # what happens to other audio while you dictate or Read replies aloud
+other_audio = "quiet"           # what happens to other audio while you dictate or a reply update or answer is read aloud
                                 #   speaks: "quiet" (default, turned
                                 #   down but still audible), "mute" (silenced), "unchanged" (left alone).
                                 #   Ducks (FaceTime-style, cannot strand); lands after the start sound,
@@ -1472,9 +1473,8 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 # keep_captures = false                          # debug: retain a copy of each committed capture WAV
 # keep_captures_max_mb = 500                     # soft budget for the archive; oldest pruned first
 
-[coding_agents.spoken_result]               # Settings ▸ Modes ▸ Coding agent ▸ Spoken replies
-# enabled = true                                 # Read replies aloud; absent = on exactly when a
-                                                 #   connection is set
+[coding_agents.spoken_result]               # Settings ▸ Modes ▸ Coding agent ▸ Replies
+# enabled = true                                 # Reply updates; absent = false
 # connection = "omlx"                            # id of the AI service that summarizes a finished reply
                                                  #   and describes a Pi prompt; absent or "" = None:
                                                  #   a longer reply is announced without a summary, and
@@ -1483,9 +1483,12 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
                                                  #   (SpokenResultSettings.defaultPrompt)
 # voice = "bf_emma"                              # speaker of the on-device voice, one of SpokenVoices.all;
                                                  #   absent or unknown = SpokenVoices.recommended
+# text_only = true                               # Voice ▸ Off — text only: reply updates and Ask answers
+                                                 #   are shown, never spoken; absent = false (spoken);
+                                                 #   `voice` is kept
 ```
 
-> **`[coding_agents.spoken_result]`** is read only while the Coding agent feature is on. A reply of at most
+> **`[coding_agents.spoken_result]`** is read for replies only while the Coding agent feature is on. A reply of at most
 > `SpokenResult.verbatimWordLimit` words (counted on the reply as written, so a reply that is mostly code is
 > summarized rather than read as "code block") is spoken as it is, with markup removed, code blocks named and
 > recognized secrets hidden, without any service call; a reply with nothing left to read, such as one that is
@@ -1499,7 +1502,11 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 > name followed by "The spoken summary is unavailable." Unavailable summaries waiting together are spoken as one
 > notice naming each conversation, followed by "The spoken summaries are unavailable." A summary longer than
 > `SpokenResult.summaryWordLimit` words is requested once more, shorter; a second overlong one is unavailable. Turning `enabled` off keeps `connection`, `prompt` and
-> `voice`. Only turns the user's own dictation started, or that the user asked from inside the agent to hear, are spoken,
+> `voice`, and so does `text_only`. `text_only` is an output choice, not a speaker: it changes only how an update or
+> answer is delivered (shown on the panel instead of read aloud, with no voice loaded and no audio lowered), never which
+> updates are given or in what order, and turning it off returns to the saved `voice`. It also applies to Ask modes
+> (`output = "speak"`), which read `voice` and `text_only` from this table even while the Coding agent feature is off.
+> Only turns the user's own dictation started, or that the user asked from inside the agent to hear, are spoken,
 > and a conversation confirmed in front when its turn finishes is skipped without a service call unless the user asked
 > to hear it. With `enabled` on, a dictated turn that starts waiting for
 > approval or an answer, or whose connector stays gone mid-turn, is announced with a fixed notice whether or not

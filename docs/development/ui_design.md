@@ -219,7 +219,7 @@ the only signal.
   which routes through the same output). So with the start sound **off** the change is instant — pick that
   for a dictation that feels immediate. The output device that was ducked is the one restored on
   completion, even if the default output changed mid-dictation.
-- The same "Other audio" choice applies to everything Read replies aloud speaks (replies, notices, answers,
+- The same "Other audio" choice applies to everything Reply updates and Ask answers speak (replies, notices, answers,
   "repeat that"; not the voice sample in Settings): the duck lands when the voice becomes audible and lifts
   a short grace after it stops, so a next reply that speaks within the grace does not pump the audio, while
   one still being prepared past it gets the audio back until it speaks. Stop gives the audio back at once.
@@ -570,7 +570,7 @@ the same kind of local command on either trigger: it replays the last spoken rep
 exactly as it was heard, ahead of any still waiting, and sends nothing. The replay waits in its own place
 rather than the queue, so a newer result for the same conversation does not replace it and an unavailable
 notice is never merged again with notices still waiting. It does not repeat the front check, since the user asked for it.
-The HUD names the conversation (“docs”), or says “There’s nothing to repeat yet.” or “Spoken replies are off.”;
+The HUD names the conversation (“docs”), or says “There’s nothing to repeat yet.” or “Reply updates are off.”;
 History records the command and adds no second copy of the line. Inside a longer take or after “tell” and a name it is
 message text. A take that is only “rename this conversation to” or “rename this session to” a new name (“name this
 conversation …” and “call this session …” work too) renames the take's recipient, with the same check
@@ -621,7 +621,7 @@ nothing. One that is not connected is “not connected. Its current status is un
 seen, and one whose state was carried over because its agent's session list could not be read is
 “last seen waiting for approval. Its current status is unavailable.” A description is used only while
 the prompt it describes is still the one pending; if the prompt or state changed meanwhile, the answer is
-rebuilt from what is pending now. The answer shows in the HUD, and is read aloud when spoken replies are on,
+rebuilt from what is pending now. The answer shows in the HUD, and is given as a reply update when reply updates are on,
 even with the conversation in front; speech that has to wait (for the dictation HUD, or while its audio is
 prepared) is dropped if what it reports stopped being true, its state, prompt, connection or freshness,
 while “repeat that” still replays it as heard. An answer replaces a notice about the same conversation that
@@ -733,7 +733,7 @@ example, the user sent that conversation a message after the take was decided, i
 or its prompt box already holds text. The HUD says so, why, and how to recover (“Not sent to docs: its
 prompt box already has text. Send or clear that text there, then say this again”); it never says who wrote
 that text. Text already in the agent's prompt box is left exactly as it was, and what was said stays in
-History. With **Read replies aloud** on, a take the conversation did not take is also spoken once, as a short
+History. With **Reply updates** on, a take the conversation did not take is also spoken once, as a short
 line naming the conversation and the reason (“docs didn’t take that: its prompt box has text”); what to do
 stays in the HUD and History. It is spoken whether that happens at once or after the take was queued, and even with the conversation in front:
 it is the only notice of a refusal that comes after the user has moved on. It waits like any spoken reply
@@ -907,9 +907,29 @@ panel closes. The panel also closes at once from the close button, when the next
 reply summary needs it. An answer interrupts a reply summary or notice that is playing. An
 interrupted notice is read again, from its start, once the answer ends; an interrupted reply summary is
 not, and "repeat that" replays it. Queued replies wait until the answer ends. Stop or Escape stops the
-answer only. The answer's voice is the one chosen for spoken replies; a `speak`
-mode's editor shows the same voice picker under **Spoken answer**, says that it also reads coding agent
-replies, and lets it be chosen without the Coding agent feature.
+answer only. The answer's voice is the one chosen for reply updates; a `speak`
+mode's editor shows the same voice picker under **Answer**, says that the choice also applies to coding agent
+reply updates, and lets it be chosen without the Coding agent feature.
+
+**Text only.** When the shared voice picker is set to **Off — text only**
+(`[coding_agents.spoken_result] text_only`), answers and reply updates (summaries, notices, refusals, "repeat
+that" and agent answers) use the answer panel without speech. The panel appears with the full text expanded,
+the mode's or conversation's name in the header, the close and copy buttons, and the status "Text only · Esc
+closes" ("Text only" when Escape cannot be claimed). The chevron reads "Show text" or "Hide text". Nothing about speech happens: no voice is warmed or made,
+other audio is never lowered, and no "Getting ready to speak" or "Speaking" status appears. The reading pause
+starts as soon as the panel appears, with the same length-aware pause, hover hold and VoiceOver rule as a
+finished spoken answer; VoiceOver hears the name and the text when it appears. A text-only reply waits its turn
+like a spoken one: the next update in the queue appears only once the panel closes, by its pause, the close
+button or Escape, so updates arrive one at a time in the order they would have been read. The same relevance,
+in-front skip, supersession, stop and cancellation rules apply as when speaking, so text-only never adds,
+replays or drops an update. Text-only updates also wait while the user records or the dictation HUD shows,
+and while an answer has the panel; one counts as given, and goes to History, only once its panel is on screen.
+An answer that takes the panel from a shown update hands it back when the answer closes: the update is shown
+again before the rest, and is not recorded twice. An answer switching to text keeps the panel throughout.
+Starting a dictation, or the dictation HUD appearing, closes the update shown, as it silences a spoken one, and
+the rest wait. Choosing **Off — text only** while an answer or update is being spoken, or is about to be, stops
+the audio at once and leaves its text on the panel as a text-only result; nothing waiting is dropped, and a reply
+already heard is not recorded twice. A spoken reply summary keeps its own panel behavior above: it hides when playback ends.
 
 ### Rules for cloud and privacy state
 
@@ -986,7 +1006,7 @@ Next Dictation ▸
   Manage Modes…
 
 Paste Last Dictation
-Read Agent Replies Aloud ✓
+Agent Reply Updates ✓
 Last Reply in History…
 
 ────────────────
@@ -1044,9 +1064,9 @@ disabled while it cannot open.
 > affordance, rendered only when the updater reports one. The public build uses Sparkle (EdDSA-verified);
 > a build with no injected updater shows neither.
 
-**Read Agent Replies Aloud** is shown only while the Coding agent feature is on. Its checkmark is the **Read replies
-aloud** switch (§7 Coding agent), with the same effects: off stops playback and drops waiting and in-progress
-spoken replies, on keeps the configuration and replays nothing. It needs no AI service, since notices are spoken
+**Agent Reply Updates** is shown only while the Coding agent feature is on. Its checkmark is the **Reply
+updates** switch (§7 Coding agent), with the same effects: off stops playback, closes a shown update and drops
+waiting and in-progress reply updates, on keeps the configuration and replays nothing. It needs no AI service, since notices are spoken
 without one.
 
 **Last Reply in History…** appears once a spoken reply has been saved to History in this session, and opens History
@@ -1192,7 +1212,7 @@ Show the few choices a new user is most likely to need:
 - **HUD** holds the HUD appearance picker (Match System, Opposite of System, Light, Dark). Its footer
   says that every window, Settings included, still follows the Mac.
 - **During dictation** groups keeping the Mac awake and muting other audio. Its footer makes clear that
-  both apply while the user dictates, and that other audio also applies while Read replies aloud speaks.
+  both apply while the user dictates, and that other audio also applies while reply updates and answers are read aloud.
 - Microphone choice, with a short explanation of following the Mac’s current input
 - Open at login
 - (History enable and retention live in the **History** pane, not here.)
@@ -1965,7 +1985,7 @@ can say**, built like the Voice Commands section of that name: one introduction 
 conversation’s name to send it an instruction.”), then short examples with what each does
 (`CodingAgentPhrasesSection.examples`): “tell” and a name with an instruction, “select” and a name, “open” and a
 name, “check on” a name, “check on all conversations”, “go back”, “cancel”, and “repeat that” only while
-**Read replies aloud** is on. The examples use the name of the conversation the
+**Reply updates** is on. The examples use the name of the conversation the
 guidance below would use, a placeholder when there is none, and “conversation two” while names are unavailable.
 Captions then say where an instruction without a name goes, that the numbers shown while recording can be
 said as “conversation” and the number, and how to rename a conversation by voice. Every example is one the
@@ -1997,11 +2017,14 @@ the current one is marked Current. The guidance names only what can be said. The
 while connector setup is unavailable, so a connected conversation never disappears behind installation
 status or a collapsed disclosure.
 
-**Spoken replies** sits between the conversations and connector setup, and its everyday view is three rows
-and one disclosure. **Read replies aloud** is its own switch, off by default, with "Hear replies to messages
-you dictate or ask the agent to read aloud, and know when it needs you." as the row's always-visible caption. Its help explains
-that replies are skipped while the conversation is in front, how short replies and longer summaries differ,
-and that it also announces approval requests and disconnections. It reads a reply or summary when a turn
+**Replies** sits between the conversations and connector setup, and its everyday view is three rows
+and one disclosure. **Reply updates** is its own switch, off by default, with "Get replies to messages
+you dictate or ask the agent to report, and know when it needs you." as the row's always-visible caption. Its help explains
+that each update is shown and read aloud unless the voice is **Off — text only**, that replies are skipped while
+the conversation is in front, how short replies and longer summaries differ,
+and that it also announces approval requests and disconnections. Whether an update is spoken or only shown is the
+shared voice choice below; the rules in this section apply the same way to both, and "read" here means given as
+an update either way. It reads a reply or summary when a turn
 the user's dictation started finishes, or a turn the user asked from inside the agent to hear, and a notice when it
 needs attention (below). Replies waiting together are read in the order the turns were asked for, not the
 order their summaries finish. A turn that ends with an error is announced as "Ended with an error.", one the agent declines
@@ -2013,19 +2036,19 @@ for it, or the connector's own command (`/keyscribe`, `/keyscribe cancel`, named
 running, or the next one when the agent is idle, and only that turn. A requested turn that finishes with no text to
 read is announced as "Finished without a written reply. Open the conversation for the result." Asking to hear a turn
 whose wait was skipped because the conversation was in front announces that wait then; one already queued or heard
-is not repeated. The app answers whether spoken replies are on, so
+is not repeated. The app answers whether reply updates are on, so
 the agent never claims a request that was not accepted; with the switch off nothing is armed for later. The request
 lives in the hub's memory only; a reconnect that reports the same running turn keeps it, as it keeps a dictated
 turn's, and turning the switch off, disconnecting, or quitting drops it. A reconnect from a new connector instance
 never carries a request over: turn ids are unique to the instance that reported them. While a request stands, and until
-its reply is audible, the conversation's row in the session list shows "Reply will be read aloud." ("Next reply will
-be read aloud." while it waits for the next turn) with a **Cancel** link; cancelling there or with the command drops any
+its reply is given, the conversation's row in the session list shows "Reply will be reported." ("Next reply will
+be reported." while it waits for the next turn) with a **Cancel** link; cancelling there or with the command drops any
 summary being made, waiting, or handed to the voice but not yet audible, but not audio already playing. A requested
 reply is superseded only by another requested reply from the same conversation, which also stops one handed to the
 voice but not yet audible; a later automatic reply queues behind it. The command's answer is shown to the user, never added to what the model reads. Turning it off stops
 playback, cancels any summary being made, and drops spoken replies still waiting, while the chosen service,
 speaker and instruction are kept; turning it back on applies to the next reply and replays nothing.
-The **Read Agent Replies Aloud** item in the menu bar menu (§6) is the same switch. The rest
+The **Agent Reply Updates** item in the menu bar menu (§6) is the same switch. The rest
 of the section shows only while it is on.
 
 A notice is a fixed sentence after the conversation's name, in the session list's own words: "Waiting for
@@ -2062,12 +2085,18 @@ after best-effort redaction."); its help adds that short replies are read withou
 `Branding.appName`, does not save replies or summaries, with no claim about what the provider keeps.
 
 **Voice** is one row, with **Preview Voice** beside its control, wrapping below it only when the pane is too
-narrow. Preview speaks a sample in whichever voice would read a summary now, never while recording, and
+narrow. Its picker's first choice is **Off — text only**, which shows answers and updates on the panel (§5, The
+speaking panel) without reading them aloud; it is stored as its own setting beside the chosen speaker
+(`text_only`), so choosing a speaker again turns speech back on with that speaker. While it is chosen, **Preview
+Voice** and the macOS-voice advisories are hidden. The same picker shows whether or not the voice is installed;
+before it is, a chosen speaker is read by the macOS voice. A caption under the row states the shared effect: in
+the Coding agent pane, "This choice also applies to Ask modes’ answers."; in an Ask mode's **Answer** section, "This choice also applies to coding agent reply updates, so
+changing it here changes it there." Preview speaks a sample in whichever voice would read a summary now, never while recording, and
 interrupts a summary rather than overlapping one. Before the voice is installed, the row's caption reads
 "Using the macOS voice. Download the natural voice for better speech." and its prominent button names the
 language and download size; enabling the switch never downloads anything. While installing, the row's status
-reads "Downloading N%" and then "Testing…" with the phase beside a spinner. Once installed, the row's control
-is the speaker picker, listing `SpokenVoices.all` by name and accent with the recommended speaker first and
+reads "Downloading N%" and then "Testing…" with the phase beside a spinner. After **Off — text only**, the
+picker lists `SpokenVoices.all` by name and accent with the recommended speaker first and
 marked "(Recommended)"; only English speakers the voice's authors grade C+ or better are offered, every one
 downloaded with the voice. A voice that makes no sound, whose files went missing (found at launch or when a
 result fails to speak), or whose delete removed only some files reads "Needs attention" with an `IssueText`
@@ -2426,21 +2455,22 @@ rewrite** offers the usual comparison, collapsed, with the final text called **R
 rewrite fell back or was skipped stays **Local fallback** or **Rewrite skipped** after it is sent. The
 text and Markdown exports carry the same summary and lines, and say why local text was kept.
 
-What a spoken reply (§7 Coding agent) read aloud is kept as it was heard, once it was audible: never a reply
+What a reply update (§7 Coding agent) gave is kept as it was heard or seen, once it was audible, or, with the
+voice set to **Off — text only**, once its panel was on screen: never a reply
 withdrawn or skipped before it played, and never a second copy for “repeat that”. A reply to a message the user
 dictated joins that message's entry, and only when that entry was kept; a reply the user asked for from inside
 the agent is an entry of its own under the Coding agent mode, reading *Reply from backend*, kept only while
 History is on and the mode is not left out of History. A notice (an approval or a wait) is not kept: a long
 session would fill History with them, and the agent's own screen already shows them. Either way a
-**Read aloud** section shows the line, selectable, with the conversation it came from (**From**), when it was
-read and, for a summary, **Summarized by**
-and the service; the entry's badges add **Spoken summary** and **Best-effort redaction**. The line is never
+**Reply** section shows the line, selectable, with the conversation it came from (**From**), when it was
+given (**At**) and, for a summary, **Summarized by**
+and the service; the entry's badges add **Reply summary** and **Best-effort redaction**. The line is never
 offered for corrections, since it is the agent's words, not the user's. Search finds it, and the exports carry it. An entry that is only a reply is not a dictation: the History stats, the mishearing search and its count, and
 the diagnostics report leave it out, and its export has no Result line. Its action bar offers **Copy Reply** in
 place of Copy Result and has no Copy Report. A dictation with a reply joined to it offers **Copy Reply** beside
-Copy Result, and its **Copy Report** says it includes what was read aloud.
+Copy Result, and its **Copy Report** says it includes the reply.
 
-The **Read aloud** section also says which voice read the line (**Read by**: Natural voice or macOS voice) and
+The **Reply** section also says, when a voice read the line, which one (**Read by**: Natural voice or macOS voice) and
 why the macOS voice read it (**Why**), both kept with the entry, and, while its spoken audio is held, its playback (**Playback**: Not started,
 Playing, Played to the end, Stopped before the end, or Failed). **Read with macOS Voice** reads the line again with the macOS voice
 for as long as the entry exists; while the user is dictating it reads nothing and the status line says why. Whichever

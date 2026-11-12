@@ -283,7 +283,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
             labels.append(contentsOf: contextLabels)
         }
         if spokenReply?.connection != nil {
-            labels.append("Spoken summary")
+            labels.append("Reply summary")
             if !labels.contains("Best-effort redaction") { labels.append("Best-effort redaction") }
         }
         return labels.isEmpty ? ["On this Mac"] : labels

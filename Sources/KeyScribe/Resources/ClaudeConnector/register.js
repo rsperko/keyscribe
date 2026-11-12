@@ -644,19 +644,19 @@ function toolDescription() {
   const app = appName()
   return 'The user has ' + app + ', a voice app on this Mac. Call this only when the user explicitly asks ' + app +
     ', or asks to hear it out loud, to report when the current work is done. Call it once, then keep working. When this turn ends, ' +
-    app + ' reads your final reply aloud. If the work is already finished, answer instead of calling it. Not for a plain "let me know".'
+    app + ' reports your final reply. If the work is already finished, answer instead of calling it. Not for a plain "let me know".'
 }
 
 function toolAnswer(answer) {
   const app = appName()
-  if (answer === true) return app + ' will read your final reply aloud when this turn ends. Say so in one short sentence and continue.'
+  if (answer === true) return app + ' will report your final reply when this turn ends. Say so in one short sentence and continue.'
   if (answer === false) {
-    return 'Spoken replies are off in ' + app + '. Tell the user to turn on Read replies aloud in ' + app +
-      '\u2019s Coding agent settings and ask again. Nothing will be read.'
+    return 'Reply updates are off in ' + app + '. Tell the user to turn on Reply updates in ' + app +
+      '\u2019s Coding agent settings and ask again. Nothing will be reported.'
   }
   if (answer === 'quiet') {
     return 'This conversation is disconnected from ' + app + '. Tell the user to reconnect it in ' + app +
-      '\u2019s Coding agent settings. Nothing will be read.'
+      '\u2019s Coding agent settings. Nothing will be reported.'
   }
   return app + ' didn\u2019t confirm the request, so a spoken reply can\u2019t be promised. Tell the user.'
 }
@@ -666,11 +666,11 @@ function commandAnswer(args, answer, running) {
   const cancelling = args === 'cancel'
   if (answer === 'quiet') return 'This conversation is disconnected from ' + app + '. Reconnect it in ' + app + '\u2019s Coding agent settings.'
   if (answer === null) {
-    return cancelling ? app + ' didn\u2019t confirm the cancel.' : app + ' didn\u2019t confirm the request, so a spoken reply isn\u2019t certain.'
+    return cancelling ? app + ' didn\u2019t confirm the cancel.' : app + ' didn\u2019t confirm the request, so a reply update isn\u2019t certain.'
   }
-  if (cancelling) return app + ' won\u2019t read this reply aloud.'
-  if (answer === false) return 'Spoken replies are off. Turn on Read replies aloud in ' + app + '\u2019s Coding agent settings.'
-  return running ? app + ' will read the result of this work aloud.' : app + ' will read your next reply aloud.'
+  if (cancelling) return app + ' won\u2019t report this reply.'
+  if (answer === false) return 'Reply updates are off. Turn on Reply updates in ' + app + '\u2019s Coding agent settings.'
+  return running ? app + ' will report the result of this work.' : app + ' will report your next reply.'
 }
 
 async function offerReadAloud($) {
@@ -685,7 +685,7 @@ async function offerReadAloud($) {
   try {
     await $.command.register({
       name: $.plugin.name, immediate: true, argumentHint: '[cancel]',
-      description: 'Have ' + appName() + ' read the reply aloud when this work is done, or cancel that.',
+      description: 'Have ' + appName() + ' report the reply when this work is done, or cancel that.',
     })
   } catch (err) {
     quietly($.ui.log('voice connector could not add its command: ' + String(err), { to: 'debug' }))
@@ -720,7 +720,7 @@ export function register(on) {
     const args = String(e.args || '').trim().toLowerCase()
     const running = currentTurn !== null
     const said = args && args !== 'cancel'
-      ? 'Use /' + e.command + ' to hear the reply aloud, or /' + e.command + ' cancel.'
+      ? 'Use /' + e.command + ' to get the reply when this work is done, or /' + e.command + ' cancel.'
       : commandAnswer(args, await askToReadAloud($, args !== 'cancel'), running)
     quietly($.ui.log(said))
     return {}

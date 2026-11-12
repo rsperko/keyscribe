@@ -514,7 +514,7 @@ final class HistoryPaneModel: ObservableObject {
     func copyReport() {
         guard let entry = selected else { return }
         copyText?(SupportReport.render(entry: entry, appName: Branding.appName, setup: supportSetup()))
-        flash("Report copied. It includes what you said, any AI request, and anything read aloud — check it before sending.")
+        flash("Report copied. It includes what you said, any AI request, and any reply update — check it before sending.")
     }
 
     var voiceCommandsEnabled: () -> Bool = { true }
@@ -712,7 +712,7 @@ struct HistoryPaneView: View {
             PaneListSectionHeader("History")
             SettingRow(
                 title: "Keep history on this Mac",
-                help: "Stores transcripts and final text locally so you can search and correct them, and coding agent replies as they were read aloud. Audio and password-field dictations are never saved. For other sensitive work, choose a shorter period or exclude a mode in its Result handling.",
+                help: "Stores transcripts and final text locally so you can search and correct them, and coding agent reply updates as they were given. Audio and password-field dictations are never saved. For other sensitive work, choose a shorter period or exclude a mode in its Result handling.",
                 combinesAccessibilityChildren: false)
             {
                 Toggle("Keep history on this Mac", isOn: $settings.historyEnabled).labelsHidden()
@@ -1025,12 +1025,12 @@ private struct HistoryDetailView: View {
 
     private func readAloud(_ reply: HistoryEntry.SpokenReply) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Read aloud").font(.headline)
+            Text("Reply").font(.headline)
             Text(reply.text)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             detailRow("From", reply.conversation)
-            detailRow("Read at", reply.at.formatted(date: .omitted, time: .standard))
+            detailRow("At", reply.at.formatted(date: .omitted, time: .standard))
             if let connection = reply.connection { detailRow("Summarized by", connection) }
             spokenAudio(reply)
         }
@@ -1245,7 +1245,7 @@ private struct HistoryDetailView: View {
             }
             if !entry.isSpokenReplyOnly {
                 Button { model.copyReport() } label: { Label("Copy Report", systemImage: "ladybug") }
-                    .help("Copies this dictation for a bug report: what you said, the inserted text, the app it was for, your microphone's name, any AI request and reply (which can include your dictionary words, selected text, or text from the app), what a coding agent's reply read aloud, and details about your setup.")
+                    .help("Copies this dictation for a bug report: what you said, the inserted text, the app it was for, your microphone's name, any AI request and reply (which can include your dictionary words, selected text, or text from the app), a coding agent's reply update, and details about your setup.")
                     .accessibilityIdentifier(AccessibilityID.History.copyReport)
             }
         }

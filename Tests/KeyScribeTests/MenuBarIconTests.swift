@@ -15,7 +15,7 @@ struct MenuBarIconTests {
 
         let titles = controller.mainMenu?.items.map(\.title) ?? []
         #expect(titles == [
-            "starting…", "Next Dictation", "Paste Last Dictation", "Read Agent Replies Aloud", "Last Reply in History…", "",
+            "starting…", "Next Dictation", "Paste Last Dictation", "Agent Reply Updates", "Last Reply in History…", "",
             "Add to Vocabulary…", "", "Speech Model", "History…", "",
             "Move HUD…", "Settings…", "About & Notices…", "", "Quit \(Branding.appName)",
         ])

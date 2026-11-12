@@ -412,7 +412,7 @@ struct CodingAgentsSettingsModelTests {
             [conversation("backend", pid: 1, setup: defaultFolder(dir)), conversation("docs", pid: 2, setup: defaultFolder(dir)),
              conversation("web", pid: 3, setup: defaultFolder(dir))], current: nil,
             readAloud: ["backend"], readNextAloud: ["web"])
-        #expect(model.rows.map(\.readAloud?.note) == ["Reply will be read aloud.", nil, "Next reply will be read aloud."])
+        #expect(model.rows.map(\.readAloud?.note) == ["Reply will be reported.", nil, "Next reply will be reported."])
         model.cancelReadAloud(model.rows[0])
         #expect(cancelled == ["backend"])
     }

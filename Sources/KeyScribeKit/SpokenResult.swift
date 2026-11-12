@@ -5,6 +5,7 @@ public struct SpokenResultSettings: Codable, Equatable, Sendable {
     public var connection: String
     public var prompt: String?
     public var voice: String?
+    public var textOnly: Bool
 
     public static let defaultPrompt = """
     Summarize this reply from a coding agent in one or two short, natural sentences to be read aloud: aim for 15 \
@@ -15,22 +16,27 @@ public struct SpokenResultSettings: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case enabled, connection, prompt, voice
+        case textOnly = "text_only"
     }
 
-    public init(enabled: Bool? = nil, connection: String = "", prompt: String? = nil, voice: String? = nil) {
-        self.enabled = enabled ?? !connection.isEmpty
+    public init(
+        enabled: Bool = false, connection: String = "", prompt: String? = nil, voice: String? = nil, textOnly: Bool = false
+    ) {
+        self.enabled = enabled
         self.connection = connection
         self.prompt = prompt
         self.voice = voice
+        self.textOnly = textOnly
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
-            enabled: try c.decodeIfPresent(Bool.self, forKey: .enabled),
+            enabled: try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false,
             connection: try c.decodeIfPresent(String.self, forKey: .connection) ?? "",
             prompt: try c.decodeIfPresent(String.self, forKey: .prompt),
-            voice: try c.decodeIfPresent(String.self, forKey: .voice))
+            voice: try c.decodeIfPresent(String.self, forKey: .voice),
+            textOnly: try c.decodeIfPresent(Bool.self, forKey: .textOnly) ?? false)
     }
 
     public var isOn: Bool { enabled && !connection.isEmpty }

@@ -153,6 +153,13 @@ struct SpokenResultSettingsDecodeTests {
 }
 
 struct SpokenResultEnablementTests {
+    @Test func textOnlyIsSavedBesideTheChosenVoice() throws {
+        var settings = Settings.defaults
+        settings.codingAgents.spokenResult = SpokenResultSettings(enabled: true, voice: "bf_emma", textOnly: true)
+        let reread = try SettingsStore.decode(from: SettingsStore.encode(settings)).codingAgents.spokenResult
+        #expect(reread.textOnly && reread.voice == "bf_emma" && reread.enabled)
+    }
+
     @Test func readingAloudIsItsOwnSwitchAndNeedsAServiceToSpeak() {
         let off = SpokenResultSettings(enabled: false, connection: "omlx", prompt: "Be brief.", voice: "bf_emma")
         #expect(!off.isOn)
@@ -162,18 +169,15 @@ struct SpokenResultEnablementTests {
         #expect(SpokenResultSettings(enabled: true, connection: "omlx").isOn)
     }
 
-    @Test func aSavedServiceWithoutTheSwitchStaysOnAndTheSwitchIsWrittenBack() throws {
-        let legacy = try SettingsStore.decode(from: """
+    @Test func updatesStayOffUntilTurnedOnEvenWithAServiceSaved() throws {
+        let saved = try SettingsStore.decode(from: """
         schema_version = 1
 
         [coding_agents.spoken_result]
         connection = "omlx"
         """)
-        #expect(legacy.codingAgents.spokenResult.enabled)
-        var settings = Settings.defaults
-        settings.codingAgents.spokenResult = SpokenResultSettings(enabled: false, connection: "omlx")
-        let reread = try SettingsStore.decode(from: SettingsStore.encode(settings))
-        #expect(reread.codingAgents.spokenResult == SpokenResultSettings(enabled: false, connection: "omlx"))
+        #expect(!saved.codingAgents.spokenResult.enabled)
+        #expect(!SpokenResultSettings(connection: "omlx").enabled)
     }
 
     @Test func aResultStartsWithItsConversationAndAFailedSummarySaysSo() {

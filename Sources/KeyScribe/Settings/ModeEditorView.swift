@@ -202,11 +202,12 @@ struct ModeEditorView: View {
                 onRevealFragment: onRevealFragment)
             dataSentWithAISection
             if mode.answersAloud, let codingAgents, let voice = codingAgents.voice {
-                Section("Spoken answer") {
+                Section("Answer") {
                     SpokenVoiceRows(
-                        voice: voice, selection: Binding(get: { codingAgents.chosenVoice }, set: { codingAgents.chosenVoice = $0 }))
-                    Text("This voice also reads coding agent replies, so changing it here changes it there.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        voice: voice,
+                        selection: Binding(get: { codingAgents.voiceChoice }, set: { codingAgents.voiceChoice = $0 }),
+                        spokenVoice: codingAgents.chosenVoice,
+                        sharedNote: "This choice also applies to coding agent reply updates, so changing it here changes it there.")
                 }
             }
 
@@ -264,7 +265,7 @@ struct ModeEditorView: View {
                 summaryLine("Status", mode.enabled ? "Enabled" : "Disabled")
                 summaryLine("Trigger", ModeSummary.whenRuns(mode))
                 summaryLine("Does", mode.answersAloud
-                    ? "Answers your spoken question about the selected text, aloud"
+                    ? "Answers your spoken question about the selected text"
                     : mode.source == .selection
                     ? "Replaces the selected text using your spoken instruction"
                     : (mode.commands.liveEdits ? "Dictation with spoken edits" : "Plain dictation"))

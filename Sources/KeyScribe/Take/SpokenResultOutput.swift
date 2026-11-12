@@ -18,6 +18,8 @@ final class SpokenResultOutput {
         var origin: String?
         var refusal = false
         var mergedOrigins: [String?] = []
+        var shownOnly = false
+        var heardAlready = false
         var text: String { standalone ? body : SpokenResult.prefaced(body, name: name) }
     }
 
@@ -45,6 +47,7 @@ final class SpokenResultOutput {
     struct Speaking: Equatable {
         let name: String
         let text: String
+        var textOnly = false
     }
 
     enum Replay: Equatable {
@@ -70,6 +73,7 @@ final class SpokenResultOutput {
     private let inFront: @MainActor (String) async -> Bool
     private let duck: (Bool) -> Void
     private let duckGrace: Duration
+    private let mayShow: () -> Bool
     private var ducked = false
     private var duckGraceTask: Task<Void, Never>?
     private var nextOrder = 0
@@ -102,7 +106,8 @@ final class SpokenResultOutput {
         wait: @escaping @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) },
         inFront: @escaping @MainActor (String) async -> Bool = { _ in false },
         duck: @escaping (Bool) -> Void = { _ in },
-        duckGrace: Duration = .seconds(1)
+        duckGrace: Duration = .seconds(1),
+        mayShow: @escaping () -> Bool = { true }
     ) {
         self.client = client
         self.permits = permits
@@ -119,10 +124,12 @@ final class SpokenResultOutput {
         self.inFront = inFront
         self.duck = duck
         self.duckGrace = duckGrace
+        self.mayShow = mayShow
         speech.onStarted = { [weak self] in self?.started() }
         speech.onFinished = { [weak self] in self?.ended() }
         silencer.register(speech)
         silencer.onAvailable = { [weak self] in self?.playNext() }
+        silencer.onBusy = { [weak self] in self?.dismissed() }
         if settings().enabled, residency().eviction == .fastest { load() }
     }
 
@@ -130,6 +137,11 @@ final class SpokenResultOutput {
         guard settings().enabled else {
             stop()
             return releaseVoice()
+        }
+        if settings().textOnly {
+            releaseVoice()
+            showSpokenAsText()
+            return playNext()
         }
         let residency = residency()
         if residency.eviction == .fastest { return load() }
@@ -151,6 +163,7 @@ final class SpokenResultOutput {
     }
 
     private func load() {
+        guard !settings().textOnly else { return }
         cancelRelease()
         guard !resident else { return }
         resident = true
@@ -408,6 +421,42 @@ final class SpokenResultOutput {
     }
 
     var readsReplies: Bool { settings().enabled }
+
+    var displayed: Speaking? {
+        guard let playing, playing.shownOnly, announced else { return nil }
+        return Speaking(name: playing.name, text: playing.body, textOnly: true)
+    }
+
+    func panelFreed() { playNext() }
+
+    func yieldPanel() {
+        guard var current = playing, current.shownOnly else { return }
+        current.heardAlready = true
+        playing = nil
+        playingCheck = nil
+        playingRequested = []
+        announced = false
+        queued.insert(current, at: 0)
+    }
+
+    private func showSpokenAsText() {
+        guard var current = playing, !current.shownOnly else { return }
+        current.heardAlready = announced
+        playing = nil
+        playingCheck = nil
+        playingRequested = []
+        if announced {
+            announced = false
+            onSpeaking?(nil)
+        }
+        queued.insert(current, at: 0)
+        speech.stop()
+    }
+
+    func dismissed() {
+        guard playing?.shownOnly == true else { return }
+        ended()
+    }
     var hasReplyToRepeat: Bool { heard != nil }
 
     func repeatLast() -> Replay {
@@ -435,27 +484,28 @@ final class SpokenResultOutput {
         guard let playing, !announced else { return }
         if let check = playingCheck {
             playingCheck = nil
-            guard check() else { return speech.stop() }
+            guard check() else { return playing.shownOnly ? ended() : speech.stop() }
         }
         announced = true
         pendingRequested.subtract(playingRequested)
         playingRequested = []
         heard = playing
         syncDuck()
-        onSpeaking?(Speaking(name: playing.name, text: playing.body))
-        if !playing.replayed, !playing.standalone, !playing.notice {
+        onSpeaking?(Speaking(name: playing.name, text: playing.body, textOnly: playing.shownOnly))
+        if !playing.replayed, !playing.standalone, !playing.notice, !playing.heardAlready {
             let origins = playing.mergedOrigins.isEmpty ? [playing.origin] : playing.mergedOrigins.compactMap { $0 }
             for origin in origins {
                 onHeard?(Heard(
                     conversation: playing.conversation, name: playing.name, text: playing.text,
-                    connection: playing.connection, origin: origin, attempt: speech.attempt, reader: speech.reader,
-                    reason: speech.reader == .macOS ? speech.macOSReason : nil))
+                    connection: playing.connection, origin: origin,
+                    attempt: playing.shownOnly ? nil : speech.attempt, reader: playing.shownOnly ? nil : speech.reader,
+                    reason: !playing.shownOnly && speech.reader == .macOS ? speech.macOSReason : nil))
             }
         }
     }
 
     private func ended() {
-        if silencer.resumesInterrupted, var interrupted = playing, interrupted.notice {
+        if playing?.shownOnly != true, silencer.resumesInterrupted, var interrupted = playing, interrupted.notice {
             interrupted.replayed = true
             queued.insert(interrupted, at: 0)
         }
@@ -478,7 +528,7 @@ final class SpokenResultOutput {
     // Held while a reply is audible and for a short grace after it, so a next reply that speaks within the
     // grace does not pump the other audio; one still being prepared past it gets the audio back until it speaks.
     private func syncDuck() {
-        if announced { return setDucked(true) }
+        if announced { return setDucked(playing?.shownOnly != true) }
         guard ducked, duckGraceTask == nil else { return }
         let grace = duckGrace
         duckGraceTask = Task { [weak self] in
@@ -505,7 +555,8 @@ final class SpokenResultOutput {
             answering = nil
             return
         }
-        guard playing == nil, silencer.isAvailable(for: speech), !speech.isSpeaking else { return }
+        let free = settings().textOnly ? !silencer.isBusy && mayShow() : silencer.isAvailable(for: speech) && !speech.isSpeaking
+        guard playing == nil, free else { return }
         if let answering {
             self.answering = nil
             guard answering.stillTrue() else { return advance() }
@@ -531,10 +582,16 @@ final class SpokenResultOutput {
     }
 
     private func play(_ item: Queued, while stillTrue: (() -> Bool)? = nil, requested: Set<String> = []) {
-        resident = true
-        playing = item
+        var item = item
+        item.shownOnly = settings().textOnly
         playingCheck = stillTrue
         playingRequested = requested
+        guard !item.shownOnly else {
+            playing = item
+            return started()
+        }
+        resident = true
+        playing = item
         silencer.speak(item.text, voice: settings().voice, with: speech)
         if !speech.isSpeaking {
             playing = nil

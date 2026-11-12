@@ -90,7 +90,9 @@ final class SpeechSilencer {
     private var dictationHUDVisible = false
     var onAvailableFirst: (() -> Void)?
     var onAvailable: (() -> Void)?
+    var onBusy: (() -> Void)?
     private(set) var isRecording = false
+    var isBusy: Bool { isRecording || dictationHUDVisible }
 
     func register(_ speech: any SpeechSynthesizing) {
         entries = entries.filter { $0.speech != nil }
@@ -137,6 +139,7 @@ final class SpeechSilencer {
         }
         entries = entries.filter { $0.speech != nil }
         for entry in entries { entry.speech?.stop() }
+        onBusy?()
     }
 
     func released(_ speech: any SpeechSynthesizing) {
@@ -148,6 +151,7 @@ final class SpeechSilencer {
         isRecording = true
         entries = entries.filter { $0.speech != nil }
         for entry in entries { entry.speech?.stop() }
+        onBusy?()
     }
 
     func recordingEnded() {

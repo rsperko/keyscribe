@@ -1384,8 +1384,8 @@ test("the read-aloud tool asks for the running turn and tells the model only wha
   assert.equal(h.tools[0].name, "keyscribe_dev_tell_me_when_done")
   assert.notEqual(readAloudToolName("keyscribe"), readAloudToolName("keyscribe-dev"))
   const cases: Array<[string, RegExp]> = [
-    ['{"ok":true,"spoken":true}', /will read your final reply aloud/],
-    ['{"ok":true,"spoken":false}', /Spoken replies are off/],
+    ['{"ok":true,"spoken":true}', /will report your final reply/],
+    ['{"ok":true,"spoken":false}', /Reply updates are off/],
     ['{"ok":true,"quiet":true}', /disconnected/],
   ]
   for (const [answer, said] of cases) {
@@ -1424,7 +1424,7 @@ test("the command covers the running turn, the next one when idle, and cancels",
 
   const third = await askedToReadAloud(h, h.runCommand("keyscribe-dev", "cancel"), '{"ok":true,"spoken":true}')
   assert.equal(third.body.on, false)
-  assert.match(h.notes[2], /won\u2019t read this reply/)
+  assert.match(h.notes[2], /won\u2019t report this reply/)
 })
 
 test("a reloaded connector numbers its turns apart from the one before, so a request never carries over to other work", async () => {

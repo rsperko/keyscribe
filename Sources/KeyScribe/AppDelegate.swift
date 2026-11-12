@@ -40,7 +40,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var spokenResult: SpokenResultOutput?
     private var answers: SpokenAnswerOutput?
     private var answerOnPanel = false
-    private var shownAnswer = ""
+    private var shownText = ""
     private var speechLowering: Set<String> = []
     private let spokenVoice = SpokenVoiceModel(installer: KokoroVoice.shared)
     private let voiceResidency = VoiceResidency.kokoro()
@@ -831,7 +831,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                         guard let candidates = hub?.frontCandidates else { return false }
                         return await AgentFront.withoutAsking.shown(among: candidates) { _ in }?.id == id
                     },
-                    duck: { [weak self] in self?.lowerOtherAudio(for: "replies", $0) })
+                    duck: { [weak self] in self?.lowerOtherAudio(for: "replies", $0) },
+                    mayShow: { [weak self] in
+                        guard let self, self.answerOnPanel else { return true }
+                        return self.answers?.isActive != true && self.answers?.showsText != true
+                    })
                 runtime.hub.onResult = { [weak spoken] in spoken?.finished(conversation: $0, handle: $1, answer: $2, requested: $3, origin: $4) }
                 runtime.hub.onEnded = { [weak spoken] in spoken?.ended(conversation: $0, handle: $1, body: $2, requested: $3, origin: $4) }
                 runtime.hub.onAttention = { [weak spoken] in spoken?.attention(conversation: $0, handle: $1, $2, requested: $3) }
@@ -896,19 +900,25 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let answers = SpokenAnswerOutput(
             speech: spokenVoice.makeSpeech(reportsOutcome: false, sentenceAtATime: true),
             voice: { [weak self] in self?.settings.codingAgents.spokenResult.voice },
+            textOnly: { [weak self] in self?.settings.codingAgents.spokenResult.textOnly ?? false },
             warm: { [weak self] in
                 guard let self, self.spokenVoice.isReady else { return }
                 self.voiceResidency.warm()
             },
             release: { [weak self] in self?.voiceIdle() },
             duck: { [weak self] in self?.lowerOtherAudio(for: "answer", $0) })
-        answers.onShow = { [weak self] name, text in
+        answers.onShow = { [weak self] name, text, spoken in
             guard let self else { return }
             self.answerOnPanel = true
-            self.shownAnswer = text
+            self.spokenResult?.yieldPanel()
+            self.shownText = text
             self.positionPicker.cancel()
             self.speakingHUD.appearance = self.settings.hud.appearance
-            self.speakingHUD.show(name: name, summary: text, answer: true, preparing: true)
+            if spoken {
+                self.speakingHUD.show(name: name, summary: text, answer: true, preparing: true)
+            } else {
+                self.speakingHUD.showText(name: name, text: text)
+            }
         }
         answers.onSpeaking = { [weak self] in self?.speakingHUD.speaking() }
         answers.onEnded = { [weak self] in
@@ -919,6 +929,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, self.answerOnPanel else { return }
             self.answerOnPanel = false
             self.speakingHUD.hide()
+            self.spokenResult?.panelFreed()
         }
         answers.onFirstAudio = { [weak self] milliseconds in
             Log.insertion.notice("answer: first audio \(Int(milliseconds.rounded()), privacy: .public)ms after release")
@@ -928,10 +939,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             if self.answerOnPanel { self.answers?.stop() } else { self.spokenResult?.stop() }
         }
-        speakingHUD.onClose = { [weak self] in self?.answers?.close() }
+        speakingHUD.onClose = { [weak self] in
+            guard let self else { return }
+            if self.answerOnPanel { self.answers?.close() } else { self.spokenResult?.dismissed() }
+        }
         speakingHUD.onCopy = { [weak self] in
-            guard let self, self.answerOnPanel else { return false }
-            return TextInserter.copyToClipboard(self.shownAnswer)
+            guard let self, self.speakingHUD.offersCopy else { return false }
+            return TextInserter.copyToClipboard(self.shownText)
         }
         self.answers = answers
         controller.answers = answers
@@ -954,13 +968,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func showSpeaking(_ speaking: SpokenResultOutput.Speaking?) {
         if answerOnPanel {
-            guard speaking != nil, answers?.isActive != true else { return }
+            guard speaking != nil, answers?.isActive != true, answers?.showsText != true else { return }
             answerOnPanel = false
         }
         guard let speaking else { return speakingHUD.hide() }
         positionPicker.cancel()
         speakingHUD.appearance = settings.hud.appearance
-        speakingHUD.show(name: speaking.name, summary: speaking.text)
+        guard speaking.textOnly else { return speakingHUD.show(name: speaking.name, summary: speaking.text) }
+        shownText = speaking.text
+        speakingHUD.showText(name: speaking.name, text: speaking.text)
     }
 
     private func toggleSpokenUpdates() {
@@ -995,6 +1011,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         settings = updated
         spokenResult?.settingsChanged()
+        answers?.settingsChanged()
         if !updated.codingAgents.spokenResult.enabled { agentRuntime?.hub.speechTurnedOff() }
         if updated.history != previousHistory {
             history?.applyRetention(retentionDays: updated.history.retentionDays)
