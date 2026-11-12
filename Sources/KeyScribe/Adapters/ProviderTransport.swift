@@ -44,6 +44,11 @@ enum ProviderTransportError: Error, CustomStringConvertible, LocalizedError {
 // from the status code alone (KS-07). The body stays in the associated value for OpenAIAPIError.parse and the
 // remediation loop — in memory only.
 extension ProviderTransportError: RewriteFailureReporting {
+    var cutOffAtLimit: Bool {
+        if case .truncated = self { return true }
+        return false
+    }
+
     var rewriteFailureReason: String {
         switch self {
         case .missingKey: return "No API key is stored for this connection."

@@ -43,6 +43,7 @@ final class ModesSettingsModel: ObservableObject {
     var codingAgents: CodingAgentsSettingsModel?
 
     private(set) var codingAgentsEnabled: Bool
+    private(set) var askAboutSelectionEnabled = false
 
     init(repository: ConfigRepository, voiceCommandsEnabled: Bool = false, codingAgentsEnabled: Bool = false) {
         self.repository = repository
@@ -61,6 +62,12 @@ final class ModesSettingsModel: ObservableObject {
     func setVoiceCommandsEnabled(_ enabled: Bool) {
         guard enabled != voiceCommandsEnabled else { return }
         voiceCommandsEnabled = enabled
+        reload(force: true)
+    }
+
+    func setAskAboutSelectionEnabled(_ enabled: Bool) {
+        guard enabled != askAboutSelectionEnabled else { return }
+        askAboutSelectionEnabled = enabled
         reload(force: true)
     }
 
@@ -90,7 +97,7 @@ final class ModesSettingsModel: ObservableObject {
         connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections
         fragmentIds = loadFragmentIds()
         let selectionStillValid = selectedID != nil
-            && (modes.contains { $0.id == selectedID } || ModeStore.templates().contains { $0.id == selectedID })
+            && (modes.contains { $0.id == selectedID } || allTemplates.contains { $0.id == selectedID })
         if !selectionStillValid {
             // A fresh, templates-only install lands on the first user mode if one exists; otherwise leave the
             // detail empty (the Start-from-a-Template section is visible in the list either way).
@@ -163,7 +170,7 @@ final class ModesSettingsModel: ObservableObject {
     // At its free catalog id this is a `.seed`, kept migratable via the ledger; if the id is taken it's a
     // `.copy` (plain user mode). No name autofocus — a template name is already meaningful.
     func materializeTemplate(_ seedId: String) {
-        guard let template = ModeStore.templates().first(where: { $0.id == seedId }) else { return }
+        guard let template = allTemplates.first(where: { $0.id == seedId }) else { return }
         let materialization = ModeTemplateInstantiation.materialize(
             template: template, existing: modes, connections: connections)
         guard save(materialization.mode) else { return }
@@ -176,7 +183,7 @@ final class ModesSettingsModel: ObservableObject {
     // Always the full catalog — the first instance materialized at a free catalog id is the migratable seed;
     // adding it again yields a plain suffixed copy, so a template never drops out of the chooser.
     var allTemplates: [Mode] {
-        ModeStore.templates()
+        ModeStore.templates(askAboutSelection: askAboutSelectionEnabled)
     }
 
     // The copy drops the seed identity and trigger keys, so it never clashes with the original's shortcut.

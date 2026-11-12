@@ -69,7 +69,8 @@ final class SpokenVoiceModel: ObservableObject {
 
     func makeSpeech(
         player: any AudioPlaying = WAVPlayer(), fallback: any SpeechSynthesizing = SystemSpeech(), attempts: SpokenAttempts? = nil,
-        preview: Bool = false, details: @escaping @Sendable (Bool) -> [SpokenAttempt.Detail] = SpokenAttempts.environment
+        preview: Bool = false, details: @escaping @Sendable (Bool) -> [SpokenAttempt.Detail] = SpokenAttempts.environment,
+        reportsOutcome: Bool = true, sentenceAtATime: Bool = false
     ) -> NaturalSpeech {
         let installer = installer
         let speech = NaturalSpeech(
@@ -84,7 +85,7 @@ final class SpokenVoiceModel: ObservableObject {
             },
             player: player, fallback: fallback,
             outcome: { [weak self] natural, reason, attempt in
-                guard let self else { return }
+                guard let self, reportsOutcome else { return }
                 let shown = natural || self.status != .ready ? nil : reason ?? "the natural voice failed"
                 guard !preview else {
                     self.previewFallbackReason = shown
@@ -95,7 +96,7 @@ final class SpokenVoiceModel: ObservableObject {
                 self.fallbackReason = shown
                 self.fallbackAttempt = shown == nil ? nil : attempt
                 self.fallbackEntry = nil
-            }, attempts: attempts, details: details)
+            }, attempts: attempts, details: details, sentenceAtATime: sentenceAtATime)
         speakers = speakers.filter { $0.speech != nil } + [WeakSpeech(speech: speech)]
         return speech
     }

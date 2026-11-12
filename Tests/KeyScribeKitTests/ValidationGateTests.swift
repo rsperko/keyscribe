@@ -33,16 +33,6 @@ struct ValidationGateTests {
         #expect(v == .fail(.strayToken("⟦SN:REDACT:9⟧")))
     }
 
-    @Test func allowDeletionLetsTokenBeAbsent() {
-        #expect(ValidationGate.check(
-            output: "clean output", issuedTokens: ["⟦SN:VERB:1⟧"], allowDeletion: true) == .pass)
-    }
-
-    @Test func allowDeletionStillRejectsDuplicates() {
-        #expect(ValidationGate.check(
-            output: "⟦SN:VERB:1⟧ ⟦SN:VERB:1⟧", issuedTokens: ["⟦SN:VERB:1⟧"], allowDeletion: true)
-            == .fail(.duplicatedToken("⟦SN:VERB:1⟧")))
-    }
 
     @Test func allowedTokenMayAppearOnceWithoutFailing() {
         let v = ValidationGate.check(

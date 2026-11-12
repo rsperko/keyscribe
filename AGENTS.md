@@ -18,7 +18,8 @@ before you edit code in its area.
   allowed; the STT engine is singular. Resolve it through one provider (seam for per-mode later,
   not built — YAGNI).
 - **The only outbound network calls that carry content are explicit BYOK LLM calls**, each over a redacted
-  payload and each to a connection the user chose for that purpose: a mode's rewrite of the transcript, and,
+  payload and each to a connection the user chose for that purpose: a mode's rewrite of the transcript (or of
+  the selected text by spoken instruction), a mode's answer to a spoken request about the selected text, and,
   when the user turns on the Coding agent spoken updates and chooses a service, the summary of an agent's final reply to the user's
   own dictation, or to a turn the user asked from inside the agent to hear read aloud, and the description of a prompt
   that turn waits on, from the prompt's title, the tool call it seems to
@@ -151,7 +152,7 @@ controller owns the state machine, the take's lease, and the diagnostics record;
 - `beginCapture`, `handleStart`, `handleCommit`, `TakeRecorder` → audio capture, plus insertion and HUD for
   the HUD flip.
 - `presenceReading`, `Transcriber`, `EngineKeeper` → speech-to-text engines.
-- `finishInsertion`, `InsertOutput`, `HUDChannel`, `rewriteSelection`, `pasteLast` → insertion, pasteboard,
+- `finishInsertion`, `InsertOutput`, `HUDChannel`, `runOnSelection`, `pasteLast` → insertion, pasteboard,
   HUD focus.
 - `VoiceCommandOutput`, `AgentOutput`, `AgentTake` → voice commands and coding agents.
 - `probeCandidates`, `PressResolver`, and in `AppDelegate` `rebuildHotkeyMonitor`, `claimableModes`,

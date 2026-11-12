@@ -602,6 +602,62 @@ struct SpokenResultOutputTests {
         for _ in 0..<200 where !condition() { try? await Task.sleep(for: .milliseconds(10)) }
     }
 
+    @Test func aNoticeCutOffByAnAnswerIsReadAgainAfterIt() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, _) = make(silencer: silencer)
+        output.refused(conversation: "pi:s1", "api is waiting for you.")
+        await settled()
+        speech.start()
+        let answer = silencer.registered(FakeSpeech())
+        silencer.speak("An answer.", voice: nil, with: answer, resumingInterrupted: true)
+        #expect(!speech.isSpeaking)
+        answer.finish()
+        silencer.released(answer)
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["api is waiting for you.", "api is waiting for you."])
+    }
+
+    @Test func aReplyCutOffByAnAnswerIsLeftForRepeatThat() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, _) = make(silencer: silencer)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        speech.start()
+        let answer = silencer.registered(FakeSpeech())
+        silencer.speak("An answer.", voice: nil, with: answer, resumingInterrupted: true)
+        answer.finish()
+        silencer.released(answer)
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["api: Done."])
+        #expect(output.hasReplyToRepeat)
+    }
+
+    @Test func aNoticeCutOffByAnythingElseIsNotReadAgain() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, _) = make(silencer: silencer)
+        output.refused(conversation: "pi:s1", "api is waiting for you.")
+        await settled()
+        speech.start()
+        let history = silencer.registered(FakeSpeech())
+        silencer.speak("Read from History.", voice: nil, with: history)
+        history.finish()
+        silencer.released(history)
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["api is waiting for you."])
+    }
+
+    @Test func aReplyStoppedByARecordingIsNotReadAgain() async {
+        let silencer = SpeechSilencer()
+        let (output, speech, _) = make(silencer: silencer)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")
+        await settled()
+        speech.start()
+        silencer.recordingStarted()
+        silencer.recordingEnded()
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["api: Done."])
+    }
+
     @Test func otherAudioIsLoweredOnceAReplyIsAudibleAndRestoredAShortGraceAfterTheLastReply() async {
         let silencer = SpeechSilencer()
         var ducks: [Bool] = []
@@ -1615,6 +1671,15 @@ struct SpokenResultOutputTests {
 
 @MainActor
 struct SpokenResultSettingsWiringTests {
+    @Test func theChosenVoiceShowsTheRecommendedOneAndStoresItAsTheDefault() {
+        let agents = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: FileManager.default.temporaryDirectory, connectors: [])
+        #expect(agents.chosenVoice == SpokenVoices.recommended)
+        agents.chosenVoice = "voice.one"
+        #expect(agents.spokenResult.voice == "voice.one")
+        agents.chosenVoice = SpokenVoices.recommended
+        #expect(agents.spokenResult.voice == nil)
+    }
+
     @Test func aChangeInTheSpokenResultSectionIsSavedAndALoadedValueIsNotSavedBack() {
         var saved: [SpokenResultSettings] = []
         let model = SettingsModel(settings: .defaults, onChange: { saved.append($0.codingAgents.spokenResult) }, onReload: {}, onResetHUDPosition: {})

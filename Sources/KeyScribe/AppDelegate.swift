@@ -38,6 +38,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var correctionPanel: CorrectionPanelController!
     private var agentRuntime: AgentRuntime?
     private var spokenResult: SpokenResultOutput?
+    private var answers: SpokenAnswerOutput?
+    private var answerOnPanel = false
+    private var shownAnswer = ""
+    private var speechLowering: Set<String> = []
     private let spokenVoice = SpokenVoiceModel(installer: KokoroVoice.shared)
     private let voiceResidency = VoiceResidency.kokoro()
     private let spokenAttempts = SpokenAttempts()
@@ -189,6 +193,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         config.voiceCommandsEnabled = settings.features.isEnabled(.voiceCommands)
         config.codingAgentsEnabled = settings.features.isEnabled(.codingAgents)
         config.findsInAppsEnabled = settings.features.isEnabled(.findInApps)
+        config.answersEnabled = settings.features.isEnabled(.askAboutSelection)
         configRepository = ConfigRepository(
             supportDir: KeyScribePaths.supportDir, config: config, selfWriteGate: selfWriteGate,
             replacementUsage: replacementUsage)
@@ -394,15 +399,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             if self?.controller.forgetSpokenReplies(ids) == true { self?.menu.setLastReply(available: false) }
         }
         history.readWithMacOSVoice = { [weak self] text, onEnd in self?.historySpeech.read(text, onEnd: onEnd) ?? .failed }
+        setUpAnswers()
         spokenAttempts.onChange = { [weak history] in history?.spokenAudioChanged() }
-        spokenVoice.onVoiceUsed = { [weak self] in
-            guard let self else { return }
-            if let spoken = self.spokenResult {
-                spoken.voiceUsedElsewhere()
-            } else if self.settings.stt.eviction != .fastest {
-                self.voiceResidency.release()
-            }
-        }
+        spokenVoice.onVoiceUsed = { [weak self] in self?.voiceIdle() }
         controller.onMemoryPressure = { [weak self] in
             guard let self else { return }
             if let spoken = self.spokenResult { spoken.releaseVoice() } else { self.voiceResidency.release() }
@@ -832,7 +831,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                         guard let candidates = hub?.frontCandidates else { return false }
                         return await AgentFront.withoutAsking.shown(among: candidates) { _ in }?.id == id
                     },
-                    duck: { [weak controller = self.controller] in controller?.lowerOtherAudioForSpeech($0) })
+                    duck: { [weak self] in self?.lowerOtherAudio(for: "replies", $0) })
                 runtime.hub.onResult = { [weak spoken] in spoken?.finished(conversation: $0, handle: $1, answer: $2, requested: $3, origin: $4) }
                 runtime.hub.onEnded = { [weak spoken] in spoken?.ended(conversation: $0, handle: $1, body: $2, requested: $3, origin: $4) }
                 runtime.hub.onAttention = { [weak spoken] in spoken?.attention(conversation: $0, handle: $1, $2, requested: $3) }
@@ -846,7 +845,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     guard let hub else { return }
                     self?.showCodingAgents(hub)
                 }
-                speakingHUD.onStop = { [weak spoken] in spoken?.stop() }
                 spokenResult = spoken
                 controller.spokenUpdates = spoken
                 agentRuntime = runtime
@@ -894,7 +892,71 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if hadError != settingsController.codingAgents.hasError { settingsController.refreshProblems() }
     }
 
+    private func setUpAnswers() {
+        let answers = SpokenAnswerOutput(
+            speech: spokenVoice.makeSpeech(reportsOutcome: false, sentenceAtATime: true),
+            voice: { [weak self] in self?.settings.codingAgents.spokenResult.voice },
+            warm: { [weak self] in
+                guard let self, self.spokenVoice.isReady else { return }
+                self.voiceResidency.warm()
+            },
+            release: { [weak self] in self?.voiceIdle() },
+            duck: { [weak self] in self?.lowerOtherAudio(for: "answer", $0) })
+        answers.onShow = { [weak self] name, text in
+            guard let self else { return }
+            self.answerOnPanel = true
+            self.shownAnswer = text
+            self.positionPicker.cancel()
+            self.speakingHUD.appearance = self.settings.hud.appearance
+            self.speakingHUD.show(name: name, summary: text, answer: true, preparing: true)
+        }
+        answers.onSpeaking = { [weak self] in self?.speakingHUD.speaking() }
+        answers.onEnded = { [weak self] in
+            guard let self, self.answerOnPanel else { return }
+            self.speakingHUD.finished()
+        }
+        answers.onClosed = { [weak self] in
+            guard let self, self.answerOnPanel else { return }
+            self.answerOnPanel = false
+            self.speakingHUD.hide()
+        }
+        answers.onFirstAudio = { [weak self] milliseconds in
+            Log.insertion.notice("answer: first audio \(Int(milliseconds.rounded()), privacy: .public)ms after release")
+            self?.controller.noteAnswerFirstAudio(milliseconds: milliseconds)
+        }
+        speakingHUD.onStop = { [weak self] in
+            guard let self else { return }
+            if self.answerOnPanel { self.answers?.stop() } else { self.spokenResult?.stop() }
+        }
+        speakingHUD.onClose = { [weak self] in self?.answers?.close() }
+        speakingHUD.onCopy = { [weak self] in
+            guard let self, self.answerOnPanel else { return false }
+            return TextInserter.copyToClipboard(self.shownAnswer)
+        }
+        self.answers = answers
+        controller.answers = answers
+    }
+
+    private func lowerOtherAudio(for speaker: String, _ lower: Bool) {
+        let wasLowered = !speechLowering.isEmpty
+        if lower { speechLowering.insert(speaker) } else { speechLowering.remove(speaker) }
+        guard wasLowered != !speechLowering.isEmpty else { return }
+        controller.lowerOtherAudioForSpeech(!speechLowering.isEmpty)
+    }
+
+    private func voiceIdle() {
+        if let spoken = spokenResult {
+            spoken.voiceUsedElsewhere()
+        } else if settings.stt.eviction != .fastest {
+            voiceResidency.release()
+        }
+    }
+
     private func showSpeaking(_ speaking: SpokenResultOutput.Speaking?) {
+        if answerOnPanel {
+            guard speaking != nil, answers?.isActive != true else { return }
+            answerOnPanel = false
+        }
         guard let speaking else { return speakingHUD.hide() }
         positionPicker.cancel()
         speakingHUD.appearance = settings.hud.appearance
@@ -950,6 +1012,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             config.codingAgentsEnabled = updated.features.isEnabled(.codingAgents)
         }
         config.findsInAppsEnabled = updated.features.isEnabled(.findInApps)
+        config.answersEnabled = updated.features.isEnabled(.askAboutSelection)
+        if !config.answersEnabled { answers?.close() }
         controller.updateSettings(updated)
         applyCodingAgents()
         hud.appearance = updated.hud.appearance

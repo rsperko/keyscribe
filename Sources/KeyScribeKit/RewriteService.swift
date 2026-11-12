@@ -29,6 +29,7 @@ public enum RewriteOutcome: Equatable, Sendable {
     // rather than trusted. `received` is the last reply the provider returned before the fallback (the
     // evidence for `reason`); nil when the call itself failed.
     case localFallback(localText: String, reason: String?, received: String?)
+    case cutOff(localText: String, reason: String, received: String?)
 }
 
 // An error that can name itself in persisted history and public logs. Conformance is an assertion that
@@ -38,6 +39,11 @@ public enum RewriteOutcome: Equatable, Sendable {
 // reaching for `localizedDescription`, so a new error type cannot leak by omission.
 public protocol RewriteFailureReporting: Error {
     var rewriteFailureReason: String { get }
+    var cutOffAtLimit: Bool { get }
+}
+
+public extension RewriteFailureReporting {
+    var cutOffAtLimit: Bool { false }
 }
 
 // Orchestrates one optional rewrite (design.md §4.2, prompt_design.md): assemble the prompt, call the
@@ -52,6 +58,8 @@ public actor RewriteService {
     private let permits: @Sendable (Connection) -> Bool
     private static let strictReminder =
         "IMPORTANT: Return ONLY the transformed text and reproduce every ⟦SN:…⟧ token verbatim, exactly once."
+    private static let strictAnswerReminder =
+        "IMPORTANT: Return ONLY the spoken answer. Copy any ⟦SN:…⟧ marker you use verbatim, and never invent one."
 
     // Covers the whole rewrite — every attempt and retry — so a slow model may finish while a hung
     // endpoint cannot hold the dictation forever. Waiting less is the user's call, via the HUD.
@@ -72,6 +80,11 @@ public actor RewriteService {
         return "The rewrite took longer than the \(limit) limit, so your local version was kept."
     }
 
+    public static func answerDeadlineReason(seconds: Double) -> String {
+        let limit = seconds >= 60 ? "\(Int((seconds / 60).rounded()))-minute" : "\(Int(seconds.rounded()))-second"
+        return "The answer took longer than the \(limit) limit."
+    }
+
     static let cancelledReason = "The rewrite was cancelled."
 
     // Kept for callers written before the policy became an argument. It applies the build's own catalog rather
@@ -89,7 +102,7 @@ public actor RewriteService {
 
     public func rewrite(
         payload: TokenizedPayload, inputs: PromptInputs, connection: Connection,
-        allowDeletion: Bool = false, allowedTokens: [String] = [], prompt: RewritePrompt? = nil
+        allowedTokens: [String] = [], prompt: RewritePrompt? = nil, reply: ReplyKind = .rewrite
     ) async -> RewriteOutcome {
         // Tokens and fallback text both come from the sealed payload. On failure, fall back to tokenized
         // text; the caller's restore pass unwinds it. `allowedTokens` are minted outside payload.text
@@ -98,7 +111,9 @@ public actor RewriteService {
         guard permits(connection) else {
             return .localFallback(
                 localText: localText,
-                reason: "This AI service isn't available in this app, so your local version was kept.",
+                reason: reply == .answer
+                    ? "This AI service isn't available in this app."
+                    : "This AI service isn't available in this app, so your local version was kept.",
                 received: nil)
         }
         let base = prompt ?? PromptAssembler.assemble(inputs)
@@ -108,11 +123,12 @@ public actor RewriteService {
             return try await runWithDeadline(seconds: deadlineSeconds) { [client] in
                 await Self.attempts(
                     client: client, base: base, inputs: inputs, connection: connection, localText: localText,
-                    required: required, allowedTokens: allowedTokens, allowDeletion: allowDeletion, received: received)
+                    required: required, allowedTokens: allowedTokens, reply: reply, received: received)
             }
         } catch is DeadlineExceeded {
-            return .localFallback(
-                localText: localText, reason: Self.deadlineReason(seconds: deadlineSeconds), received: received.value)
+            let reason = reply == .answer
+                ? Self.answerDeadlineReason(seconds: deadlineSeconds) : Self.deadlineReason(seconds: deadlineSeconds)
+            return .localFallback(localText: localText, reason: reason, received: received.value)
         } catch {
             return .localFallback(localText: localText, reason: Self.cancelledReason, received: received.value)
         }
@@ -120,16 +136,20 @@ public actor RewriteService {
 
     private static func attempts(
         client: LLMClient, base: RewritePrompt, inputs: PromptInputs, connection: Connection, localText: String,
-        required: [String], allowedTokens: [String], allowDeletion: Bool, received: ReceivedReply
+        required: [String], allowedTokens: [String], reply: ReplyKind, received: ReceivedReply
     ) async -> RewriteOutcome {
         var attempt = 0
         var lastReceived: String?
         while true {
-            let system = attempt == 0 ? base.system : base.system + "\n" + Self.strictReminder
+            let reminder = reply == .answer ? Self.strictAnswerReminder : Self.strictReminder
+            let system = attempt == 0 ? base.system : base.system + "\n" + reminder
             let output: String
             do {
                 output = try await client.complete(system: system, user: base.user, connection: connection)
             } catch {
+                if (error as? RewriteFailureReporting)?.cutOffAtLimit == true {
+                    return .cutOff(localText: localText, reason: Self.sanitizedReason(for: error), received: lastReceived)
+                }
                 return .localFallback(
                     localText: localText, reason: Self.sanitizedReason(for: error), received: lastReceived)
             }
@@ -139,15 +159,20 @@ public actor RewriteService {
             // fails the gate (→ stricter retry) instead of inserting nothing.
             let candidate = PromptAssembler.unwrappingContentEcho(output, sentContent: inputs.content)
             switch ValidationGate.check(
-                output: candidate, issuedTokens: required, allowedTokens: allowedTokens, allowDeletion: allowDeletion
+                output: candidate, issuedTokens: required, allowedTokens: allowedTokens, reply: reply
             ) {
             case .pass:
+                if reply == .answer {
+                    return .rewritten(candidate.trimmingCharacters(in: .whitespacesAndNewlines), received: output)
+                }
                 return .rewritten(OutputCleanup.preserveBoundaryLayout(from: localText, in: candidate), received: output)
             case .fail:
                 guard ValidationGate.recovery(attempt: attempt) == .retryStricter else {
                     return .localFallback(
                         localText: localText,
-                        reason: "The AI reply left out or changed protected text, so your local version was kept.",
+                        reason: reply == .answer
+                            ? "The AI reply changed or invented protected text."
+                            : "The AI reply left out or changed protected text, so your local version was kept.",
                         received: lastReceived)
                 }
                 attempt += 1

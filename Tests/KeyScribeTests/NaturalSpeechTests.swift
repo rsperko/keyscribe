@@ -34,6 +34,8 @@ struct NaturalSpeechTests {
             set { lock.withLock { holding = newValue } }
         }
         var fails = false
+        var failsOn: String?
+        var holdsOn: String?
         var error: (any Error)?
         var exclusive = false
         private var running = 0
@@ -49,18 +51,20 @@ struct NaturalSpeechTests {
             defer { lock.withLock { running -= 1 } }
             await withCheckedContinuation { continuation in
                 let waits = lock.withLock { () -> Bool in
-                    if holding { held.append(continuation) }
-                    return holding
+                    let waits = holding || holdsOn.map { text.contains($0) } == true
+                    if waits { held.append(continuation) }
+                    return waits
                 }
                 if !waits { continuation.resume() }
             }
             if let error { throw error }
-            if fails { throw CocoaError(.fileReadCorruptFile) }
+            if fails || failsOn.map({ text.contains($0) }) == true { throw CocoaError(.fileReadCorruptFile) }
             return SpokenAudio(wav: Data(text.utf8))
         }
         func release() {
             let pending = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
                 holding = false
+                holdsOn = nil
                 defer { held = [] }
                 return held
             }
@@ -80,15 +84,167 @@ struct NaturalSpeechTests {
         ready: Bool = true, synth: Synth = Synth(), outcome: @escaping (Bool, String?, String?) -> Void = { _, _, _ in },
         fallbackLimit: @escaping (String) -> Duration = NaturalSpeech.fallbackLimit,
         synthesisLimit: @escaping (String) -> Duration = NaturalSpeech.fallbackLimit, attempts: SpokenAttempts? = nil,
-        busyWait: Duration = NaturalSpeech.busyWait
+        busyWait: Duration = NaturalSpeech.busyWait, followingLimit: @escaping (String) -> Duration = NaturalSpeech.followingLimit,
+        sentenceAtATime: Bool = false
     ) -> (NaturalSpeech, FakePlayer, SpokenResultOutputTests.FakeSpeech, Synth) {
         let player = FakePlayer()
         let fallback = SpokenResultOutputTests.FakeSpeech()
         let speech = NaturalSpeech(
             ready: { ready }, synthesize: { try await synth.run($0, $1) }, player: player, fallback: fallback, outcome: outcome,
             fallbackLimit: fallbackLimit, synthesisLimit: synthesisLimit, attempts: attempts, busyWait: busyWait,
-            details: { natural in natural ? [.init(label: "Output", value: "USB DAC, 48000 Hz")] : [] })
+            details: { natural in natural ? [.init(label: "Output", value: "USB DAC, 48000 Hz")] : [] },
+            followingLimit: followingLimit, sentenceAtATime: sentenceAtATime)
         return (speech, player, fallback, synth)
+    }
+
+    private let answer = "Reply to Dana by Friday. Then ship the release. Ask Sam about the date."
+
+    @Test func aLongAnswerStartsPlayingAfterItsFirstSentence() async {
+        let synth = Synth()
+        let (speech, player, _, _) = make(synth: synth, sentenceAtATime: true)
+        var started = 0
+        var finished = 0
+        speech.onStarted = { started += 1 }
+        speech.onFinished = { finished += 1 }
+        speech.speak(answer, voice: nil)
+        await until { player.isPlaying }
+        #expect(player.played == [Data("Reply to Dana by Friday.".utf8)])
+        await until { synth.calls.count == 3 }
+        #expect(synth.calls.map(\.text) == ["Reply to Dana by Friday.", "Then ship the release.", "Ask Sam about the date."])
+        player.finish()
+        await until { player.played.count == 2 }
+        #expect(player.played.last == Data("Then ship the release.".utf8))
+        #expect(speech.isSpeaking)
+        player.finish()
+        await until { player.played.count == 3 }
+        #expect(player.played.last == Data("Ask Sam about the date.".utf8))
+        player.finish()
+        #expect(player.played.count == 3)
+        #expect(started == 1)
+        #expect(finished == 1)
+        #expect(!speech.isSpeaking)
+    }
+
+    @Test func aSentenceNotReadyYetIsWaitedForWithoutEndingTheAnswer() async {
+        let synth = Synth()
+        let (speech, player, _, _) = make(synth: synth, sentenceAtATime: true)
+        var finished = 0
+        speech.onFinished = { finished += 1 }
+        synth.holdsOn = "ship"
+        speech.speak(answer, voice: nil)
+        await until { player.isPlaying }
+        await until { synth.calls.count == 2 }
+        player.finish()
+        #expect(speech.isSpeaking)
+        #expect(finished == 0)
+        synth.release()
+        await until { player.played.count == 2 }
+        #expect(player.played.last == Data("Then ship the release.".utf8))
+    }
+
+    @Test func stoppingAnAnswerDropsTheSentencesStillToCome() async {
+        let synth = Synth()
+        let (speech, player, _, _) = make(synth: synth, sentenceAtATime: true)
+        speech.speak(answer, voice: nil)
+        await until { player.isPlaying }
+        await until { synth.calls.count == 3 }
+        speech.stop()
+        player.onFinished?()
+        await settled()
+        #expect(player.played.count == 1)
+        #expect(!speech.isSpeaking)
+    }
+
+    @Test func aLaterSentenceTheNaturalVoiceCannotMakeIsReadByTheMacOSVoice() async {
+        let synth = Synth()
+        let (speech, player, fallback, _) = make(synth: synth, sentenceAtATime: true)
+        synth.failsOn = "ship"
+        speech.speak(answer, voice: nil)
+        await until { player.isPlaying }
+        await until { synth.calls.count >= 2 }
+        await settled()
+        player.finish()
+        await until { fallback.isSpeaking }
+        #expect(fallback.spoken.map(\.text) == ["Then ship the release. Ask Sam about the date."])
+        #expect(speech.isSpeaking)
+    }
+
+    @Test func aSentenceThatWillNotPlayIsReadByTheMacOSVoiceWithTheRest() async {
+        let synth = Synth()
+        let (speech, player, fallback, _) = make(synth: synth, sentenceAtATime: true)
+        speech.speak(answer, voice: nil)
+        await until { player.isPlaying }
+        await until { synth.calls.count == 3 }
+        await settled()
+        player.accepts = false
+        player.finish()
+        await until { fallback.isSpeaking }
+        #expect(fallback.spoken.map(\.text) == ["Then ship the release. Ask Sam about the date."])
+    }
+
+    @Test func aSentenceThatFailsWhilePlayingIsReadAgainWithTheRest() async {
+        let synth = Synth()
+        let (speech, player, fallback, _) = make(synth: synth, sentenceAtATime: true)
+        speech.speak(answer, voice: nil)
+        await until { player.isPlaying }
+        await until { synth.calls.count == 3 }
+        await settled()
+        player.lastPlaybackFailed = true
+        player.finish()
+        await until { fallback.isSpeaking }
+        #expect(fallback.spoken.map(\.text) == [answer])
+    }
+
+    @Test func aLaterSentenceThatStallsIsReadByTheMacOSVoiceSoon() async {
+        let synth = Synth()
+        synth.holdsOn = "ship"
+        let (speech, player, fallback, _) = make(
+            synth: synth, followingLimit: { _ in .milliseconds(50) }, sentenceAtATime: true)
+        speech.speak(answer, voice: nil)
+        await until { player.isPlaying }
+        player.finish()
+        await until { fallback.isSpeaking }
+        #expect(fallback.spoken.map(\.text) == ["Then ship the release. Ask Sam about the date."])
+        synth.release()
+    }
+
+    @Test func aStoppedAnswerStillCountsItsSentenceUntilTheVoiceLetsGo() async {
+        let synth = Synth()
+        synth.holdsOn = "ship"
+        let (speech, player, _, _) = make(synth: synth, sentenceAtATime: true)
+        speech.speak(answer, voice: nil)
+        await until { player.isPlaying }
+        await until { synth.calls.count == 2 }
+        speech.stop()
+        #expect(speech.unfinishedSyntheses == 1)
+        synth.release()
+        await until { speech.unfinishedSyntheses == 0 }
+        #expect(speech.unfinishedSyntheses == 0)
+    }
+
+    @Test func askingAgainRightAfterStoppingStillUsesTheNaturalVoice() async {
+        let synth = Synth()
+        synth.exclusive = true
+        synth.holdsOn = "ship"
+        let (speech, player, fallback, _) = make(synth: synth, sentenceAtATime: true)
+        speech.speak(answer, voice: nil)
+        await until { player.isPlaying }
+        await until { synth.calls.count == 2 }
+        speech.stop()
+        speech.speak("A second answer for you. It has two sentences.", voice: nil)
+        try? await Task.sleep(for: .milliseconds(100))
+        synth.release()
+        await until { player.played.count == 2 }
+        #expect(player.played.last == Data("A second answer for you.".utf8))
+        #expect(fallback.spoken.isEmpty)
+    }
+
+    @Test func withoutSentencePlaybackTheWholeAnswerIsMadeAtOnce() async {
+        let synth = Synth()
+        let (speech, player, _, _) = make(synth: synth)
+        speech.speak(answer, voice: nil)
+        await until { player.isPlaying }
+        #expect(synth.calls.map(\.text) == [answer])
     }
 
     @Test func aSuccessfulRetryReplacesTheMacOSVoiceStillSpeaking() async {

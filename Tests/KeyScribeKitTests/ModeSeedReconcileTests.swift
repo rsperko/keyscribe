@@ -49,7 +49,7 @@ struct ModeSeedReconcileTests {
 
         let outcome = ModeStore.reconcileSeeds(modesDir: d.modes, ledgerDir: d.ledger, settingsDir: d.support)
         #expect(outcome.isEmpty)
-        #expect(ModeStore.loadAll(in: d.modes).count == 8)
+        #expect(ModeStore.loadAll(in: d.modes).count == ModeStore.starterModes().count)
     }
 
     @Test func failedRenameWritePreservesTheOldFileAndDoesNotRecord() throws {
@@ -529,6 +529,7 @@ struct ModeSeedReconcileTests {
             "code": (4, "cf077d166866bfc"),
             "markdown": (4, "a55b54483bc21549"),
             "shell": (1, "debf79feb745f80b"),
+            "ask-about-selection": (1, "b9bdcd1fbdbb6d59"),
         ]
         let catalog = ModeStore.starterModes()
         #expect(Set(catalog.map(\.id)) == Set(pinned.keys),

@@ -36,6 +36,7 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         case replaceSelection = "replace_selection"
         case voiceCommand = "voice_command"
         case agent
+        case speak
     }
     public enum Insertion: String, Codable, Sendable { case paste, insert, type }
 
@@ -397,7 +398,22 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public var isSystem: Bool { id == Mode.directId || id == Mode.voiceCommandsId || id == Mode.codingAgentId }
     public var isDirect: Bool { id == Mode.directId }
     public var runsVoiceCommands: Bool { output == .voiceCommand }
+    public var answersAloud: Bool { output == .speak }
+    public var reply: ReplyKind { answersAloud ? .answer : .rewrite }
     public var hasOwnVocabulary: Bool { !isDirect }
+
+    public static let answerPrompt = "The line below these instructions is a spoken request from the user about the text in <content>. Answer it in two to four short sentences unless the request asks for more or less."
+    public static let cleanupPrompt = "Clean up grammar and punctuation. Keep my meaning and wording."
+
+    public mutating func chooseConnection(_ id: String) {
+        if id.isEmpty {
+            if answersAloud { aiRewrite?.connection = "" } else { aiRewrite = nil }
+        } else if aiRewrite == nil {
+            aiRewrite = AIRewrite(connection: id, prompt: answersAloud ? Mode.answerPrompt : Mode.cleanupPrompt)
+        } else {
+            aiRewrite?.connection = id
+        }
+    }
 
     public static var voiceCommands: Mode {
         var mode = Mode(id: voiceCommandsId, name: "Voice Commands")
@@ -414,8 +430,10 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         return mode
     }
 
-    public static func visible(_ modes: [Mode], voiceCommands: Bool, codingAgents: Bool = false) -> [Mode] {
-        modes.filter { (voiceCommands || $0.id != voiceCommandsId) && (codingAgents || $0.id != codingAgentId) }
+    public static func visible(_ modes: [Mode], voiceCommands: Bool, codingAgents: Bool = false, answers: Bool = true) -> [Mode] {
+        modes.filter {
+            (voiceCommands || $0.id != voiceCommandsId) && (codingAgents || $0.id != codingAgentId) && (answers || !$0.answersAloud)
+        }
     }
 
     public static var direct: Mode {
@@ -536,6 +554,9 @@ public enum ModeStore {
         if mode.output == .agent && id != Mode.codingAgentId {
             throw ConfigError.invalid("output = \"agent\" belongs to the built-in Coding agent mode")
         }
+        if mode.answersAloud && mode.source != .selection {
+            throw ConfigError.invalid("output = \"speak\" answers about selected text, so it needs source = \"selection\"")
+        }
         mode.id = id
         return mode
     }
@@ -631,6 +652,14 @@ public enum ModeStore {
             prompt: "The line below these instructions is a spoken instruction from the user. Apply that instruction to the text in <content> and output only the resulting text. If the spoken instruction does not describe a clear change to the text, return the text unchanged. Preserve intentional paragraph, list, and code line breaks inside the text unless the spoken instruction explicitly asks to change them.")
         selection.seedVersion = 4
 
+        var ask = Mode(id: "ask-about-selection", name: "Ask About Selection")
+        ask.enabled = false
+        ask.source = .selection
+        ask.output = .speak
+        ask.trailing = .none
+        ask.commands.privacy = true
+        ask.aiRewrite = Mode.AIRewrite(connection: "", prompt: Mode.answerPrompt)
+
         var prompt = Mode(id: "ai-prompt", name: "AI Prompt")
         prompt.enabled = false
         prompt.commands.liveEdits = true
@@ -681,7 +710,7 @@ public enum ModeStore {
             connection: "",
             prompt: "Convert the dictated text into a single shell command for a Unix shell (zsh or bash on macOS), ready to paste and run at a terminal prompt.\n\nOutput ONLY the command — one line or a pipeline, with no leading $ prompt, no surrounding code fence or backticks, no comments, and no explanation. Never run, answer, or describe the command; if the text is phrased as a question (\"how do I...\", \"what is the command to...\"), output the command that does it, not an answer.\n\nBuild exactly the command described. Do not add flags, paths, redirects, or behavior I did not ask for, and never introduce destructive options (rm -rf, --force, -f, overwriting redirects) unless I explicitly said so. Keep file names, paths, flags, branch names, URLs, and other identifiers exactly as dictated. Quote any argument that contains spaces or shell metacharacters. Write numbers as digits.\n\nMap spoken symbols to shell syntax: \"dash\" to -, \"dash dash\" to --, \"pipe\" to |, \"redirect to\" or \"output to\" to >, \"append to\" to >>, \"and and\" to &&, \"or or\" to ||, \"semicolon\" to ;, \"tilde\" to ~, \"slash\" to /, \"dot\" to ., \"star\" or \"glob\" to *, \"dollar\" to $, \"ampersand\" or \"in the background\" to &.\n\nCorrect common speech-to-text mishearings of command names back to the intended tool: \"sue do\" or \"pseudo\" to sudo, \"see dee\" to cd, \"ellis\" to ls, \"make dir\" to mkdir, \"g it\" to git, \"groep\" to grep, \"vee eye\" to vim, \"ess ess h\" to ssh, \"ceh mod\" to chmod, \"cube control\" or \"coob cuttle\" to kubectl, \"dock er\" to docker, \"home brew\" to brew. Use judgment for similar mishearings, but keep anything that is clearly a file name or identifier as spoken.\n\nExamples:\nlist all files including hidden ones in long format → ls -la\nfind every python file under src and search them for the word token → find src -name '*.py' | xargs grep token\ngit checkout a new branch called fix dash auth → git checkout -b fix-auth\nsee dee into tilde slash projects → cd ~/projects\nshow what is listening on port 8000 → lsof -i :8000\n\nIf the text does not describe a command, return it unchanged.")
 
-        return [polish, message, email, selection, prompt, code, markdown, shell].map {
+        return [polish, message, email, selection, ask, prompt, code, markdown, shell].map {
             var mode = $0
             mode.seedId = mode.id
             mode.seedVersion = mode.seedVersion ?? 1
@@ -689,8 +718,9 @@ public enum ModeStore {
         }
     }
 
-    public static func templates() -> [Mode] {
+    public static func templates(askAboutSelection: Bool = false) -> [Mode] {
         let order = ["polish", "message", "email", "markdown", "code", "shell", "ai-prompt", "edit-selection"]
+            + (askAboutSelection ? ["ask-about-selection"] : [])
         let byId = Dictionary(starterModes().map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return order.compactMap { byId[$0] }
     }
@@ -705,6 +735,7 @@ public enum ModeStore {
         case "shell": return "Turn a spoken request into a shell command"
         case "ai-prompt": return "Clean prompt for an AI — end with \"as a prompt\""
         case "edit-selection": return "Rewrite selected text by voice"
+        case "ask-about-selection": return "Ask about selected text and hear a short answer"
         default: return ""
         }
     }
@@ -728,6 +759,8 @@ public enum ModeStore {
             return ("draft release notes for the audio fixes as a prompt", "Draft release notes for the following audio fixes:")
         case "edit-selection":
             return ("“make this more formal” with text selected", "Your selected text, rewritten in a more formal tone.")
+        case "ask-about-selection":
+            return ("“what do I need to do?” with text selected", "A short answer, read aloud and shown. Your text is unchanged.")
         default:
             return nil
         }

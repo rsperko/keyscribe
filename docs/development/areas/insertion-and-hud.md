@@ -18,7 +18,7 @@ Read before changing text insertion, pasteboard capture or restore, selection ca
   Synthesized ⌘C/⌘V/Return go to the key window, so the
   HUD (`HUDPanel`) must relinquish key focus before any selection-capture ⌘C or paste ⌘V —
   `HUDController.relinquishKeyFocus()` runs when a take begins acting (an insert's `TakeLease.beginActing`,
-  an agent delivery, a voice command's first act), in `rewriteSelection`, in `pasteLast`, and on every
+  an agent delivery, a voice command's first act), in `runOnSelection`, in `pasteLast`, and on every
   non-recording `render`. Take code reaches the HUD only through `HUDChannel`, never `HUDPresenting` directly.
   **Arming is deliberately outside this**: it shows no HUD (`ui_design.md` §5's timing contract — a
   panel before the mic is live invites speech it cannot record), so the panel is NOT key while the mic

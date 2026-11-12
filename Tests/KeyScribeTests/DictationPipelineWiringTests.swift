@@ -130,7 +130,7 @@ struct DictationPipelineWiringTests {
         private(set) var states: [HUDState] = []
         func render(_ state: HUDState) { states.append(state) }
         var offersLocalTranscript: Bool {
-            if case .rewriting(_, _, _, _, true)? = states.last { return true }
+            if case .rewriting(_, _, _, _, true, _)? = states.last { return true }
             return false
         }
     }
@@ -212,6 +212,8 @@ struct DictationPipelineWiringTests {
         historyEnabled: Bool = true,
         snapshotProvider: (@MainActor () -> TargetSnapshot)? = nil,
         triggerKey: String? = nil,
+        features: [Feature] = [],
+        answers: SpokenAnswerOutput? = nil,
         updateSettingsAfterStart: ((inout Settings) -> Void)? = nil
     ) async -> Result {
         let supportDir = FileManager.default.temporaryDirectory
@@ -232,6 +234,7 @@ struct DictationPipelineWiringTests {
         }
         settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
         settings.history.enabled = historyEnabled
+        for feature in features { settings.features.setEnabled(true, for: feature) }
 
         let engine = FixedEngine(text: transcript, supportsRecognitionBias: engineSupportsRecognitionBias)
         let provider = try! SpeechEngineProvider(engines: [engine], activeId: "fixed")
@@ -241,8 +244,10 @@ struct DictationPipelineWiringTests {
         let submitSpy = SubmitSpy()
         let hudSpy = HUDSpy()
         let clipboardReads = ClipboardReads()
+        let config = ConfigCache(supportDir: supportDir)
+        config.answersEnabled = features.contains(.askAboutSelection)
         let controller = DictationController(
-            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            settings: settings, provider: provider, config: config,
             history: history, replacementUsage: usage, hud: hudSpy, permits: permits,
             audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
             insert: { _, method, paste, text, _ in await insertSpy.record(method, paste, text); return insertSucceeds },
@@ -254,6 +259,7 @@ struct DictationPipelineWiringTests {
             accessibilityGranted: { accessibility },
             llmClient: llm)
 
+        controller.answers = answers
         if triggerKey == nil { controller.setNextModeOverride(id: defaultModeId) }
         controller.handleStart(triggerKey: triggerKey)
         if let updateSettingsAfterStart {
@@ -986,6 +992,121 @@ struct DictationPipelineWiringTests {
         #expect(out.lastResult == nil)
         #expect(out.historyEntry == nil)
         #expect(out.lastHUD == .error(message: "Rewrite failed — selection unchanged", action: nil))
+    }
+
+    private actor AnswerLLM: LLMClient {
+        private(set) var systems: [String] = []
+        private(set) var users: [String] = []
+        let reply: String
+        let error: (any Error)?
+        init(reply: String = "Reply by Friday.", error: (any Error)? = nil) {
+            self.reply = reply
+            self.error = error
+        }
+        func complete(system: String, user: String, connection: Connection) async throws -> String {
+            systems.append(system)
+            users.append(user)
+            if let error { throw error }
+            return reply
+        }
+    }
+
+    private func askMode() -> Mode {
+        var m = mode(id: "ask", privacy: true, connectionId: "c", prompt: "Answer it.", source: .selection)
+        m.output = .speak
+        return m
+    }
+
+    @Test func anAnswerIsSpokenAndRecordedWithoutTouchingTheTarget() async throws {
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let llm = AnswerLLM(reply: "Write to ⟦SN:REDACT:1⟧ by Friday.")
+        let speech = SpokenResultOutputTests.FakeSpeech()
+        let answers = SpokenAnswerOutput(speech: speech, silencer: SpeechSilencer(), voice: { nil })
+        let out = await run(
+            transcript: "what do I need to do", modes: [askMode()], defaultModeId: "ask", connection: conn, llm: llm,
+            captureSelection: { _ in "Please email bob@example.com the report by Friday." },
+            features: [.askAboutSelection], answers: answers)
+
+        #expect(speech.spoken.map(\.text) == ["Write to bob@example.com by Friday."])
+        #expect(out.insertedText == nil)
+        #expect(out.outcome == .answered)
+        #expect(out.historyEntry?.result == "Write to bob@example.com by Friday.")
+        #expect(out.historyEntry?.stageMillis?["selection"] != nil)
+        let user = try #require(await llm.users.first)
+        #expect(!user.contains("bob@example.com"))
+        #expect(await llm.systems.first?.contains("read aloud") == true)
+    }
+
+    @Test func aCutOffAnswerIsReportedAndNothingIsSpoken() async {
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let speech = SpokenResultOutputTests.FakeSpeech()
+        let answers = SpokenAnswerOutput(speech: speech, silencer: SpeechSilencer(), voice: { nil })
+        let out = await run(
+            transcript: "summarize this", modes: [askMode()], defaultModeId: "ask", connection: conn,
+            llm: AnswerLLM(error: ProviderTransportError.truncated),
+            captureSelection: { _ in "A long page." }, features: [.askAboutSelection], answers: answers)
+
+        #expect(speech.spoken.isEmpty)
+        #expect(out.insertedText == nil)
+        #expect(out.lastHUD == .error(message: "The answer was too long and was cut off", action: nil))
+    }
+
+    @Test func aFailedAnswerSaysWhy() async {
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let speech = SpokenResultOutputTests.FakeSpeech()
+        let answers = SpokenAnswerOutput(speech: speech, silencer: SpeechSilencer(), voice: { nil })
+        let out = await run(
+            transcript: "summarize this", modes: [askMode()], defaultModeId: "ask", connection: conn,
+            llm: AnswerLLM(error: ProviderTransportError.missingBaseURL),
+            captureSelection: { _ in "A long page." }, features: [.askAboutSelection], answers: answers)
+
+        #expect(speech.spoken.isEmpty)
+        #expect(out.lastHUD == .error(
+            message: "Couldn\u{2019}t get an answer. \(ProviderTransportError.missingBaseURL.rewriteFailureReason)", action: nil))
+    }
+
+    @Test func withoutASelectionNothingIsAskedOrSpoken() async {
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let llm = AnswerLLM()
+        let speech = SpokenResultOutputTests.FakeSpeech()
+        let answers = SpokenAnswerOutput(speech: speech, silencer: SpeechSilencer(), voice: { nil })
+        let out = await run(
+            transcript: "summarize this", modes: [askMode()], defaultModeId: "ask", connection: conn, llm: llm,
+            features: [.askAboutSelection], answers: answers)
+
+        #expect(await llm.systems.isEmpty)
+        #expect(speech.spoken.isEmpty)
+        #expect(out.lastHUD == .error(message: "Select some text first", action: nil))
+    }
+
+    @Test func answersStayOffUntilTheirFeatureIsOn() async {
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let llm = AnswerLLM()
+        let speech = SpokenResultOutputTests.FakeSpeech()
+        let answers = SpokenAnswerOutput(speech: speech, silencer: SpeechSilencer(), voice: { nil })
+        let out = await run(
+            transcript: "summarize this", modes: [askMode()], defaultModeId: "ask", connection: conn, llm: llm,
+            captureSelection: { _ in "A page." }, answers: answers)
+
+        #expect(await llm.systems.isEmpty)
+        #expect(speech.spoken.isEmpty)
+        #expect(out.outcome != .answered)
+    }
+
+    @Test func turningAnswersOffMidTakeStopsTheAnswer() async {
+        let conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        let llm = AnswerLLM()
+        let speech = SpokenResultOutputTests.FakeSpeech()
+        let answers = SpokenAnswerOutput(speech: speech, silencer: SpeechSilencer(), voice: { nil })
+        let out = await run(
+            transcript: "summarize this", modes: [askMode()], defaultModeId: "ask", connection: conn, llm: llm,
+            captureSelection: { _ in "A page." }, features: [.askAboutSelection], answers: answers,
+            updateSettingsAfterStart: { $0.features.setEnabled(false, for: .askAboutSelection) })
+
+        #expect(await llm.systems.isEmpty)
+        #expect(speech.spoken.isEmpty)
+        #expect(out.insertedText == nil)
+        #expect(out.lastHUD == .error(message: DictationController.answersOff, action: nil))
     }
 
     @Test func selectionRewriteInsertsTheRewrittenSelection() async {

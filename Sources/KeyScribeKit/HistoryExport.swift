@@ -120,6 +120,7 @@ public enum HistoryExport {
         case .commandNeedsChoice: "Needs a choice"
         case .commandCancelled: "Choice cancelled"
         case .rewrittenLater: "Rewritten later, not inserted"
+        case .answered: "Answered"
         }
     }
 }

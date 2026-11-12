@@ -52,6 +52,30 @@ struct RewriteRequestBuilderTests {
     }
 
     @MainActor
+    @Test func anAnswerIsAskedForWithAnAnswerSizedBudgetAndNoScreenContext() async {
+        var mode = Mode(id: "ask", name: "Ask")
+        mode.source = .selection
+        mode.output = .speak
+        mode.aiRewrite = .init(connection: "c", prompt: "Answer.", context: .init(app: true, precedingText: true))
+        var conn = Connection(id: "c", name: "C", provider: .gemini, model: "m", keyRef: "k")
+        conn.params.maxTokens = 2048
+        let plan = ResolvedConfig(
+            modes: [mode], dictionary: DictionarySet(), replacements: ReplacementsSet(),
+            connections: ConnectionSet(), fragments: [:])
+        var builder = RewriteRequestBuilder(
+            mode: mode, content: String(repeating: "word ", count: 20_000), instruction: "summarize this", issuedTokens: [],
+            capturedBundleId: "com.example.browser", capturedPid: 7, plan: plan, connection: conn)
+        builder.precedingTextProbe = { _, _ in "CTX" }
+        let assembled = await builder.build()
+        #expect(assembled.inputs.reply == .answer)
+        #expect(assembled.sized.params.maxTokens == 2048)
+        #expect(assembled.contextCategories.isEmpty)
+        #expect(assembled.inputs.appName == nil)
+        #expect(assembled.inputs.precedingText == nil)
+        #expect(assembled.prompt.system.contains("read aloud"))
+    }
+
+    @MainActor
     @Test func contextCategoriesOmitsPrecedingTextWhenProbeReturnsNil() async {
         var mode = Mode(id: "ai", name: "AI")
         mode.aiRewrite = .init(connection: "c", prompt: "Clean up.", context: .init(precedingText: true))

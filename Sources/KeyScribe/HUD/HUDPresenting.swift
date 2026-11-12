@@ -71,7 +71,7 @@ enum HUDState: Equatable {
     case recording(mode: String?, level: Float, latchedTrigger: String?, countdown: RecordingCountdown? = nil, agents: AgentRoster? = nil)
     case loadingModel(mode: String)
     case transcribing(mode: String, status: String? = nil)
-    case rewriting(connection: String, mode: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool)
+    case rewriting(connection: String, mode: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool, answering: Bool = false)
     case localFallback(outcome: DictationOutcome, mode: String, reason: String? = nil, connectionId: String? = nil)
     case rewriteSkipped(outcome: DictationOutcome, mode: String, seconds: Double)
     case complete(outcome: DictationOutcome, mode: String, notice: String? = nil, spokenEdits: String? = nil)
@@ -151,7 +151,7 @@ extension HUDState {
             return mode
         case .transcribing(let mode, _):
             return mode
-        case .rewriting(_, let mode, _, _, _):
+        case .rewriting(_, let mode, _, _, _, _):
             return mode
         case .rewriteSkipped(.failed, _, _):
             return Self.completePrimary(.failed)
@@ -193,8 +193,8 @@ extension HUDState {
             return "Loading speech model…"
         case .transcribing(_, let status):
             return status ?? "Transcribing"
-        case .rewriting(let connection, _, _, _, _):
-            return "Rewriting with \(connection)"
+        case .rewriting(let connection, _, _, _, _, let answering):
+            return answering ? "Answering with \(connection)" : "Rewriting with \(connection)"
         case .localFallback(.copied(let copied), _, let reason?, _):
             return Self.joined(Self.copiedSecondary(copied), Self.rewriteFailureSummary(reason))
         case .rewriteSkipped(.copied(let copied), _, let seconds):
@@ -245,8 +245,8 @@ extension HUDState {
     // (ui_components.md). A rewrite is always cloud; redaction forces context off, mirroring
     // HistoryEntry.dataBoundaryLabels.
     var dataBoundaryBadges: [String] {
-        guard case .rewriting(_, _, let redacted, let contextCategories, _) = self else { return [] }
-        var labels = ["Cloud rewrite"]
+        guard case .rewriting(_, _, let redacted, let contextCategories, _, let answering) = self else { return [] }
+        var labels = [answering ? "Cloud answer" : "Cloud rewrite"]
         if redacted { labels.append("Best-effort redaction") }
         labels.append(contentsOf: contextCategories.compactMap(HistoryEntry.contextLabel))
         return labels
@@ -290,7 +290,7 @@ extension HUDState {
     }
 
     var offersLocalTranscript: Bool {
-        if case .rewriting(_, _, _, _, let offer) = self { return offer }
+        if case .rewriting(_, _, _, _, let offer, _) = self { return offer }
         return false
     }
 
@@ -342,8 +342,8 @@ extension HUDState {
             return "Loading speech model"
         case .transcribing(_, let status):
             return status ?? "Transcribing"
-        case .rewriting(let connection, _, _, _, _):
-            return "Rewriting with \(connection)"
+        case .rewriting(let connection, _, _, _, _, let answering):
+            return answering ? "Answering with \(connection)" : "Rewriting with \(connection)"
         case .localFallback, .rewriteSkipped, .complete, .commandDone, .stoppedAtLimit, .error, .advisory:
             return [primaryText, secondaryText].compactMap { $0 }.joined(separator: ". ")
         case .choice(let prompt, _, _):

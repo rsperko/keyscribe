@@ -252,6 +252,16 @@ struct HUDStateTests {
         #expect(state.secondaryText == "Rewriting with Gemini")
     }
 
+    @Test func anAnswerBeingPreparedSaysAnsweringNotRewriting() {
+        let state = HUDState.rewriting(
+            connection: "Gemini", mode: "Ask About Selection", redacted: true,
+            contextCategories: [], offerLocalTranscript: false, answering: true)
+        #expect(state.primaryText == "Ask About Selection")
+        #expect(state.secondaryText == "Answering with Gemini")
+        #expect(state.voiceOverAnnouncement == "Answering with Gemini")
+        #expect(state.dataBoundaryBadges == ["Cloud answer", "Best-effort redaction"])
+    }
+
     @Test func rewritingWithBadgesUsesTheTallerProcessingHUD() {
         let state = HUDState.rewriting(
             connection: "Gemini", mode: "Email", redacted: false,

@@ -6,7 +6,7 @@ struct ModeStoreSeedTests {
     @Test func starterSetMatchesCatalog() {
         let starters = ModeStore.starterModes()
         #expect(starters.map(\.id) == [
-            "polish", "message", "email", "edit-selection", "ai-prompt", "code",
+            "polish", "message", "email", "edit-selection", "ask-about-selection", "ai-prompt", "code",
             "markdown", "shell",
         ])
 

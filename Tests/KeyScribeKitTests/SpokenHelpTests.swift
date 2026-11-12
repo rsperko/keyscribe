@@ -202,6 +202,13 @@ struct SpokenHelpTests {
         #expect(help.status == SpokenHelp.selectionGuidance)
     }
 
+    @Test func answerHelpSaysToAskAboutTheSelection() {
+        let help = SpokenHelp.selection(title: "Ask About Selection", answers: true)
+        #expect(help.rows.isEmpty)
+        #expect(help.status == SpokenHelp.answerGuidance)
+        #expect(SpokenHelp.answerGuidance.contains("what do I need to do"))
+    }
+
     @Test func voiceCommandHelpWithNoAppsInventsNone() {
         let said = SpokenHelp.voiceCommands(title: "Voice Commands", apps: [], places: [], scripts: [], stages: []).rows.map(\.said)
         #expect(said == ["cancel", "go back"])

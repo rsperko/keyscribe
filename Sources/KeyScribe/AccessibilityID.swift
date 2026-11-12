@@ -387,7 +387,6 @@ enum AccessibilityID {
             static let shortcutWell = "mode.editor.shortcutWell"
             static let pressStyle = "mode.editor.pressStyle"
             static let extraTriggersNote = "mode.editor.extraTriggersNote"
-            static let rewriteSelection = "mode.editor.rewriteSelection"
             static let liveEdits = "mode.editor.liveEdits"
             static let aiService = "mode.editor.aiService"
             static let instruction = "mode.editor.instruction"
@@ -499,6 +498,8 @@ enum AccessibilityID {
         static let speakingSummary = "hud.speakingSummary"
         static let speakingSummaryToggle = "hud.action.speakingSummaryToggle"
         static let stopSpeaking = "hud.action.stopSpeaking"
+        static let closeSpeaking = "hud.action.closeSpeaking"
+        static let copySpeaking = "hud.action.copySpeaking"
         static let insertWithoutRewriting = "hud.action.insertWithoutRewriting"
         static let pasteLast = "hud.action.pasteLast"
         static let repairAction = "hud.action.repair"
@@ -671,7 +672,7 @@ enum AccessibilityID {
         Mode.List.moveShortcutConfirm, Mode.List.moveShortcutCancel, Mode.List.moveShortcutUndo,
         Mode.Editor.name, Mode.Editor.enabled, Mode.Editor.shortcutWell, Mode.Editor.pressStyle,
         Mode.Editor.extraTriggersNote,
-        Mode.Editor.rewriteSelection, Mode.Editor.liveEdits, Mode.Editor.aiService, Mode.Editor.instruction,
+        Mode.Editor.liveEdits, Mode.Editor.aiService, Mode.Editor.instruction,
         Mode.Editor.instructionExpand, Mode.Editor.instructionExpandDone,
         Mode.Editor.addInstruction, Mode.Editor.newInstruction, Mode.Editor.newInstructionName,
         Mode.Editor.newInstructionCreate, Mode.Editor.newInstructionCancel,

@@ -427,7 +427,7 @@ name = "Email"
 enabled = true
 
 # source: "dictation" (default) or "selection" (edit-in-place: capture the current selection as
-# content, dictation becomes the instruction). output: "cursor" | "replace_selection".
+# content, dictation becomes the instruction). output: "cursor" | "replace_selection" | "speak".
 source = "dictation"
 output = "cursor"
 
@@ -550,7 +550,7 @@ context = { app = true, preceding_text = false }
 | `trigger_phrases` | string[] | Spoken phrases matched at the transcript end post-STT — case-insensitive, word-boundary-honored, trailing punctuation/space tolerated. Each is a regex, so power users can write one (`(?-i)` opts back into case-sensitivity). Zero or more. |
 | `constraints[]` | table[] | Any of `bundle_id`, `bundle_prefix`, `url_pattern`, `window_title` (ANDed). Empty ⇒ eligible everywhere. |
 | `source` | enum | `dictation` \| `selection`. |
-| `output` | enum | `cursor` \| `replace_selection` \| `voice_command` \| `agent`. `voice_command` is the Voice Commands system mode's output: the take is run as a command (`voice_commands.toml`) and nothing is inserted. `agent` is the Coding agent system mode's output: the take goes to a coding agent conversation ("Coding agent bridge" above). Any other mode file that sets either fails to load. |
+| `output` | enum | `cursor` \| `replace_selection` \| `speak` \| `voice_command` \| `agent`. `speak` answers the spoken request about the selected text and reads the answer aloud; the selection is not changed. It needs `source = "selection"` (a file that pairs it with `dictation` fails to load), runs only while the `ask_about_selection` experimental flag is on, and ignores the insertion, `trailing`, `submit`, and context settings: only the selection and the spoken request are sent. `voice_command` is the Voice Commands system mode's output: the take is run as a command (`voice_commands.toml`) and nothing is inserted. `agent` is the Coding agent system mode's output: the take goes to a coding agent conversation ("Coding agent bridge" above). Any other mode file that sets either fails to load. |
 | `[agent]` | table | Read only with `output = "agent"`. `target` picks the conversation a take goes to when it does not start with one's name: `current` (default) is the conversation the front terminal shows when the take starts, if that can be confirmed in the window that had focus, without asking for access, shortly after release at the latest, and otherwise the current recipient; `ask` holds the take until one is named, and any other text is the name of a fixed conversation (the take is held if no live conversation has that name). An older `focused` is read as `current`. |
 | `commands.live_edits` | bool | Opt-in to the spoken-command list (insert new line, insert new paragraph, insert tab character, scratch that, **never mind** / **start over** to discard the whole take, **insert clipboard contents**, **begin/end verbatim**). |
 | `commands.privacy` | bool | Opt-in to best-effort redaction. When true, **context is forced off** — `ai_rewrite.context` is locked to all-false so only the redacted transcript leaves. |
@@ -574,8 +574,9 @@ is the single floor and owns Fn by default; the everyday mode is simply whicheve
 (Older `settings.toml` files may still carry a `default_mode_id` key — it is ignored and dropped on the
 next write.)
 
-The mode editor surfaces `source = "selection"` + `output = "replace_selection"` together as a
-single **"Rewrite selected text"** checkbox; the two-field model stays in TOML for flexibility.
+The template a mode is created from sets `source` + `output`, and the mode editor shows the result read-only
+on the summary's **Does** line; it offers no control to change it. A duplicate keeps it. The two-field model
+stays in TOML for flexibility.
 
 ### Separate start and stop shortcuts
 
@@ -619,7 +620,7 @@ or make global behavior hard to reason about.
 | `submit` | New and edited modes use `none` in Settings. If a mode file sets `return`, `shift_return`, or `cmd_return`, Settings shows a read-only note that the mode sends a key after insertion. | Submit keystrokes can send unfinished messages or commands in the target app. They are useful for deliberate automation modes, not casual editing. |
 | `dictionary.include_global` | No per-mode toggle in Settings; global dictionary terms stay included by default. | Turning this off makes a mode stop using vocabulary the user expects to apply everywhere. |
 | `replacements.include_global` | No per-mode toggle in Settings; global replacements stay included by default. | Turning this off creates surprising mode-specific replacement gaps. |
-| `source` + `output` | Shown as one “Rewrite selected text” control. | The app-supported selection workflow is the paired shape: capture the current selection and replace it with the rewritten result. |
+| `source` + `output` | Set by the template; shown read-only on the summary's “Does” line. | The app-supported selection workflow is the paired shape: capture the current selection and replace it with the rewritten result. |
 | `trigger_keys[]` beyond the first, `tap_threshold_ms`, `press_style = "start"` / `"stop"` | Settings edits the first entry's key. Regular press styles use a picker; an existing `start` or `stop` style instead appears as read-only “Start only · configured in its TOML file” or “Stop only · configured in its TOML file.” Changing those styles requires editing TOML. Further entries show as read-only “Also starts with” / “Stops with” notes and are preserved when the first is edited. | Separate start/stop controls and additional shortcuts are advanced configuration; the shortcut well stays one control showing one binding. |
 
 ---
@@ -645,6 +646,7 @@ menu bar).
 | `message` | Message | `source = dictation`, `output = cursor` | **disabled by default.** casual chat-style message; no greeting/sign-off. A discoverable example enabled in Settings. |
 | `email` | Email | `source = dictation`, `output = cursor`, phrase `as an email` | **disabled by default.** polished professional email with greeting + closing; never invents names/facts. A discoverable example enabled in Settings; once enabled, route to it by ending a dictation with **"as an email"**. |
 | `edit-selection` | Edit Selection | `source = selection`, `output = replace_selection`, trigger `right_command` | transforms the selection from a spoken instruction. Auto-enabled and connected when the first AI service is added; reachable on **Right-⌘**. |
+| `ask-about-selection` | Ask About Selection | `source = selection`, `output = speak`, best-effort redaction on, no trigger | **offered only while the `ask_about_selection` experimental flag is on.** Answers a spoken request about the selection in a few sentences, shown and read aloud; the selection is unchanged. |
 | `ai-prompt` | AI Prompt | `source = dictation`, `output = cursor` | **disabled by default.** Cleans dictation into a clear instruction for an AI assistant, preserving technical terms; never answers it. Intended as a smart-model example. |
 | `code` | Code | `source = dictation`, `output = cursor` | **disabled by default.** Cleans dictation for IDEs, code review, issues, commits, and coding assistants while preserving technical identifiers. |
 | `markdown` | Markdown | `source = dictation`, `output = cursor` | **disabled by default.** Reformats dictation into raw Markdown (headings, bullet/numbered lists, bold, blockquotes, inline/fenced code) without wrapping the output in a code fence. |

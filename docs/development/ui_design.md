@@ -135,7 +135,7 @@ privacy, or output.
 | Fragment | “Reusable writing instruction” | The fragment is appended to a mode’s rewrite instruction, in order; it is not executable code. |
 | Dictionary | “Words KeyScribe should recognize” | Engine support varies; entries always help rewrite prompts when a rewrite is enabled. |
 | Replacement | “Change a recognized phrase automatically” | Replacements occur before rewrite; regular expressions are Advanced. |
-| Rewrite selected text | “Replace selected text using your spoken instruction” | Selection is copied at trigger time and is sent to the selected rewrite provider when rewrite runs. |
+| Does (mode summary, read-only) | What the mode does, set by the template it was created from: dictation, replacing the selected text, or answering about it (experimental) | The selection is copied after you finish speaking. Editing sends it to the rewrite service and replaces it; answering sends it with your spoken request, shows and reads the answer aloud, and never changes the selected text. There is no control to change it; create the mode from the matching template instead. |
 | Insertion method | “How finished text reaches the target app” | Paste is the normal Settings behavior; Insert and Type are TOML-only compatibility escapes. |
 | History | “Keep dictations on this Mac” | Audio is never saved; transcript and final text may be sensitive; per-mode exclusion and retention are available. |
 
@@ -306,6 +306,7 @@ because opening its mic switches it to call mode.
 | Transcribing | “Transcribing” | Mode name | Cancel when safe |
 | Voice command opening an app | Mode name | “Opening [app]…” only while “open” starts an app, then “Looking in [app]…” while its tabs or sidebar fill; “switch to” never starts one, so never shows it | None; shown only once the command is acting, so it is not cancellable and does not take key focus away from the app being opened |
 | Rewriting | “Rewriting with [connection name]” | Boundary badges: `Cloud rewrite`, then `Best-effort redaction` or the exact shared context categories | Insert without rewriting after timeout (the shortcut does the same once it is shown) |
+| Answering (a `speak` mode) | “Answering with [connection name]” | Same badges as Rewriting | Escape cancels; nothing is inserted |
 | Complete | “Inserted” | Mode name, followed by “Spoken edits: …” naming the live edits that ran, each once in the order first used with a count when repeated (“Spoken edits: new line ×2, scratch that”), so a user can tell a spoken edit worked; it stays five seconds. A copied completion keeps its explanation first and names the edits after it | None; dismiss automatically |
 | Target changed | “Copied instead of inserting” | “Focus changed while KeyScribe was working”, or “Accessibility is off — copied to the clipboard. Paste with ⌘V.” when the copy is due to a missing Accessibility grant | Paste last dictation (suppressed when Accessibility is off, since synthetic ⌘V can’t fire) |
 | Stopped at the limit | “Stopped at the [limit] limit” (e.g. “5-minute”) | “Inserted without rewriting — dictate again to continue” when the mode rewrites, “Inserted — dictate again to continue” when it does not, or the copied explanation | Paste last dictation when copied |
@@ -885,6 +886,30 @@ dictation HUD appearing for any other reason, such as the acknowledgement for a 
 Dictation, likewise silences the summary being read and hides the panel; that summary is not resumed, and the
 rest wait. There is no countdown or
 waveform.
+
+**An answer about selected text** (`output = "speak"`, experimental) uses the same panel with the mode's name
+in the header. Unlike a reply summary, it appears as soon as the answer arrives, with the full answer text
+already expanded, and the status reads "Getting ready to speak · Esc stops" until audio starts, then
+"Speaking · Esc stops playback". Collapsing or expanding an answer's text does not change the remembered
+choice for reply summaries. The panel shows the answer as written; the voice reads it without Markdown, code
+marks, or links ("a link"). The natural voice reads the answer a sentence at a time, so the first sentence
+plays while the rest are prepared; a sentence the natural voice cannot make or play in time is read by the
+macOS voice together with the rest. A copy button in the header copies the answer as written; its glyph
+briefly becomes a checkmark, as a copyable value's does.
+
+When the voice finishes, or stop or Escape silences it, the panel stays with the answer for a reading pause
+and then closes itself: the status reads "Finished speaking · Esc closes", and the stop button becomes a
+close button. The pause grows with the answer's length within fixed bounds (`SpeakingHUDLayout.readingTime`).
+Hovering the panel holds it open, and the pause starts again when the pointer leaves; while VoiceOver is
+running it does not close by itself, as with the help panel. Escape stays claimed while the panel shows, so
+the first press stops the voice and the next closes the panel; it reaches the app in front again once the
+panel closes. The panel also closes at once from the close button, when the next dictation starts, or when a
+reply summary needs it. An answer interrupts a reply summary or notice that is playing. An
+interrupted notice is read again, from its start, once the answer ends; an interrupted reply summary is
+not, and "repeat that" replays it. Queued replies wait until the answer ends. Stop or Escape stops the
+answer only. The answer's voice is the one chosen for spoken replies; a `speak`
+mode's editor shows the same voice picker under **Spoken answer**, says that it also reads coding agent
+replies, and lets it be chosen without the Coding agent feature.
 
 ### Rules for cloud and privacy state
 
@@ -1668,8 +1693,10 @@ sections:
    **Add app or website…** precedes saved places and offers running apps (with their icons), Choose from Applications…,
    Enter Bundle ID…, and **Website…**. Window-title regexes and raw URL patterns live under
    **More precise matching**. Availability is separate from the ways a user starts or selects a mode.
-4. **What it does** — plain dictation, rewrite selected text, live edits, spoken symbols, numbers
-   (inverse text normalization), and an always-visible **Recognition and replacements** summary. Its
+4. **What it does** — live edits, spoken symbols, numbers (inverse text normalization), and an
+   always-visible **Recognition and replacements** summary. Whether the mode dictates, replaces the
+   selected text, or answers about it is fixed by its template and shown read-only on the summary's
+   **Does** line, never as a control here. Its
    **Edit Vocabulary…** action opens Vocabulary with that mode selected. (Dictionary recovery is not
    a setting anywhere — it runs automatically whenever the mode's dictionary is non-empty.)
 5. **Improve with AI** — disabled by default; connection, plain-language instruction, and the
@@ -2354,6 +2381,15 @@ enabled, which context categories were sent, and the raw cloud exchange as sibli
 provider's reply, verbatim — before any output enforcement, so model misbehavior stays visible
 rather than silently corrected). Whenever local text was kept, even if delivery later failed, the received view notes the reply was
 not used. Redaction maps are never shown or persisted.
+
+An **answer about selected text** is recorded as **Answered**, with a `Cloud answer` badge. Its detail shows
+two plain panels, **Request** (what was heard) and **Answer** (the answer as shown), with no comparison,
+change count, or highlighting: an answer is not a correction of the request. Corrections and mishearing
+hints apply to the Request panel only. **Answered** means an answer was produced, not that it was heard to
+the end.
+
+The detail's action buttons wrap onto another row when the pane is narrow rather than truncating their
+names (`WrapLayout`).
 
 A **voice command** entry reuses the same detail: the comparison reads **Heard → Command**, where
 Command is what ran — a script's exact command line, quoted the way a shell would so it can be copied

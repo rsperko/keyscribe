@@ -19,15 +19,16 @@ public enum GateRecovery: Equatable, Sendable {
 
 // The hard post-LLM gate (design.md §4.2). A dropped redaction token leaks the protected span and a dropped
 // verbatim token corrupts the insert, so this is a safety check, not normalization: every required nonce token
-// must return exactly once (unless the mode allows deletion), no invented sentinel-like tokens, non-empty output.
+// must return exactly once (an answer may leave one out or repeat it), no invented sentinel-like tokens, non-empty output.
 public enum ValidationGate {
     private static let sentinelPattern = "⟦SN:[^⟧]*⟧"
 
     // `allowedTokens` (selection-mode instruction redaction) are never required, but one occurrence isn't
     // stray; more than one is still ambiguous restore and fails.
     public static func check(
-        output: String, issuedTokens: [String], allowedTokens: [String] = [], allowDeletion: Bool = false
+        output: String, issuedTokens: [String], allowedTokens: [String] = [], reply: ReplyKind = .rewrite
     ) -> GateVerdict {
+        let answering = reply == .answer
         if output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return .fail(.empty) }
 
         // One regex pass finds every sentinel-shaped span, so a count map answers presence/duplication
@@ -38,10 +39,10 @@ public enum ValidationGate {
 
         for token in issuedTokens {
             let count = counts[token] ?? 0
-            if count > 1 { return .fail(.duplicatedToken(token)) }
-            if count == 0 && !allowDeletion { return .fail(.missingToken(token)) }
+            if count > 1 && !answering { return .fail(.duplicatedToken(token)) }
+            if count == 0 && !answering { return .fail(.missingToken(token)) }
         }
-        for token in allowedTokens where (counts[token] ?? 0) > 1 {
+        for token in allowedTokens where (counts[token] ?? 0) > 1 && !answering {
             return .fail(.duplicatedToken(token))
         }
 

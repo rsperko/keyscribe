@@ -97,6 +97,7 @@ final class DictationController {
         var pendingHeardTranscript: String?
         var pendingLocalRewriteDetails: RewriteDetails?
         var rewriteStartedAt: DispatchTime?
+        var releasedAt: DispatchTime?
         var dictationTask: Task<Void, Never>?
         var rewriteEscapeTask: Task<Void, Never>?
         var stoppedAtLimit = false
@@ -127,6 +128,7 @@ final class DictationController {
     }
     private var session: DictationSession?
     weak var spokenUpdates: SpokenResultOutput?
+    weak var answers: SpokenAnswerOutput?
     var onMemoryPressure: (() -> Void)?
     var spokenAttempts: SpokenAttempts?
     private(set) var lastSpokenReplyEntry: String?
@@ -621,7 +623,7 @@ final class DictationController {
         if engaged == nil {
             guard machine.beginArming() else {
                 if pressStyle == .startOnly { return }
-                if case .rewriting(_, _, _, _, true)? = hud.lastPresented {
+                if case .rewriting(_, _, _, _, true, _)? = hud.lastPresented {
                     insertLocalTranscriptNow()
                 } else {
                     playBusyPressCue()
@@ -632,6 +634,7 @@ final class DictationController {
         dictationStarts += 1
         if !replayingKeys { keysTakenByHUD = [] }
         effects.pressBegan()
+        answers?.close()
         silencer.recordingStarted()
         activeStartTrigger = triggerKey
         latchedTriggerName = (pressStyle == .tapToToggle)
@@ -905,6 +908,7 @@ final class DictationController {
             return
         }
         session?.recorder.stopLimit()
+        session?.releasedAt = .now()
         session?.agentFrontCutoff = .now + frontReadingGrace
         onRecordingChanged?(false)
         machine.beginTranscribing()
@@ -1308,6 +1312,7 @@ final class DictationController {
     }
 
     private func onModeAndSnapshotReady() {
+        if activeMode?.answersAloud == true { answers?.prepare() }
         maybePreconnect()
         maybeStartPrecedingProbe()
     }
@@ -1598,12 +1603,14 @@ final class DictationController {
         // Cancelled during the rewrite: bail before any insert or history write.
         if Task.isCancelled { return }
 
-        await dispatch(final, to: .cursor, heard: raw, transformed: transformed, rewrite: rewrite)
+        await dispatch(
+            final, to: finalMode?.answersAloud == true ? .speak : .cursor, heard: raw, transformed: transformed, rewrite: rewrite)
     }
 
     private enum Destination {
         case cursor
         case agent(id: String, facts: [HistoryEntry.Fact])
+        case speak
     }
 
     // The one place a take's final text goes to its output, for the normal path and the escape hatch alike.
@@ -1622,9 +1629,32 @@ final class DictationController {
             finishDiscarded()
         case (.insert(let text, _, _), .agent(let id, let facts)):
             await agentTake.deliver(id, text: text, heard: heard, transformed: transformed, rewrite: rewrite, facts: facts)
+        case (.insert(let text, _, _), .speak):
+            finishAnswer(text, heard: heard, rewrite: rewrite)
         case (.insert(let text, let bare, let submit), .cursor):
             await finishInsertion(transcript: text, heard: heard, transformed: transformed, rewrite: rewrite, bare: bare, submitOverride: submit)
         }
+    }
+
+    private func finishAnswer(_ answer: String, heard: String, rewrite: RewriteDetails?) {
+        clearRewriteEscapeHatch()
+        guard settings.features.isEnabled(.askAboutSelection) else { return finishError(Self.answersOff) }
+        guard lease().stillWanted() else { return }
+        building.fingerprints[.final] = .of(answer)
+        if let answers {
+            answers.answer(answer, name: currentModeName, since: session?.releasedAt ?? .now())
+        } else {
+            log.error("answer ready but no speech output is wired")
+        }
+        finish(
+            machine: .finish(.inserted), cue: .success, state: .hidden,
+            record: (.answered, nil),
+            history: HistoryWrite(heard: heard, transformed: nil, result: answer, insertion: .inserted, rewrite: rewrite, outcome: .answered))
+    }
+
+    func noteAnswerFirstAudio(milliseconds: Double) {
+        guard lastRecord?.outcome == .answered, lastRecord?.stageMillis[.firstAudio] == nil else { return }
+        lastRecord?.stageMillis[.firstAudio] = milliseconds
     }
 
     var frontReadingGrace: Duration {
@@ -1926,7 +1956,10 @@ final class DictationController {
                 let message = "Stopped at the \(limitPhrase) limit — selection unchanged"
                 return (.abort(kept ? message + ". What you said is in History." : message, nil), nil, nil)
             }
-            let (final, details) = await rewriteSelection(instruction: routed.transcript, mode: mode)
+            if mode?.answersAloud == true, !settings.features.isEnabled(.askAboutSelection) {
+                return (.abort(Self.answersOff, nil), nil, nil)
+            }
+            let (final, details) = await runOnSelection(instruction: routed.transcript, mode: mode)
             return (final, details, nil)
         }
         return await produceDictationText(transcript: routed.transcript, mode: mode)
@@ -1978,10 +2011,10 @@ final class DictationController {
         return (guardedInsert(result.text, issuedTokens: take.payload.issuedTokens), result.details, transformed)
     }
 
-    // Edit-in-place: capture the selection, transform it per the spoken instruction. Any failure —
-    // no selection, no connection, or a rewrite that fell back — aborts and leaves the selection
-    // untouched. A destructive operation must never clobber the user's text on failure.
-    private func rewriteSelection(instruction: String, mode: Mode?) async -> (FinalText, RewriteDetails?) {
+    // Edit-in-place or answer: capture the selection, then rewrite it or answer about it per the spoken
+    // instruction. Any failure — no selection, no connection, or a reply that fell back — aborts and leaves
+    // the selection untouched. A destructive operation must never clobber the user's text on failure.
+    private func runOnSelection(instruction: String, mode: Mode?) async -> (FinalText, RewriteDetails?) {
         guard let mode else { return (.abort("No mode resolved", nil), nil) }
         // Capturing the selection fires a synthetic ⌘C, which the OS drops without Accessibility — so
         // the read silently fails and the abort below would misreport it as "no selection". Name the
@@ -1992,7 +2025,10 @@ final class DictationController {
         // The selection-capture ⌘C must reach the target, so drop key focus held for ESC-cancel; the
         // subsequent .rewriting render re-takes it so ESC still cancels the rewrite.
         hud.relinquishKeyFocus()
-        guard let selection = await captureSelection(mode.copyKeystroke), !selection.isEmpty else {
+        let captureStart = DispatchTime.now()
+        let captured = await captureSelection(mode.copyKeystroke)
+        building.stageMillis[.selection] = elapsedMs(since: captureStart)
+        guard let selection = captured, !selection.isEmpty else {
             return (.abort("Select some text first", nil), nil)
         }
         guard let connection = connection(for: mode) else {
@@ -2007,13 +2043,26 @@ final class DictationController {
                 selection: selection, instruction: instruction, liveEdits: liveEdits, privacy: privacy,
                 trimsTrailingPunctuation: trims)
         }.value
+        if mode.answersAloud, !settings.features.isEnabled(.askAboutSelection) {
+            return (.abort(Self.answersOff, nil), nil)
+        }
         let result = await rewriteTokenized(
             prepared.take, localText: selection, instruction: prepared.instruction, mode: mode, connection: connection,
             instructionTokens: prepared.instructionTokens)
         let final: FinalText = result.ok
             ? guardedInsert(result.text, issuedTokens: prepared.take.payload.issuedTokens)
-            : .abort("Rewrite failed — selection unchanged", nil)
+            : .abort(
+                mode.answersAloud
+                    ? Self.answerFailure(cutOff: result.details.cutOff, reason: result.details.fallbackReason)
+                    : "Rewrite failed — selection unchanged",
+                nil)
         return (final, result.details)
+    }
+
+    static let answersOff = "Turn on \u{201C}\(Feature.askAboutSelection.title)\u{201D} in Experimental features to hear answers"
+    static func answerFailure(cutOff: Bool, reason: String?) -> String {
+        if cutOff { return "The answer was too long and was cut off" }
+        return ["Couldn\u{2019}t get an answer.", reason].compactMap { $0 }.joined(separator: " ")
     }
 
     enum RewriteAgain {
@@ -2414,6 +2463,7 @@ final class DictationController {
                           outcome: history.outcome, summary: history.summary, facts: history.facts,
                           onRecorded: history.onRecorded)
         }
+        if activeMode?.answersAloud == true { answers?.takeEnded() }
         let engineUsed = activeEngine
         releaseCapturedPlan()
         engines.applyEvictionAfterDictation(engine: engineUsed)
@@ -2456,7 +2506,7 @@ final class DictationController {
     private func spokenHelp(for mode: Mode?) -> SpokenHelp {
         let stages = plan.postSTTTextStages(for: mode)
         let title = mode?.name ?? currentModeName ?? "Dictation"
-        if mode?.source == .selection { return .selection(title: title) }
+        if mode?.source == .selection { return .selection(title: title, answers: mode?.answersAloud == true) }
         if mode?.runsVoiceCommands == true {
             let commands = config.voiceCommands
             return SpokenHelp.voiceCommands(

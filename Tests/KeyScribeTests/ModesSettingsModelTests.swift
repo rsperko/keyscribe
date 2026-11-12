@@ -287,6 +287,19 @@ struct ModesSettingsModelTests {
         #expect(model.allTemplates.map(\.id) == ModeStore.templates().map(\.id))
     }
 
+    @Test func theAskTemplateIsOfferedOnlyWhileItsFeatureIsOn() throws {
+        let (model, support, modesDir) = try makeModel()
+        defer { try? FileManager.default.removeItem(at: support) }
+        #expect(!model.allTemplates.contains { $0.id == "ask-about-selection" })
+        model.materializeTemplate("ask-about-selection")
+        #expect(!FileManager.default.fileExists(atPath: modesDir.appendingPathComponent("ask-about-selection.toml").path))
+
+        model.setAskAboutSelectionEnabled(true)
+        #expect(model.allTemplates.last?.id == "ask-about-selection")
+        model.materializeTemplate("ask-about-selection")
+        #expect(model.modes.first { $0.id == "ask-about-selection" }?.output == .speak)
+    }
+
     @Test func materializingATemplateWritesADisabledSeedAndSelectsIt() throws {
         let (model, support, modesDir) = try makeModel()
         defer { try? FileManager.default.removeItem(at: support) }

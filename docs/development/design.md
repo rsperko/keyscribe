@@ -601,7 +601,25 @@ This requires a reliable **"copy selected text" capability**. Synthesized **⌘C
 the universal method** (works in Electron/Chromium/native); AX `kAXSelectedText` is a **native-only**
 enhancement (empty on Electron/Chromium), so ⌘C-copy is the primary path and AX a bonus where
 present. It is the one case that bends the Mode model (input is selection+voice, output overwrites),
-but it stays a configured mode, not an engine fork.
+but it stays a configured mode, not an engine fork. The selection is read after the take is
+transcribed, once the trigger key is released, so the copy keystroke never fires while the user is
+still holding the trigger's modifiers.
+
+**Answering about the selection is the same capability with a different output** (`output = "speak"`,
+behind the `ask_about_selection` flag). The flow is identical up to the LLM call, which uses an
+answering system prompt (`prompt_design.md`) and an answer-sized output budget (the connection's own
+`max_tokens`, not one sized to the selection). The reply goes through the same validation gate with two
+relaxations an answer needs: a protected token may be left out or repeated, but an invented or altered
+token still fails. Restored values are shown and read aloud locally. Nothing is inserted and the
+selection is untouched; a failed or cut-off answer is reported and nothing is spoken. App identity and
+preceding text are never sent with an answer. The answer text appears in the speaking panel at once,
+and the natural voice reads it a sentence at a time, so the first sentence plays while the rest are
+prepared (`NaturalSpeech`, `SpokenAnswerOutput`). The voice reads `SpokenResult.spokenForm` of the answer
+(no Markdown, code marks, or links) while the panel shows it as written. An answer interrupts a coding agent
+reply or notice that is playing; an interrupted notice is read again once the answer ends, and an
+interrupted reply is left for "repeat that"; a new recording or Escape stops
+the answer. While the `ask_about_selection` flag is off, a `speak` mode is left out of routing and its
+shortcut, and turning the flag off stops an answer in flight.
 
 ### 4.4 AI rewrite context
 A mode **opts into** the context it sends to the LLM via checkboxes — **App** and **preceding text**
@@ -663,8 +681,8 @@ the mode picks.
   the *only* reason to ask for a permission. Request **Automation** only when a mode constrains by URL
   (`url_pattern` routing, §4.3).
 
-**Target capture & focus race.** The target (frontmost app, focused element if AX exposes it, and a
-selection snapshot) is captured **at trigger time**. Because batch + LLM rewrite takes seconds, focus
+**Target capture & focus race.** The target (frontmost app and focused element if AX exposes it) is
+captured **at trigger time**; an edit-in-place selection is read later, after transcription (§4.3). Because batch + LLM rewrite takes seconds, focus
 may move before insertion. KeyScribe verifies best-effort at insert: app/focus change is reliably
 detectable; **field-level** change is detectable on native apps but often **only app-level on
 Electron**. On mismatch or uncertainty, it **falls back to the clipboard** and a HUD notice rather

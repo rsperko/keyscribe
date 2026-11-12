@@ -37,8 +37,8 @@ not a legal privacy policy.
 
 ## The only things KeyScribe itself sends
 
-KeyScribe itself sends content off your Mac on two paths only, both **optional, bring-your-own-key (BYOK)
-LLM calls** to a service you configured, and both off unless you turn them on:
+KeyScribe itself sends content off your Mac only on the paths below, all **optional, bring-your-own-key (BYOK)
+LLM calls** to a service you configured, and all off unless you turn them on:
 
 - **LLM cleanup**, which rewrites a transcript (removing filler, fixing grammar, reformatting). It runs only
   for a mode you enabled it for. When a rewrite falls back, **Rewrite Again** in History sends that
@@ -58,6 +58,11 @@ LLM calls** to a service you configured, and both off unless you turn them on:
   in a terminal it can't read, the reply is sent as usual. Agent replies often contain code and command output, and the
   redaction described below is tuned to dictated speech, so it catches less there. Choose a local service
   such as oMLX if replies must stay on your Mac.
+- **Answers about selected text**, in the experimental Ask About Selection feature. When you use a mode that
+  answers, the text you selected and the request you spoke are sent to that mode's service, after best-effort
+  redaction when the mode has it on (the starter mode does). Nothing else from your screen is sent, and the
+  selected text is not changed. Values redaction hid are put back on your Mac, so the answer shown and read
+  aloud can contain them. The answer is kept in History like any other dictation, unless the mode is excluded.
 
 A script or
 shortcut you set up to run by voice can send what you said wherever it is built to; see
@@ -152,7 +157,9 @@ original text is substituted back in locally *after* the response returns. The m
 original lives in memory only — it is **never logged and never written to history**. A validation gate
 checks that every token sent to the model comes back exactly once, rejects stray token-looking text,
 and rejects empty responses before the result is used; on failure KeyScribe retries once more
-strictly, then falls back to the local transcript with a HUD notice.
+strictly, then falls back to the local transcript with a HUD notice. An answer about selected text may leave a
+token out or use it twice, since a summary naturally does; an invented or altered token still fails it, and
+a failed answer is reported and never read aloud.
 
 **This is best-effort redaction, not a security guarantee.** It reduces what a third-party model
 sees when a span is recognized, but it cannot promise that every sensitive span is caught. It works

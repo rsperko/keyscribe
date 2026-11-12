@@ -174,14 +174,6 @@ struct ModeEditorView: View {
             ModeRoutingSection(mode: mode, allModes: allModes, onUpdate: onUpdate)
             Section("What it does") {
                 SettingRow(
-                    title: "Rewrite selected text",
-                    result: mode.source == .selection ? "Rewrites the highlighted text" : "Dictates at the cursor",
-                    help: "When on, this mode edits the currently selected text using your spoken instruction instead of inserting new text at the cursor — for \u{201C}make this more formal\u{201D} style edits. The selection is captured with ⌘C, so there must be something selected for it to act on.")
-                {
-                    Toggle("", isOn: selectionMode).labelsHidden()
-                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.rewriteSelection)
-                }
-                SettingRow(
                     title: "Turn spoken editing phrases into edits",
                     help: "Turns phrases you say into edits: \u{201C}insert new line\u{201D}, \u{201C}insert new paragraph\u{201D}, \u{201C}insert tab character\u{201D}, \u{201C}insert clipboard contents\u{201D} (or \u{201C}insert clipboard as code\u{201D} for a code block), \u{201C}scratch that\u{201D}, \u{201C}never mind\u{201D} at the end to throw the dictation away, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
                 {
@@ -209,9 +201,17 @@ struct ModeEditorView: View {
                 onCloseFragment: onCloseFragment,
                 onRevealFragment: onRevealFragment)
             dataSentWithAISection
+            if mode.answersAloud, let codingAgents, let voice = codingAgents.voice {
+                Section("Spoken answer") {
+                    SpokenVoiceRows(
+                        voice: voice, selection: Binding(get: { codingAgents.chosenVoice }, set: { codingAgents.chosenVoice = $0 }))
+                    Text("This voice also reads coding agent replies, so changing it here changes it there.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
 
             Section("Result handling") {
-                nonPasteInsertionNotice
+                if !mode.answersAloud { nonPasteInsertionNotice }
                 SettingRow(
                     title: "Do not save this mode in history",
                     help: "When on, this mode's dictations are never written to local history — useful for sensitive work. Other modes still record per your History setting.")
@@ -219,7 +219,7 @@ struct ModeEditorView: View {
                     Toggle("", isOn: bind.binding(\.excludeFromHistory)).labelsHidden()
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.excludeFromHistory)
                 }
-                finishingControls
+                if !mode.answersAloud { finishingControls }
             }
 
             Section {
@@ -263,7 +263,9 @@ struct ModeEditorView: View {
             VStack(alignment: .leading, spacing: 6) {
                 summaryLine("Status", mode.enabled ? "Enabled" : "Disabled")
                 summaryLine("Trigger", ModeSummary.whenRuns(mode))
-                summaryLine("Does", mode.source == .selection
+                summaryLine("Does", mode.answersAloud
+                    ? "Answers your spoken question about the selected text, aloud"
+                    : mode.source == .selection
                     ? "Replaces the selected text using your spoken instruction"
                     : (mode.commands.liveEdits ? "Dictation with spoken edits" : "Plain dictation"))
                 summaryLine("Text goes", boundarySummary)
@@ -286,7 +288,7 @@ struct ModeEditorView: View {
             return "AI service missing"
         }
         let redaction = mode.commands.privacy ? ", best-effort redaction on" : ""
-        return "Cloud rewrite via \(name)\(redaction)"
+        return "\(mode.answersAloud ? "Cloud answer" : "Cloud rewrite") via \(name)\(redaction)"
     }
 
     private var modeVocabularyRow: some View {
@@ -355,28 +357,18 @@ struct ModeEditorView: View {
     @ViewBuilder private var dataSentWithAISection: some View {
         if mode.aiRewrite != nil {
             Section("Data sent with AI") {
-                if mode.source == .selection {
+                if mode.answersAloud {
+                    Label(
+                        "Selected text shared — the highlighted text and your spoken request are sent to the AI service to be answered. Nothing else from your screen is sent.",
+                        systemImage: "doc.on.doc")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if mode.source == .selection {
                     Label(
                         "Selected text shared — the highlighted text is the content sent to the AI service to be rewritten.",
                         systemImage: "doc.on.doc")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                SettingRow(
-                    title: "Send app details",
-                    help: "Shares the frontmost app's name as untrusted reference, never as commands. The browser URL is never sent — it is only a local routing key.",
-                    dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)
-                {
-                    Toggle("", isOn: bind.contextBinding(\.app)).labelsHidden().disabled(mode.commands.privacy)
-                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Context.app)
-                }
-                SettingRow(
-                    title: "Send text before the cursor",
-                    help: "Shares a short, bounded excerpt of the text just before the insertion point as untrusted reference, so a rewrite can match the surrounding voice and tense. Native text fields only — best-effort (browsers expose nothing).",
-                    dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)
-                {
-                    Toggle("", isOn: bind.contextBinding(\.precedingText)).labelsHidden().disabled(mode.commands.privacy)
-                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.Context.precedingText)
-                }
+                if !mode.answersAloud { contextRows }
                 SettingRow(
                     title: "Hide recognizable sensitive text",
                     help: "Best-effort redaction replaces recognizable sensitive spans with tokens before the request, then restores them on this Mac. It is pattern matching: it can miss content, it turns all context off, and it does not make cloud use appropriate for every secret.",
@@ -389,15 +381,23 @@ struct ModeEditorView: View {
         }
     }
 
-    private var selectionMode: Binding<Bool> {
-        Binding(
-            get: { mode.source == .selection },
-            set: { enabled in
-                var updated = mode
-                updated.source = enabled ? .selection : .dictation
-                updated.output = enabled ? .replaceSelection : .cursor
-                onUpdate(updated)
-            })
+    @ViewBuilder private var contextRows: some View {
+        SettingRow(
+            title: "Send app details",
+            help: "Shares the frontmost app's name as untrusted reference, never as commands. The browser URL is never sent — it is only a local routing key.",
+            dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)
+        {
+            Toggle("", isOn: bind.contextBinding(\.app)).labelsHidden().disabled(mode.commands.privacy)
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.Context.app)
+        }
+        SettingRow(
+            title: "Send text before the cursor",
+            help: "Shares a short, bounded excerpt of the text just before the insertion point as untrusted reference, so a rewrite can match the surrounding voice and tense. Native text fields only — best-effort (browsers expose nothing).",
+            dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)
+        {
+            Toggle("", isOn: bind.contextBinding(\.precedingText)).labelsHidden().disabled(mode.commands.privacy)
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.Context.precedingText)
+        }
     }
 
     private var privacyMode: Binding<Bool> {

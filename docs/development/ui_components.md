@@ -61,6 +61,7 @@ it as a shared type — never a one-off inline pattern. (Anatomy, behavior, and 
 | Action confirmation | A secondary caption confirming what a button just did (copied, saved, exported), cleared after a few seconds. It sits in the pane's bottom footer, leading the trailing actions, in a slot that always reserves its lines, so appearing and clearing moves nothing. Never inside a button row, where it squeezes the buttons into truncated labels, and never on a line that appears with it, which shifts the whole pane. |
 | Correction action | History + global correction panel: `Add to Dictionary`, `Create Replacement` — pre-filled, showing the resulting rule and its scope. |
 | Pane notice | A failed operation or unreadable config file in a Settings pane (`PaneNotice` + `PaneNoticeBanner`, `SettingsComponents.swift`): placed above the pane's Form, ScrollView, or list/detail split, never inside it. A short outcome-first `IssueText` title, one plain line (which file needs fixing, what still works), **Show in Finder** for a file, and a collapsed **Technical details** with the parser's position and message. Its owning model keeps the state; there is no global error manager. |
+| Wrapping action row | A row of labeled buttons that wraps onto further rows when there is no room, keeping every name whole (`WrapLayout`, `WrapLayout.swift`). Use it where a pane can be narrower than its actions; never let a button label truncate. |
 | Copyable value | A path or identifier shown as caption text that copies on click (`CopyableValue`, `SettingsComponents.swift`): the value, then a copy glyph that briefly becomes a checkmark without moving the row. The tooltip is “Copy <what>: <value>” (“Copied <value>” after), and assistive technology hears “Copy <what> for <owner>” with the value. Use it for supporting values a user pastes elsewhere; a primary result copy stays a labeled button (History's **Copy Result**). |
 | Vocabulary feedback | Settings and the global correction panel: a checkmark status for an entry that already exists, an info status for an update, and `IssueText` for an advisory. |
 | Rule preview | A replacement rule being written (`RulePreviewSection` + `RuleScopePicker`, `Settings/RulePreviewSection.swift`): one behaviour sentence when the rule is not a word fix, advisories for a dropped Return (with **Only Match When Said Alone**) and for matches inside words (with **Match Whole Words…** showing the new pattern before it is used), **Try a sentence**, and the rule replayed over recent History behind one collapsed summary line. The scope override (`RuleScopePicker`) lives under **Advanced**. Used by the composer and the Edit Replacement sheet. |
@@ -124,7 +125,11 @@ it as a shared type — never a one-off inline pattern. (Anatomy, behavior, and 
 | `Listening` / `Transcribing` (no location word) | listening locally, transcribing locally |
 | `On-device speech` (idle status) | local transcription |
 | `Rewriting with {name}` | Polishing, processing |
+| `Answering with {name}` | Thinking, asking |
+| `Getting ready to speak` | Loading voice, buffering |
+| `Finished speaking · Esc closes` | Done, playback ended |
 | `Cloud rewrite` | AI mode, remote magic |
+| `Cloud answer` (a mode that answers about selected text) | Cloud rewrite (for an answer), AI reply |
 | `Spoken summary` (a spoken reply a service summarized) | AI voice, cloud reply |
 | `No cloud rewrite` (rewrite off) | off, don't use AI |
 | `Best-effort redaction` | protected, anonymized, safe |

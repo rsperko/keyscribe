@@ -375,7 +375,7 @@ private struct ModeSummaryRow: View {
 
     private var summary: String {
         guard mode.enabled else { return "Disabled" }
-        return [ModeSummary.whenRuns(mode), issue?.summary ?? (mode.aiRewrite == nil ? "On this Mac" : "Cloud rewrite")]
+        return [ModeSummary.whenRuns(mode), issue?.summary ?? (mode.aiRewrite == nil ? "On this Mac" : mode.answersAloud ? "Cloud answer" : "Cloud rewrite")]
             .joined(separator: " · ")
     }
 }

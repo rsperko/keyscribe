@@ -43,14 +43,14 @@ public struct TextFingerprint: Codable, Equatable, Sendable {
 // transcript text.
 public struct DictationRecord: Codable, Equatable, Sendable {
     public enum Outcome: String, Codable, Sendable {
-        case inserted, copied, localFallback, noSpeech, failed, command
+        case inserted, copied, localFallback, noSpeech, failed, command, answered
     }
 
     // Wall-clock stage timings, stamped by the app layer, chronological. `grace` is the physical press until
     // the controller sees it (chord grace + main-queue hop); `arm` is physical press→recording and INCLUDES
     // `grace`; `modelWait` is the commit-time load await.
     public enum Stage: String, Codable, Sendable, CaseIterable {
-        case grace, arm, drain, modelWait, transcribe, localProcess, rewrite, targetCheck, insert
+        case grace, arm, drain, modelWait, transcribe, localProcess, selection, rewrite, targetCheck, insert, firstAudio
     }
 
     // The text boundaries a fingerprint is taken at, in pipeline order.

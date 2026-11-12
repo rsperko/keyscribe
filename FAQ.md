@@ -488,6 +488,17 @@ tells you when this happens. A mode that normally presses Return after inserting
 an unfinished message is never sent. In an edit-in-place mode, a dictation stopped by the limit leaves your
 selected text unchanged.
 
+### Can KeyScribe answer a question about text I select?
+
+Yes, as an experimental feature. Turn on **Ask about selected text** in Settings > Maintenance >
+Experimental features, add the **Ask About Selection** template in Settings > Modes, choose its AI service,
+and give it a shortcut. Select text in any app, use the shortcut, and ask something like "summarize this" or
+"what do I need to do?" The answer appears and is read aloud; your selected text is not changed. Only the
+selected text and your request are sent to the service, after best-effort redaction. The answer stays on
+screen for a few moments after it is read, longer for a long answer, with a button to copy it; hovering over
+it keeps it open. Press Escape once to stop the voice and again to close the answer. The voice is set in the mode's **Spoken answer** section and is the same one that reads
+coding agent replies.
+
 ### How do I connect a coding agent conversation?
 
 In **Settings ▸ Modes ▸ Coding agent**, find the conversation in **Conversations** and choose **Connect…**,

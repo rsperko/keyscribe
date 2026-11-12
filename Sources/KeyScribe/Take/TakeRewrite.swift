@@ -16,6 +16,7 @@ struct RewriteDetails {
     var received: String? = nil
     var reasoning: ReasoningOutcome? = nil
     var skippedAfterMs: Double? = nil
+    var cutOff = false
 }
 
 @MainActor
@@ -79,7 +80,8 @@ final class TakeRewrite {
         if presentsHUD {
             hud.present(.rewriting(
                 connection: connection.name, mode: mode.name, redacted: mode.commands.privacy,
-                contextCategories: request.contextCategories, offerLocalTranscript: false))
+                contextCategories: request.contextCategories, offerLocalTranscript: false,
+                answering: mode.answersAloud))
         }
 
         let outcome = await RewriteService(
@@ -87,7 +89,7 @@ final class TakeRewrite {
             deadlineSeconds: deadlineSecondsOverride ?? RewriteService.defaultDeadlineSeconds
         ).rewrite(
             payload: take.payload, inputs: request.inputs, connection: request.sized,
-            allowedTokens: instructionTokens, prompt: request.prompt)
+            allowedTokens: instructionTokens, prompt: request.prompt, reply: request.inputs.reply)
         if Task.isCancelled { return Result(text: localText, ok: false, details: pending, finished: nil) }
         let milliseconds = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1e6
         let gateApproved: String
@@ -101,6 +103,10 @@ final class TakeRewrite {
             gateApproved = local; received = raw
             log.notice("rewrite fell back to local: \(reason ?? "unknown", privacy: .public)")
             finished = Finished(milliseconds: milliseconds, modelOutput: nil, fallbackReason: reason)
+        case .cutOff(let local, let reason, let raw):
+            gateApproved = local; received = raw
+            log.notice("rewrite fell back to local: \(reason, privacy: .public)")
+            finished = Finished(milliseconds: milliseconds, modelOutput: nil, fallbackReason: reason)
         }
         let fellBack = finished.modelOutput == nil
         let details = RewriteDetails(
@@ -108,7 +114,8 @@ final class TakeRewrite {
             redaction: mode.commands.privacy,
             contextCategories: request.contextCategories, prompt: request.promptForHistory, fellBack: fellBack,
             fallbackReason: finished.fallbackReason, received: received,
-            reasoning: fellBack ? nil : await client.reasoningOutcome(for: request.sized))
+            reasoning: fellBack ? nil : await client.reasoningOutcome(for: request.sized),
+            cutOff: { if case .cutOff = outcome { true } else { false } }())
         return Result(text: take.finish(gateApproved), ok: !fellBack, details: details, finished: finished)
     }
 }

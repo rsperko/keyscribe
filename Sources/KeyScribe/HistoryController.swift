@@ -981,19 +981,13 @@ private struct HistoryDetailView: View {
                 if !entry.result.isEmpty, entry.result != entry.heard {
                     plainPane("Message", role: .result, text: entry.result)
                 }
+            } else if entry.outcome == .answered {
+                plainPane("Request", role: .heard, text: entry.heard)
+                mishearingHints
+                plainPane("Answer", role: .result, text: entry.result)
             } else {
                 comparison
-                ForEach(model.hints, id: \.term) { hint in
-                    HStack(spacing: 8) {
-                        Text("\u{201C}\(hint.phrase)\u{201D} may be \u{201C}\(hint.term)\u{201D}")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                        Button("Review Mishearings\u{2026}") { model.reviewMishearings(hint) }
-                            .controlSize(.small)
-                    }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier(AccessibilityID.History.mishearingHint)
-                }
+                mishearingHints
             }
             if entry.facts != nil || entry.steps != nil {
                 VStack(alignment: .leading, spacing: 8) {
@@ -1096,6 +1090,20 @@ private struct HistoryDetailView: View {
         case .finished: "Played to the end"
         case .interrupted: "Stopped before the end"
         case .failed: "Failed"
+        }
+    }
+
+    private var mishearingHints: some View {
+        ForEach(model.hints, id: \.term) { hint in
+            HStack(spacing: 8) {
+                Text("\u{201C}\(hint.phrase)\u{201D} may be \u{201C}\(hint.term)\u{201D}")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                Button("Review Mishearings\u{2026}") { model.reviewMishearings(hint) }
+                    .controlSize(.small)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(AccessibilityID.History.mishearingHint)
         }
     }
 
@@ -1205,7 +1213,7 @@ private struct HistoryDetailView: View {
     private var canCopyHeard: Bool { !entry.heard.isEmpty && entry.heard != entry.result }
 
     private var actionBar: some View {
-        HStack(spacing: 8) {
+        WrapLayout(spacing: 8) {
             if !entry.isSpokenReplyOnly {
                 Button { model.copyResult() } label: { Label("Copy Result", systemImage: "doc.on.doc") }
                     .disabled(!canReuseResult)
@@ -1240,7 +1248,6 @@ private struct HistoryDetailView: View {
                     .help("Copies this dictation for a bug report: what you said, the inserted text, the app it was for, your microphone's name, any AI request and reply (which can include your dictionary words, selected text, or text from the app), what a coding agent's reply read aloud, and details about your setup.")
                     .accessibilityIdentifier(AccessibilityID.History.copyReport)
             }
-            Spacer()
         }
     }
 
@@ -1281,13 +1288,14 @@ private struct HistoryDetailView: View {
     }
 
     private var correctionHint: String {
+        let box = entry.outcome == .answered ? "Request" : "Heard"
         switch HistoryCorrectionSource.hint(selection: selectedText, selectionIsHeard: selectionIsHeard) {
         case .selectFirst:
-            return "Select words in a Heard box first, so the correction targets just that phrase."
+            return "Select words in a \(box) box first, so the correction targets just that phrase."
         case .usingHeard(let phrase):
-            return "Using your Heard selection \u{201C}\(phrase)\u{201D}."
+            return "Using your \(box) selection \u{201C}\(phrase)\u{201D}."
         case .selectHeard:
-            return "Select words in a Heard box to create a replacement or dictionary hint."
+            return "Select words in a \(box) box to create a replacement or dictionary hint."
         }
     }
 
@@ -1299,7 +1307,7 @@ private struct HistoryDetailView: View {
                     reason: entry.modeChoice, routedPhrase: entry.routedPhrase, triggerDisplay: entry.triggerKey) {
                     detailRow("How chosen", howChosen)
                 }
-                detailRow("AI rewrite", rewriteSummary)
+                detailRow(entry.outcome == .answered ? "AI answer" : "AI rewrite", rewriteSummary)
                 if let reasoning = entry.reasoning {
                     detailRow("Reasoning", reasoning)
                 }
@@ -1394,5 +1402,6 @@ func outcomeLabel(_ entry: HistoryEntry) -> String {
     case .commandNeedsChoice: "Needs a choice"
     case .commandCancelled: "Choice cancelled"
     case .rewrittenLater: "Rewritten later, not inserted"
+    case .answered: "Answered"
     }
 }

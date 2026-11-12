@@ -139,8 +139,10 @@ public struct SpokenHelp: Equatable, Sendable {
 
     public static let selectionGuidance = "Select text first, then say how to change it, such as \u{201C}make this shorter\u{201D}."
 
-    public static func selection(title: String) -> SpokenHelp {
-        SpokenHelp(title: title, status: selectionGuidance, rows: [])
+    public static let answerGuidance = "Select text first, then ask about it, such as \u{201C}summarize this\u{201D} or \u{201C}what do I need to do?\u{201D} The answer is read aloud."
+
+    public static func selection(title: String, answers: Bool = false) -> SpokenHelp {
+        SpokenHelp(title: title, status: answers ? answerGuidance : selectionGuidance, rows: [])
     }
 
     static func ruleRows(_ stages: [any PipelineStage]) -> [Row] {

@@ -35,9 +35,12 @@ struct RewriteRequestBuilder {
 
     func build() async -> Assembled {
         // Give the model output room at least as large as the input (prompt_design.md budget).
+        let answering = mode.answersAloud
         var sized = connection
-        sized.params.maxTokens = ContextBudget.maxTokens(
-            forSelectionChars: content.count, floor: connection.params.maxTokens)
+        if !answering {
+            sized.params.maxTokens = ContextBudget.maxTokens(
+                forSelectionChars: content.count, floor: connection.params.maxTokens)
+        }
 
         // Mode prompt = the task; shared fragments = style rules layered on top, passed separately (not
         // flattened) so PromptAssembler can label them and signal precedence (prompt_design.md).
@@ -49,7 +52,7 @@ struct RewriteRequestBuilder {
 
         // Context opt-in (mode.effectiveContext — privacy mode forces it all off). App identity is a context
         // channel; the browser URL is a local routing key only, never sent to the LLM (design.md §4.3/§4.4).
-        let ctx = mode.effectiveContext
+        let ctx = answering ? Mode.ContextOptIn() : mode.effectiveContext
         let bundleId = ctx.app ? capturedBundleId : nil
         let appName = bundleId.map { ContextProbe.appName(forBundleId: $0) ?? $0 }
 
@@ -75,7 +78,7 @@ struct RewriteRequestBuilder {
         let localeIdentifier = locale.language.languageCode?.identifier == "en"
             ? locale.identifier(.bcp47) : nil
 
-        let inputs = PromptInputs(
+        var inputs = PromptInputs(
             modePrompt: modePrompt, dictatedInstructions: instruction, content: content,
             tokens: issuedTokens, validTerms: validTerms, fuzzyCandidates: [],
             styleRules: styleRules,
@@ -83,6 +86,7 @@ struct RewriteRequestBuilder {
             appName: appName, bundleId: bundleId, fieldRole: nil,
             selectedText: nil, precedingText: precedingText,
             locale: localeIdentifier, currentDateTime: Self.formattedDateTime(now(), locale: locale, timeZone: timeZone))
+        inputs.reply = mode.reply
 
         // The exact prompt stored in history (design.md §4.7) — tokens, not their originals. Assembled once
         // and handed to RewriteService so the inputs aren't assembled twice.

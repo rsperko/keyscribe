@@ -16,11 +16,12 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         case commandNeedsChoice = "command_needs_choice"
         case commandCancelled = "command_cancelled"
         case rewrittenLater = "rewritten_later"
+        case answered
 
         public var isCommand: Bool {
             switch self {
             case .command, .commandFailed, .commandStarted, .commandNeedsChoice, .commandCancelled: true
-            case .inserted, .copied, .localFallback, .failed, .rewrittenLater: false
+            case .inserted, .copied, .localFallback, .failed, .rewrittenLater, .answered: false
             }
         }
     }
@@ -277,7 +278,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
     public var dataBoundaryLabels: [String] {
         var labels: [String] = []
         if cloudInvolved {
-            labels.append("Cloud rewrite")
+            labels.append(outcome == .answered ? "Cloud answer" : "Cloud rewrite")
             if redaction { labels.append("Best-effort redaction") }
             labels.append(contentsOf: contextLabels)
         }

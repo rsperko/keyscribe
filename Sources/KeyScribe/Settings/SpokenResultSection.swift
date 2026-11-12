@@ -98,14 +98,10 @@ struct SpokenResultSection: View {
         Binding(get: { model.spokenResult.connection }, set: { model.spokenResult.connection = $0 })
     }
 
-    private var voice: Binding<String> {
-        Binding(
-            get: { SpokenVoices.resolved(model.spokenResult.voice) },
-            set: { model.spokenResult.voice = $0 == SpokenVoices.recommended ? nil : $0 })
-    }
+    private var voice: Binding<String> { $model.chosenVoice }
 }
 
-private struct SpokenVoiceRows: View {
+struct SpokenVoiceRows: View {
     @ObservedObject var voice: SpokenVoiceModel
     let selection: Binding<String>
     @State private var preview: NaturalSpeech?

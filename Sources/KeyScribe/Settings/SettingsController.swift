@@ -180,6 +180,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         modes = ModesSettingsModel(
             repository: repository, voiceCommandsEnabled: settings.features.isEnabled(.voiceCommands),
             codingAgentsEnabled: settings.features.isEnabled(.codingAgents))
+        modes.setAskAboutSelectionEnabled(settings.features.isEnabled(.askAboutSelection))
         let agentsDir = AgentRuntime.bridgeDirectory(supportDir: repository.supportDir)
         codingAgents = CodingAgentsSettingsModel(
             agentsDir: agentsDir, setups: ConnectorSetupRegistry(directory: agentsDir),
@@ -286,6 +287,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
         codingAgents.load(spokenResult: settings.codingAgents.spokenResult)
         modes.setVoiceCommandsEnabled(settings.features.isEnabled(.voiceCommands))
         modes.setCodingAgentsEnabled(settings.features.isEnabled(.codingAgents))
+        modes.setAskAboutSelectionEnabled(settings.features.isEnabled(.askAboutSelection))
         speechModels.syncActive(settings.stt.engine)
         speechModels.syncSTT(settings.stt)
     }

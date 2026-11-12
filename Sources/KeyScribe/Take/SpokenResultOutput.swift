@@ -455,6 +455,10 @@ final class SpokenResultOutput {
     }
 
     private func ended() {
+        if silencer.resumesInterrupted, var interrupted = playing, interrupted.notice {
+            interrupted.replayed = true
+            queued.insert(interrupted, at: 0)
+        }
         playing = nil
         playingCheck = nil
         pendingRequested.subtract(playingRequested)

@@ -19,12 +19,14 @@ struct ModeAISection: View {
     @State private var fragmentFlush = PromptEditorFlush()
 
     var body: some View {
-        Section("Improve with AI") {
+        Section(mode.answersAloud ? "Answer with AI" : "Improve with AI") {
             if connections.isEmpty {
                 if let aiServiceIssueText {
                     IssueText(aiServiceIssueText)
                 }
-                Text("Add an AI service in Settings before a mode can rewrite the transcript.")
+                Text(mode.answersAloud
+                    ? "Add an AI service in Settings before this mode can answer."
+                    : "Add an AI service in Settings before a mode can rewrite the transcript.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 if let aiServiceIssueText {
@@ -33,10 +35,12 @@ struct ModeAISection: View {
                 SettingRow(
                     title: "AI service",
                     result: aiServiceLabel,
-                    help: "When set, the transcript is sent to this AI service to be rewritten before it is inserted. Only an explicit AI service can run a rewrite; if it fails, the transcript is inserted without rewriting — your words are never lost.")
+                    help: mode.answersAloud
+                        ? "The selected text and your spoken request are sent to this AI service to be answered. If it fails, nothing is read aloud and the selected text is not changed."
+                        : "When set, the transcript is sent to this AI service to be rewritten before it is inserted. Only an explicit AI service can run a rewrite; if it fails, the transcript is inserted without rewriting — your words are never lost.")
                 {
                     Picker("", selection: rewriteSelection) {
-                        Text("No cloud rewrite").tag("")
+                        Text(mode.answersAloud ? "None" : "No cloud rewrite").tag("")
                         ForEach(connections) { connection in
                             Text(connection.name).tag(connection.id)
                         }
@@ -46,8 +50,9 @@ struct ModeAISection: View {
                 }
                 if mode.aiRewrite != nil {
                     PromptEditor(
-                        title: "Writing instruction",
-                        placeholder: "Describe how the AI should rewrite your dictation\u{2026}",
+                        title: mode.answersAloud ? "Answer instruction" : "Writing instruction",
+                        placeholder: mode.answersAloud
+                            ? "Describe how the AI should answer\u{2026}" : "Describe how the AI should rewrite your dictation\u{2026}",
                         text: mode.aiRewrite?.prompt ?? "",
                         expandID: AccessibilityID.Mode.Editor.instructionExpand,
                         expandDoneID: AccessibilityID.Mode.Editor.instructionExpandDone
@@ -236,24 +241,10 @@ struct ModeAISection: View {
         Binding(
             get: { mode.aiRewrite?.connection ?? "" },
             set: { id in
-                if id.isEmpty {
-                    disableRewrite()
-                } else if mode.aiRewrite == nil {
-                    var updated = mode
-                    updated.aiRewrite = .init(
-                        connection: id,
-                        prompt: "Clean up grammar and punctuation. Keep my meaning and wording.")
-                    onUpdate(updated)
-                } else {
-                    updateRewrite { $0.connection = id }
-                }
+                var updated = mode
+                updated.chooseConnection(id)
+                onUpdate(updated)
             })
-    }
-
-    private func disableRewrite() {
-        var updated = mode
-        updated.aiRewrite = nil
-        onUpdate(updated)
     }
 
     private func updateRewrite(_ update: (inout Mode.AIRewrite) -> Void) {

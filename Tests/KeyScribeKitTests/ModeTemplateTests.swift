@@ -8,10 +8,10 @@ struct ModeTemplateTests {
     }
 
     @Test func templatesArePresentationOrderedOverTheSameCatalog() {
-        #expect(ModeStore.templates().map(\.id) == [
-            "polish", "message", "email", "markdown", "code", "shell", "ai-prompt", "edit-selection",
+        #expect(ModeStore.templates(askAboutSelection: true).map(\.id) == [
+            "polish", "message", "email", "markdown", "code", "shell", "ai-prompt", "edit-selection", "ask-about-selection",
         ])
-        #expect(Set(ModeStore.templates().map(\.id)) == Set(ModeStore.starterModes().map(\.id)))
+        #expect(Set(ModeStore.templates(askAboutSelection: true).map(\.id)) == Set(ModeStore.starterModes().map(\.id)))
     }
 
     @Test func templateSummariesNamePhrasesForPhraseCarryingModes() {

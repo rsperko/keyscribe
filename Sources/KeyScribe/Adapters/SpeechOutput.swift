@@ -86,7 +86,9 @@ final class SpeechSilencer {
     private var entries: [Entry] = []
     private weak var owner: (any SpeechSynthesizing)?
     private var claiming = false
+    private var resuming = false
     private var dictationHUDVisible = false
+    var onAvailableFirst: (() -> Void)?
     var onAvailable: (() -> Void)?
     private(set) var isRecording = false
 
@@ -100,14 +102,24 @@ final class SpeechSilencer {
         return speech
     }
 
-    func speak(_ text: String, voice: String?, with speech: any SpeechSynthesizing) {
+    func speak(_ text: String, voice: String?, with speech: any SpeechSynthesizing, resumingInterrupted: Bool = false) {
         guard !isRecording else { return }
         owner = speech
         claiming = true
+        resuming = resumingInterrupted
         entries = entries.filter { $0.speech != nil }
         for entry in entries where entry.speech !== speech { entry.speech?.stop() }
         claiming = false
+        resuming = false
         speech.speak(text, voice: voice)
+    }
+
+    var mayInterrupt: Bool { !isRecording && !claiming && !dictationHUDVisible }
+    var resumesInterrupted: Bool { claiming && resuming }
+
+    private func available() {
+        onAvailableFirst?()
+        onAvailable?()
     }
 
     func isAvailable(for speech: any SpeechSynthesizing) -> Bool {
@@ -120,7 +132,7 @@ final class SpeechSilencer {
         guard visible != dictationHUDVisible else { return }
         dictationHUDVisible = visible
         if !visible {
-            onAvailable?()
+            available()
             return
         }
         entries = entries.filter { $0.speech != nil }
@@ -129,7 +141,7 @@ final class SpeechSilencer {
 
     func released(_ speech: any SpeechSynthesizing) {
         if owner === speech { owner = nil }
-        onAvailable?()
+        available()
     }
 
     func recordingStarted() {
@@ -141,7 +153,7 @@ final class SpeechSilencer {
     func recordingEnded() {
         guard isRecording else { return }
         isRecording = false
-        onAvailable?()
+        available()
     }
 }
 
@@ -217,6 +229,14 @@ final class NaturalSpeech: SpeechSynthesizing {
     private let attempts: SpokenAttempts?
     private let details: @Sendable (Bool) -> [SpokenAttempt.Detail]
     private let busyWait: Duration
+    private let sentenceAtATime: Bool
+    private let followingLimit: (String) -> Duration
+    private var playingSentence: String?
+    private var following: [String] = []
+    private var prepared: [SpokenAudio] = []
+    private var restFailed = false
+    private var awaitingNext = false
+    private var prefetch: Task<Void, Never>?
     private(set) var attempt: String?
     private(set) var macOSReason: String?
     var onStarted: (() -> Void)?
@@ -229,9 +249,12 @@ final class NaturalSpeech: SpeechSynthesizing {
         fallbackLimit: @escaping (String) -> Duration = NaturalSpeech.fallbackLimit,
         synthesisLimit: @escaping (String) -> Duration = NaturalSpeech.fallbackLimit,
         attempts: SpokenAttempts? = nil, busyWait: Duration = NaturalSpeech.busyWait,
-        details: @escaping @Sendable (Bool) -> [SpokenAttempt.Detail] = SpokenAttempts.environment
+        details: @escaping @Sendable (Bool) -> [SpokenAttempt.Detail] = SpokenAttempts.environment,
+        followingLimit: @escaping (String) -> Duration = NaturalSpeech.followingLimit, sentenceAtATime: Bool = false
     ) {
         self.attempts = attempts
+        self.followingLimit = followingLimit
+        self.sentenceAtATime = sentenceAtATime
         self.busyWait = busyWait
         self.details = details
         self.ready = ready
@@ -243,6 +266,10 @@ final class NaturalSpeech: SpeechSynthesizing {
         self.synthesisLimit = synthesisLimit
         player.onFinished = { [weak self] in
             guard let self, self.active == .player else { return }
+            if self.sentenceAtATime, self.player.lastPlaybackFailed, let sentence = self.playingSentence {
+                return self.readWithMacOS([sentence] + self.following)
+            }
+            guard self.following.isEmpty else { return self.playFollowing() }
             self.record { $0.playback = self.player.lastPlaybackFailed ? .failed : .finished }
             self.attempts?.ended(self.attempt)
             self.ended(.player)
@@ -287,6 +314,10 @@ final class NaturalSpeech: SpeechSynthesizing {
         }
     }
 
+    nonisolated static func followingLimit(_ text: String) -> Duration {
+        .seconds(3) + .milliseconds(200 * text.split(whereSeparator: { $0.isWhitespace }).count)
+    }
+
     nonisolated static func fallbackLimit(_ text: String) -> Duration {
         .seconds(10) + .milliseconds(600 * text.split(whereSeparator: { $0.isWhitespace }).count)
     }
@@ -294,16 +325,19 @@ final class NaturalSpeech: SpeechSynthesizing {
     func speak(_ text: String, voice: String?) {
         silence()
         let voice = SpokenVoices.resolved(voice)
+        let sentences = sentenceAtATime ? SpokenSentences.split(text) : []
+        let first = sentences.count > 1 ? sentences[0] : text
+        following = sentences.count > 1 ? Array(sentences.dropFirst()) : []
         macOSReason = nil
         attempt = attempts?.begin(text: text, voice: voice)
         if unfinished.count > 0 { record { $0.notes.append("Started while an earlier synthesis was still finishing.") } }
-        guard ready() else { return speakWithFallback(text, because: "the natural voice isn\u{2019}t installed") }
+        guard ready() else { return speakWholeWithFallback(text, because: "the natural voice isn\u{2019}t installed") }
         guard unfinished.count < Self.unfinishedLimit else {
-            return speakWithFallback(text, because: "the natural voice was still finishing earlier replies")
+            return speakWholeWithFallback(text, because: "the natural voice was still finishing earlier replies")
         }
         let synthesize = synthesize
         let unfinished = unfinished
-        let limit = synthesisLimit(text)
+        let limit = synthesisLimit(first)
         let seconds = Double(limit.components.seconds) + Double(limit.components.attoseconds) / 1e18
         active = .making
         unfinished.begin()
@@ -316,7 +350,7 @@ final class NaturalSpeech: SpeechSynthesizing {
                 made = .success(try await runWithDeadline(
                     seconds: seconds,
                     operation: {
-                        let audio = try await Self.waitingWhileBusy(upTo: busyWait) { try await synthesize(text, voice) }
+                        let audio = try await Self.waitingWhileBusy(upTo: busyWait) { try await synthesize(first, voice) }
                         return (audio, details(true))
                     },
                     onSettled: { unfinished.end() }))
@@ -333,6 +367,7 @@ final class NaturalSpeech: SpeechSynthesizing {
                     $0.details = details
                 }
                 self.active = .player
+                self.playingSentence = first
                 if self.player.play(audio.wav) {
                     self.record {
                         $0.reader = .natural
@@ -340,6 +375,7 @@ final class NaturalSpeech: SpeechSynthesizing {
                     }
                     self.outcome(true, nil, self.attempt)
                     self.onStarted?()
+                    self.prepareFollowing(voice: voice)
                     return
                 }
                 reason = "the audio couldn\u{2019}t be played"
@@ -351,7 +387,7 @@ final class NaturalSpeech: SpeechSynthesizing {
             }
             Log.agents.error("natural voice unavailable; using the system voice")
             self.outcome(false, reason, self.attempt)
-            self.speakWithFallback(text, because: reason)
+            self.speakWholeWithFallback(text, because: reason)
         }
         making = task
     }
@@ -370,6 +406,67 @@ final class NaturalSpeech: SpeechSynthesizing {
     private func record(_ change: (inout SpokenAttempt) -> Void) {
         guard let attempt else { return }
         attempts?.update(attempt, change)
+    }
+
+    private func speakWholeWithFallback(_ text: String, because reason: String) {
+        following = []
+        speakWithFallback(text, because: reason)
+    }
+
+    private func prepareFollowing(voice: String) {
+        let texts = following
+        guard !texts.isEmpty else { return }
+        let synthesize = synthesize
+        let busyWait = busyWait
+        let unfinished = unfinished
+        let limits = texts.map(followingLimit)
+        var task: Task<Void, Never>?
+        task = Task { [weak self] in
+            for (text, limit) in zip(texts, limits) {
+                let seconds = Double(limit.components.seconds) + Double(limit.components.attoseconds) / 1e18
+                unfinished.begin()
+                let audio = try? await runWithDeadline(
+                    seconds: seconds,
+                    operation: { try await Self.waitingWhileBusy(upTo: busyWait) { try await synthesize(text, voice) } },
+                    onSettled: { unfinished.end() })
+                guard !Task.isCancelled, let self, self.prefetch == task else { return }
+                if let audio { self.prepared.append(audio) } else { self.restFailed = true }
+                if self.awaitingNext {
+                    self.awaitingNext = false
+                    self.playFollowing()
+                }
+                if audio == nil { return }
+            }
+        }
+        prefetch = task
+    }
+
+    private func playFollowing() {
+        if !prepared.isEmpty {
+            let audio = prepared.removeFirst()
+            let sentence = following.removeFirst()
+            if player.play(audio.wav) {
+                playingSentence = sentence
+                return
+            }
+            following.insert(sentence, at: 0)
+            restFailed = true
+        }
+        guard restFailed else {
+            awaitingNext = true
+            return
+        }
+        readWithMacOS(following)
+    }
+
+    private func readWithMacOS(_ sentences: [String]) {
+        following = []
+        prepared = []
+        playingSentence = nil
+        prefetch?.cancel()
+        prefetch = nil
+        Log.agents.error("natural voice could not read a sentence; using the system voice")
+        speakWithFallback(sentences.joined(separator: " "), because: "the natural voice failed")
     }
 
     private func speakWithFallback(_ text: String, because reason: String) {
@@ -406,6 +503,13 @@ final class NaturalSpeech: SpeechSynthesizing {
         active = nil
         making?.cancel()
         making = nil
+        prefetch?.cancel()
+        prefetch = nil
+        following = []
+        prepared = []
+        playingSentence = nil
+        restFailed = false
+        awaitingNext = false
         watchdog?.cancel()
         watchdog = nil
         player.stop()

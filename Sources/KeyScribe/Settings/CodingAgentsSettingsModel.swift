@@ -81,6 +81,10 @@ final class CodingAgentsSettingsModel: ObservableObject {
         didSet { if !loadingSpokenResult, spokenResult != oldValue { onSpokenResultChange?(spokenResult) } }
     }
     var onSpokenResultChange: ((SpokenResultSettings) -> Void)?
+    var chosenVoice: String {
+        get { SpokenVoices.resolved(spokenResult.voice) }
+        set { spokenResult.voice = newValue == SpokenVoices.recommended ? nil : newValue }
+    }
     var onOpenAIServices: (() -> Void)?
     var voice: SpokenVoiceModel?
     private var loadingSpokenResult = false

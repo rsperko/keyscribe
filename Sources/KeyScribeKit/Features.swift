@@ -63,5 +63,11 @@ public struct Feature: CaseIterable, Hashable, Sendable {
         summary: "Send what you say to a coding agent conversation running in a terminal, such as Claude Code or Pi, and hear when it finishes. Requires installing the agent connector."
     )
 
-    public static let allCases: [Feature] = [consumptionDrivenRestore, voiceCommands, findInApps, codingAgents]
+    public static let askAboutSelection = Feature(
+        id: "ask_about_selection",
+        title: "Ask about selected text",
+        summary: "Adds an Ask About Selection mode template: select text, use its shortcut, and ask a question. The selected text and your question go to the mode\u{2019}s AI service, and the answer is shown and read aloud. Your text is not changed."
+    )
+
+    public static let allCases: [Feature] = [consumptionDrivenRestore, voiceCommands, findInApps, codingAgents, askAboutSelection]
 }

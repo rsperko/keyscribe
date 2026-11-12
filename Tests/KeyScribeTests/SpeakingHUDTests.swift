@@ -17,6 +17,142 @@ struct SpeakingHUDTests {
         #expect(hud.shownSummary == "Done.")
     }
 
+    @Test func anAnswerShowsItsTextAtOnceWithoutChangingTheRememberedChoice() {
+        let defaults = scratchDefaults()
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults)
+        hud.show(name: "Ask About Selection", summary: "Reply by Friday.", answer: true, preparing: true)
+        #expect(hud.showsSummary)
+        #expect(hud.status == SpeakingHUDLayout.preparingWithEscape)
+        hud.speaking()
+        #expect(hud.status == SpeakingHUDLayout.withEscape)
+        hud.hide()
+        #expect(!hud.showsSummary)
+        #expect(!SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults).showsSummary)
+    }
+
+    @Test func collapsingAnAnswerLeavesTheRememberedChoiceAlone() {
+        let defaults = scratchDefaults()
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults)
+        defer { hud.hide() }
+        hud.show(name: "Ask", summary: "Reply by Friday.", answer: true, preparing: true)
+        hud.toggleSummary()
+        #expect(!hud.showsSummary)
+        hud.toggleSummary()
+        #expect(hud.showsSummary)
+        hud.hide()
+        hud.show(name: "backend", summary: "Done.")
+        #expect(!hud.showsSummary)
+        #expect(!SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults).showsSummary)
+    }
+
+    @Test func aFinishedAnswerStaysWithItsTextAndEscapeClosesIt() {
+        let escape = FakeChordRegistrar()
+        let hud = SpeakingHUDController(escape: escape, defaults: scratchDefaults())
+        defer { hud.hide() }
+        var closed = 0
+        var copied = 0
+        hud.onClose = { closed += 1 }
+        var stopped = 0
+        hud.onStop = { stopped += 1 }
+        hud.onCopy = { copied += 1; return true }
+        hud.show(name: "Ask", summary: "Reply by Friday.", answer: true, preparing: true)
+        escape.lastRegistrations.first?.onPressed()
+        #expect(stopped == 1)
+        #expect(closed == 0)
+        hud.finished()
+        #expect(hud.shownName == "Ask")
+        #expect(hud.shownSummary == "Reply by Friday.")
+        #expect(hud.showsSummary)
+        #expect(hud.isFinished)
+        #expect(hud.status == SpeakingHUDLayout.finishedWithEscape)
+        escape.lastRegistrations.first?.onPressed()
+        #expect(closed == 1)
+        #expect(stopped == 1)
+        #expect(hud.copy())
+        #expect(copied == 1)
+    }
+
+    private func settle(until done: () -> Bool) async {
+        for _ in 0..<200 where !done() { try? await Task.sleep(for: .milliseconds(10)) }
+    }
+
+    private func answerPanel(readingTime: Duration = .milliseconds(50), voiceOver: Bool = false) -> (SpeakingHUDController, () -> Int) {
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults())
+        hud.readingTime = { _ in readingTime }
+        hud.voiceOverRunning = { voiceOver }
+        var closed = 0
+        hud.onClose = { closed += 1 }
+        hud.show(name: "Ask", summary: "Reply by Friday.", answer: true, preparing: true)
+        return (hud, { closed })
+    }
+
+    @Test func aFinishedAnswerClosesItselfAfterTimeToReadIt() async {
+        let (hud, closed) = answerPanel()
+        defer { hud.hide() }
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(closed() == 0)
+        hud.finished()
+        await settle { closed() == 1 }
+        #expect(closed() == 1)
+    }
+
+    @Test func hoveringHoldsAFinishedAnswerUntilThePointerLeaves() async {
+        let (hud, closed) = answerPanel()
+        defer { hud.hide() }
+        hud.finished()
+        hud.hover(true)
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(closed() == 0)
+        hud.hover(false)
+        await settle { closed() == 1 }
+        #expect(closed() == 1)
+    }
+
+    @Test func underVoiceOverAFinishedAnswerWaitsToBeClosed() async {
+        let (hud, closed) = answerPanel(voiceOver: true)
+        defer { hud.hide() }
+        hud.finished()
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(closed() == 0)
+    }
+
+    @Test func aNewAnswerCancelsTheEarlierOnesCountdown() async {
+        let (hud, closed) = answerPanel(readingTime: .milliseconds(80))
+        defer { hud.hide() }
+        hud.finished()
+        hud.show(name: "Ask", summary: "Second.", answer: true, preparing: true)
+        try? await Task.sleep(for: .milliseconds(200))
+        #expect(closed() == 0)
+    }
+
+    @Test func readingTimeGrowsWithTheAnswerWithinBounds() {
+        #expect(SpeakingHUDLayout.readingTime(for: "Reply by Friday.") == .seconds(8))
+        let long = Array(repeating: "word", count: 60).joined(separator: " ")
+        #expect(SpeakingHUDLayout.readingTime(for: long) == .seconds(18))
+        let huge = Array(repeating: "word", count: 400).joined(separator: " ")
+        #expect(SpeakingHUDLayout.readingTime(for: huge) == .seconds(30))
+    }
+
+    @Test func aNewAnswerAfterAFinishedOneClaimsEscapeAgain() {
+        let escape = FakeChordRegistrar()
+        let hud = SpeakingHUDController(escape: escape, defaults: scratchDefaults())
+        defer { hud.hide() }
+        hud.show(name: "Ask", summary: "First.", answer: true, preparing: true)
+        hud.finished()
+        hud.show(name: "Ask", summary: "Second.", answer: true, preparing: true)
+        #expect(!hud.isFinished)
+        #expect(!escape.lastRegistrations.isEmpty)
+        #expect(hud.status == SpeakingHUDLayout.preparingWithEscape)
+    }
+
+    @Test func aPanelAlreadyShowingTakesTheNextStatus() {
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults())
+        defer { hud.hide() }
+        hud.show(name: "backend", summary: "Done.")
+        hud.show(name: "Ask", summary: "Reply by Friday.", answer: true, preparing: true)
+        #expect(hud.status == SpeakingHUDLayout.preparingWithEscape)
+    }
+
     @Test func showingTheSummaryIsRememberedAcrossLaunches() {
         let defaults = scratchDefaults()
         let first = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults)

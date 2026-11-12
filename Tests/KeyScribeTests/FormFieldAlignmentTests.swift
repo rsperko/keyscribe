@@ -1,4 +1,5 @@
 import AppKit
+import KeyScribeKit
 import SwiftUI
 import Testing
 @testable import KeyScribeApp
@@ -58,5 +59,18 @@ struct FormFieldAlignmentTests {
             CommittedTextField("Name", text: "foo ", validation: nil) { _ in }
         }.formStyle(.grouped))
         #expect(fields.map(\.alignment) == [.natural])
+    }
+
+    @Test func theModeEditorKeepsEveryFieldLeading() {
+        var mode = Mode(id: "ask", name: "Ask About Selection")
+        mode.source = .selection
+        mode.output = .speak
+        let fields = render(ModeEditorView(
+            mode: mode, allModes: [mode], connections: [], fragmentIds: [], fragmentNames: [:],
+            onUpdate: { _ in }, onAddFragmentFile: { _ in nil }, onLoadFragmentBody: { _ in "" },
+            onSaveFragmentBody: { _, _ in }, onCloseFragment: { _, _ in }, onRevealFragment: { _ in }, onDelete: {})
+            .environmentObject(HotkeyRecordingState()))
+        #expect(!fields.isEmpty)
+        #expect(fields.allSatisfy { $0.alignment == .natural })
     }
 }
