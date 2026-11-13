@@ -60,6 +60,9 @@ Read before adding or changing a speech model, an engine adapter, the no-speech 
 
 ## STT engines
 
+Before adding a model, check `docs/reference/stt_benchmarks.md` *Models evaluated and not shipped*: a model
+measured and set aside there needs the reason it names to reopen it.
+
 Every shipped model is one entry in `SpeechModelCatalog.all`, with in-app download/install; its family
 is an `EngineKind` and its bias capability is `supportsRecognitionBias`. **Read the catalog for the
 current list — never restate it here.** Where a model biases at all, the mechanism is engine-family

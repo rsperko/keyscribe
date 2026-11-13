@@ -126,6 +126,84 @@ Apple rows were measured on the same corpus on 2026-09-25, with the fallback for
 | Parakeet TDT-CTC 110M | 9.8% | 0.85 | 0.69 | 0.008 | 330 MB |
 | Apple Dictation (fallback) | 12.6% | 0.64 | 0.53 | 0.029 | managed |
 
+## Models evaluated and not shipped
+
+Check here before wiring up a new model: a model already set aside needs a reason to reopen, not a re-run.
+Each entry names what would reopen it.
+
+### Measured on our corpus and set aside
+
+**Nemotron Unified ASR 0.6B** (`nvidia/nemotron-labs-unified-asr-0.6b`, the FluidAudio CoreML export). A
+multilingual sibling of Parakeet Unified: 25 European languages, with punctuation and capitalization. As
+measured, 2026-11-12, on FluidAudio `d653a34` (v0.18.3 plus later main commits), same corpora, day, and
+machine as its comparison rows, no dictionary, full-precision (fp16) encoder with automatic language:
+
+| Model | Quiet | Noisy | Average | Recall noisy | RTF quiet / noisy | Commands | Download |
+|---|---|---|---|---|---|---|---|
+| Parakeet Ultra | 7.1% | 9.3% | 8.2% | 77% | 0.009 / 0.013 | 28 / 35 | 630 MB |
+| Parakeet Unified 0.6B (English) | 7.4% | 9.8% | 8.6% | 78% | 0.010 / 0.014 | 30 / 35 | 614 MB |
+| Nemotron Unified 0.6B | 7.8% | 10.8% | 9.3% | 70% | 0.011 / 0.018 | 30 / 35 | 1.2 GB |
+
+"Commands" is `--commands-check corpus/commands` on the real no-LLM pipeline. Both Parakeet rows matched
+the 2026-10-13 comparison exactly, so the newer FluidAudio did not move them. Forcing the English language
+prompt instead of automatic detection did not help (7.8% quiet, 11.3% noisy). Silence and hiss transcribed
+to clean empty text, and the first inference was not slow enough to need the warm-up clip.
+
+Set aside because it trails both Parakeet models on English, most of all in noise, at twice Parakeet
+Unified's download. Its one distinct offer, punctuation in European languages at Parakeet speed, is
+already covered more accurately (if more slowly) by Whisper Large v3 Turbo and Qwen3-ASR 1.7B. **What
+would reopen it:** a non-English corpus showing it ahead of those models, since this English-only
+corpus cannot measure the case it was built for. Upstream measured its int8 encoder losing accuracy on
+French, so test fp16 there.
+
+**Nemotron Speech 3.5 (English)** (`nemotron-speech-streaming-en-0.6b`, the streaming model run in batch)
+was added and removed on 2026-06-29 because it emitted no punctuation. No measurement of it survives.
+Nemotron Unified above is the punctuating successor, so this one has nothing left to reopen.
+
+**Moonshine Base (English)** (`moonshine-base-en`, ONNX Runtime through a prebuilt `Moonshine.xcframework`,
+141 MB of model files) shipped from the start and was removed on 2026-09-14. It was the least accurate
+model offered: as measured, 2026-06-30, 14.9% WER quiet and 26.7% noisy (an 11.9-point noise penalty),
+RTF 0.024, with no recognition bias. Its dependency was also a liability: on 2026-08-13 upstream
+re-uploaded the release asset and moved the tag in place, which broke every fresh checkout at
+`swift package resolve` (*Upstream dependency mutation* in `docs/development/areas/dependencies.md`).
+Upstream can also loop-repeat on short audio. **What would reopen it:** a release that is competitive
+with the shipped small models on English and that can be pinned without a mutable binary artifact.
+
+### Passed over without a local run
+
+These were weighed from published numbers only. Vendor figures are the vendor's, not ours.
+
+- **NVIDIA Canary-Qwen 2.5B** was dropped by decision before 2026-06-22. Neither the measurements nor the
+  reason survive. A community CoreML conversion exists (`phequals/canary-qwen-2.5b-coreml-*`), so a re-look
+  would be an ordinary engine add. **Reopen if** a port runs on Apple silicon at a size worth offering.
+- **FluidAudio Phonon-2** (English-only retrain of Parakeet TDT v3), reviewed 2026-10-13. The vendor gives
+  2.47% LibriSpeech test-clean WER, behind Parakeet Ultra's 2.13%, at about 360 MB. Ultra shipped instead.
+  **Reopen if** a smaller English download is wanted; Phonon-2.5 (multilingual) is a separate release, not
+  reviewed as of 2026-11-12.
+- **FluidAudio Parakeet Redux** (2-bit Parakeet TDT v3, about 220 MB), reviewed 2026-10-13. The vendor gives
+  2.71% / 5.12% LibriSpeech clean / other, behind Ultra's 2.13% / 3.81%. It needs macOS 15 or later and
+  takes minutes to compile on its first Neural Engine load. **Reopen if** a small-download option is wanted.
+- **Voxtral Mini 3B** (on-device, through speech-swift), reviewed 2026-10-13. It is larger than what ships
+  with no evidence that it is more accurate. **Reopen if** a published comparison puts it ahead of
+  Qwen3-ASR 1.7B.
+
+### Still open
+
+**Cohere Transcribe 2B** (`cohere-transcribe-03-2026`, Apache 2.0, 14 languages) is queued, not rejected.
+Cohere reports 5.42% average English WER on the Open ASR Leaderboard. It earns a place only if it clearly
+beats Qwen3-ASR 1.7B on our corpus. As reviewed, 2026-11-12, from each port's published numbers:
+
+- **MLX, through speech-swift (the route to take).** The int8 build is 2.25 GB with a 3.3 GB footprint
+  and runs at RTF 0.016 on an M5 Pro, near Qwen3-ASR 1.7B. It needs our speech-swift fork rebased onto an
+  upstream that pulls in `mlx-swift-lm` from a branch rather than a release.
+- **CoreML, through FluidAudio (already in our pin, but too slow for dictation).** Its encoder always
+  processes a padded 35 s window, so every dictation, however short, costs about 1.5 s warm on an M5 Pro;
+  throughput is under 2× real time on an M2, the first call takes about 10 s, and the first load compiles
+  for minutes.
+- **Both need the language up front.** The model is conditioned on a language prompt: FluidAudio requires
+  it and speech-swift takes it as a hint. KeyScribe has no language setting, so first establish what the
+  model does with no hint.
+
 ## What to read into this (and what not to)
 
 - **The top three are a wash.** 5.7 / 5.8 / 6.0% biased WER is well inside the noise of a
