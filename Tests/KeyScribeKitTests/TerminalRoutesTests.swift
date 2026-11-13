@@ -7,6 +7,8 @@ struct TerminalRoutesTests {
         var table: [Int: TerminalProcess] = [:]
         var outputs: [[String]: String] = [:]
         var owners: [String: [String: Int]] = [:]
+        var listening: [Int: Set<String>] = [:]
+        var socketsUnreadable = false
         var unreadableTTYs: Set<String> = []
         var childrenUnreadable = false
         var namesUnreadable = false
@@ -37,6 +39,10 @@ struct TerminalRoutesTests {
             return table.values.filter { $0.parent == pid }.sorted { $0.pid < $1.pid }
         }
         func socketOwners(in directory: String) -> [String: Int]? { owners[directory] }
+        func listeningSockets(of pid: Int) -> Set<String>? {
+            guard !socketsUnreadable, table[pid] != nil else { return nil }
+            return listening[pid] ?? []
+        }
         func run(_ argv: [String]) -> (status: Int32, output: String) {
             ran.append(argv)
             return outputs[argv].map { (0, $0) } ?? (1, "")
@@ -180,8 +186,8 @@ struct TerminalRoutesTests {
     @Test func aTerminalOpenHasNoRouteForIsUnsupportedAndOnlyComesForward() {
         let facts = Facts()
             .add(30, parent: 10, tty: "/dev/ttys030", ["claude"])
-            .add(10, parent: 1, ["kitty"], app: "net.kovidgoyal.kitty")
-        #expect(TerminalRoutes.plan(agent: 30, facts: facts) == [.unsupported(app: "net.kovidgoyal.kitty", pid: 10)])
+            .add(10, parent: 1, ["unrouted"], app: "dev.example.unrouted")
+        #expect(TerminalRoutes.plan(agent: 30, facts: facts) == [.unsupported(app: "dev.example.unrouted", pid: 10)])
     }
 
     @Test func anAgentNoAppOwnsHasNoSteps() {
@@ -493,6 +499,7 @@ struct TerminalRoutesTests {
     @Test func onlyTheEnvironmentOpenAndTheFrontCheckReadIsKept() {
         #expect(ResolvedSurfaces.builtIn.environmentKeys == [
             "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "TMUX", "ZELLIJ_PANE_ID", "WARP_FOCUS_URL", "CMUX_SURFACE_ID",
+            "WEZTERM_PANE", "WEZTERM_UNIX_SOCKET", "KITTY_WINDOW_ID", "KITTY_LISTEN_ON",
         ])
     }
 }

@@ -1283,7 +1283,8 @@ final class AgentRuntime {
             transport: server, discovery: discovery,
             names: AgentNameStore(directory: directory, legacyAgent: legacyAgent),
             focus: AgentTerminalFocus(
-                plan: AgentTerminalFocus.plan(surfaces), connector: { session, definition in await box.hub?.focusInPlace(session, definition: definition) ?? .notFound }),
+                plan: AgentTerminalFocus.plan(surfaces), connector: { session, definition in await box.hub?.focusInPlace(session, definition: definition) ?? .notFound },
+                noun: AgentTerminalFocus.noun(surfaces)),
             front: AgentFront(surfaces: surfaces), glance: AgentFront.confirmingWithoutAsking(surfaces), exclusions: exclusions,
             places: Self.places(surfaces: surfaces, sources: placeSources))
         box.hub = hub

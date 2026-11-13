@@ -654,7 +654,13 @@ names a particular terminal or multiplexer: what Open does for an agent it holds
 in front. Open's answer is ordered actions, so a terminal that must come forward before it can select a tab
 says so itself. A
 terminal that names each surface with an id its processes carry (cmux) is selected by that id, so it works
-for every agent. When no process shows the agent's surface id, the agent's connector is asked instead:
+for every agent. A terminal with its own command line (WezTerm) is selected through that command, against the
+instance that owns the agent's pane, and counts only once the terminal reports that pane focused: WezTerm cannot
+raise another of its windows, so a pane in a window behind the front one reads “Brought WezTerm forward.
+Couldn’t find docs’s pane”. kitty is selected the same way, and also raises the window, but only once the
+user has turned on its remote control (`allow_remote_control` and `listen_on`, which the FAQ explains);
+until then it only comes forward (“Select docs’s terminal yourself”), and KeyScribe never edits its
+configuration. When no process shows the agent's surface id, the agent's connector is asked instead:
 KeyScribe asks it to run the terminal's own focus command for its surface, and only a connector that announced it can is asked. An older
 connector says how to get there: “Brought cmux forward. Update the Claude Code connector in Settings, then run
 /reload-plugins in docs to open its tab”. Every layer is found by something stable — a pane id, a tty, or the terminal's own
@@ -667,7 +673,7 @@ The receipt stays short when it worked: “Opened docs” only when every layer 
 “Asked Warp to show docs” when the terminal accepted a session link but cannot report which tab it chose.
 Anything less says what came forward, what is still missing, and who the recipient now is — “Brought
 Ghostty forward. Couldn’t find docs’s tab. Your recipient is docs”. The missing part names the layer that
-fell short: the terminal’s tab, a multiplexer’s pane (“Couldn’t select docs’s herdr pane”, or “Couldn’t
+fell short: the terminal’s tab (its pane, in a terminal whose route calls its places panes), a multiplexer’s pane (“Couldn’t select docs’s herdr pane”, or “Couldn’t
 confirm docs’s Zellij pane” when a session open in several windows cannot say which one moved), or a
 terminal with no tab route, where the next step is the user’s (“Select docs’s terminal yourself”). These
 stay up long enough to read. A multiplexer command counts only when it succeeded, or when its own answer

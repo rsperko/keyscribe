@@ -16,7 +16,7 @@ public struct ConnectorSurfaces: Equatable, Sendable, Encodable {
     public var fingerprint: String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return (try? encoder.encode(self)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+        return (try? encoder.encode(focusDefinitions)).map { String(decoding: $0, as: UTF8.self) } ?? ""
     }
 
     public var configFields: [String: Any] {

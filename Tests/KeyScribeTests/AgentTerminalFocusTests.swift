@@ -80,7 +80,33 @@ struct AgentTerminalFocusTests {
             activate: { pid in
                 calls.record("activate \(pid)")
                 return apps[pid]
-            })
+            },
+            noun: { $0 == Self.wezterm ? "pane" : "tab" })
+    }
+
+    nonisolated private static let wezterm = "com.github.wez.wezterm"
+    private static let weztermFocus = ["/w/wezterm", "activate-pane", "--pane-id", "1"]
+    private static let weztermCheck = ["/w/wezterm", "list-clients"]
+    private static let weztermSteps: [OpenAction] = [
+        .select(.command(PaneCommand(weztermFocus, until: FocusWalk(check: weztermCheck, header: ["PID", "FOCUS"], value: "1", steps: 1)))),
+        .activate(app: wezterm, pid: 10),
+    ]
+
+    @Test func aTerminalFocusedByItsOwnCommandIsOpenedOnlyOnceItReportsThePaneFocused() async {
+        let calls = Calls()
+        let answers = Answers([Self.weztermCheck.joined(separator: " "): ["PID FOCUS\n10 5", "PID FOCUS\n10 1"]])
+        #expect(await focuser(Self.weztermSteps, answers: answers, apps: [10: "WezTerm"], calls: calls)
+            .focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .exact)
+        #expect(calls.events == [
+            "plan", Self.weztermCheck.joined(separator: " "), Self.weztermFocus.joined(separator: " "), Self.weztermCheck.joined(separator: " "),
+            "activate 10",
+        ])
+    }
+
+    @Test func aPaneTheTerminalCannotBringToTheFrontLeavesTheTerminalAppAndNamesWhatTheRouteCallsItsPlace() async {
+        let answers = Answers([Self.weztermCheck.joined(separator: " "): ["PID FOCUS\n10 5"]])
+        let focus = focuser(Self.weztermSteps, answers: answers, apps: [10: "WezTerm"], calls: Calls())
+        #expect(await focus.focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == .app("WezTerm", noun: "pane"))
     }
 
     @Test func theOpenIsPlannedWithTheEnvironmentTheConnectorReported() async {
@@ -355,6 +381,7 @@ struct AgentTerminalFocusTests {
         (AgentFocusResult.exact, HUDState.commandDone(summary: "Opened backend", detail: "Coding agent")),
         (.requested("Warp"), .commandDone(summary: "Asked Warp to show backend", detail: "Coding agent")),
         (.app("Ghostty"), .advisory(message: "Brought Ghostty forward. Couldn\u{2019}t find backend\u{2019}s tab. Your recipient is backend")),
+        (.app("WezTerm", noun: "pane"), .advisory(message: "Brought WezTerm forward. Couldn\u{2019}t find backend\u{2019}s pane. Your recipient is backend")),
         (.pane(app: "Ghostty", multiplexer: "Zellij", uncertain: true),
          .advisory(message: "Brought Ghostty forward. Couldn\u{2019}t confirm backend\u{2019}s Zellij pane. Your recipient is backend")),
         (.pane(app: "Ghostty", multiplexer: "herdr", uncertain: false),
@@ -363,8 +390,13 @@ struct AgentTerminalFocusTests {
         (.notAllowed("Ghostty"), .error(
             message: "Brought Ghostty forward. Couldn\u{2019}t select backend\u{2019}s tab without access to Ghostty. Your recipient is backend",
             action: .openAutomationSettings)),
+        (.notAllowed("Example", noun: "pane"), .error(
+            message: "Brought Example forward. Couldn\u{2019}t select backend\u{2019}s pane without access to Example. Your recipient is backend",
+            action: .openAutomationSettings)),
         (.connectorOutdated("cmux"), .advisory(
             message: "Brought cmux forward. Update the Claude Code connector in Settings, then run /reload-plugins in backend to open its tab. Your recipient is backend")),
+        (.connectorOutdated("Example", noun: "pane"), .advisory(
+            message: "Brought Example forward. Update the Claude Code connector in Settings, then run /reload-plugins in backend to open its pane. Your recipient is backend")),
         (.none, .advisory(message: "Nothing showing backend could be brought forward. Your recipient is backend")),
     ])
     func eachResultSaysWhatHappened(result: AgentFocusResult, state: HUDState) {
@@ -375,10 +407,12 @@ struct AgentTerminalFocusTests {
         (AgentFocusResult.exact, "Opened backend"),
         (.requested("Warp"), "Asked Warp to show backend"),
         (.app("Ghostty"), "Brought Ghostty forward; backend\u{2019}s tab not found"),
+        (.app("WezTerm", noun: "pane"), "Brought WezTerm forward; backend\u{2019}s pane not found"),
         (.pane(app: "Ghostty", multiplexer: "Zellij", uncertain: true), "Brought Ghostty forward; backend\u{2019}s Zellij pane not confirmed"),
         (.pane(app: "Ghostty", multiplexer: "herdr", uncertain: false), "Brought Ghostty forward; backend\u{2019}s herdr pane not selected"),
         (.unsupported("kitty"), "Brought kitty forward; backend\u{2019}s terminal not selected"),
         (.notAllowed("Ghostty"), "Brought Ghostty forward; no access to select backend\u{2019}s tab"),
+        (.notAllowed("Example", noun: "pane"), "Brought Example forward; no access to select backend\u{2019}s pane"),
         (.connectorOutdated("cmux"), "Brought cmux forward; the Claude Code connector needs an update"),
         (.none, "Nothing showing backend was brought forward"),
     ])

@@ -55,7 +55,13 @@ probes and the app disagree about which terminals exist. A route's `open`, `plac
 read: they run on every plan, every in-front read, and every probe, so anything that changes a terminal or
 multiplexer belongs in the `PaneCommand`s `open` returns. A surface only the agent's own process can select
 declares a `FocusDefinition` (its environment keys and the argv that focuses it) and has `open` return
-`.select(.connector(id))`; installing writes it into both connectors, which run it themselves. Check a new route live with `--route-probe <pid>` (the
+`.select(.connector(id))`; installing writes it into both connectors, which run it themselves. A terminal whose
+processes carry their own surface id or link is a `KeyedSurfaceRoute` value (a URL to open, or a command whose
+`FocusWalk` confirms the result, run against the instance socket the terminal process itself listens on,
+`TerminalFacts.listeningSockets`), not a new
+type. Each tool's adapter lives in its own `Integrations/<Tool>/` folder, and `RouteConformance.problems` must
+come back empty for every route a build registers (a route that opens a process not its own, reads or confirms
+a front it could not read, or needs a special start to come forward fails it). Check a new route live with `--route-probe <pid>` (the
 open plan and places for one agent; add `--read-places` to run its place script and place sources too) and
 `--front-probe` (what reads as in front). Full from-source build, prerequisites, and signing live
 in **`BUILD.md`**.

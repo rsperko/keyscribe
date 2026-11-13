@@ -109,6 +109,28 @@ struct SystemTerminalFacts: TerminalFacts {
         return owners
     }
 
+    func listeningSockets(of pid: Int) -> Set<String>? {
+        let needed = proc_pidinfo(pid_t(pid), PROC_PIDLISTFDS, 0, nil, 0)
+        guard needed > 0 else { return needed == 0 ? [] : nil }
+        let stride = MemoryLayout<proc_fdinfo>.stride
+        var descriptors = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(needed) / stride + 32)
+        let filled = descriptors.withUnsafeMutableBytes { proc_pidinfo(pid_t(pid), PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count)) }
+        guard filled > 0 else { return filled == 0 ? [] : nil }
+        var paths: Set<String> = []
+        for descriptor in descriptors.prefix(Int(filled) / stride) where descriptor.proc_fdtype == UInt32(PROX_FDTYPE_SOCKET) {
+            var info = socket_fdinfo()
+            let size = Int32(MemoryLayout<socket_fdinfo>.size)
+            guard proc_pidfdinfo(pid_t(pid), descriptor.proc_fd, PROC_PIDFDSOCKETINFO, &info, size) == size,
+                  info.psi.soi_kind == Int32(SOCKINFO_UN), Int32(info.psi.soi_options) & SO_ACCEPTCONN != 0
+            else { continue }
+            let path = withUnsafeBytes(of: info.psi.soi_proto.pri_un.unsi_addr.ua_sun.sun_path) {
+                String(decoding: $0.prefix { $0 != 0 }, as: UTF8.self)
+            }
+            if !path.isEmpty { paths.insert(path) }
+        }
+        return paths
+    }
+
     private static func listener(at path: String) -> Int? {
         var address = sockaddr_un()
         address.sun_family = sa_family_t(AF_UNIX)

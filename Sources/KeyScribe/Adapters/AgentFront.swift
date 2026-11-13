@@ -65,7 +65,7 @@ struct AgentFront: AgentFronting, Sendable {
     }
 
     func reading(asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }) async -> FrontReading {
-        switch await confirmed(asking: asking, { _ in () }) {
+        switch await confirmed(asking: asking, reported: [], { _ in () }) {
         case .success(let confirmed): .pane(confirmed.pane)
         case .failure(let why): .unknown(why)
         }
@@ -75,7 +75,7 @@ struct AgentFront: AgentFronting, Sendable {
         agent pid: Int, environment: [String: String] = [:], asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }
     ) async -> FrontCheck {
         let (facts, surfaces) = (facts, surfaces)
-        let result = await confirmed(asking: asking) { reading in
+        let result = await confirmed(asking: asking, reported: [environment]) { reading in
             await Task.detached {
                 reading.check(agent: pid, facts: facts().reporting(environment, for: pid, keeping: surfaces.environmentKeys), surfaces: surfaces)
             }.value
@@ -90,7 +90,7 @@ struct AgentFront: AgentFronting, Sendable {
         among agents: [AgentFrontCandidate], asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }
     ) async -> FrontSession? {
         let (facts, surfaces) = (facts, surfaces)
-        let result = await confirmed(asking: asking) { reading in
+        let result = await confirmed(asking: asking, reported: agents.map(\.environment)) { reading in
             await Task.detached {
                 agents.filter {
                     reading.check(
@@ -110,30 +110,38 @@ struct AgentFront: AgentFronting, Sendable {
     }
 
     private func confirmed<Value: Sendable>(
-        asking: @escaping @MainActor @Sendable (String) -> Void, _ evaluate: @escaping @Sendable (FrontReading) async -> Value
+        asking: @escaping @MainActor @Sendable (String) -> Void, reported: [[String: String]],
+        _ evaluate: @escaping @Sendable (FrontReading) async -> Value
     ) async -> Result<Confirmed<Value>, FrontUnknown> {
         guard let app = await frontmost() else { return .failure(.noTerminal) }
-        guard let route = surfaces.terminal(app.bundle), let script = route.frontScript else { return .failure(.unsupported(app.bundle)) }
-        let first = await surface(app, route, script, asking: { await asking(app.name) })
+        guard let route = surfaces.terminal(app.bundle) else { return .failure(.unsupported(app.bundle)) }
+        let first = await surface(app, route, reported: reported, asking: { await asking(app.name) })
         guard case .pane(let pane) = first else { return .failure(Self.reason(first)) }
         let value = await evaluate(first)
         guard confirming else { return .success(Confirmed(app: app, pane: pane, value: value)) }
-        let second = await surface(app, route, script, asking: {})
+        let second = await surface(app, route, reported: reported, asking: {})
         guard case .pane = second else { return .failure(Self.reason(second)) }
         guard second == first, await frontmost() == app else { return .failure(.changed) }
         return .success(Confirmed(app: app, pane: pane, value: value))
     }
 
     private func surface(
-        _ app: FrontApp, _ route: any TerminalRoute, _ script: String, asking: @escaping @Sendable () async -> Void
+        _ app: FrontApp, _ route: any TerminalRoute, reported: [[String: String]], asking: @escaping @Sendable () async -> Void
     ) async -> FrontReading {
+        let (facts, panes) = (facts, surfaces.multiplexers)
+        guard let script = route.frontScript else {
+            return await Task.detached {
+                let facts = facts()
+                guard let step = route.readFront(appPid: app.pid, facts: facts, reported: reported) else { return .unknown(.unsupported(app.bundle)) }
+                return FrontPanes.read(step, app: app.bundle, facts: facts, panes: panes)
+            }.value
+        }
         let answer: String
         switch await read(app.bundle, app.pid, script, asking) {
         case .value(let value): answer = value
         case .notAllowed: return .unknown(.notAllowed(app.bundle))
         case .failed: return .unknown(.unreadable(app.bundle))
         }
-        let (facts, panes) = (facts, surfaces.multiplexers)
         return await Task.detached { FrontPanes.read(answer: answer, from: route, app: app.bundle, appPid: app.pid, facts: facts(), panes: panes) }.value
     }
 

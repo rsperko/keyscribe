@@ -40,6 +40,23 @@ struct SourceInvariantsTests {
         #expect(found == ["Sources/A.swift:1: forbidden()", "Sources/A.swift:3: forbidden()"])
     }
 
+    @Test func onlyAFileInsideOneIntegrationsToolFolderMayNameItsOwnToolAndNoOther() {
+        #expect(SourceInvariants.integrationTool("Sources/KeyScribeKit/Integrations/Example/ExampleRoute.swift") == "Example")
+        #expect(SourceInvariants.integrationTool("Sources/KeyScribe/Integrations/Example/Reader.swift") == "Example")
+        #expect(SourceInvariants.integrationTool("Sources/KeyScribeKit/Integrations/Shared.swift") == nil)
+        #expect(SourceInvariants.integrationTool("Sources/KeyScribeKit/TerminalRoutes/ExampleRoute.swift") == nil)
+        let rule = SourceRule(pattern: #"(?i)herdr|tmux"#, allowed: [:], reason: "r", own: SourceInvariants.integrationTool)
+        let found = rule.violations(in: [
+            "Sources/KeyScribeKit/Integrations/Herdr/HerdrRoute.swift": "let name = \"herdr\"\nstruct HerdrRoute {}",
+            "Sources/KeyScribeKit/Integrations/Herdr/HerdrPlaces.swift": "let inner = \"tmux\"",
+            "Sources/KeyScribe/Adapters/HerdrPlaceReader.swift": "let name = \"herdr\"",
+        ])
+        #expect(found == [
+            "Sources/KeyScribe/Adapters/HerdrPlaceReader.swift:1: let name = \"herdr\"",
+            "Sources/KeyScribeKit/Integrations/Herdr/HerdrPlaces.swift:1: let inner = \"tmux\"",
+        ])
+    }
+
     @Test func commentLinesNeverCount() {
         let rule = SourceRule(pattern: #"\bforbidden\("#, allowed: [:], reason: "r")
         let found = rule.violations(in: ["Sources/A.swift": "    // never call forbidden() here\n/// forbidden() too"])

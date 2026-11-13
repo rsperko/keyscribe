@@ -8,6 +8,7 @@ struct AgentFrontTests {
     nonisolated final class Facts: TerminalFacts, @unchecked Sendable {
         var table: [Int: TerminalProcess] = [:]
         var outputs: [[String]: String] = [:]
+        var listening: [Int: Set<String>] = [:]
 
         func add(_ pid: Int, parent: Int?, tty: String?, _ name: String) -> Facts {
             table[pid] = TerminalProcess(pid: pid, parent: parent, tty: tty, arguments: [name], environment: [:], executable: name, app: nil)
@@ -19,6 +20,7 @@ struct AgentFrontTests {
         func processes(onTTY tty: String) -> [TerminalProcess]? { table.values.filter { $0.tty == tty } }
         func children(of pid: Int) -> [TerminalProcess]? { table.values.filter { $0.parent == pid } }
         func socketOwners(in directory: String) -> [String: Int]? { nil }
+        func listeningSockets(of pid: Int) -> Set<String>? { listening[pid] ?? [] }
         func run(_ argv: [String]) -> (status: Int32, output: String) { outputs[argv].map { (0, $0) } ?? (1, "") }
 
         func showing(tmuxPane tty: String) -> Facts {
@@ -152,6 +154,53 @@ struct AgentFrontTests {
         #expect(await front(Front(Self.ghosttyApp), reply: .value("/dev/ttys009")).shown(among: agents) == nil)
         #expect(await front(Front(Self.safari)).shown(among: agents) == nil)
         #expect(await front(Front(Self.ghosttyApp), reply: .notAllowed).shown(among: agents) == nil)
+    }
+
+    @Test func aTerminalWithoutAScriptIsReadThroughItsOwnCommandsAndNeverAskedForAutomation() async throws {
+        let surfaces = try AgentSurfaces(terminals: [KeyedSurfaceRoute(
+            name: "Keyed", apps: ["dev.example.keyed"], key: "KEYED_PANE", focus: .url(prefix: "keyed://"),
+            front: { terminal, _, facts in
+                let answer = facts.run(["keyed", "front", "\(terminal.pid)"])
+                return answer.status == 0 ? .tty(answer.output) : .unknown(.unreadable("Keyed"))
+            })]).resolve()
+        let facts = Facts().add(10, parent: 1, tty: nil, "/Applications/Keyed.app/keyed").add(30, parent: 10, tty: "/dev/ttys004", "claude")
+            .add(40, parent: 10, tty: "/dev/ttys005", "pi")
+        facts.outputs[["keyed", "front", "10"]] = "/dev/ttys004"
+        let keyed = FrontApp(bundle: "dev.example.keyed", pid: 10, name: "Keyed")
+        let front = AgentFront(
+            surfaces: surfaces, frontmost: { keyed },
+            read: { _, _, _, _ in
+                Issue.record("a terminal without a script is never sent one")
+                return .failed
+            },
+            facts: { facts })
+        #expect(await front.check(agent: 30) == .shown)
+        #expect(await front.check(agent: 40) == .elsewhere)
+        facts.outputs = [:]
+        #expect(await front.check(agent: 30) == .unknown(.unreadable("Keyed")))
+        let blind = AgentFront(
+            surfaces: try AgentSurfaces(terminals: [KeyedSurfaceRoute(name: "Keyed", apps: ["dev.example.keyed"], key: "K", focus: .url(prefix: "k://"))]).resolve(),
+            frontmost: { keyed }, facts: { facts })
+        #expect(await blind.check(agent: 30) == .unknown(.unsupported("dev.example.keyed")))
+    }
+
+    @Test func aTerminalListeningOnSeveralSocketsIsReadThroughTheOneTheCheckedConversationReports() async throws {
+        let surfaces = try AgentSurfaces(terminals: [KeyedSurfaceRoute(
+            name: "Keyed", apps: ["dev.example.keyed"], key: "KEYED_WINDOW", socket: "KEYED_SOCKET",
+            focus: .command { _, _, _ in nil },
+            front: { _, socket, facts in
+                let answer = facts.run(["keyed", "front", socket ?? ""])
+                return answer.status == 0 ? .tty(answer.output) : .unknown(.unreadable("Keyed"))
+            })]).resolve()
+        let facts = Facts().add(10, parent: 1, tty: nil, "/Applications/Keyed.app/keyed").add(30, parent: 10, tty: "/dev/ttys004", "claude")
+        facts.listening[10] = ["/tmp/keyed-10", "/var/folders/xx/C/keyed-ipc-501"]
+        facts.outputs[["keyed", "front", "/tmp/keyed-10"]] = "/dev/ttys004"
+        let keyed = FrontApp(bundle: "dev.example.keyed", pid: 10, name: "Keyed")
+        let front = AgentFront(surfaces: surfaces, frontmost: { keyed }, facts: { facts })
+        #expect(await front.check(agent: 30, environment: ["KEYED_SOCKET": "unix:/tmp/keyed-10"]) == .shown)
+        #expect(await front.check(agent: 30) == .unknown(.ambiguous))
+        let shown = await front.shown(among: [AgentFrontCandidate(id: "claude:s1", pid: 30, environment: ["KEYED_SOCKET": "unix:/tmp/keyed-10"])])
+        #expect(shown?.id == "claude:s1")
     }
 
     @Test func aFrontAppWithoutATerminalRouteIsUnknown() async {

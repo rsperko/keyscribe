@@ -50,16 +50,18 @@ public enum RouteProbe {
         switch action {
         case .layer(let layer):
             guard !layer.commands.isEmpty else { return "layer \(layer.multiplexer) unresolved" }
-            let commands = layer.commands.map { command in
-                command.arguments.joined(separator: " ")
-                    + (command.until.map { " until \($0.column)=\($0.value) within \($0.steps)" } ?? "")
-            }
+            let commands = layer.commands.map(describe)
             return "layer \(layer.multiplexer)\(layer.confirmed ? "" : " unconfirmed"): " + commands.joined(separator: " ; ")
         case .select(.script(let app, let pid, _)): return "select script app=\(app) pid=\(pid)"
         case .select(.url(let url)): return "select url=\(url)"
+        case .select(.command(let command)): return "select command: " + Self.describe(command)
         case .select(.connector(let definition)): return "select connector definition=\(definition)"
         case .activate(let app, let pid): return "activate app=\(app) pid=\(pid)"
         case .unsupported(let app, let pid): return "unsupported app=\(app) pid=\(pid)"
         }
+    }
+
+    private static func describe(_ command: PaneCommand) -> String {
+        command.arguments.joined(separator: " ") + (command.until.map { " until \($0.column)=\($0.value) within \($0.steps)" } ?? "")
     }
 }
