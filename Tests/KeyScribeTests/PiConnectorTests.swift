@@ -69,7 +69,7 @@ struct PiConnectorInstallerTests {
         return (installer, agents, folder.appendingPathComponent("extensions"))
     }
 
-    @Test func aConnectorInstalledBeforeARouteWasAddedIsOutdatedUntilItCarriesTheRoutesKeys() throws {
+    @Test func aConnectorInstalledBeforeARouteWasAddedIsRewrittenToCarryItsKeysWithoutAskingOpenConversationsToReload() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ks-pi-\(UUID().uuidString)")
         let (before, _, _) = setup(root: root)
         try before.install(installation: "id-1")
@@ -79,6 +79,8 @@ struct PiConnectorInstallerTests {
         try after.install(installation: "id-1")
         #expect(after.installed(installation: "id-1") == .current)
         #expect(before.installed(installation: "id-1") == .other(version: PiConnectorFiles.version(for: Self.script, surfaces: added)))
+        #expect(PiConnectorFiles.version(for: Self.script, surfaces: added) == PiConnectorFiles.version(for: Self.script, surfaces: .builtIn))
+        #expect(ClaudeConnectorFiles.version(for: Self.script, surfaces: added) == ClaudeConnectorFiles.version(for: Self.script, surfaces: .builtIn))
     }
 
     private func json(_ url: URL) throws -> [String: Any] {
@@ -311,24 +313,27 @@ struct PiConnectorStatusTests {
         #expect(!model.setups.admits(agent: "pi", installation: installation))
     }
 
-    @Test func aConversationStillRunningTheConfigurationFromBeforeARouteWasAddedIsAskedToReload() async throws {
+    @Test(arguments: [false, true])
+    func aRouteThatAddsKeysUpdatesTheFilesAndAsksOpenConversationsToReloadOnlyWhenItAddsAFocusCommand(addsFocus: Bool) async throws {
         let (before, _, agents, folder) = make()
         let model = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [before])
         await model.refresh()
         await model.connectors[0].setups[0].install()
         let loaded = try #require(before.bundledVersion)
 
+        let focus = FocusDefinition(id: "mux", requiresEnv: ["MUX_PANE"], argv: ["/usr/bin/env", "mux", "focus", "{MUX_PANE}"])
+        let definitions = ConnectorSurfaces.builtIn.focusDefinitions + (addsFocus ? [focus] : [])
         let after = PiConnector(
             locate: { "/bin/pi-test" }, run: CLI().run, agentsDir: agents, pluginName: "keyscribe-dev",
-            surfaces: ConnectorSurfaces(environmentKeys: ResolvedSurfaces.builtIn.environmentKeys.union(["MUX_PANE"]), focusDefinitions: ConnectorSurfaces.builtIn.focusDefinitions), script: PiConnectorFiles.indexTS,
-            home: folder.deletingLastPathComponent().deletingLastPathComponent())
+            surfaces: ConnectorSurfaces(environmentKeys: ResolvedSurfaces.builtIn.environmentKeys.union(["MUX_PANE"]), focusDefinitions: definitions),
+            script: PiConnectorFiles.indexTS, home: folder.deletingLastPathComponent().deletingLastPathComponent())
         let updated = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [after])
         await updated.refresh()
         let setup = updated.connectors[0].setups[0]
         #expect(setup.state == .status(.outdated(installed: loaded)))
         await setup.update()
         #expect(setup.state == .status(.ready))
-        #expect(CodingAgentsSettingsModel.older(loaded, than: after.bundledVersion))
+        #expect(CodingAgentsSettingsModel.older(loaded, than: after.bundledVersion) == addsFocus)
         #expect(!CodingAgentsSettingsModel.older(after.bundledVersion, than: after.bundledVersion))
     }
 

@@ -39,7 +39,12 @@ public protocol TerminalFacts {
     func processes(onTTY tty: String) -> [TerminalProcess]?
     func children(of pid: Int) -> [TerminalProcess]?
     func socketOwners(in directory: String) -> [String: Int]?
+    func listeningSockets(of pid: Int) -> Set<String>?
     func run(_ argv: [String]) -> (status: Int32, output: String)
+}
+
+extension TerminalFacts {
+    public func listeningSockets(of pid: Int) -> Set<String>? { nil }
 }
 
 public struct PaneCommand: Equatable, Sendable {
@@ -55,22 +60,58 @@ public struct PaneCommand: Equatable, Sendable {
 }
 
 public struct FocusWalk: Equatable, Sendable {
+    public enum Listing: Equatable, Sendable {
+        case table(header: [String])
+        case json(rowsWhere: [String: String], column: String)
+    }
+
     public var check: [String]
-    public var header: [String]
+    public var listing: Listing
     public var value: String
     public var steps: Int
 
-    public init(check: [String], header: [String], value: String, steps: Int) {
+    public init(check: [String], listing: Listing, value: String, steps: Int) {
         self.check = check
-        self.header = header
+        self.listing = listing
         self.value = value
         self.steps = steps
     }
 
-    public var column: String { header.last ?? "" }
+    public init(check: [String], header: [String], value: String, steps: Int) {
+        self.init(check: check, listing: .table(header: header), value: value, steps: steps)
+    }
+
+    public var column: String {
+        switch listing {
+        case .table(let header): header.last ?? ""
+        case .json(_, let column): column
+        }
+    }
 
     public func reached(_ result: (status: Int32, output: String)) -> Bool? {
-        Self.lastColumn(of: header, in: result)?.contains(value)
+        switch listing {
+        case .table(let header): Self.lastColumn(of: header, in: result)?.contains(value)
+        case .json(let rowsWhere, let column): Self.column(column, rowsWhere: rowsWhere, in: result)?.contains(value)
+        }
+    }
+
+    public static func column(_ column: String, rowsWhere: [String: String], in result: (status: Int32, output: String)) -> Set<String>? {
+        guard result.status == 0,
+              let rows = try? JSONSerialization.jsonObject(with: Data(result.output.utf8)) as? [[String: Any]]
+        else { return nil }
+        let matching = rows.filter { row in rowsWhere.allSatisfy { scalar(row[$0.key]) == $0.value } }
+        guard !matching.isEmpty else { return nil }
+        return Set(matching.compactMap { scalar($0[column]) })
+    }
+
+    private static func scalar(_ value: Any?) -> String? {
+        switch value {
+        case let text as String: return text
+        case let number as NSNumber:
+            guard CFGetTypeID(number) != CFBooleanGetTypeID() else { return number.boolValue ? "true" : "false" }
+            return number.stringValue
+        default: return nil
+        }
     }
 
     public static func lastColumn(of header: [String], in result: (status: Int32, output: String)) -> Set<String>? {
@@ -156,7 +197,9 @@ extension Route {
 
 public protocol TerminalRoute: Route {
     var apps: Set<String> { get }
+    var noun: String { get }
     var frontScript: String? { get }
+    func readFront(appPid: Int, facts: TerminalFacts, reported: [[String: String]]) -> FrontStep?
     var placeScript: String? { get }
     func front(answer: String, appPid: Int, facts: TerminalFacts) -> FrontStep
     func bundle(of process: TerminalProcess) -> String?
@@ -164,7 +207,9 @@ public protocol TerminalRoute: Route {
 }
 
 extension TerminalRoute {
+    public var noun: String { "tab" }
     public var placeScript: String? { nil }
+    public func readFront(appPid: Int, facts: TerminalFacts, reported: [[String: String]]) -> FrontStep? { nil }
     public func front(answer: String, appPid: Int, facts: TerminalFacts) -> FrontStep { .tty(answer) }
     public func claims(_ process: TerminalProcess) -> Bool { bundle(of: process) != nil }
 
@@ -183,6 +228,7 @@ public protocol PaneRoute: Route {
 public enum TerminalSelector: Equatable, Sendable {
     case script(app: String, pid: Int, body: String)
     case url(String)
+    case command(PaneCommand)
     case connector(String)
 }
 
@@ -258,7 +304,7 @@ extension TerminalRoutes {
             switch action {
             case .layer(let layer): multiplexers.insert(layer.multiplexer, at: 0)
             case .select(.script(let bundle, _, _)), .activate(let bundle, _), .unsupported(let bundle, _): app = app ?? bundle
-            case .select(.url), .select(.connector): break
+            case .select(.url), .select(.command), .select(.connector): break
             }
         }
         return (app, multiplexers)
@@ -281,6 +327,7 @@ private struct ReportedFacts: TerminalFacts {
     func processes(onTTY tty: String) -> [TerminalProcess]? { base.processes(onTTY: tty)?.map(reported) }
     func children(of pid: Int) -> [TerminalProcess]? { base.children(of: pid)?.map(reported) }
     func socketOwners(in directory: String) -> [String: Int]? { base.socketOwners(in: directory) }
+    func listeningSockets(of pid: Int) -> Set<String>? { base.listeningSockets(of: pid) }
     func run(_ argv: [String]) -> (status: Int32, output: String) { base.run(argv) }
 
     private func reported(_ process: TerminalProcess) -> TerminalProcess {

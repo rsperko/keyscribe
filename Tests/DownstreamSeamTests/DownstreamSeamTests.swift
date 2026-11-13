@@ -87,6 +87,10 @@ struct DownstreamSeamTests {
         #expect(walk?.host?.app == "dev.example.term-nightly")
     }
 
+    @Test func theDownstreamRoutesPassTheConformanceCheck() {
+        #expect(RouteConformance.problems(Self.integrations().surfaces) == [])
+    }
+
     @Test @MainActor func theAppAcceptsTheIntegrationsAndTheDevCLIAcceptsTheSameValue() {
         let integrations = Self.integrations()
         _ = AppDelegate(codingAgents: integrations)

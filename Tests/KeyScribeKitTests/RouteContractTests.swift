@@ -55,6 +55,74 @@ struct RouteContractTests {
         #expect(FrontPanes.read(TerminalFront(app: Self.ghostty, tty: "/dev/ttys001"), facts: facts, panes: [Mux()]) == .unknown(.multiplexer("mux")))
     }
 
+    @Test func everyBuiltInRouteConforms() {
+        #expect(RouteConformance.problems(AgentSurfaces.builtIn) == [])
+    }
+
+    private struct Guessing: PaneRoute {
+        let name = "guessing"
+        let processName = "guessing"
+        let environmentKeys: [String] = []
+        func open(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> Opening? {
+            Opening([.layer(.unresolved(name))])
+        }
+        func isClient(_ process: TerminalProcess) -> Bool { false }
+        func front(client: TerminalProcess, tty: String, facts: TerminalFacts) -> FrontStep { .tty(tty) }
+        func check(agent pid: Int, view: FrontView, facts: TerminalFacts, multiplexerProcesses: Set<String>) -> FrontCheck { .shown }
+    }
+
+    private struct Hiding: TerminalRoute {
+        let name = "hiding"
+        let apps: Set<String> = ["dev.example.hiding"]
+        let environmentKeys = ["HIDING_TAB"]
+        let frontScript: String? = nil
+        func open(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> Opening? {
+            guard claims(process), let tab = TerminalRoutes.nearest("HIDING_TAB", in: inner)?.environment["HIDING_TAB"] else { return nil }
+            return Opening([.select(.url("hiding://\(tab)")), .activate(app: "dev.example.hiding", pid: process.pid)])
+        }
+        func readFront(appPid: Int, facts: TerminalFacts, reported: [[String: String]]) -> FrontStep? { .tty("/dev/ttys000") }
+    }
+
+    @Test func aRouteThatGuessesOrNeedsASpecialStartIsReportedByName() {
+        var surfaces = AgentSurfaces.builtIn
+        surfaces.multiplexers.append(Guessing())
+        surfaces.terminals.append(Hiding())
+        #expect(RouteConformance.problems(surfaces) == [
+            "hiding: opening dev.example.hiding started without its own environment does not bring it forward",
+            "hiding: reads a front it could not read",
+            "guessing: opens a process that is not its own",
+            "guessing: reads a front it could not read",
+            "guessing: confirms a view it could not read",
+        ])
+    }
+
+    private struct ActivatesFirst: TerminalRoute {
+        let name = "activates first"
+        let apps: Set<String> = ["dev.example.first"]
+        let environmentKeys = ["FIRST_TAB"]
+        let frontScript: String? = nil
+        func open(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> Opening? {
+            guard let app = bundle(of: process) else { return nil }
+            let activate = OpenAction.activate(app: app, pid: process.pid)
+            guard let tab = TerminalRoutes.nearest("FIRST_TAB", in: inner)?.environment["FIRST_TAB"] else {
+                return Opening([activate, .select(.connector("first"))])
+            }
+            return Opening([activate, .select(.url("first://\(tab)"))])
+        }
+    }
+
+    @Test func aRouteMayBringItsTerminalForwardBeforeSelectingTheSurface() {
+        var surfaces = AgentSurfaces.builtIn
+        surfaces.terminals.append(ActivatesFirst())
+        #expect(RouteConformance.problems(surfaces) == [])
+    }
+
+    @Test func surfacesThatDoNotResolveReportOnlyWhy() {
+        var surfaces = AgentSurfaces.builtIn
+        surfaces.multiplexers += [Mux(), Mux()]
+        #expect(RouteConformance.problems(surfaces) == ["the surfaces do not resolve: \(AgentSurfaces.Conflict.name("mux"))"])
+    }
+
     @Test func theBuiltInSurfacesResolve() throws {
         let resolved = try AgentSurfaces.builtIn.resolve()
         #expect(resolved.routes.count == AgentSurfaces.builtIn.terminals.count + AgentSurfaces.builtIn.multiplexers.count)
@@ -107,7 +175,16 @@ struct RouteContractTests {
         #expect(resolved.focusDefinitions.contains { $0.id == "cmux" })
     }
 
-    @Test func whatAConnectorIsGivenChangesWhenAnyRouteChangesItsKeysOrFocusAndNotWithOrder() throws {
+    @Test func aRouteThatOnlyAddsEnvironmentKeysChangesWhatAConnectorIsGivenButNotItsVersion() throws {
+        let builtIn = ConnectorSurfaces(try AgentSurfaces.builtIn.resolve())
+        var keyed = AgentSurfaces.builtIn
+        keyed.multiplexers.append(Focusing(focusDefinitions: []))
+        let added = ConnectorSurfaces(try keyed.resolve())
+        #expect(added.environmentKeys.contains("FOCUS_PANE") && !builtIn.environmentKeys.contains("FOCUS_PANE"))
+        #expect(added.fingerprint == builtIn.fingerprint)
+    }
+
+    @Test func aConnectorsVersionChangesWhenAnyRouteChangesItsFocusAndNotWithOrder() throws {
         let builtIn = ConnectorSurfaces(try AgentSurfaces.builtIn.resolve())
         #expect(builtIn.environmentKeys == builtIn.environmentKeys.sorted())
         #expect(builtIn.environmentKeys.contains("ZELLIJ_PANE_ID"))

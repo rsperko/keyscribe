@@ -540,6 +540,26 @@ isn't connected), nothing is sent and your words are kept: **Paste Last Dictatio
 **“Cancel”** or **“never mind”** on its own sends nothing; to send that word to an
 agent, for example to answer its prompt, say “tell docs cancel”.
 
+### Can “open” select a conversation in kitty or WezTerm?
+
+WezTerm works with no setup. “Open docs” switches to the pane docs runs in, but WezTerm cannot raise
+another of its own windows, so when that pane is in a window behind the front one, KeyScribe brings WezTerm
+forward and says it couldn't find the pane. A conversation running under WezTerm's own multiplexer server
+(`wezterm connect`, or a domain set up in your WezTerm configuration) is not selected; KeyScribe says nothing
+could be brought forward.
+
+kitty lets other programs select its windows only when you turn on its remote control, which is off by
+default. Until then, “open” only brings kitty forward and asks you to select the conversation yourself. To
+turn it on, add these two lines to `~/.config/kitty/kitty.conf`, then quit and reopen kitty:
+
+```
+allow_remote_control socket-only
+listen_on unix:/tmp/kitty
+```
+
+kitty then listens on a socket only your user account can open, and any program running as you can control
+kitty through it, not just KeyScribe. KeyScribe never changes kitty's settings itself.
+
 ### How do I rename a conversation?
 
 In the Coding agent mode, switch to the conversation, then say **“rename this conversation to”** and the new

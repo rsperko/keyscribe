@@ -306,8 +306,11 @@ a hello on any other protocol is refused with `426` and is never registered or s
   can read (its Zellij pane); the connector reads only the keys its terminal routes use
   (`ResolvedSurfaces.environmentKeys`), and KeyScribe keeps only those. The Claude Code connector reads each
   variable by name, as Claude Code requires, so installing writes one read per key into its script; a key
-  that is not a plain variable name keeps the routes from resolving. A change to the keys or focus commands
-  changes the connector version, so Settings offers the update.
+  that is not a plain variable name keeps the routes from resolving. A change to the focus commands changes
+  the connector version, so open conversations are asked to reload. A change to the keys alone rewrites the
+  installed files on the next update and leaves the version as it was: a conversation still on the older keys
+  keeps working and reports only those, so Open for a terminal it does not know only brings that terminal
+  forward until the conversation reloads.
 - **Every command names the session it expects**, and the connector refuses one whose session has changed.
 - **A disconnected conversation goes quiet.** KeyScribe answers the hello of a conversation listed in
   `names.json`'s `excluded` with `{"ok":true,"quiet":true}` and passes on only who it is (agent, session,

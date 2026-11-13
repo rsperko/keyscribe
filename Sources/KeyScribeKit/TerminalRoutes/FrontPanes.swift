@@ -81,7 +81,11 @@ public enum FrontPanes {
     ) -> FrontReading {
         let value = answer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return .unknown(.noTerminal) }
-        switch terminal.front(answer: value, appPid: appPid, facts: facts) {
+        return read(terminal.front(answer: value, appPid: appPid, facts: facts), app: app, facts: facts, panes: panes)
+    }
+
+    public static func read(_ step: FrontStep, app: String, facts: TerminalFacts, panes: [any PaneRoute]) -> FrontReading {
+        switch step {
         case .tty(let tty): return read(TerminalFront(app: app, tty: tty), facts: facts, panes: panes)
         case .view(let view): return .pane(FrontPane(app: app, tty: nil, multiplexers: [], view: view))
         case .unknown(let why): return .unknown(why)

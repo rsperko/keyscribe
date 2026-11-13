@@ -5,11 +5,11 @@ import KeyScribeKit
 enum AgentFocusResult: Equatable, Sendable {
     case exact
     case requested(String)
-    case app(String)
+    case app(String, noun: String = "tab")
     case pane(app: String, multiplexer: String, uncertain: Bool)
     case unsupported(String)
-    case connectorOutdated(String)
-    case notAllowed(String)
+    case connectorOutdated(String, noun: String = "tab")
+    case notAllowed(String, noun: String = "tab")
     case none
 
     func hudState(handle: String, detail: String, agent: AgentKind? = nil) -> HUDState {
@@ -17,17 +17,17 @@ enum AgentFocusResult: Equatable, Sendable {
         return switch self {
         case .exact: .commandDone(summary: "Opened \(handle)", detail: detail)
         case .requested(let app): .commandDone(summary: "Asked \(app) to show \(handle)", detail: detail)
-        case .app(let app): .advisory(message: "Brought \(app) forward. Couldn\u{2019}t find \(handle)\u{2019}s tab. \(recipient)")
+        case .app(let app, let noun): .advisory(message: "Brought \(app) forward. Couldn\u{2019}t find \(handle)\u{2019}s \(noun). \(recipient)")
         case .pane(let app, let multiplexer, let uncertain):
             .advisory(message: "Brought \(app) forward. Couldn\u{2019}t \(uncertain ? "confirm" : "select") \(handle)\u{2019}s \(multiplexer) pane. \(recipient)")
         case .unsupported(let app):
             .advisory(message: "Brought \(app) forward. Select \(handle)\u{2019}s terminal yourself. \(recipient)")
-        case .notAllowed(let app):
+        case .notAllowed(let app, let noun):
             .error(
-                message: "Brought \(app) forward. Couldn\u{2019}t select \(handle)\u{2019}s tab without access to \(app). \(recipient)",
+                message: "Brought \(app) forward. Couldn\u{2019}t select \(handle)\u{2019}s \(noun) without access to \(app). \(recipient)",
                 action: .openAutomationSettings)
-        case .connectorOutdated(let app):
-            .advisory(message: "Brought \(app) forward. Update the \(agent?.connectorName ?? "connector") in Settings, then \(Self.reload(agent, in: handle)) to open its tab. \(recipient)")
+        case .connectorOutdated(let app, let noun):
+            .advisory(message: "Brought \(app) forward. Update the \(agent?.connectorName ?? "connector") in Settings, then \(Self.reload(agent, in: handle)) to open its \(noun). \(recipient)")
         case .none: .advisory(message: "Nothing showing \(handle) could be brought forward. \(recipient)")
         }
     }
@@ -37,12 +37,12 @@ enum AgentFocusResult: Equatable, Sendable {
         return switch self {
         case .exact: "Opened \(handle)"
         case .requested(let app): "Asked \(app) to show \(handle)"
-        case .app(let app): forward(app, "\(handle)\u{2019}s tab not found")
+        case .app(let app, let noun): forward(app, "\(handle)\u{2019}s \(noun) not found")
         case .pane(let app, let multiplexer, let uncertain):
             forward(app, "\(handle)\u{2019}s \(multiplexer) pane not \(uncertain ? "confirmed" : "selected")")
         case .unsupported(let app): forward(app, "\(handle)\u{2019}s terminal not selected")
-        case .notAllowed(let app): forward(app, "no access to select \(handle)\u{2019}s tab")
-        case .connectorOutdated(let app): forward(app, "the \(agent?.connectorName ?? "connector") needs an update")
+        case .notAllowed(let app, let noun): forward(app, "no access to select \(handle)\u{2019}s \(noun)")
+        case .connectorOutdated(let app, _): forward(app, "the \(agent?.connectorName ?? "connector") needs an update")
         case .none: "Nothing showing \(handle) was brought forward"
         }
     }
@@ -84,6 +84,11 @@ struct AgentTerminalFocus: AgentTerminalFocusing {
     var connector: @MainActor @Sendable (_ session: String, _ definition: String) async -> TerminalSelection = { _, _ in .unsupported }
     var running: @MainActor @Sendable (_ app: String, _ near: Int) -> (pid: Int, name: String)? = AgentTerminalFocus.running
     var activate: @MainActor @Sendable (Int) -> String? = AppActivation.bringForwardApp(pid:)
+    var noun: @Sendable (_ app: String) -> String = { _ in "tab" }
+
+    static func noun(_ surfaces: ResolvedSurfaces) -> @Sendable (String) -> String {
+        { surfaces.terminal($0)?.noun ?? "tab" }
+    }
 
     static func plan(
         _ surfaces: ResolvedSurfaces,
@@ -114,6 +119,7 @@ struct AgentTerminalFocus: AgentTerminalFocusing {
         var unselectedLayer: (multiplexer: String, uncertain: Bool)?
         var terminal = Terminal.unsupported
         var shown: String?
+        var shownApp: String?
         for action in actions {
             guard await wanted() else { return .none }
             switch action {
@@ -151,9 +157,17 @@ struct AgentTerminalFocus: AgentTerminalFocusing {
                 }
             case .select(.url(let url)):
                 terminal = await openURL(url) ? .requested : .notFound
+            case .select(.command(let command)):
+                let selected = if let walk = command.until {
+                    await Self.step(command.arguments, until: walk, run: run, wanted: wanted)
+                } else {
+                    await Task.detached { command.accepting.contains(run(command.arguments).0) }.value
+                }
+                terminal = selected ? .selected : .notFound
             case .activate(let app, let near), .unsupported(let app, let near):
                 guard let (appPid, _) = await running(app, near), await wanted(), let name = await activate(appPid) else { return .none }
                 shown = name
+                shownApp = app
             }
         }
         guard let shown else { return .none }
@@ -163,10 +177,10 @@ struct AgentTerminalFocus: AgentTerminalFocusing {
         switch terminal {
         case .selected: return .exact
         case .requested: return .requested(shown)
-        case .notFound: return .app(shown)
-        case .notAllowed: return .notAllowed(shown)
+        case .notFound: return .app(shown, noun: shownApp.map(noun) ?? "tab")
+        case .notAllowed: return .notAllowed(shown, noun: shownApp.map(noun) ?? "tab")
         case .unsupported: return .unsupported(shown)
-        case .outdated: return .connectorOutdated(shown)
+        case .outdated: return .connectorOutdated(shown, noun: shownApp.map(noun) ?? "tab")
         }
     }
 

@@ -252,8 +252,9 @@ every rule above applies to it, with these sharpenings:
 - **A place reader emits only names the user can see and provably set.** Each surface gets a reader behind
   `AgentPlaceReading` that emits `AgentPlace` labels by level; the directory and the resolver stay
   surface-blind, so a reader never implements addressing. Everything one surface needs, its focus route and its
-  names, lives in files named for it (`HerdrRoute`, `HerdrPlaces`, `HerdrPlaceReader`, `TmuxRoute`, `GhosttyRoute`,
-  …); only the registries and the composition root list them, and `SourceInvariantsTests` pins it. A label must be shown by that surface's current
+  names, lives in that surface's own `Integrations/<Tool>/` folder (in `KeyScribeKit`, and in the app for a reader
+  that runs commands, such as `HerdrPlaceReader`); only the registries and the composition root list them, and
+  `SourceInvariantsTests` pins it. A label must be shown by that surface's current
   configuration (tmux with its status line and pane borders off shows none), must be one the surface keeps
   apart from the title a program writes through OSC 0/2 (which Claude Code and Pi set to generated text, so
   it is never read: herdr's `terminal_title`, and Terminal.app's custom title, which receives it), and must be
@@ -316,7 +317,15 @@ every rule above applies to it, with these sharpenings:
   process can select declares a `FocusDefinition` and has Open ask the connector for it by id; the connector
   runs it without a shell, with each value a whole argument, after the expiry and session checks. A connector
   without the named command is outdated, never a silent fallback to another surface's focus.
-  `SourceInvariantsTests` keeps surface names out of both connectors' sources.
+  `SourceInvariantsTests` keeps surface names out of both connectors' sources. A connector's version covers
+  its script and the focus commands, not the environment keys: a route that only adds keys rewrites the
+  installed files on the next update without asking open conversations to reload, and a conversation still on
+  the older key list keeps working, reporting only the keys it already reads, so Open for the new terminal only
+  brings it forward until that conversation reloads. This relies on Claude Code loading a plugin from a local
+  marketplace's own folder, not from its version-keyed cache: measured on Claude Code 2.1.325 (2026-11-13),
+  `claude plugin list --json` reports `readFromFolder` for it, and `claude plugin update` with the version
+  unchanged reports that edits in that folder take effect at the next session start or `/reload-plugins`. If
+  a later Claude Code loads the cached copy instead, a keys-only change needs its own Claude version.
 - **One agent, one adapter.** Everything particular to an agent (how its sessions are found, how its
   connector is installed and checked, its names, its reload command, its copy) lives in files named for that
   agent, behind `AgentDiscovery` and `AgentConnector`, with the facts shared code needs carried by

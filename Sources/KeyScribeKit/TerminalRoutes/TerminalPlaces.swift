@@ -101,6 +101,7 @@ public final class CachedTerminalFacts: TerminalFacts, @unchecked Sendable {
         return found
     }
     private var owners: [String: [String: Int]?] = [:]
+    public func listeningSockets(of pid: Int) -> Set<String>? { base.listeningSockets(of: pid) }
     public func run(_ argv: [String]) -> (status: Int32, output: String) {
         if let earlier = ran[argv] { return earlier }
         let result = base.run(argv)

@@ -5,14 +5,16 @@ struct SourceRule: Sendable {
     let allowed: [String: Int]
     let reason: String
     var exempt: @Sendable (String) -> Bool = { _ in false }
+    var own: @Sendable (String) -> String? = { _ in nil }
 
     func violations(in files: [String: String]) -> [String] {
         let regex = try! NSRegularExpression(pattern: pattern)
         return files.keys.sorted().filter { !exempt($0) }.flatMap { path -> [String] in
             let hits = files[path]!.components(separatedBy: "\n").enumerated().compactMap { index, line -> String? in
                 if line.trimmingCharacters(in: .whitespaces).hasPrefix("//") { return nil }
-                let range = NSRange(line.startIndex..., in: line)
-                return regex.firstMatch(in: line, range: range) == nil ? nil : "\(path):\(index + 1): \(line)"
+                let checked = own(path).map { line.replacingOccurrences(of: $0, with: "", options: .caseInsensitive) } ?? line
+                let range = NSRange(checked.startIndex..., in: checked)
+                return regex.firstMatch(in: checked, range: range) == nil ? nil : "\(path):\(index + 1): \(line)"
             }
             return hits.count > allowed[path, default: 0] ? hits : []
         }
@@ -80,20 +82,18 @@ enum SourceInvariants {
                 + "fixed local strings and names: never an agent reply, a secret, or an environment value."
         ),
         SourceRule(
-            pattern: #"(?i)herdr|tmux|zellij|ghostty|iterm|cmux|warp"#,
+            pattern: #"(?i)herdr|tmux|zellij|ghostty|iterm|cmux|warp|wezterm|kitty"#,
             allowed: [
                 "Sources/KeyScribe/CodingAgentIntegrations.swift": 1,
                 "Sources/KeyScribe/DevCLI.swift": 1,
                 "Sources/KeyScribeKit/TerminalRoutes/AgentSurfaces.swift": 2,
             ],
             reason: "Everything one terminal or multiplexer needs, to focus a conversation or to read the names the user "
-                + "gave its place, lives in that surface's files (named for it); shared code speaks Route, PlaceRoute, "
-                + "AgentPlace and AgentPlaceReading, so another surface is another adapter, never a branch "
-                + "(docs/development/areas/voice-commands.md). The registries and the composition root list the adapters.",
-            exempt: { name in
-                let file = (name as NSString).lastPathComponent
-                return ["Herdr", "Tmux", "Zellij", "Ghostty", "ITerm", "Cmux", "Warp", "TerminalApp"].contains { file.hasPrefix($0) }
-            }
+                + "gave its place, lives in that surface's own Integrations/<Tool>/ folder, which names no other surface; "
+                + "shared code speaks Route, PlaceRoute, AgentPlace and AgentPlaceReading, so another surface is another "
+                + "adapter, never a branch (docs/development/areas/voice-commands.md). The registries and the composition "
+                + "root list the adapters.",
+            own: SourceInvariants.integrationTool
         ),
         SourceRule(
             pattern: #"(?i)claude"#,
@@ -143,6 +143,12 @@ enum SourceInvariants {
             exempt: { ($0 as NSString).lastPathComponent.hasPrefix("Pi") }
         ),
     ]
+
+    @Sendable static func integrationTool(_ path: String) -> String? {
+        let parts = path.split(separator: "/")
+        guard let folder = parts.firstIndex(of: "Integrations"), parts.count == folder + 3 else { return nil }
+        return String(parts[folder + 1])
+    }
 
     static func swiftFiles(under root: URL, in directory: String) throws -> [String: String] {
         let base = root.appendingPathComponent(directory).resolvingSymlinksInPath()

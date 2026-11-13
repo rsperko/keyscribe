@@ -11,7 +11,7 @@ public struct AgentSurfaces: Sendable {
 
     public static var builtIn: AgentSurfaces {
         AgentSurfaces(
-            terminals: [ScriptedTerminalRoute.ghostty, ScriptedTerminalRoute.terminal, ScriptedTerminalRoute.iterm, WarpRoute(), CmuxRoute()],
+            terminals: [ScriptedTerminalRoute.ghostty, ScriptedTerminalRoute.terminal, ScriptedTerminalRoute.iterm, WarpRoute.route, CmuxRoute(), WezTermRoute.route, KittyRoute.route],
             multiplexers: [HerdrRoute(), TmuxRoute(), ZellijRoute()])
     }
 
