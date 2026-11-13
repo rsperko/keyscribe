@@ -7,6 +7,18 @@ struct SourceInvariantsTests {
         .deletingLastPathComponent()
         .deletingLastPathComponent()
 
+    @Test func theConnectorsNameNoTerminalOrMultiplexer() throws {
+        let connectors = ["Sources/KeyScribe/Resources/ClaudeConnector/register.js", "Sources/KeyScribe/Resources/PiConnector/index.ts"]
+        var sources: [String: String] = [:]
+        for path in connectors { sources[path] = try String(contentsOf: Self.repoRoot.appendingPathComponent(path), encoding: .utf8) }
+        let rule = SourceRule(
+            pattern: #"(?i)herdr|tmux|zellij|ghostty|iterm|cmux|warp"#, allowed: [:],
+            reason: "A connector reads the keys and runs the focus commands its configuration lists, generated from the "
+                + "routes; a surface's name in a connector is a fallback no route controls (docs/development/areas/voice-commands.md).")
+        #expect(sources.count == connectors.count)
+        #expect(rule.violations(in: sources).isEmpty, "\(rule.reason)\n\(rule.violations(in: sources).joined(separator: "\n"))")
+    }
+
     @Test func theAppSourcesKeepEveryInvariant() throws {
         let sources = try SourceInvariants.swiftFiles(under: Self.repoRoot, in: "Sources")
         #expect(!sources.isEmpty)

@@ -87,6 +87,64 @@ struct RouteContractTests {
         #expect(throws: AgentSurfaces.Conflict.processName("mux")) { try surfaces.resolve() }
     }
 
+    private struct Focusing: PaneRoute {
+        var name = "focusing"
+        var processName = "focusing"
+        var environmentKeys = ["FOCUS_PANE"]
+        var focusDefinitions: [FocusDefinition]
+        func open(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> Opening? { nil }
+        func isClient(_ process: TerminalProcess) -> Bool { false }
+        func front(client: TerminalProcess, tty: String, facts: TerminalFacts) -> FrontStep { .unknown(.multiplexer(name)) }
+    }
+
+    private static let paneFocus = FocusDefinition(id: "focusing", requiresEnv: ["FOCUS_PANE"], argv: ["/usr/local/bin/focusing", "show", "{FOCUS_PANE}"])
+
+    @Test func theResolvedSurfacesCarryEveryRoutesFocusDefinitions() throws {
+        var surfaces = AgentSurfaces.builtIn
+        surfaces.multiplexers.append(Focusing(focusDefinitions: [Self.paneFocus]))
+        let resolved = try surfaces.resolve()
+        #expect(resolved.focusDefinitions.contains(Self.paneFocus))
+        #expect(resolved.focusDefinitions.contains { $0.id == "cmux" })
+    }
+
+    @Test func whatAConnectorIsGivenChangesWhenAnyRouteChangesItsKeysOrFocusAndNotWithOrder() throws {
+        let builtIn = ConnectorSurfaces(try AgentSurfaces.builtIn.resolve())
+        #expect(builtIn.environmentKeys == builtIn.environmentKeys.sorted())
+        #expect(builtIn.environmentKeys.contains("ZELLIJ_PANE_ID"))
+        var focusing = AgentSurfaces.builtIn
+        focusing.multiplexers.append(Focusing(focusDefinitions: [Self.paneFocus]))
+        let added = ConnectorSurfaces(try focusing.resolve())
+        #expect(added.fingerprint != builtIn.fingerprint)
+        var changed = focusing
+        changed.multiplexers[changed.multiplexers.count - 1] = Focusing(focusDefinitions: [
+            FocusDefinition(id: "focusing", requiresEnv: ["FOCUS_PANE"], argv: ["/usr/local/bin/focusing", "raise", "{FOCUS_PANE}"]),
+        ])
+        #expect(ConnectorSurfaces(try changed.resolve()).fingerprint != added.fingerprint)
+        var reordered = focusing
+        reordered.multiplexers.insert(reordered.multiplexers.removeLast(), at: 0)
+        #expect(ConnectorSurfaces(try reordered.resolve()) == added)
+    }
+
+    @Test(arguments: ["FOCUS PANE", "FOCUS-PANE", "1PANE", "", "PANE\")", "PANE;x"])
+    func anEnvironmentKeyThatIsNotAPlainNameIsRejectedBeforeAnythingStarts(key: String) {
+        var surfaces = AgentSurfaces.builtIn
+        surfaces.multiplexers.append(Focusing(environmentKeys: [key], focusDefinitions: []))
+        #expect(throws: AgentSurfaces.Conflict.environmentKey(key)) { try surfaces.resolve() }
+    }
+
+    @Test(arguments: [
+        FocusDefinition(id: "cmux", requiresEnv: ["FOCUS_PANE"], argv: ["/usr/local/bin/focusing", "{FOCUS_PANE}"]),
+        FocusDefinition(id: "loose", requiresEnv: ["FOCUS_PANE"], argv: ["focusing", "{FOCUS_PANE}"]),
+        FocusDefinition(id: "unlisted", requiresEnv: ["FOCUS_PANE"], argv: ["/usr/local/bin/focusing", "{OTHER}"]),
+        FocusDefinition(id: "foreign", requiresEnv: ["OTHER"], argv: ["/usr/local/bin/focusing", "{OTHER}"]),
+        FocusDefinition(id: "empty", requiresEnv: [], argv: []),
+    ])
+    func aFocusDefinitionThatCannotRunSafelyIsRejectedBeforeAnythingStarts(definition: FocusDefinition) {
+        var surfaces = AgentSurfaces.builtIn
+        surfaces.multiplexers.append(Focusing(focusDefinitions: [definition]))
+        #expect(throws: AgentSurfaces.Conflict.focusDefinition(definition.id)) { try surfaces.resolve() }
+    }
+
     private static let twins = ScriptedTerminalRoute(
         name: "Twins", apps: ["dev.example.twins", "dev.example.twins-preview"],
         front: "return tty of front", body: "focus wanted", placeScript: "return names",

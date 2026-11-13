@@ -174,7 +174,7 @@ struct TerminalRoutesTests {
             .add(30, parent: 20, tty: "/dev/ttys050", ["claude"])
             .add(20, parent: 10, tty: "/dev/ttys050", ["/usr/bin/login"])
             .add(10, parent: 1, ["/Applications/cmux.app/Contents/MacOS/cmux"], app: "com.cmuxterm.app")
-        #expect(TerminalRoutes.plan(agent: 30, facts: facts) == [.select(.connector), .activate(app: "com.cmuxterm.app", pid: 10)])
+        #expect(TerminalRoutes.plan(agent: 30, facts: facts) == [.select(.connector("cmux")), .activate(app: "com.cmuxterm.app", pid: 10)])
     }
 
     @Test func aTerminalOpenHasNoRouteForIsUnsupportedAndOnlyComesForward() {

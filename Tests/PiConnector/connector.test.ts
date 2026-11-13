@@ -24,7 +24,13 @@ function harness(options: Options = {}) {
   const env: Record<string, string | undefined> = {}
   const config = {
     protocol: 2, socketPath: "/tmp/ks.sock", tokenPath: "/tmp/ks-token", readyPath: "/tmp/ks-ready.json", installation: "I1",
-    plugin: "keyscribe-dev", environmentKeys: ["ZELLIJ_PANE_ID", "CMUX_SURFACE_ID"],
+    plugin: "keyscribe-dev", environmentKeys: ["CMUX_SURFACE_ID", "MUX_PANE", "ZELLIJ_PANE_ID"],
+    focusDefinitions: [
+      { id: "cmux", requiresEnv: ["CMUX_SURFACE_ID"], argv: ["/usr/bin/env", "cmux", "focus-panel", "--panel", "{CMUX_SURFACE_ID}"] },
+      { id: "mux", requiresEnv: ["MUX_PANE"], argv: ["/opt/mux/bin/mux", "focus", "--pane={MUX_PANE}", "{MUX_PANE}"] },
+      { id: "stray", requiresEnv: ["MUX_PANE"], argv: ["/opt/mux/bin/mux", "{ZELLIJ_PANE_ID}"] },
+      { id: "relative", requiresEnv: ["MUX_PANE"], argv: ["mux", "{MUX_PANE}"] },
+    ],
   }
   const files: Record<string, string | undefined> = {
     "/plugin/keyscribe.json": JSON.stringify(config),
@@ -260,7 +266,7 @@ test("a session start says hello with the process, its directory, its name and w
   assert.equal(hello.cwd, "/work")
   assert.equal(hello.session, "s1")
   assert.equal(hello.title, "frontend")
-  assert.deepEqual(hello.features, ["focus", "label", "readiness", "notify", "images", "check"])
+  assert.deepEqual(hello.features, ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check"])
   assert.equal(hello.prompts, 0)
   assert.equal(hello.idle, true)
   assert.equal(hello.gap, false)
@@ -1140,23 +1146,43 @@ test("losing the connection clears only the status this connector set, once", as
   assert.deepEqual(h.statuses, ["keyscribe-dev: “api”", undefined])
 })
 
-test("a focus outside cmux is refused, inside cmux it focuses the connector's own surface before expiry", async () => {
+test("a focus runs only the named definition, outside its place it is refused, and it runs before expiry", async () => {
   const h = harness()
   await h.connect()
-  await h.deliver([{ op: "focus", id: "r1", expectedSession: "s1", expiresAt: h.now + 3000 }])
-  assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["notInCmux"])
+  await h.deliver([{ op: "focus", id: "r1", expectedSession: "s1", expiresAt: h.now + 3000, definition: "cmux" }])
+  assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["notInPlace"])
   h.env.CMUX_SURFACE_ID = "surface-9"
   await h.answerEvents()
-  await h.deliver([{ op: "focus", id: "r2", expectedSession: "s1", expiresAt: h.now - 1 }])
+  await h.deliver([{ op: "focus", id: "r2", expectedSession: "s1", expiresAt: h.now - 1, definition: "cmux" }])
   assert.deepEqual(h.replies().filter((b) => b.request === "r2").map((b) => b.reason).filter(Boolean), ["expired"])
   await h.answerEvents()
-  await h.deliver([{ op: "focus", id: "r3", expectedSession: "s1", expiresAt: h.now + 3000 }])
-  assert.deepEqual(h.execs, [["cmux", "focus-panel", "--panel", "surface-9"]])
+  await h.deliver([{ op: "focus", id: "r3", expectedSession: "s1", expiresAt: h.now + 3000, definition: "cmux" }])
+  assert.deepEqual(h.execs, [["/usr/bin/env", "cmux", "focus-panel", "--panel", "surface-9"]])
   assert.deepEqual(h.replies().filter((b) => b.request === "r3").map((b) => b.op), ["ack", "focused"])
   h.execCode = 1
   await h.answerEvents()
-  await h.deliver([{ op: "focus", id: "r4", expectedSession: "s1", expiresAt: h.now + 3000 }])
+  await h.deliver([{ op: "focus", id: "r4", expectedSession: "s1", expiresAt: h.now + 3000, definition: "cmux" }])
   assert.deepEqual(h.replies().filter((b) => b.request === "r4").map((b) => b.reason).filter(Boolean), ["focusFailed"])
+})
+
+test("a focus definition is substituted whole, never by a shell, and never from a value that reads as an option", async () => {
+  const h = harness()
+  await h.connect()
+  h.env.MUX_PANE = `pane "1" $(touch /tmp/x); rm`
+  h.env.ZELLIJ_PANE_ID = "7"
+  for (const [id, definition] of [["r1", undefined], ["r2", "unknown"], ["r3", "stray"], ["r4", "relative"]] as const) {
+    await h.deliver([{ op: "focus", id, expectedSession: "s1", expiresAt: h.now + 3000, definition }])
+    await h.answerEvents()
+  }
+  assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["unknownFocus", "unknownFocus", "unknownFocus", "unknownFocus"])
+  assert.deepEqual(h.execs, [])
+  await h.deliver([{ op: "focus", id: "r5", expectedSession: "s1", expiresAt: h.now + 3000, definition: "mux" }])
+  assert.deepEqual(h.execs, [["/opt/mux/bin/mux", "focus", "--pane={MUX_PANE}", `pane "1" $(touch /tmp/x); rm`]])
+  await h.answerEvents()
+  h.env.MUX_PANE = "-rf"
+  await h.deliver([{ op: "focus", id: "r6", expectedSession: "s1", expiresAt: h.now + 3000, definition: "mux" }])
+  assert.deepEqual(h.replies().filter((b) => b.request === "r6").map((b) => b.reason).filter(Boolean), ["unsafeValue"])
+  assert.equal(h.execs.length, 1)
 })
 
 test("a command the connector does not offer is refused", async () => {

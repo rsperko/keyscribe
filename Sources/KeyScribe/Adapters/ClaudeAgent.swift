@@ -139,11 +139,12 @@ final class ClaudeConnector: AgentConnector {
     private let pluginName: String
     private let script: String?
     private let baseEnvironment: [String: String]
+    private let surfaces: ConnectorSurfaces
 
     init(
         locate: @escaping () -> String? = { ClaudeCLI.locate() },
         run: @escaping @Sendable ([String], [String: String]) -> (Int32, String) = { ClaudeCLI.run($0, environment: $1) },
-        agentsDir: URL, pluginName: String, script: String? = ClaudeConnectorFiles.registerJS,
+        agentsDir: URL, pluginName: String, surfaces: ConnectorSurfaces, script: String? = ClaudeConnectorFiles.registerJS,
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
     ) {
@@ -153,12 +154,13 @@ final class ClaudeConnector: AgentConnector {
         self.pluginName = pluginName
         self.script = script
         self.baseEnvironment = baseEnvironment
+        self.surfaces = surfaces
         defaultFolder = ClaudeConnectorInstaller.defaultSetupFolder(home: home)
     }
 
     private var pluginId: String { "\(pluginName)@\(pluginName)-local" }
     var isBundled: Bool { script != nil }
-    var bundledVersion: String? { script.map(ClaudeConnectorFiles.version(for:)) }
+    var bundledVersion: String? { script.map { ClaudeConnectorFiles.version(for: $0, surfaces: surfaces) } }
 
     func hasFiles(in target: ConnectorTarget) -> Bool {
         FileManager.default.fileExists(atPath: ClaudeConnectorInstaller.marketplaceDir(in: agentsDir, setupFolder: target.folder).path)
@@ -180,7 +182,7 @@ final class ClaudeConnector: AgentConnector {
         let environment = ClaudeConnectorInstaller.environment(for: target.folder, isDefault: target.isDefault, base: baseEnvironment)
         let (status, output) = await Task.detached { run([tool, "plugin", "list", "--json"], environment) }.value
         guard status == 0 else { return .failed(Self.trimmed(output)) }
-        let found = AgentConnectorStatus.parse(pluginList: Data(output.utf8), pluginId: pluginId, bundledVersion: ClaudeConnectorFiles.version(for: script))
+        let found = AgentConnectorStatus.parse(pluginList: Data(output.utf8), pluginId: pluginId, bundledVersion: ClaudeConnectorFiles.version(for: script, surfaces: surfaces))
         let registered = switch found {
         case .ready, .outdated, .disabled: true
         case .notInstalled, .unknown: false
@@ -210,7 +212,7 @@ final class ClaudeConnector: AgentConnector {
             socketPath: agentsDir.appendingPathComponent("bridge.sock").path,
             tokenPath: agentsDir.appendingPathComponent("token").path,
             readyPath: agentsDir.appendingPathComponent("ready.json").path,
-            script: script, run: run, baseEnvironment: baseEnvironment)
+            script: script, surfaces: surfaces, run: run, baseEnvironment: baseEnvironment)
         let failure: String? = await Task.detached {
             do {
                 try action(installer)

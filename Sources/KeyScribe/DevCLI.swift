@@ -116,6 +116,9 @@ public enum DevCLI {
                                       source with its own reader. Exits 1 when <pid> is not running.
                 --read-places           Also read the agent's place the way the app does: through every place
                                         source and the terminal's place script. May ask for Automation access.
+                --agent <id>            The agent id a place source matches by: the id the agent's connector sends
+                                        in its hello, which for the built-in agents is their command name
+                                        (default: the process name).
                 --session <id>          The agent's own conversation id, for a place source that matches by it.
               --list-engines          Print each shipped catalog engine and whether it is installed
                                       (installed / missing / system), then exit — coverage for the release gate.
@@ -272,13 +275,17 @@ public enum DevCLI {
         }
 
         if let i = CommandLine.arguments.firstIndex(of: "--route-probe") {
-            let session: String? = switch RouteProbe.option("--session", in: CommandLine.arguments) {
-            case .absent: ""
-            case .value(let value): value
-            case .missing: nil
+            let given = { (flag: String) -> String?? in
+                switch RouteProbe.option(flag, in: CommandLine.arguments) {
+                case .absent: .some(nil)
+                case .value(let value): .some(value)
+                case .missing: nil
+                }
             }
-            guard i + 1 < CommandLine.arguments.count, let pid = RouteProbe.pid(CommandLine.arguments[i + 1]), let session else {
-                FileHandle.standardError.write(Data("Usage: \(Branding.appName) --route-probe <pid> [--read-places [--session <id>]]\n".utf8))
+            guard i + 1 < CommandLine.arguments.count, let pid = RouteProbe.pid(CommandLine.arguments[i + 1]),
+                  let session = given("--session"), let agentName = given("--agent")
+            else {
+                FileHandle.standardError.write(Data("Usage: \(Branding.appName) --route-probe <pid> [--read-places [--agent <kind>] [--session <id>]]\n".utf8))
                 exit(2)
             }
             let surfaces = resolvedSurfaces()
@@ -291,12 +298,12 @@ public enum DevCLI {
                 for line in lines { print(line) }
                 exit(0)
             }
-            let agent = facts.process(pid)?.name ?? ""
+            let agent = agentName ?? facts.process(pid)?.name ?? ""
             let sources = codingAgents.placeSources
             Task { @MainActor in
                 let reader = AgentRuntime.places(surfaces: surfaces, sources: sources.map { $0() })
                 for line in lines where line != RouteProbe.skipped { print(line) }
-                for line in await PlaceProbe.lines(pid: pid, agent: agent, session: session, reader: reader) { print(line) }
+                for line in await PlaceProbe.lines(pid: pid, agent: agent, session: session ?? "", reader: reader) { print(line) }
                 exit(0)
             }
             dispatchMain()

@@ -265,7 +265,7 @@ a hello on any other protocol is refused with `426` and is never registered or s
 - **The Pi connector is a folder in the setup's `extensions/`.** It is installed by writing that folder and
   uninstalled by deleting it; Pi loads whatever is there when it starts or on `/reload`, so no Pi command
   is run. The folder's `keyscribe.json` carries the connection settings, the installation id, the connector
-  version and the environment keys the terminal routes read. An extension turned off in the setup's
+  version, the environment keys the terminal routes read, and their focus commands (see Hello). An extension turned off in the setup's
   `settings.json` (an `extensions` entry `-path` or a matching `!pattern`, unless `+path` brings it back) is
   reported as turned off, and an update never turns it back on.
 - **Updates keep setups as they are.** When KeyScribe starts, it updates the connector in each enrolled setup
@@ -293,9 +293,21 @@ a hello on any other protocol is refused with `426` and is never registered or s
   KeyScribe uses only what was announced: `label` for the status-line label naming the conversation, and
   `focus` for selecting the connector's own terminal surface during Open when the terminal cannot be
   told which surface from outside (cmux, when no process shows the agent's surface id). A connector that lacks
-  `focus` is reported as outdated, with the steps to update it. A hello may carry the conversation's title,
-  and an `environment` map with terminal facts only the agent's own process can read (its Zellij pane);
-  KeyScribe keeps only the keys its terminal routes use (`ResolvedSurfaces.environmentKeys`).
+  `focus` is reported as outdated, with the steps to update it. With `focusDefinitions`, a `focus` command
+  names one of the focus commands the routes declare (`FocusDefinition`, written into each connector's
+  `keyscribe.json`): the connector runs it only if it is listed there, every variable it names is set in the
+  agent's own environment, no value starts with `-`, and the request has not expired and the session has not
+  changed. Each value replaces a whole argument, the command starts with an absolute program path (`/usr/bin/env`
+  still finds the program it names on the agent's `PATH`), no shell runs it, and it runs under a short
+  deadline. A connector without `focusDefinitions`, or one still running on a configuration from before the
+  named command existed (it answers `unknownFocus`), is reported as outdated: Open brings the terminal
+  forward and gives the steps to update and reload. A hello may
+  carry the conversation's title, and an `environment` map with terminal facts only the agent's own process
+  can read (its Zellij pane); the connector reads only the keys its terminal routes use
+  (`ResolvedSurfaces.environmentKeys`), and KeyScribe keeps only those. The Claude Code connector reads each
+  variable by name, as Claude Code requires, so installing writes one read per key into its script; a key
+  that is not a plain variable name keeps the routes from resolving. A change to the keys or focus commands
+  changes the connector version, so Settings offers the update.
 - **Every command names the session it expects**, and the connector refuses one whose session has changed.
 - **A disconnected conversation goes quiet.** KeyScribe answers the hello of a conversation listed in
   `names.json`'s `excluded` with `{"ok":true,"quiet":true}` and passes on only who it is (agent, session,

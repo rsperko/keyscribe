@@ -81,7 +81,7 @@ struct AgentTerminalFocus: AgentTerminalFocusing {
     var run: @Sendable ([String]) -> (Int32, String) = { ToolCLI.run($0, timeout: 3) }
     var script: Script = TerminalScripting.select
     var openURL: @MainActor @Sendable (String) -> Bool = { URL(string: $0).map(NSWorkspace.shared.open) ?? false }
-    var connector: @MainActor @Sendable (_ session: String) async -> TerminalSelection = { _ in .unsupported }
+    var connector: @MainActor @Sendable (_ session: String, _ definition: String) async -> TerminalSelection = { _, _ in .unsupported }
     var running: @MainActor @Sendable (_ app: String, _ near: Int) -> (pid: Int, name: String)? = AgentTerminalFocus.running
     var activate: @MainActor @Sendable (Int) -> String? = AppActivation.bringForwardApp(pid:)
 
@@ -142,8 +142,8 @@ struct AgentTerminalFocus: AgentTerminalFocusing {
                 case .notAllowed: terminal = .notAllowed
                 case .unsupported, .outdated: terminal = .unsupported
                 }
-            case .select(.connector):
-                switch await connector(session) {
+            case .select(.connector(let definition)):
+                switch await connector(session, definition) {
                 case .selected: terminal = .selected
                 case .notFound, .notAllowed: terminal = .notFound
                 case .unsupported: terminal = .unsupported

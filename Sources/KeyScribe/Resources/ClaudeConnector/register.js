@@ -16,7 +16,7 @@ const stallRetries = 3
 const late = { late: true }
 const unreachable = { unreachable: true }
 const freshSources = ['startup', 'clear', 'fork']
-const features = ['focus', 'label', 'readiness', 'notify', 'fill', 'check']
+const features = ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check']
 const readAloudTool = 'tell_me_when_done'
 
 let config = null
@@ -64,13 +64,24 @@ async function loadConfig($) {
   if (loaded.installation !== loadedFrom) retire($)
 }
 
-async function terminalPlace($) {
+async function readEnvironment($) {
+  const keys = []
   try {
-    const pane = await $.env.get("ZELLIJ_PANE_ID")
-    return pane ? { ZELLIJ_PANE_ID: pane } : {}
+    const reads = await Promise.all([
+    ])
+    return Object.fromEntries(keys.map((key, index) => [key, reads[index]]))
   } catch (err) {
     return {}
   }
+}
+
+async function terminalPlace($) {
+  const values = await readEnvironment($)
+  const place = {}
+  for (const key of (config && config.environmentKeys) || []) {
+    if (typeof values[key] === 'string' && values[key]) place[key] = values[key]
+  }
+  return place
 }
 
 async function readiness($) {
@@ -567,13 +578,32 @@ function noteTitle($, e) {
   if (target === session) observe($, { op: 'title', session: target, text: next || '' })
 }
 
-async function focus($, id, expiresAt, gen, expected) {
-  const surface = await $.env.get("CMUX_SURFACE_ID")
-  if (!surface) return reply($, gen, { op: 'refused', request: id, reason: 'notInCmux' })
+async function focusArgv($, name) {
+  const definition = ((config && config.focusDefinitions) || []).find((d) => d.id === name)
+  if (!name || !definition || !Array.isArray(definition.argv) || !Array.isArray(definition.requiresEnv)) return { reason: 'unknownFocus' }
+  const environment = await readEnvironment($)
+  const values = {}
+  for (const key of definition.requiresEnv) {
+    const value = Object.prototype.hasOwnProperty.call(environment, key) ? environment[key] : null
+    if (typeof value !== 'string' || !value) return { reason: 'notInPlace' }
+    if (value.startsWith('-')) return { reason: 'unsafeValue' }
+    values[key] = value
+  }
+  const argv = definition.argv.map((arg) => {
+    const key = /^\{([^{}]+)\}$/.exec(arg)
+    return key ? values[key[1]] : arg
+  })
+  if (!argv.length || argv.some((arg) => typeof arg !== 'string') || !argv[0].startsWith('/')) return { reason: 'unknownFocus' }
+  return { argv }
+}
+
+async function focus($, id, name, expiresAt, gen, expected) {
+  const found = await focusArgv($, name)
+  if (!found.argv) return reply($, gen, { op: 'refused', request: id, reason: found.reason })
   if (!((await $.clock.now()) < expiresAt)) return reply($, gen, { op: 'refused', request: id, reason: 'expired' })
   if (!current(expected, gen)) return reply($, gen, { op: 'refused', request: id, reason: 'sessionChanged' })
   try {
-    const result = await $.process.run(['/usr/bin/env', 'cmux', 'focus-panel', '--panel', surface], { timeoutMs: 3000 })
+    const result = await $.process.run(found.argv, { timeoutMs: 3000 })
     return reply($, gen, result.exitCode === 0 ? { op: 'focused', request: id } : { op: 'refused', request: id, reason: 'focusFailed' })
   } catch (err) {
     return reply($, gen, { op: 'refused', request: id, reason: 'focusFailed' })
@@ -598,7 +628,7 @@ async function handle($, cmd, gen) {
     return submit($, cmd.id, cmd.text, cmd.expiresAt, gen, cmd.expectedSession)
   }
   if (cmd.op === 'check') return reply($, gen, { op: 'checked', request: cmd.request || '', check: cmd.id, ...report(cmd.request || '') })
-  if (cmd.op === 'focus') return focus($, cmd.id, cmd.expiresAt, gen, cmd.expectedSession)
+  if (cmd.op === 'focus') return focus($, cmd.id, cmd.definition, cmd.expiresAt, gen, cmd.expectedSession)
   if (cmd.op === 'status') {
     ownedStatus = Boolean(cmd.text)
     quietly($.ui.status(cmd.text || undefined))

@@ -72,8 +72,8 @@ struct AgentTerminalFocusTests {
                 onOpen?()
                 return opens
             },
-            connector: { session in
-                calls.record("connector \(session)")
+            connector: { session, definition in
+                calls.record("connector \(session) \(definition)")
                 return connector
             },
             running: { _, _ in appPid.map { ($0, "Ghostty") } },
@@ -170,9 +170,9 @@ struct AgentTerminalFocusTests {
     ])
     func aTerminalOnlyTheAgentsConnectorCanFocusAsksItForTheSession(answer: TerminalSelection, result: AgentFocusResult) async {
         let calls = Calls()
-        let cmux: [OpenAction] = [.select(.connector), .activate(app: "com.cmuxterm.app", pid: 10)]
+        let cmux: [OpenAction] = [.select(.connector("cmux")), .activate(app: "com.cmuxterm.app", pid: 10)]
         #expect(await focuser(cmux, apps: [10: "cmux"], calls: calls, connector: answer).focus(session: "s1", pid: 30, environment: [:], asking: { _ in }) == result)
-        #expect(calls.events == ["plan", "connector s1", "activate 10"])
+        #expect(calls.events == ["plan", "connector s1 cmux", "activate 10"])
     }
 
     @Test func aTabTheTerminalCouldNotFindLeavesOnlyTheTerminalApp() async {

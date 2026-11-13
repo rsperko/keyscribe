@@ -39,7 +39,7 @@ struct CodingAgentsSettingsModelTests {
             }
             if argv.suffix(3) == ["marketplace", "list", "--json"] { return (0, marketplace ? #"[{"name":"keyscribe-dev-local"}]"# : "[]") }
             if argv.contains("add") { marketplace = true }
-            if argv.contains("install") || argv.contains("update") { installed = ClaudeConnectorFiles.version }
+            if argv.contains("install") || argv.contains("update") { installed = ClaudeConnectorFiles.registerJS.map { ClaudeConnectorFiles.version(for: $0, surfaces: .builtIn) } }
             if argv.contains("uninstall") { installed = nil }
             if argv.contains("remove") {
                 marketplace = false
@@ -60,7 +60,7 @@ struct CodingAgentsSettingsModelTests {
     ) -> (CodingAgentsSettingsModel, CLI, URL) {
         let dir = dir ?? FileManager.default.temporaryDirectory.appendingPathComponent("ks-agents-model-\(UUID().uuidString)")
         let connector = ClaudeConnector(
-            locate: { claude }, run: { argv, _ in cli.run(argv) }, agentsDir: dir, pluginName: "keyscribe-dev", script: script,
+            locate: { claude }, run: { argv, _ in cli.run(argv) }, agentsDir: dir, pluginName: "keyscribe-dev", surfaces: .builtIn, script: script,
             home: dir.appendingPathComponent("home"))
         let model = CodingAgentsSettingsModel(describeTerminal: terminals.describe, agentsDir: dir, connectors: [connector])
         return (model, cli, dir)
@@ -84,7 +84,7 @@ struct CodingAgentsSettingsModelTests {
 
     @Test func aRegistrationThisSetupNeverInstalledIsNotItsConnector() async {
         let cli = CLI()
-        cli.installed = ClaudeConnectorFiles.version
+        cli.installed = ClaudeConnectorFiles.registerJS.map { ClaudeConnectorFiles.version(for: $0, surfaces: .builtIn) }
         let (model, _, _) = makeModel(cli: cli)
         await model.refresh()
         #expect(setup(model).state == .status(.notInstalled))
@@ -137,7 +137,7 @@ struct CodingAgentsSettingsModelTests {
         row.connectorLive = true
         model.show([row], current: nil, loadedVersions: ["backend": "0.1.0-old"])
         #expect(setup(model).needsReload)
-        model.show([row], current: nil, loadedVersions: ["backend": ClaudeConnectorFiles.version(for: ClaudeConnectorFiles.registerJS ?? "")])
+        model.show([row], current: nil, loadedVersions: ["backend": ClaudeConnectorFiles.version(for: ClaudeConnectorFiles.registerJS ?? "", surfaces: .builtIn)])
         #expect(!setup(model).needsReload)
     }
 
@@ -508,7 +508,7 @@ struct CodingAgentsSettingsModelTests {
 
     @Test func aConversationStillRunningThePreviousConnectorIsNotedAndOneOnTheCurrentIsNot() {
         let (model, _, _) = makeModel()
-        let bundled = ClaudeConnectorFiles.version(for: ClaudeConnectorFiles.registerJS ?? "")
+        let bundled = ClaudeConnectorFiles.version(for: ClaudeConnectorFiles.registerJS ?? "", surfaces: .builtIn)
         model.show([conversation("backend", pid: 1), conversation("api", pid: 2)], current: nil,
                    loadedVersions: ["backend": "0.1.0-old", "api": bundled])
         #expect(model.rows.first { $0.name == "backend" }?.olderConnector == true)
@@ -952,7 +952,7 @@ struct ClaudeCLITests {
 @MainActor
 struct ClaudeConnectorCopyTests {
     @Test func afterRemovalOutsideTheAppOpenSessionsAreToldHowToStopListening() {
-        #expect(ClaudeConnector(agentsDir: URL(fileURLWithPath: "/tmp"), pluginName: "keyscribe-dev").copy.stillConnected(1) == "The connector was uninstalled outside \(Branding.appName), so 1 open session is still connected and keeps receiving what you say until you run /reload-plugins in it or restart it.")
-        #expect(ClaudeConnector(agentsDir: URL(fileURLWithPath: "/tmp"), pluginName: "keyscribe-dev").copy.stillConnected(3) == "The connector was uninstalled outside \(Branding.appName), so 3 open sessions are still connected and keep receiving what you say until you run /reload-plugins in each one or restart them.")
+        #expect(ClaudeConnector(agentsDir: URL(fileURLWithPath: "/tmp"), pluginName: "keyscribe-dev", surfaces: .builtIn).copy.stillConnected(1) == "The connector was uninstalled outside \(Branding.appName), so 1 open session is still connected and keeps receiving what you say until you run /reload-plugins in it or restart it.")
+        #expect(ClaudeConnector(agentsDir: URL(fileURLWithPath: "/tmp"), pluginName: "keyscribe-dev", surfaces: .builtIn).copy.stillConnected(3) == "The connector was uninstalled outside \(Branding.appName), so 3 open sessions are still connected and keep receiving what you say until you run /reload-plugins in each one or restart them.")
     }
 }

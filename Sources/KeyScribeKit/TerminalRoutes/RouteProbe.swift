@@ -57,7 +57,7 @@ public enum RouteProbe {
             return "layer \(layer.multiplexer)\(layer.confirmed ? "" : " unconfirmed"): " + commands.joined(separator: " ; ")
         case .select(.script(let app, let pid, _)): return "select script app=\(app) pid=\(pid)"
         case .select(.url(let url)): return "select url=\(url)"
-        case .select(.connector): return "select connector"
+        case .select(.connector(let definition)): return "select connector definition=\(definition)"
         case .activate(let app, let pid): return "activate app=\(app) pid=\(pid)"
         case .unsupported(let app, let pid): return "unsupported app=\(app) pid=\(pid)"
         }

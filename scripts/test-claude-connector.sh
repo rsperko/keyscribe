@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs the Claude Code connector's behavior tests (Tests/ClaudeConnector/*.test.ts) with the Claude Code
-# CLI's own mod test runner, against the exact register.js the app packages and installs. Exits 2 before
+# CLI's own mod test runner, against the register.js the app packages, with the environment reader installed
+# the way the app installs it, for the variables the tests use. Exits 2 before
 # any test when the CLI is missing, older than the validated minimum, or has no test runner, so an
 # incompatible CLI is never reported as a test failure. Swift builds and tests never need the CLI.
 set -euo pipefail
@@ -30,7 +31,16 @@ PLUGIN="$WORK/plugin"
 mkdir -p "$PLUGIN/.claude-plugin" "$PLUGIN/hooks" "$PLUGIN/tests" "$WORK/config"
 printf '{"name":"keyscribe-connector-test","version":"0.0.0"}\n' > "$PLUGIN/.claude-plugin/plugin.json"
 printf '{"modules":["./register.js"]}\n' > "$PLUGIN/hooks/hooks.json"
-cp "$ROOT/Sources/KeyScribe/Resources/ClaudeConnector/register.js" "$PLUGIN/hooks/register.js"
+"$ROOT/scripts/claude-connector-env-reader.sh" CMUX_SURFACE_ID MUX_PANE TMUX ZELLIJ_PANE_ID > "$WORK/reader.js"
+awk -v reader="$WORK/reader.js" '
+  /^async function readEnvironment\(\$\) \{$/ { while ((getline line < reader) > 0) print line; skipping = 1; next }
+  skipping && /^}$/ { skipping = 0; next }
+  !skipping
+' "$ROOT/Sources/KeyScribe/Resources/ClaudeConnector/register.js" > "$PLUGIN/hooks/register.js"
+grep -q '$.env.get("MUX_PANE")' "$PLUGIN/hooks/register.js" || {
+  echo "test-claude-connector: could not install the environment reader into register.js" >&2
+  exit 1
+}
 cp "$ROOT"/Tests/ClaudeConnector/*.test.ts "$PLUGIN/tests/"
 
 CLAUDE_CONFIG_DIR="$WORK/config" timeout 300 "$CLAUDE" plugin validate "$PLUGIN" >"$WORK/validate.log" 2>&1 || {

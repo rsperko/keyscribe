@@ -56,7 +56,7 @@ struct PiConnectorInstallerTests {
         .appendingPathComponent("Sources/KeyScribe/Resources/PiConnector/index.ts")
     static let script = PiConnectorFiles.indexTS ?? ""
 
-    private func setup(root: URL? = nil, environmentKeys: Set<String> = ResolvedSurfaces.builtIn.environmentKeys) -> (PiConnectorInstaller, URL, URL) {
+    private func setup(root: URL? = nil, surfaces: ConnectorSurfaces = .builtIn) -> (PiConnectorInstaller, URL, URL) {
         let root = root ?? FileManager.default.temporaryDirectory.appendingPathComponent("ks-pi-\(UUID().uuidString)")
         let agents = root.appendingPathComponent("agents")
         let folder = root.appendingPathComponent("pi-setup")
@@ -65,7 +65,7 @@ struct PiConnectorInstallerTests {
             socketPath: agents.appendingPathComponent("bridge.sock").path,
             tokenPath: agents.appendingPathComponent("token").path,
             readyPath: agents.appendingPathComponent("ready.json").path,
-            script: Self.script, environmentKeys: environmentKeys)
+            script: Self.script, surfaces: surfaces)
         return (installer, agents, folder.appendingPathComponent("extensions"))
     }
 
@@ -73,12 +73,12 @@ struct PiConnectorInstallerTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ks-pi-\(UUID().uuidString)")
         let (before, _, _) = setup(root: root)
         try before.install(installation: "id-1")
-        let added = ResolvedSurfaces.builtIn.environmentKeys.union(["MUX_PANE"])
-        let (after, _, _) = setup(root: root, environmentKeys: added)
-        #expect(after.installed(installation: "id-1") == .other(version: PiConnectorFiles.version(for: Self.script, environmentKeys: ResolvedSurfaces.builtIn.environmentKeys)))
+        let added = ConnectorSurfaces(environmentKeys: ResolvedSurfaces.builtIn.environmentKeys.union(["MUX_PANE"]), focusDefinitions: ConnectorSurfaces.builtIn.focusDefinitions)
+        let (after, _, _) = setup(root: root, surfaces: added)
+        #expect(after.installed(installation: "id-1") == .other(version: PiConnectorFiles.version(for: Self.script, surfaces: .builtIn)))
         try after.install(installation: "id-1")
         #expect(after.installed(installation: "id-1") == .current)
-        #expect(before.installed(installation: "id-1") == .other(version: PiConnectorFiles.version(for: Self.script, environmentKeys: added)))
+        #expect(before.installed(installation: "id-1") == .other(version: PiConnectorFiles.version(for: Self.script, surfaces: added)))
     }
 
     private func json(_ url: URL) throws -> [String: Any] {
@@ -101,8 +101,11 @@ struct PiConnectorInstallerTests {
         #expect(config["readyPath"] as? String == agents.appendingPathComponent("ready.json").path)
         #expect(config["plugin"] as? String == "keyscribe-dev")
         #expect(config["appName"] as? String == Branding.appName)
-        #expect(config["version"] as? String == PiConnectorFiles.version(for: Self.script, environmentKeys: ResolvedSurfaces.builtIn.environmentKeys))
+        #expect(config["version"] as? String == PiConnectorFiles.version(for: Self.script, surfaces: .builtIn))
         #expect(Set(config["environmentKeys"] as? [String] ?? []) == ResolvedSurfaces.builtIn.environmentKeys)
+        let focus = try #require((config["focusDefinitions"] as? [[String: Any]])?.first { $0["id"] as? String == "cmux" })
+        #expect(focus["requiresEnv"] as? [String] == ["CMUX_SURFACE_ID"])
+        #expect((focus["argv"] as? [String])?.first == "/usr/bin/env")
         #expect(config["installation"] as? String == "id-1")
         let code = try String(contentsOf: plugin.appendingPathComponent("index.ts"), encoding: .utf8)
         #expect(code.contains("const loadedFrom: string | null = \"id-1\""))
@@ -112,8 +115,8 @@ struct PiConnectorInstallerTests {
             .replacingOccurrences(of: "const configPath: string | null = \"\(plugin.appendingPathComponent("keyscribe.json").path)\"", with: "const configPath: string | null = null")
         #expect(restored == Self.script)
         #expect(installer.installed(installation: "id-1") == .current)
-        #expect(installer.installed(installation: "id-2") == .other(version: PiConnectorFiles.version(for: Self.script, environmentKeys: ResolvedSurfaces.builtIn.environmentKeys)))
-        #expect(installer.installed(installation: nil) == .other(version: PiConnectorFiles.version(for: Self.script, environmentKeys: ResolvedSurfaces.builtIn.environmentKeys)))
+        #expect(installer.installed(installation: "id-2") == .other(version: PiConnectorFiles.version(for: Self.script, surfaces: .builtIn)))
+        #expect(installer.installed(installation: nil) == .other(version: PiConnectorFiles.version(for: Self.script, surfaces: .builtIn)))
     }
 
     @Test func uninstallRemovesOnlyTheConnectorsFolder() throws {
@@ -141,7 +144,7 @@ struct PiConnectorInstallerTests {
         try installer.install(installation: "id-1")
         #expect(installer.installed(installation: "id-1") == .current)
         try Data("edited\n".utf8).write(to: plugin.appendingPathComponent("index.ts"))
-        #expect(installer.installed(installation: "id-1") == .other(version: PiConnectorFiles.version(for: Self.script, environmentKeys: ResolvedSurfaces.builtIn.environmentKeys)))
+        #expect(installer.installed(installation: "id-1") == .other(version: PiConnectorFiles.version(for: Self.script, surfaces: .builtIn)))
     }
 
     @Test func anExtensionTurnedOffInPisSettingsIsSeen() throws {
@@ -166,9 +169,11 @@ struct PiConnectorInstallerTests {
         #expect(!source.contains("KeyScribeDev"))
         #expect(source.contains("const configPath: string | null = null"))
         #expect(source.contains("const loadedFrom: string | null = null"))
-        #expect(source.contains("const features = [\"focus\", \"label\", \"readiness\", \"notify\", \"images\", \"check\"]"))
-        let reads = try Regex(#"host\.env\("([A-Z_]+)"\)"#)
-        #expect(source.matches(of: reads).compactMap { $0.output[1].substring.map(String.init) } == ["CMUX_SURFACE_ID"])
+        #expect(source.contains("const features = [\"focus\", \"focusDefinitions\", \"label\", \"readiness\", \"notify\", \"images\", \"check\"]"))
+        #expect(!source.contains("host.env(\""))
+        #expect(source.matches(of: try Regex(#"host\.env\(key\)"#)).count == 2)
+        #expect(source.contains("const keys = (config && config.environmentKeys) || []"))
+        #expect(source.contains("for (const key of definition.requiresEnv)"))
         #expect(!source.contains("tokenPath\""))
     }
 
@@ -201,7 +206,7 @@ struct PiConnectorStatusTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ks-pi-conn-\(UUID().uuidString)")
         let agents = root.appendingPathComponent("agents")
         let home = root.appendingPathComponent("home")
-        let connector = PiConnector(locate: { pi }, run: cli.run, agentsDir: agents, pluginName: "keyscribe-dev", environmentKeys: ResolvedSurfaces.builtIn.environmentKeys, script: script, home: home)
+        let connector = PiConnector(locate: { pi }, run: cli.run, agentsDir: agents, pluginName: "keyscribe-dev", surfaces: .builtIn, script: script, home: home)
         return (connector, cli, agents, home.appendingPathComponent(".pi/agent"))
     }
 
@@ -315,7 +320,7 @@ struct PiConnectorStatusTests {
 
         let after = PiConnector(
             locate: { "/bin/pi-test" }, run: CLI().run, agentsDir: agents, pluginName: "keyscribe-dev",
-            environmentKeys: ResolvedSurfaces.builtIn.environmentKeys.union(["MUX_PANE"]), script: PiConnectorFiles.indexTS,
+            surfaces: ConnectorSurfaces(environmentKeys: ResolvedSurfaces.builtIn.environmentKeys.union(["MUX_PANE"]), focusDefinitions: ConnectorSurfaces.builtIn.focusDefinitions), script: PiConnectorFiles.indexTS,
             home: folder.deletingLastPathComponent().deletingLastPathComponent())
         let updated = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [after])
         await updated.refresh()
@@ -345,7 +350,7 @@ struct PiConnectorStatusTests {
         await model.refresh()
         await model.connectors[0].setups[0].install()
         let connector = PiConnector(
-            locate: { nil }, run: { _ in (0, "") }, agentsDir: agents, pluginName: "keyscribe-dev", environmentKeys: ResolvedSurfaces.builtIn.environmentKeys, script: PiConnectorFiles.indexTS,
+            locate: { nil }, run: { _ in (0, "") }, agentsDir: agents, pluginName: "keyscribe-dev", surfaces: .builtIn, script: PiConnectorFiles.indexTS,
             home: folder.deletingLastPathComponent().deletingLastPathComponent())
         let without = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
         await without.refresh()
