@@ -324,9 +324,38 @@ struct AgentBridgeCodecTests {
             .submit(id: "r1", expectedSession: "s1", text: "/usr/local/bin is missing", expiresAt: Date(timeIntervalSince1970: 1_793_400_008.5)),
             .status(id: "r5", expectedSession: "s1", text: "🎙 keyscribe"),
             .focus(id: "r6", expectedSession: "s1", expiresAt: Date(timeIntervalSince1970: 1_793_400_000.25)),
+            .check(id: "check-r1", expectedSession: "s1", request: "r1", expiresAt: Date(timeIntervalSince1970: 1_793_400_010.5)),
         ]
         let data = try AgentBridgeCodec.encode(commands)
         #expect(try AgentBridgeCodec.decodeCommands(data) == commands)
+        #expect(commands.last?.expiresAt == Date(timeIntervalSince1970: 1_793_400_010.5))
+    }
+
+    @Test func aReceiptCarriesWhenTheAgentHadTheMessageAndWhenItEnteredTheConversation() throws {
+        let plain = #"{"op":"submitted","request":"r1","turn":"t1"}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(plain.utf8))
+            == .submitted(request: "r1", turn: "t1", report: AgentDeliveryReport(state: .seen, turn: "t1")))
+        let timed = #"{"op":"submitted","request":"r1","turn":"t1","handedAt":1793400000250,"seenAt":1793400000500,"altered":true}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(timed.utf8)) == .submitted(request: "r1", turn: "t1", report: AgentDeliveryReport(
+            state: .seen, turn: "t1", handedAt: Date(timeIntervalSince1970: 1_793_400_000.25),
+            seenAt: Date(timeIntervalSince1970: 1_793_400_000.5), altered: true)))
+    }
+
+    @Test func aCheckAnswerSaysWhereTheMessageIsAndAnUnknownStateIsUnknown() throws {
+        let handed = #"{"op":"checked","request":"r1","check":"c1","state":"handed","handedAt":1793400000250,"miss":"other"}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(handed.utf8)) == .checked(request: "r1", check: "c1", report: AgentDeliveryReport(
+            state: .handed, handedAt: Date(timeIntervalSince1970: 1_793_400_000.25), miss: "other")))
+        let refused = #"{"op":"checked","request":"r1","check":"c1","state":"refused","reason":"working"}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(refused.utf8))
+            == .checked(request: "r1", check: "c1", report: AgentDeliveryReport(state: .refused, reason: "working")))
+        let odd = #"{"op":"checked","request":"r1","check":"c1","state":"sideways"}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(odd.utf8)) == .checked(request: "r1", check: "c1", report: AgentDeliveryReport(state: .unknown)))
+    }
+
+    @Test func aCheckAnswerThatDoesNotNameItsCheckIsMalformed() {
+        #expect(throws: AgentBridgeCodec.CodecError.malformed) {
+            try AgentBridgeCodec.decodeEvent(Data(#"{"op":"checked","request":"r1","state":"seen"}"#.utf8))
+        }
     }
 
     @Test func eventsDecodeFromTheConnectorsWireFormat() throws {
@@ -482,7 +511,7 @@ struct AgentBridgeCodecTests {
 
     @Test(arguments: [
         (#"{"op":"ack","request":"r1"}"#, AgentEvent.ack(request: "r1")),
-        (#"{"op":"submitted","request":"r1","turn":"t9"}"#, .submitted(request: "r1", turn: "t9")),
+        (#"{"op":"submitted","request":"r1","turn":"t9"}"#, .submitted(request: "r1", turn: "t9", report: AgentDeliveryReport(state: .seen, turn: "t9"))),
         (#"{"op":"refused","request":"r1","reason":"stopLocked"}"#, .refused(request: "r1", reason: "stopLocked")),
         (#"{"op":"typed","session":"s1"}"#, .typed(session: "s1")),
         (#"{"op":"turnStarted","session":"s1","turn":"t7"}"#, .turnStarted(session: "s1", turn: "t7")),

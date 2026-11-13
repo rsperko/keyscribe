@@ -303,7 +303,7 @@ final class AgentBridgeServer: @unchecked Sendable {
                 self?.queue.async { self?.register(hello, answering: fd) }
             }
             return
-        case .ack(let request), .submitted(let request, _), .refused(let request, _), .focused(let request):
+        case .ack(let request), .submitted(let request, _, _), .refused(let request, _), .focused(let request):
             if let instance = envelope.instance, let connection = envelope.connection {
                 commands.ack(request, instance: instance, connection: connection)
             }
@@ -312,7 +312,7 @@ final class AgentBridgeServer: @unchecked Sendable {
                 self?.queue.async { self?.respond(fd, status: 200, body: Data(#"{"ok":true,"spoken":\#(spoken)}"#.utf8)) }
             }
             return
-        case .typed, .turnStarted, .turnComplete, .undelivered, .title, .waiting:
+        case .typed, .turnStarted, .turnComplete, .undelivered, .title, .waiting, .checked:
             break
         }
         onEvent(event)

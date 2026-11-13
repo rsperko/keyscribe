@@ -154,7 +154,7 @@ struct PiConnectorInstallerTests {
         #expect(!source.contains("KeyScribeDev"))
         #expect(source.contains("const configPath: string | null = null"))
         #expect(source.contains("const loadedFrom: string | null = null"))
-        #expect(source.contains("const features = [\"focus\", \"label\", \"readiness\", \"notify\", \"images\"]"))
+        #expect(source.contains("const features = [\"focus\", \"label\", \"readiness\", \"notify\", \"images\", \"check\"]"))
         let reads = try Regex(#"host\.env\("([A-Z_]+)"\)"#)
         #expect(source.matches(of: reads).compactMap { $0.output[1].substring.map(String.init) } == ["CMUX_SURFACE_ID"])
         #expect(!source.contains("tokenPath\""))

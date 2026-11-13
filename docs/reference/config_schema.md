@@ -112,7 +112,11 @@
   A **Coding agent** take fills them: `summary` says what happened (`Sent to backend`, `Queued for backend`,
   `Opened backend`, or why nothing was sent), and `facts` record the command (Open, choosing a recipient, or a
   message), the spoken address, the conversation chosen with its session id, how it was chosen, the default
-  recipient frozen at the start of the take. `result` is the text actually sent,
+  recipient frozen at the start of the take, and for a message that was handed off, `Delivery`: when it was
+  handed off and, relative to that, when the agent had it, when it entered the conversation (and whether it
+  changed on its way in), whether a receipt was missing and what the check found, why a message that entered
+  did not match, a turn followed for its reply, when the receipt arrived, and reconnects while waiting. It
+  holds times and fixed wording only and is rewritten as later reports arrive. `result` is the text actually sent,
   empty for an Open. A queued or uncertain message's entry is updated in place, by `id`, when its receipt
   arrives while the app is still running; a receipt after a restart, or after Coding agents is turned off,
   leaves the entry as it was. The update re-reads the entry, so a rewrite that fell back or was skipped
@@ -316,7 +320,32 @@ a hello on any other protocol is refused with `426` and is never registered or s
   event that KeyScribe does not answer within its deadline, a poll that outlives its hold, a failed
   delivery, or a full outgoing queue counts as a lost connection: the connector stops acting on what it
   had, clears what it showed, and says hello again once its earlier request has finished. It never opens a
-  second request around one that has not finished.
+  second request around one that has not finished. A deadline that ran out only because the agent's own
+  process stalled (its timer fired a second or more late) is restarted instead, a bounded number of times, so
+  an agent busy starting a turn is never mistaken for an app that stopped answering.
+- **A receipt outlives its connection.** A submission the agent already has is not something to act on
+  again, so a lost connection never drops it: its `submitted` receipt (with `handedAt` and `seenAt`, epoch
+  milliseconds) is kept until KeyScribe answers it and is sent again on the next connection, for a bounded
+  time and number. Only leaving the session or retiring the connector forgets it.
+- **KeyScribe checks before it doubts.** When a receipt is late, or a connection is lost after a submit was
+  collected, KeyScribe sends a connector that announces `check` a `check` command naming the request, with a
+  short deadline. The connector answers `checked` with where that submission is: `holding` (not yet handed to
+  the agent), `handed` (the agent has it, but it has not entered the conversation; `miss: "other"` when another
+  message entered meanwhile), `seen` (with its turn), `refused` (with the reason), or `unknown`. `seen` settles
+  the take as sent; `refused` settles it exactly as the same refusal sent directly would (a busy agent queues
+  it again, a draft keeps it for review). The answer echoes the check's `id`, so an answer for an earlier
+  attempt never settles a message sent again. Anything else, or no answer, reports it as uncertain, and a
+  connector whose session is retired or gone is not asked. A take left uncertain with no answer from its
+  connector still follows a turn: the one that started while it awaited its receipt, or else the next one in
+  that conversation, unless the user typed in that conversation at any point since the hand-off or a turn
+  that started during the hand-off has already ended. A connector that answered `handed`, `holding` or
+  `unknown`, even after the take was left uncertain, vouches that no turn so far is the take's: the hub stops
+  following on the take's behalf (keeping a reply the user asked to hear) and only a late receipt counts. A
+  late refusal, direct or found by a check, stops following the same way.
+- **Each attempt has its own request id.** A message sent again after a `working` refusal goes out under a new
+  `id` (the first id with a `~` and the attempt), because a connector acknowledges an id it has already handled
+  without acting on it. Receipts, refusals and checks for an earlier attempt are ignored; History keeps the
+  first id.
 - **A hello says whether anything may have been missed.** It reports whether the session is known to be
   idle and whether it resumes after a gap (a lost connection, a resumed session, or a reloaded connector).
   When it resumes after a gap, KeyScribe reconciles before it accepts the hello: takes it was holding for
@@ -344,11 +373,12 @@ a hello on any other protocol is refused with `426` and is never registered or s
   mark of its own appended: a short run of zero-width characters encoding a random value drawn when the
   connector loaded and a count of its submissions, so no two submissions share a mark, within one connector
   instance or across reloads, and the clock plays no part (Pi gives an extension no other identity for a
-  message it submits). The connector reports `submitted` only when Pi's own user message
-  carrying that exact marked text appears, so a message another extension consumed or changed, the same
-  words submitted again or by another extension, a prompt the user typed, or a message delayed across a
-  reload can never confirm it. Until a receipt arrives the outcome is unknown: the connector keeps waiting
-  (another extension's input hook may hold the message for a while), KeyScribe's own receipt timeout reports
+  message it submits). The connector reports `submitted` only when a user message carrying
+  that submission's mark enters the conversation, whatever input came before it, so the same words submitted
+  again or by another extension, a prompt the user typed, or a message delayed across a reload can never
+  confirm it. A marked message whose text changed on its way in (another extension's input hook, or Pi noting
+  a resized image) still confirms it, reported as `altered`; a message another extension consumed never does. Until a receipt arrives the outcome is unknown: the connector keeps waiting
+  (another extension's input hook may hold the message for a while), KeyScribe's own receipt timeout checks, then reports
   the take as uncertain and, after a bounded wait, lets later dictation to that conversation go ahead and
   forgets the request; a receipt that arrives within that wait still settles it as sent, and one after it
   leaves the take uncertain. A submission stops holding further dictation after

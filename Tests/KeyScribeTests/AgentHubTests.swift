@@ -40,7 +40,7 @@ struct AgentHubTests {
 
     private func makeHub(
         receiptTimeout: Duration = .seconds(5), handOffLimit: Duration = .seconds(30), disconnectGrace: Duration = .seconds(30),
-        clock: Clock = Clock()
+        checkWait: Duration = .seconds(5), clock: Clock = Clock()
     ) -> (AgentHub, FakeTransport, Registry, Notices) {
         let transport = FakeTransport()
         let registry = Registry()
@@ -48,7 +48,7 @@ struct AgentHubTests {
         var counter = 0
         let hub = AgentHub(
             transport: transport, scan: { registry.entries }, receiptTimeout: receiptTimeout, handOffLimit: handOffLimit,
-            disconnectGrace: disconnectGrace, scanDeadline: .seconds(30), now: { clock.now }
+            checkWait: checkWait, disconnectGrace: disconnectGrace, scanDeadline: .seconds(30), now: { clock.now }
         ) {
             counter += 1
             return "r\(counter)"
@@ -295,9 +295,12 @@ struct AgentHubTests {
         hub.handle(.refused(request: "r1", reason: "working"))
         #expect(await receipt == .queued("keyscribe"))
         hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
-        #expect(transport.sent.map(\.0.id) == ["r1", "r1"])
-        hub.handle(.submitted(request: "r1", turn: ""))
+        #expect(transport.sent.map(\.0.id) == ["r1", "r1~1"])
+        hub.handle(.refused(request: "r1", reason: "working"))
+        #expect(notices.items.isEmpty)
+        hub.handle(.submitted(request: "r1~1", turn: ""))
         #expect(notices.items == [.sent("keyscribe")])
+        #expect(notices.requests == ["r1"])
     }
 
     @Test func aBusyConversationQueuesAndSendsWhenTheTurnCompletes() async {
@@ -514,6 +517,338 @@ struct AgentHubTests {
         #expect(transport.sent.map(\.0.id) == ["r1", "r2"])
         hub.handle(.submitted(request: "r2", turn: "2"))
         #expect(notices.items.last == .sent("keyscribe"))
+    }
+
+    private func canCheck(_ hub: AgentHub) {
+        greet(hub, .init(
+            protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0,
+            features: ["readiness", "check"], idle: true, gap: false))
+    }
+
+    private func checks(_ transport: FakeTransport) -> [AgentCommand] {
+        transport.sent.map(\.0).filter { if case .check = $0 { true } else { false } }
+    }
+
+    private func untilChecked(_ transport: FakeTransport) async {
+        for _ in 0..<500 where checks(transport).isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    @Test func aMissingReceiptIsCheckedBeforeDoubtAndAMessageTheCheckFindsIsSentWithItsReplyFollowed() async {
+        let clock = Clock()
+        let (hub, transport, registry, notices) = makeHub(receiptTimeout: .milliseconds(20), clock: clock)
+        await connected(hub, transport, registry)
+        canCheck(hub)
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilChecked(transport)
+        #expect(checks(transport) == [.check(id: "check-r1-1", expectedSession: "claude:s1", request: "r1", expiresAt: clock.now.addingTimeInterval(5))])
+        hub.handle(.checked(request: "r1", check: "check-r1-1", report: AgentDeliveryReport(state: .seen, turn: "t1")))
+        #expect(await receipt == .sent("keyscribe"))
+        #expect(notices.items.isEmpty)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+        #expect(origins == ["r1"])
+        #expect(hub.delivery(of: "r1")?.check == .answered(.seen))
+    }
+
+    @Test(arguments: [AgentDeliveryReport.State.handed, .holding, .unknown])
+    func aCheckThatCannotPlaceTheMessageInTheConversationLeavesItUncertainUntilALateReceipt(_ state: AgentDeliveryReport.State) async {
+        let (hub, transport, registry, notices) = makeHub(receiptTimeout: .milliseconds(20))
+        await connected(hub, transport, registry)
+        canCheck(hub)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilChecked(transport)
+        hub.handle(.checked(request: "r1", check: "check-r1-1", report: AgentDeliveryReport(state: state, miss: "other")))
+        #expect(await receipt == .uncertain("keyscribe"))
+        #expect(hub.delivery(of: "r1")?.check == .answered(state))
+        #expect(hub.delivery(of: "r1")?.miss == "other")
+        hub.handle(.submitted(request: "r1", turn: "t1"))
+        #expect(notices.items == [.sent("keyscribe")])
+    }
+
+    @Test func aCheckThatFindsTheMessageRefusedReportsItNotSent() async {
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20))
+        await connected(hub, transport, registry)
+        canCheck(hub)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilChecked(transport)
+        hub.handle(.checked(request: "r1", check: "check-r1-1", report: AgentDeliveryReport(state: .refused, reason: "sessionChanged")))
+        #expect(await receipt == .notSent("keyscribe", reason: .conversationChanged))
+    }
+
+    @Test(arguments: [
+        ("typedSince", AgentReceipt.kept("keyscribe", reason: .typedSince)),
+        ("draft", .kept("keyscribe", reason: .composing)),
+        ("dialog", .kept("keyscribe", reason: .dialog)),
+        ("filled", .notSent("keyscribe", reason: .stopped)),
+        ("working", .queued("keyscribe")),
+    ])
+    func aRefusalACheckFindsMeansWhatTheSameRefusalMeansDirectly(_ reason: String, _ expected: AgentReceipt) async {
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20))
+        await connected(hub, transport, registry)
+        canCheck(hub)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilChecked(transport)
+        hub.handle(.checked(request: "r1", check: "check-r1-1", report: AgentDeliveryReport(state: .refused, reason: reason)))
+        #expect(await receipt == expected)
+    }
+
+    @Test func aCheckAnswerForAnEarlierAttemptNeverSettlesTheMessageSentAgain() async {
+        let (hub, transport, registry, notices) = makeHub()
+        await connected(hub, transport, registry)
+        canCheck(hub)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        hub.handle(.refused(request: "r1", reason: "working"))
+        #expect(await receipt == .queued("keyscribe"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
+        #expect(transport.sent.map(\.0.id) == ["r1", "r1~1"])
+        hub.handle(.checked(request: "r1", check: "check-r1-1", report: AgentDeliveryReport(state: .refused, reason: "sessionChanged")))
+        hub.handle(.checked(request: "r1~1", check: "check-r1-1", report: AgentDeliveryReport(state: .refused, reason: "sessionChanged")))
+        #expect(notices.items.isEmpty)
+        hub.handle(.submitted(request: "r1~1", turn: "t2"))
+        #expect(notices.items == [.sent("keyscribe")])
+    }
+
+    @Test(arguments: ["retired", "instanceGone"])
+    func aMessageWhoseConversationIsGoneIsDoubtedWithoutAskingIt(_ reason: String) async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        canCheck(hub)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        hub.handle(.undelivered(request: "r1", reason: reason, handedOff: true))
+        #expect(await receipt == .uncertain("keyscribe"))
+        #expect(checks(transport).isEmpty)
+    }
+
+    @Test func aCheckNoOneAnswersIsDoubtedOnceItsWaitEnds() async {
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20), checkWait: .milliseconds(20))
+        await connected(hub, transport, registry)
+        canCheck(hub)
+        #expect(await hub.deliver("run the tests", to: "claude:s1") == .uncertain("keyscribe"))
+        #expect(checks(transport).count == 1)
+        #expect(hub.delivery(of: "r1")?.check == .unanswered)
+        #expect(hub.delivery(of: "r1")?.doubted != nil)
+    }
+
+    @Test func aConnectionLostAfterTheHandOffIsCheckedAndAReceiptResentOnTheNewConnectionIsSent() async {
+        let (hub, transport, registry, notices) = makeHub()
+        await connected(hub, transport, registry)
+        canCheck(hub)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        hub.handle(.undelivered(request: "r1", reason: "connectionGap", handedOff: true))
+        await untilChecked(transport)
+        canCheck(hub)
+        hub.handle(.submitted(request: "r1", turn: "t1"))
+        #expect(await receipt == .sent("keyscribe"))
+        #expect(notices.items.isEmpty)
+        #expect(hub.delivery(of: "r1")?.reconnects == 1)
+    }
+
+    @Test func aReceiptTimerFromAnEarlierHandOffNeverDoubtsTheMessageSentAgain() async {
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(60))
+        await connected(hub, transport, registry)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        hub.handle(.refused(request: "r1", reason: "working"))
+        #expect(await receipt == .queued("keyscribe"))
+        try? await Task.sleep(for: .milliseconds(40))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
+        #expect(transport.sent.map(\.0.id) == ["r1", "r1~1"])
+        try? await Task.sleep(for: .milliseconds(35))
+        #expect(hub.delivery(of: "r1")?.doubted == nil)
+    }
+
+    @Test func aDoubtedMessageFollowsTheNextTurnsReply() async {
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20))
+        await connected(hub, transport, registry)
+        var origins: [String?] = []
+        var recorded: [HistoryEntry.Fact] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onDelivery = { request, fact in if request == "r1" { recorded.append(fact) } }
+        #expect(await hub.deliver("run the tests", to: "claude:s1") == .uncertain("keyscribe"))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+        #expect(origins == ["r1"])
+        #expect(hub.delivery(of: "r1")?.followedTurn != nil)
+        #expect(recorded.last?.value.contains("so its reply is followed") == true)
+    }
+
+    @Test func aTurnThatStartedBeforeTheDoubtIsTheOneFollowed() async {
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20))
+        await connected(hub, transport, registry)
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        #expect(await receipt == .uncertain("keyscribe"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+        #expect(origins == ["r1"])
+    }
+
+    @Test func aTurnThatStartedAndEndedBeforeTheDoubtLeavesTheNextTurnUnfollowed() async {
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(40))
+        await connected(hub, transport, registry)
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+        #expect(await receipt == .uncertain("keyscribe"))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t2"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Someone else's."))
+        #expect(origins.isEmpty)
+        #expect(hub.delivery(of: "r1")?.followedTurn == nil)
+    }
+
+    @Test func aTurnIsNeverFollowedOnceACheckSaysTheMessageHasNotEnteredTheConversation() async {
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20))
+        await connected(hub, transport, registry)
+        canCheck(hub)
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        await untilChecked(transport)
+        hub.handle(.checked(request: "r1", check: "check-r1-1", report: AgentDeliveryReport(state: .handed, miss: "other")))
+        #expect(await receipt == .uncertain("keyscribe"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Not this one."))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t2"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Nor this."))
+        #expect(origins.isEmpty)
+    }
+
+    @Test func aMessageRefusedAsWorkingIsCheckedUnderItsRetryAndARetryRefusedAgainIsQueuedAgain() async {
+        let (hub, transport, registry, notices) = makeHub(receiptTimeout: .milliseconds(20))
+        await connected(hub, transport, registry)
+        canCheck(hub)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        hub.handle(.refused(request: "r1", reason: "working"))
+        #expect(await receipt == .queued("keyscribe"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
+        await untilChecked(transport)
+        #expect(checks(transport).map { if case .check(_, _, let request, _) = $0 { request } else { "" } } == ["r1~1"])
+        hub.handle(.checked(request: "r1~1", check: "check-r1-2", report: AgentDeliveryReport(state: .refused, reason: "working")))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
+        #expect(transport.sent.map(\.0).filter { if case .submit = $0 { true } else { false } }.map(\.id) == ["r1", "r1~1", "r1~2"])
+        hub.handle(.submitted(request: "r1~2", turn: "t3"))
+        #expect(notices.items.last == .sent("keyscribe"))
+    }
+
+    @Test(arguments: [true, false])
+    func aMessageTheUserTypedOverBeforeItsDoubtNeverFollowsATurn(_ turnStartedFirst: Bool) async {
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(30))
+        await connected(hub, transport, registry)
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        hub.handle(.typed(session: "claude:s1"))
+        if turnStartedFirst { hub.handle(.turnStarted(session: "claude:s1", turn: "t1")) }
+        #expect(await receipt == .uncertain("keyscribe"))
+        if !turnStartedFirst { hub.handle(.turnStarted(session: "claude:s1", turn: "t1")) }
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "The typed message's reply."))
+        #expect(origins.isEmpty)
+    }
+
+    @Test(arguments: [true, false])
+    func aLateCheckSayingTheMessageNeverEnteredStopsFollowingItsTurn(_ turnStartedFirst: Bool) async {
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20), checkWait: .milliseconds(20))
+        await connected(hub, transport, registry)
+        canCheck(hub)
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        if turnStartedFirst { hub.handle(.turnStarted(session: "claude:s1", turn: "t1")) }
+        #expect(await receipt == .uncertain("keyscribe"))
+        #expect(hub.delivery(of: "r1")?.check == .unanswered)
+        hub.handle(.checked(request: "r1", check: "check-r1-1", report: AgentDeliveryReport(state: .handed)))
+        if !turnStartedFirst { hub.handle(.turnStarted(session: "claude:s1", turn: "t1")) }
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Someone else's."))
+        #expect(origins.isEmpty)
+        #expect(hub.delivery(of: "r1")?.followedTurn == nil)
+    }
+
+    @Test(arguments: [true, false])
+    func aLateRefusalStopsFollowingTheTurnTheMessageWasDoubtedInto(_ throughCheck: Bool) async {
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20), checkWait: .milliseconds(20))
+        await connected(hub, transport, registry)
+        canCheck(hub)
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        #expect(await receipt == .uncertain("keyscribe"))
+        #expect(hub.delivery(of: "r1")?.followedTurn != nil)
+        if throughCheck {
+            hub.handle(.checked(request: "r1", check: "check-r1-1", report: AgentDeliveryReport(state: .refused, reason: "sessionChanged")))
+        } else {
+            hub.handle(.refused(request: "r1", reason: "sessionChanged"))
+        }
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Someone else's."))
+        #expect(origins.isEmpty)
+        #expect(hub.delivery(of: "r1")?.followedTurn == nil)
+    }
+
+    @Test func aLateCheckKeepsAReplyTheUserAskedToHear() async {
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20), checkWait: .milliseconds(20))
+        await connected(hub, transport, registry)
+        canCheck(hub)
+        hub.speaks = { true }
+        var results: [(Bool, String?)] = []
+        hub.onResult = { _, _, _, requested, origin in results.append((requested, origin)) }
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        #expect(await receipt == .uncertain("keyscribe"))
+        _ = hub.notify(session: "claude:s1", turn: "t1", on: true)
+        hub.handle(.checked(request: "r1", check: "check-r1-1", report: AgentDeliveryReport(state: .handed)))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Asked for."))
+        #expect(results.map(\.0) == [true])
+        #expect(results.map(\.1) == [nil])
+    }
+
+    @Test func aTurnTheUserTypedAfterADoubtedMessageIsNotFollowed() async {
+        let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20))
+        await connected(hub, transport, registry)
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        #expect(await hub.deliver("run the tests", to: "claude:s1") == .uncertain("keyscribe"))
+        hub.handle(.typed(session: "claude:s1"))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "All green."))
+        #expect(origins.isEmpty)
+    }
+
+    @Test func theDeliveryRecordsTheHandOffWhatTheConnectorSawItsConfirmationAndReconnects() async {
+        let clock = Clock()
+        let start = clock.now
+        let (hub, transport, registry, _) = makeHub(clock: clock)
+        await connected(hub, transport, registry)
+        async let receipt = hub.deliver("run the tests", to: "claude:s1")
+        await untilSent(transport, 1)
+        clock.now = start.addingTimeInterval(0.5)
+        greet(hub, ready(gap: false))
+        clock.now = start.addingTimeInterval(1)
+        hub.handle(.submitted(request: "r1", turn: "", report: AgentDeliveryReport(
+            handedAt: start.addingTimeInterval(0.1), seenAt: start.addingTimeInterval(0.2))))
+        _ = await receipt
+        let delivery = hub.delivery(of: "r1")
+        #expect(delivery?.handedOff == start)
+        #expect(delivery?.handedToAgent == start.addingTimeInterval(0.1))
+        #expect(delivery?.entered == start.addingTimeInterval(0.2))
+        #expect(delivery?.confirmed == start.addingTimeInterval(1))
+        #expect(delivery?.reconnects == 1)
+        #expect(hub.deliveryFact(of: "r1")?.label == "Delivery")
     }
 
     private func dictated(_ hub: AgentHub, _ transport: FakeTransport, turn: String = "t1") async {

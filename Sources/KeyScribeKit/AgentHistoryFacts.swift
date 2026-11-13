@@ -29,6 +29,16 @@ public enum AgentHistoryFacts {
         return facts
     }
 
+    public static func delivery(_ delivery: AgentDelivery, agent: String, timeZone: TimeZone = .current) -> HistoryEntry.Fact {
+        .init(label: "Delivery", value: delivery.describe(agent: agent, timeZone: timeZone))
+    }
+
+    public static func replacing(_ fact: HistoryEntry.Fact, in entry: HistoryEntry) -> HistoryEntry {
+        var next = entry
+        next.facts = (entry.facts ?? []).filter { $0.label != fact.label } + [fact]
+        return next
+    }
+
     public static func goBack(frozen: AgentRecipient.Frozen?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
         [fact(command: "Go back")] + defaultRecipient(frozen, in: conversations)
     }

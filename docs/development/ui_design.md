@@ -732,6 +732,11 @@ running, the take waits and is sent when the turn finishes (“Queued for docs�
 When the conversation is waiting on the user instead (an approval, a question, or a dialog), the take still
 waits for the turn, and the receipt says what it waits on, how to respond, and what happens to the message
 (“Waiting for approval. Say “open docs” to respond; this message stays queued”).
+“May not have reached docs: check its terminal” appears only after the app has asked the connector where the
+message is and still cannot tell; when the answer is that it reached the conversation, the receipt is
+“Sent to docs”. A take left uncertain still has its turn's reply spoken when nothing says that turn belongs to another
+message, and History's Delivery line records
+when each side saw the message, for diagnosing a receipt that went missing.
 A take that would no longer fit what is on screen is not sent, and never sends later on its own: for
 example, the user sent that conversation a message after the take was decided, its question was answered,
 or its prompt box already holds text. The HUD says so, why, and how to recover (“Not sent to docs: its

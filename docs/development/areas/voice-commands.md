@@ -278,6 +278,18 @@ every rule above applies to it, with these sharpenings:
   longer take, replacement or dictionary output that equals a live session name addresses that session.
 - **Cancel withdraws the request itself, not just its HUD.** A message the user cancelled must not
   still send, and a cancelled message must not stay visible as if it will.
+- **A lost receipt is not a lost message.** A connector keeps the receipt of a submission the agent already
+  has across a lost connection and sends it on the next one, and a deadline overrun by the agent's own stall
+  is restarted, not counted as a lost connection. The match is the connector's own mark, never the text or
+  the input that came before it. Before the hub reports a take as uncertain it asks the connector where the
+  submission is (`AgentHub.doubt`, the `check` command); a refusal the check finds goes through the same
+  `AgentHub.refuse` a direct one does. A take left uncertain follows a turn's reply (`AgentHub.follow`) only
+  when nothing contradicts it: never after the user typed in that conversation since the hand-off, never a
+  turn that ended before the doubt, and never once a check (even a late one) said the message had not entered
+  the conversation. A retried hand-off goes out under its own wire id (`AgentHub.Request.wire`), since a
+  connector only acknowledges an id it has seen. Each hand-off keeps an `AgentDelivery` record, written to the take's History
+  entry as its Delivery fact and logged at notice level when a receipt is missing or late; it holds times
+  and fixed wording, never content.
 - **A receipt timeout is "unknown", not "failed" or "gone".** A request that may still be delivered
   stays tracked until the connector settles it or it expires. It holds later dictation for that
   conversation, so nothing overtakes it, but only for a bounded time (`AgentHub`'s hand-off limit); after

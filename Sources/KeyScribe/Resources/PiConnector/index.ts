@@ -32,7 +32,9 @@ type Config = {
 }
 type ReadAloud = boolean | "quiet" | null
 type Ready = { launch: string; protocol: number }
-type Pending = { id: string; generation: number; text: string; late: boolean; cancel: () => void }
+type Pending = { id: string; generation: number; text: string; serial: number; late: boolean; cancel: () => void }
+type Submission = { state: "holding" | "handed" | "seen" | "refused"; reason?: string; turn?: string; handedAt?: number; seenAt?: number; altered?: boolean; miss?: string }
+type Receipt = { id: string; at: number; sending: boolean }
 type Item = {
   stale?: boolean
   kind: "hello" | "observe" | "reply"
@@ -53,6 +55,7 @@ type Command = {
   text?: string
   expiresAt?: number
   images?: string[]
+  request?: string
 }
 
 const queueLimit = 64
@@ -65,6 +68,11 @@ const keystrokeQuiet = 3000
 const keystrokeHoldLimit = 6000
 const receiptDeadline = 3000
 const lateLimit = 8
+const submissionLimit = 64
+const receiptLimit = 16
+const receiptKeep = 60000
+const stallSlack = 1000
+const stallRetries = 3
 const staleCheck = 2000
 const answerLimit = 8 * 1024
 const waitingTitleLimit = 300
@@ -76,7 +84,7 @@ const backoff = [30000, 60000, 120000, 300000]
 const late = { late: true } as const
 const unreachable = { unreachable: true } as const
 const freshReasons = ["startup", "new", "fork"]
-const features = ["focus", "label", "readiness", "notify", "images"]
+const features = ["focus", "label", "readiness", "notify", "images", "check"]
 
 const readAloudTool = "tell_me_when_done"
 
@@ -100,8 +108,9 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   let said = ""
   const tools: { id: string; name: string; args: unknown }[] = []
   let lastKeyAt: number | null = null
-  let lastInputSource: string | null = null
   const pending: Pending[] = []
+  const submissions = new Map<string, Submission>()
+  const receipts: Receipt[] = []
   let lastAnswer = ""
   let lastFailed = false
   let staleWatch: (() => void) | null = null
@@ -224,11 +233,24 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     }
   }
 
+  function deadline(ms: number, fn: () => void): () => void {
+    let cancel: () => void = () => {}
+    const arm = (stalls: number) => {
+      const due = host.now() + ms
+      cancel = host.after(ms, () => {
+        if (host.now() - due >= stallSlack && stalls < stallRetries) arm(stalls + 1)
+        else fn()
+      })
+    }
+    arm(0)
+    return () => cancel()
+  }
+
   async function exchange(request: Exchange | null, ms: number): Promise<{ result: Response | typeof late | typeof unreachable; settled: Promise<void> }> {
     if (!request) return { result: unreachable, settled: Promise.resolve() }
     const settled = request.response.then(() => {}, () => {})
     let cancelTimer: () => void = () => {}
-    const expired = new Promise<typeof late>((resolve) => { cancelTimer = host.after(ms, () => resolve(late)) })
+    const expired = new Promise<typeof late>((resolve) => { cancelTimer = deadline(ms, () => resolve(late)) })
     let result: Response | typeof late | typeof unreachable
     try {
       result = await Promise.race([request.response, expired])
@@ -402,6 +424,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
             helloSession = target
             connection = attempt.connection
             admitted.clear()
+            sendReceipts()
           }
           if (attempt.generation === generation && target === session && attemptLaunch === launch) heard(outcome, attemptLaunch)
           resolve(outcome === "ok")
@@ -437,7 +460,58 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   function forget(): void {
     connection = null
     admitted.clear()
+  }
+
+  function dropSubmissions(): void {
     for (const item of pending.splice(0)) item.cancel()
+    submissions.clear()
+    receipts.length = 0
+  }
+
+  function track(id: string, change: Partial<Submission>): void {
+    const was = submissions.get(id)
+    submissions.delete(id)
+    submissions.set(id, { ...(was || { state: "holding" }), ...change })
+    for (const old of submissions.keys()) {
+      if (submissions.size <= submissionLimit) break
+      submissions.delete(old)
+    }
+  }
+
+  function report(id: string): Record<string, unknown> {
+    const sub = submissions.get(id)
+    if (!sub) return { state: "unknown" }
+    return { state: sub.state, reason: sub.reason, turn: sub.turn, handedAt: sub.handedAt, seenAt: sub.seenAt, altered: sub.altered, miss: sub.miss }
+  }
+
+  function confirm(id: string): void {
+    const at = host.now()
+    receipts.push({ id, at, sending: false })
+    while (receipts.length > receiptLimit) receipts.shift()
+    sendReceipts()
+  }
+
+  function sendReceipts(): void {
+    const now = host.now()
+    for (let i = receipts.length - 1; i >= 0; i--) {
+      if (now - receipts[i].at > receiptKeep) receipts.splice(i, 1)
+    }
+    if (!connection) return
+    for (const receipt of receipts) {
+      if (receipt.sending) continue
+      const sub = submissions.get(receipt.id)
+      receipt.sending = true
+      enqueue({
+        kind: "reply", generation, connection,
+        body: bound({ op: "submitted", request: receipt.id, turn: (sub && sub.turn) || "", handedAt: sub && sub.handedAt, seenAt: sub && sub.seenAt, altered: sub && sub.altered }),
+        done: (outcome) => {
+          receipt.sending = false
+          if (outcome !== "ok") return
+          const index = receipts.indexOf(receipt)
+          if (index >= 0) receipts.splice(index, 1)
+        },
+      })
+    }
   }
 
   function cancelPoll(): void {
@@ -464,6 +538,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     freshSession = null
     helloSession = null
     forget()
+    dropSubmissions()
     drain(() => false)
     clearOwnedUI()
     cancelPoll()
@@ -475,6 +550,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     freshSession = null
     helloSession = null
     forget()
+    dropSubmissions()
     stopStaleWatch()
     currentTurn = null
     drain(() => false)
@@ -517,6 +593,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   }
 
   function refuse(gen: number, id: string, reason: string): void {
+    if (submissions.has(id)) track(id, { state: "refused", reason })
     reply(gen, { op: "refused", request: id, reason })
   }
 
@@ -537,6 +614,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   }
 
   async function submit(cmd: Command, gen: number): Promise<void> {
+    track(cmd.id, { state: "holding" })
     const expected = cmd.expectedSession
     const hold = (): string | null => {
       if (!current(expected, gen)) return "sessionChanged"
@@ -559,9 +637,10 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     }
     serial += 1
     const text = (cmd.text || "") + nonce + mark(serial)
-    const item: Pending = { id: cmd.id, generation: gen, text, late: false, cancel: () => {} }
+    const item: Pending = { id: cmd.id, generation: gen, text, serial, late: false, cancel: () => {} }
     while (pending.length >= lateLimit) pending.shift()!.cancel()
     pending.push(item)
+    track(cmd.id, { state: "handed", handedAt: host.now() })
     try {
       const sent: unknown = pi.sendUserMessage(attached.length ? [{ type: "text", text }, ...attached] : text, { deliverAs: "followUp" })
       if (sent && typeof (sent as Promise<void>).then === "function") {
@@ -611,13 +690,35 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   }
 
   function received(message: unknown): void {
-    if (lastInputSource !== "extension") return
     const text = messageText(message)
-    const index = pending.findIndex((item) => item.text === text)
-    if (index < 0) return
+    const serialIn = markedSerial(text)
+    const index = serialIn === null ? -1 : pending.findIndex((item) => item.serial === serialIn)
+    if (index < 0) {
+      if (serialIn === null) for (const item of pending) track(item.id, { miss: "other" })
+      return
+    }
     const [item] = pending.splice(index, 1)
     item.cancel()
-    reply(item.generation, { op: "submitted", request: item.id, turn: currentTurn || "" })
+    track(item.id, { state: "seen", turn: currentTurn || "", seenAt: host.now(), altered: text !== item.text })
+    confirm(item.id)
+  }
+
+  function markedSerial(text: string): number | null {
+    const at = text.indexOf(nonce)
+    if (at < 0) return null
+    let value = 0
+    let digits = 0
+    for (const char of text.slice(at + nonce.length)) {
+      const digit = markAlphabet.indexOf(char)
+      if (digit < 0) break
+      value = value * markAlphabet.length + digit
+      digits += 1
+    }
+    return digits ? value : null
+  }
+
+  function answerCheck(cmd: Command, gen: number): void {
+    reply(gen, { op: "checked", request: cmd.request || "", check: cmd.id, ...report(cmd.request || "") })
   }
 
   async function focus(cmd: Command, gen: number): Promise<void> {
@@ -638,6 +739,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     const live = ctx ? ctx.sessionManager.getSessionId() : null
     if (!current(cmd.expectedSession, gen) || cmd.expectedSession !== live) return refuse(gen, cmd.id, "sessionChanged")
     if (cmd.op === "submit") return submit(cmd, gen)
+    if (cmd.op === "check") return answerCheck(cmd, gen)
     if (cmd.op === "focus") return focus(cmd, gen)
     if (cmd.op === "status") {
       ownedStatus = Boolean(cmd.text)
@@ -741,7 +843,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     if (!session || helloSession !== session || !connection) return Promise.resolve(null)
     const item: Item = { kind: "observe", session, generation, body: bound({ op: "notify", session, turn: currentTurn || "", on }) }
     return new Promise((resolve) => {
-      const cancel = host.after(eventDeadline * 2, () => {
+      const cancel = deadline(eventDeadline * 2, () => {
         item.stale = true
         resolve(null)
       })
@@ -816,7 +918,6 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
 
   pi.on("input", (event) => {
     if (!session) return
-    lastInputSource = event.source
     if (event.source === "interactive") {
       if (currentTurn !== null && ctx && ctx.isIdle()) closeStaleTurn()
       prompts += 1

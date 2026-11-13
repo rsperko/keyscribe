@@ -30,10 +30,30 @@ final class AgentHub {
     private struct Request {
         let message: AgentOutbox.Message
         let handle: String
+        let attempt: Int
+        let retry: Int
         var timedOut = false
+        var check: String?
+        var turnDuringHandOff: TurnDuringHandOff?
+        var followsNextTurn = false
+        var typedSince = false
+
+        var wire: String { retry == 0 ? message.id : "\(message.id)~\(retry)" }
+    }
+
+    private enum TurnDuringHandOff {
+        case started(String)
+        case ended
+    }
+
+    private struct Traced {
+        var conversation: String
+        var delivery: AgentDelivery
     }
 
     static let runningGrace: TimeInterval = 5
+    static let defaultCheckWait: Duration = .seconds(2)
+    private static let keptDeliveries = 64
 
     var onNotice: ((AgentReceipt, _ request: String, _ conversation: String) -> Void)?
     var onForget: ((_ request: String) -> Void)?
@@ -43,6 +63,11 @@ final class AgentHub {
     var onEnded: ((_ conversation: String, _ handle: String, _ body: String, _ requested: Bool, _ origin: String?) -> Void)?
     var onAttention: ((_ conversation: String, _ handle: String, _ attention: AgentAttention?, _ requested: Bool) -> Void)?
     var onWithdraw: ((_ conversation: String) -> Void)?
+    var onDelivery: ((_ request: String, _ fact: HistoryEntry.Fact) -> Void)?
+    private var traced: [String: Traced] = [:]
+    private var tracedOrder: [String] = []
+    private var attempts = 0
+    private var retries: [String: Int] = [:]
     var speaks: () -> Bool = { false }
     private var awaitingResult: [String: String] = [:]
     private var awaitedRequests: [String: String] = [:]
@@ -89,6 +114,7 @@ final class AgentHub {
     private let discoveries: [any AgentDiscovery]
     private let receiptTimeout: Duration
     private let handOffLimit: Duration
+    private let checkWait: Duration
     private let makeId: () -> String
     private let now: () -> Date
     private var outbox = AgentOutbox()
@@ -111,8 +137,8 @@ final class AgentHub {
     init(
         transport: AgentTransport, discovery: [any AgentDiscovery], names: AgentNameStore? = nil,
         focus: AgentTerminalFocusing? = nil, front: AgentFronting? = nil, glance: AgentFronting? = nil,
-        receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30), disconnectGrace: Duration = AgentHub.defaultDisconnectGrace,
-        scanDeadline: Duration = AgentHub.defaultScanDeadline, exclusions: AgentExclusions = AgentExclusions(nil),
+        receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30), checkWait: Duration = AgentHub.defaultCheckWait,
+        disconnectGrace: Duration = AgentHub.defaultDisconnectGrace, scanDeadline: Duration = AgentHub.defaultScanDeadline, exclusions: AgentExclusions = AgentExclusions(nil),
         places: (any AgentPlaceReading)? = nil,
         now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString }
     ) {
@@ -127,6 +153,7 @@ final class AgentHub {
         discoveries = discovery
         self.receiptTimeout = receiptTimeout
         self.handOffLimit = handOffLimit
+        self.checkWait = checkWait
         self.now = now
         self.makeId = makeId
         adopt(names?.load() ?? .names([:]))
@@ -338,10 +365,11 @@ final class AgentHub {
         saveExclusions()
         if current == id { current = nil }
         for message in outbox.withdraw(conversation: id) {
+            retries[message.id] = nil
             report(.notSent(handle(of: id), reason: .disconnected), for: message.id, in: id)
         }
         for (request, entry) in requests where entry.message.conversation == id && !entry.timedOut {
-            if transport.withdraw(request) {
+            if transport.withdraw(entry.wire) {
                 clearHandOff(request)
                 settle(request, .notSent(entry.handle, reason: .disconnected))
             }
@@ -742,7 +770,7 @@ final class AgentHub {
     }
 
     func handle(_ event: AgentEvent) {
-        guard !stopped else { return }
+        guard !stopped, let event = local(event) else { return }
         if let session = event.session, let agent = AgentSessionID.agent(of: session) {
             discoveries.first { $0.kind.id == agent }?.observe(event.renamingSession(AgentSessionID.native))
         }
@@ -752,6 +780,9 @@ final class AgentHub {
         }
         switch event {
         case .hello(let hello):
+            for (request, entry) in requests where entry.message.conversation == hello.session {
+                trace(request) { $0.reconnects += 1 }
+            }
             resume(hello)
             features[hello.session] = Set(hello.features)
             installations[hello.session] = hello.installation
@@ -783,49 +814,30 @@ final class AgentHub {
             focusWaiters.removeValue(forKey: request)?.resume(returning: .selected)
         case .ack:
             break
-        case .submitted(let request, let turn):
-            if let conversation = requests[request]?.message.conversation, !turn.isEmpty, awaitingResult[conversation] != turn {
-                stopAwaiting(conversation)
-                awaitingResult[conversation] = turn
-                awaitedRequests[conversation] = request
+        case .submitted(let request, let turn, let report):
+            confirm(request, turn: turn, report: report)
+        case .checked(let request, let check, let report):
+            guard requests[request]?.check == check else { break }
+            trace(request) {
+                $0.check = .answered(report.state)
+                if report.state != .seen { $0.absorb(report) }
             }
-            settle(request, .sent(requests[request]?.handle ?? ""))
+            switch report.state {
+            case .seen: confirm(request, turn: report.turn, report: report)
+            case .refused: refuse(request, reason: report.reason ?? "")
+            default:
+                leaveUncertain(request, follows: false)
+                stopFollowing(request)
+            }
         case .refused(let request, _) where focusWaiters[request] != nil:
             focusWaiters.removeValue(forKey: request)?.resume(returning: .notFound)
         case .undelivered(let request, _, _) where focusWaiters[request] != nil:
             focusWaiters.removeValue(forKey: request)?.resume(returning: .notFound)
-        case .refused(let request, "working") where requests[request]?.timedOut == true:
-            clearHandOff(request)
-            settle(request, .notSent(requests[request]?.handle, reason: Self.notSent("working")))
-            releaseHeld()
-        case .refused(let request, "working"):
-            clearHandOff(request)
-            guard let entry = requests.removeValue(forKey: request) else { break }
-            running[entry.message.conversation] = now()
-            _ = outbox.send(entry.message, state: .working)
-            report(.queued(entry.handle), for: request, in: entry.message.conversation)
-        case .refused(let request, "typedSince"):
-            clearHandOff(request)
-            settle(request, .kept(requests[request]?.handle ?? "", reason: .typedSince))
-            releaseHeld()
-        case .refused(let request, "draft"):
-            clearHandOff(request)
-            settle(request, .kept(requests[request]?.handle ?? "", reason: .composing))
-            releaseHeld()
-        case .refused(let request, "filled"):
-            clearHandOff(request)
-            settle(request, Self.filled(handle: requests[request]?.handle ?? "", features: requests[request].flatMap { features[$0.message.conversation] }))
-            releaseHeld()
-        case .refused(let request, "dialog"):
-            clearHandOff(request)
-            settle(request, .kept(requests[request]?.handle ?? "", reason: .dialog))
-            releaseHeld()
         case .refused(let request, let reason):
-            clearHandOff(request)
-            settle(request, .notSent(requests[request]?.handle, reason: Self.notSent(reason)))
-            releaseHeld()
-        case .undelivered(let request, _, true):
-            leaveUncertain(request)
+            refuse(request, reason: reason)
+        case .undelivered(let request, let reason, true):
+            doubt(request, askingConnector: reason != AgentCommandQueue.Undeliverable.retired.rawValue
+                && reason != AgentCommandQueue.Undeliverable.instanceGone.rawValue)
         case .undelivered(let request, "expired", false):
             clearHandOff(request)
             settle(request, .notSent(requests[request]?.handle, reason: .expired))
@@ -844,6 +856,10 @@ final class AgentHub {
                 if pending.typedAt == nil { nextTyped[session]?.typedAt = now() } else { nextTyped[session] = nil }
             }
             if let count { prompts[session] = count }
+            for (id, entry) in requests where entry.message.conversation == session {
+                requests[id]?.followsNextTurn = false
+                requests[id]?.typedSince = true
+            }
             outbox.noteTyped(conversation: session)
             if handle(of: session) != nil { makeCurrent(session) }
         case .turnStarted(let session, let turn):
@@ -854,10 +870,18 @@ final class AgentHub {
                 waitForReply(turn, of: session, requested: false)
                 awaitedRequests[session] = pending.request
             }
+            if let pending = handingOff[session], requests[pending] != nil { requests[pending]?.turnDuringHandOff = .started(turn) }
+            if let (request, _) = requests.first(where: { $0.value.message.conversation == session && $0.value.followsNextTurn }) {
+                requests[request]?.followsNextTurn = false
+                follow(turn, of: session, for: request)
+            }
             handingOff[session] = nil
             running[session] = now()
         case .turnComplete(let session, let reason, let answer):
             handingOff[session] = nil
+            for (id, entry) in requests where entry.message.conversation == session && entry.turnDuringHandOff != nil {
+                requests[id]?.turnDuringHandOff = .ended
+            }
             running[session] = nil
             if awaitingResult[session] != nil {
                 let wasRequested = requested.contains(session)
@@ -963,26 +987,135 @@ final class AgentHub {
         return conversation.state
     }
 
+    func delivery(of request: String) -> AgentDelivery? { traced[request]?.delivery }
+
+    func deliveryFact(of request: String) -> HistoryEntry.Fact? {
+        traced[request].map { AgentHistoryFacts.delivery($0.delivery, agent: agentName(of: $0.conversation)) }
+    }
+
+    private func agentName(of conversation: String) -> String {
+        let agent = AgentSessionID.agent(of: conversation)
+        return discoveries.first { $0.kind.id == agent }?.kind.displayName ?? "the agent"
+    }
+
+    private func trace(_ request: String, _ change: (inout AgentDelivery) -> Void) {
+        guard var entry = traced[request] else { return }
+        change(&entry.delivery)
+        guard entry.delivery != traced[request]?.delivery else { return }
+        traced[request] = entry
+        guard waiters[request] == nil, let fact = deliveryFact(of: request) else { return }
+        onDelivery?(request, fact)
+    }
+
+    private func startTrace(_ request: String, in conversation: String) {
+        if traced[request] == nil {
+            tracedOrder.append(request)
+            if tracedOrder.count > Self.keptDeliveries { traced[tracedOrder.removeFirst()] = nil }
+        }
+        traced[request] = Traced(conversation: conversation, delivery: AgentDelivery(handedOff: now()))
+    }
+
+    private func confirm(_ request: String, turn: String, report: AgentDeliveryReport) {
+        let late = requests[request]?.timedOut == true
+        trace(request) {
+            $0.absorb(report)
+            if $0.confirmed == nil { $0.confirmed = now() }
+        }
+        if late, let fact = deliveryFact(of: request) {
+            Log.agents.notice("delivery confirmed late: \(fact.value, privacy: .public)")
+        }
+        if let conversation = requests[request]?.message.conversation, !turn.isEmpty, awaitingResult[conversation] != turn {
+            stopAwaiting(conversation)
+            awaitingResult[conversation] = turn
+            awaitedRequests[conversation] = request
+        }
+        settle(request, .sent(requests[request]?.handle ?? ""))
+    }
+
+    private func follow(_ turn: String, of conversation: String, for request: String) {
+        guard awaitingResult[conversation] == nil else { return }
+        waitForReply(turn, of: conversation, requested: false)
+        awaitedRequests[conversation] = request
+        trace(request) { $0.followedTurn = now() }
+    }
+
+    private func doubt(_ request: String, askingConnector: Bool = true) {
+        guard let entry = requests[request], !entry.timedOut, entry.check == nil else { return }
+        let conversation = entry.message.conversation
+        guard askingConnector, features[conversation]?.contains("check") == true else { return leaveUncertain(request, follows: true) }
+        let check = "check-\(request)-\(entry.attempt)"
+        requests[request]?.check = check
+        trace(request) { $0.check = .asked }
+        transport.enqueue(.check(id: check, expectedSession: conversation, request: entry.wire, expiresAt: deadline(after: checkWait)), for: conversation)
+        let wait = checkWait
+        Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            self?.checkUnanswered(request, check: check)
+        }
+    }
+
+    private func checkUnanswered(_ request: String, check: String) {
+        guard let entry = requests[request], entry.check == check, !entry.timedOut else { return }
+        trace(request) { $0.check = .unanswered }
+        leaveUncertain(request, follows: true)
+    }
+
+    private func refuse(_ request: String, reason: String) {
+        clearHandOff(request)
+        guard let entry = requests[request] else { return releaseHeld() }
+        stopFollowing(request)
+        let handle = entry.handle
+        switch reason {
+        case "working" where !entry.timedOut:
+            requests[request] = nil
+            retries[request] = entry.retry + 1
+            running[entry.message.conversation] = now()
+            _ = outbox.send(entry.message, state: .working)
+            report(.queued(handle), for: request, in: entry.message.conversation)
+            return
+        case "typedSince": settle(request, .kept(handle, reason: .typedSince))
+        case "draft": settle(request, .kept(handle, reason: .composing))
+        case "filled": settle(request, Self.filled(handle: handle, features: features[entry.message.conversation]))
+        case "dialog": settle(request, .kept(handle, reason: .dialog))
+        default: settle(request, .notSent(handle, reason: Self.notSent(reason)))
+        }
+        releaseHeld()
+    }
+
     private func handOff(_ message: AgentOutbox.Message, handle: String) {
-        requests[message.id] = Request(message: message, handle: handle)
+        attempts += 1
+        let attempt = attempts
+        let entry = Request(message: message, handle: handle, attempt: attempt, retry: retries.removeValue(forKey: message.id) ?? 0)
+        requests[message.id] = entry
+        startTrace(message.id, in: message.conversation)
         handingOff[message.conversation] = message.id
         transport.enqueue(
             .submit(
-                id: message.id, expectedSession: message.conversation, text: message.text,
+                id: entry.wire, expectedSession: message.conversation, text: message.text,
                 expectedPrompts: prompts[message.conversation], expiresAt: deadline(after: receiptTimeout),
                 images: takesImages(message.conversation) ? message.images : []),
             for: message.conversation)
         let timeout = receiptTimeout
         Task { [weak self] in
             try? await Task.sleep(for: timeout)
-            self?.leaveUncertain(message.id)
+            guard self?.requests[message.id]?.attempt == attempt else { return }
+            self?.doubt(message.id)
         }
     }
 
-    private func leaveUncertain(_ request: String) {
+    private func leaveUncertain(_ request: String, follows: Bool) {
         guard let entry = requests[request], !entry.timedOut else { return }
         requests[request]?.timedOut = true
+        trace(request) { $0.doubted = now() }
+        if let fact = deliveryFact(of: request) { Log.agents.notice("delivery not confirmed: \(fact.value, privacy: .public)") }
         report(.uncertain(entry.handle), for: request, in: entry.message.conversation)
+        let conversation = entry.message.conversation
+        let follows = follows && !entry.typedSince
+        switch entry.turnDuringHandOff {
+        case .started(let turn)? where follows: follow(turn, of: conversation, for: request)
+        case nil where follows: requests[request]?.followsNextTurn = true
+        default: break
+        }
         let limit = handOffLimit
         Task { [weak self] in
             try? await Task.sleep(for: limit)
@@ -999,6 +1132,34 @@ final class AgentHub {
 
     private func deadline(after duration: Duration) -> Date {
         now().addingTimeInterval(TimeInterval(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18)
+    }
+
+    private func stopFollowing(_ request: String) {
+        guard let entry = requests[request] else { return }
+        requests[request]?.followsNextTurn = false
+        let conversation = entry.message.conversation
+        guard awaitedRequests[conversation] == request else { return }
+        trace(request) { $0.followedTurn = nil }
+        if requested.contains(conversation) { awaitedRequests[conversation] = nil } else { stopAwaiting(conversation) }
+    }
+
+    private func local(_ event: AgentEvent) -> AgentEvent? {
+        func request(_ wire: String) -> String? {
+            if let match = requests.first(where: { $0.value.wire == wire }) { return match.key }
+            return requests[wire] == nil ? wire : nil
+        }
+        switch event {
+        case .submitted(let wire, let turn, let report):
+            return request(wire).map { .submitted(request: $0, turn: turn, report: report) }
+        case .checked(let wire, let check, let report):
+            return request(wire).map { .checked(request: $0, check: check, report: report) }
+        case .refused(let wire, let reason):
+            return request(wire).map { .refused(request: $0, reason: reason) }
+        case .undelivered(let wire, let reason, let handedOff):
+            return request(wire).map { .undelivered(request: $0, reason: reason, handedOff: handedOff) }
+        default:
+            return event
+        }
     }
 
     private func clearHandOff(_ request: String) {
@@ -1026,8 +1187,10 @@ final class AgentHub {
             case .handOff:
                 handOff(release.message, handle: handle ?? "")
             case .needsReview(let reason):
+                retries[release.message.id] = nil
                 report(.kept(handle ?? "", reason: Self.kept(reason)), for: release.message.id, in: release.message.conversation)
             case .disconnected:
+                retries[release.message.id] = nil
                 report(.notSent(handle, reason: .connectorNotRunning), for: release.message.id, in: release.message.conversation)
             case .queue:
                 break

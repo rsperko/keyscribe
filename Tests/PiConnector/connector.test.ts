@@ -260,7 +260,7 @@ test("a session start says hello with the process, its directory, its name and w
   assert.equal(hello.cwd, "/work")
   assert.equal(hello.session, "s1")
   assert.equal(hello.title, "frontend")
-  assert.deepEqual(hello.features, ["focus", "label", "readiness", "notify", "images"])
+  assert.deepEqual(hello.features, ["focus", "label", "readiness", "notify", "images", "check"])
   assert.equal(hello.prompts, 0)
   assert.equal(hello.idle, true)
   assert.equal(hello.gap, false)
@@ -482,21 +482,26 @@ test("the same words from another extension are not the dictation: unmarked, the
   assert.deepEqual(h.replies().map((b) => [b.op, b.request]), [["ack", "r1"], ["submitted", "r1"]])
 })
 
-test("dictation another extension changed on its way in is never confirmed by the changed message", async () => {
+test("dictation changed on its way in still carries its mark, so it is confirmed and reported as changed", async () => {
   const h = harness()
   await h.connect()
   await h.deliver([h.submit("r1", "run the tests")])
-  await arrives(h, h.sends[0].text.replace("run the tests", "run the tests, please"))
-  assert.deepEqual(h.replies().map((b) => b.op), ["ack"])
+  await arrives(h, h.sends[0].text.replace("run the tests", "run the tests, please") + "\n\n[Image resized]")
+  const sent = h.replies().filter((b) => b.op === "submitted")
+  assert.deepEqual(sent.map((b) => [b.request, b.altered]), [["r1", true]])
 })
 
-test("a user message that starts before any input event is no receipt", async () => {
+test("a marked message is confirmed whatever input came last, and carries when Pi had it and when it entered", async () => {
   const h = harness()
   await h.connect()
+  const handed = h.now
   await h.deliver([h.submit("r1", "run the tests")])
+  await h.typed("typed while it was starting")
+  await h.advance(400)
   h.emit("message_start", { message: { role: "user", content: h.sends[0].text } })
   await h.settle()
-  assert.deepEqual(h.replies().map((b) => b.op), ["ack"])
+  const sent = h.replies().filter((b) => b.op === "submitted")
+  assert.deepEqual(sent.map((b) => [b.request, b.handedAt, b.seenAt, b.altered]), [["r1", handed, handed + 400, false]])
 })
 
 test("identical words submitted twice are each confirmed by their own message, in whichever order they arrive", async () => {
@@ -542,18 +547,113 @@ test("a submission dropped unanswered when the list is full stays uncertain, and
   assert.deepEqual(h.replies().filter((b) => b.op === "submitted").map((b) => b.request), ["r9"])
 })
 
-test("a submission dropped by a lost connection stays uncertain, and its late message confirms nothing on the next one", async () => {
+test("a submission whose connection was lost is confirmed on the next connection, and the next submission by its own message", async () => {
   const h = harness()
   await h.connect()
   await h.deliver([h.submit("r1", "continue")])
   await h.advance(28_000)
-  assert.equal(h.events().filter((b) => b.op === "hello").length, 2)
+  const hellos = h.events().filter((b) => b.op === "hello")
+  assert.equal(hellos.length, 2)
   await h.deliver([h.submit("r2", "continue")])
   await arrives(h, h.sends[0].text)
-  assert.equal(h.replies().filter((b) => b.op === "submitted").length, 0)
   await h.finished()
   await arrives(h, h.sends[1].text)
-  assert.deepEqual(h.replies().filter((b) => b.op === "submitted").map((b) => b.request), ["r2"])
+  const sent = h.replies().filter((b) => b.op === "submitted")
+  assert.deepEqual(sent.map((b) => [b.request, b.connection]), [["r1", hellos[1].connection], ["r2", hellos[1].connection]])
+})
+
+test("a confirmation lost with its connection is sent again once the connector says hello again", async () => {
+  const h = harness()
+  await h.connect()
+  await h.deliver([h.submit("r1", "run the tests")])
+  h.autoEvents = false
+  await h.accepted()
+  assert.ok(h.open("/event").length > 0)
+  await h.advance(2_000)
+  const hello = h.open("/event").find((r) => r.body.op === "hello")
+  assert.ok(hello, "no second hello")
+  hello.answer(200)
+  h.autoEvents = true
+  await h.settle()
+  await h.answerEvents()
+  const sent = h.replies().filter((b) => b.op === "submitted")
+  assert.equal(sent.at(-1).request, "r1")
+  assert.equal(sent.at(-1).connection, hello.body.connection)
+})
+
+test("a confirmation the app already took is not sent again", async () => {
+  const h = harness()
+  await h.connect()
+  await h.deliver([h.submit("r1", "run the tests")])
+  await h.accepted()
+  await h.advance(28_000)
+  await h.answerEvents()
+  assert.equal(h.replies().filter((b) => b.op === "submitted").length, 1)
+})
+
+test("Pi stalling past an event's deadline does not count as a lost connection", async () => {
+  const h = harness()
+  await h.connect()
+  h.autoEvents = false
+  await h.typed()
+  assert.equal(h.open("/event").length, 1)
+  h.now += 5_000
+  await h.advance(0)
+  assert.equal(h.open("/event").length, 1)
+  h.open("/event")[0].answer(200)
+  await h.advance(1_000)
+  assert.equal(h.events().filter((b) => b.op === "hello").length, 1)
+})
+
+test("an event the app never answers still loses the connection when Pi is not stalled", async () => {
+  const h = harness()
+  await h.connect()
+  h.autoEvents = false
+  await h.typed()
+  await h.advance(2_000)
+  assert.equal(h.events().filter((b) => b.op === "hello").length, 2)
+})
+
+let checks = 0
+const check = (h: ReturnType<typeof harness>, request: string) =>
+  ({ op: "check", id: `check-${request}-${++checks}`, expectedSession: h.live.session, request, expiresAt: h.now + 2_000 })
+const checked = (h: ReturnType<typeof harness>) => h.events().filter((b) => b.op === "checked")
+
+test("a check says whether a dictation is still held, handed to Pi, in the conversation, refused or unknown", async () => {
+  const h = harness()
+  await h.connect()
+  await h.key()
+  await h.deliver([h.submit("r1", "run the tests")])
+  await h.deliver([check(h, "r1")])
+  await h.advance(3_000)
+  const handed = h.now
+  await h.deliver([check(h, "r1")])
+  await h.advance(500)
+  await h.accepted()
+  await h.deliver([check(h, "r1"), check(h, "r9")])
+  h.sendFails = true
+  await h.finished()
+  await h.deliver([h.submit("r2", "lint")])
+  const last = check(h, "r2")
+  await h.deliver([last])
+  assert.equal(checked(h).at(-1).check, last.id)
+  assert.deepEqual(checked(h).map((b) => [b.request, b.state]), [
+    ["r1", "holding"], ["r1", "handed"], ["r1", "seen"], ["r9", "unknown"], ["r2", "refused"],
+  ])
+  const seen = checked(h)[2]
+  assert.equal(seen.turn, h.turn(1))
+  assert.equal(seen.handedAt, handed)
+  assert.equal(seen.seenAt, handed + 500)
+  assert.match(checked(h)[4].reason, /agent is busy/)
+})
+
+test("a check says another message entered while a dictation waited for its own", async () => {
+  const h = harness()
+  await h.connect()
+  await h.deliver([h.submit("r1", "run the tests")])
+  await arrives(h, "from another extension")
+  await h.deliver([check(h, "r1")])
+  assert.deepEqual(checked(h).map((b) => [b.state, b.miss]), [["handed", "other"]])
 })
 
 test("only a bounded number of late submissions wait for a receipt, oldest forgotten first", async () => {
@@ -735,6 +835,21 @@ test("dictation is refused while a turn runs and accepted again once it settles"
   await h.answerEvents()
   assert.equal(h.open("/poll").length, 1)
   await h.deliver([h.submit("r2")])
+  assert.equal(h.sends.length, 1)
+})
+
+test("a dictation refused as working is delivered when sent again as its next attempt, never under its first id", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.idle = false
+  h.emit("agent_start")
+  await h.settle()
+  await h.deliver([h.submit("r1")])
+  await h.finished()
+  await h.answerEvents()
+  await h.deliver([h.submit("r1")])
+  assert.equal(h.sends.length, 0)
+  await h.deliver([h.submit("r1~1")])
   assert.equal(h.sends.length, 1)
 })
 

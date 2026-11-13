@@ -8,10 +8,15 @@ const identityTries = 50
 const discoveryInterval = 10000
 const admitLimit = 4096
 const backoff = [30000, 60000, 120000, 300000]
+const submissionLimit = 64
+const receiptLimit = 16
+const receiptKeep = 60000
+const stallSlack = 1000
+const stallRetries = 3
 const late = { late: true }
 const unreachable = { unreachable: true }
 const freshSources = ['startup', 'clear', 'fork']
-const features = ['focus', 'label', 'readiness', 'notify', 'fill']
+const features = ['focus', 'label', 'readiness', 'notify', 'fill', 'check']
 const readAloudTool = 'tell_me_when_done'
 
 let config = null
@@ -38,6 +43,8 @@ let greeting = null
 let nudge = null
 let connection = null
 const admitted = new Set()
+const submissions = new Map()
+const receipts = []
 let loadedFrom = null
 const appLabel = null
 let retired = false
@@ -134,11 +141,25 @@ function post($, path, body) {
 
 async function within($, request, ms) {
   let timer = null
-  const expired = new Promise((resolve) => { timer = $.clock.after(ms, () => resolve(late)) })
+  let settled = false
+  const expired = new Promise((resolve) => {
+    const arm = async (stalls) => {
+      const due = (await $.clock.now()) + ms
+      if (settled) return
+      timer = $.clock.after(ms, async () => {
+        const stalled = (await $.clock.now()) - due >= stallSlack && stalls < stallRetries
+        if (settled) return
+        if (stalled) arm(stalls + 1)
+        else resolve(late)
+      })
+    }
+    quietly(arm(0))
+  })
   try {
     return await Promise.race([request, expired])
   } finally {
-    timer.cancel()
+    settled = true
+    if (timer) timer.cancel()
   }
 }
 
@@ -311,6 +332,7 @@ function sayHello($, target, attemptLaunch) {
           helloSession = target
           connection = attempt.connection
           admitted.clear()
+          quietly(sendReceipts($))
         }
         if (attempt.generation === generation && target === session && attemptLaunch === launch) heard($, outcome, attemptLaunch)
         resolve(outcome === 'ok')
@@ -348,6 +370,56 @@ function forget() {
   admitted.clear()
 }
 
+function dropSubmissions() {
+  submissions.clear()
+  receipts.length = 0
+}
+
+function track(id, change) {
+  const was = submissions.get(id)
+  submissions.delete(id)
+  submissions.set(id, { ...(was || { state: 'holding' }), ...change })
+  for (const old of submissions.keys()) {
+    if (submissions.size <= submissionLimit) break
+    submissions.delete(old)
+  }
+}
+
+function report(id) {
+  const sub = submissions.get(id)
+  if (!sub) return { state: 'unknown' }
+  return { state: sub.state, reason: sub.reason, turn: sub.turn, handedAt: sub.handedAt, seenAt: sub.seenAt }
+}
+
+function confirm($, id, at) {
+  receipts.push({ id, at, sending: false })
+  while (receipts.length > receiptLimit) receipts.shift()
+  return sendReceipts($)
+}
+
+async function sendReceipts($) {
+  const now = await $.clock.now()
+  for (let i = receipts.length - 1; i >= 0; i--) {
+    if (now - receipts[i].at > receiptKeep) receipts.splice(i, 1)
+  }
+  if (!connection) return
+  for (const receipt of receipts) {
+    if (receipt.sending) continue
+    const sub = submissions.get(receipt.id) || {}
+    receipt.sending = true
+    enqueue($, {
+      kind: 'reply', generation, connection,
+      body: bound({ op: 'submitted', request: receipt.id, turn: sub.turn || '', handedAt: sub.handedAt, seenAt: sub.seenAt }),
+      done: (outcome) => {
+        receipt.sending = false
+        if (outcome !== 'ok') return
+        const index = receipts.indexOf(receipt)
+        if (index >= 0) receipts.splice(index, 1)
+      },
+    })
+  }
+}
+
 function lose($) {
   generation += 1
   freshSession = null
@@ -365,6 +437,7 @@ function retire($) {
   freshSession = null
   helloSession = null
   forget()
+  dropSubmissions()
   drain(() => false)
   clearOwnedUI($)
 }
@@ -376,6 +449,7 @@ function leave($, ended) {
   freshSession = null
   helloSession = null
   forget()
+  dropSubmissions()
   currentTurn = null
   drain(() => false)
   clearOwnedUI($)
@@ -434,33 +508,45 @@ function ownPrompt(started, sent) {
   return plain(started) === plain(sent)
 }
 
+function refuse($, gen, id, reason) {
+  if (submissions.has(id)) track(id, { state: 'refused', reason })
+  return reply($, gen, { op: 'refused', request: id, reason })
+}
+
 async function submit($, id, text, expiresAt, gen, expected) {
-  if (!current(expected, gen)) return reply($, gen, { op: 'refused', request: id, reason: 'sessionChanged' })
-  if (!((await $.clock.now()) < expiresAt)) return reply($, gen, { op: 'refused', request: id, reason: 'expired' })
-  if (quiet) return reply($, gen, { op: 'refused', request: id, reason: 'disconnected' })
+  const handedAt = await $.clock.now()
+  if (!current(expected, gen)) return refuse($, gen, id, 'sessionChanged')
+  if (!(handedAt < expiresAt)) return refuse($, gen, id, 'expired')
+  if (quiet) return refuse($, gen, id, 'disconnected')
   const own = { text: asText(text), turn: null }
   ownSubmit = own
+  track(id, { state: 'handed', handedAt })
   let result
   try {
     result = await $.prompt.submit({ text: own.text, asUser: true })
   } catch (err) {
+    if (!submissions.has(id)) return
     return refused($, gen, id, own.text, refusal(err && err.message || err))
   } finally {
     if (ownSubmit === own) ownSubmit = null
   }
+  const seenAt = await $.clock.now()
+  if (!submissions.has(id)) return
   if (result && result.drop) return refused($, gen, id, own.text, refusal(result.drop))
-  return reply($, gen, { op: 'submitted', request: id, turn: own.turn || '' })
+  track(id, { state: 'seen', turn: own.turn || '', seenAt })
+  return confirm($, id, seenAt)
 }
 
 async function refused($, gen, id, text, reason) {
-  if (reason === 'stopped' && await leftInEmptyBox($, text)) reason = 'filled'
-  return reply($, gen, { op: 'refused', request: id, reason })
+  if (reason === 'stopped' && await leftInEmptyBox($, id, text)) reason = 'filled'
+  if (!submissions.has(id)) return
+  return refuse($, gen, id, reason)
 }
 
-async function leftInEmptyBox($, text) {
+async function leftInEmptyBox($, id, text) {
   try {
     const box = await $.prompt.read()
-    if (box.text.trim()) return false
+    if (box.text.trim() || !submissions.has(id)) return false
     const filled = await $.prompt.fill({ text })
     return Boolean(filled && filled.isFilled)
   } catch (err) {
@@ -495,10 +581,9 @@ async function focus($, id, expiresAt, gen, expected) {
 }
 
 async function handle($, cmd, gen) {
+  if (cmd.op === 'submit') track(cmd.id, { state: 'holding' })
   const live = await $.session.id()
-  if (!current(cmd.expectedSession, gen) || cmd.expectedSession !== live) {
-    return reply($, gen, { op: 'refused', request: cmd.id, reason: 'sessionChanged' })
-  }
+  if (!current(cmd.expectedSession, gen) || cmd.expectedSession !== live) return refuse($, gen, cmd.id, 'sessionChanged')
   if (cmd.op === 'submit') {
     const hold = () => {
       if (quiet) return 'disconnected'
@@ -506,12 +591,13 @@ async function handle($, cmd, gen) {
       if (currentTurn) return 'working'
       return null
     }
-    if (hold()) return reply($, gen, { op: 'refused', request: cmd.id, reason: hold() })
+    if (hold()) return refuse($, gen, cmd.id, hold())
     const box = await $.prompt.read()
-    if (hold()) return reply($, gen, { op: 'refused', request: cmd.id, reason: hold() })
-    if (box.text.trim()) return reply($, gen, { op: 'refused', request: cmd.id, reason: 'draft' })
+    if (hold()) return refuse($, gen, cmd.id, hold())
+    if (box.text.trim()) return refuse($, gen, cmd.id, 'draft')
     return submit($, cmd.id, cmd.text, cmd.expiresAt, gen, cmd.expectedSession)
   }
+  if (cmd.op === 'check') return reply($, gen, { op: 'checked', request: cmd.request || '', check: cmd.id, ...report(cmd.request || '') })
   if (cmd.op === 'focus') return focus($, cmd.id, cmd.expiresAt, gen, cmd.expectedSession)
   if (cmd.op === 'status') {
     ownedStatus = Boolean(cmd.text)

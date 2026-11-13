@@ -282,6 +282,7 @@ struct AgentDeliveryWiringTests {
         controller.frontReadingGrace = frontGrace
         hub.onNotice = { [weak controller] in controller?.showAgentNotice($0, request: $1, conversation: $2) }
         hub.onForget = { [weak controller] in controller?.forgetAgentReceipt(request: $0) }
+        hub.onDelivery = { [weak controller] in controller?.recordAgentDelivery($1, request: $0) }
         controller.agentNoticeDelayOverride = .milliseconds(10)
         return Rig(
             controller: controller, hub: hub, transport: transport, hud: hud, captured: captured, history: history,
@@ -2154,6 +2155,8 @@ struct AgentDeliveryWiringTests {
         #expect(fact(entry, "Command") == "Send message")
         #expect(fact(entry, "Conversation") == "keyscribe \u{00B7} claude \u{00B7} s1")
         #expect(fact(entry, "Chosen by") == "The current conversation")
+        #expect(fact(entry, "Delivery")?.hasPrefix("Handed off at ") == true)
+        #expect(fact(entry, "Delivery")?.contains("; confirmed +") == true)
         #expect(entry?.steps == nil)
     }
 
@@ -2244,7 +2247,8 @@ struct AgentDeliveryWiringTests {
         #expect(entries.first?.id == queued?.id)
         #expect(entries.first?.summary == "Sent to keyscribe")
         #expect(entries.first?.steps?.map(\.text) == ["Queued for keyscribe", "Sent to keyscribe"])
-        #expect(entries.first?.facts == queued?.facts)
+        #expect(entries.first?.facts?.filter { $0.label != "Delivery" } == queued?.facts)
+        #expect(fact(entries.first, "Delivery")?.contains("; confirmed +") == true)
     }
 
     @Test func anUncertainDeliveryThatLaterSettlesKeepsTheEarlierUncertainty() async {
@@ -2307,6 +2311,8 @@ struct AgentDeliveryWiringTests {
         #expect(entry?.summary == "Sent to keyscribe")
         #expect(entry?.outcome == .inserted)
         #expect(entry?.steps?.map(\.text) == ["May not have reached keyscribe: check its terminal", "Sent to keyscribe"])
+        #expect(fact(entry, "Delivery")?.contains("; confirmed +") == true)
+        #expect(fact(entry, "Delivery")?.contains("not confirmed by +") == true)
     }
 
     @Test func aQueuedMessageWhoseRewriteFellBackKeepsTheFallbackOnceSent() async {

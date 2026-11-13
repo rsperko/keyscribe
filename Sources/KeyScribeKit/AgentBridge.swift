@@ -6,19 +6,45 @@ public enum AgentCommand: Equatable, Sendable {
     case focus(id: String, expectedSession: String, expiresAt: Date)
     case quiet(id: String, expectedSession: String)
     case admit(id: String, expectedSession: String)
+    case check(id: String, expectedSession: String, request: String, expiresAt: Date)
 
     public var id: String {
         switch self {
         case .submit(let id, _, _, _, _, _), .status(let id, _, _): id
-        case .focus(let id, _, _), .quiet(let id, _), .admit(let id, _): id
+        case .focus(let id, _, _), .quiet(let id, _), .admit(let id, _), .check(let id, _, _, _): id
         }
     }
 
     public var expiresAt: Date? {
         switch self {
-        case .focus(_, _, let expiresAt), .submit(_, _, _, _, let expiresAt, _): expiresAt
+        case .focus(_, _, let expiresAt), .submit(_, _, _, _, let expiresAt, _), .check(_, _, _, let expiresAt): expiresAt
         case .status, .quiet, .admit: nil
         }
+    }
+}
+
+public struct AgentDeliveryReport: Equatable, Sendable {
+    public enum State: String, Equatable, Sendable { case holding, handed, seen, refused, unknown }
+
+    public var state: State
+    public var reason: String?
+    public var turn: String
+    public var handedAt: Date?
+    public var seenAt: Date?
+    public var altered: Bool
+    public var miss: String?
+
+    public init(
+        state: State = .unknown, reason: String? = nil, turn: String = "", handedAt: Date? = nil, seenAt: Date? = nil,
+        altered: Bool = false, miss: String? = nil
+    ) {
+        self.state = state
+        self.reason = reason
+        self.turn = turn
+        self.handedAt = handedAt
+        self.seenAt = seenAt
+        self.altered = altered
+        self.miss = miss
     }
 }
 
@@ -88,7 +114,8 @@ public enum AgentEvent: Equatable, Sendable {
 
     case hello(Hello)
     case ack(request: String)
-    case submitted(request: String, turn: String)
+    case submitted(request: String, turn: String, report: AgentDeliveryReport = AgentDeliveryReport(state: .seen))
+    case checked(request: String, check: String, report: AgentDeliveryReport)
     case refused(request: String, reason: String)
     case typed(session: String, prompts: Int? = nil)
     case turnStarted(session: String, turn: String)
@@ -106,7 +133,7 @@ extension AgentEvent {
         case .hello(let hello): hello.session
         case .typed(let session, _), .turnStarted(let session, _), .turnComplete(let session, _, _), .title(let session, _),
              .waiting(let session, _), .notify(let session, _, _): session
-        case .ack, .submitted, .refused, .undelivered, .focused: nil
+        case .ack, .submitted, .checked, .refused, .undelivered, .focused: nil
         }
     }
 
@@ -121,7 +148,7 @@ extension AgentEvent {
         case .title(let session, let text): return .title(session: rename(session), text: text)
         case .waiting(let session, let prompt): return .waiting(session: rename(session), prompt: prompt)
         case .notify(let session, let turn, let on): return .notify(session: rename(session), turn: turn, on: on)
-        case .ack, .submitted, .refused, .undelivered, .focused: return self
+        case .ack, .submitted, .checked, .refused, .undelivered, .focused: return self
         }
     }
 }
@@ -135,6 +162,7 @@ extension AgentCommand {
         case .focus(let id, let s, let expiresAt): .focus(id: id, expectedSession: rename(s), expiresAt: expiresAt)
         case .quiet(let id, let s): .quiet(id: id, expectedSession: rename(s))
         case .admit(let id, let s): .admit(id: id, expectedSession: rename(s))
+        case .check(let id, let s, let request, let expiresAt): .check(id: id, expectedSession: rename(s), request: request, expiresAt: expiresAt)
         }
     }
 }
@@ -203,6 +231,12 @@ public enum AgentBridgeCodec {
         var version: String?
         var on: Bool?
         var images: [String]?
+        var state: String?
+        var check: String?
+        var handedAt: Double?
+        var seenAt: Double?
+        var altered: Bool?
+        var miss: String?
     }
 
     public static func encode(_ commands: [AgentCommand]) throws -> Data {
@@ -236,7 +270,11 @@ public enum AgentBridgeCodec {
         case "ack":
             return .ack(request: try required(w.request))
         case "submitted":
-            return .submitted(request: try required(w.request), turn: w.turn ?? "")
+            return .submitted(request: try required(w.request), turn: w.turn ?? "", report: report(w, state: .seen))
+        case "checked":
+            return .checked(
+                request: try required(w.request), check: try required(w.check),
+                report: report(w, state: w.state.flatMap(AgentDeliveryReport.State.init(rawValue:)) ?? .unknown))
         case "refused":
             return .refused(request: try required(w.request), reason: w.reason ?? "")
         case "typed":
@@ -259,6 +297,13 @@ public enum AgentBridgeCodec {
         }
     }
 
+    private static func report(_ w: Wire, state: AgentDeliveryReport.State) -> AgentDeliveryReport {
+        AgentDeliveryReport(
+            state: state, reason: w.reason, turn: w.turn ?? "",
+            handedAt: w.handedAt.map { Date(timeIntervalSince1970: $0 / 1000) }, seenAt: w.seenAt.map { Date(timeIntervalSince1970: $0 / 1000) },
+            altered: w.altered ?? false, miss: w.miss)
+    }
+
     private static func required(_ value: String?) throws -> String {
         guard let value else { throw CodecError.malformed }
         return value
@@ -274,6 +319,8 @@ public enum AgentBridgeCodec {
             Wire(op: "focus", id: id, expectedSession: s, expiresAt: milliseconds(expiresAt))
         case .quiet(let id, let s): Wire(op: "quiet", id: id, expectedSession: s)
         case .admit(let id, let s): Wire(op: "admit", id: id, expectedSession: s)
+        case .check(let id, let s, let request, let expiresAt):
+            Wire(op: "check", id: id, expectedSession: s, request: request, expiresAt: milliseconds(expiresAt))
         }
     }
 
@@ -297,6 +344,7 @@ public enum AgentBridgeCodec {
         case "focus": return .focus(id: id, expectedSession: s, expiresAt: try date(w.expiresAt))
         case "quiet": return .quiet(id: id, expectedSession: s)
         case "admit": return .admit(id: id, expectedSession: s)
+        case "check": return .check(id: id, expectedSession: s, request: try required(w.request), expiresAt: try date(w.expiresAt))
         default: throw CodecError.unknownOp(w.op)
         }
     }

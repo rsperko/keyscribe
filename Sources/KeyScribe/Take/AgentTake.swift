@@ -558,7 +558,7 @@ final class AgentTake {
         finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id, clipboard: clipboard),
                     outcome: AgentOutput.dictationOutcome(receipt),
                     heard: heard, body: text, transformed: transformed, rewrite: rewrite, transitioned: true,
-                    facts: facts, awaitingReceipt: (request, receipt))
+                    facts: facts + [agents.deliveryFact(of: request)].compactMap { $0 }, awaitingReceipt: (request, receipt))
         speakRefusal(receipt, conversation: id)
     }
 

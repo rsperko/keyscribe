@@ -6,6 +6,7 @@ final class AgentOutput {
     private struct AwaitedReceipt {
         var entry: (id: String, at: Date)?
         var early: [AgentReceipt] = []
+        var delivery: HistoryEntry.Fact?
     }
 
     private let hud: HUDChannel
@@ -83,7 +84,21 @@ final class AgentOutput {
         return next
     }
 
+    func recordDelivery(_ fact: HistoryEntry.Fact, request: String) {
+        guard let tracked = awaited[request] else { return }
+        guard let entry = tracked.entry else {
+            awaited[request]?.delivery = fact
+            return
+        }
+        guard keepsHistory(), reporter.keepsHistory else { return }
+        reporter.update(id: entry.id, near: entry.at, { AgentHistoryFacts.replacing(fact, in: $0) }, then: { _ in })
+    }
+
     func replayEarlyReceipts(request: String, receipt: AgentReceipt) {
+        if let fact = awaited[request]?.delivery, awaited[request]?.entry != nil {
+            awaited[request]?.delivery = nil
+            recordDelivery(fact, request: request)
+        }
         guard let tracked = awaited[request], tracked.entry != nil,
               !tracked.early.isEmpty || Self.mayStillSettle(receipt) else { return stopAwaiting(request) }
         awaited[request]?.early = []

@@ -1771,6 +1771,10 @@ final class DictationController {
         if request != nil, let conversation { agentTake.speakRefusal(receipt, conversation: conversation) }
     }
 
+    func recordAgentDelivery(_ fact: HistoryEntry.Fact, request: String) {
+        agentOutput.recordDelivery(fact, request: request)
+    }
+
     func forgetAgentReceipt(request: String) {
         agentOutput.forgetReceipt(request: request)
     }

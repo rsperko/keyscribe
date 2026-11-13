@@ -3,7 +3,12 @@ import { expect, mock, test } from 'claude-code/testing'
 type Request = { path: string, body: any, auth: string, answer: (status: number, text?: string) => void, refuse: () => void, settled: boolean }
 
 function harness(on: any) {
-  const clock = mock.clock(on)
+  const clockHold = { on: false, held: [] as Array<() => void> }
+  const clock = mock.clock((name: string, handler: any) => on(name, name !== 'clock.now' ? handler : async ($: any, e: any) => {
+    const answer = await handler($, e)
+    if (clockHold.on) await new Promise<void>((resolve) => { clockHold.held.push(resolve) })
+    return answer
+  }))
   const requests: Request[] = []
   const submits: string[] = []
   const statuses: string[] = []
@@ -132,7 +137,7 @@ function harness(on: any) {
   const ready = (launch?: string, protocol = 2) => { files['/tmp/ks-ready.json'] = launch === undefined ? undefined : JSON.stringify({ launch, protocol }) }
 
   const releaseSubmits = () => { for (const release of heldSubmits.splice(0)) release() }
-  return { fills, fillRefusal, logs, env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
+  return { clockHold, fills, fillRefusal, logs, env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
 }
 
 test('agent hooks return while the bridge never answers, through one sender', async ($, on) => {
@@ -653,6 +658,25 @@ test('a turn starting while the draft is being read holds the dictation until it
   expect(h.events().filter((b) => b.request === 'r1').map((b) => b.reason ?? b.op)).toEqual(['ack', 'working'])
 })
 
+test('a dictation refused as working is delivered when sent again as its next attempt, never under its first id', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  await h.settle()
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests' }])
+  await h.answerEvents()
+  await $.turn.complete({ turnId: 't1', answer: '', durationMs: 5, isAborted: false, usage: null, reason: 'answer' })
+  await h.settle()
+  await h.answerEvents()
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests' }])
+  await h.answerEvents()
+  expect(h.submits).toEqual([])
+  await h.deliver([{ op: 'submit', id: 'r1~1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests' }])
+  await h.answerEvents()
+  expect(h.submits).toEqual(['run the tests'])
+  expect(h.events().filter((b: any) => b.op === 'submitted').map((b: any) => b.request)).toEqual(['r1~1'])
+})
+
 test('a submission whose deadline passes while the draft is being read is refused as expired and never submits', async ($, on) => {
   const h = harness(on)
   await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
@@ -755,6 +779,97 @@ test('a poll past its deadline disconnects, and polling resumes only after it se
   expect(h.submits).toEqual([])
   expect(h.open('/poll').length).toBe(1)
   expect(h.open('/poll')[0]).not.toBe(stuck)
+})
+
+test('a submission whose clock read is still pending when its session is cleared never submits into the next session', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  h.box.held = true
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests' }])
+  await h.answerEvents()
+  h.clockHold.on = true
+  h.reads[0]()
+  await h.settle()
+  expect(h.clockHold.held.length).toBeGreaterThan(0)
+  h.clockHold.on = false
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
+  h.live.session = 's2'
+  await h.settle()
+  for (const release of h.clockHold.held.splice(0)) release()
+  await h.settle()
+  await h.answerEvents()
+  expect(h.submits).toEqual([])
+  expect(h.events().filter((b: any) => b.op === 'submitted')).toEqual([])
+})
+
+test('a submission still in flight when its session is cleared never confirms on the next session', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  h.submitHold.on = true
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests' }])
+  await h.answerEvents()
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
+  h.live.session = 's2'
+  await h.settle()
+  await h.answerEvents()
+  h.releaseSubmits()
+  await h.settle()
+  await h.answerEvents()
+  expect(h.events().filter((b: any) => b.op === 'submitted')).toEqual([])
+})
+
+test('a confirmation lost with its connection is sent again once the connector says hello again', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  h.submitHold.on = true
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests' }])
+  await h.answerEvents()
+  h.open('/poll')[0].answer(409)
+  await h.settle()
+  const hello = h.open('/event')[0]
+  expect(hello.body.op).toBe('hello')
+  h.releaseSubmits()
+  await h.settle()
+  hello.answer(200)
+  await h.settle()
+  await h.answerEvents()
+  const sent = h.events().filter((b: any) => b.op === 'submitted')
+  expect(sent.map((b: any) => [b.request, b.connection])).toEqual([['r1', hello.body.connection]])
+  expect(typeof sent[0].handedAt).toBe('number')
+  expect(typeof sent[0].seenAt).toBe('number')
+})
+
+test('a check says whether a dictation is still held, handed to the agent, in the conversation, refused or unknown', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  const check = (id: string, request: string) => ({ op: 'check', id, expectedSession: 's1', request, expiresAt: Number.MAX_SAFE_INTEGER })
+  h.box.held = true
+  await h.deliver([{ op: 'submit', id: 'r1', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'run the tests' }])
+  await h.answerEvents()
+  await h.deliver([check('c1', 'r1')])
+  await h.answerEvents()
+  h.submitHold.on = true
+  h.reads[0]()
+  await h.settle()
+  await h.deliver([check('c2', 'r1')])
+  await h.answerEvents()
+  h.releaseSubmits()
+  await h.settle()
+  await h.answerEvents()
+  await h.deliver([check('c3', 'r1'), check('c4', 'r9')])
+  await h.answerEvents()
+  h.submitHold.on = false
+  h.box.held = false
+  h.downstream['prompt.submit'] = { drop: 'blocked by a hook' }
+  await h.deliver([{ op: 'submit', id: 'r2', expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, text: 'two' }])
+  await h.answerEvents()
+  await h.deliver([check('c5', 'r2')])
+  await h.answerEvents()
+  const checked = h.events().filter((b: any) => b.op === 'checked')
+  expect(checked.map((b: any) => [b.check, b.request, b.state])).toEqual([['c1', 'r1', 'holding'], ['c2', 'r1', 'handed'], ['c3', 'r1', 'seen'], ['c4', 'r9', 'unknown'], ['c5', 'r2', 'refused']])
+  expect(checked[4].reason).toBe('blocked by a hook')
 })
 
 test('a command being prepared when the connection is lost never acts', async ($, on) => {
@@ -948,7 +1063,7 @@ test('a session the module saw start says hello as fresh and idle', async ($, on
   await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await h.settle()
-  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'label', 'readiness', 'notify', 'fill'] })
+  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'label', 'readiness', 'notify', 'fill', 'check'] })
 })
 
 test('hello reports the zellij pane its session runs in, which only its own process can read', async ($, on) => {

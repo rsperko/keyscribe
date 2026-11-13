@@ -100,7 +100,7 @@ extension AgentHub {
     convenience init(
         transport: AgentTransport, scan: @escaping @Sendable () -> [ClaudeRegistryEntry]?, names: AgentNameStore? = nil,
         focus: AgentTerminalFocusing? = nil, front: AgentFronting? = nil, glance: AgentFronting? = nil, transcriptTitles: ClaudeTranscriptTitles? = nil,
-        receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30),
+        receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30), checkWait: Duration = AgentHub.defaultCheckWait,
         disconnectGrace: Duration = AgentHub.defaultDisconnectGrace, scanDeadline: Duration = AgentHub.defaultScanDeadline,
         places: (any AgentPlaceReading)? = nil,
         now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString },
@@ -109,7 +109,7 @@ extension AgentHub {
         self.init(
             transport: transport, discovery: [ClaudeDiscovery(scan: scan, titles: transcriptTitles, stillRunning: stillRunning)],
             names: names, focus: focus, front: front, glance: glance, receiptTimeout: receiptTimeout, handOffLimit: handOffLimit,
-            disconnectGrace: disconnectGrace, scanDeadline: scanDeadline, places: places, now: now, makeId: makeId)
+            checkWait: checkWait, disconnectGrace: disconnectGrace, scanDeadline: scanDeadline, places: places, now: now, makeId: makeId)
     }
 }
 
