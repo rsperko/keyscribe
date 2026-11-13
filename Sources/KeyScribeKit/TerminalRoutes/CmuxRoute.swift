@@ -3,13 +3,14 @@ import Foundation
 struct CmuxRoute: TerminalRoute {
     static let surfaceKey = "CMUX_SURFACE_ID"
     let name = "cmux"
-    let app = "com.cmuxterm.app"
+    static let app = "com.cmuxterm.app"
+    let apps: Set<String> = [app]
     let environmentKeys = [surfaceKey]
     let frontScript: String? = "return id of focused terminal of selected tab of front window"
 
     func open(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> Opening? {
-        guard process.app == app else { return nil }
-        let activate = OpenAction.activate(app: app, pid: process.pid)
+        guard process.app == Self.app else { return nil }
+        let activate = OpenAction.activate(app: Self.app, pid: process.pid)
         guard let surface = TerminalRoutes.nearest(Self.surfaceKey, in: inner)?.environment[Self.surfaceKey] else {
             return Opening([.select(.connector), activate])
         }
@@ -19,7 +20,7 @@ struct CmuxRoute: TerminalRoute {
             focus (item 1 of found)
             return true
             """
-        return Opening([.select(.script(app: app, pid: process.pid, body: body)), activate])
+        return Opening([.select(.script(app: Self.app, pid: process.pid, body: body)), activate])
     }
 
     func front(answer id: String, appPid: Int, facts: TerminalFacts) -> FrontStep {
@@ -38,7 +39,7 @@ struct CmuxRoute: TerminalRoute {
         return unreadable ? .unknown(.processesUnreadable) : .view(FrontView(host: name, server: appPid, pane: id))
     }
 
-    func check(agent pid: Int, view: FrontView, facts: TerminalFacts) -> FrontCheck {
+    func check(agent pid: Int, view: FrontView, facts: TerminalFacts, multiplexerProcesses: Set<String>) -> FrontCheck {
         let chain = TerminalRoutes.ancestors(of: pid, facts: facts)
         guard let terminal = chain.firstIndex(where: { $0.pid == view.server }),
               let surface = TerminalRoutes.nearest(Self.surfaceKey, in: chain[..<terminal])?.environment[Self.surfaceKey]

@@ -647,9 +647,9 @@ docs, run the tests” addresses docs.
 With the Coding agent feature off, a remembered conversation is only its app and window. While
 it looks, the HUD says so (“Opening docs…”). It follows the agent's processes outward and
 selects each layer it passes through: the multiplexer pane showing the agent (herdr or tmux, for example — the
-`PaneRoute`s in `TerminalRoutes`), then the terminal tab and split holding that pane (or holding the agent directly),
+`PaneRoute`s in `AgentSurfaces`), then the terminal tab and split holding that pane (or holding the agent directly),
 then the terminal app. Each multiplexer is one `PaneRoute` and each terminal app one `TerminalRoute`, listed
-in `TerminalRoutes.routes`. Every route answers the same questions inside its own file, so nothing shared
+in `AgentSurfaces` and resolved once at launch (`ResolvedSurfaces.routes`). Every route answers the same questions inside its own file, so nothing shared
 names a particular terminal or multiplexer: what Open does for an agent it holds, and which of its views is
 in front. Open's answer is ordered actions, so a terminal that must come forward before it can select a tab
 says so itself. A
@@ -2188,7 +2188,11 @@ agent's conversations. When an agent's conversations cannot all be checked, its 
 advisory and the conversations last seen stay listed rather than vanishing; only those are marked Last
 seen. When `connectors.json` cannot be read, a **Connectors** section above the agents says no connector
 can connect, shows why, explains that removing the file means installing every connector again, and offers
-**Try Again**, which reads the file again, and **Show in Finder**.
+**Try Again**, which reads the file again, and **Show in Finder**. When the build's own coding agent
+integrations conflict (two terminals or multiplexers with one name, two terminals claiming one app, or two
+multiplexers claiming one process), an **Integrations** section above it says coding agents are off, names the
+conflict, and says the fix belongs to whoever made the build; nothing in Settings can fix it, so it offers
+no action.
 
 **Install…** on a setup and **Connect…** on a conversation open the same consent sheet, presented like the
 Rename sheet: the title "Connect conversations using this {agent} setup?", then the open conversations it

@@ -9,7 +9,7 @@ struct TerminalPlaceReaderTests {
     private let answer = "W\tw1\t1\t1\nT\ttab-a\tPayments\t/dev/ttys004\nS\tterm-a\t/dev/ttys004\tArchitect\n"
 
     private func reader(walk: TerminalPlaceWalk?, read: TerminalRead) -> TerminalPlaceReader {
-        TerminalPlaceReader(walk: { _, _, _ in walk }, script: { _, _, _ in read })
+        TerminalPlaceReader(surfaces: .builtIn, walk: { _, _, _ in walk }, script: { _, _, _ in read })
     }
 
     @Test func aTerminalTheUserNamedNamesThePlaceAfterAnyMultiplexerInsideIt() async {
@@ -46,7 +46,7 @@ struct TerminalPlaceReaderTests {
         final class Reads: @unchecked Sendable { var next: [TerminalRead] = [] }
         let reads = Reads()
         reads.next = [.value(answer), .failed, .notAllowed]
-        let reader = TerminalPlaceReader(walk: { _, _, _ in walk }, script: { _, _, _ in reads.next.removeFirst() })
+        let reader = TerminalPlaceReader(surfaces: .builtIn, walk: { _, _, _ in walk }, script: { _, _, _ in reads.next.removeFirst() })
         guard case .found(let first)? = await reader.read([placed])[query.id] else {
             Issue.record("expected a place")
             return

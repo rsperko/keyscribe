@@ -9,15 +9,15 @@ struct SystemTerminalFactsTests {
         for part in ["/opt/homebrew/bin/herdr", "", "", "herdr", "server", "HERDR_SOCKET_PATH=/s=1.sock", "NOEQUALS", "TERM=xterm", ""] {
             buffer += Array(part.utf8) + [0]
         }
-        let parsed = try #require(SystemTerminalFacts.parse(procargs: buffer))
+        let parsed = try #require(SystemTerminalFacts.parse(procargs: buffer, keeping: ResolvedSurfaces.builtIn.environmentKeys))
         #expect(parsed.executable == "/opt/homebrew/bin/herdr")
         #expect(parsed.arguments == ["herdr", "server"])
         #expect(parsed.environment == ["HERDR_SOCKET_PATH": "/s=1.sock"])
     }
 
     @Test func truncatedProcessArgumentsAreUnreadableNotEmpty() {
-        #expect(SystemTerminalFacts.parse(procargs: [1, 0]) == nil)
-        #expect(SystemTerminalFacts.parse(procargs: []) == nil)
+        #expect(SystemTerminalFacts.parse(procargs: [1, 0], keeping: []) == nil)
+        #expect(SystemTerminalFacts.parse(procargs: [], keeping: []) == nil)
     }
 
     @Test func aRewrittenTitleKeepsTheEnvironmentAfterItsPadding() throws {
@@ -95,22 +95,22 @@ struct SystemTerminalFactsTests {
     }
 
     @Test func thisProcessesChildrenAndNamedProcessesCanBeListed() throws {
-        let facts = SystemTerminalFacts()
+        let facts = SystemTerminalFacts(environmentKeys: ResolvedSurfaces.builtIn.environmentKeys)
         #expect(facts.children(of: Int(getpid())) != nil)
         let named = try #require(facts.processes(named: (CommandLine.arguments[0] as NSString).lastPathComponent))
         #expect(named.contains { $0.pid == Int(getpid()) })
     }
 
     @Test func thisProcessIsReadWithItsParentAndArguments() throws {
-        let process = try #require(SystemTerminalFacts().process(Int(getpid())))
+        let process = try #require(SystemTerminalFacts(environmentKeys: ResolvedSurfaces.builtIn.environmentKeys).process(Int(getpid())))
         #expect(process.parent == Int(getppid()))
         #expect(process.arguments.first == CommandLine.arguments.first)
-        #expect(Set(process.environment.keys).isSubset(of: TerminalRoutes.environmentKeys))
+        #expect(Set(process.environment.keys).isSubset(of: ResolvedSurfaces.builtIn.environmentKeys))
     }
 
     @Test func thisProcessIsReadWithItsWorkingFolderAndAStableStartIdentity() throws {
-        let first = try #require(SystemTerminalFacts().process(Int(getpid())))
-        let second = try #require(SystemTerminalFacts().process(Int(getpid())))
+        let first = try #require(SystemTerminalFacts(environmentKeys: ResolvedSurfaces.builtIn.environmentKeys).process(Int(getpid())))
+        let second = try #require(SystemTerminalFacts(environmentKeys: ResolvedSurfaces.builtIn.environmentKeys).process(Int(getpid())))
         #expect(first.directory == URL(fileURLWithPath: FileManager.default.currentDirectoryPath).resolvingSymlinksInPath().path)
         #expect(first.argumentsReadable)
         let started = try #require(first.startedAt)

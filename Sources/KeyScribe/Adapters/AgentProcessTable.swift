@@ -16,7 +16,7 @@ final class AgentProcessTable: @unchecked Sendable {
     init(
         rules: [AgentProcesses.Rule] = [], maxAge: TimeInterval = 5, home: String = FileManager.default.homeDirectoryForCurrentUser.path,
         now: @escaping @Sendable () -> Date = Date.init, isRunning: @escaping @Sendable (Int) -> Bool = ProcessStart.isRunning(pid:),
-        list: @escaping @Sendable ([AgentProcesses.Rule]) -> [TerminalProcess]? = AgentProcessTable.list
+        list: @escaping @Sendable ([AgentProcesses.Rule]) -> [TerminalProcess]?
     ) {
         self.rules = rules
         self.maxAge = maxAge
@@ -55,10 +55,13 @@ final class AgentProcessTable: @unchecked Sendable {
         return found
     }
 
-    static func list(_ rules: [AgentProcesses.Rule]) -> [TerminalProcess]? {
+    convenience init(surfaces: ResolvedSurfaces) {
+        self.init(list: { AgentProcessTable.list($0, keeping: surfaces.environmentKeys) })
+    }
+
+    static func list(_ rules: [AgentProcesses.Rule], keeping keys: Set<String>) -> [TerminalProcess]? {
         guard let pids = SystemTerminalFacts.allPids() else { return nil }
-        var facts = SystemTerminalFacts()
-        facts.environmentKeys = TerminalRoutes.environmentKeys.union(rules.map(\.setupVariable))
+        let facts = SystemTerminalFacts(environmentKeys: keys.union(rules.map(\.setupVariable)))
         let uid = getuid()
         return pids.compactMap { pid -> TerminalProcess? in
             let name = SystemTerminalFacts.name(of: pid)

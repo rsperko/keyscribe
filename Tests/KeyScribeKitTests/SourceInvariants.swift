@@ -82,10 +82,9 @@ enum SourceInvariants {
         SourceRule(
             pattern: #"(?i)herdr|tmux|zellij|ghostty|iterm|cmux|warp"#,
             allowed: [
-                "Sources/KeyScribe/AgentHub.swift": 1,
+                "Sources/KeyScribe/CodingAgentIntegrations.swift": 1,
                 "Sources/KeyScribe/DevCLI.swift": 1,
-                "Sources/KeyScribeKit/TerminalRoutes/ScriptedTerminalRoute.swift": 1,
-                "Sources/KeyScribeKit/TerminalRoutes/TerminalRoutes.swift": 2,
+                "Sources/KeyScribeKit/TerminalRoutes/AgentSurfaces.swift": 2,
             ],
             reason: "Everything one terminal or multiplexer needs, to focus a conversation or to read the names the user "
                 + "gave its place, lives in that surface's files (named for it); shared code speaks Route, PlaceRoute, "

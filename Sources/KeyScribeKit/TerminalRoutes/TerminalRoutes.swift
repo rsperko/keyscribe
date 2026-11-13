@@ -90,21 +90,33 @@ public protocol Route: Sendable {
     var name: String { get }
     var environmentKeys: [String] { get }
     func open(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> Opening?
-    func check(agent pid: Int, view: FrontView, facts: TerminalFacts) -> FrontCheck
+    func check(agent pid: Int, view: FrontView, facts: TerminalFacts, multiplexerProcesses: Set<String>) -> FrontCheck
 }
 
 extension Route {
-    public func check(agent pid: Int, view: FrontView, facts: TerminalFacts) -> FrontCheck { .unknown(.unreported(name)) }
+    public func check(agent pid: Int, view: FrontView, facts: TerminalFacts, multiplexerProcesses: Set<String>) -> FrontCheck {
+        .unknown(.unreported(name))
+    }
 }
 
 public protocol TerminalRoute: Route {
-    var app: String { get }
+    var apps: Set<String> { get }
     var frontScript: String? { get }
+    var placeScript: String? { get }
     func front(answer: String, appPid: Int, facts: TerminalFacts) -> FrontStep
+    func bundle(of process: TerminalProcess) -> String?
+    func places(answer: String, ttys: [String]) -> PlaceLayer?
 }
 
 extension TerminalRoute {
+    public var placeScript: String? { nil }
     public func front(answer: String, appPid: Int, facts: TerminalFacts) -> FrontStep { .tty(answer) }
+    public func claims(_ process: TerminalProcess) -> Bool { bundle(of: process) != nil }
+
+    public func bundle(of process: TerminalProcess) -> String? {
+        process.app.flatMap { apps.contains($0) ? $0 : nil }
+    }
+    public func places(answer: String, ttys: [String]) -> PlaceLayer? { nil }
 }
 
 public protocol PaneRoute: Route {
@@ -129,16 +141,8 @@ public enum OpenAction: Equatable, Sendable {
 public enum TerminalRoutes {
     public static let maxAncestors = 64
     public static let maxLayers = 4
-    public static let terminalRoutes: [any TerminalRoute] = ScriptedTerminalRoute.all.map { $0 as any TerminalRoute } + [WarpRoute(), CmuxRoute()]
-    public static let paneRoutes: [any PaneRoute] = [HerdrRoute(), TmuxRoute(), ZellijRoute()]
-    public static let routes: [any Route] = terminalRoutes.map { $0 as any Route } + paneRoutes.map { $0 as any Route }
-    public static let environmentKeys: Set<String> = Set(routes.flatMap(\.environmentKeys))
 
-    public static func terminal(_ app: String) -> (any TerminalRoute)? { terminalRoutes.first { $0.app == app } }
-
-    static func route(named name: String) -> (any Route)? { routes.first { $0.name == name } }
-
-    public static func plan(agent pid: Int, facts: TerminalFacts, routes: [any Route] = routes) -> [OpenAction] {
+    public static func plan(agent pid: Int, facts: TerminalFacts, routes: [any Route]) -> [OpenAction] {
         var actions: [OpenAction] = []
         var start = pid
         layers: for _ in 0..<maxLayers {
@@ -160,7 +164,7 @@ public enum TerminalRoutes {
         return actions
     }
 
-    static func ancestors(of pid: Int, facts: TerminalFacts) -> [TerminalProcess] {
+    public static func ancestors(of pid: Int, facts: TerminalFacts) -> [TerminalProcess] {
         var chain: [TerminalProcess] = []
         var next: Int? = pid
         while let pid = next, pid > 1, chain.count < maxAncestors, !chain.contains(where: { $0.pid == pid }),
@@ -171,20 +175,20 @@ public enum TerminalRoutes {
         return chain
     }
 
-    static func nearest(_ key: String, in inner: ArraySlice<TerminalProcess>) -> TerminalProcess? {
+    public static func nearest(_ key: String, in inner: ArraySlice<TerminalProcess>) -> TerminalProcess? {
         inner.reversed().first { $0.environment[key] != nil }
     }
 
-    static func rows(_ result: (status: Int32, output: String)) -> [[String]] {
+    public static func rows(_ result: (status: Int32, output: String)) -> [[String]] {
         guard result.status == 0 else { return [] }
         return result.output.split(separator: "\n").map { $0.split(separator: "\t", omittingEmptySubsequences: false).map(String.init) }
     }
 
-    static func steadiest(_ clients: [Int], preferring pid: Int?) -> Int? {
+    public static func steadiest(_ clients: [Int], preferring pid: Int?) -> Int? {
         clients.first { $0 == pid } ?? clients.min()
     }
 
-    static func ttys(of processes: ArraySlice<TerminalProcess>) -> [String] {
+    public static func ttys(of processes: ArraySlice<TerminalProcess>) -> [String] {
         var seen: [String] = []
         for tty in processes.reversed().compactMap(\.tty) where !seen.contains(tty) { seen.append(tty) }
         return seen
@@ -207,8 +211,8 @@ extension TerminalRoutes {
 }
 
 extension TerminalFacts {
-    public func reporting(_ environment: [String: String], for pid: Int) -> TerminalFacts {
-        ReportedFacts(base: self, pid: pid, environment: environment.filter { TerminalRoutes.environmentKeys.contains($0.key) })
+    public func reporting(_ environment: [String: String], for pid: Int, keeping keys: Set<String>) -> TerminalFacts {
+        ReportedFacts(base: self, pid: pid, environment: environment.filter { keys.contains($0.key) })
     }
 }
 

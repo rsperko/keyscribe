@@ -21,7 +21,7 @@ struct CmuxFrontTests {
     }
 
     private static func reading(_ answer: String, _ facts: Facts) -> FrontReading? {
-        TerminalRoutes.terminal(cmux).map { FrontPanes.read(answer: answer, from: $0, appPid: 10, facts: facts) }
+        ResolvedSurfaces.builtIn.terminal(cmux).map { FrontPanes.read(answer: answer, from: $0, appPid: 10, facts: facts) }
     }
 
     @Test func theFocusedCmuxTerminalIsTheSurfaceWhoseProcessesCarryItsId() {
@@ -104,11 +104,11 @@ struct CmuxFrontTests {
         let facts = Facts()
             .add(10, parent: 1, ["ghostty"], app: "com.mitchellh.ghostty")
             .add(30, parent: 10, tty: "/dev/ttys004", ["claude"])
-        let ghostty = try #require(TerminalRoutes.terminal("com.mitchellh.ghostty"))
+        let ghostty = try #require(ResolvedSurfaces.builtIn.terminal("com.mitchellh.ghostty"))
         #expect(ghostty.frontScript == ScriptedTerminalRoute.ghostty.frontScript)
         #expect(FrontPanes.read(answer: "/dev/ttys004\n", from: ghostty, appPid: 10, facts: facts)
             == .pane(FrontPane(app: "com.mitchellh.ghostty", tty: "/dev/ttys004", multiplexers: [])))
-        #expect(TerminalRoutes.terminal("com.apple.Safari") == nil)
-        #expect(TerminalRoutes.terminal("dev.warp.Warp-Stable")?.frontScript == nil)
+        #expect(ResolvedSurfaces.builtIn.terminal("com.apple.Safari") == nil)
+        #expect(ResolvedSurfaces.builtIn.terminal("dev.warp.Warp-Stable")?.frontScript == nil)
     }
 }

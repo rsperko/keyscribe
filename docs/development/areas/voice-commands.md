@@ -83,6 +83,11 @@ every rule above applies to it, with these sharpenings:
 - **Confirm the intended session has focus, not a particular view of it.** A session visible in
   several places counts as focused when every view that could be in front shows it; when the front
   view could belong to another session, the answer is unknown, never a guess.
+- **A terminal acts as the app its process runs as.** A route may claim several bundle ids
+  (`TerminalRoute.apps`); Open, the front read and the place script address the one the claimed process
+  runs as (`TerminalRoute.bundle(of:)`). A helper process with no app of its own (iTerm's `iTermServer-*`
+  after a restart) is claimed only by a route with a single app; with several, which app owns it is
+  unknown, so it is not claimed rather than addressed to a guess.
 - **Minimal agent impact is a release requirement** (`docs/development/principles.md` §10).
   Observation hooks never await bridge work or perform I/O. The one wait is a request the user or the model makes
   explicitly (the read-aloud tool and command): it waits for the app's answer within a bounded deadline, never for

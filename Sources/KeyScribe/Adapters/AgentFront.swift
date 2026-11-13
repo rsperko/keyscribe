@@ -33,18 +33,36 @@ protocol AgentFronting: Sendable {
 struct AgentFront: AgentFronting, Sendable {
     typealias Read = @Sendable (_ app: String, _ pid: Int, _ body: String, _ asking: @escaping @Sendable () async -> Void) async -> TerminalRead
 
-    static let withoutAsking = AgentFront(
-        frontmost: { AgentFront.frontmost(withWindow: false) },
-        read: { app, pid, body, _ in await TerminalScripting.read(app, pid: pid, body: body, asking: {}, mayAsk: false) },
-        confirming: false)
+    static func withoutAsking(_ surfaces: ResolvedSurfaces) -> AgentFront {
+        AgentFront(
+            surfaces: surfaces, frontmost: { AgentFront.frontmost(withWindow: false) },
+            read: { app, pid, body, _ in await TerminalScripting.read(app, pid: pid, body: body, asking: {}, mayAsk: false) },
+            confirming: false)
+    }
 
-    static let confirmingWithoutAsking = AgentFront(
-        read: { app, pid, body, _ in await TerminalScripting.read(app, pid: pid, body: body, asking: {}, mayAsk: false) })
+    static func confirmingWithoutAsking(_ surfaces: ResolvedSurfaces) -> AgentFront {
+        AgentFront(
+            surfaces: surfaces,
+            read: { app, pid, body, _ in await TerminalScripting.read(app, pid: pid, body: body, asking: {}, mayAsk: false) })
+    }
 
-    var frontmost: @MainActor @Sendable () -> FrontApp? = { AgentFront.frontmost() }
-    var read: Read = { await TerminalScripting.read($0, pid: $1, body: $2, asking: $3) }
-    var facts: @Sendable () -> TerminalFacts = { SystemTerminalFacts() }
-    var confirming = true
+    let surfaces: ResolvedSurfaces
+    var frontmost: @MainActor @Sendable () -> FrontApp?
+    var read: Read
+    var facts: @Sendable () -> TerminalFacts
+    var confirming: Bool
+
+    init(
+        surfaces: ResolvedSurfaces, frontmost: @escaping @MainActor @Sendable () -> FrontApp? = { AgentFront.frontmost() },
+        read: @escaping Read = { await TerminalScripting.read($0, pid: $1, body: $2, asking: $3) },
+        facts: (@Sendable () -> TerminalFacts)? = nil, confirming: Bool = true
+    ) {
+        self.surfaces = surfaces
+        self.frontmost = frontmost
+        self.read = read
+        self.facts = facts ?? { SystemTerminalFacts(environmentKeys: surfaces.environmentKeys) }
+        self.confirming = confirming
+    }
 
     func reading(asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }) async -> FrontReading {
         switch await confirmed(asking: asking, { _ in () }) {
@@ -56,9 +74,11 @@ struct AgentFront: AgentFronting, Sendable {
     func check(
         agent pid: Int, environment: [String: String] = [:], asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }
     ) async -> FrontCheck {
-        let facts = facts
+        let (facts, surfaces) = (facts, surfaces)
         let result = await confirmed(asking: asking) { reading in
-            await Task.detached { reading.check(agent: pid, facts: facts().reporting(environment, for: pid)) }.value
+            await Task.detached {
+                reading.check(agent: pid, facts: facts().reporting(environment, for: pid, keeping: surfaces.environmentKeys), surfaces: surfaces)
+            }.value
         }
         switch result {
         case .success(let confirmed): return confirmed.value
@@ -69,10 +89,14 @@ struct AgentFront: AgentFronting, Sendable {
     func shown(
         among agents: [AgentFrontCandidate], asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }
     ) async -> FrontSession? {
-        let facts = facts
+        let (facts, surfaces) = (facts, surfaces)
         let result = await confirmed(asking: asking) { reading in
             await Task.detached {
-                agents.filter { reading.check(agent: $0.pid, facts: facts().reporting($0.environment, for: $0.pid)) == .shown }.map(\.id)
+                agents.filter {
+                    reading.check(
+                        agent: $0.pid, facts: facts().reporting($0.environment, for: $0.pid, keeping: surfaces.environmentKeys),
+                        surfaces: surfaces) == .shown
+                }.map(\.id)
             }.value
         }
         guard case .success(let confirmed) = result, confirmed.value.count == 1 else { return nil }
@@ -89,7 +113,7 @@ struct AgentFront: AgentFronting, Sendable {
         asking: @escaping @MainActor @Sendable (String) -> Void, _ evaluate: @escaping @Sendable (FrontReading) async -> Value
     ) async -> Result<Confirmed<Value>, FrontUnknown> {
         guard let app = await frontmost() else { return .failure(.noTerminal) }
-        guard let route = TerminalRoutes.terminal(app.bundle), let script = route.frontScript else { return .failure(.unsupported(app.bundle)) }
+        guard let route = surfaces.terminal(app.bundle), let script = route.frontScript else { return .failure(.unsupported(app.bundle)) }
         let first = await surface(app, route, script, asking: { await asking(app.name) })
         guard case .pane(let pane) = first else { return .failure(Self.reason(first)) }
         let value = await evaluate(first)
@@ -109,8 +133,8 @@ struct AgentFront: AgentFronting, Sendable {
         case .notAllowed: return .unknown(.notAllowed(app.bundle))
         case .failed: return .unknown(.unreadable(app.bundle))
         }
-        let facts = facts
-        return await Task.detached { FrontPanes.read(answer: answer, from: route, appPid: app.pid, facts: facts()) }.value
+        let (facts, panes) = (facts, surfaces.multiplexers)
+        return await Task.detached { FrontPanes.read(answer: answer, from: route, app: app.bundle, appPid: app.pid, facts: facts(), panes: panes) }.value
     }
 
     private static func reason(_ reading: FrontReading) -> FrontUnknown {

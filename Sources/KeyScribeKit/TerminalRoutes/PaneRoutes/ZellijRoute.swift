@@ -149,10 +149,10 @@ struct ZellijRoute: PaneRoute, PlaceRoute {
         return Set(rows.map { String($0[1]) })
     }
 
-    func check(agent pid: Int, view: FrontView, facts: TerminalFacts) -> FrontCheck {
+    func check(agent pid: Int, view: FrontView, facts: TerminalFacts, multiplexerProcesses: Set<String>) -> FrontCheck {
         let chain = TerminalRoutes.ancestors(of: pid, facts: facts)
         guard let server = chain.firstIndex(where: { $0.pid == view.server }) else {
-            switch nests(chain, in: view.server, facts: facts) {
+            switch nests(chain, in: view.server, facts: facts, multiplexerProcesses: multiplexerProcesses) {
             case true: return .unknown(.nested(name))
             case false: return .elsewhere
             case nil: return .unknown(.processesUnreadable)
@@ -165,8 +165,8 @@ struct ZellijRoute: PaneRoute, PlaceRoute {
         return .shown
     }
 
-    private func nests(_ chain: [TerminalProcess], in server: Int, facts: TerminalFacts) -> Bool? {
-        let nestable = TerminalRoutes.paneRoutes.map(\.processName).filter { $0 != processName }
+    private func nests(_ chain: [TerminalProcess], in server: Int, facts: TerminalFacts, multiplexerProcesses: Set<String>) -> Bool? {
+        let nestable = multiplexerProcesses.subtracting([processName]).sorted()
         guard chain.contains(where: { $0.tty == nil && nestable.contains($0.name) }) else { return false }
         var clients: [TerminalProcess] = []
         for name in nestable {

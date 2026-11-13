@@ -1241,11 +1241,18 @@ final class AgentRuntime {
         connected || settingsOpen ? .seconds(1) : .seconds(10)
     }
 
+    static func places(surfaces: ResolvedSurfaces, sources: [any AgentPlaceReading]) -> CombinedPlaceReader {
+        CombinedPlaceReader(readers: sources + [TerminalPlaceReader(surfaces: surfaces)])
+    }
+
     static func bridgeDirectory(supportDir: URL) -> URL {
         supportDir.appendingPathComponent("agents", isDirectory: true)
     }
 
-    init(supportDir: URL, discovery: [any AgentDiscovery], setups: ConnectorSetupRegistry, legacyAgent: String) throws {
+    init(
+        supportDir: URL, surfaces: ResolvedSurfaces, placeSources: [any AgentPlaceReading], discovery: [any AgentDiscovery],
+        setups: ConnectorSetupRegistry, legacyAgent: String
+    ) throws {
         let directory = Self.bridgeDirectory(supportDir: supportDir)
         let token = try AgentBridgeToken.loadOrCreate(in: directory)
         let box = HubBox()
@@ -1272,8 +1279,10 @@ final class AgentRuntime {
         hub = AgentHub(
             transport: server, discovery: discovery,
             names: AgentNameStore(directory: directory, legacyAgent: legacyAgent),
-            focus: AgentTerminalFocus(connector: { session in await box.hub?.focusInPlace(session) ?? .notFound }),
-            front: AgentFront(), glance: AgentFront.confirmingWithoutAsking, exclusions: exclusions, places: CombinedPlaceReader(readers: [HerdrPlaceReader(), TerminalPlaceReader()]))
+            focus: AgentTerminalFocus(
+                plan: AgentTerminalFocus.plan(surfaces), connector: { session in await box.hub?.focusInPlace(session) ?? .notFound }),
+            front: AgentFront(surfaces: surfaces), glance: AgentFront.confirmingWithoutAsking(surfaces), exclusions: exclusions,
+            places: Self.places(surfaces: surfaces, sources: placeSources))
         box.hub = hub
         try server.start()
         hub.onFirstConnection = { [weak self] in

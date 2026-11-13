@@ -2,7 +2,7 @@ import Foundation
 
 extension ScriptedTerminalRoute {
     public static let iterm = ScriptedTerminalRoute(
-        name: "iTerm", app: "com.googlecode.iterm2", helperPrefix: "iTermServer-",
+        name: "iTerm", apps: ["com.googlecode.iterm2"], helperPrefix: "iTermServer-",
         front: "return tty of current session of current window", body: itermBody, placeScript: """
         set sep to character id 9
         set out to ""

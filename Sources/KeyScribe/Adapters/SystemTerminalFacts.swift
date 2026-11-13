@@ -4,7 +4,7 @@ import Foundation
 import KeyScribeKit
 
 struct SystemTerminalFacts: TerminalFacts {
-    var environmentKeys: Set<String> = TerminalRoutes.environmentKeys
+    var environmentKeys: Set<String>
 
     func process(_ pid: Int) -> TerminalProcess? {
         guard let info = Self.info(pid) else { return nil }
@@ -155,7 +155,7 @@ struct SystemTerminalFacts: TerminalFacts {
     }
 
     static func arguments(
-        of pid: Int, keeping keys: Set<String> = TerminalRoutes.environmentKeys
+        of pid: Int, keeping keys: Set<String>
     ) -> (executable: String, arguments: [String], environment: [String: String])? {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, Int32(pid)]
         var size = 0
@@ -166,7 +166,7 @@ struct SystemTerminalFacts: TerminalFacts {
     }
 
     static func parse(
-        procargs buffer: [UInt8], keeping keys: Set<String> = TerminalRoutes.environmentKeys
+        procargs buffer: [UInt8], keeping keys: Set<String>
     ) -> (executable: String, arguments: [String], environment: [String: String])? {
         guard buffer.count > MemoryLayout<Int32>.size else { return nil }
         let argc = buffer.withUnsafeBytes { Int($0.loadUnaligned(as: Int32.self)) }

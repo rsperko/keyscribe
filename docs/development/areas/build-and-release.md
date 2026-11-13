@@ -48,7 +48,10 @@ stable self-signed cert (**`KeyScribe Local`**) for persistent TCC, else ad-hoc;
 Xcode signs Sparkle's helpers, the framework, the binary, and the bundle inside-out with hardened runtime
 itself, so there is no re-sign block. **A downstream distribution `include:`s the template and adds its
 own target** with its own identity, signing, entry file (`main.swift` that sets `delegate.updater`), and
-export options — it never edits upstream source. Full from-source build, prerequisites, and signing live
+export options — it never edits upstream source. A downstream that adds coding agent integrations builds one
+`CodingAgentIntegrations` value (start from `.builtIn`, append its own) and passes that same value to both
+`DevCLI.handleFlags(codingAgents:)` and `AppDelegate(codingAgents:)`; passing it to only one makes the dev
+probes and the app disagree about which terminals exist. Full from-source build, prerequisites, and signing live
 in **`BUILD.md`**.
 
 ## Build variants

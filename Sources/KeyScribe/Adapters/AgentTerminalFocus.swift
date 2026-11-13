@@ -77,15 +77,21 @@ struct AgentTerminalFocus: AgentTerminalFocusing {
         _ wanted: @escaping @Sendable () async -> Bool
     ) async -> TerminalSelection
 
-    var plan: @Sendable (Int, [String: String]) -> [OpenAction] = {
-        TerminalRoutes.plan(agent: $0, facts: SystemTerminalFacts().reporting($1, for: $0))
-    }
+    var plan: @Sendable (Int, [String: String]) -> [OpenAction]
     var run: @Sendable ([String]) -> (Int32, String) = { ToolCLI.run($0, timeout: 3) }
     var script: Script = TerminalScripting.select
     var openURL: @MainActor @Sendable (String) -> Bool = { URL(string: $0).map(NSWorkspace.shared.open) ?? false }
     var connector: @MainActor @Sendable (_ session: String) async -> TerminalSelection = { _ in .unsupported }
     var running: @MainActor @Sendable (_ app: String, _ near: Int) -> (pid: Int, name: String)? = AgentTerminalFocus.running
     var activate: @MainActor @Sendable (Int) -> String? = AppActivation.bringForwardApp(pid:)
+
+    static func plan(_ surfaces: ResolvedSurfaces) -> @Sendable (Int, [String: String]) -> [OpenAction] {
+        { pid, environment in
+            let facts = SystemTerminalFacts(environmentKeys: surfaces.environmentKeys)
+            return TerminalRoutes.plan(
+                agent: pid, facts: facts.reporting(environment, for: pid, keeping: surfaces.environmentKeys), routes: surfaces.routes)
+        }
+    }
 
     private enum Terminal {
         case selected, requested, notFound, notAllowed, unsupported, outdated
