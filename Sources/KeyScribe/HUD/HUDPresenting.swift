@@ -555,4 +555,7 @@ extension HUDPresenting {
 extension HUDState {
     static let commandDetail = "Voice command"
     static let commandStillRunningDetail = "Started, still running"
+    static var settingsReplaced: String {
+        "settings.toml was changed outside \(Branding.appName), so its contents replaced Settings changes that hadn\u{2019}t been saved. Check Settings and make them again."
+    }
 }

@@ -239,7 +239,9 @@ becomes a second destination for configuration.
 
 The HUD sits at one of the anchors in `HUDAnchor`: the corners and the middle of each screen edge, never
 the middle of the screen. One anchor is saved and applied on whichever display the HUD appears, so the
-position is not per-display. The spoken-reply panel uses the same anchor. There are two ways to change it,
+position is not per-display. The spoken-reply panel uses the same anchor. Both appear on the display holding
+the frontmost app's window: the HUD when each take starts, including one started while the last take's result
+still shows, and the spoken-reply panel each time it opens. Neither changes display while it stays up; when that display is resized or rearranged it moves to the same position on it, and when the display is gone it moves to the display it now sits on, or the main one. With no frontmost window it uses the display it is already on. There are two ways to change the position,
 and both write the same anchor:
 
 - **Drag** the HUD, in any state including “What you can say”, or the spoken-reply panel, from anywhere but a
@@ -324,6 +326,7 @@ because opening its mic switches it to call mode.
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
 | Config problem (idle, after an external edit) | “Couldn’t read [file] — [parser message] — previous version still in use” (or “— ignored until fixed”), or “[file] — “[key]” (did you mean “[key]”?) has no effect” | — | None; dismisses automatically |
+| Settings replaced (after an edit to `settings.toml` that sets something else, while app-wide changes made in Settings were not saved) | “settings.toml was changed outside [app], so its contents replaced Settings changes that hadn’t been saved. Check Settings and make them again.” | — | None; dismisses after eight seconds. Shown in place of that reload's config-problem notice, which Settings still lists. During a dictation it waits until the dictation's result has shown, or until a cancelled dictation ends |
 
 **Config problems.** The HUD names only problems an external edit just introduced — each new unreadable
 file or unread key once, never during a dictation. Settings → Maintenance keeps listing every current
@@ -2348,8 +2351,9 @@ reset. (Notices live in the separate **About & Notices** window, not here.)
   couldn't be opened as text, a newer version's file, a missing `schema_version`, otherwise a neutral
   "isn't valid for this app"; for an advisory, the unread keys themselves), what is running meanwhile
   (`The previous version is still in use.` / `Default settings are in use until it’s fixed.` / `It’s
-  ignored until it’s fixed.` — and, for `settings.toml`, that app-wide settings changed meanwhile are
-  temporary and are replaced when the fixed file reloads, while modes and vocabulary save normally), **Show in Finder** selecting
+  ignored until it’s fixed.` — and, for `settings.toml`, that app-wide settings changed meanwhile
+  are not saved yet: they are saved once the file is fixed, unless the fixed file sets something else, which
+  replaces them and says so on the HUD; modes and vocabulary save normally), **Show in Finder** selecting
   that file, and a collapsed **Technical details** with the parser's message as selectable text.
 - **Copy Diagnostics** puts a redaction-safe summary of the install on the clipboard for a bug
   report: version and revision, granted permissions, speech model, each mode's delivery settings,

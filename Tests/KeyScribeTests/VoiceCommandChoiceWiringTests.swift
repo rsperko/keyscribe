@@ -847,6 +847,36 @@ struct VoiceCommandChoiceWiringTests {
         }
     }
 
+    @Test func settingsReplacedDuringATakeIsSaidOnceTheTakesResultHasShown() async throws {
+        let h = try Harness(places: [])
+        h.engine.text = "hello there"
+        await h.press()
+        h.controller.announceSettingsReplaced()
+        #expect(!h.hud.states.contains(.advisory(message: HUDState.settingsReplaced)))
+        h.controller.handleCommit()
+        await h.controller.dictationTask?.value
+        #expect(h.hud.last != .advisory(message: HUDState.settingsReplaced))
+        for _ in 0..<200 where h.hud.last != .advisory(message: HUDState.settingsReplaced) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(h.hud.last == .advisory(message: HUDState.settingsReplaced))
+        #expect(h.hud.states.filter { $0 == .advisory(message: HUDState.settingsReplaced) }.count == 1)
+    }
+
+    @Test func settingsReplacedDuringATakeThatIsCancelledIsSaidOnceTheTakeEnds() async throws {
+        let h = try Harness(places: [])
+        await h.press()
+        h.controller.announceSettingsReplaced()
+        #expect(!h.hud.states.contains(.advisory(message: HUDState.settingsReplaced)))
+        h.controller.cancel()
+        await h.controller.dictationTask?.value
+        for _ in 0..<100 where h.hud.last != .advisory(message: HUDState.settingsReplaced) {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(h.hud.last == .advisory(message: HUDState.settingsReplaced))
+        #expect(h.hud.states.filter { $0 == .advisory(message: HUDState.settingsReplaced) }.count == 1)
+    }
+
     @Test func helpStaysWhileVoiceOverIsRunning() async throws {
         let h = try Harness(places: [])
         h.controller.help.seconds = 0.05

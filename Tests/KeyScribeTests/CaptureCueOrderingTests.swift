@@ -532,7 +532,7 @@ struct CaptureCueOrderingTests {
             settings: { SpokenResultSettings(enabled: true, connection: "omlx") }, connection: { $0 == "omlx" ? connection : nil })
         let escape = FakeChordRegistrar()
         escape.onUpdate = { events.append($0.isEmpty ? "escape released" : "escape claimed") }
-        let panel = SpeakingHUDController(escape: escape, defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        let panel = SpeakingHUDController(escape: escape, defaults: UserDefaults(suiteName: UUID().uuidString)!, displays: .unfocused)
         defer { panel.hide() }
         output.onSpeaking = { speaking in
             if let speaking { panel.show(name: speaking.name, summary: speaking.text) } else { panel.hide() }

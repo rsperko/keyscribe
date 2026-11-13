@@ -78,7 +78,10 @@ struct ConfigFileIssueTests {
     @Test func aBrokenSettingsFileSaysInAppChangesAreNotSaved() {
         let settings = ConfigFileIssue.unreadable("settings.toml", error: parserError, recovery: .previousVersion)
         #expect(settings.recovery.hasSuffix(
-            "App-wide settings you change meanwhile are temporary: fixing the file reloads it and replaces them. Modes and vocabulary still save normally."))
+            "App-wide settings you change meanwhile aren’t saved yet. They’re saved once the file is fixed, unless the fixed file sets something else, which replaces them. Modes and vocabulary still save normally."))
+        let unread = ConfigFileIssue.unusedKeys("settings.toml", [UnknownConfigKey(path: "x", suggestion: nil)])
+        #expect(unread.recovery.hasSuffix(
+            "App-wide settings you change meanwhile aren’t saved yet. They’re saved once that line is fixed or removed, unless the file then sets something else, which replaces them."))
         let replacements = ConfigFileIssue.unreadable("replacements.toml", error: parserError, recovery: .previousVersion)
         #expect(replacements.recovery == "The previous version is still in use.")
     }

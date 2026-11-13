@@ -62,13 +62,20 @@ final class HUDController: HUDPresenting {
     private let defaults: UserDefaults
     private var anchor: HUDAnchor
     var currentAnchor: HUDAnchor { anchor }
+    private let displays: HUDDisplays
+    private var pinned: CGDirectDisplayID?
+    private var screenObserver: NSObjectProtocol?
 
     private let escape: EscapeClaim
     private var keyFocusFree = false
     private var escapeClaimed = false
 
-    init(defaults: UserDefaults = .standard, escape: any ChordRegistering = CarbonHotKeys()) {
+    init(
+        defaults: UserDefaults = .standard, escape: any ChordRegistering = CarbonHotKeys(),
+        displays: HUDDisplays = .live
+    ) {
         self.defaults = defaults
+        self.displays = displays
         self.escape = EscapeClaim(registrar: escape)
         anchor = HUDAnchorStore.load(defaults)
     }
@@ -137,11 +144,11 @@ final class HUDController: HUDPresenting {
             // in flight.
             panel?.alphaValue = 1
             if let panel {
-                resize(panel, to: state)
+                // Follow the focused window's display only when a take starts, so it never hops mid-dictation.
+                let starts = wasHidden || Self.startsTake(state, after: previous)
+                if starts { pinned = displays.focused() }
+                resize(panel, to: state, placing: starts)
             }
-            // Follow the focused window's screen only on hidden→visible, not on every level tick, so
-            // recording never hops the HUD mid-dictation.
-            if wasHidden, let panel { reposition(panel, to: placementScreen()) }
             // Re-resolved per appearance rather than observed, so Opposite tracks a system flip from the next
             // dictation on.
             if wasHidden { applyAppearance() }
@@ -203,27 +210,42 @@ final class HUDController: HUDPresenting {
         reposition(panel)
         applyAppearance()
         installLocalKeyMonitor()
+        guard displays.followsScreenChanges else { return }
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.screensChanged() }
+        }
     }
 
     private func applyAppearance() {
         panel?.appearance = appearance.nsAppearance()
     }
 
-    private func resize(_ panel: NSPanel, to state: HUDState) {
+    private func resize(_ panel: NSPanel, to state: HUDState, placing: Bool = false) {
         // contentHeight is a floor; take the max with the hosting view's actual fitting height. Force a
         // layout pass first — `model.state` was just mutated and SwiftUI may not have reconciled the
         // hosting view yet, so a cold `fittingSize` read can return the previous (smaller) state's height
         // and clip a wrap-grown state on a state→state transition.
-        if let screen = panel.screen ?? NSScreen.main, model.screenHeight != screen.visibleFrame.height {
-            model.screenHeight = screen.visibleFrame.height
+        if let screen = currentDisplay, model.screenHeight != screen.height {
+            model.screenHeight = screen.height
         }
         panel.contentView?.layoutSubtreeIfNeeded()
         let fittingHeight = panel.contentView?.fittingSize.height ?? 0
         let height = max(state.contentHeight, fittingHeight)
         let size = CGSize(width: state.panelWidth, height: height)
-        guard panel.frame.size != size else { return }
-        guard let screen = panel.screen ?? NSScreen.main else { return }
-        apply(Self.placement(of: state, size: size, in: screen.visibleFrame, anchor: anchor), to: panel)
+        guard placing || panel.frame.size != size, let screen = currentDisplay else { return }
+        apply(Self.placement(of: state, size: size, in: screen, anchor: anchor), to: panel)
+    }
+
+    static func startsTake(_ state: HUDState, after previous: HUDState) -> Bool {
+        guard case .recording = state else { return false }
+        if case .recording = previous { return false }
+        return true
+    }
+
+    private var currentDisplay: CGRect? {
+        displays.frame(pinned: pinned, panel: panel)
     }
 
     static func placement(of state: HUDState, size: CGSize, in screen: CGRect, anchor: HUDAnchor) -> HUDPlacement {
@@ -314,10 +336,16 @@ final class HUDController: HUDPresenting {
 
     // Anchors are resolution-independent — recomputed from visibleFrame each time — so a saved spot lands
     // correctly on any display; only the screen changes when the HUD follows the focused window.
-    private func reposition(_ panel: NSPanel, to screen: NSScreen? = nil) {
-        guard let screen = screen ?? panel.screen ?? NSScreen.main else { return }
-        if model.screenHeight != screen.visibleFrame.height { model.screenHeight = screen.visibleFrame.height }
-        apply(Self.placement(of: model.state, size: panel.frame.size, in: screen.visibleFrame, anchor: anchor), to: panel)
+    private func reposition(_ panel: NSPanel) {
+        guard model.state != .hidden else {
+            guard let screen = currentDisplay else { return }
+            return apply(Self.placement(of: model.state, size: panel.frame.size, in: screen, anchor: anchor), to: panel)
+        }
+        resize(panel, to: model.state, placing: true)
+    }
+
+    func screensChanged() {
+        if let panel { reposition(panel) }
     }
 
     private func place(_ change: () -> Void) {
@@ -325,13 +353,15 @@ final class HUDController: HUDPresenting {
     }
 
     private func snapToNearestAnchor() {
-        guard let panel, let screen = panel.screen ?? NSScreen.main else { return }
+        guard let panel else { return }
+        pinned = displays.holding(panel)
+        guard let screen = currentDisplay else { return }
         var header = panel.frame
         if model.state.hasList {
             header.size.height = HUDState.listHeaderExtent
             if !model.listAbove { header.origin.y = panel.frame.maxY - header.height }
         }
-        setAnchor(HUDAnchor.nearest(toCenter: CGPoint(x: header.midX, y: header.midY), in: screen.visibleFrame, size: header.size))
+        setAnchor(HUDAnchor.nearest(toCenter: CGPoint(x: header.midX, y: header.midY), in: screen, size: header.size))
     }
 
     func resetAnchor() { setAnchor(.default) }
@@ -343,42 +373,8 @@ final class HUDController: HUDPresenting {
     }
 
     func placementScreen() -> NSScreen? {
-        focusedWindowScreen() ?? panel?.screen ?? NSScreen.main
+        FocusedDisplay.screen() ?? panel?.screen ?? NSScreen.main
     }
-
-    // Reads window geometry from the window server (CGWindowList), not the target app's AX tree, so this
-    // can never block on an unresponsive app. nil ⇒ caller keeps the panel's current screen.
-    private func focusedWindowScreen() -> NSScreen? {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
-        let pid = app.processIdentifier
-        guard let infos = CGWindowListCopyWindowInfo(
-            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
-        // Front-to-back order: the first normal (layer 0) window owned by the frontmost app is its key window.
-        for info in infos {
-            guard let owner = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, owner == pid,
-                  ((info[kCGWindowLayer as String] as? NSNumber)?.intValue ?? 0) == 0,
-                  let boundsDict = info[kCGWindowBounds as String] else { continue }
-            var quartz = CGRect.zero
-            guard CGRectMakeWithDictionaryRepresentation(boundsDict as! CFDictionary, &quartz) else { continue }
-            return Self.screen(forQuartzRect: quartz)
-        }
-        return nil
-    }
-
-    // CGWindowList rects are top-left-origin global (Quartz); flip to AppKit's bottom-left space against the
-    // primary screen, then pick the NSScreen with the largest overlap (falling back to the one under center).
-    private static func screen(forQuartzRect quartz: CGRect) -> NSScreen? {
-        let primaryHeight = NSScreen.screens.first(where: { $0.frame.origin == .zero })?.frame.height
-            ?? NSScreen.main?.frame.height ?? quartz.maxY
-        let cocoa = CGRect(x: quartz.origin.x, y: primaryHeight - quartz.origin.y - quartz.height,
-                           width: quartz.width, height: quartz.height)
-        let overlap = NSScreen.screens.max { area($0.frame.intersection(cocoa)) < area($1.frame.intersection(cocoa)) }
-        if let overlap, area(overlap.frame.intersection(cocoa)) > 0 { return overlap }
-        let center = CGPoint(x: cocoa.midX, y: cocoa.midY)
-        return NSScreen.screens.first { $0.frame.contains(center) }
-    }
-
-    private static func area(_ r: CGRect) -> CGFloat { r.isNull ? 0 : r.width * r.height }
 }
 
 // A minimal flow layout: wraps to a new row when the next subview would exceed the proposed width. Used

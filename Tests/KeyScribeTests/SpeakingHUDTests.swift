@@ -10,7 +10,7 @@ struct SpeakingHUDTests {
     }
 
     @Test func theSummaryIsHiddenByDefault() {
-        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults())
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults(), displays: .unfocused)
         defer { hud.hide() }
         hud.show(name: "keyscribe blue", summary: "Done.")
         #expect(!hud.showsSummary)
@@ -19,7 +19,7 @@ struct SpeakingHUDTests {
 
     @Test func anAnswerShowsItsTextAtOnceWithoutChangingTheRememberedChoice() {
         let defaults = scratchDefaults()
-        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults)
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults, displays: .unfocused)
         hud.show(name: "Ask About Selection", summary: "Reply by Friday.", answer: true, preparing: true)
         #expect(hud.showsSummary)
         #expect(hud.status == SpeakingHUDLayout.preparingWithEscape)
@@ -27,12 +27,12 @@ struct SpeakingHUDTests {
         #expect(hud.status == SpeakingHUDLayout.withEscape)
         hud.hide()
         #expect(!hud.showsSummary)
-        #expect(!SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults).showsSummary)
+        #expect(!SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults, displays: .unfocused).showsSummary)
     }
 
     @Test func collapsingAnAnswerLeavesTheRememberedChoiceAlone() {
         let defaults = scratchDefaults()
-        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults)
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults, displays: .unfocused)
         defer { hud.hide() }
         hud.show(name: "Ask", summary: "Reply by Friday.", answer: true, preparing: true)
         hud.toggleSummary()
@@ -42,12 +42,12 @@ struct SpeakingHUDTests {
         hud.hide()
         hud.show(name: "backend", summary: "Done.")
         #expect(!hud.showsSummary)
-        #expect(!SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults).showsSummary)
+        #expect(!SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults, displays: .unfocused).showsSummary)
     }
 
     @Test func aFinishedAnswerStaysWithItsTextAndEscapeClosesIt() {
         let escape = FakeChordRegistrar()
-        let hud = SpeakingHUDController(escape: escape, defaults: scratchDefaults())
+        let hud = SpeakingHUDController(escape: escape, defaults: scratchDefaults(), displays: .unfocused)
         defer { hud.hide() }
         var closed = 0
         var copied = 0
@@ -77,7 +77,7 @@ struct SpeakingHUDTests {
     }
 
     private func answerPanel(readingTime: Duration = .milliseconds(50), voiceOver: Bool = false) -> (SpeakingHUDController, () -> Int) {
-        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults())
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults(), displays: .unfocused)
         hud.readingTime = { _ in readingTime }
         hud.voiceOverRunning = { voiceOver }
         var closed = 0
@@ -135,7 +135,7 @@ struct SpeakingHUDTests {
 
     @Test func aNewAnswerAfterAFinishedOneClaimsEscapeAgain() {
         let escape = FakeChordRegistrar()
-        let hud = SpeakingHUDController(escape: escape, defaults: scratchDefaults())
+        let hud = SpeakingHUDController(escape: escape, defaults: scratchDefaults(), displays: .unfocused)
         defer { hud.hide() }
         hud.show(name: "Ask", summary: "First.", answer: true, preparing: true)
         hud.finished()
@@ -146,7 +146,7 @@ struct SpeakingHUDTests {
     }
 
     @Test func aPanelAlreadyShowingTakesTheNextStatus() {
-        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults())
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults(), displays: .unfocused)
         defer { hud.hide() }
         hud.show(name: "backend", summary: "Done.")
         hud.show(name: "Ask", summary: "Reply by Friday.", answer: true, preparing: true)
@@ -155,16 +155,16 @@ struct SpeakingHUDTests {
 
     @Test func showingTheSummaryIsRememberedAcrossLaunches() {
         let defaults = scratchDefaults()
-        let first = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults)
+        let first = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults, displays: .unfocused)
         first.toggleSummary()
         #expect(first.showsSummary)
-        #expect(SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults).showsSummary)
+        #expect(SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults, displays: .unfocused).showsSummary)
         first.toggleSummary()
-        #expect(!SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults).showsSummary)
+        #expect(!SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults, displays: .unfocused).showsSummary)
     }
 
     @Test func theNextSummaryReplacesTheTextAndKeepsTheChoice() {
-        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults())
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults(), displays: .unfocused)
         defer { hud.hide() }
         hud.show(name: "keyscribe blue", summary: "First.")
         hud.toggleSummary()
@@ -176,7 +176,7 @@ struct SpeakingHUDTests {
 
     @Test func showingOrHidingTheSummaryLeavesPlaybackAndEscapeAlone() {
         let escape = FakeChordRegistrar()
-        let hud = SpeakingHUDController(escape: escape, defaults: scratchDefaults())
+        let hud = SpeakingHUDController(escape: escape, defaults: scratchDefaults(), displays: .unfocused)
         defer { hud.hide() }
         var stops = 0
         hud.onStop = { stops += 1 }
@@ -193,7 +193,7 @@ struct SpeakingHUDTests {
     }
 
     @Test func thePanelKeepsOneWidthWhetherOrNotTheCaptionShows() throws {
-        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults())
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults(), displays: .unfocused)
         defer { hud.hide() }
         hud.show(name: "platform infrastructure migration review green", summary: "Done. The tests pass.")
         let compact = try #require(hud.panelFrame)
@@ -216,11 +216,11 @@ struct SpeakingHUDTests {
     @Test func whenEscapeCannotBeClaimedThePanelDoesNotOfferIt() {
         let escape = FakeChordRegistrar()
         escape.refuses = true
-        let hud = SpeakingHUDController(escape: escape, defaults: scratchDefaults())
+        let hud = SpeakingHUDController(escape: escape, defaults: scratchDefaults(), displays: .unfocused)
         defer { hud.hide() }
         hud.show(name: "keyscribe blue", summary: "Done.")
         #expect(hud.status == "Speaking")
-        let claimed = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults())
+        let claimed = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults(), displays: .unfocused)
         defer { claimed.hide() }
         claimed.show(name: "keyscribe blue", summary: "Done.")
         #expect(claimed.status == "Speaking \u{00B7} Esc stops playback")
@@ -231,7 +231,7 @@ struct SpeakingHUDTests {
         let screen = CGRect(x: 0, y: 0, width: 1200, height: 120)
         let defaults = scratchDefaults()
         HUDAnchorStore.save(anchor, defaults)
-        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults, visibleFrame: { _ in screen })
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults, displays: FakeDisplays.single(screen))
         defer { hud.hide() }
         hud.show(name: "keyscribe blue", summary: String(repeating: "A long sentence that keeps going. ", count: 12))
         let controls = try #require(hud.panelFrame)
@@ -269,7 +269,7 @@ struct SpeakingHUDTests {
 
     @Test func showingClaimsEscapeAndPressingItStops() {
         let escape = FakeChordRegistrar()
-        let hud = SpeakingHUDController(escape: escape, defaults: scratchDefaults())
+        let hud = SpeakingHUDController(escape: escape, defaults: scratchDefaults(), displays: .unfocused)
         defer { hud.hide() }
         var stops = 0
         hud.onStop = { stops += 1 }
@@ -282,7 +282,7 @@ struct SpeakingHUDTests {
 
     @Test func escapeIsLeftAloneWhileNothingIsSpeaking() {
         let escape = FakeChordRegistrar()
-        let hud = SpeakingHUDController(escape: escape, defaults: scratchDefaults())
+        let hud = SpeakingHUDController(escape: escape, defaults: scratchDefaults(), displays: .unfocused)
         defer { hud.hide() }
         #expect(escape.lastRegistrations.isEmpty)
         hud.show(name: "keyscribe blue", summary: "Done.")
@@ -295,7 +295,7 @@ struct SpeakingHUDTests {
         let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
         let defaults = scratchDefaults()
         HUDAnchorStore.save(.bottomCenter, defaults)
-        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults, visibleFrame: { _ in screen })
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults, displays: FakeDisplays.single(screen))
         defer { hud.hide() }
         var stops = 0
         var anchors: [HUDAnchor] = []
@@ -306,7 +306,7 @@ struct SpeakingHUDTests {
         let panel = try #require(hud.panel)
         try await Task.sleep(for: .milliseconds(50))
         panel.setFrameOrigin(NSPoint(x: 30, y: screen.maxY - panel.frame.height - 30))
-        try await Task.sleep(for: .seconds(HUDDragSnap.settle + 0.15))
+        for _ in 0..<200 where anchors.isEmpty { try await Task.sleep(for: .milliseconds(20)) }
         #expect(anchors == [.topLeft])
         #expect(HUDAnchorStore.load(defaults) == .topLeft)
         #expect(stops == 0)
@@ -316,8 +316,68 @@ struct SpeakingHUDTests {
         #expect(placed.maxY == screen.maxY - HUDAnchor.defaultMargin)
     }
 
+    @Test func eachReplyAppearsOnTheFocusedWindowsDisplayAtTheSharedPosition() throws {
+        let screens = FakeDisplays([1: CGRect(x: 0, y: 0, width: 800, height: 600), 2: CGRect(x: 900, y: 0, width: 800, height: 900)])
+        let defaults = scratchDefaults()
+        HUDAnchorStore.save(.bottomCenter, defaults)
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults, displays: screens.displays)
+        defer { hud.hide() }
+
+        screens.focused = 1
+        hud.show(name: "keyscribe blue", summary: "Done.")
+        let first = try #require(hud.panelFrame)
+        #expect(screens.frames[1]!.contains(first))
+        #expect(first.minY == screens.frames[1]!.minY + HUDAnchor.defaultMargin)
+
+        screens.focused = 2
+        hud.speaking()
+        hud.toggleSummary()
+        hud.finished()
+        #expect(screens.frames[1]!.contains(try #require(hud.panelFrame)))
+        hud.hide()
+
+        hud.show(name: "Ask", summary: "Reply by Friday.", answer: true, preparing: true)
+        let second = try #require(hud.panelFrame)
+        #expect(screens.frames[2]!.contains(second))
+        #expect(second.minY == screens.frames[2]!.minY + HUDAnchor.defaultMargin)
+    }
+
+    @Test func aReplyFollowsItsDisplayWhenItChangesAndNeverReturnsToOneThatWentAway() throws {
+        let screens = FakeDisplays([1: CGRect(x: 0, y: 0, width: 800, height: 600), 2: CGRect(x: 900, y: 0, width: 800, height: 600)])
+        let defaults = scratchDefaults()
+        HUDAnchorStore.save(.bottomCenter, defaults)
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: defaults, displays: screens.displays)
+        defer { hud.hide() }
+
+        screens.focused = 2
+        hud.show(name: "keyscribe blue", summary: "Done.")
+        screens.frames[2] = CGRect(x: 900, y: 200, width: 1000, height: 700)
+        hud.screensChanged()
+        let moved = try #require(hud.panelFrame)
+        #expect(screens.frames[2]!.contains(moved))
+        #expect(moved.minY == screens.frames[2]!.minY + HUDAnchor.defaultMargin)
+        hud.hide()
+
+        screens.frames[2] = nil
+        screens.focused = nil
+        hud.show(name: "keyscribe blue", summary: "Done again.")
+        #expect(screens.frames[1]!.contains(try #require(hud.panelFrame)))
+    }
+
+    @Test func theCrampedPreviewShortensWhicheverDisplayThePanelUses() throws {
+        let screens = FakeDisplays([1: CGRect(x: 0, y: 0, width: 1200, height: 900), 2: CGRect(x: 1300, y: 0, width: 1200, height: 900)])
+        screens.focused = 2
+        let hud = SpeakingHUDController(
+            escape: FakeChordRegistrar(), defaults: scratchDefaults(), displays: screens.displays.withVisibleHeight(120))
+        defer { hud.hide() }
+        hud.show(name: "keyscribe blue", summary: String(repeating: "A long sentence that keeps going. ", count: 12))
+        hud.toggleSummary()
+        let frame = try #require(hud.panelFrame)
+        #expect(CGRect(x: 1300, y: 0, width: 1200, height: 120).contains(frame))
+    }
+
     @Test func itShowsTheExactConversationNameAndNeverTakesKeyFocus() {
-        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults())
+        let hud = SpeakingHUDController(escape: FakeChordRegistrar(), defaults: scratchDefaults(), displays: .unfocused)
         defer { hud.hide() }
         hud.show(name: "keyscribe blue", summary: "Done.")
         #expect(hud.shownName == "keyscribe blue")

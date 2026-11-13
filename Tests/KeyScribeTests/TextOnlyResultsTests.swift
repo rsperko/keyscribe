@@ -392,7 +392,7 @@ struct TextOnlyResultsTests {
         -> (SpeakingHUDController, FakeChordRegistrar, () -> Int)
     {
         let escape = FakeChordRegistrar()
-        let hud = SpeakingHUDController(escape: escape, defaults: UserDefaults(suiteName: "text-only-\(UUID().uuidString)")!)
+        let hud = SpeakingHUDController(escape: escape, defaults: UserDefaults(suiteName: "text-only-\(UUID().uuidString)")!, displays: .unfocused)
         hud.readingTime = { _ in readingTime }
         hud.voiceOverRunning = { voiceOver }
         var closed = 0
@@ -441,7 +441,7 @@ struct TextOnlyResultsTests {
 
     @Test func aSpokenAnswerStillWaitsForPlaybackBeforeItsCountdown() async {
         let escape = FakeChordRegistrar()
-        let hud = SpeakingHUDController(escape: escape, defaults: UserDefaults(suiteName: "text-only-\(UUID().uuidString)")!)
+        let hud = SpeakingHUDController(escape: escape, defaults: UserDefaults(suiteName: "text-only-\(UUID().uuidString)")!, displays: .unfocused)
         defer { hud.hide() }
         hud.readingTime = { _ in .milliseconds(30) }
         hud.voiceOverRunning = { false }

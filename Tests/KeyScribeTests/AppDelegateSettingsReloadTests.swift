@@ -34,6 +34,54 @@ struct AppDelegateSettingsReloadTests {
         #expect(onDisk.history.enabled == laterInAppToggle.history.enabled)
     }
 
+    @Test func aReloadKeepsAChangeThatWasNotSavedUntilTheFileItselfChangesAndThenSaysSo() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-settings-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let saved = Settings.defaults
+        try SettingsStore.write(saved, to: dir)
+        var running = saved
+        running.history.enabled.toggle()
+
+        let quiet = AppDelegate.settingsFileState(running: running, saved: saved, supportDir: dir)
+        #expect(quiet.state == .unchanged)
+        #expect(!quiet.replacesUnsaved)
+        #expect(quiet.retriesSave)
+
+        var external = saved
+        external.stt.engine = "whisper"
+        try SettingsStore.write(external, to: dir)
+
+        let edited = AppDelegate.settingsFileState(running: running, saved: saved, supportDir: dir)
+        #expect(edited.state == .updated(external))
+        #expect(edited.replacesUnsaved)
+        #expect(!edited.retriesSave)
+        try SettingsStore.write(saved, to: dir)
+        let clean = AppDelegate.settingsFileState(running: saved, saved: saved, supportDir: dir)
+        #expect(!clean.replacesUnsaved)
+        #expect(!clean.retriesSave)
+    }
+
+    @Test func aMicrophoneNameTheAppRefreshedIsNotCountedAsAChangeTheUserMade() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-settings-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let saved = Settings.defaults
+        var running = saved
+        running.audio.inputDeviceName = "Studio Mic (renamed)"
+        var external = saved
+        external.stt.engine = "whisper"
+        try SettingsStore.write(external, to: dir)
+
+        let reload = AppDelegate.settingsFileState(running: running, saved: saved, supportDir: dir)
+        #expect(reload.state == .updated(external))
+        #expect(!reload.replacesUnsaved)
+    }
+
     @Test func unchangedExternalSettingsReportUnchanged() throws {
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("keyscribe-settings-\(UUID().uuidString)", isDirectory: true)

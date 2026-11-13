@@ -75,8 +75,7 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
         }
     }
 
-    // While settings.toml can't be replaced, in-app changes to it apply but are not saved, and fixing the file
-    // reloads it over them.
+    // While settings.toml can't be replaced, in-app changes to it apply but are not saved until it is fixed.
     public var recovery: String {
         let state = switch kind {
         case .unreadable(.previousVersion): "The previous version is still in use."
@@ -86,10 +85,10 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
         case .inactiveRules: "The rest of the file works normally. Fix or remove the rule to clear this."
         }
         if kind == .unusedKeys, relativePath == SettingsStore.fileName {
-            return state + " App-wide settings you change meanwhile are temporary."
+            return state + " App-wide settings you change meanwhile aren’t saved yet. They’re saved once that line is fixed or removed, unless the file then sets something else, which replaces them."
         }
         guard isError, relativePath == SettingsStore.fileName else { return state }
-        return state + " App-wide settings you change meanwhile are temporary: fixing the file reloads it and replaces them. Modes and vocabulary still save normally."
+        return state + " App-wide settings you change meanwhile aren’t saved yet. They’re saved once the file is fixed, unless the fixed file sets something else, which replaces them. Modes and vocabulary still save normally."
     }
 
     public var oneLine: String {

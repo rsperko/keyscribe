@@ -38,15 +38,17 @@ final class SpeakingHUDController {
     var onAnchorChange: ((HUDAnchor) -> Void)?
     var appearance: HUDAppearance = .system
 
-    private let visibleFrame: (NSPanel) -> CGRect?
+    private let displays: HUDDisplays
+    private var pinned: CGDirectDisplayID?
+    private var screenObserver: NSObjectProtocol?
 
     init(
         escape: any ChordRegistering = CarbonHotKeys(), defaults: UserDefaults = .standard,
-        visibleFrame: @escaping (NSPanel) -> CGRect? = { ($0.screen ?? NSScreen.main)?.visibleFrame }
+        displays: HUDDisplays = .live
     ) {
         self.escape = EscapeClaim(registrar: escape)
         self.defaults = defaults
-        self.visibleFrame = visibleFrame
+        self.displays = displays
         model.showsSummary = defaults.bool(forKey: Self.showsSummaryKey)
     }
 
@@ -79,6 +81,7 @@ final class SpeakingHUDController {
         model.finished = textOnly
         model.textOnly = textOnly
         let panel = panel ?? makePanel()
+        if wasHidden { pinned = displays.focused() }
         panel.appearance = appearance.nsAppearance()
         place(panel)
         panel.alphaValue = 1
@@ -179,11 +182,25 @@ final class SpeakingHUDController {
         panel.allowsKey = { false }
         self.panel = panel
         dragSnap = HUDDragSnap(panel: panel) { [weak self] _ in self?.snapToNearestAnchor() }
+        if displays.followsScreenChanges {
+            screenObserver = NotificationCenter.default.addObserver(
+                forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.screensChanged() }
+            }
+        }
         return panel
     }
 
+    func screensChanged() {
+        guard shownName != nil, let panel else { return }
+        place(panel)
+    }
+
     private func snapToNearestAnchor() {
-        guard let panel, let screen = visibleFrame(panel) else { return }
+        guard let panel else { return }
+        pinned = displays.holding(panel)
+        guard let screen = displays.frame(pinned: pinned, panel: panel) else { return }
         let rowHeight = NSHostingView(rootView: SpeakingRow(model: model, onStop: {}, onToggleSummary: {})).fittingSize.height
         let frame = panel.frame
         let rowCenterY = model.showsCaption && model.captionAbove ? frame.minY + rowHeight / 2 : frame.maxY - rowHeight / 2
@@ -195,7 +212,7 @@ final class SpeakingHUDController {
     }
 
     private func place(_ panel: NSPanel) {
-        guard let screen = visibleFrame(panel) else { return }
+        guard let screen = displays.frame(pinned: pinned, panel: panel) else { return }
         let anchor = HUDAnchorStore.load(defaults)
         let rowSize = NSHostingView(rootView: SpeakingRow(model: model, onStop: {}, onToggleSummary: {})).fittingSize
         let captionHeight = model.showsCaption

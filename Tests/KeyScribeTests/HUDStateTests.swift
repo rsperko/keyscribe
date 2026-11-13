@@ -472,6 +472,82 @@ struct HUDStateTests {
         #expect(hud.panelCanBecomeKey == true)
     }
 
+    @Test func eachTakeAppearsOnTheFocusedWindowsDisplayAndStaysThereUntilItEnds() throws {
+        let screens = FakeDisplays([1: CGRect(x: 0, y: 0, width: 800, height: 600), 2: CGRect(x: 900, y: 0, width: 800, height: 900)])
+        let defaults = UserDefaults(suiteName: "hud-\(UUID().uuidString)")!
+        HUDAnchorStore.save(.bottomCenter, defaults)
+        let hud = HUDController(defaults: defaults, escape: FakeChordRegistrar(), displays: screens.displays)
+        defer { hud.render(.hidden) }
+
+        screens.focused = 1
+        hud.render(.recording(mode: "Polish", level: 0, latchedTrigger: nil))
+        #expect(screens.frames[1]!.contains(try #require(hud.panelFrame)))
+
+        screens.focused = 2
+        hud.render(.recording(mode: "Polish", level: 0.5, latchedTrigger: nil))
+        hud.render(.transcribing(mode: "Polish"))
+        hud.render(.complete(outcome: .inserted, mode: "Polish"))
+        #expect(screens.frames[1]!.contains(try #require(hud.panelFrame)))
+
+        hud.render(.recording(mode: "Polish", level: 0, latchedTrigger: nil))
+        #expect(screens.frames[2]!.contains(try #require(hud.panelFrame)))
+
+        screens.focused = 1
+        hud.render(.transcribing(mode: "Polish"))
+        hud.render(.error(message: "Nothing was heard.", action: nil))
+        #expect(screens.frames[2]!.contains(try #require(hud.panelFrame)))
+    }
+
+    @Test func aTakeWithAListIsMeasuredForTheDisplayItAppearsOn() throws {
+        let conversations = (1...20).map {
+            AgentConversation(id: "c\($0)", agent: "claude", pid: $0, cwd: "/src/p\($0)", handle: "p\($0)", state: .idle, connectorLive: true)
+        }
+        let roster = AgentRoster(frozen: conversations, live: conversations, recipient: nil)
+        let screens = FakeDisplays([1: CGRect(x: 0, y: 0, width: 800, height: 400), 2: CGRect(x: 900, y: 0, width: 800, height: 1400)])
+        let hud = HUDController(
+            defaults: UserDefaults(suiteName: "hud-\(UUID().uuidString)")!, escape: FakeChordRegistrar(), displays: screens.displays)
+        defer { hud.render(.hidden) }
+
+        screens.focused = 1
+        hud.render(.recording(mode: "Coding agent", level: 0, latchedTrigger: nil, agents: roster))
+        let short = try #require(hud.panelFrame)
+        hud.render(.transcribing(mode: "Coding agent"))
+        screens.focused = 2
+        hud.render(.recording(mode: "Coding agent", level: 0, latchedTrigger: nil, agents: roster))
+        let tall = try #require(hud.panelFrame)
+        #expect(screens.frames[2]!.contains(tall))
+        #expect(tall.height > short.height)
+
+        let fresh = HUDController(
+            defaults: UserDefaults(suiteName: "hud-\(UUID().uuidString)")!, escape: FakeChordRegistrar(), displays: screens.displays)
+        defer { fresh.render(.hidden) }
+        fresh.render(.recording(mode: "Coding agent", level: 0, latchedTrigger: nil, agents: roster))
+        #expect(try #require(fresh.panelFrame).height == tall.height)
+    }
+
+    @Test func aDisplayThatChangesWhileTheHUDIsUpMovesItAndOneThatGoesAwayIsNotUsedAgain() throws {
+        let screens = FakeDisplays([1: CGRect(x: 0, y: 0, width: 800, height: 600), 2: CGRect(x: 900, y: 0, width: 800, height: 600)])
+        let defaults = UserDefaults(suiteName: "hud-\(UUID().uuidString)")!
+        HUDAnchorStore.save(.bottomCenter, defaults)
+        let hud = HUDController(defaults: defaults, escape: FakeChordRegistrar(), displays: screens.displays)
+        defer { hud.render(.hidden) }
+
+        screens.focused = 2
+        hud.render(.recording(mode: "Polish", level: 0, latchedTrigger: nil))
+        screens.frames[2] = CGRect(x: 900, y: 200, width: 1000, height: 700)
+        hud.screensChanged()
+        let moved = try #require(hud.panelFrame)
+        #expect(screens.frames[2]!.contains(moved))
+        #expect(moved.minY == screens.frames[2]!.minY + HUDAnchor.defaultMargin)
+
+        screens.frames[2] = nil
+        screens.focused = nil
+        hud.render(.complete(outcome: .inserted, mode: "Polish"))
+        hud.render(.hidden)
+        hud.render(.recording(mode: "Polish", level: 0, latchedTrigger: nil))
+        #expect(screens.frames[1]!.contains(try #require(hud.panelFrame)))
+    }
+
     @Test func aDoubleTapTakeLeavesKeyFocusWithTheAppAndClaimsEscapeInstead() {
         let escape = FakeChordRegistrar()
         let hud = HUDController(defaults: UserDefaults(suiteName: "hud-\(UUID().uuidString)")!, escape: escape)

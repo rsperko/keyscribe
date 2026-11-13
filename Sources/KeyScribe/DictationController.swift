@@ -590,6 +590,24 @@ final class DictationController {
         scheduleHide(after: 8)
     }
 
+    private var settingsReplacedPending = false
+
+    private func announceSettingsReplacedOnceHidden() {
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self, self.settingsReplacedPending, !self.isBusy,
+                  (self.hud.lastPresented ?? .hidden) == .hidden else { return }
+            self.announceSettingsReplaced()
+        }
+    }
+
+    func announceSettingsReplaced() {
+        guard !isBusy else { return settingsReplacedPending = true }
+        settingsReplacedPending = false
+        hud.present(.advisory(message: HUDState.settingsReplaced))
+        scheduleHide(after: 8)
+    }
+
     var pressConfirmationBackstop: Duration = .seconds(1)
     lazy var help = HelpPresenter(escape: EscapeClaim()) { [weak self] in self?.hud.present(.hidden) }
     var runningAppNames: () -> [String] = {
@@ -915,6 +933,7 @@ final class DictationController {
         activeStartTrigger = nil
         scheduleCaptureRefresh()
         onBecameIdle?()
+        if settingsReplacedPending { announceSettingsReplacedOnceHidden() }
         // The dictation is fully terminal (reload + transcribe + insert are done), so any deferred idle
         // work — e.g. a Settings model-file deletion parked while this dictation ran — is now safe.
         drainIdleWork()
@@ -2570,6 +2589,7 @@ final class DictationController {
         hideTask = Task { @MainActor in
             try? await Task.sleep(for: .seconds(seconds))
             guard !Task.isCancelled, !isBusy, voiceCommands.pendingChoice == nil else { return }
+            if settingsReplacedPending { return announceSettingsReplaced() }
             hud.present(.hidden)
         }
     }

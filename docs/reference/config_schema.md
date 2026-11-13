@@ -1616,7 +1616,9 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
   from the app to a file holding one is refused with a notice naming the file and key, leaving the file
   and the unsaved edit as they were, and an automatic rewrite (a starter-mode update or rename) skips
   that file. For `settings.toml`, app-wide changes still apply but are not saved until the key is fixed
-  or removed.
+  or removed. A configuration reload keeps those unsaved changes while what `settings.toml` sets is unchanged,
+  and saves them once the key is gone; when the file sets something else, its contents replace them and the
+  HUD says so, after the result of a dictation in progress.
 - **Unknown keys are reported, not fatal.** A key this schema does not read — usually a typo such as
   `trigger_key` for `trigger_keys` — loads as if absent and is listed in Settings → Maintenance (and in the
   mode's editor for a mode file), with the nearest real key when one is close. Retired keys noted in this

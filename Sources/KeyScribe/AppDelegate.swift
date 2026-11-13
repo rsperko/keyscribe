@@ -8,6 +8,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     public override init() { super.init() }
 
     private var settings = Settings.defaults
+    private var savedSettings = Settings.defaults
     private var settingsIssue: ConfigFileIssue?
     private var provider: SpeechEngineProvider!
     private var config: ConfigCache!
@@ -144,11 +145,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if let preview = HUDPreview.speaking(from: CommandLine.arguments) {
             let hud = SpeakingHUDController(
                 defaults: UserDefaults(suiteName: "speaking-preview-\(UUID().uuidString)") ?? .standard,
-                visibleFrame: { panel in
-                    guard var frame = (panel.screen ?? NSScreen.main)?.visibleFrame else { return nil }
-                    if let height = preview.screenHeight { frame.size.height = height }
-                    return frame
-                })
+                displays: HUDDisplays.live.withVisibleHeight(preview.screenHeight.map { CGFloat($0) }))
             hud.appearance = HUDPreview.appearance(from: CommandLine.arguments) ?? .system
             hud.show(name: preview.name, summary: preview.summary)
             if preview.expanded { hud.toggleSummary() }
@@ -531,6 +528,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func loadSettings() {
         do {
             settings = try SettingsStore.loadOrCreate(supportDir: KeyScribePaths.supportDir)
+            savedSettings = settings
             settingsIssue = nil
         } catch {
             settings = Settings.defaults
@@ -700,13 +698,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         config.invalidate()
         // Absorb an external settings.toml edit (the Advanced pane promises edits are detected). Adopting
         // it into `settings` also means a later in-app toggle merges against the current on-disk value
-        switch Self.settingsFileState(current: settings, supportDir: KeyScribePaths.supportDir) {
+        let reload = Self.settingsFileState(running: settings, saved: savedSettings, supportDir: KeyScribePaths.supportDir)
+        switch reload.state {
         case .unchanged:
             settingsIssue = nil
+            if reload.retriesSave { persistSettings(settings) }
             rebuildHotkeyMonitor()
         case .updated(let fresh):
             settingsIssue = nil
+            savedSettings = fresh
             applySettingsEffects(fresh)   // rebuilds the hotkey monitor for us
+            refreshPreferredDeviceName()
         case .invalid(let error):
             let kept: ConfigFileIssue.Recovery = settingsIssue.map { $0.kind == .unreadable(.defaults) } == true
                 ? .defaults : .previousVersion
@@ -714,7 +716,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             rebuildHotkeyMonitor()
         }
         refreshStatus()
-        controller.announceConfigProblems(configProblemAnnouncement.next(current: configProblems))
+        let problems = configProblemAnnouncement.next(current: configProblems)
+        if reload.replacesUnsaved {
+            Log.config.error("settings changes that were not saved were replaced by an edit to \(SettingsStore.fileName, privacy: .public)")
+            controller.announceSettingsReplaced()
+        } else {
+            controller.announceConfigProblems(problems)
+        }
         controller.voiceCommandConfigurationChanged()
         configRepository.notifyExternalChange()
         // Rebuild the frozen plan off this path so the first press after an edit doesn't pay the
@@ -735,6 +743,19 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         case unchanged
         case updated(Settings)
         case invalid(ConfigError)
+    }
+
+    static func settingsFileState(
+        running: Settings, saved: Settings, supportDir: URL
+    ) -> (state: SettingsFileState, replacesUnsaved: Bool, retriesSave: Bool) {
+        let state = settingsFileState(current: saved, supportDir: supportDir)
+        var madeByUser = running
+        madeByUser.audio.inputDeviceName = saved.audio.inputDeviceName
+        switch state {
+        case .unchanged: return (state, false, running != saved)
+        case .updated: return (state, madeByUser != saved, false)
+        case .invalid: return (state, false, false)
+        }
     }
 
     static func settingsFileState(current: Settings, supportDir: URL) -> SettingsFileState {
@@ -780,6 +801,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         do {
             try SettingsStore.write(updated, to: KeyScribePaths.supportDir)
+            savedSettings = updated
             recordSettingsSelfWrite()
         }
         catch { Log.config.error("settings write failed: \(error.localizedDescription, privacy: .public)") }
