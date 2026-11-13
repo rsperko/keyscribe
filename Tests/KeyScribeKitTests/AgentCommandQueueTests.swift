@@ -324,11 +324,20 @@ struct AgentBridgeCodecTests {
             .submit(id: "r1", expectedSession: "s1", text: "/usr/local/bin is missing", expiresAt: Date(timeIntervalSince1970: 1_793_400_008.5)),
             .status(id: "r5", expectedSession: "s1", text: "🎙 keyscribe"),
             .focus(id: "r6", expectedSession: "s1", expiresAt: Date(timeIntervalSince1970: 1_793_400_000.25)),
+            .focus(id: "r7", expectedSession: "s1", expiresAt: Date(timeIntervalSince1970: 1_793_400_000.25), definition: "cmux"),
             .check(id: "check-r1", expectedSession: "s1", request: "r1", expiresAt: Date(timeIntervalSince1970: 1_793_400_010.5)),
         ]
         let data = try AgentBridgeCodec.encode(commands)
         #expect(try AgentBridgeCodec.decodeCommands(data) == commands)
         #expect(commands.last?.expiresAt == Date(timeIntervalSince1970: 1_793_400_010.5))
+    }
+
+    @Test func aFocusNamesItsDefinitionOnTheWireOnlyWhenItHasOne() throws {
+        let at = Date(timeIntervalSince1970: 1_793_400_000)
+        let named = String(decoding: try AgentBridgeCodec.encode([.focus(id: "r1", expectedSession: "s1", expiresAt: at, definition: "cmux")]), as: UTF8.self)
+        let plain = String(decoding: try AgentBridgeCodec.encode([.focus(id: "r1", expectedSession: "s1", expiresAt: at)]), as: UTF8.self)
+        #expect(named.contains(#""definition":"cmux""#))
+        #expect(!plain.contains("definition"))
     }
 
     @Test func aReceiptCarriesWhenTheAgentHadTheMessageAndWhenItEnteredTheConversation() throws {

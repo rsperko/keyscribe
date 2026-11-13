@@ -183,8 +183,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
             describeTerminal: { TerminalDescription.describe(pid: $0, surfaces: surfaces) },
             agentsDir: agentsDir, setups: ConnectorSetupRegistry(directory: agentsDir),
             connectors: [
-                ClaudeConnector(agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug),
-                PiConnector(agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug, environmentKeys: surfaces.environmentKeys),
+                ClaudeConnector(agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug, surfaces: ConnectorSurfaces(surfaces)),
+                PiConnector(agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug, surfaces: ConnectorSurfaces(surfaces)),
             ])
         modes.codingAgents = codingAgents
         codingAgents.load(spokenResult: settings.codingAgents.spokenResult)

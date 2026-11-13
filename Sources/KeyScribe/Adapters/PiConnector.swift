@@ -56,8 +56,7 @@ struct PiConnectorInstaller {
     let tokenPath: String
     let readyPath: String
     let script: String
-    let environmentKeys: Set<String>
-
+    let surfaces: ConnectorSurfaces
 
     static func defaultSetupFolder(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
         home.appendingPathComponent(".pi/agent", isDirectory: true)
@@ -78,7 +77,7 @@ struct PiConnectorInstaller {
     private func config(installation: String) -> String {
         PiConnectorFiles.configJSON(
             socketPath: socketPath, tokenPath: tokenPath, readyPath: readyPath, installation: installation, plugin: pluginName,
-            version: PiConnectorFiles.version(for: script, environmentKeys: environmentKeys), environmentKeys: environmentKeys)
+            version: PiConnectorFiles.version(for: script, surfaces: surfaces), surfaces: surfaces)
     }
 
     func install(installation: String) throws {
@@ -108,7 +107,7 @@ struct PiConnectorInstaller {
               let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return .absent }
         let version = config["version"] as? String ?? ""
-        guard let installation, version == PiConnectorFiles.version(for: script, environmentKeys: environmentKeys), config["installation"] as? String == installation,
+        guard let installation, version == PiConnectorFiles.version(for: script, surfaces: surfaces), config["installation"] as? String == installation,
               String(decoding: data, as: UTF8.self) == self.config(installation: installation),
               (try? String(contentsOf: scriptURL, encoding: .utf8)) == PiConnectorFiles.installedScript(script, installation: installation, configPath: configURL.path)
         else { return .other(version: version) }
@@ -127,8 +126,8 @@ struct PiConnectorInstaller {
 enum PiConnectorFiles {
     static let indexTS: String? = ConnectorResources.text(named: "index", extension: "ts")
 
-    static func version(for script: String, environmentKeys: Set<String>) -> String {
-        ConnectorResources.version(for: script + "\n" + environmentKeys.sorted().joined(separator: "\n"))
+    static func version(for script: String, surfaces: ConnectorSurfaces) -> String {
+        ConnectorResources.version(for: script + "\n" + surfaces.fingerprint)
     }
 
     static func installedScript(_ script: String, installation: String, configPath: String) -> String {
@@ -143,13 +142,12 @@ enum PiConnectorFiles {
 
     static func configJSON(
         socketPath: String, tokenPath: String, readyPath: String, installation: String, plugin: String, version: String,
-        environmentKeys: Set<String>
+        surfaces: ConnectorSurfaces
     ) -> String {
         ConnectorResources.json([
             "protocol": AgentBridgeCodec.protocolVersion, "socketPath": socketPath, "tokenPath": tokenPath, "readyPath": readyPath,
             "installation": installation, "plugin": plugin, "version": version, "appName": Branding.appName,
-            "environmentKeys": environmentKeys.sorted(),
-        ])
+        ].merging(surfaces.configFields) { own, _ in own })
     }
 }
 
@@ -163,15 +161,15 @@ final class PiConnector: AgentConnector {
     private let pluginName: String
     private let script: String?
     private let home: URL
-    private let environmentKeys: Set<String>
+    private let surfaces: ConnectorSurfaces
 
     init(
         locate: @escaping () -> String? = { PiCLI.locate() },
         run: @escaping @Sendable ([String]) -> (Int32, String) = { PiCLI.run($0) },
-        agentsDir: URL, pluginName: String, environmentKeys: Set<String>, script: String? = PiConnectorFiles.indexTS,
+        agentsDir: URL, pluginName: String, surfaces: ConnectorSurfaces, script: String? = PiConnectorFiles.indexTS,
         home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
-        self.environmentKeys = environmentKeys
+        self.surfaces = surfaces
         self.locate = locate
         self.run = run
         self.agentsDir = agentsDir
@@ -183,7 +181,7 @@ final class PiConnector: AgentConnector {
 
     private var knownVersion: (tool: String, modified: Date?, version: [Int])?
     var isBundled: Bool { script != nil }
-    var bundledVersion: String? { script.map { PiConnectorFiles.version(for: $0, environmentKeys: environmentKeys) } }
+    var bundledVersion: String? { script.map { PiConnectorFiles.version(for: $0, surfaces: surfaces) } }
 
     func hasFiles(in target: ConnectorTarget) -> Bool {
         FileManager.default.fileExists(atPath: PiConnectorInstaller.pluginDir(in: target.folder, pluginName: pluginName).path)
@@ -243,7 +241,7 @@ final class PiConnector: AgentConnector {
             socketPath: agentsDir.appendingPathComponent("bridge.sock").path,
             tokenPath: agentsDir.appendingPathComponent("token").path,
             readyPath: agentsDir.appendingPathComponent("ready.json").path,
-            script: script, environmentKeys: environmentKeys)
+            script: script, surfaces: surfaces)
     }
 
     private func perform(_ target: ConnectorTarget, _ action: @escaping @Sendable (PiConnectorInstaller) throws -> Void) async throws {

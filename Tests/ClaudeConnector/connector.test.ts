@@ -2,6 +2,16 @@ import { expect, mock, test } from 'claude-code/testing'
 
 type Request = { path: string, body: any, auth: string, answer: (status: number, text?: string) => void, refuse: () => void, settled: boolean }
 
+const surfaces = {
+  environmentKeys: ['CMUX_SURFACE_ID', 'MUX_PANE', 'ZELLIJ_PANE_ID'],
+  focusDefinitions: [
+    { id: 'cmux', requiresEnv: ['CMUX_SURFACE_ID'], argv: ['/usr/bin/env', 'cmux', 'focus-panel', '--panel', '{CMUX_SURFACE_ID}'] },
+    { id: 'mux', requiresEnv: ['MUX_PANE'], argv: ['/opt/mux/bin/mux', 'focus', '--pane={MUX_PANE}', '{MUX_PANE}'] },
+    { id: 'stray', requiresEnv: ['MUX_PANE'], argv: ['/opt/mux/bin/mux', '{TMUX}'] },
+    { id: 'relative', requiresEnv: ['MUX_PANE'], argv: ['mux', '{MUX_PANE}'] },
+  ],
+}
+
 function harness(on: any) {
   const clockHold = { on: false, held: [] as Array<() => void> }
   const clock = mock.clock((name: string, handler: any) => on(name, name !== 'clock.now' ? handler : async ($: any, e: any) => {
@@ -19,7 +29,7 @@ function harness(on: any) {
   const reads: Array<() => void> = []
   const box = { text: '', held: false }
   const files: Record<string, string | undefined> = {
-    '/plugin/keyscribe.json': JSON.stringify({ protocol: 2, socketPath: '/tmp/ks.sock', tokenPath: '/tmp/ks-token', readyPath: '/tmp/ks-ready.json', installation: 'I1' }),
+    '/plugin/keyscribe.json': JSON.stringify({ protocol: 2, socketPath: '/tmp/ks.sock', tokenPath: '/tmp/ks-token', readyPath: '/tmp/ks-ready.json', installation: 'I1', ...surfaces }),
     '/tmp/ks-token': 'secret\n',
     '/tmp/ks-ready.json': JSON.stringify({ launch: 'L1', protocol: 2 }),
   }
@@ -37,6 +47,12 @@ function harness(on: any) {
     return new Promise((resolve) => { releases.push(() => resolve(answer)) })
   })
   on('session.id', () => ({ value: live.session }))
+  const runs: any[] = []
+  const run = { exitCode: 0 }
+  on('process.run', ($: any, e: any) => {
+    runs.push(e)
+    return { value: { exitCode: run.exitCode, stdout: '', stderr: '' } }
+  })
   on('env.get', ($: any, e: any) => ({ value: env[e.name] }))
   on('store.get', ($: any, e: any) => ({ value: store.get(e.key) }))
   on('store.set', ($: any, e: any) => {
@@ -137,7 +153,7 @@ function harness(on: any) {
   const ready = (launch?: string, protocol = 2) => { files['/tmp/ks-ready.json'] = launch === undefined ? undefined : JSON.stringify({ launch, protocol }) }
 
   const releaseSubmits = () => { for (const release of heldSubmits.splice(0)) release() }
-  return { clockHold, fills, fillRefusal, logs, env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
+  return { runs, run, clockHold, fills, fillRefusal, logs, env, store, files, fileReads, holdReads, releases, readyChecks, ready, clock, requests, submits, statuses, live, downstream, reads, box, settle, open, events, ops, connect, deliver, answerEvents, typed, submitHold, releaseSubmits }
 }
 
 test('agent hooks return while the bridge never answers, through one sender', async ($, on) => {
@@ -1016,7 +1032,7 @@ test('a connector whose installation was replaced never reconnects, even for a n
   const h = harness(on)
   await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await h.connect($)
-  h.files['/plugin/keyscribe.json'] = JSON.stringify({ protocol: 2, socketPath: '/tmp/ks.sock', tokenPath: '/tmp/ks-token', readyPath: '/tmp/ks-ready.json', installation: 'I2' })
+  h.files['/plugin/keyscribe.json'] = JSON.stringify({ protocol: 2, socketPath: '/tmp/ks.sock', tokenPath: '/tmp/ks-token', readyPath: '/tmp/ks-ready.json', installation: 'I2', ...surfaces })
   h.open('/poll')[0].answer(409)
   await h.settle()
   h.open('/event')[0].answer(403)
@@ -1063,7 +1079,7 @@ test('a session the module saw start says hello as fresh and idle', async ($, on
   await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await h.settle()
-  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'label', 'readiness', 'notify', 'fill', 'check'] })
+  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check'] })
 })
 
 test('hello reports the zellij pane its session runs in, which only its own process can read', async ($, on) => {
@@ -1074,6 +1090,16 @@ test('hello reports the zellij pane its session runs in, which only its own proc
   await h.settle()
   expect(h.events()[0]).toMatchObject({ op: 'hello', environment: { ZELLIJ_PANE_ID: '3' } })
   expect(Object.keys(h.events()[0].environment)).toEqual(['ZELLIJ_PANE_ID'])
+})
+
+test('hello reports a variable a newly added route names, and nothing the config does not list', async ($, on) => {
+  const h = harness(on)
+  h.env.MUX_PANE = '7'
+  h.env.TMUX = '/tmp/tmux-501/default,1,0'
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await h.settle()
+  expect(h.events()[0]).toMatchObject({ op: 'hello', environment: { MUX_PANE: '7' } })
+  expect(Object.keys(h.events()[0].environment)).toEqual(['MUX_PANE'])
 })
 
 test('hello outside zellij reports no terminal environment', async ($, on) => {
@@ -1295,4 +1321,50 @@ test('a read-aloud request that timed out behind other events is never delivered
   expect(String((await call).result)).toMatch(/didn’t confirm the request/)
   await h.answerEvents()
   expect(h.ops()).not.toContain('notify')
+})
+
+test('a focus runs only the named definition, outside its place it is refused, and it runs before expiry', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  const focus = (id: string, expiresAt: number, definition?: string) => h.deliver([{ op: 'focus', id, expectedSession: 's1', expiresAt, definition }])
+  const reasons = (id: string) => h.events().filter((b: any) => b.request === id).map((b: any) => b.reason).filter(Boolean)
+  await focus('r1', Number.MAX_SAFE_INTEGER, 'cmux')
+  await h.answerEvents()
+  expect(reasons('r1')).toEqual(['notInPlace'])
+  h.env.CMUX_SURFACE_ID = 'surface-9'
+  await h.clock.advance(1000)
+  await focus('r2', 1000, 'cmux')
+  await h.answerEvents()
+  expect(reasons('r2')).toEqual(['expired'])
+  await focus('r3', Number.MAX_SAFE_INTEGER, 'cmux')
+  await h.answerEvents()
+  expect(h.runs.map((r: any) => r.argv ?? r)).toEqual([['/usr/bin/env', 'cmux', 'focus-panel', '--panel', 'surface-9']])
+  expect(h.events().filter((b: any) => b.request === 'r3').map((b: any) => b.op)).toContain('focused')
+  h.run.exitCode = 1
+  await focus('r4', Number.MAX_SAFE_INTEGER, 'cmux')
+  await h.answerEvents()
+  expect(reasons('r4')).toEqual(['focusFailed'])
+})
+
+test('a focus definition is substituted whole, never by a shell, and never from a value that reads as an option', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  const focus = (id: string, definition?: string) => h.deliver([{ op: 'focus', id, expectedSession: 's1', expiresAt: Number.MAX_SAFE_INTEGER, definition }])
+  const reasons = (id: string) => h.events().filter((b: any) => b.request === id).map((b: any) => b.reason).filter(Boolean)
+  h.env.MUX_PANE = 'pane "1" $(touch /tmp/x); rm'
+  h.env.TMUX = '7'
+  for (const [id, definition] of [['r1', undefined], ['r2', 'unknown'], ['r3', 'stray'], ['r4', 'relative']] as const) {
+    await focus(id, definition)
+    await h.answerEvents()
+    expect(reasons(id)).toEqual(['unknownFocus'])
+  }
+  expect(h.runs).toEqual([])
+  await focus('r5', 'mux')
+  await h.answerEvents()
+  expect(h.runs.map((r: any) => r.argv ?? r)).toEqual([['/opt/mux/bin/mux', 'focus', '--pane={MUX_PANE}', 'pane "1" $(touch /tmp/x); rm']])
+  h.env.MUX_PANE = '-rf'
+  await focus('r6', 'mux')
+  await h.answerEvents()
+  expect(reasons('r6')).toEqual(['unsafeValue'])
+  expect(h.runs.length).toBe(1)
 })

@@ -37,6 +37,7 @@ struct ClaudeConnectorInstaller {
     let tokenPath: String
     let readyPath: String
     let script: String
+    let surfaces: ConnectorSurfaces
     let run: @Sendable ([String], [String: String]) -> (Int32, String)
     var baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
 
@@ -132,12 +133,12 @@ struct ClaudeConnectorInstaller {
         let plugin = marketplaceDir.appendingPathComponent(pluginName, isDirectory: true)
         let files: [(URL, String)] = [
             (marketplaceDir.appendingPathComponent(".claude-plugin/marketplace.json"), ClaudeConnectorFiles.marketplaceJSON(name: marketplaceName, plugin: pluginName)),
-            (plugin.appendingPathComponent(".claude-plugin/plugin.json"), ClaudeConnectorFiles.pluginJSON(name: pluginName, version: ClaudeConnectorFiles.version(for: script))),
+            (plugin.appendingPathComponent(".claude-plugin/plugin.json"), ClaudeConnectorFiles.pluginJSON(name: pluginName, version: ClaudeConnectorFiles.version(for: script, surfaces: surfaces))),
             (plugin.appendingPathComponent("hooks/hooks.json"), ClaudeConnectorFiles.hooksJSON),
-            (plugin.appendingPathComponent("hooks/register.js"), ClaudeConnectorFiles.installedScript(script, installation: installation)),
+            (plugin.appendingPathComponent("hooks/register.js"), try ClaudeConnectorFiles.installedScript(script, installation: installation, surfaces: surfaces)),
             (plugin.appendingPathComponent("keyscribe.json"), ClaudeConnectorFiles.configJSON(
                 socketPath: socketPath, tokenPath: tokenPath, readyPath: readyPath, installation: installation,
-                version: ClaudeConnectorFiles.version(for: script))),
+                version: ClaudeConnectorFiles.version(for: script, surfaces: surfaces), surfaces: surfaces)),
         ]
         for (url, text) in files {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -148,13 +149,14 @@ struct ClaudeConnectorInstaller {
 
 enum ClaudeConnectorFiles {
     static let registerJS: String? = ConnectorResources.text(named: "register", extension: "js")
-    static let version: String? = registerJS.map(version(for:))
 
     static func script(searching bundles: [URL]) -> String? {
         ConnectorResources.text(named: "register", extension: "js", searching: bundles)
     }
 
-    static func version(for script: String) -> String { ConnectorResources.version(for: script) }
+    static func version(for script: String, surfaces: ConnectorSurfaces) -> String {
+        ConnectorResources.version(for: script + "\n" + surfaces.fingerprint)
+    }
 
     static func json(_ object: [String: Any]) -> String { ConnectorResources.json(object) }
 
@@ -176,9 +178,41 @@ enum ClaudeConnectorFiles {
         ])
     }
 
-    static func installedScript(_ script: String, installation: String) -> String {
-        script.replacingOccurrences(of: "let loadedFrom = null", with: "let loadedFrom = \"\(installation)\"")
+    struct ReaderMissing: LocalizedError {
+        var errorDescription: String? { "This copy of \(Branding.appName) has a damaged Claude Code connector, so it was not installed." }
+    }
+
+    static func installedScript(_ script: String, installation: String, surfaces: ConnectorSurfaces) throws -> String {
+        try reading(surfaces.environmentKeys, in: script)
+            .replacingOccurrences(of: "let loadedFrom = null", with: "let loadedFrom = \"\(installation)\"")
             .replacingOccurrences(of: "const appLabel = null", with: "const appLabel = \(literal(Branding.appName))")
+    }
+
+    private static let readerStart = "async function readEnvironment($) {\n"
+    private static let readerEnd = "    return {}\n  }\n}\n"
+
+    static func environmentReader(_ keys: [String]) -> String {
+        let keys = keys.filter(AgentSurfaces.isPlainName)
+        return readerStart
+            + "  const keys = [\(keys.map { "\"\($0)\"" }.joined(separator: ", "))]\n"
+            + "  try {\n"
+            + "    const reads = await Promise.all([\n"
+            + keys.map { "      $.env.get(\"\($0)\").catch(() => undefined),\n" }.joined()
+            + "    ])\n"
+            + "    return Object.fromEntries(keys.map((key, index) => [key, reads[index]]))\n"
+            + "  } catch (err) {\n"
+            + readerEnd
+    }
+
+    static func packagedReader(in script: String) -> String? {
+        guard let start = script.range(of: readerStart), let end = script.range(of: readerEnd, range: start.upperBound..<script.endIndex)
+        else { return nil }
+        return String(script[start.lowerBound..<end.upperBound])
+    }
+
+    private static func reading(_ keys: [String], in script: String) throws -> String {
+        guard let packaged = packagedReader(in: script) else { throw ReaderMissing() }
+        return script.replacingOccurrences(of: packaged, with: environmentReader(keys))
     }
 
     private static func literal(_ text: String) -> String {
@@ -187,10 +221,12 @@ enum ClaudeConnectorFiles {
 
     static let hooksJSON = json(["description": "Voice connector", "modules": ["./register.js"]])
 
-    static func configJSON(socketPath: String, tokenPath: String, readyPath: String, installation: String, version: String) -> String {
+    static func configJSON(
+        socketPath: String, tokenPath: String, readyPath: String, installation: String, version: String, surfaces: ConnectorSurfaces
+    ) -> String {
         json([
             "protocol": AgentBridgeCodec.protocolVersion, "socketPath": socketPath, "tokenPath": tokenPath, "readyPath": readyPath,
             "installation": installation, "version": version,
-        ])
+        ].merging(surfaces.configFields) { own, _ in own })
     }
 }

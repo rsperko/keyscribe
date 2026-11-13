@@ -311,6 +311,12 @@ every rule above applies to it, with these sharpenings:
   handle right before acting, so they never hit a newer turn or a renamed or reordered session.
 - **No speech means no message.** A silent or empty take never submits to an agent; every output
   branch keeps the gates the insert path applies.
+- **Connectors name no terminal.** A connector reads only the environment keys and runs only the focus commands
+  written into its configuration from the resolved routes (`ConnectorSurfaces`). A surface only the agent's own
+  process can select declares a `FocusDefinition` and has Open ask the connector for it by id; the connector
+  runs it without a shell, with each value a whole argument, after the expiry and session checks. A connector
+  without the named command is outdated, never a silent fallback to another surface's focus.
+  `SourceInvariantsTests` keeps surface names out of both connectors' sources.
 - **One agent, one adapter.** Everything particular to an agent (how its sessions are found, how its
   connector is installed and checked, its names, its reload command, its copy) lives in files named for that
   agent, behind `AgentDiscovery` and `AgentConnector`, with the facts shared code needs carried by

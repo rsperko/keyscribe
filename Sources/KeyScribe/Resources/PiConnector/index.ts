@@ -29,7 +29,9 @@ type Config = {
   plugin?: string
   appName?: string
   environmentKeys?: string[]
+  focusDefinitions?: FocusDefinition[]
 }
+type FocusDefinition = { id: string; requiresEnv: string[]; argv: string[] }
 type ReadAloud = boolean | "quiet" | null
 type Ready = { launch: string; protocol: number }
 type Pending = { id: string; generation: number; text: string; serial: number; late: boolean; cancel: () => void }
@@ -56,6 +58,7 @@ type Command = {
   expiresAt?: number
   images?: string[]
   request?: string
+  definition?: string
 }
 
 const queueLimit = 64
@@ -84,7 +87,7 @@ const backoff = [30000, 60000, 120000, 300000]
 const late = { late: true } as const
 const unreachable = { unreachable: true } as const
 const freshReasons = ["startup", "new", "fork"]
-const features = ["focus", "label", "readiness", "notify", "images", "check"]
+const features = ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check"]
 
 const readAloudTool = "tell_me_when_done"
 
@@ -157,7 +160,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   }
 
   function terminalPlace(): Record<string, string> | undefined {
-    const keys = (config && config.environmentKeys) || ["ZELLIJ_PANE_ID"]
+    const keys = (config && config.environmentKeys) || []
     const place: Record<string, string> = {}
     for (const key of keys) {
       const value = host.env(key)
@@ -721,13 +724,31 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     reply(gen, { op: "checked", request: cmd.request || "", check: cmd.id, ...report(cmd.request || "") })
   }
 
+  function focusArgv(name: string | undefined): { argv: string[] } | { reason: string } {
+    const definition = ((config && config.focusDefinitions) || []).find((d) => d.id === name)
+    if (!name || !definition || !Array.isArray(definition.argv) || !Array.isArray(definition.requiresEnv)) return { reason: "unknownFocus" }
+    const values: Record<string, string> = {}
+    for (const key of definition.requiresEnv) {
+      const value = host.env(key)
+      if (!value) return { reason: "notInPlace" }
+      if (value.startsWith("-")) return { reason: "unsafeValue" }
+      values[key] = value
+    }
+    const argv = definition.argv.map((arg) => {
+      const key = /^\{([^{}]+)\}$/.exec(arg)
+      return key ? values[key[1]] : arg
+    })
+    if (!argv.length || argv.some((arg) => typeof arg !== "string") || !argv[0].startsWith("/")) return { reason: "unknownFocus" }
+    return { argv }
+  }
+
   async function focus(cmd: Command, gen: number): Promise<void> {
-    const surface = host.env("CMUX_SURFACE_ID")
-    if (!surface) return refuse(gen, cmd.id, "notInCmux")
+    const found = focusArgv(cmd.definition)
+    if (!("argv" in found)) return refuse(gen, cmd.id, found.reason)
     if (!(host.now() < (cmd.expiresAt || 0))) return refuse(gen, cmd.id, "expired")
     if (!current(cmd.expectedSession, gen)) return refuse(gen, cmd.id, "sessionChanged")
     try {
-      const result = await host.exec("cmux", ["focus-panel", "--panel", surface], 3000)
+      const result = await host.exec(found.argv[0], found.argv.slice(1), 3000)
       if (result.code === 0) reply(gen, { op: "focused", request: cmd.id })
       else refuse(gen, cmd.id, "focusFailed")
     } catch (err) {

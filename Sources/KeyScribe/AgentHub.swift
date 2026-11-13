@@ -311,16 +311,19 @@ final class AgentHub {
 
     static let focusTimeout: Duration = .seconds(3)
 
-    func focusInPlace(_ session: String, within timeout: Duration = focusTimeout) async -> TerminalSelection {
+    func focusInPlace(_ session: String, definition: String, within timeout: Duration = focusTimeout) async -> TerminalSelection {
         guard transport.isLive(session: session), let features = features[session] else { return .notFound }
-        guard features.contains("focus") else { return kind(of: session)?.connectorFeatures.contains("focus") == true ? .outdated : .unsupported }
+        let shipped = kind(of: session)?.connectorFeatures ?? []
+        guard features.contains("focus"), features.contains("focusDefinitions") else {
+            return shipped.contains("focus") && shipped.contains("focusDefinitions") ? .outdated : .unsupported
+        }
         let id = makeId()
         let expiresAt = deadline(after: timeout)
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 guard !Task.isCancelled else { return continuation.resume(returning: .notFound) }
                 focusWaiters[id] = continuation
-                transport.enqueue(.focus(id: id, expectedSession: session, expiresAt: expiresAt), for: session)
+                transport.enqueue(.focus(id: id, expectedSession: session, expiresAt: expiresAt, definition: definition), for: session)
                 Task { [weak self] in
                     try? await Task.sleep(for: timeout)
                     self?.abandonFocus(id)
@@ -829,8 +832,8 @@ final class AgentHub {
                 leaveUncertain(request, follows: false)
                 stopFollowing(request)
             }
-        case .refused(let request, _) where focusWaiters[request] != nil:
-            focusWaiters.removeValue(forKey: request)?.resume(returning: .notFound)
+        case .refused(let request, let reason) where focusWaiters[request] != nil:
+            focusWaiters.removeValue(forKey: request)?.resume(returning: reason == "unknownFocus" ? .outdated : .notFound)
         case .undelivered(let request, _, _) where focusWaiters[request] != nil:
             focusWaiters.removeValue(forKey: request)?.resume(returning: .notFound)
         case .refused(let request, let reason):
@@ -1280,7 +1283,7 @@ final class AgentRuntime {
             transport: server, discovery: discovery,
             names: AgentNameStore(directory: directory, legacyAgent: legacyAgent),
             focus: AgentTerminalFocus(
-                plan: AgentTerminalFocus.plan(surfaces), connector: { session in await box.hub?.focusInPlace(session) ?? .notFound }),
+                plan: AgentTerminalFocus.plan(surfaces), connector: { session, definition in await box.hub?.focusInPlace(session, definition: definition) ?? .notFound }),
             front: AgentFront(surfaces: surfaces), glance: AgentFront.confirmingWithoutAsking(surfaces), exclusions: exclusions,
             places: Self.places(surfaces: surfaces, sources: placeSources))
         box.hub = hub

@@ -3,7 +3,7 @@ import Foundation
 public enum AgentCommand: Equatable, Sendable {
     case submit(id: String, expectedSession: String, text: String, expectedPrompts: Int? = nil, expiresAt: Date, images: [String] = [])
     case status(id: String, expectedSession: String, text: String)
-    case focus(id: String, expectedSession: String, expiresAt: Date)
+    case focus(id: String, expectedSession: String, expiresAt: Date, definition: String? = nil)
     case quiet(id: String, expectedSession: String)
     case admit(id: String, expectedSession: String)
     case check(id: String, expectedSession: String, request: String, expiresAt: Date)
@@ -11,13 +11,13 @@ public enum AgentCommand: Equatable, Sendable {
     public var id: String {
         switch self {
         case .submit(let id, _, _, _, _, _), .status(let id, _, _): id
-        case .focus(let id, _, _), .quiet(let id, _), .admit(let id, _), .check(let id, _, _, _): id
+        case .focus(let id, _, _, _), .quiet(let id, _), .admit(let id, _), .check(let id, _, _, _): id
         }
     }
 
     public var expiresAt: Date? {
         switch self {
-        case .focus(_, _, let expiresAt), .submit(_, _, _, _, let expiresAt, _), .check(_, _, _, let expiresAt): expiresAt
+        case .focus(_, _, let expiresAt, _), .submit(_, _, _, _, let expiresAt, _), .check(_, _, _, let expiresAt): expiresAt
         case .status, .quiet, .admit: nil
         }
     }
@@ -159,7 +159,7 @@ extension AgentCommand {
         case .submit(let id, let s, let text, let prompts, let expiresAt, let images):
             .submit(id: id, expectedSession: rename(s), text: text, expectedPrompts: prompts, expiresAt: expiresAt, images: images)
         case .status(let id, let s, let text): .status(id: id, expectedSession: rename(s), text: text)
-        case .focus(let id, let s, let expiresAt): .focus(id: id, expectedSession: rename(s), expiresAt: expiresAt)
+        case .focus(let id, let s, let expiresAt, let definition): .focus(id: id, expectedSession: rename(s), expiresAt: expiresAt, definition: definition)
         case .quiet(let id, let s): .quiet(id: id, expectedSession: rename(s))
         case .admit(let id, let s): .admit(id: id, expectedSession: rename(s))
         case .check(let id, let s, let request, let expiresAt): .check(id: id, expectedSession: rename(s), request: request, expiresAt: expiresAt)
@@ -237,6 +237,7 @@ public enum AgentBridgeCodec {
         var seenAt: Double?
         var altered: Bool?
         var miss: String?
+        var definition: String?
     }
 
     public static func encode(_ commands: [AgentCommand]) throws -> Data {
@@ -315,8 +316,8 @@ public enum AgentBridgeCodec {
             Wire(op: "submit", id: id, expectedSession: s, text: t, expiresAt: milliseconds(expiresAt), expectedPrompts: prompts,
                  images: images.isEmpty ? nil : images)
         case .status(let id, let s, let t): Wire(op: "status", id: id, expectedSession: s, text: t)
-        case .focus(let id, let s, let expiresAt):
-            Wire(op: "focus", id: id, expectedSession: s, expiresAt: milliseconds(expiresAt))
+        case .focus(let id, let s, let expiresAt, let definition):
+            Wire(op: "focus", id: id, expectedSession: s, expiresAt: milliseconds(expiresAt), definition: definition)
         case .quiet(let id, let s): Wire(op: "quiet", id: id, expectedSession: s)
         case .admit(let id, let s): Wire(op: "admit", id: id, expectedSession: s)
         case .check(let id, let s, let request, let expiresAt):
@@ -341,7 +342,7 @@ public enum AgentBridgeCodec {
                 id: id, expectedSession: s, text: try required(w.text), expectedPrompts: w.expectedPrompts, expiresAt: try date(w.expiresAt),
                 images: w.images ?? [])
         case "status": return .status(id: id, expectedSession: s, text: try required(w.text))
-        case "focus": return .focus(id: id, expectedSession: s, expiresAt: try date(w.expiresAt))
+        case "focus": return .focus(id: id, expectedSession: s, expiresAt: try date(w.expiresAt), definition: w.definition)
         case "quiet": return .quiet(id: id, expectedSession: s)
         case "admit": return .admit(id: id, expectedSession: s)
         case "check": return .check(id: id, expectedSession: s, request: try required(w.request), expiresAt: try date(w.expiresAt))

@@ -7,12 +7,15 @@ struct CmuxRoute: TerminalRoute {
     let apps: Set<String> = [app]
     let environmentKeys = [surfaceKey]
     let frontScript: String? = "return id of focused terminal of selected tab of front window"
+    let focusDefinitions = [
+        FocusDefinition(id: "cmux", requiresEnv: [surfaceKey], argv: ["/usr/bin/env", "cmux", "focus-panel", "--panel", "{\(surfaceKey)}"]),
+    ]
 
     func open(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> Opening? {
         guard process.app == Self.app else { return nil }
         let activate = OpenAction.activate(app: Self.app, pid: process.pid)
         guard let surface = TerminalRoutes.nearest(Self.surfaceKey, in: inner)?.environment[Self.surfaceKey] else {
-            return Opening([.select(.connector), activate])
+            return Opening([.select(.connector(focusDefinitions[0].id)), activate])
         }
         let body = """
             set found to (every terminal whose id is \(AppleScriptText.literal(surface)))

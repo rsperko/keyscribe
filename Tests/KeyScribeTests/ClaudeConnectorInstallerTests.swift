@@ -48,7 +48,7 @@ struct ClaudeConnectorInstallerTests {
             socketPath: dir.appendingPathComponent("bridge.sock").path,
             tokenPath: dir.appendingPathComponent("token").path,
             readyPath: dir.appendingPathComponent("ready.json").path,
-            script: Self.script, run: runner.run, baseEnvironment: ["CLAUDE_CONFIG_DIR": "/inherited", "PATH": "/usr/bin"])
+            script: Self.script, surfaces: .builtIn, run: runner.run, baseEnvironment: ["CLAUDE_CONFIG_DIR": "/inherited", "PATH": "/usr/bin"])
         return (installer, runner, dir)
     }
 
@@ -79,12 +79,16 @@ struct ClaudeConnectorInstallerTests {
         #expect(try json(plugin.appendingPathComponent("hooks/hooks.json"))["modules"] as? [String] == ["./register.js"])
         let code = try String(contentsOf: plugin.appendingPathComponent("hooks/register.js"), encoding: .utf8)
         #expect(code.contains("let loadedFrom = \"id-1\""))
+        #expect(ClaudeConnectorFiles.packagedReader(in: code) == ClaudeConnectorFiles.environmentReader(ConnectorSurfaces.builtIn.environmentKeys))
         let config = try json(plugin.appendingPathComponent("keyscribe.json"))
         #expect(config["socketPath"] as? String == dir.appendingPathComponent("bridge.sock").path)
         #expect(config["tokenPath"] as? String == dir.appendingPathComponent("token").path)
         #expect(config["readyPath"] as? String == dir.appendingPathComponent("ready.json").path)
         #expect(config["installation"] as? String == "id-1")
-        #expect(config["version"] as? String == ClaudeConnectorFiles.version(for: Self.script))
+        #expect(config["version"] as? String == ClaudeConnectorFiles.version(for: Self.script, surfaces: .builtIn))
+        #expect(config["environmentKeys"] as? [String] == ConnectorSurfaces.builtIn.environmentKeys)
+        let focus = try #require((config["focusDefinitions"] as? [[String: Any]])?.first { $0["id"] as? String == "cmux" })
+        #expect(focus["requiresEnv"] as? [String] == ["CMUX_SURFACE_ID"])
         #expect(code.contains("const appLabel = \"\(Branding.appName)\""))
     }
 
@@ -229,12 +233,14 @@ struct ClaudeConnectorInstallerTests {
         #expect(Data(bundled.utf8) == (try Data(contentsOf: Self.source)))
     }
 
-    @Test func installWritesThePackagedConnectorChangingOnlyTheInstallationItCameFromAndTheAppsName() throws {
+    @Test func installWritesThePackagedConnectorChangingOnlyTheInstallationItCameFromTheAppsNameAndItsReader() throws {
         let (installer, _, dir) = setup()
         try installer.install(installation: "id-1")
         let installed = try String(contentsOf: market(dir).appendingPathComponent("keyscribe-dev/hooks/register.js"), encoding: .utf8)
         let restored = installed.replacingOccurrences(of: "let loadedFrom = \"id-1\"", with: "let loadedFrom = null")
             .replacingOccurrences(of: "const appLabel = \"\(Branding.appName)\"", with: "const appLabel = null")
+            .replacingOccurrences(
+                of: ClaudeConnectorFiles.environmentReader(ConnectorSurfaces.builtIn.environmentKeys), with: ClaudeConnectorFiles.environmentReader([]))
         #expect(restored != installed)
         #expect(Data(restored.utf8) == (try Data(contentsOf: Self.source)))
     }
@@ -266,21 +272,62 @@ struct ClaudeConnectorInstallerTests {
         #expect(source.contains("keyscribe.json"))
     }
 
-    @Test func theModReadsOnlyWhereItsTerminalShowsItNeverAnAccessToken() throws {
+    @Test func thePackagedModReadsNoVariableUntilInstallingNamesItsRoutesKeys() throws {
         let source = Self.script
-        let reads = try Regex(#"\$\.env\.get\("([A-Z_]+)"\)"#)
-        #expect(source.matches(of: reads).compactMap { $0.output[1].substring.map(String.init) } == ["ZELLIJ_PANE_ID", "CMUX_SURFACE_ID"])
-        #expect(source.contains("const features = ['focus', 'label', 'readiness', 'notify', 'fill', 'check']"))
+        #expect(!source.contains("$.env.get("))
+        #expect(ClaudeConnectorFiles.packagedReader(in: source) == ClaudeConnectorFiles.environmentReader([]))
+        #expect(source.contains("const features = ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check']"))
+    }
+
+    @Test func anInstalledModReadsExactlyTheKeysItsRoutesNameWithALiteralReadForEach() throws {
+        let surfaces = ConnectorSurfaces(environmentKeys: Set(ConnectorSurfaces.builtIn.environmentKeys).union(["MUX_PANE"]))
+        let code = try ClaudeConnectorFiles.installedScript(Self.script, installation: "id-1", surfaces: surfaces)
+        let reads = try Regex(#"\$\.env\.get\("([A-Za-z_0-9]+)"\)"#)
+        #expect(code.matches(of: reads).compactMap { $0.output[1].substring.map(String.init) } == surfaces.environmentKeys)
+        #expect(ClaudeConnectorFiles.packagedReader(in: code) == ClaudeConnectorFiles.environmentReader(surfaces.environmentKeys))
+        #expect(ClaudeConnectorFiles.environmentReader(["OK", "NOT\")"]) == ClaudeConnectorFiles.environmentReader(["OK"]))
+    }
+
+    @Test func aConnectorWhoseReaderCannotBeFoundIsNeverInstalledReadingNothing() throws {
+        let drifted = Self.script.replacingOccurrences(of: "async function readEnvironment($) {", with: "async function readEnv($) {")
+        #expect(throws: ClaudeConnectorFiles.ReaderMissing.self) {
+            try ClaudeConnectorFiles.installedScript(drifted, installation: "id-1", surfaces: .builtIn)
+        }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-agents-\(UUID().uuidString)")
+        let installer = ClaudeConnectorInstaller(
+            agentsDir: dir, setupFolder: Self.setupFolder, isDefaultSetup: false, pluginName: "keyscribe-dev", claude: "/bin/claude-test",
+            socketPath: "", tokenPath: "", readyPath: "", script: drifted, surfaces: .builtIn, run: Runner().run)
+        #expect(throws: ClaudeConnectorFiles.ReaderMissing.self) { try installer.install(installation: "id-1") }
+        #expect(!FileManager.default.fileExists(atPath: market(dir).appendingPathComponent("keyscribe-dev/hooks/register.js").path))
+    }
+
+    @Test func theConnectorTestsInstallTheReaderTheWayTheAppDoes() throws {
+        let script = Self.source.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("scripts/claude-connector-env-reader.sh")
+        for keys in [[], ["CMUX_SURFACE_ID", "MUX_PANE"], ["A_1", "bad key", "B"]] {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = [script.path] + keys
+            let output = Pipe()
+            process.standardOutput = output
+            try process.run()
+            let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 0)
+            #expect(text == ClaudeConnectorFiles.environmentReader(keys))
+        }
     }
 
     @Test func thePluginVersionNamesTheConnectorCodeItCarries() throws {
         let (installer, _, dir) = setup()
         try installer.install(installation: "id-1")
         let manifest = try json(market(dir).appendingPathComponent("keyscribe-dev/.claude-plugin/plugin.json"))
-        #expect(manifest["version"] as? String == ClaudeConnectorFiles.version)
-        #expect(ClaudeConnectorFiles.version == ClaudeConnectorFiles.version(for: Self.script))
-        #expect(ClaudeConnectorFiles.version(for: Self.script + " ") != ClaudeConnectorFiles.version)
-        #expect(ClaudeConnectorFiles.version?.hasPrefix("0.1.0-") == true)
+        let version = ClaudeConnectorFiles.version(for: Self.script, surfaces: .builtIn)
+        #expect(manifest["version"] as? String == version)
+        #expect(ClaudeConnectorFiles.version(for: Self.script + " ", surfaces: .builtIn) != version)
+        let added = ConnectorSurfaces(environmentKeys: Set(ConnectorSurfaces.builtIn.environmentKeys).union(["MUX_PANE"]))
+        #expect(ClaudeConnectorFiles.version(for: Self.script, surfaces: added) != version)
+        #expect(version.hasPrefix("0.1.0-"))
     }
 }
 

@@ -53,7 +53,9 @@ export options — it never edits upstream source. A downstream that adds coding
 `DevCLI.handleFlags(codingAgents:)` and `AppDelegate(codingAgents:)`; passing it to only one makes the dev
 probes and the app disagree about which terminals exist. A route's `open`, `place`, `front`, and `check` only
 read: they run on every plan, every in-front read, and every probe, so anything that changes a terminal or
-multiplexer belongs in the `PaneCommand`s `open` returns. Check a new route live with `--route-probe <pid>` (the
+multiplexer belongs in the `PaneCommand`s `open` returns. A surface only the agent's own process can select
+declares a `FocusDefinition` (its environment keys and the argv that focuses it) and has `open` return
+`.select(.connector(id))`; installing writes it into both connectors, which run it themselves. Check a new route live with `--route-probe <pid>` (the
 open plan and places for one agent; add `--read-places` to run its place script and place sources too) and
 `--front-probe` (what reads as in front). Full from-source build, prerequisites, and signing live
 in **`BUILD.md`**.

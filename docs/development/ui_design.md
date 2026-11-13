@@ -655,7 +655,7 @@ in front. Open's answer is ordered actions, so a terminal that must come forward
 says so itself. A
 terminal that names each surface with an id its processes carry (cmux) is selected by that id, so it works
 for every agent. When no process shows the agent's surface id, the agent's connector is asked instead:
-KeyScribe asks it to focus its own surface, and only a connector that announced it can is asked. An older
+KeyScribe asks it to run the terminal's own focus command for its surface, and only a connector that announced it can is asked. An older
 connector says how to get there: “Brought cmux forward. Update the Claude Code connector in Settings, then run
 /reload-plugins in docs to open its tab”. Every layer is found by something stable — a pane id, a tty, or the terminal's own
 session link — never by matching a title, so Open never guesses a pane (`TerminalRoutes`). A terminal with

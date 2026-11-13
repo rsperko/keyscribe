@@ -1995,7 +1995,7 @@ struct AgentHubTests {
         let hub = AgentHub(transport: transport, discovery: [fake])
         await hub.rescan()
         hub.handle(.hello(.init(protocolVersion: 1, agent: "fake", agentVersion: "", instance: "i1", session: "fake:f1", pid: 10)))
-        #expect(await hub.focusInPlace("fake:f1") == .unsupported)
+        #expect(await hub.focusInPlace("fake:f1", definition: "cmux") == .unsupported)
         #expect(transport.sent.isEmpty)
     }
 
@@ -2074,27 +2074,48 @@ struct AgentHubTests {
     }
 
     private func focusHello(_ session: String = "claude:s1") -> AgentEvent {
-        .hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: session, pid: 0, features: ["focus"]))
+        .hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: session, pid: 0, features: ["focus", "focusDefinitions"]))
     }
 
-    @Test func aConnectorThatAnnouncedFocusIsAskedToFocusItsSessionBeforeTheRequestExpires() async {
+    @Test func aConnectorThatAnnouncedFocusIsAskedToRunTheNamedFocusBeforeTheRequestExpires() async {
         let clock = Clock()
         let (hub, transport, registry, _) = makeHub(clock: clock)
         await connected(hub, transport, registry)
         hub.handle(focusHello())
         let sentBefore = transport.sent.count
-        async let answer = hub.focusInPlace("claude:s1")
+        async let answer = hub.focusInPlace("claude:s1", definition: "mux")
         await untilSent(transport, sentBefore + 1)
-        #expect(transport.sent.map(\.0) == [.focus(id: "r1", expectedSession: "claude:s1", expiresAt: clock.now.addingTimeInterval(3))])
+        #expect(transport.sent.map(\.0) == [.focus(id: "r1", expectedSession: "claude:s1", expiresAt: clock.now.addingTimeInterval(3), definition: "mux")])
         hub.handle(.focused(request: "r1"))
         #expect(await answer == .selected)
+    }
+
+    @Test(arguments: ["cmux", "mux"])
+    func aConnectorFromBeforeNamedFocusIsNeverAskedAndSaysItNeedsAnUpdate(definition: String) async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["focus"])))
+        #expect(await hub.focusInPlace("claude:s1", definition: definition) == .outdated)
+        #expect(transport.sent.isEmpty)
+    }
+
+    @Test func aRunningConnectorLoadedBeforeAFocusWasAddedSaysItNeedsAReload() async {
+        let (hub, transport, registry, notices) = makeHub()
+        await connected(hub, transport, registry)
+        hub.handle(focusHello())
+        let sentBefore = transport.sent.count
+        async let answer = hub.focusInPlace("claude:s1", definition: "mux")
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.refused(request: "r1", reason: "unknownFocus"))
+        #expect(await answer == .outdated)
+        #expect(notices.items.isEmpty)
     }
 
     @Test func aLiveConnectorThatCannotFocusIsNeverAskedAndSaysItNeedsAnUpdate() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         hub.handle(hello("claude:s1"))
-        #expect(await hub.focusInPlace("claude:s1") == .outdated)
+        #expect(await hub.focusInPlace("claude:s1", definition: "cmux") == .outdated)
         #expect(transport.sent.isEmpty)
     }
 
@@ -2102,7 +2123,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         transport.live = []
-        #expect(await hub.focusInPlace("claude:s1") == .notFound)
+        #expect(await hub.focusInPlace("claude:s1", definition: "cmux") == .notFound)
         #expect(transport.sent.isEmpty)
     }
 
@@ -2111,9 +2132,9 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         hub.handle(focusHello())
         let sentBefore = transport.sent.count
-        async let refused = hub.focusInPlace("claude:s1")
+        async let refused = hub.focusInPlace("claude:s1", definition: "cmux")
         await untilSent(transport, sentBefore + 1)
-        hub.handle(.refused(request: "r1", reason: "notInCmux"))
+        hub.handle(.refused(request: "r1", reason: "notInPlace"))
         #expect(await refused == .notFound)
         #expect(notices.items.isEmpty)
     }
@@ -2122,7 +2143,7 @@ struct AgentHubTests {
         let (hub, transport, registry, notices) = makeHub()
         await connected(hub, transport, registry)
         hub.handle(focusHello())
-        #expect(await hub.focusInPlace("claude:s1", within: .milliseconds(20)) == .notFound)
+        #expect(await hub.focusInPlace("claude:s1", definition: "cmux", within: .milliseconds(20)) == .notFound)
         #expect(transport.withdrawn == ["r1"])
         hub.handle(.focused(request: "r1"))
         #expect(notices.items.isEmpty)
@@ -2132,7 +2153,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         hub.handle(focusHello())
-        let task = Task { await hub.focusInPlace("claude:s1", within: .seconds(30)) }
+        let task = Task { await hub.focusInPlace("claude:s1", definition: "cmux", within: .seconds(30)) }
         while transport.sent.isEmpty { await Task.yield() }
         task.cancel()
         #expect(await task.value == .notFound)

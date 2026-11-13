@@ -115,14 +115,40 @@ public enum FrontStep: Equatable, Sendable {
     case unknown(FrontUnknown)
 }
 
+public struct FocusDefinition: Equatable, Sendable, Encodable {
+    public var id: String
+    public var requiresEnv: [String]
+    public var argv: [String]
+
+    public init(id: String, requiresEnv: [String], argv: [String]) {
+        self.id = id
+        self.requiresEnv = requiresEnv
+        self.argv = argv
+    }
+
+    public static func placeholder(_ argument: String) -> String? {
+        guard argument.count > 2, argument.hasPrefix("{"), argument.hasSuffix("}") else { return nil }
+        return String(argument.dropFirst().dropLast())
+    }
+
+    func runs(within environmentKeys: [String]) -> Bool {
+        guard let executable = argv.first, executable.hasPrefix("/"), Self.placeholder(executable) == nil else { return false }
+        let required = Set(requiresEnv)
+        return required.isSubset(of: environmentKeys) && argv.compactMap(Self.placeholder).allSatisfy(required.contains)
+    }
+}
+
 public protocol Route: Sendable {
     var name: String { get }
     var environmentKeys: [String] { get }
+    var focusDefinitions: [FocusDefinition] { get }
     func open(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> Opening?
     func check(agent pid: Int, view: FrontView, facts: TerminalFacts, multiplexerProcesses: Set<String>) -> FrontCheck
 }
 
 extension Route {
+    public var focusDefinitions: [FocusDefinition] { [] }
+
     public func check(agent pid: Int, view: FrontView, facts: TerminalFacts, multiplexerProcesses: Set<String>) -> FrontCheck {
         .unknown(.unreported(name))
     }
@@ -157,7 +183,7 @@ public protocol PaneRoute: Route {
 public enum TerminalSelector: Equatable, Sendable {
     case script(app: String, pid: Int, body: String)
     case url(String)
-    case connector
+    case connector(String)
 }
 
 public enum OpenAction: Equatable, Sendable {
