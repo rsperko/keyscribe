@@ -2,6 +2,7 @@ import Foundation
 
 struct ZellijRoute: PaneRoute, PlaceRoute {
     static let paneKey = "ZELLIJ_PANE_ID"
+    static let clientsHeader = ["CLIENT_ID", paneKey]
     let name = "Zellij"
     let processName = "zellij"
     let environmentKeys = [paneKey]
@@ -25,7 +26,7 @@ struct ZellijRoute: PaneRoute, PlaceRoute {
         else { return (.unresolved(name), client) }
         let action = [server.executable, "--session", session, "action"]
         guard let (tab, steps) = Self.walk(to: id, in: facts.run(action + ["list-panes", "-t", "-j"])) else { return (.unresolved(name), client) }
-        let walk = FocusWalk(check: action + ["list-clients"], pane: "terminal_\(id)", steps: steps)
+        let walk = FocusWalk(check: action + ["list-clients"], header: Self.clientsHeader, value: "terminal_\(id)", steps: steps)
         let commands = [
             PaneCommand(action + ["go-to-tab-by-id", String(tab)]),
             PaneCommand(action + ["hide-floating-panes", "-t", String(tab)], accepting: [0, 2]),
@@ -141,12 +142,7 @@ struct ZellijRoute: PaneRoute, PlaceRoute {
     }
 
     static func focusedPanes(_ result: (status: Int32, output: String)) -> Set<String>? {
-        guard result.status == 0 else { return nil }
-        let lines = result.output.split(separator: "\n").map { $0.split(whereSeparator: \.isWhitespace) }
-        guard let header = lines.first, header.prefix(2) == ["CLIENT_ID", "ZELLIJ_PANE_ID"] else { return nil }
-        let rows = lines.dropFirst()
-        guard !rows.isEmpty, rows.allSatisfy({ $0.count >= 2 }) else { return nil }
-        return Set(rows.map { String($0[1]) })
+        FocusWalk.lastColumn(of: clientsHeader, in: result)
     }
 
     func check(agent pid: Int, view: FrontView, facts: TerminalFacts, multiplexerProcesses: Set<String>) -> FrontCheck {
@@ -179,18 +175,3 @@ struct ZellijRoute: PaneRoute, PlaceRoute {
     }
 }
 
-public struct FocusWalk: Equatable, Sendable {
-    public var check: [String]
-    public var pane: String
-    public var steps: Int
-
-    public init(check: [String], pane: String, steps: Int) {
-        self.check = check
-        self.pane = pane
-        self.steps = steps
-    }
-
-    public func reached(_ result: (status: Int32, output: String)) -> Bool? {
-        ZellijRoute.focusedPanes(result)?.contains(pane)
-    }
-}

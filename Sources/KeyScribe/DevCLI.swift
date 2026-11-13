@@ -109,6 +109,14 @@ public enum DevCLI {
                                       Automation access to the front terminal.
                 --after <s>             Wait this long before the first read.
                 --samples <n>           Read n times, a second apart (default 1).
+              --route-probe <pid>     Print how Open would reach the coding agent running as <pid> (its process
+                                      chain, each multiplexer and terminal step) and the places it reads, then
+                                      exit. Runs each route's planning and place reads (the built-in ones only
+                                      list), never a step of the plan, a terminal's place script, or a place
+                                      source with its own reader. Exits 1 when <pid> is not running.
+                --read-places           Also read the agent's place the way the app does: through every place
+                                        source and the terminal's place script. May ask for Automation access.
+                --session <id>          The agent's own conversation id, for a place source that matches by it.
               --list-engines          Print each shipped catalog engine and whether it is installed
                                       (installed / missing / system), then exit — coverage for the release gate.
               --mlx-smoke             Run a tiny MLX computation on the GPU, then exit 0. A missing or unloadable
@@ -256,14 +264,48 @@ public enum DevCLI {
             dispatchMain()
         }
 
-        if CommandLine.arguments.contains("--front-probe") {
-            let args = CommandLine.arguments
-            let value = { (flag: String) in args.firstIndex(of: flag).flatMap { $0 + 1 < args.count ? Double(args[$0 + 1]) : nil } }
-            let surfaces: ResolvedSurfaces
-            do { surfaces = try codingAgents.surfaces.resolve() } catch {
+        let resolvedSurfaces = {
+            do { return try codingAgents.surfaces.resolve() } catch {
                 print("coding agent integrations do not resolve: \(error)")
                 exit(1)
             }
+        }
+
+        if let i = CommandLine.arguments.firstIndex(of: "--route-probe") {
+            let session: String? = switch RouteProbe.option("--session", in: CommandLine.arguments) {
+            case .absent: ""
+            case .value(let value): value
+            case .missing: nil
+            }
+            guard i + 1 < CommandLine.arguments.count, let pid = RouteProbe.pid(CommandLine.arguments[i + 1]), let session else {
+                FileHandle.standardError.write(Data("Usage: \(Branding.appName) --route-probe <pid> [--read-places [--session <id>]]\n".utf8))
+                exit(2)
+            }
+            let surfaces = resolvedSurfaces()
+            let facts = SystemTerminalFacts(environmentKeys: surfaces.environmentKeys)
+            guard let lines = RouteProbe.report(agent: pid, facts: facts, surfaces: surfaces) else {
+                FileHandle.standardError.write(Data("No process \(pid) is running.\n".utf8))
+                exit(1)
+            }
+            guard CommandLine.arguments.contains("--read-places") else {
+                for line in lines { print(line) }
+                exit(0)
+            }
+            let agent = facts.process(pid)?.name ?? ""
+            let sources = codingAgents.placeSources
+            Task { @MainActor in
+                let reader = AgentRuntime.places(surfaces: surfaces, sources: sources.map { $0() })
+                for line in lines where line != RouteProbe.skipped { print(line) }
+                for line in await PlaceProbe.lines(pid: pid, agent: agent, session: session, reader: reader) { print(line) }
+                exit(0)
+            }
+            dispatchMain()
+        }
+
+        if CommandLine.arguments.contains("--front-probe") {
+            let args = CommandLine.arguments
+            let value = { (flag: String) in args.firstIndex(of: flag).flatMap { $0 + 1 < args.count ? Double(args[$0 + 1]) : nil } }
+            let surfaces = resolvedSurfaces()
             Task { @MainActor in
                 exit(await FrontProbe.run(after: value("--after") ?? 0, samples: Int(value("--samples") ?? 1), surfaces: surfaces))
             }

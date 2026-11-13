@@ -345,7 +345,7 @@ struct TerminalRoutesTests {
         return .layer(PaneLayer("Zellij", commands: [
             PaneCommand(action + ["go-to-tab-by-id", "5"]),
             PaneCommand(action + ["hide-floating-panes", "-t", "5"], accepting: [0, 2]),
-            PaneCommand(action + ["focus-next-pane"], until: FocusWalk(check: action + ["list-clients"], pane: "terminal_2", steps: 2)),
+            PaneCommand(action + ["focus-next-pane"], until: FocusWalk(check: action + ["list-clients"], header: ["CLIENT_ID", "ZELLIJ_PANE_ID"], value: "terminal_2", steps: 2)),
         ], confirmed: confirmed))
     }
 
@@ -395,11 +395,75 @@ struct TerminalRoutesTests {
     }
 
     @Test func aZellijFocusWalkIsDoneOnlyWhenAWindowShowsTheTargetPaneAndUnknownWhenTheWindowsCannotBeRead() {
-        let walk = FocusWalk(check: ["list-clients"], pane: "terminal_2", steps: 1)
+        let walk = FocusWalk(check: ["list-clients"], header: ["CLIENT_ID", "ZELLIJ_PANE_ID"], value: "terminal_2", steps: 1)
         #expect(walk.reached((0, "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n1         terminal_2     claude\n")) == true)
         #expect(walk.reached((0, "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n1         terminal_20    claude terminal_2\n")) == false)
         #expect(walk.reached((1, "CLIENT_ID ZELLIJ_PANE_ID RUNNING_COMMAND\n1         terminal_2     claude\n")) == nil)
         #expect(walk.reached((0, "")) == nil)
+    }
+
+    @Test func aFocusWalkReadsTheLastColumnOfTheHeaderItNamesAndIsUnknownWhenTheHeaderDiffers() {
+        let walk = FocusWalk(check: ["clients"], header: ["WINDOW", "PANE"], value: "7", steps: 1)
+        #expect(walk.reached((0, "WINDOW PANE COMMAND\nw1 7 vim notes.md\nw2 3 zsh\n")) == true)
+        #expect(walk.reached((0, "WINDOW PANE\nw1 3\n")) == false)
+        #expect(walk.reached((0, "COMMAND WINDOW PANE\nvim notes.md w1 7\n")) == nil)
+        #expect(walk.reached((0, "WINDOW CLIENT PANE\nw1 c1 7\n")) == nil)
+        #expect(walk.reached((0, "WINDOW PANE\nw1\n")) == nil)
+        #expect(walk.reached((0, "WINDOW PANE\n")) == nil)
+    }
+
+    @Test func theRouteProbeShowsTheChainTheOpenPlanAndThePlacesAndNeverRunsAStepOfThePlan() throws {
+        let facts = zellijFacts()
+        let lines = try #require(RouteProbe.report(agent: 90, facts: facts, surfaces: .builtIn))
+        #expect(lines.first == "chain=90:claude@/dev/ttys040 < 85:zsh@/dev/ttys040 < 84:zellij")
+        let action = "\(Self.zellij) --session work action"
+        #expect(lines.contains(
+            "open layer Zellij: \(action) go-to-tab-by-id 5 ; \(action) hide-floating-panes -t 5 ; "
+                + "\(action) focus-next-pane until ZELLIJ_PANE_ID=terminal_2 within 2"))
+        #expect(lines.contains { $0.hasPrefix("open select script app=\(Self.ghostty) pid=10") })
+        #expect(lines.contains { $0.hasPrefix("places surface=Zellij") })
+        #expect(lines.contains { $0.hasPrefix("place ") && $0.contains("zellij:\(Self.zellijSocket)#pane:2") })
+        #expect(lines.last == RouteProbe.skipped)
+        let steps = TerminalRoutes.plan(agent: 90, facts: zellijFacts()).flatMap { action -> [[String]] in
+            guard case .layer(let layer) = action else { return [] }
+            return layer.commands.map(\.arguments)
+        }
+        #expect(!steps.isEmpty)
+        #expect(Set(facts.ran).isDisjoint(with: steps))
+    }
+
+    @Test func theRouteProbeMarksAProcessWhoseNameCannotBeRead() {
+        let facts = Facts().add(5, parent: 4, tty: "/dev/ttys001", ["claude"]).add(4, parent: 1, [], executable: "")
+        #expect(RouteProbe.report(agent: 5, facts: facts, surfaces: .builtIn)?.first == "chain=5:claude@/dev/ttys001 < 4:?")
+    }
+
+    @Test func theRouteProbeHasNoReportForAnAgentThatIsNotRunning() {
+        #expect(RouteProbe.report(agent: 999, facts: Facts(), surfaces: .builtIn) == nil)
+    }
+
+    @Test func theRouteProbeNamesAnUnresolvedMultiplexer() {
+        #expect(RouteProbe.report(agent: 70, facts: tmuxFacts(clients: ""), surfaces: .builtIn)?.contains("open layer tmux unresolved") == true)
+    }
+
+    @Test(arguments: [("42", 42), ("2147483647", 2_147_483_647)] as [(String, Int)])
+    func theRouteProbeTakesAProcessId(argument: String, pid: Int) {
+        #expect(RouteProbe.pid(argument) == pid)
+    }
+
+    @Test(arguments: [
+        (["--route-probe", "5"], .absent),
+        (["--session", "abc", "--read-places"], .value("abc")),
+        (["--read-places", "--session"], .missing),
+        (["--session", "--read-places"], .missing),
+        (["--session", ""], .missing),
+    ] as [([String], RouteProbe.Option)])
+    func theRouteProbeTreatsAFlagWithoutItsValueAsAUsageError(arguments: [String], option: RouteProbe.Option) {
+        #expect(RouteProbe.option("--session", in: arguments) == option)
+    }
+
+    @Test(arguments: ["0", "-5", "2147483648", "99999999999999999999", "abc", ""])
+    func theRouteProbeRejectsWhatCannotBeAProcessId(argument: String) {
+        #expect(RouteProbe.pid(argument) == nil)
     }
 
     @Test func aZellijSessionWithNoWindowHasNothingToShowItIn() {
