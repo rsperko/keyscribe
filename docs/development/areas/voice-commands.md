@@ -130,8 +130,8 @@ every rule above applies to it, with these sharpenings:
   `TakeReporterTests.everyRetentionChoiceOutlastsHeldSpokenAudio`), and even a hand-set shorter value is bounded by
   the same timer, and `SpokenAttemptLog` also bounds count and bytes; deleting the
   entry or quitting drops it at once. Nothing reaches disk unless the user chooses **Save Generated Audio…**, which
-  exports the held bytes and never makes the audio again; **Play Generated Audio** plays those same bytes through `HeldAudioSpeech` and the
-  silencer, and records nothing. `HistorySpeech` switches between it and the macOS voice inside the silencer's
+  exports the held bytes and never makes the audio again; History's **Play** (or **Play Generated Audio**, for a
+  rejected take) plays those same bytes through `HeldAudioSpeech` and the silencer, and records nothing. `HistorySpeech` switches between it and the macOS voice inside the silencer's
   claim, so a reply queued behind it stays queued instead of starting and being cut off. The diagnostics report lists the recent attempts' metadata without their text
   (`SpokenAttempt.diagnosticLine`). Why the macOS voice read a reply is fixed wording, so it is kept with the entry
   (`spoken_reply.reason`); the audio is not. Attempt text, phonemes and normalized text are content: never log them.

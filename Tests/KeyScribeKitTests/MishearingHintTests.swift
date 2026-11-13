@@ -26,6 +26,19 @@ struct MishearingHintTests {
         #expect(hints.first?.term == "Kryten")
     }
 
+    @Test func anOrdinaryWordThatOnlyLooselyMatchesIsNotPointedOut() {
+        #expect(MishearingHint.find(heard: "I just want to check", dictionary: ["Ghostty"], stages: []).isEmpty)
+        #expect(MishearingHint.find(heard: "what does it cost", dictionary: ["Ghostty"], stages: []).isEmpty)
+        #expect(MishearingHint.find(heard: "we should be able to", dictionary: ["Fable"], stages: []).isEmpty)
+    }
+
+    @Test func aCloseSoundAlikeIsStillPointedOut() {
+        #expect(MishearingHint.find(heard: "open Ghost TTY please", dictionary: ["Ghostty"], stages: [])
+            == [MishearingHint.Hint(phrase: "Ghost TTY", term: "Ghostty")])
+        #expect(MishearingHint.find(heard: "ask the herder", dictionary: ["herdr"], stages: [])
+            == [MishearingHint.Hint(phrase: "herder", term: "herdr")])
+    }
+
     @Test func nothingIsPointedOutWithAnEmptyDictionary() {
         #expect(MishearingHint.find(heard: "Cryden", dictionary: [], stages: []).isEmpty)
     }

@@ -517,6 +517,7 @@ enum AccessibilityID {
         static let list = "history.list"
         static func row(_ id: String) -> String { "history.list.row.\(id)" }
         static let search = "history.search"
+        static let clearSearch = "history.action.clearSearch"
         static let export = "history.action.export"
         static let rewriteAgain = "history.action.rewriteAgain"
         static let copyUnsavedRewrite = "history.action.copyUnsavedRewrite"
@@ -533,6 +534,8 @@ enum AccessibilityID {
         static let receivedDisclosure = "history.detail.receivedDisclosure"
         static let copyResult = "history.action.copyResult"
         static let copyReply = "history.action.copyReply"
+        static let playReply = "history.action.playReply"
+        static let playbackDetails = "history.detail.playbackDetails"
         static let readWithMacOSVoice = "history.action.readWithMacOSVoice"
         static let saveSpokenAudio = "history.action.saveSpokenAudio"
         static let playSpokenAudio = "history.action.playSpokenAudio"
@@ -703,9 +706,11 @@ enum AccessibilityID {
         FirstRun.AI.connectionEditor, FirstRun.AI.connect, FirstRun.AI.skip, FirstRun.AI.offerConnect,
         FirstRun.Playground.field, FirstRun.Playground.next, FirstRun.Playground.done,
         HUD.panel, HUD.insertWithoutRewriting, HUD.pasteLast, HUD.repairAction, HUD.helpClose,
-        History.list, History.search, History.export, History.stagePicker, History.comparisonPicker, History.whatHappened, History.actionOutcome, History.rewriteComparison,
+        History.list, History.search, History.clearSearch, History.export, History.stagePicker, History.comparisonPicker, History.whatHappened, History.actionOutcome, History.rewriteComparison,
         History.promptDisclosure, History.receivedDisclosure, History.copyResult, History.copyReply, History.pasteResult, History.copyHeard, History.delete,
         History.rewriteAgain, History.copyUnsavedRewrite, History.mishearingHint,
+        History.spokenReply, History.fullSummary, History.playReply, History.playbackDetails,
+        History.readWithMacOSVoice, History.playSpokenAudio, History.saveSpokenAudio,
         History.manageVocabulary, History.createReplacement, History.addToDictionary,
         History.retentionConfirm, History.retentionCancel,
         History.ReplacementSheet.source, History.ReplacementSheet.replace, History.ReplacementSheet.save,

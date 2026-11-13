@@ -2390,7 +2390,12 @@ immediately without confirmation.
 
 ### List view
 
-The list is grouped by day and supports search over locally stored text. Each row contains:
+The list is grouped by day and supports search over locally stored text. Without a search it shows the newest
+dictations up to the list's load limit (`HistoryPaneModel.loadLimit`) and, when it reaches it, says so beneath the stats
+line and that search finds older ones, since search reads everything stored. While a search is active the footer shows
+the number of matches in place of the stats, a clear button (**Clear Search**) sits at the end of the search field,
+and the export menu reads **Export Matches…** (off
+when nothing matches); without one it reads **Export All…**. Each row contains:
 
 - final inserted text preview — or, when nothing was inserted (an edit-in-place take stopped by the
   recording limit), what was heard, in secondary text, so the entry the error pointed to is
@@ -2412,14 +2417,23 @@ Heard → Transformed → Result
 ```
 
 It shows the mode, insertion outcome, correction actions, and a `Result` view with a separate
-`Details` view for processing details.
+`Details` view for processing details. The comparison names its result by what happened to it (**Inserted**,
+**Copied**, or a neutral **Result** for anything else), never **Inserted** for text that was not inserted, and drops
+its own heading when the stage picker already names it. A failed dictation or voice command does not show a
+comparison: its Result view leads with why it failed, in large red type (the recorded reason, or the outcome when none
+was recorded), then what was heard, and the result only when there is one.
 section. Details reveal the exact connection/model when used, where its reasoning setting landed
-(**Reasoning**, the same words as the connection test), whether best-effort redaction was
-enabled, which context categories were sent, and the raw cloud exchange as sibling disclosures:
+(**Reasoning**, the same words as the connection test), and, when any field the entry recorded shows an AI service was
+used (a connection, cloud involvement, redaction, or context sent — older entries may lack the connection), whether
+best-effort redaction was enabled and which context categories were sent; an entry with none of these says **AI
+rewrite**: None — local only, and nothing more about what left the Mac, since nothing did. An older entry that
+recorded cloud use but not the connection says an AI service was used and that which one was not recorded, never
+"local only". Then the raw cloud exchange
+as sibling disclosures:
 **Show exactly what was sent** (the stored prompt) and **Show exactly what was received** (the
 provider's reply, verbatim — before any output enforcement, so model misbehavior stays visible
 rather than silently corrected). Whenever local text was kept, even if delivery later failed, the received view notes the reply was
-not used. Redaction maps are never shown or persisted.
+not used. Redaction maps are never shown or persisted; an entry that used redaction says so beneath the details.
 
 An **answer about selected text** is recorded as **Answered**, with a `Cloud answer` badge. Its detail shows
 two plain panels, **Request** (what was heard) and **Answer** (the answer as shown), with no comparison,
@@ -2472,10 +2486,10 @@ dictated joins that message's entry, and only when that entry was kept; a reply 
 the agent is an entry of its own under the Coding agent mode, reading *Reply from backend*, kept only while
 History is on and the mode is not left out of History. A notice (an approval or a wait) is not kept: a long
 session would fill History with them, and the agent's own screen already shows them. Either way a
-**Reply** section shows the line, selectable, with the conversation it came from (**From**), when it was
-given (**At**) and, for a summary, **Summarized by**
-and the service; a summary cut short also says **Summary**: Shortened, and below the playback controls a collapsed
-**Full summary** disclosure holds everything the service returned, selectable; a missing one shows **No summary** with
+**Reply** section shows the line, selectable, then **From** with the conversation it came from and when it was
+given, and, for a summary, **Summarized by**
+and the service; for a summary cut short, a caption under the line says it was shortened for reading, and a collapsed
+**Full summary** disclosure below the playback control holds everything the service returned, selectable; a missing one shows **No summary** with
 a sanitized reason (the service failed, timed out, returned nothing, or could not be used), never the service's own
 error text. Search matches both, and the text and Markdown exports carry them; the entry's badges add **Reply summary** and **Best-effort redaction**. The line is never
 offered for corrections, since it is the agent's words, not the user's. Search finds it, and the exports carry it. An entry that is only a reply is not a dictation: the History stats, the mishearing search and its count, and
@@ -2483,22 +2497,29 @@ the diagnostics report leave it out, and its export has no Result line. Its acti
 place of Copy Result and has no Copy Report. A dictation with a reply joined to it offers **Copy Reply** beside
 Copy Result, and its **Copy Report** says it includes the reply.
 
-The **Reply** section also says, when a voice read the line, which one (**Read by**: Natural voice or macOS voice) and
-why the macOS voice read it (**Why**), both kept with the entry, and, while its spoken audio is held, its playback (**Playback**: Not started,
-Playing, Played to the end, Stopped before the end, or Failed). **Read with macOS Voice** reads the line again with the macOS voice
-for as long as the entry exists; while the user is dictating it reads nothing and the status line says why. Whichever
-of Read and Play is speaking turns into **Stop**; choosing another entry or closing History stops it. **Play Generated Audio** and **Save Generated Audio…** appear only while the audio is held. Play plays the exact
-audio the app generated for that reply, which for a reply the macOS voice read is the natural voice's rejected take
-(the caption says so), through the same rules as any speech (dictation stops it; while dictating it plays nothing and the
-status line says why), and records nothing. It is disabled while that reply is still being read aloud, and a player
-that refuses the audio says "Couldn't play the generated audio." rather than showing Stop.
+The **Reply** section has one playback control, **Play**, which replays what the user heard: while the natural
+voice's audio for that reply is held, the exact audio the app generated; otherwise, including when the macOS voice
+read the reply, the macOS voice reads the line again, for as long as the entry exists. A caption beside it says which:
+"Original audio · kept until 4:12 PM at most" while the audio is held (the hour is an upper bound, since older audio
+can be dropped sooner), or, for a reply the natural voice read, that the original audio is gone and Play uses the
+macOS voice. Play turns into **Stop** while anything from this section is speaking; choosing another entry or closing
+History stops it. Playback goes through the same rules as any speech (dictation stops it; while dictating it plays
+nothing and the status line says why) and records nothing. Play is disabled while the held audio is still being read
+aloud, and a player that refuses the audio says "Couldn't play the generated audio." rather than showing Stop.
+
+Everything else about the playback is for troubleshooting a reply that sounded wrong, so it sits in a collapsed
+**Playback details** disclosure: which voice read the line (**Read by**: Natural voice or macOS voice) and why the
+macOS voice read it (**Why**), both kept with the entry; while its audio is held, its playback (**Playback**: Not
+started, Playing, Played to the end, Stopped before the end, or Failed); and the actions Play does not cover, each
+disabled while something is speaking. **Read with macOS Voice** appears when Play would replay the original audio.
+**Play Generated Audio** appears for a reply the macOS voice read while the natural voice's rejected take is held,
+and a caption says it is that rejected take. **Save Generated Audio…** appears only while the audio is held.
 Save asks for a folder, then writes the audio and a report (the text read, the voice and its details, how playback
 ended) there as two files named for when the reply was read, in local time, numbering the name ("… 2") rather than
 replacing a file already there; if either write fails it removes what it wrote, so a retry starts clean. It then
-selects the audio in Finder, says so in the status line, and sends nothing anywhere. A caption under the
-buttons says the audio is kept for an hour while the app is running; once it is gone, a reply the natural voice
-read says "The original audio is no longer available." and the save action is not offered, since making the
-audio again would not be the audio that played.
+selects the audio in Finder, says so in the status line, and sends nothing anywhere. Once the audio is gone, save is
+not offered, since making the audio again would not be the audio that played. The disclosure is absent when there is
+nothing to put in it (a reply shown as text only).
 
 A dictation in which live edits ran, including a Coding agent message (beside its recipient lines), adds a
 **What happened** row, **Spoken edits**, with the same words as the completion HUD (“new line ×2, scratch that”), so the user can tell afterwards whether a spoken edit fired.
@@ -2507,14 +2528,21 @@ Under the comparison of a dictation (not a command or a Coding agent message), a
 mishearing of a dictionary word that applied to it and that no rule or near match already fixes:
 **“Cryden” may be “Kryten”**, with **Review Mishearings…**, which opens the **Mishearings of “Kryten”**
 sheet in the scope the word lives in (Global, or the mode whose own dictionary holds it). One line per
-word, its likeliest spelling. It uses the History finder's scoring on that one dictation, so a common
-word that sounds like a name can be named too; the user judges it, and nothing is changed or sent anywhere.
+word, its likeliest spelling. It uses the History finder's scoring on that one dictation but, because nobody asked
+for it, only a close match is named (`MishearingHint.minimumScore`, stricter than the finder's own threshold): as
+measured on 2026-11-12 over 224 dictations and a 29-word dictionary, real mishearings scored 0.9 and up while the
+highest-scoring ordinary word ("be able" for "Fable") scored 0.82. The Mishearings sheet keeps the finder's broader
+discovery. The user judges a hint, and nothing is changed or sent anywhere.
 The line goes away once a rule fixes the phrase.
 
 Correction actions are directly beside the relevant text:
 
 - **Add to Dictionary** for a term that should be recognized as written.
 - **Create Replacement** for a repeated heard-to-intended correction.
+
+Both sheets name where the correction is saved: the global vocabulary for a dictation, the Voice Commands mode's for
+a command. A sheet opened with nothing selected does not flag the empty field until the user edits it, and Return
+performs whichever action the sheet's default button shows.
 
 Reuse actions (**Copy Result**, **Paste Result**, **Copy Heard**) lead an action row at the top of the
 detail. On a dictation whose rewrite fell back or was skipped (not a Coding agent message, which was
@@ -2528,7 +2556,8 @@ cannot run (the mode is gone or has no AI service, the dictation inserted the cl
 whole dictation) or the service fails again, the entry is unchanged and the status line says why. If the
 dictation was deleted meanwhile, the rewrite is dropped and the status line says so; if History could not
 save it, **Copy Rewrite** appears beside the other actions so the text is never lost and the clipboard is
-changed only when the user asks.
+changed only when the user asks. An entry that is only a reply offers no corrections, since it holds no words of the
+user's, and its delete action reads **Delete Reply** ("Delete this reply?").
 **Copy Report** follows, which copies that one dictation for a bug report: every field the
 entry recorded, including what was said, the request sent to an AI service and its reply, plus the install
 summary Copy Diagnostics produces. Nothing is redacted. The report's first lines, the button's help, and

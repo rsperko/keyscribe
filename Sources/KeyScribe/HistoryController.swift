@@ -64,6 +64,9 @@ final class HistoryPaneModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var statusMessage: String?
     @Published private(set) var statsLine: String?
+    @Published private(set) var matchCount: Int?
+    var listIsCapped: Bool { rows.count >= Self.loadLimit }
+    static var loadLimitText: String { Self.loadLimit.formatted() }
     @Published private(set) var hasStoredHistory = false
 
     private static let loadLimit = 1000
@@ -170,6 +173,7 @@ final class HistoryPaneModel: ObservableObject {
         rewritingAgain = false
         unsavedRewrite = nil
         statsLine = nil
+        matchCount = nil
         statusMessage = nil
         isLoading = false
     }
@@ -266,6 +270,7 @@ final class HistoryPaneModel: ObservableObject {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             applyFilteredRows(rows, generation: generation)
+            matchCount = nil
             return
         }
         let store = self.store
@@ -283,7 +288,7 @@ final class HistoryPaneModel: ObservableObject {
                 .filter { HistorySearch.matches($0, query: trimmed) }
                 .map { HistoryRow(entry: $0, day: Self.dayFormatter.string(from: $0.timestamp)) }
             if Task.isCancelled { return }
-            await self?.applyFilteredRows(filtered, generation: generation)
+            await self?.applySearchMatches(filtered, generation: generation)
         }
     }
 
@@ -291,6 +296,14 @@ final class HistoryPaneModel: ObservableObject {
         guard generation == loadGeneration else { return }
         searchCache = (signature, entries)
     }
+
+    private func applySearchMatches(_ filtered: [HistoryRow], generation: Int) {
+        guard generation == loadGeneration else { return }
+        applyFilteredRows(filtered, generation: generation)
+        matchCount = filtered.count
+    }
+
+    func clearSearch() { query = "" }
 
     private func applyFilteredRows(_ filtered: [HistoryRow], generation: Int) {
         guard generation == loadGeneration else { return }
@@ -361,6 +374,17 @@ final class HistoryPaneModel: ObservableObject {
     }
 
     var canPlaySpokenAudio: Bool { selectedSpokenAudio.map { $0.playback != .playing } ?? false }
+
+    var playsOriginalAudio: Bool { selectedSpokenAudio.map { $0.reader != .macOS } ?? false }
+
+    var originalAudioExpires: Date? {
+        guard playsOriginalAudio, let held = selectedSpokenAudio else { return nil }
+        return held.at.addingTimeInterval(SpokenAttemptLog.keptFor)
+    }
+
+    func playReply() {
+        if playsOriginalAudio { playSpokenAudio() } else { readReplyWithMacOSVoice() }
+    }
 
     func stopSpeaking() {
         stopHistorySpeech?()
@@ -519,7 +543,11 @@ final class HistoryPaneModel: ObservableObject {
 
     var voiceCommandsEnabled: () -> Bool = { true }
     var correctsCommands: Bool { selected?.outcome.isCommand == true }
-    var canCorrect: Bool { !correctsCommands || voiceCommandsEnabled() }
+    var canCorrect: Bool { selected?.isSpokenReplyOnly != true && (!correctsCommands || voiceCommandsEnabled()) }
+    var correctionAudience: String {
+        correctsCommands ? "future voice commands in the Voice Commands mode" : "future dictations in every mode that uses replacements"
+    }
+    var correctionDictionaryName: String { correctsCommands ? "the Voice Commands dictionary" : "your global dictionary" }
     private var correctionScope: CorrectionDestination.Scope { correctsCommands ? .mode(Mode.voiceCommandsId) : .global }
 
     func addDictionaryWord(_ word: String) -> ConfigRepository.AddResult { canCorrect ? saveWord(word, correctionScope) : .failed }
@@ -768,6 +796,14 @@ struct HistoryPaneView: View {
                 .multilineTextAlignment(.leading)
                 .textFieldStyle(.plain)
                 .accessibilityIdentifier(AccessibilityID.History.search)
+            if !model.query.isEmpty {
+                Button { model.clearSearch() } label: { Image(systemName: "xmark.circle.fill") }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Clear Search")
+                    .accessibilityLabel("Clear Search")
+                    .accessibilityIdentifier(AccessibilityID.History.clearSearch)
+            }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
     }
@@ -829,7 +865,10 @@ struct HistoryPaneView: View {
         VStack(spacing: 0) {
             if model.hasEntries {
                 HStack(spacing: 8) {
-                    if let line = model.statsLine {
+                    if let matches = model.matchCount {
+                        Text("\(matches) match\(matches == 1 ? "" : "es")").font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(1).fixedSize()
+                    } else if let line = model.statsLine {
                         Text(line).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer()
@@ -838,14 +877,21 @@ struct HistoryPaneView: View {
                         Button("Plain text (.txt)") { model.export(format: .text) }
                         Button("JSON (.jsonl)") { model.export(format: .json) }
                     } label: {
-                        Label("Export Results…", systemImage: "square.and.arrow.up")
+                        Label(model.matchCount == nil ? "Export All\u{2026}" : "Export Matches\u{2026}", systemImage: "square.and.arrow.up")
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
+                    .disabled(model.matchCount == 0)
                     .accessibilityIdentifier(AccessibilityID.History.export)
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
+                if model.matchCount == nil, model.listIsCapped {
+                    Text("Showing the latest \(HistoryPaneModel.loadLimitText). Search to find older dictations.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10).padding(.bottom, 6)
+                }
                 Divider()
             }
             storageTruth
@@ -906,6 +952,7 @@ private struct HistoryDetailView: View {
     @State private var promptExpanded = false
     @State private var rewriteComparisonExpanded = false
     @State private var fullSummaryExpanded = false
+    @State private var playbackDetailsExpanded = false
     @State private var receivedExpanded = false
     @State private var confirmingDelete = false
 
@@ -933,12 +980,12 @@ private struct HistoryDetailView: View {
         }
         .padding(24)
         .confirmationDialog(
-            "Delete this dictation?", isPresented: $confirmingDelete, titleVisibility: .visible
+            entry.isSpokenReplyOnly ? "Delete this reply?" : "Delete this dictation?", isPresented: $confirmingDelete, titleVisibility: .visible
         ) {
             Button("Delete", role: .destructive) { model.deleteSelected() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This dictation will be removed from local history. This cannot be undone.")
+            Text("This \(entry.isSpokenReplyOnly ? "reply" : "dictation") will be removed from local history. This cannot be undone.")
         }
         .onChange(of: stage) {
             selectedText = ""
@@ -952,10 +999,10 @@ private struct HistoryDetailView: View {
             selectedRole = nil
         }
         .sheet(isPresented: $showReplacementSheet) {
-            CreateReplacementSheet(initialSource: replacementSource, onSave: model.saveReplacement)
+            CreateReplacementSheet(initialSource: replacementSource, audience: model.correctionAudience, onSave: model.saveReplacement)
         }
         .sheet(isPresented: $showDictionarySheet, onDismiss: { model.dictionarySheetDidClose() }) {
-            AddToDictionarySheet(initialTerm: dictionarySource, analyze: { proposal in
+            AddToDictionarySheet(initialTerm: dictionarySource, audience: model.correctionAudience, dictionaryName: model.correctionDictionaryName, analyze: { proposal in
                 guard case let .word(word) = proposal else {
                     return VocabularyAnalysis(action: .addWord)
                 }
@@ -986,6 +1033,14 @@ private struct HistoryDetailView: View {
                 plainPane("Request", role: .heard, text: entry.heard)
                 mishearingHints
                 plainPane("Answer", role: .result, text: entry.result)
+            } else if let failure = failureExplanation(entry) {
+                IssueText(failure, font: .title3)
+                    .accessibilityIdentifier(AccessibilityID.History.actionOutcome)
+                if !entry.heard.isEmpty { plainPane("Heard", role: .heard, text: entry.heard) }
+                mishearingHints
+                if !entry.result.isEmpty, entry.result != entry.heard {
+                    plainPane(resultTitle, role: .result, text: entry.result)
+                }
             } else {
                 comparison
                 mishearingHints
@@ -1004,10 +1059,9 @@ private struct HistoryDetailView: View {
             }
             if let reply = entry.spokenReply { readAloud(reply) }
             if entry.summary != nil, entry.cloudInvolved {
-                DisclosureSection("Compare with the AI rewrite", isExpanded: $rewriteComparisonExpanded) {
+                DisclosureSection("Compare with the AI rewrite", isExpanded: $rewriteComparisonExpanded, headerID: AccessibilityID.History.rewriteComparison) {
                     comparison
                 }
-                .accessibilityIdentifier(AccessibilityID.History.rewriteComparison)
             }
         }
     }
@@ -1021,7 +1075,7 @@ private struct HistoryDetailView: View {
             .labelsHidden()
             .accessibilityIdentifier(AccessibilityID.History.comparisonPicker)
         }
-        ComparisonSectionView(section: selectedComparisonSection, onSelect: selectComparisonText)
+        ComparisonSectionView(section: selectedComparisonSection, showsTitle: comparisonStages.count <= 1, onSelect: selectComparisonText)
     }
 
     private func readAloud(_ reply: HistoryEntry.SpokenReply) -> some View {
@@ -1030,68 +1084,95 @@ private struct HistoryDetailView: View {
             Text(reply.text)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            detailRow("From", reply.conversation)
-            detailRow("At", reply.at.formatted(date: .omitted, time: .standard))
+            if reply.returned != nil {
+                Text("Shortened for reading \u{00B7} the full summary is below")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            detailRow("From", "\(reply.conversation) \u{00B7} \(reply.at.formatted(date: .omitted, time: .shortened))")
             if let connection = reply.connection { detailRow("Summarized by", connection) }
             if let failure = reply.failure { detailRow("No summary", failure) }
-            if reply.returned != nil { detailRow("Summary", "Shortened: it ran too long to read in full.") }
-            spokenAudio(reply)
+            playControl(reply)
             if let returned = reply.returned {
-                DisclosureSection("Full summary", isExpanded: $fullSummaryExpanded) {
+                DisclosureSection("Full summary", isExpanded: $fullSummaryExpanded, headerID: AccessibilityID.History.fullSummary) {
                     Text(returned)
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .accessibilityIdentifier(AccessibilityID.History.fullSummary)
+            }
+            if hasPlaybackDetails(reply) {
+                DisclosureSection("Playback details", isExpanded: $playbackDetailsExpanded, headerID: AccessibilityID.History.playbackDetails) {
+                    playbackDetails(reply)
+                }
             }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.History.spokenReply)
     }
 
-    @ViewBuilder private func spokenAudio(_ reply: HistoryEntry.SpokenReply) -> some View {
-        let attempt = model.selectedSpokenAttempt
-        if let reader = reply.voice.flatMap(SpokenAttempt.Reader.init(rawValue:)) {
-            detailRow("Read by", reader.label.prefix(1).uppercased() + reader.label.dropFirst())
-        }
-        if let reason = reply.reason ?? attempt?.macOSReason { detailRow("Why", reason.prefix(1).uppercased() + reason.dropFirst()) }
-        if let attempt { detailRow("Playback", Self.playback(attempt.playback)) }
+    private func playControl(_ reply: HistoryEntry.SpokenReply) -> some View {
         HStack(spacing: 8) {
-            if model.speaking == .macOSVoice {
-                Button("Stop") { model.stopSpeaking() }
-                    .accessibilityIdentifier(AccessibilityID.History.readWithMacOSVoice)
+            if model.speaking != nil {
+                Button { model.stopSpeaking() } label: { Label("Stop", systemImage: "stop.fill") }
+                    .accessibilityIdentifier(AccessibilityID.History.playReply)
             } else {
-                Button("Read with macOS Voice") { model.readReplyWithMacOSVoice() }
-                    .accessibilityIdentifier(AccessibilityID.History.readWithMacOSVoice)
+                let busy = model.playsOriginalAudio && !model.canPlaySpokenAudio
+                Button { model.playReply() } label: { Label("Play", systemImage: "play.fill") }
+                    .disabled(busy)
+                    .help(busy ? "This reply is still being read aloud." : "")
+                    .accessibilityIdentifier(AccessibilityID.History.playReply)
             }
-            if model.selectedSpokenAudio != nil {
-                if model.speaking == .audio {
-                    Button("Stop") { model.stopSpeaking() }
-                        .accessibilityIdentifier(AccessibilityID.History.playSpokenAudio)
-                } else {
-                    Button("Play Generated Audio") { model.playSpokenAudio() }
-                        .disabled(!model.canPlaySpokenAudio)
-                        .help(model.canPlaySpokenAudio ? "" : "This reply is still being read aloud.")
-                        .accessibilityIdentifier(AccessibilityID.History.playSpokenAudio)
-                }
-                Button("Save Generated Audio\u{2026}") { model.saveSpokenAudio() }
-                    .accessibilityIdentifier(AccessibilityID.History.saveSpokenAudio)
+            if let caption = playCaption(reply) {
+                Text(caption).font(.caption).foregroundStyle(.secondary)
             }
-        }
-        if let held = model.selectedSpokenAudio {
-            Text(Self.heldAudioCaption(held))
-                .font(.caption).foregroundStyle(.secondary)
-        } else if reply.voice.flatMap(SpokenAttempt.Reader.init(rawValue:)) == .natural {
-            Text("The original audio is no longer available.").font(.caption).foregroundStyle(.secondary)
         }
     }
 
-    private static func heldAudioCaption(_ held: SpokenAttempt) -> String {
-        let kept = "The audio \(Branding.appName) generated for this reply is kept for an hour while \(Branding.appName) is running."
-        guard held.reader != .macOS else {
-            return kept + " It is the natural voice\u{2019}s audio that was not played; the macOS voice read the reply."
+    private func playCaption(_ reply: HistoryEntry.SpokenReply) -> String? {
+        if let expires = model.originalAudioExpires {
+            return "Original audio \u{00B7} kept until \(expires.formatted(date: .omitted, time: .shortened)) at most"
         }
-        return kept + " Play it to hear the audio \(Branding.appName) generated, or save it to report a reply that sounded wrong."
+        guard Self.reader(reply) == .natural else { return nil }
+        return "The original audio is gone \u{00B7} plays with the macOS voice"
+    }
+
+    private static func reader(_ reply: HistoryEntry.SpokenReply) -> SpokenAttempt.Reader? {
+        reply.voice.flatMap(SpokenAttempt.Reader.init(rawValue:))
+    }
+
+    private func hasPlaybackDetails(_ reply: HistoryEntry.SpokenReply) -> Bool {
+        Self.reader(reply) != nil || reply.reason != nil || model.selectedSpokenAttempt != nil
+    }
+
+    @ViewBuilder private func playbackDetails(_ reply: HistoryEntry.SpokenReply) -> some View {
+        let attempt = model.selectedSpokenAttempt
+        VStack(alignment: .leading, spacing: 8) {
+            if let reader = Self.reader(reply) {
+                detailRow("Read by", reader.label.prefix(1).uppercased() + reader.label.dropFirst())
+            }
+            if let reason = reply.reason ?? attempt?.macOSReason { detailRow("Why", reason.prefix(1).uppercased() + reason.dropFirst()) }
+            if let attempt { detailRow("Playback", Self.playback(attempt.playback)) }
+            WrapLayout(spacing: 8) {
+                if model.playsOriginalAudio {
+                    Button("Read with macOS Voice") { model.readReplyWithMacOSVoice() }
+                        .disabled(model.speaking != nil)
+                        .accessibilityIdentifier(AccessibilityID.History.readWithMacOSVoice)
+                } else if model.selectedSpokenAudio != nil {
+                    Button("Play Generated Audio") { model.playSpokenAudio() }
+                        .disabled(model.speaking != nil || !model.canPlaySpokenAudio)
+                        .accessibilityIdentifier(AccessibilityID.History.playSpokenAudio)
+                }
+                if model.selectedSpokenAudio != nil {
+                    Button("Save Generated Audio\u{2026}") { model.saveSpokenAudio() }
+                        .accessibilityIdentifier(AccessibilityID.History.saveSpokenAudio)
+                }
+            }
+            if let held = model.selectedSpokenAudio {
+                Text(held.reader == .macOS
+                    ? "The generated audio is the natural voice\u{2019}s take that was not played; the macOS voice read the reply. Save it to report a reply that sounded wrong."
+                    : "Save the generated audio to report a reply that sounded wrong.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
     }
 
     private static func playback(_ playback: SpokenAttempt.Playback) -> String {
@@ -1175,10 +1256,7 @@ private struct HistoryDetailView: View {
         }
     }
 
-    private var resultTitle: String {
-        if entry.outcome.isCommand { return "Command" }
-        return entry.summary == nil && entry.outcome != .rewrittenLater ? "Inserted" : "Result"
-    }
+    private var resultTitle: String { comparisonResultTitle(entry) }
 
     private var rewriteContext: String {
         if let connection = entry.connection {
@@ -1269,7 +1347,7 @@ private struct HistoryDetailView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2, reservesSpace: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            PaneDeleteButton(title: "Delete Dictation") { confirmingDelete = true }
+            PaneDeleteButton(title: deleteTitle(entry)) { confirmingDelete = true }
                 .disabled(model.rewritingAgain)
                 .accessibilityIdentifier(AccessibilityID.History.delete)
         }
@@ -1318,7 +1396,7 @@ private struct HistoryDetailView: View {
                     reason: entry.modeChoice, routedPhrase: entry.routedPhrase, triggerDisplay: entry.triggerKey) {
                     detailRow("How chosen", howChosen)
                 }
-                detailRow(entry.outcome == .answered ? "AI answer" : "AI rewrite", rewriteSummary)
+                detailRow(entry.outcome == .answered ? "AI answer" : "AI rewrite", serviceSummary(entry))
                 if let reasoning = entry.reasoning {
                     detailRow("Reasoning", reasoning)
                 }
@@ -1334,21 +1412,24 @@ private struct HistoryDetailView: View {
                 if let reported = entry.reported {
                     detailRow("Reported", reported)
                 }
-                detailRow("Best-effort redaction", entry.redaction ? "Applied" : "Not applied")
+                if showsServiceDetails(entry) {
+                    detailRow("Best-effort redaction", entry.redaction ? "Applied" : "Not applied")
+                }
                 detailRow("Speech", entry.engine.map { "On-device · \($0)" } ?? "On-device")
                 if let device = entry.device {
                     detailRow("Input device", device)
                 }
-                detailRow("Context sent", entry.contextLabels.isEmpty ? "None" : entry.contextLabels.joined(separator: ", "))
+                if showsServiceDetails(entry) {
+                    detailRow("Context sent", entry.contextLabels.isEmpty ? "None" : entry.contextLabels.joined(separator: ", "))
+                }
             }
             if let prompt = entry.prompt {
-                DisclosureSection("Show exactly what was sent", isExpanded: $promptExpanded) {
+                DisclosureSection("Show exactly what was sent", isExpanded: $promptExpanded, headerID: AccessibilityID.History.promptDisclosure) {
                     rawExchangeText(prompt)
                 }
-                .accessibilityIdentifier(AccessibilityID.History.promptDisclosure)
             }
             if let received = entry.received {
-                DisclosureSection("Show exactly what was received", isExpanded: $receivedExpanded) {
+                DisclosureSection("Show exactly what was received", isExpanded: $receivedExpanded, headerID: AccessibilityID.History.receivedDisclosure) {
                     VStack(alignment: .leading, spacing: 6) {
                         if showsUnusedReplyNote(entry) {
                             Text("This reply was not used — your local text was kept.")
@@ -1357,18 +1438,14 @@ private struct HistoryDetailView: View {
                         rawExchangeText(received)
                     }
                 }
-                .accessibilityIdentifier(AccessibilityID.History.receivedDisclosure)
             }
-            Text("Redaction maps are never shown or stored.")
-                .font(.caption2).foregroundStyle(.secondary)
+            if entry.redaction {
+                Text("Redaction maps are never shown or stored.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
 
-    private var rewriteSummary: String {
-        guard let connection = entry.connection else { return "None — local only" }
-        let where_ = entry.cloudInvolved ? "cloud" : "local"
-        return connection + (entry.model.map { " · \($0)" } ?? "") + " · \(where_)"
-    }
 
     private func rawExchangeText(_ text: String) -> some View {
         Text(text)
@@ -1390,6 +1467,37 @@ private struct HistoryDetailView: View {
 func whyLocalWasKept(_ entry: HistoryEntry) -> String? {
     if let skipped = entry.rewriteSkippedMs { return HUDState.skippedLine(Double(skipped) / 1000) }
     return entry.keptLocalText ? entry.fallbackReason : nil
+}
+
+func comparisonResultTitle(_ entry: HistoryEntry) -> String {
+    if entry.outcome.isCommand { return "Command" }
+    guard entry.summary == nil else { return "Result" }
+    return switch entry.outcome {
+    case .inserted, .localFallback: "Inserted"
+    case .copied: "Copied"
+    default: "Result"
+    }
+}
+
+func failureExplanation(_ entry: HistoryEntry) -> String? {
+    guard entry.outcome == .failed || entry.outcome == .commandFailed else { return nil }
+    return entry.failureReason ?? outcomeLabel(entry)
+}
+
+func showsServiceDetails(_ entry: HistoryEntry) -> Bool {
+    entry.connection != nil || entry.cloudInvolved || entry.redaction || !entry.contextLabels.isEmpty
+}
+
+func serviceSummary(_ entry: HistoryEntry) -> String {
+    guard let connection = entry.connection else {
+        guard showsServiceDetails(entry) else { return "None \u{2014} local only" }
+        return entry.cloudInvolved ? "An AI service \u{00B7} cloud (not recorded which)" : "An AI service (not recorded which)"
+    }
+    return connection + (entry.model.map { " \u{00B7} \($0)" } ?? "") + " \u{00B7} \(entry.cloudInvolved ? "cloud" : "local")"
+}
+
+func deleteTitle(_ entry: HistoryEntry) -> String {
+    entry.isSpokenReplyOnly ? "Delete Reply" : "Delete Dictation"
 }
 
 func showsUnusedReplyNote(_ entry: HistoryEntry) -> Bool {

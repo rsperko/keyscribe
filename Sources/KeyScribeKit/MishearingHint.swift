@@ -25,6 +25,8 @@ public enum MishearingHint {
         }
     }
 
+    public static let minimumScore = 0.85
+
     public static func find(heard: String, dictionary: [String], stages: [any PipelineStage]) -> [Hint] {
         let texts = [heard]
         var scored: [(hint: Hint, score: Double)] = []
@@ -33,7 +35,7 @@ public enum MishearingHint {
             let findings = AliasDiscovery.find(target: term, in: texts, dictionary: dictionary)
             guard !findings.isEmpty else { continue }
             let open = AliasDiscovery.separatingHandled(findings, in: texts, target: term, stages: { _ in stages }).open
-            guard let best = open.first, let occurrence = best.occurrences.first else { continue }
+            guard let best = open.first, best.score >= minimumScore, let occurrence = best.occurrences.first else { continue }
             scored.append((Hint(phrase: String(heard[occurrence.range]), term: term), best.score))
         }
         return scored.sorted { $0.score > $1.score }.map(\.hint)

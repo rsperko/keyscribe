@@ -4,17 +4,20 @@ import SwiftUI
 
 struct CreateReplacementSheet: View {
     let initialSource: String
+    let audience: String
     let onSave: (String, String) -> String?
     @Environment(\.dismiss) private var dismiss
     @State private var source: String
+    @State private var sourceEdited = false
     @State private var replace = ""
     @State private var saveFailure: String?
     @FocusState private var focus: Field?
 
     private enum Field { case source, replace }
 
-    init(initialSource: String, onSave: @escaping (String, String) -> String?) {
+    init(initialSource: String, audience: String, onSave: @escaping (String, String) -> String?) {
         self.initialSource = initialSource
+        self.audience = audience
         self.onSave = onSave
         _source = State(initialValue: initialSource)
     }
@@ -39,7 +42,7 @@ struct CreateReplacementSheet: View {
                     .textFieldStyle(.roundedBorder).focused($focus, equals: .source).onSubmit { save() }
                     .accessibilityIdentifier(AccessibilityID.History.ReplacementSheet.source)
             }
-            if let sourceIssue { IssueText(sourceIssue.message) }
+            if let sourceIssue, sourceEdited || !initialSource.isEmpty { IssueText(sourceIssue.message) }
             VStack(alignment: .leading, spacing: 4) {
                 Text("Replace with").font(.caption).foregroundStyle(.secondary)
                 ReplacementValueField(
@@ -58,7 +61,7 @@ struct CreateReplacementSheet: View {
             if let message = VocabularyDraftAnalysis.invisibleOnlyDescription(replace) {
                 IssueText(message, severity: .advisory)
             }
-            Text("Applies to future dictations in every mode that uses replacements.")
+            Text("Applies to \(audience).")
                 .font(.caption).foregroundStyle(.secondary)
             if let saveFailure { IssueText(saveFailure) }
             HStack {
@@ -71,6 +74,7 @@ struct CreateReplacementSheet: View {
         }
         .padding(20).frame(width: 400)
         .onAppear { if sourceTrimmed.isEmpty { focus = .source } }
+        .onChange(of: source) { sourceEdited = true }
     }
 
     private func save() {
@@ -82,21 +86,28 @@ struct CreateReplacementSheet: View {
 
 struct AddToDictionarySheet: View {
     let initialTerm: String
+    let audience: String
+    let dictionaryName: String
     let analyze: (VocabularyProposal) -> VocabularyAnalysis
     let onSave: (String, VocabularyAnalysis.Action) -> String?
     let onCorrect: (String, String) -> String?
     @Environment(\.dismiss) private var dismiss
     @State private var term: String
+    @State private var termEdited = false
     @State private var saveFailure: String?
     @FocusState private var termFocused: Bool
 
     init(
         initialTerm: String,
+        audience: String,
+        dictionaryName: String,
         analyze: @escaping (VocabularyProposal) -> VocabularyAnalysis,
         onSave: @escaping (String, VocabularyAnalysis.Action) -> String?,
         onCorrect: @escaping (String, String) -> String? = { _, _ in nil }
     ) {
         self.initialTerm = initialTerm
+        self.audience = audience
+        self.dictionaryName = dictionaryName
         self.analyze = analyze
         self.onSave = onSave
         self.onCorrect = onCorrect
@@ -117,20 +128,19 @@ struct AddToDictionarySheet: View {
                 TextField("A name, product term, or jargon", text: $term)
                     .multilineTextAlignment(.leading)
                     .textFieldStyle(.roundedBorder).focused($termFocused)
-                    .onSubmit { save() }
+                    .onSubmit { commit() }
                     .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.term)
             }
-            if case let .invalidInput(issue) = draft.validationIssue { IssueText(issue.message) }
+            if case let .invalidInput(issue) = draft.validationIssue, termEdited || !initialTerm.isEmpty { IssueText(issue.message) }
             if let feedback = draft.feedback {
                 VocabularyFeedbackView(feedback: feedback)
                     .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.status)
             }
-            let correction = VocabularyDraftAnalysis.teachableCorrection(selected: initialTerm, term: trimmed, action: draft.analysis?.action)
             if let correction {
-                Text("“\(correction.heard)” will always become “\(correction.word)” in this scope.")
+                Text("“\(correction.heard)” will always become “\(correction.word)” in \(audience).")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
-                Text("Next time you say this, \(Branding.appName) will prefer your spelling. A phrase that is always misheard the same way works better as a Replacement, which changes it exactly.")
+                Text("Saved to \(dictionaryName). Next time you say this, \(Branding.appName) will prefer your spelling. A phrase that is always misheard the same way works better as a Replacement, which changes it exactly.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             if let saveFailure { IssueText(saveFailure) }
@@ -138,14 +148,11 @@ struct AddToDictionarySheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 if let correction {
-                    Button("Correct “\(correction.heard)” to “\(correction.word)” from now on") {
-                        saveFailure = onCorrect(correction.heard, correction.word)
-                        if saveFailure == nil { dismiss() }
-                    }
+                    Button("Correct “\(correction.heard)” to “\(correction.word)” from now on") { commit() }
                     .keyboardShortcut(.defaultAction)
                     .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.correct)
                 } else {
-                    Button(draft.buttonTitle) { save() }
+                    Button(draft.buttonTitle) { commit() }
                         .keyboardShortcut(.defaultAction).disabled(!draft.canCommit)
                         .accessibilityIdentifier(AccessibilityID.History.DictionarySheet.save)
                 }
@@ -153,6 +160,21 @@ struct AddToDictionarySheet: View {
         }
         .padding(20).frame(width: 400)
         .onAppear { termFocused = true }
+        .onChange(of: term) { termEdited = true }
+    }
+
+    private var correction: (heard: String, word: String)? {
+        VocabularyDraftAnalysis.teachableCorrection(selected: initialTerm, term: trimmed, action: draft.analysis?.action)
+            .map { ($0.heard, $0.word) }
+    }
+
+    private func commit() {
+        if let correction {
+            saveFailure = onCorrect(correction.heard, correction.word)
+            if saveFailure == nil { dismiss() }
+        } else {
+            save()
+        }
     }
 
     private func save() {

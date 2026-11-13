@@ -69,6 +69,7 @@ struct HistoryPaneModelTests {
         let model = model(store)
         model.reload()
         for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(model.listIsCapped)
         model.query = "older-search-result"
         for _ in 0..<80 where !model.groups.flatMap(\.rows).contains(where: { $0.entry.result == "older-search-result" }) {
             try await Task.sleep(for: .milliseconds(25))
@@ -76,6 +77,30 @@ struct HistoryPaneModelTests {
         model.selection = model.groups.first?.rows.first?.id
         #expect(model.selected?.result == "older-search-result")
     }
+    @Test func aSearchCountsItsMatchesAndCanBeCleared() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try store.append(entry("alpha one"), today: "2026-07-10")
+        try store.append(entry("alpha two"), today: "2026-07-10")
+        try store.append(entry("beta"), today: "2026-07-10")
+        let model = model(store)
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(model.matchCount == nil)
+        #expect(!model.listIsCapped)
+        model.query = "alpha"
+        for _ in 0..<80 where model.matchCount != 2 { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(model.matchCount == 2)
+        model.query = "nothing like it"
+        for _ in 0..<80 where model.matchCount != 0 { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(model.matchCount == 0)
+        model.clearSearch()
+        for _ in 0..<80 where model.matchCount != nil { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(model.query.isEmpty)
+        #expect(model.matchCount == nil)
+        #expect(model.groups.flatMap(\.rows).count == 3)
+    }
+
     @Test func theSelectedCommandStaysSelectedWhenItFinishesLate() async throws {
         let (store, dir) = tempStore()
         defer { try? FileManager.default.removeItem(at: dir) }
@@ -194,6 +219,85 @@ struct HistoryPaneModelTests {
         refused.received = "garbled"
         #expect(whyLocalWasKept(refused) == "The reply dropped a protected token")
         #expect(showsUnusedReplyNote(refused))
+    }
+
+    @Test func theComparisonNamesWhatHappenedToTheResult() {
+        var take = entry("hello")
+        #expect(comparisonResultTitle(take) == "Inserted")
+        take.outcome = .copied
+        #expect(comparisonResultTitle(take) == "Copied")
+        take.outcome = .failed
+        #expect(comparisonResultTitle(take) == "Result")
+        take.outcome = .rewrittenLater
+        #expect(comparisonResultTitle(take) == "Result")
+        take.outcome = .commandFailed
+        #expect(comparisonResultTitle(take) == "Command")
+    }
+
+    @Test func aFailureLeadsWithWhyItFailed() {
+        var take = entry("open the thing")
+        #expect(failureExplanation(take) == nil)
+        take.outcome = .commandFailed
+        #expect(failureExplanation(take) == "Command failed")
+        take.failureReason = "No app named thing is installed."
+        #expect(failureExplanation(take) == "No app named thing is installed.")
+        take.outcome = .failed
+        #expect(failureExplanation(take) == "No app named thing is installed.")
+    }
+
+    @Test func serviceDetailsShowWheneverAnyRecordSaysAServiceWasUsed() {
+        var take = entry("hello")
+        #expect(!showsServiceDetails(take))
+        take.cloudInvolved = true
+        #expect(showsServiceDetails(take))
+        take.cloudInvolved = false
+        take.redaction = true
+        #expect(showsServiceDetails(take))
+        take.redaction = false
+        take.connection = "local"
+        #expect(showsServiceDetails(take))
+    }
+
+    @Test func theServiceSummaryNeverCallsACloudTakeLocal() {
+        var take = entry("hello")
+        #expect(serviceSummary(take) == "None — local only")
+        take.cloudInvolved = true
+        #expect(serviceSummary(take) == "An AI service · cloud (not recorded which)")
+        take.connection = "fast"
+        take.model = "flash"
+        #expect(serviceSummary(take) == "fast · flash · cloud")
+        take.cloudInvolved = false
+        #expect(serviceSummary(take) == "fast · flash · local")
+        take.connection = nil
+        take.redaction = true
+        #expect(serviceSummary(take) == "An AI service (not recorded which)")
+    }
+
+    @Test func aReplyIsDeletedAsAReply() {
+        let reply = AgentHistoryFacts.spokenReplyEntry(
+            id: "r1", mode: "Coding agent",
+            reply: .init(at: Date(timeIntervalSince1970: 1_700_000_000), conversation: "docs", text: "docs: Done."))
+        #expect(deleteTitle(reply) == "Delete Reply")
+        #expect(deleteTitle(entry("hello")) == "Delete Dictation")
+    }
+
+    @Test func correctionsNameWhereTheyAreSaved() async throws {
+        let dictation = try await selectingOnly(entry("hello"), corrections: Corrections())
+        #expect(dictation.correctionAudience == "future dictations in every mode that uses replacements")
+        #expect(dictation.correctionDictionaryName == "your global dictionary")
+        var command = entry("open mail")
+        command.outcome = .command
+        let commands = try await selectingOnly(command, corrections: Corrections())
+        #expect(commands.correctionAudience == "future voice commands in the Voice Commands mode")
+        #expect(commands.correctionDictionaryName == "the Voice Commands dictionary")
+    }
+
+    @Test func aReplyOffersNoCorrections() async throws {
+        let reply = AgentHistoryFacts.spokenReplyEntry(
+            id: "r1", mode: "Coding agent",
+            reply: .init(at: Date(timeIntervalSince1970: 1_700_000_000), conversation: "docs", text: "docs: Done."))
+        let model = try await selectingOnly(reply, corrections: Corrections())
+        #expect(!model.canCorrect)
     }
 
     @Test func aDeliveredRewriteShowsNoLocalTextExplanation() {
@@ -517,6 +621,49 @@ struct HistoryPaneModelTests {
         #expect(!model.canPlaySpokenAudio)
         model.spokenAudio = { _ in self.holding(.finished) }
         #expect(model.canPlaySpokenAudio)
+    }
+
+    @Test func playRepeatsTheOriginalAudioWhileItIsHeld() async throws {
+        let model = try await selectingOnly(spokenReply(), corrections: Corrections())
+        let attempt = holding()
+        model.spokenAudio = { _ in attempt }
+        var played: [Data] = []
+        var read: [String] = []
+        model.playHeldAudio = { data, _ in played.append(data); return .started }
+        model.readWithMacOSVoice = { text, _ in read.append(text); return .started }
+        #expect(model.playsOriginalAudio)
+        #expect(model.originalAudioExpires == attempt.at.addingTimeInterval(SpokenAttemptLog.keptFor))
+        model.playReply()
+        #expect(played == [Data("RIFF-original".utf8)])
+        #expect(read.isEmpty)
+        #expect(model.speaking == .audio)
+    }
+
+    @Test func playReadsWithTheMacOSVoiceOnceTheOriginalAudioIsGone() async throws {
+        let model = try await selectingOnly(spokenReply(), corrections: Corrections())
+        model.spokenAudio = { _ in nil }
+        var read: [String] = []
+        model.readWithMacOSVoice = { text, _ in read.append(text); return .started }
+        #expect(!model.playsOriginalAudio)
+        #expect(model.originalAudioExpires == nil)
+        model.playReply()
+        #expect(read == ["docs: Done."])
+        #expect(model.speaking == .macOSVoice)
+    }
+
+    @Test func playReadsWithTheMacOSVoiceWhenThatIsWhatReadTheReply() async throws {
+        let model = try await selectingOnly(spokenReply(), corrections: Corrections())
+        var rejected = holding()
+        rejected.reader = .macOS
+        model.spokenAudio = { _ in rejected }
+        var played: [Data] = []
+        var read: [String] = []
+        model.playHeldAudio = { data, _ in played.append(data); return .started }
+        model.readWithMacOSVoice = { text, _ in read.append(text); return .started }
+        #expect(!model.playsOriginalAudio)
+        model.playReply()
+        #expect(read == ["docs: Done."])
+        #expect(played.isEmpty)
     }
 
     @Test func closingHistoryStopsWhatItIsPlaying() async throws {

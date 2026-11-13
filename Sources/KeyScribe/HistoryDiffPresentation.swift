@@ -90,12 +90,13 @@ enum DiffStyle {
 
 struct ComparisonSectionView: View {
     let section: ComparisonSection
+    var showsTitle = true
     let onSelect: (ComparisonTextRole, String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                Text(section.title).font(.headline)
+                if showsTitle { Text(section.title).font(.headline) }
                 Spacer()
                 Text(status(section.comparison.summary))
                     .font(.caption)
