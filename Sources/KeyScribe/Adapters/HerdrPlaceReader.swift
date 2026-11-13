@@ -7,7 +7,7 @@ struct HerdrPlaceReader: AgentPlaceReading {
             of: pid, keeping: [HerdrPlaces.socketKey, HerdrPlaces.paneKey, HerdrPlaces.executableKey])?.environment
     }
     var serverExecutable: @Sendable () -> String? = {
-        SystemTerminalFacts().processes(named: HerdrPlaces.processName)?
+        SystemTerminalFacts(environmentKeys: []).processes(named: HerdrPlaces.processName)?
             .first { $0.arguments.dropFirst().first == "server" && !$0.executable.isEmpty }?.executable
     }
     var run: @Sendable ([String]) -> (status: Int32, output: String) = { ToolCLI.run($0, timeout: 3) }

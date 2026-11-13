@@ -2,7 +2,7 @@ import Foundation
 
 extension ScriptedTerminalRoute {
     public static let ghostty = ScriptedTerminalRoute(
-        name: "Ghostty", app: "com.mitchellh.ghostty", helperPrefix: nil,
+        name: "Ghostty", apps: ["com.mitchellh.ghostty"], helperPrefix: nil,
         front: "return tty of focused terminal of selected tab of front window", body: """
         repeat with candidate in wanted
             set found to (every terminal whose tty is (contents of candidate))

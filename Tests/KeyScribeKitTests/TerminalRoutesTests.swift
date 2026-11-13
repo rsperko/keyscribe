@@ -96,6 +96,31 @@ struct TerminalRoutesTests {
         #expect(TerminalRoutes.plan(agent: 30, facts: facts) == ScriptedTerminalRoute.iterm.open(pid: 15, ttys: ["/dev/ttys021"]))
     }
 
+    @Test func aHelperProcessIsClaimedOnlyWhenItsTerminalHasOneAppBecauseOtherwiseWhichAppOwnsItIsUnknown() {
+        let helper = TerminalProcess(
+            pid: 15, parent: 1, tty: nil, arguments: ["/opt/term/TermServer-1"], environment: [:], executable: "/opt/term/TermServer-1", app: nil)
+        let single = ScriptedTerminalRoute(name: "Term", apps: ["dev.example.term"], helperPrefix: "TermServer-", front: "", body: "")
+        let twins = ScriptedTerminalRoute(
+            name: "Term", apps: ["dev.example.term", "dev.example.term-nightly"], helperPrefix: "TermServer-", front: "", body: "")
+        #expect(single.bundle(of: helper) == "dev.example.term")
+        #expect(twins.bundle(of: helper) == nil)
+        #expect(!twins.claims(helper))
+        #expect(twins.open(helper, inner: [], facts: Facts()) == nil)
+    }
+
+    @Test func iTermSessionsThatOutlivedAnITermRestartStillReadTheirPlaceNames() throws {
+        let facts = Facts()
+            .add(30, parent: 20, tty: "/dev/ttys021", ["claude"])
+            .add(20, parent: 15, tty: "/dev/ttys021", ["/usr/bin/login"])
+            .add(15, parent: 1, ["/Users/me/Library/Application Support/iTerm2/iTermServer-3.7.6", "/Users/me/iterm2-daemon-1.socket"])
+        let helper = try #require(facts.process(15))
+        let route: any TerminalRoute = try #require(ResolvedSurfaces.builtIn.terminal(named: "iTerm"))
+        #expect(route.bundle(of: helper) == "com.googlecode.iterm2")
+        #expect(route.claims(helper))
+        #expect(TerminalPlaces.walk(agent: 30, facts: facts)?.host
+            == TerminalHost(route: "iTerm", app: "com.googlecode.iterm2", pid: 15, ttys: ["/dev/ttys021"]))
+    }
+
     @Test func warpOpensTheSessionsOwnFocusURL() {
         let facts = Facts()
             .add(30, parent: 20, tty: "/dev/ttys030", ["claude"], environment: ["WARP_FOCUS_URL": "warp://session/inner"])
@@ -402,7 +427,7 @@ struct TerminalRoutesTests {
     }
 
     @Test func onlyTheEnvironmentOpenAndTheFrontCheckReadIsKept() {
-        #expect(TerminalRoutes.environmentKeys == [
+        #expect(ResolvedSurfaces.builtIn.environmentKeys == [
             "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "TMUX", "ZELLIJ_PANE_ID", "WARP_FOCUS_URL", "CMUX_SURFACE_ID",
         ])
     }

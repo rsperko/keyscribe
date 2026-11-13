@@ -335,6 +335,7 @@ enum AccessibilityID {
             static let reconnect = "mode.codingAgents.reconnect"
             static let disconnected = "mode.codingAgents.disconnected"
             static let exclusionsProblem = "mode.codingAgents.exclusionsProblem"
+            static let integrationsProblem = "mode.codingAgents.integrationsProblem"
             static let recovery = "mode.codingAgents.recovery"
             static let reloadCommand = "mode.codingAgents.reloadCommand"
             static let showConversation = "mode.codingAgents.showConversation"

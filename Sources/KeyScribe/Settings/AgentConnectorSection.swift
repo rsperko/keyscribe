@@ -6,6 +6,17 @@ struct ConnectorSetupsProblemSection: View {
     @ObservedObject var model: CodingAgentsSettingsModel
 
     var body: some View {
+        if let problem = model.integrationsProblem {
+            Section("Integrations") {
+                VStack(alignment: .leading, spacing: 8) {
+                    IssueText("Two of this build's coding agent integrations conflict, so coding agents are off.")
+                    Text(problem).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text("This is a problem in how \(Branding.appName) was built, not in your settings. Report it to whoever made this build.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.integrationsProblem)
+            }
+        }
         if let problem = model.setupsProblem {
             Section("Connectors") {
                 VStack(alignment: .leading, spacing: 8) {

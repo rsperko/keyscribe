@@ -67,6 +67,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
     @Published private(set) var disconnectedRows: [Row] = []
     @Published private(set) var exclusionsNotSaved: String?
     @Published private(set) var setupsProblem: String?
+    @Published var integrationsProblem: String?
     var onDisconnect: ((String) -> Void)?
     var onReconnect: ((String) -> Void)?
     var onShow: ((String) -> Void)?
@@ -120,7 +121,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
     var showsAgentType: Bool { Set(rows.map(\.agent)).count > 1 }
 
     var hasError: Bool {
-        namesProblem != nil || exclusionsNotSaved != nil || setupsProblem != nil
+        namesProblem != nil || exclusionsNotSaved != nil || setupsProblem != nil || integrationsProblem != nil
             || connectors.contains { $0.setups.contains(where: \.hasError) }
     }
 
@@ -170,7 +171,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
     let setups: ConnectorSetupRegistry
 
     init(
-        describeTerminal: @escaping @Sendable (Int) -> String? = TerminalDescription.describe(pid:),
+        describeTerminal: @escaping @Sendable (Int) -> String?,
         agentsDir: URL, setups: ConnectorSetupRegistry? = nil, connectors: [any AgentConnector]
     ) {
         self.describeTerminal = describeTerminal

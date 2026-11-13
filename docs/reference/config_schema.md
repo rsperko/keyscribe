@@ -295,7 +295,7 @@ a hello on any other protocol is refused with `426` and is never registered or s
   told which surface from outside (cmux, when no process shows the agent's surface id). A connector that lacks
   `focus` is reported as outdated, with the steps to update it. A hello may carry the conversation's title,
   and an `environment` map with terminal facts only the agent's own process can read (its Zellij pane);
-  KeyScribe keeps only the keys its terminal routes use (`TerminalRoutes.environmentKeys`).
+  KeyScribe keeps only the keys its terminal routes use (`ResolvedSurfaces.environmentKeys`).
 - **Every command names the session it expects**, and the connector refuses one whose session has changed.
 - **A disconnected conversation goes quiet.** KeyScribe answers the hello of a conversation listed in
   `names.json`'s `excluded` with `{"ok":true,"quiet":true}` and passes on only who it is (agent, session,

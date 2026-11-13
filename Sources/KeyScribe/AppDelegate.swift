@@ -5,7 +5,17 @@ import KeyScribeKit
 
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate {
-    public override init() { super.init() }
+    private let codingAgents: CodingAgentIntegrations
+    private lazy var surfaces: Result<ResolvedSurfaces, Error> = Result { try codingAgents.surfaces.resolve() }
+
+    public init(codingAgents: CodingAgentIntegrations = .builtIn) {
+        self.codingAgents = codingAgents
+        super.init()
+    }
+
+    private var resolvedSurfaces: ResolvedSurfaces {
+        (try? surfaces.get()) ?? (try! AgentSurfaces().resolve())
+    }
 
     private var settings = Settings.defaults
     private var savedSettings = Settings.defaults
@@ -375,8 +385,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             replacedActiveId: launchEngineId == settings.stt.engine ? nil : settings.stt.engine)
 
+        if case .failure(let error) = surfaces {
+            Log.agents.error("coding agent integrations conflict, coding agents stay off: \(String(describing: error), privacy: .public)")
+        }
         settingsController = SettingsController(
-            settings: settings, speechModels: speechModels, repository: configRepository,
+            settings: settings, speechModels: speechModels, repository: configRepository, surfaces: resolvedSurfaces,
             historyStore: history,
             onChange: { [weak self] updated in self?.applySettings(updated) },
             onReload: { [weak self] in self?.reloadConfig() },
@@ -389,6 +402,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() },
             onEraseAllData: { [weak self] in self?.eraseAllDataAndRelaunch() })
         settingsController.onErrorsChanged = { [weak self] in self?.menu.setErrorBadge($0) }
+        if case .failure(let error) = surfaces {
+            settingsController.codingAgents.integrationsProblem = CodingAgentIntegrations.describe(error)
+        }
         settingsController.codingAgents.voice = spokenVoice
         controller.spokenAttempts = spokenAttempts
         let history = settingsController.history
@@ -814,14 +830,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyCodingAgents() {
-        let enabled = settings.features.isEnabled(.codingAgents)
+        let enabled = settings.features.isEnabled(.codingAgents) && (try? surfaces.get()) != nil
         guard enabled != (agentRuntime != nil) else { return }
         if enabled {
             do {
                 let setups = settingsController.codingAgents.setups
-                let processes = AgentProcessTable()
+                let surfaces = resolvedSurfaces
+                let processes = AgentProcessTable(surfaces: surfaces)
                 let runtime = try AgentRuntime(
-                    supportDir: KeyScribePaths.supportDir,
+                    supportDir: KeyScribePaths.supportDir, surfaces: surfaces, placeSources: codingAgents.placeSources.map { $0() },
                     discovery: [ClaudeDiscovery(setups: setups, processes: processes), PiDiscovery(processes: { processes.found(.pi) })], setups: setups,
                     legacyAgent: AgentKind.claude.id)
                 runtime.hub.onNotice = { [weak self] in self?.controller.showAgentNotice($0, request: $1, conversation: $2) }
@@ -855,7 +872,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     },
                     inFront: { [weak hub = runtime.hub] id in
                         guard let candidates = hub?.frontCandidates else { return false }
-                        return await AgentFront.withoutAsking.shown(among: candidates) { _ in }?.id == id
+                        return await AgentFront.withoutAsking(surfaces).shown(among: candidates) { _ in }?.id == id
                     },
                     duck: { [weak self] in self?.lowerOtherAudio(for: "replies", $0) },
                     mayShow: { [weak self] in

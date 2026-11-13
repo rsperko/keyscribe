@@ -73,5 +73,9 @@ let package = Package(
             name: "KeyScribeTests",
             dependencies: ["KeyScribeApp", "KeyScribeKit"]
         ),
+        .testTarget(
+            name: "DownstreamSeamTests",
+            dependencies: ["KeyScribeApp", "KeyScribeKit"]
+        ),
     ]
 )

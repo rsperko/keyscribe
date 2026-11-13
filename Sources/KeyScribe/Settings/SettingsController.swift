@@ -151,7 +151,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private var rulePreviewSource: ((ReplacementPreview.Destination) -> RulePreviewModel.Source)?
 
     init(
-        settings: Settings, speechModels: SpeechModelsModel, repository: ConfigRepository,
+        settings: Settings, speechModels: SpeechModelsModel, repository: ConfigRepository, surfaces: ResolvedSurfaces,
         historyStore: HistoryStore,
         onChange: @escaping (Settings) -> Void, onReload: @escaping () -> Void,
         onResetHUDPosition: @escaping () -> Void,
@@ -180,10 +180,11 @@ final class SettingsController: NSObject, NSWindowDelegate {
         modes.setAskAboutSelectionEnabled(settings.features.isEnabled(.askAboutSelection))
         let agentsDir = AgentRuntime.bridgeDirectory(supportDir: repository.supportDir)
         codingAgents = CodingAgentsSettingsModel(
+            describeTerminal: { TerminalDescription.describe(pid: $0, surfaces: surfaces) },
             agentsDir: agentsDir, setups: ConnectorSetupRegistry(directory: agentsDir),
             connectors: [
                 ClaudeConnector(agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug),
-                PiConnector(agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug),
+                PiConnector(agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug, environmentKeys: surfaces.environmentKeys),
             ])
         modes.codingAgents = codingAgents
         codingAgents.load(spokenResult: settings.codingAgents.spokenResult)

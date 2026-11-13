@@ -61,7 +61,7 @@ struct AgentFrontTests {
         let facts = Sequence(facts)
         let reads = Sequence(Array(1...3))
         return AgentFront(
-            frontmost: { front.next() },
+            surfaces: .builtIn, frontmost: { front.next() },
             read: { app, pid, body, asking in
                 #expect(app == Self.ghostty && pid == 10 && body == ScriptedTerminalRoute.ghostty.frontScript)
                 if let asked { await asking(); asked(app) }
@@ -89,9 +89,9 @@ struct AgentFrontTests {
         facts.table[50] = TerminalProcess(
             pid: 50, parent: 40, tty: "/dev/ttys022", arguments: ["pi"], environment: ["CMUX_SURFACE_ID": "B"], executable: "pi", app: nil)
         let front = AgentFront(
-            frontmost: { cmux },
+            surfaces: .builtIn, frontmost: { cmux },
             read: { app, pid, body, _ in
-                #expect(app == "com.cmuxterm.app" && pid == 10 && body == TerminalRoutes.terminal("com.cmuxterm.app")?.frontScript)
+                #expect(app == "com.cmuxterm.app" && pid == 10 && body == ResolvedSurfaces.builtIn.terminal("com.cmuxterm.app")?.frontScript)
                 return .value("A")
             },
             facts: { facts })
@@ -128,15 +128,15 @@ struct AgentFrontTests {
         final class Count: @unchecked Sendable { var reads = 0; var fronts = 0 }
         let count = Count()
         var check = AgentFront(
-            frontmost: { count.fronts += 1; return Self.ghosttyApp },
+            surfaces: .builtIn, frontmost: { count.fronts += 1; return Self.ghosttyApp },
             read: { _, _, _, _ in count.reads += 1; return .value("/dev/ttys004") },
             facts: { Self.facts })
         check.confirming = false
         let agents = [AgentFrontCandidate(id: "a", pid: 30), AgentFrontCandidate(id: "b", pid: 40)]
         #expect(await check.shown(among: agents) == FrontSession(id: "a", app: Self.ghosttyApp))
         #expect(count.reads == 1 && count.fronts == 1)
-        #expect(AgentFront.withoutAsking.confirming == false)
-        #expect(AgentFront.confirmingWithoutAsking.confirming)
+        #expect(AgentFront.withoutAsking(.builtIn).confirming == false)
+        #expect(AgentFront.confirmingWithoutAsking(.builtIn).confirming)
     }
 
     @Test func anAgentInTheFrontTerminalTabIsShown() async {

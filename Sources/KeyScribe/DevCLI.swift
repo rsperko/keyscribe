@@ -7,7 +7,7 @@ import Synchronization
 public enum DevCLI {
     // Handles any dev/admin flag present in the process arguments and exits; returns only when the
     // invocation is a plain menu-bar app launch.
-    public static func handleFlags() {
+    public static func handleFlags(codingAgents: CodingAgentIntegrations = .builtIn) {
         // `--help` / `-h`: print the CLI surface and exit. No arguments launches the menu-bar app.
         if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-h") {
             print("""
@@ -259,8 +259,13 @@ public enum DevCLI {
         if CommandLine.arguments.contains("--front-probe") {
             let args = CommandLine.arguments
             let value = { (flag: String) in args.firstIndex(of: flag).flatMap { $0 + 1 < args.count ? Double(args[$0 + 1]) : nil } }
+            let surfaces: ResolvedSurfaces
+            do { surfaces = try codingAgents.surfaces.resolve() } catch {
+                print("coding agent integrations do not resolve: \(error)")
+                exit(1)
+            }
             Task { @MainActor in
-                exit(await FrontProbe.run(after: value("--after") ?? 0, samples: Int(value("--samples") ?? 1)))
+                exit(await FrontProbe.run(after: value("--after") ?? 0, samples: Int(value("--samples") ?? 1), surfaces: surfaces))
             }
             dispatchMain()
         }

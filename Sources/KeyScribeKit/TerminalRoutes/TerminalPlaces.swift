@@ -43,7 +43,7 @@ public struct TerminalPlaceWalk: Equatable, Sendable {
 }
 
 public enum TerminalPlaces {
-    public static func walk(agent pid: Int, facts: TerminalFacts, routes: [any Route] = TerminalRoutes.routes) -> TerminalPlaceWalk? {
+    public static func walk(agent pid: Int, facts: TerminalFacts, routes: [any Route]) -> TerminalPlaceWalk? {
         guard facts.process(pid) != nil else { return nil }
         var walk = TerminalPlaceWalk()
         var start = pid
@@ -59,10 +59,10 @@ public enum TerminalPlaces {
                         start = next
                         continue layers
                     }
-                    if let scripted = route as? ScriptedTerminalRoute, scripted.claims(process) {
-                        if scripted.placeScript != nil {
-                            walk.host = TerminalHost(route: scripted.name, app: scripted.app, pid: process.pid, ttys: TerminalRoutes.ttys(of: inner))
-                            walk.surface = walk.surface ?? scripted.name
+                    if let terminal = route as? any TerminalRoute, terminal.claims(process) {
+                        if terminal.placeScript != nil, let app = terminal.bundle(of: process) {
+                            walk.host = TerminalHost(route: terminal.name, app: app, pid: process.pid, ttys: TerminalRoutes.ttys(of: inner))
+                            walk.surface = walk.surface ?? terminal.name
                         }
                         return walk
                     }
@@ -71,17 +71,11 @@ public enum TerminalPlaces {
                         start = next
                         continue layers
                     }
-                    if claims(route, process) { return walk }
                 }
             }
             return walk
         }
         return walk
-    }
-
-    private static func claims(_ route: any Route, _ process: TerminalProcess) -> Bool {
-        guard let terminal = route as? any TerminalRoute else { return false }
-        return process.app == terminal.app
     }
 
     public static func userSet(_ text: String?, unless defaults: [String] = []) -> String? {

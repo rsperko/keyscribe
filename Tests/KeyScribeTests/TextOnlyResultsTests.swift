@@ -456,6 +456,7 @@ struct TextOnlyResultsTests {
 
     @Test func theVoicePickerOffersTextOnlyFirstAndKeepsTheNamedVoice() {
         let model = CodingAgentsSettingsModel(
+            describeTerminal: { _ in nil },
             agentsDir: FileManager.default.temporaryDirectory.appendingPathComponent("text-only-\(UUID().uuidString)"), connectors: [])
         model.load(spokenResult: SpokenResultSettings(enabled: true, voice: "bf_emma"))
         var saved: [SpokenResultSettings] = []
