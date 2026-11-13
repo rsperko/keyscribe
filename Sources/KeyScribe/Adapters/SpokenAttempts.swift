@@ -8,6 +8,7 @@ final class SpokenAttempts {
     private var entries: [String: String] = [:]
     private var awaiting: [String: Int] = [:]
     private var finished: Set<String> = []
+    private var parts: [String: (sampleRate: Int, sentences: [[Float]])] = [:]
     private let now: () -> Date
     private let wait: @Sendable (Duration) async -> Void
     private var expiry: Task<Void, Never>?
@@ -36,6 +37,22 @@ final class SpokenAttempts {
         changed()
     }
 
+    func addSegment(_ id: String?, text: String, audio: SpokenAudio) {
+        guard let id, log.attempt(id, now: now()) != nil else { return }
+        let sentences = (parts[id]?.sentences ?? []) + [audio.samples]
+        parts[id] = (audio.sampleRate, sentences)
+        update(id) {
+            if sentences.count == 1 { $0.audio = audio.wav }
+            if let synthesis = audio.synthesis { $0.segments.append(.init(text: text, synthesis: synthesis)) }
+        }
+    }
+
+    private func joinSentences(_ id: String) {
+        guard let held = parts.removeValue(forKey: id), held.sentences.count > 1,
+              let wav = SpokenAudio.wav(held.sentences, sampleRate: held.sampleRate) else { return }
+        update(id) { $0.audio = wav }
+    }
+
     func attempt(_ id: String) -> SpokenAttempt? {
         log.attempt(id, now: now())
     }
@@ -46,7 +63,8 @@ final class SpokenAttempts {
     func ended(_ id: String?) {
         guard let id else { return }
         finished.insert(id)
-        if awaiting[id] == nil, !entries.values.contains(id) { discard([id]) }
+        if awaiting[id] == nil, !entries.values.contains(id) { return discard([id]) }
+        joinSentences(id)
     }
 
     func awaitLink(_ id: String?) {
@@ -92,6 +110,7 @@ final class SpokenAttempts {
         entries = entries.filter { held.contains($0.value) }
         awaiting = awaiting.filter { held.contains($0.key) }
         finished.formIntersection(held)
+        parts = parts.filter { held.contains($0.key) }
         let lines = log.attempts.suffix(Self.diagnosed).map(\.diagnosticLine)
         DiagnosticsCollector.spokenReplies.withLock { $0 = lines }
         onChange?()

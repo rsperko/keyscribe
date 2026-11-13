@@ -505,6 +505,7 @@ enum AccessibilityID {
         static let insertWithoutRewriting = "hud.action.insertWithoutRewriting"
         static let pasteLast = "hud.action.pasteLast"
         static let repairAction = "hud.action.repair"
+        static let discardDictation = "hud.action.discardDictation"
         static let choiceRow = "hud.choice.row"
         static let choiceCancel = "hud.choice.cancel"
         static let agentRow = "hud.agent.row"
@@ -532,6 +533,7 @@ enum AccessibilityID {
         static func comparisonPane(_ role: String) -> String { "history.detail.comparison.\(role)" }
         static let promptDisclosure = "history.detail.promptDisclosure"
         static let receivedDisclosure = "history.detail.receivedDisclosure"
+        static let copyMenu = "history.action.copyMenu"
         static let copyResult = "history.action.copyResult"
         static let copyReply = "history.action.copyReply"
         static let playReply = "history.action.playReply"
@@ -539,7 +541,13 @@ enum AccessibilityID {
         static let readWithMacOSVoice = "history.action.readWithMacOSVoice"
         static let saveSpokenAudio = "history.action.saveSpokenAudio"
         static let playSpokenAudio = "history.action.playSpokenAudio"
-        static let pasteResult = "history.action.pasteResult"
+        static let soundedWrong = "history.action.soundedWrong"
+        static let showKeptReply = "history.action.showKeptReply"
+        static let renderAgain = "history.action.renderAgain"
+        static let checkAudio = "history.action.checkAudio"
+        static func playRender(_ number: Int) -> String { "history.action.playRender.\(number)" }
+        static func checkRender(_ number: Int) -> String { "history.action.checkRender.\(number)" }
+        static let replyCheck = "history.detail.replyCheck"
         static let copyHeard = "history.action.copyHeard"
         static let copyReport = "history.action.copyReport"
         static let delete = "history.action.delete"
@@ -705,12 +713,13 @@ enum AccessibilityID {
         FirstRun.TryIt.changeTrigger, FirstRun.TryIt.shortcutWell,
         FirstRun.AI.connectionEditor, FirstRun.AI.connect, FirstRun.AI.skip, FirstRun.AI.offerConnect,
         FirstRun.Playground.field, FirstRun.Playground.next, FirstRun.Playground.done,
-        HUD.panel, HUD.insertWithoutRewriting, HUD.pasteLast, HUD.repairAction, HUD.helpClose,
+        HUD.panel, HUD.insertWithoutRewriting, HUD.pasteLast, HUD.repairAction, HUD.discardDictation, HUD.helpClose,
         History.list, History.search, History.clearSearch, History.export, History.stagePicker, History.comparisonPicker, History.whatHappened, History.actionOutcome, History.rewriteComparison,
-        History.promptDisclosure, History.receivedDisclosure, History.copyResult, History.copyReply, History.pasteResult, History.copyHeard, History.delete,
+        History.promptDisclosure, History.receivedDisclosure, History.copyMenu, History.copyResult, History.copyReply, History.copyHeard, History.delete,
         History.rewriteAgain, History.copyUnsavedRewrite, History.mishearingHint,
         History.spokenReply, History.fullSummary, History.playReply, History.playbackDetails,
         History.readWithMacOSVoice, History.playSpokenAudio, History.saveSpokenAudio,
+        History.soundedWrong, History.showKeptReply, History.renderAgain, History.checkAudio, History.replyCheck,
         History.manageVocabulary, History.createReplacement, History.addToDictionary,
         History.retentionConfirm, History.retentionCancel,
         History.ReplacementSheet.source, History.ReplacementSheet.replace, History.ReplacementSheet.save,

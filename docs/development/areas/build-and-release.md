@@ -38,8 +38,10 @@ with `--lockfile`, and the script fails unless every upstream pin matches it), a
 (`MARKETING_VERSION` from `git describe`, `CURRENT_PROJECT_VERSION` from the commit count,
 `KEYSCRIBE_SCM_REVISION`; `KEYSCRIBE_VERSION`/`KEYSCRIBE_BUILD`/`KEYSCRIBE_SCM_REVISION` env override them
 for a mirror whose git history is not this repo's), plus `KEYSCRIBE_FLUIDAUDIO_REVISION`, upstream's FluidAudio
-pin, which the spoken-audio report names (`Info.plist` `FluidAudioRevision`; "unknown" in a build that did not
-pass it). `./make-app.sh` builds the **dev** target with the
+pin, which the spoken-audio report names (`Info.plist` `FluidAudioRevision`). A build that did not pass it gets it
+from the build's own lockfile in the template's post-build phase (`scripts/stamp-dependency-revisions.sh`), on every
+build, so an incremental build after a pin bump never keeps an earlier stamp; it reads "unknown" only when that
+lockfile has no FluidAudio pin. `./make-app.sh` builds the **dev** target with the
 stable self-signed cert (**`KeyScribe Local`**) for persistent TCC, else ad-hoc; it **ignores**
 `KEYSCRIBE_SIGN_ID` / `CODESIGN_IDENTITY` for dev (those are the release Developer ID identity, so an
 `.envrc` for `release.sh` never leaks into dev). `release.sh` archives and exports the public target;

@@ -13,7 +13,7 @@ struct SpokenHelpTests {
         #expect(help.status == "Recipient: backend")
         #expect(help.rows.map(\.said) == [
             "cancel", "check on all conversations", "check on backend", "go back", "open backend", "repeat that", "select backend",
-            "tell backend run the unit tests",
+            "tell backend run the unit tests", "that sounded wrong",
         ])
         for row in help.rows { #expect(!row.effect.isEmpty) }
     }
@@ -213,6 +213,8 @@ struct SpokenHelpTests {
     @Test func repeatHelpHoldsWhetherTheLastReplyWasSpokenOrShown() {
         let row = SpokenHelp.codingAgentPhrases(name: "api", readsReplies: true).first { $0.said == VoiceCommandGrammar.repeatSummary[0] }
         #expect(row?.effect == "Gives the last reply update again.")
+        let keep = SpokenHelp.codingAgentPhrases(name: "api", readsReplies: true).first { $0.said == VoiceCommandGrammar.keepReply[0] }
+        #expect(keep?.effect == "Keeps the last reply\u{2019}s audio and report in History.")
     }
 
     @Test func voiceCommandHelpWithNoAppsInventsNone() {

@@ -585,6 +585,33 @@ struct HistoryPaneModelTests {
         return attempt
     }
 
+    @Test func aReplyStillBeingReadCannotBeKeptCheckedOrSavedUntilItsAudioIsWhole() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let entry = spokenReply()
+        try store.append(entry, today: HistoryStore.todayString(date: entry.timestamp))
+        let model = model(store)
+        model.diagnostics = SpokenReplyDiagnostics(attempts: SpokenAttempts(), history: { store })
+        var listened = 0
+        model.diagnostics?.listen = { _ in
+            listened += 1
+            return .heard("docs done", checker: "parakeet-ultra")
+        }
+        var attempt = holding(.playing)
+        model.spokenAudio = { _ in attempt }
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.selection = model.groups.first?.rows.first?.id
+        #expect(model.selectedReplyStillPlaying)
+        model.keepSelectedReply()
+        model.checkSelectedAudio()
+        await model.checkTask?.value
+        #expect(!store.evidence.isKept(entry: "r1", at: entry.timestamp))
+        #expect(listened == 0)
+        attempt.playback = .finished
+        #expect(!model.selectedReplyStillPlaying)
+    }
+
     @Test func theHeldAudioCanBePlayedAgainAndStopped() async throws {
         let model = try await selectingOnly(spokenReply(), corrections: Corrections())
         let attempt = holding()
@@ -664,6 +691,146 @@ struct HistoryPaneModelTests {
         model.playReply()
         #expect(read == ["docs: Done."])
         #expect(played.isEmpty)
+    }
+
+    private static let keptWAV = SpokenAudio.wav([[Float](repeating: 0.2, count: 2400)], sampleRate: 24_000) ?? Data()
+
+    private func keptReply(readBy reader: SpokenAttempt.Reader) async throws -> (HistoryPaneModel, URL) {
+        let (store, dir) = tempStore()
+        var entry = spokenReply()
+        entry.spokenReply?.voice = reader.rawValue
+        try store.append(entry, today: HistoryStore.todayString(date: entry.timestamp))
+        #expect(store.keepSpokenReply(id: "r1", near: entry.timestamp, files: [.init(name: "reply.wav", data: Self.keptWAV)]) == .saved)
+        let model = model(store)
+        model.diagnostics = SpokenReplyDiagnostics(attempts: SpokenAttempts(), history: { store })
+        model.spokenAudio = { _ in nil }
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.selection = model.groups.first?.rows.first?.id
+        return (model, dir)
+    }
+
+    @Test func playRepeatsTheKeptOriginalAfterTheHeldAudioIsGone() async throws {
+        let (model, dir) = try await keptReply(readBy: .natural)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var played: [Data] = []
+        var read: [String] = []
+        model.playHeldAudio = { data, _ in played.append(data); return .started }
+        model.readWithMacOSVoice = { text, _ in read.append(text); return .started }
+        #expect(model.playsOriginalAudio)
+        model.playReply()
+        #expect(played == [Self.keptWAV])
+        #expect(read.isEmpty)
+    }
+
+    @Test func keptAudioTheMacOSVoiceReplacedIsPlayedOnlyWhenAskedFor() async throws {
+        let (model, dir) = try await keptReply(readBy: .macOS)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var played: [Data] = []
+        var read: [String] = []
+        model.playHeldAudio = { data, _ in played.append(data); return .started }
+        model.readWithMacOSVoice = { text, onEnd in read.append(text); onEnd(); return .started }
+        #expect(!model.playsOriginalAudio)
+        #expect(model.hasGeneratedAudio)
+        model.playReply()
+        #expect(read == ["docs: Done."])
+        #expect(played.isEmpty)
+        model.playSpokenAudio()
+        #expect(played == [Self.keptWAV])
+    }
+
+    @Test func renderAgainIsOfferedOnlyWhileTheNaturalVoiceIsReady() async throws {
+        let (model, dir) = try await keptReply(readBy: .natural)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var ready = false
+        model.diagnostics?.voiceReady = { ready }
+        #expect(!model.canRenderAgain)
+        ready = true
+        #expect(model.canRenderAgain)
+    }
+
+    @Test func aRenderIsReportedInOneShortSentence() {
+        #expect(HistoryPaneModel.renderedMessage(number: 2, changedInputs: false) == "Saved Render 2.")
+        #expect(HistoryPaneModel.renderedMessage(number: 3, changedInputs: true) == "Saved Render 3 with the current voice.")
+    }
+
+    @Test func keepingAReplyConfirmsInPlaceRatherThanInTheStatusLine() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let entry = spokenReply()
+        try store.append(entry, today: HistoryStore.todayString(date: entry.timestamp))
+        let model = model(store)
+        model.diagnostics = SpokenReplyDiagnostics(attempts: SpokenAttempts(), history: { store })
+        model.diagnostics?.onChange = { [weak model] in model?.diagnosticsChanged() }
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.selection = model.groups.first?.rows.first?.id
+        model.keepSelectedReply()
+        #expect(model.statusMessage == nil)
+        for _ in 0..<80 where model.selected?.spokenReply?.kept != true { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(model.selectedReplyIsKept)
+        #expect(model.selectedKeptOriginal == nil)
+    }
+
+    @Test func checkingAKeptReplyShowsWhatWasHeardWithoutWaitingOnTheModel() async throws {
+        let (model, dir) = try await keptReply(readBy: .natural)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        model.diagnostics?.onChange = { [weak model] in model?.diagnosticsChanged() }
+        model.diagnostics?.listen = { _ in .heard("docs done", checker: "parakeet-ultra") }
+        #expect(model.canCheckAudio)
+        model.checkSelectedAudio()
+        await model.checkTask?.value
+        #expect(model.checking == nil)
+        #expect(model.statusMessage == "Speech recognition heard 100% of the reply\u{2019}s text in the generated audio.")
+        for _ in 0..<80 where model.selected?.spokenReply?.check == nil { try await Task.sleep(for: .milliseconds(25)) }
+        #expect(model.selected?.spokenReply?.check?.matched == true)
+    }
+
+    @Test func aCheckWhileDictatingSaysToTryAgainInsteadOfWaiting() async throws {
+        let (model, dir) = try await keptReply(readBy: .natural)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        var listened = 0
+        model.diagnostics?.listen = { _ in
+            listened += 1
+            return .busy
+        }
+        model.checkSelectedAudio()
+        await model.checkTask?.value
+        #expect(listened == 1)
+        #expect(model.statusMessage == "The speech model is busy with a dictation. Check again in a moment.")
+    }
+
+    @Test func aCheckThatFinishesAfterAnotherEntryWasSelectedSaysNothingThere() async throws {
+        let (model, dir) = try await keptReply(readBy: .natural)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let release = AsyncStream<Void>.makeStream()
+        model.diagnostics?.listen = { _ in
+            for await _ in release.stream { break }
+            return .heard("docs done", checker: "parakeet-ultra")
+        }
+        model.checkSelectedAudio()
+        #expect(model.isCheckingSelected)
+        model.selection = nil
+        #expect(!model.isCheckingSelected)
+        release.continuation.yield()
+        await model.checkTask?.value
+        #expect(model.statusMessage == nil)
+        #expect(model.checking == nil)
+    }
+
+    @Test func closingHistoryCancelsACheckAndShowsNoResult() async throws {
+        let (model, dir) = try await keptReply(readBy: .natural)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        model.diagnostics?.listen = { _ in
+            while !Task.isCancelled { try? await Task.sleep(for: .milliseconds(5)) }
+            return .cancelled
+        }
+        model.checkSelectedAudio()
+        let task = model.checkTask
+        model.releaseForClose()
+        await task?.value
+        #expect(model.statusMessage == nil)
+        #expect(model.checking == nil)
     }
 
     @Test func closingHistoryStopsWhatItIsPlaying() async throws {

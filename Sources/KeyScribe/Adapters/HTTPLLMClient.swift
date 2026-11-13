@@ -60,6 +60,8 @@ struct HTTPLLMClient: LLMClient {
     }
 
     func complete(system: String, user: String, connection: Connection) async throws -> String {
+        let activity = HardwareActivity.begin(.aiRequest)
+        defer { HardwareActivity.end(activity) }
         let key = try await transport.credential(for: connection)
         if connection.provider != .openaiCompatible, key?.isEmpty != false {
             throw ProviderTransportError.missingKey(connection.keyRef)

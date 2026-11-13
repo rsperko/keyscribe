@@ -511,6 +511,7 @@ struct AgentDeliveryWiringTests {
         #expect(entry.spokenReply?.voice == "macos")
         #expect(entry.spokenReply?.reason == "the natural voice made silent audio")
         #expect(rig.controller.lastSpokenReplyEntry == entry.id)
+        #expect(rig.controller.lastHeardReply?.entry == entry.id)
         #expect(!rig.controller.forgetSpokenReplies(["another"]))
         #expect(rig.controller.forgetSpokenReplies([try #require(entry.id)]))
         #expect(rig.controller.lastSpokenReplyEntry == nil)
@@ -533,6 +534,8 @@ struct AgentDeliveryWiringTests {
         rig.controller.recordSpokenReply(spoken)
         attempts.ended(spoken.attempt)
         #expect(attempts.attempt(spoken.attempt ?? "") == nil)
+        #expect(rig.controller.lastHeardReply?.entry == nil)
+        #expect(rig.controller.lastHeardReply?.conversation == spoken.name)
     }
 
     @Test func aReplyWhoseTakeWasDeletedBeforeItPlayedIsNotOfferedAndKeepsNoAudio() async throws {
@@ -1847,6 +1850,7 @@ struct AgentDeliveryWiringTests {
     @Test(arguments: [
         ("Tell keyscribe go back", "go back"), ("Go back to the parser", "Go back to the parser"),
         ("Tell keyscribe repeat that", "repeat that"), ("Repeat that test run", "Repeat that test run"),
+        ("Tell keyscribe that sounded wrong", "that sounded wrong"), ("That sounded wrong", "That sounded wrong"),
     ])
     func goBackInsideAMessageIsStillAMessage(text: String, sent: String) async {
         let runner = BackRunner()
@@ -1855,6 +1859,43 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         #expect(rig.texts == [sent])
         #expect(runner.ran.isEmpty)
+    }
+
+    @Test func thatSoundedWrongAloneKeepsTheReplyOnlyWhileReplyUpdatesHaveOneToKeep() async {
+        let runner = BackRunner()
+        runner.outcome = .done(summary: "Kept the reply from keyscribe", command: "Keeps the reply.")
+        let rig = await rig("That sounded wrong.", current: "claude:s1", voiceCommands: runner)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        let (output, _) = speaking(rig)
+        rig.controller.recordSpokenReply(heard("keyscribe: Done.", origin: nil))
+        for _ in 0..<200 where rig.controller.lastHeardReply == nil {
+            try? await Task.sleep(for: .milliseconds(5))
+            rig.controller.waitForHistoryWrites()
+        }
+        #expect(rig.controller.lastHeardReply?.conversation == "keyscribe")
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(runner.ran.map(\.transcript) == ["that sounded wrong"])
+        withExtendedLifetime(output) {}
+    }
+
+    @Test func thatSoundedWrongReachesTheAgentOnceReplyUpdatesAreTurnedOff() async {
+        let runner = BackRunner()
+        let rig = await rig("That sounded wrong.", current: "claude:s1", voiceCommands: runner)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        var updatesOn = true
+        let (output, _) = speaking(rig, enabled: { updatesOn })
+        rig.controller.recordSpokenReply(heard("keyscribe: Done.", origin: nil))
+        for _ in 0..<200 where rig.controller.lastHeardReply == nil {
+            try? await Task.sleep(for: .milliseconds(5))
+            rig.controller.waitForHistoryWrites()
+        }
+        #expect(rig.controller.lastHeardReply != nil)
+        updatesOn = false
+        await take(rig)
+        #expect(rig.texts == ["That sounded wrong."])
+        #expect(runner.ran.isEmpty)
+        withExtendedLifetime(output) {}
     }
 
     @Test func aHeldMessageSaysItsWordsAreKeptAndKeepsThem() async {
@@ -2603,11 +2644,13 @@ struct AgentDeliveryWiringTests {
 
     private static let service = Connection(id: "omlx", name: "Local", provider: .openaiCompatible, model: "qwen", keyRef: "k")
 
-    private func speaking(_ rig: Rig, llm: any LLMClient = HTTPLLMClient(), connection: String = "") -> (SpokenResultOutput, Speaker) {
+    private func speaking(
+        _ rig: Rig, llm: any LLMClient = HTTPLLMClient(), connection: String = "", enabled: @escaping () -> Bool = { true }
+    ) -> (SpokenResultOutput, Speaker) {
         let speaker = Speaker()
         let output = SpokenResultOutput(
             client: llm, permits: { _ in true }, speech: speaker, silencer: SpeechSilencer(),
-            settings: { SpokenResultSettings(enabled: true, connection: connection) },
+            settings: { SpokenResultSettings(enabled: enabled(), connection: connection) },
             connection: { $0 == Self.service.id ? Self.service : nil })
         rig.controller.spokenUpdates = output
         return (output, speaker)

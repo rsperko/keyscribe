@@ -71,6 +71,7 @@ enum HUDState: Equatable {
     case recording(mode: String?, level: Float, latchedTrigger: String?, countdown: RecordingCountdown? = nil, agents: AgentRoster? = nil)
     case loadingModel(mode: String)
     case transcribing(mode: String, status: String? = nil)
+    case waitingForCheck(mode: String, stalled: Bool)
     case rewriting(connection: String, mode: String, redacted: Bool, contextCategories: [String], offerLocalTranscript: Bool, answering: Bool = false)
     case localFallback(outcome: DictationOutcome, mode: String, reason: String? = nil, connectionId: String? = nil)
     case rewriteSkipped(outcome: DictationOutcome, mode: String, seconds: Double)
@@ -110,8 +111,10 @@ extension HUDState {
             return .recording
         case .loadingModel:
             return .preparing
-        case .transcribing, .rewriting:
+        case .transcribing, .rewriting, .waitingForCheck(_, false):
             return .processing
+        case .waitingForCheck(_, true):
+            return .error
         case .complete, .commandDone:
             return .complete
         case .rewriteSkipped(.failed, _, _):
@@ -149,7 +152,7 @@ extension HUDState {
             return mode
         case .loadingModel(let mode):
             return mode
-        case .transcribing(let mode, _):
+        case .transcribing(let mode, _), .waitingForCheck(let mode, _):
             return mode
         case .rewriting(_, let mode, _, _, _, _):
             return mode
@@ -193,6 +196,10 @@ extension HUDState {
             return "Loading speech model…"
         case .transcribing(_, let status):
             return status ?? "Transcribing"
+        case .waitingForCheck(_, false):
+            return "Waiting for Check Audio to finish\u{2026} Esc discards this dictation."
+        case .waitingForCheck(_, true):
+            return "Check Audio is taking longer than expected. Your recording is held until it ends; quitting \(Branding.appName) discards it."
         case .rewriting(let connection, _, _, _, _, let answering):
             return answering ? "Answering with \(connection)" : "Rewriting with \(connection)"
         case .localFallback(.copied(let copied), _, let reason?, _):
@@ -252,6 +259,13 @@ extension HUDState {
         return labels
     }
 
+    var offersDiscard: Bool {
+        if case .waitingForCheck = self { return true }
+        return false
+    }
+
+    var claimsEscapeWithoutFocus: Bool { offersDiscard }
+
     var offersPasteLast: Bool {
         switch self {
         case .complete(.copied(let reason), _, _, _), .localFallback(.copied(let reason), _, _, _),
@@ -296,7 +310,7 @@ extension HUDState {
 
     var contentHeight: CGFloat {
         let base: CGFloat
-        if offersLocalTranscript || offersPasteLast || errorAction != nil {
+        if offersLocalTranscript || offersPasteLast || offersDiscard || errorAction != nil {
             base = dataBoundaryBadges.isEmpty ? 92 : 104
         } else {
             base = dataBoundaryBadges.isEmpty ? 64 : 78
@@ -318,7 +332,7 @@ extension HUDState {
 
     private var hasLongSecondary: Bool {
         switch self {
-        case .localFallback(_, _, _?, _), .complete(_, _, _?, _), .complete(_, _, _, _?), .rewriteSkipped: true
+        case .localFallback(_, _, _?, _), .complete(_, _, _?, _), .complete(_, _, _, _?), .rewriteSkipped, .waitingForCheck: true
         default: false
         }
     }
@@ -344,7 +358,7 @@ extension HUDState {
             return status ?? "Transcribing"
         case .rewriting(let connection, _, _, _, _, let answering):
             return answering ? "Answering with \(connection)" : "Rewriting with \(connection)"
-        case .localFallback, .rewriteSkipped, .complete, .commandDone, .stoppedAtLimit, .error, .advisory:
+        case .localFallback, .rewriteSkipped, .complete, .commandDone, .stoppedAtLimit, .error, .advisory, .waitingForCheck:
             return [primaryText, secondaryText].compactMap { $0 }.joined(separator: ". ")
         case .choice(let prompt, _, _):
             return prompt.announcement
@@ -371,7 +385,7 @@ extension HUDState {
 
     var isPassive: Bool {
         switch self {
-        case .recording, .loadingModel, .transcribing, .rewriting, .choice: false
+        case .recording, .loadingModel, .transcribing, .rewriting, .choice, .waitingForCheck: false
         case .hidden, .ready, .localFallback, .rewriteSkipped, .complete, .commandDone, .stoppedAtLimit,
              .error, .advisory, .help: true
         }

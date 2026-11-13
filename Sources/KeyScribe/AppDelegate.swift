@@ -45,6 +45,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let spokenVoice = SpokenVoiceModel(installer: KokoroVoice.shared)
     private let voiceResidency = VoiceResidency.kokoro()
     private let spokenAttempts = SpokenAttempts()
+    private lazy var spokenDiagnostics = SpokenReplyDiagnostics(attempts: spokenAttempts, history: { [weak self] in self?.history })
     private lazy var historySpeech = HistorySpeech()
     private let llmClient = HTTPLLMClient()
     private var configRepository: ConfigRepository!
@@ -135,6 +136,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         DependencyLogging.configure()
         if let hudPreview {
             hud.appearance = HUDPreview.appearance(from: CommandLine.arguments) ?? .system
+            hud.canCancel = { true }
+            hud.onEscapeCancel = { NSApp.terminate(nil) }
             hud.render(hudPreview)
             return
         }
@@ -387,8 +390,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             detectProblems: { [weak self] in self?.currentProblems() ?? [] },
             accessibilityTapActive: { [weak self] in self?.hotkey?.isTapActive ?? false },
             onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() },
-            onEraseAllData: { [weak self] in self?.eraseAllDataAndRelaunch() },
-            clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
+            onEraseAllData: { [weak self] in self?.eraseAllDataAndRelaunch() })
         settingsController.onErrorsChanged = { [weak self] in self?.menu.setErrorBadge($0) }
         settingsController.codingAgents.voice = spokenVoice
         controller.spokenAttempts = spokenAttempts
@@ -401,6 +403,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         history.readWithMacOSVoice = { [weak self] text, onEnd in self?.historySpeech.read(text, onEnd: onEnd) ?? .failed }
         setUpAnswers()
         spokenAttempts.onChange = { [weak history] in history?.spokenAudioChanged() }
+        setUpSpokenDiagnostics(history)
         spokenVoice.onVoiceUsed = { [weak self] in self?.voiceIdle() }
         controller.onMemoryPressure = { [weak self] in
             guard let self else { return }
@@ -956,6 +959,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         if lower { speechLowering.insert(speaker) } else { speechLowering.remove(speaker) }
         guard wasLowered != !speechLowering.isEmpty else { return }
         controller.lowerOtherAudioForSpeech(!speechLowering.isEmpty)
+    }
+
+    private func setUpSpokenDiagnostics(_ pane: HistoryPaneModel) {
+        SystemConditions.start()
+        let diagnostics = spokenDiagnostics
+        diagnostics.listen = { [weak self] wav in await self?.controller.listenToSpokenReply(wav: wav) ?? .unavailable }
+        diagnostics.currentVoice = { [weak self] in self?.settingsController.codingAgents.chosenVoice ?? SpokenVoices.recommended }
+        diagnostics.onChange = { [weak pane] in pane?.diagnosticsChanged() }
+        pane.diagnostics = diagnostics
+        diagnostics.voiceReady = { [weak self] in self?.spokenVoice.isReady ?? false }
+        controller.keepLastReply = { [weak self, weak diagnostics] in
+            guard let self, let diagnostics, let heard = self.controller.lastHeardReply else { return .nothingHeard }
+            guard let id = heard.entry else { return .notSaved(heard.conversation) }
+            guard let entry = self.history?.entries(limit: 1, where: { $0.id == id }).first else { return .nothingHeard }
+            return diagnostics.keep(entry)
+        }
     }
 
     private func voiceIdle() {

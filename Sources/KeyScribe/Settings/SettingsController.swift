@@ -133,7 +133,6 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let detectProblems: () -> [SettingsProblem]
     private let accessibilityTapActive: () -> Bool
     private let onRelaunch: () -> Void
-    private let clipboardPaste: () -> ClipboardPaste
     // Captured in `present()` BEFORE we activate our own window (once NSApp.activate runs the frontmost
     // app is KeyScribe itself), refreshed by the activation observer while the History pane shows, and
     // cleared when the window closes. Stable across in-window pane navigation.
@@ -160,13 +159,11 @@ final class SettingsController: NSObject, NSWindowDelegate {
         detectProblems: @escaping () -> [SettingsProblem],
         accessibilityTapActive: @escaping () -> Bool = { true },
         onRelaunch: @escaping () -> Void = {},
-        onEraseAllData: @escaping () -> Void = {},
-        clipboardPaste: @escaping () -> ClipboardPaste = { ClipboardPaste() }
+        onEraseAllData: @escaping () -> Void = {}
     ) {
         self.detectProblems = detectProblems
         self.accessibilityTapActive = accessibilityTapActive
         self.onRelaunch = onRelaunch
-        self.clipboardPaste = clipboardPaste
         model = SettingsModel(
             settings: settings, onChange: onChange, onReload: onReload,
             onResetHUDPosition: onResetHUDPosition, onPreviewSound: onPreviewSound,
@@ -252,7 +249,6 @@ final class SettingsController: NSObject, NSWindowDelegate {
         history.voiceCommandsEnabled = { repository.voiceCommandsEnabled }
         modes.voiceCommands.previousApp = { [weak self] in self?.historyPreviousApp }
         history.copyText = { TextInserter.copyToClipboard($0) }
-        history.pasteText = { [weak self] in self?.pasteHistoryResult($0) }
         aiServices.onCreateModeWithConnection = { [weak self] connectionId in
             guard let self else { return }
             self.modes.createWithConnection(connectionId: connectionId)
@@ -439,29 +435,6 @@ final class SettingsController: NSObject, NSWindowDelegate {
             NSWorkspace.shared.notificationCenter.removeObserver(historyActivationObserver)
         }
         historyActivationObserver = nil
-    }
-
-    // The Settings window is key while the History pane reads, so hand focus back to the last real app and
-    // paste there: order Settings out (through the activation policy), paste, then close on success or
-    // re-present + flash on failure.
-    private func pasteHistoryResult(_ text: String) {
-        guard let target = historyPreviousApp,
-              target.bundleIdentifier != Bundle.main.bundleIdentifier else {
-            TextInserter.copyToClipboard(text)
-            history.flash("No target app to paste into — copied to clipboard instead.")
-            return
-        }
-        window?.orderOut(nil)
-        Task { @MainActor in
-            guard await TextInserter.pasteReturning(to: target, text: text, paste: clipboardPaste()) else {
-                TextInserter.copyToClipboard(text)
-                NSApp.activate(ignoringOtherApps: true)
-                window?.makeKeyAndOrderFront(nil)
-                history.flash("Could not return to the app — copied to clipboard instead.")
-                return
-            }
-            window?.close()
-        }
     }
 
     private func startProblemPoll() {

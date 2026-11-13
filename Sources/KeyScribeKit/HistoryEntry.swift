@@ -46,6 +46,19 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         public var reason: String?
         public var returned: String?
         public var failure: String?
+        public var check: SpokenReplyCheck.Result?
+        public var kept: Bool?
+        public var rendering: Rendering?
+
+        public struct Rendering: Codable, Equatable, Sendable {
+            public var voice: String
+            public var sentences: [String]
+            public init(voice: String, sentences: [String]) {
+                self.voice = voice
+                self.sentences = sentences
+            }
+        }
+
         public init(
             at: Date, conversation: String, text: String, connection: String? = nil, voice: String? = nil, reason: String? = nil,
             returned: String? = nil, failure: String? = nil

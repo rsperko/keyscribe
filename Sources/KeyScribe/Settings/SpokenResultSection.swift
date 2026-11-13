@@ -86,7 +86,7 @@ struct SpokenResultSection: View {
 
     private var serviceHelp: String {
         let name = chosen?.name ?? "the chosen service"
-        return "A longer reply is sent to \(name) to be summarized. When a conversation waits on a prompt its connector describes, the prompt\u{2019}s title, the tool call it seems to be about (such as a command to approve) and the agent\u{2019}s last words are sent to say what it asks. Both go after best-effort redaction, which can miss things in code and command output. A short reply is read as it is, without any service; with None, a longer reply is announced without a summary. \(Branding.appName) does not save replies or summaries."
+        return "A longer reply is sent to \(name) to be summarized. When a conversation waits on a prompt its connector describes, the prompt\u{2019}s title, the tool call it seems to be about (such as a command to approve) and the agent\u{2019}s last words are sent to say what it asks. Both go after best-effort redaction, which can miss things in code and command output. A short reply is read as it is, without any service; with None, a longer reply is announced without a summary. With History on, \(Branding.appName) saves what was read aloud in History."
     }
 
     private var chosen: Connection? { connections.first { $0.id == model.spokenResult.connection } }

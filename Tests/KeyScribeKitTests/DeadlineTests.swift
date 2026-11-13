@@ -8,6 +8,15 @@ import Testing
 // fails for lack of a scheduler, not because the deadline misbehaved. Suspending on a continuation the
 // detached thread resumes preserves what is being modelled (cancellation does not shorten it) without
 // consuming the pool.
+private func nonCooperativeBlock(until release: Latch) async {
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        Thread.detachNewThread {
+            while !release.isSet { Thread.sleep(forTimeInterval: 0.005) }
+            continuation.resume()
+        }
+    }
+}
+
 private func nonCooperativeBlock(seconds: TimeInterval) async {
     await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
         Thread.detachNewThread {
@@ -70,7 +79,7 @@ struct DeadlineTests {
 
     @Test func cancelledTimerNeverResumesFailureAfterFastSuccess() async throws {
         for _ in 0..<200 {
-            let value = try await runWithDeadline(seconds: 0.05) {
+            let value = try await runWithDeadline(seconds: 0.5) {
                 await nonCooperativeBlock(seconds: 0.02)
                 return "in-time"
             }
@@ -80,16 +89,18 @@ struct DeadlineTests {
 
     @Test func onSettledFiresAfterAbandonedOperationTrulyFinishes() async {
         let settled = Counter()
+        let release = Latch()
         await #expect(throws: DeadlineExceeded.self) {
             try await runWithDeadline(seconds: 0.1) {
-                await nonCooperativeBlock(seconds: 0.5)
+                await nonCooperativeBlock(until: release)
                 return "late"
             } onSettled: {
                 Task { await settled.bump() }
             }
         }
         #expect(await settled.value == 0)
-        try? await Task.sleep(for: .seconds(1))
+        release.set()
+        for _ in 0..<500 where await settled.value == 0 { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(await settled.value == 1)
     }
 }

@@ -28,7 +28,7 @@ Read before changing text insertion, pasteboard capture or restore, selection ca
   the TRIGGER cancels an arming dictation — release for a hold trigger, second tap for a latched one.
   It also means a wedged bring-up can no longer swallow the user's typing, which it did when arming
   held key focus. Do not add an arming HUD to "restore" ESC.
-  `CorrectionPanelController`/`HistoryController` solve the same problem by capturing `previousApp`
+  `CorrectionPanelController` solves the same problem by capturing `previousApp`
   + selection first, then orderOut → activate → wait → paste.
 - **`NSPasteboard`/`NSPasteboardItem` are main-thread-only — `PasteboardSnapshot.capture` is deliberately
   SYNCHRONOUS `@MainActor`, and must stay both.** `data(forType:)` on a promised/lazy flavor drives

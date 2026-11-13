@@ -26,6 +26,10 @@
     pig-latin.toml
   history/                 # append-only local history, one JSONL file per day
     2026-06-20.jsonl
+    spoken-replies/        #   spoken replies kept for diagnosis, by the day of their entry, then the entry's id
+      2026-06-20/<id>/     #     reply.wav, reply report.txt, render 2.wav, render 2 report.txt, …
+  spoken-voice/            # the natural voice's own measurements; no text
+    baseline.json          #   recent stage timings per second of audio, for "usual" in reports
   usage/                   # replacement use counts (see "Replacement usage")
     replacements.json
   agents/                  # coding agent bridge (experimental; see "Coding agent names")
@@ -130,6 +134,48 @@
   under the Coding agent mode's name, with `outcome = "command"`, empty `heard` and `result`, and `summary`
   `Reply from <name>`; it is written only when History is on and the Coding agent mode is not excluded from
   History. A notice on its own is not written.
+  Optional fields come later, written in place by `id`: `check` (`{heard, error_rate, checker}`), what on-device
+  speech recognition heard the last time Check Audio listened to the natural voice's generated audio for that reply,
+  its error rate against the text read, and the speech engine that checked it (see "Spoken reply checks"); `kept: true` once the reply's evidence was written under
+  `history/spoken-replies/`; and `rendering` (`{voice, sentences}`), the natural voice's id and the sentences it
+  read one at a time, written when the reply is kept, so Render Again can repeat the same inputs after the generated
+  audio is gone. A reply never kept falls back to the current voice reading it in one piece. Evidence is written only while the entry is still on disk, under the same
+  lock as delete and retention. Deleting the entry deletes its folder there first; if the folder cannot be removed,
+  the delete fails and the entry stays, so it can be retried. Retention drops those folders by day with the day files,
+  folders first; a day whose folder cannot be removed keeps its day file, so its entries stay in History and the next
+  sweep tries again.
+
+### Spoken reply checks
+
+A check runs only when asked: Check Audio in History, for the generated audio still held for the reply or the
+`reply.wav` kept for it, or Check beside a saved render. Nothing is checked in the background, and Render Again only
+renders. The active speech-to-text engine transcribes the whole audio in one pass, as the threshold below was
+measured; held audio is written to a temporary file for that pass and deleted after it. A check asked for while a
+dictation is recording or transcribing is refused, not queued. A dictation committed while a check holds the transcription gate waits until the engine call really returns (the
+gate's `isBusy`, which outlasts a deadline or a cancellation the engine ignores), with no limit of its own: engines
+are serialized, so nothing could transcribe it sooner. The HUD says it is waiting for Check Audio, and after a while
+that the check is taking longer than expected and that quitting discards the recording; the recording is kept until it is transcribed or the user discards it, and
+transcription starts on its own once the check ends. Only a
+check that entered the gate is waited for, and only until its own work ends; a check refused by a busy gate leaves
+the next dictation to the usual busy handling.
+
+The result is compared with the words read (`SpokenReplyCheck`): the error rate is the character edit distance over
+letters only, with apostrophes left out and numerals spelled out as words on both sides, since speech recognition
+writes "three thousand" as "3,000" and "backend" as "back-end". Text with no letters or numerals to compare is not
+checked. A rate at or above `SpokenReplyCheck.mismatchRate` marks the audio as not matching its text. As measured on
+2026-11-12 with Parakeet Ultra (`parakeet-ultra`) over 60 natural-voice renders of 30 typical reply lines, clean
+renders scored at most 0.04 (by words, before this normalization, up to 0.40), a reply heard only halfway at least
+0.40, and an unrelated sentence at least 0.75. History shows "The generated audio may not match the reply." only for
+a checker in `SpokenReplyCheck.calibratedCheckers`, the engines the threshold was measured on; other checkers'
+results show in Playback details. A check of the reply is written to the entry's `check` and, when the reply was
+kept, replaces the check line in `reply report.txt`; a check of a render replaces the check line in that render's
+report and leaves the entry alone. A check keeps nothing by itself.
+
+Every natural-voice render records its conditions in its report (`RenderConditions`: app and voice uptime, renders
+since the voice loaded, other work in the app that overlapped the render, thermal state, memory pressure, the app's
+memory, load average, and each stage's time against `baseline.json`). `baseline.json` holds no text. The voice
+writes it at most once a minute and when it unloads; it keeps the last `SynthesisBaseline.window` timings per stage in milliseconds per second of audio, and a stage has a usual time
+only after `SynthesisBaseline.minimumRenders` renders.
 
 ### Model storage
 

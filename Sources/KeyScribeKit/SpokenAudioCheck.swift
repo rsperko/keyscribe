@@ -19,8 +19,12 @@ public enum SpokenAudioCheck {
 
     public static func problem(in samples: [Float]) -> Problem? {
         guard !samples.isEmpty else { return .empty }
-        guard samples.allSatisfy(\.isFinite) else { return .invalidSamples }
-        return samples.contains { abs($0) > silentPeak } ? nil : .silent
+        var audible = false
+        for sample in samples {
+            guard sample.isFinite else { return .invalidSamples }
+            if abs(sample) > silentPeak { audible = true }
+        }
+        return audible ? nil : .silent
     }
 
     public static func measure(_ samples: [Float], sampleRate: Int) -> Measurements {

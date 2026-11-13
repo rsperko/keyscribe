@@ -37,6 +37,10 @@ public enum AgentHistoryFacts {
         [fact(command: "Repeat that")] + defaultRecipient(frozen, in: conversations)
     }
 
+    public static func keepReply(frozen: AgentRecipient.Frozen?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
+        [fact(command: "That sounded wrong")] + defaultRecipient(frozen, in: conversations)
+    }
+
     public static func rename(frozen: AgentRecipient.Frozen?, to name: String?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
         var facts = [fact(command: "Rename")]
         facts.append(.init(label: "Conversation", value: frozen.map { described($0.id, in: conversations) } ?? "None resolved"))

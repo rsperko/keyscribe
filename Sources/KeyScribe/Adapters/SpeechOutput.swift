@@ -147,8 +147,11 @@ final class SpeechSilencer {
         available()
     }
 
+    private var recordingActivity: Int?
+
     func recordingStarted() {
         isRecording = true
+        if recordingActivity == nil { recordingActivity = HardwareActivity.begin(.recording) }
         entries = entries.filter { $0.speech != nil }
         for entry in entries { entry.speech?.stop() }
         onBusy?()
@@ -157,6 +160,8 @@ final class SpeechSilencer {
     func recordingEnded() {
         guard isRecording else { return }
         isRecording = false
+        if let recordingActivity { HardwareActivity.end(recordingActivity) }
+        recordingActivity = nil
         available()
     }
 }
@@ -365,11 +370,8 @@ final class NaturalSpeech: SpeechSynthesizing {
             self.making = nil
             var reason = Self.reason(for: made.map(\.0))
             if case .success(let (audio, details)) = made {
-                self.record {
-                    $0.audio = audio.wav
-                    $0.synthesis = audio.synthesis
-                    $0.details = details
-                }
+                self.record { $0.details = details }
+                self.attempts?.addSegment(self.attempt, text: first, audio: audio)
                 self.active = .player
                 self.playingSentence = first
                 if self.player.play(audio.wav) {
@@ -383,11 +385,8 @@ final class NaturalSpeech: SpeechSynthesizing {
                     return
                 }
                 reason = "the audio couldn\u{2019}t be played"
-            } else if case .failure(let error as SpokenAudio.Unusable) = made {
-                self.record {
-                    $0.audio = error.audio?.wav
-                    $0.synthesis = error.audio?.synthesis
-                }
+            } else if case .failure(let error as SpokenAudio.Unusable) = made, let audio = error.audio {
+                self.attempts?.addSegment(self.attempt, text: first, audio: audio)
             }
             Log.agents.error("natural voice unavailable; using the system voice")
             self.outcome(false, reason, self.attempt)
@@ -451,6 +450,7 @@ final class NaturalSpeech: SpeechSynthesizing {
             let sentence = following.removeFirst()
             if player.play(audio.wav) {
                 playingSentence = sentence
+                attempts?.addSegment(attempt, text: sentence, audio: audio)
                 return
             }
             following.insert(sentence, at: 0)

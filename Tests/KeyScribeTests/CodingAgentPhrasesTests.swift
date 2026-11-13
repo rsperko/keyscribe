@@ -43,8 +43,9 @@ struct CodingAgentPhrasesTests {
         #expect(VoiceCommandGrammar.parse(said[6]) == .cancel)
         #expect(said.count == 7)
         let reading = phrases(name: "backend", readsReplies: true)
-        #expect(reading.count == 8)
+        #expect(reading.count == 9)
         #expect(VoiceCommandGrammar.parse(reading[5]) == .repeatSummary)
+        #expect(VoiceCommandGrammar.parse(reading[6]) == .keepReply)
     }
 
     @Test func withoutNamesTheExamplesUseTheConversationNumber() {

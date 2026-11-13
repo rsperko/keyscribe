@@ -75,4 +75,7 @@ targetTemplates:
       - name: Collect license notices
         script: '"${KEYSCRIBE_ROOT}/scripts/collect-licenses.sh"'
         basedOnDependencyAnalysis: false
+      - name: Stamp dependency revisions
+        script: '"${KEYSCRIBE_ROOT}/scripts/stamp-dependency-revisions.sh"'
+        basedOnDependencyAnalysis: false
     scheme: {}

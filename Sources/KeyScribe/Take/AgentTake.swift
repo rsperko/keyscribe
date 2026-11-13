@@ -24,6 +24,7 @@ struct AgentSnapshot {
 protocol AgentTakeHost: AnyObject {
     var agents: AgentHub? { get }
     var spokenUpdates: SpokenResultOutput? { get }
+    var lastHeardReply: (entry: String?, conversation: String)? { get }
     var codingAgentsEnabled: Bool { get }
     var isBusy: Bool { get }
     var takeIdentity: AnyObject? { get }
@@ -171,6 +172,12 @@ final class AgentTake {
             await builtInFromAgent(
                 VoiceCommandGrammar.repeatSummary[0], heard: heard,
                 facts: AgentHistoryFacts.repeatSummary(frozen: recipient(in: pressed), conversations: pressed.conversations))
+            return
+        case .keepReply where host.spokenUpdates?.readsReplies == true && host.lastHeardReply != nil:
+            host.agentFrontTask?.cancel()
+            await builtInFromAgent(
+                VoiceCommandGrammar.keepReply[0], heard: heard,
+                facts: AgentHistoryFacts.keepReply(frozen: recipient(in: pressed), conversations: pressed.conversations))
             return
         default:
             break

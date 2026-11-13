@@ -30,6 +30,10 @@ struct VoiceCommandResolverTests {
         #expect(resolve("repeat that") == .action(.repeatSummary))
         #expect(VoiceCommandAction.repeatSummary.summary(appName: { _ in nil }) == "Repeat")
         #expect(VoiceCommandAction.repeatSummary.detail(appName: { _ in nil }) == "Replays the last spoken reply.")
+        #expect(resolve("that sounded wrong") == .action(.keepReply))
+        #expect(VoiceCommandAction.keepReply.summary(appName: { _ in nil }) == "Kept")
+        #expect(VoiceCommandAction.keepReply.detail(appName: { _ in nil })
+            == "Keeps the last spoken reply\u{2019}s audio, text and report with its History entry.")
     }
 
     @Test func runningAppByExactName() {

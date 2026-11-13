@@ -81,7 +81,7 @@ final class HUDController: HUDPresenting {
     }
 
     private func syncEscapeClaim() {
-        let wanted = keyFocusFree && model.state.holdsKeyFocus
+        let wanted = (keyFocusFree && model.state.holdsKeyFocus) || model.state.claimsEscapeWithoutFocus
         if wanted, !escapeClaimed {
             escapeClaimed = escape.claim { [weak self] in
                 guard let self, self.canCancel?() == true else { return }
@@ -173,6 +173,10 @@ final class HUDController: HUDPresenting {
             level: levelModel,
             onInsertLocalTranscript: { [weak self] in self?.onInsertLocalTranscript?() },
             onPasteLast: { [weak self] in self?.onPasteLast?() },
+            onDiscard: { [weak self] in
+                guard let self, self.canCancel?() == true else { return }
+                self.onEscapeCancel?()
+            },
             onErrorAction: { [weak self] action in
                 switch action {
                 case .openMicrophoneSettings: Permissions.openSettings(.microphone)
@@ -406,6 +410,7 @@ private struct HUDView: View {
     let level: HUDLevel
     let onInsertLocalTranscript: () -> Void
     let onPasteLast: () -> Void
+    let onDiscard: () -> Void
     let onErrorAction: (HUDErrorAction) -> Void
     let onChoose: (Int, String) -> Void
     let onCancelChoice: (Int) -> Void
@@ -655,7 +660,7 @@ private struct HUDView: View {
     }
 
     private var hasAction: Bool {
-        model.shown.offersLocalTranscript || model.shown.offersPasteLast || model.shown.errorAction != nil
+        model.shown.offersLocalTranscript || model.shown.offersPasteLast || model.shown.offersDiscard || model.shown.errorAction != nil
     }
 
     @ViewBuilder private var actionButtons: some View {
@@ -676,6 +681,13 @@ private struct HUDView: View {
                 Label(action.buttonTitle, systemImage: "gearshape")
             }
             .accessibilityIdentifier(AccessibilityID.HUD.repairAction)
+        }
+        if model.shown.offersDiscard {
+            Button { onDiscard() } label: {
+                Label("Discard Dictation", systemImage: "xmark.circle")
+            }
+            .help("Throws this recording away without transcribing it. It does not stop the speech model.")
+            .accessibilityIdentifier(AccessibilityID.HUD.discardDictation)
         }
     }
 

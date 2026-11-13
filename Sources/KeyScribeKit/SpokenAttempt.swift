@@ -33,11 +33,13 @@ public struct SpokenAttempt: Sendable, Equatable, Identifiable {
         public var stageMilliseconds: [Detail]
         public var sampleRate: Int
         public var measurements: SpokenAudioCheck.Measurements
+        public var conditions: RenderConditions?
 
         public init(
             normalizedText: String?, phonemes: String, predictedDurations: [Int32], stageMilliseconds: [Detail], sampleRate: Int,
-            measurements: SpokenAudioCheck.Measurements
+            measurements: SpokenAudioCheck.Measurements, conditions: RenderConditions? = nil
         ) {
+            self.conditions = conditions
             self.normalizedText = normalizedText
             self.phonemes = phonemes
             self.predictedDurations = predictedDurations
@@ -47,6 +49,18 @@ public struct SpokenAttempt: Sendable, Equatable, Identifiable {
         }
     }
 
+    public struct Segment: Sendable, Equatable {
+        public var text: String
+        public var synthesis: Synthesis
+        public init(text: String, synthesis: Synthesis) {
+            self.text = text
+            self.synthesis = synthesis
+        }
+    }
+
+    public static let determinismNote =
+        "The natural voice takes no random seed, so another render of the same phonemes, voice, route and model files differs only through how the hardware computed it. A render far from the others points at the hardware or the conditions above, not at chance."
+
     public let id: String
     public let at: Date
     public let text: String
@@ -54,7 +68,13 @@ public struct SpokenAttempt: Sendable, Equatable, Identifiable {
     public var reader: Reader?
     public var macOSReason: String?
     public var audio: Data?
-    public var synthesis: Synthesis?
+    public var segments: [Segment] = []
+    public var check: SpokenReplyCheck.Result?
+    public var synthesis: Synthesis? { segments.first?.synthesis }
+    public var normalizedText: String? {
+        let parts = segments.compactMap(\.synthesis.normalizedText)
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
+    }
     public var details: [Detail] = []
     public var notes: [String] = []
     public var playback: Playback = .preparing
@@ -92,10 +112,13 @@ public struct SpokenAttempt: Sendable, Equatable, Identifiable {
         ]
         lines += details.map { "\($0.label): \($0.value)" }
         lines += notes.map { "Note: \($0)" }
-        if let synthesis {
+        if let check { lines.append(Self.checkLine(check)) }
+        for (index, segment) in segments.enumerated() {
+            let synthesis = segment.synthesis
             let measured = synthesis.measurements
             lines += [
                 "",
+                segments.count > 1 ? "Sentence \(index + 1) of \(segments.count): \(segment.text)" : "Sentence: \(segment.text)",
                 "Normalized text: \(synthesis.normalizedText ?? "(none)")",
                 "Phonemes: \(synthesis.phonemes)",
                 "Predicted durations: \(synthesis.predictedDurations.map(String.init).joined(separator: " "))",
@@ -104,8 +127,23 @@ public struct SpokenAttempt: Sendable, Equatable, Identifiable {
                     format: "Audio: %.2f s at %d Hz, peak %.3f, RMS %.3f, clipped samples %d", measured.seconds, synthesis.sampleRate,
                     measured.peak, measured.rms, measured.clippedSamples),
             ]
+            lines += (synthesis.conditions?.details ?? []).map { "\($0.label): \($0.value)" }
         }
+        if !segments.isEmpty { lines += ["", Self.determinismNote] }
         return lines.joined(separator: "\n") + "\n"
+    }
+
+    private static let checkPrefix = "Check of the generated audio by speech recognition"
+
+    static func checkLine(_ check: SpokenReplyCheck.Result) -> String {
+        "\(checkPrefix)\(check.checkerName.map { " (\($0))" } ?? ""): \(check.summary), error rate "
+            + String(format: "%.2f", check.errorRate) + " · heard: \(check.heard)"
+    }
+
+    public static func report(_ saved: String, checked check: SpokenReplyCheck.Result) -> String {
+        let kept = saved.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            .filter { !$0.hasPrefix(checkPrefix) }
+        return kept.joined(separator: "\n").trimmingCharacters(in: .newlines) + "\n\n" + checkLine(check) + "\n"
     }
 }
 

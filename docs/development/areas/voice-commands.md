@@ -130,11 +130,27 @@ every rule above applies to it, with these sharpenings:
   `TakeReporterTests.everyRetentionChoiceOutlastsHeldSpokenAudio`), and even a hand-set shorter value is bounded by
   the same timer, and `SpokenAttemptLog` also bounds count and bytes; deleting the
   entry or quitting drops it at once. Nothing reaches disk unless the user chooses **Save Generated Audio…**, which
-  exports the held bytes and never makes the audio again; History's **Play** (or **Play Generated Audio**, for a
+  exports the held bytes and never makes the audio again, or the reply is kept for diagnosis
+  (`SpokenReplyDiagnostics.keep`: Sounded Wrong, "that sounded wrong", or Render Again), which writes
+  the held bytes of every sentence played beside the entry (`HistoryStore.evidence`); History's **Play** (or **Play Generated Audio**, for a
   rejected take) plays those same bytes through `HeldAudioSpeech` and the silencer, and records nothing. `HistorySpeech` switches between it and the macOS voice inside the silencer's
   claim, so a reply queued behind it stays queued instead of starting and being cut off. The diagnostics report lists the recent attempts' metadata without their text
   (`SpokenAttempt.diagnosticLine`). Why the macOS voice read a reply is fixed wording, so it is kept with the entry
   (`spoken_reply.reason`); the audio is not. Attempt text, phonemes and normalized text are content: never log them.
+- **A spoken reply check runs only when asked, and never outranks a dictation.** Check Audio in History, or Check
+  beside a saved render, runs speech recognition on the natural voice's generated audio; it diagnoses the voice, not
+  the recognizer. Nothing checks in the background, and Render Again only renders. `EngineKeeper.listen` refuses
+  while a dictation runs and otherwise transcribes the whole WAV in one pass, as the threshold was calibrated. A
+  commit polls the transcription gate's `isBusy` (`awaitSelfTestClearance(on:)`), which stays true until the engine
+  call really returns, with no cap and no fresh gate: `SerializedEngine` would queue the dictation behind the check
+  anyway, so a cap or a new gate only turns the wait into a lost recording. The HUD shows
+  `HUDState.waitingForCheck`, stalled after `DictationController.checkStallSeconds`, with Discard Dictation and an
+  Escape claimed without key focus, since the wait can be long; either discards the take. `EngineKeeper.checkGate` marks only a check that
+  entered that gate, and clears when its work really ends, so a refused check never holds a later commit.
+  A check keeps nothing by itself; only
+  `SpokenReplyCheck.calibratedCheckers` show the advisory. In Coding agent mode, "that sounded wrong" on its own is a
+  command only while reply updates are on and a reply has been heard; anything else, including a message addressed
+  to a conversation, reaches the agent.
 - **One synthesis at a time on the natural voice.** `KokoroVoice` admits replies, previews and the install check
   through one `InFlightWork.runAlone` gate, held until the work truly returns, not when it is cancelled or times
   out. Anything that finds it busy (a reply right after a stop, or a preview) waits up to `NaturalSpeech.busyWait`

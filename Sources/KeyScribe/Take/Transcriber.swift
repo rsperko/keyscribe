@@ -17,6 +17,8 @@ final class Transcriber {
         reading: SpeechPresenceReading?, recovery: RecoveryProgress
     ) async throws -> String {
         let timeout = timeoutOverride ?? max(30, audioSeconds * 20)
+        let activity = HardwareActivity.begin(.transcription)
+        defer { HardwareActivity.end(activity) }
         let result = try await gate.run(seconds: timeout) { () async throws -> TranscribeResult in
             let firstStart = DispatchTime.now()
             // Prefer the in-memory PCM when the engine accepts it; fall back to the WAV otherwise.

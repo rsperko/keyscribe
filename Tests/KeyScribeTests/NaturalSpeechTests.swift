@@ -38,6 +38,7 @@ struct NaturalSpeechTests {
         var holdsOn: String?
         var error: (any Error)?
         var exclusive = false
+        var detailed = false
         private var running = 0
         var calls: [(text: String, voice: String)] { lock.withLock { _calls } }
         func run(_ text: String, _ voice: String) async throws -> SpokenAudio {
@@ -59,7 +60,7 @@ struct NaturalSpeechTests {
             }
             if let error { throw error }
             if fails || failsOn.map({ text.contains($0) }) == true { throw CocoaError(.fileReadCorruptFile) }
-            return SpokenAudio(wav: Data(text.utf8))
+            return detailed ? SpokenReplyDiagnosticsTests.audio(text) : SpokenAudio(wav: Data(text.utf8))
         }
         func release() {
             let pending = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
@@ -294,7 +295,7 @@ struct NaturalSpeechTests {
         speech.onFinished = { finished += 1 }
         speech.speak("Done.", voice: nil)
         #expect(speech.isSpeaking)
-        try? await Task.sleep(for: .milliseconds(300))
+        await until { finished > 0 }
         await settled()
         #expect(!speech.isSpeaking)
         #expect(!fallback.isSpeaking)
@@ -521,6 +522,27 @@ struct NaturalSpeechTests {
         speech.stop()
         speech.stop()
         #expect(finished == 1)
+    }
+
+    @Test func aReplyReadSentenceBySentenceKeepsEverySentenceItPlayed() async throws {
+        let attempts = SpokenAttempts()
+        let synth = Synth()
+        synth.detailed = true
+        let (speech, player, _, _) = make(synth: synth, attempts: attempts, sentenceAtATime: true)
+        speech.speak(answer, voice: nil)
+        attempts.awaitLink(speech.attempt)
+        await until { player.isPlaying }
+        player.finish()
+        await until { player.played.count == 2 }
+        player.finish()
+        await until { player.played.count == 3 }
+        let longestSentence = try #require(player.played.map(\.count).max())
+        #expect(recorded(speech, in: attempts)?.audio == player.played.first)
+        player.finish()
+        await until { (recorded(speech, in: attempts)?.audio?.count ?? 0) > longestSentence }
+        let attempt = try #require(recorded(speech, in: attempts))
+        #expect(attempt.segments.map(\.text) == ["Reply to Dana by Friday.", "Then ship the release.", "Ask Sam about the date."])
+        #expect(try #require(attempt.audio).count > longestSentence)
     }
 
     private func recorded(_ speech: NaturalSpeech, in attempts: SpokenAttempts) -> SpokenAttempt? {

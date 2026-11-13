@@ -23,6 +23,31 @@ private final class WedgeableEngine: SpeechEngine, @unchecked Sendable {
     func evict() async {}
 }
 
+private final class StuckOnceEngine: SpeechEngine, @unchecked Sendable {
+    let id = "stuck-once"
+    let displayName = "Stuck once"
+    let supportsRecognitionBias = true
+    private let started: Signal
+    private let release: Signal
+    init(started: Signal, release: Signal) {
+        self.started = started
+        self.release = release
+    }
+    func loadIfNeeded() async throws {}
+    func transcribe(wavURL: URL, biasTerms: [String]) async throws -> String {
+        guard wavURL.lastPathComponent == "reply.wav" else { return "hello world" }
+        started.fire()
+        await release.wait()
+        return "the reply"
+    }
+    func evict() async {}
+}
+
+private final class WaitingHUDSpy: HUDPresenting {
+    private(set) var states: [HUDState] = []
+    func render(_ state: HUDState) { states.append(state) }
+}
+
 private final class InstantEngine: SpeechEngine, @unchecked Sendable {
     let id: String
     let displayName = "Instant"
@@ -97,6 +122,90 @@ struct TranscribeGateRecoveryTests {
 
         #expect(controller.lastResult == "hello world")
         #expect(await insertSpy.calls == 1)
+    }
+
+    private func stuckCheck(
+        _ supportDir: URL, started: Signal, release: Signal, hud: WaitingHUDSpy? = nil
+    ) -> (DictationController, InsertSpy) {
+        ModeStore.seedStarterFilesForTesting(in: supportDir.appendingPathComponent("modes", isDirectory: true))
+        let engine = SerializedEngine(StuckOnceEngine(started: started, release: release))
+        let provider = try! SpeechEngineProvider(engines: [engine], activeId: "stuck-once")
+        let insertSpy = InsertSpy()
+        var settings = Settings.defaults
+        settings.stt = .init(engine: "stuck-once", eviction: .fastest)
+        settings.duringDictation = .init(otherAudio: .unchanged, keepDisplayAwake: false, sounds: false)
+        let controller = DictationController(
+            settings: settings, provider: provider, config: ConfigCache(supportDir: supportDir),
+            history: HistoryStore(supportDir: supportDir), hud: hud, permits: { _ in true },
+            audio: FakeAudio(url: supportDir.appendingPathComponent("capture.wav")),
+            insert: { _, _, _, _, _ in await insertSpy.record(); return true },
+            snapshot: { TargetSnapshot(bundleId: "test.bundle") },
+            micStatus: { .granted }, accessibilityGranted: { true })
+        controller.transcribeTimeoutOverride = 0.3
+        controller.checkStallSeconds = 0.3
+        return (controller, insertSpy)
+    }
+
+    @Test func aDictationCommittedWhileAStuckReplyCheckHoldsTheModelWaitsPastItsTimeoutAndIsTranscribedOnceTheCheckEnds() async throws {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let started = Signal()
+        let release = Signal()
+        defer { release.fire() }
+        let hud = WaitingHUDSpy()
+        let (controller, insertSpy) = stuckCheck(supportDir, started: started, release: release, hud: hud)
+
+        let check = Task { await controller.listenToSpokenReply(wav: supportDir.appendingPathComponent("reply.wav")) }
+        await started.wait()
+        defer { check.cancel() }
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.handleCommit()
+        func waits() -> [Bool] {
+            hud.states.compactMap { state -> Bool? in
+                if case .waitingForCheck(_, let stalled) = state { return stalled }
+                return nil
+            }
+        }
+        for _ in 0..<1000 where !waits().contains(true) { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(controller.isBusy)
+        #expect(waits() == [false, true])
+        #expect(controller.lastResult == nil)
+        #expect(await insertSpy.calls == 0)
+
+        release.fire()
+        await controller.dictationTask?.value
+        #expect(controller.lastResult == "hello world")
+        #expect(await insertSpy.calls == 1)
+    }
+
+    @Test func cancellingADictationWaitingOnAStuckReplyCheckDiscardsIt() async throws {
+        let supportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("keyscribe-test-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: supportDir) }
+        let started = Signal()
+        let release = Signal()
+        defer { release.fire() }
+        let (controller, insertSpy) = stuckCheck(supportDir, started: started, release: release)
+
+        let check = Task { await controller.listenToSpokenReply(wav: supportDir.appendingPathComponent("reply.wav")) }
+        await started.wait()
+        defer { check.cancel() }
+        controller.handleStart()
+        await controller.captureBringUpTask?.value
+        controller.handleCommit()
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(controller.isBusy)
+        controller.cancel()
+        #expect(!controller.isBusy)
+        release.fire()
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(controller.lastResult == nil)
+        #expect(await insertSpy.calls == 0)
     }
 
     @Test func dictationCommittedDuringSelfTestWaitsThenSucceeds() async {

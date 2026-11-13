@@ -12,6 +12,10 @@ public struct HistoryStore: Sendable {
         dir = supportDir.appendingPathComponent("history", isDirectory: true)
     }
 
+    public var evidence: SpokenReplyEvidence {
+        SpokenReplyEvidence(dir: dir.appendingPathComponent("spoken-replies", isDirectory: true))
+    }
+
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
@@ -103,21 +107,25 @@ public struct HistoryStore: Sendable {
     // history dir cannot silently report success, while an already-removed row does not flash a false error.
     public enum DeleteOutcome: Sendable { case deleted, notFound, writeFailed }
 
-    // Remove the first matching line only; duplicate entries can compare equal after JSON round-trip.
+    // Remove the first matching line only; duplicate entries can compare equal after JSON round-trip. A kept
+    // spoken reply's folder goes first: when it cannot be removed the entry stays, so the delete can be retried.
     @discardableResult
     public func delete(_ entry: HistoryEntry) -> DeleteOutcome {
-        // Try the expected local-day file first, then fall back for rare day-boundary skew.
-        let derived = "\(HistoryStore.todayString(date: entry.timestamp)).jsonl"
-        var files = [derived]
-        files.append(contentsOf: dayFiles().filter { $0 != derived })
-        for file in files {
-            switch deleteEntry(entry, fromFile: file) {
-            case .deleted: return .deleted
-            case .writeFailed: return .writeFailed
-            case .notFound: continue
+        Self.mutationQueue.sync {
+            if let id = entry.id {
+                do { try evidence.remove(entry: id, at: entry.timestamp) } catch { return .writeFailed }
             }
+            // Try the expected local-day file first, then fall back for rare day-boundary skew.
+            let derived = "\(HistoryStore.todayString(date: entry.timestamp)).jsonl"
+            for file in [derived] + dayFiles().filter({ $0 != derived }) {
+                switch deleteEntry(entry, fromFile: file) {
+                case .deleted: return .deleted
+                case .writeFailed: return .writeFailed
+                case .notFound: continue
+                }
+            }
+            return .notFound
         }
-        return .notFound
     }
 
     // Rewrites the first matching line in place, keeping its position in the day file.
@@ -134,28 +142,65 @@ public struct HistoryStore: Sendable {
 
     @discardableResult
     public func update(id: String, near date: Date, _ change: (HistoryEntry) -> HistoryEntry) -> UpdateOutcome {
+        Self.mutationQueue.sync { updateUnlocked(id: id, near: date, change) }
+    }
+
+    private func updateUnlocked(id: String, near date: Date, _ change: (HistoryEntry) -> HistoryEntry) -> UpdateOutcome {
         let derived = "\(HistoryStore.todayString(date: date)).jsonl"
         var failed = false
         for file in [derived] + dayFiles().filter({ $0 != derived }) {
-            let outcome: UpdateOutcome = Self.mutationQueue.sync {
-                let url = dir.appendingPathComponent(file)
-                guard FileManager.default.fileExists(atPath: url.path) else { return .notFound }
-                guard let content = try? String(contentsOf: url, encoding: .utf8) else { return .failed }
-                var lines = content.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
-                guard let index = lines.firstIndex(where: { (try? HistoryEntry(jsonLine: $0))?.id == id }) else { return .notFound }
-                guard let current = try? HistoryEntry(jsonLine: lines[index]),
-                      let line = try? change(current).jsonLine() else { return .failed }
-                lines[index] = line
-                return (try? Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)) != nil
-                    ? .updated : .failed
-            }
-            switch outcome {
-            case .updated: return .updated
-            case .failed: failed = true
-            case .notFound: continue
-            }
+            let url = dir.appendingPathComponent(file)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            guard let content = try? String(contentsOf: url, encoding: .utf8) else { failed = true; continue }
+            var lines = content.split(separator: "\n", omittingEmptySubsequences: true).map(String.init)
+            guard let index = lines.firstIndex(where: { (try? HistoryEntry(jsonLine: $0))?.id == id }) else { continue }
+            guard let current = try? HistoryEntry(jsonLine: lines[index]),
+                  let line = try? change(current).jsonLine() else { failed = true; continue }
+            lines[index] = line
+            if (try? Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)) != nil { return .updated }
+            failed = true
         }
         return failed ? .failed : .notFound
+    }
+
+    private func entryUnlocked(id: String, near date: Date) -> HistoryEntry? {
+        let derived = "\(HistoryStore.todayString(date: date)).jsonl"
+        for file in [derived] + dayFiles().filter({ $0 != derived }) {
+            guard let content = try? String(contentsOf: dir.appendingPathComponent(file), encoding: .utf8) else { continue }
+            for line in content.split(separator: "\n", omittingEmptySubsequences: true) {
+                if let entry = try? HistoryEntry(jsonLine: String(line)), entry.id == id { return entry }
+            }
+        }
+        return nil
+    }
+
+    // Evidence is written only while its entry is on disk, under the same lock as delete and retention, so a
+    // check or render that finishes after its entry is gone writes nothing.
+    public enum KeepOutcome: Equatable, Sendable { case saved, entryGone, failed }
+    public enum RenderOutcome: Equatable, Sendable { case saved(Int), entryGone, failed }
+
+    public func keepSpokenReply(
+        id: String, near date: Date, files: [SpokenReplyEvidence.File], rendering: HistoryEntry.SpokenReply.Rendering? = nil
+    ) -> KeepOutcome {
+        Self.mutationQueue.sync {
+            guard let entry = entryUnlocked(id: id, near: date) else { return .entryGone }
+            do { try evidence.save(entry: id, at: entry.timestamp, files: files) } catch { return .failed }
+            let marked = updateUnlocked(id: id, near: entry.timestamp) {
+                var updated = $0
+                updated.spokenReply?.kept = true
+                if let rendering { updated.spokenReply?.rendering = rendering }
+                return updated
+            }
+            return marked == .updated ? .saved : .failed
+        }
+    }
+
+    public func addSpokenRender(id: String, near date: Date, wav: Data, report: Data) -> RenderOutcome {
+        Self.mutationQueue.sync {
+            guard let entry = entryUnlocked(id: id, near: date) else { return .entryGone }
+            guard let number = try? evidence.addRender(entry: id, at: entry.timestamp, wav: wav, report: report) else { return .failed }
+            return .saved(number)
+        }
     }
 
     private func rewrite(_ entry: HistoryEntry, with replacement: HistoryEntry, inFile file: String) -> Bool {
@@ -180,36 +225,44 @@ public struct HistoryStore: Sendable {
     }
 
     private func deleteEntry(_ entry: HistoryEntry, fromFile file: String) -> DeleteOutcome {
-        Self.mutationQueue.sync {
-            let url = dir.appendingPathComponent(file)
-            guard let content = try? String(contentsOf: url, encoding: .utf8) else { return .notFound }
-            var kept: [String] = []
-            var removed = false
-            for line in content.split(separator: "\n", omittingEmptySubsequences: true).map(String.init) {
-                if !removed, let decoded = try? HistoryEntry(jsonLine: line), Self.isSameRecord(decoded, entry) {
-                    removed = true
-                } else {
-                    kept.append(line)
-                }
+        let url = dir.appendingPathComponent(file)
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return .notFound }
+        var kept: [String] = []
+        var removed = false
+        for line in content.split(separator: "\n", omittingEmptySubsequences: true).map(String.init) {
+            if !removed, let decoded = try? HistoryEntry(jsonLine: line), Self.isSameRecord(decoded, entry) {
+                removed = true
+            } else {
+                kept.append(line)
             }
-            guard removed else { return .notFound }
-            do {
-                if kept.isEmpty {
-                    try FileManager.default.removeItem(at: url)
-                } else {
-                    try Data((kept.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)
-                }
-            } catch {
-                return .writeFailed
-            }
-            return .deleted
         }
+        guard removed else { return .notFound }
+        do {
+            if kept.isEmpty {
+                try FileManager.default.removeItem(at: url)
+            } else {
+                try Data((kept.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)
+            }
+        } catch {
+            return .writeFailed
+        }
+        return .deleted
     }
 
+    // An expired day's kept spoken replies go first; a day whose folder cannot be removed keeps its History file,
+    // so its entries stay visible and the next sweep, or deleting them, tries again.
     @discardableResult
     public func applyRetention(today: String = HistoryStore.todayString(), retentionDays: Int) -> [String] {
         Self.mutationQueue.sync {
+            let evidenceDays = (try? FileManager.default.contentsOfDirectory(atPath: evidence.dir.path)) ?? []
+            let expiredEvidence = HistoryRetention.expired(
+                dayFiles: evidenceDays.map { "\($0).jsonl" }, today: today, retentionDays: retentionDays)
+            var stuck: Set<String> = []
+            for file in expiredEvidence {
+                do { try evidence.removeDay(String(file.dropLast(".jsonl".count))) } catch { stuck.insert(file) }
+            }
             let expired = HistoryRetention.expired(dayFiles: dayFiles(), today: today, retentionDays: retentionDays)
+                .filter { !stuck.contains($0) }
             for file in expired {
                 try? FileManager.default.removeItem(at: dir.appendingPathComponent(file))
             }

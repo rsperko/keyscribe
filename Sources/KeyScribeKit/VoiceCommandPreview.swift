@@ -59,6 +59,8 @@ extension VoiceCommandAction {
             return VoiceCommandPreview(headline: "Go back", context: "To where you were before your last command")
         case .repeatSummary:
             return VoiceCommandPreview(headline: "Repeat that", context: "The last spoken reply")
+        case .keepReply:
+            return VoiceCommandPreview(headline: "Keep that reply", context: "The last spoken reply, for diagnosis")
         case .script(let script, _, _):
             return VoiceCommandPreview(headline: "Run \(script.name)", context: detail(appName: appName))
         }

@@ -2,7 +2,7 @@ import KeyScribeKit
 
 enum HUDPreview {
     static let names = [
-        "ready", "recording", "recording-latched", "loading-model", "transcribing",
+        "ready", "recording", "recording-latched", "loading-model", "transcribing", "waiting-check", "waiting-check-stalled",
         "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
         "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
         "rewrite-fallback-reasoning", "rewrite-fallback-copied", "rewrite-fallback-copied-accessibility", "rewrite-skipped",
@@ -92,6 +92,10 @@ enum HUDPreview {
             .loadingModel(mode: "Email")
         case "transcribing":
             .transcribing(mode: "Markdown")
+        case "waiting-check":
+            .waitingForCheck(mode: "Plain Dictation", stalled: false)
+        case "waiting-check-stalled":
+            .waitingForCheck(mode: "Plain Dictation", stalled: true)
         case "rewriting":
             .rewriting(
                 connection: "Example Service", mode: "Cleanup", redacted: false,

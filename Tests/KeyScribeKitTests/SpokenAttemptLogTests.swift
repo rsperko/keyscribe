@@ -94,9 +94,9 @@ struct SpokenAttemptLogTests {
         spoken.macOSReason = "silent audio"
         spoken.playback = .finished
         spoken.details = [.init(label: "Output", value: "USB DAC, 48000 Hz")]
-        spoken.synthesis = .init(
+        spoken.segments = [.init(text: "docs: Done.", synthesis: .init(
             normalizedText: "docs done", phonemes: "dˈɑks dˈʌn", predictedDurations: [1, 4, 2], stageMilliseconds: [.init(label: "tail", value: "12.5")],
-            sampleRate: 24000, measurements: .init(seconds: 1.5, peak: 0.5, rms: 0.1, clippedSamples: 0))
+            sampleRate: 24000, measurements: .init(seconds: 1.5, peak: 0.5, rms: 0.1, clippedSamples: 0)))]
         let report = spoken.report(appName: "KeyScribe")
         for line in [
             "Text read: docs: Done.", "Voice: af_heart", "Read by: macOS voice (silent audio)", "Playback: finished",

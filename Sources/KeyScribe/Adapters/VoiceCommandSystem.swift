@@ -32,6 +32,9 @@ struct SessionReturns {
     var open: @MainActor (String, _ stillWanted: @escaping @MainActor @Sendable () -> Bool) async -> AgentFocusResult
     var handle: @MainActor (String) -> String?
     var replay: @MainActor () -> SpokenResultOutput.Replay = { .nothingHeard }
+    var keepReply: @MainActor () -> KeptReply = { .nothingHeard }
+
+    enum KeptReply: Equatable { case kept(String), reportOnly(String), notSaved(String), nothingHeard, failed }
 }
 
 enum VoiceCommandFailureKind: Equatable, Sendable {
@@ -616,10 +619,11 @@ final class VoiceCommandRunner: VoiceCommandRunning {
         let succeeded: Bool
         if case .goBack = action { return await goBack(to: origin, stillWanted: stillWanted) }
         if case .repeatSummary = action { return replay(stillWanted: stillWanted) }
+        if case .keepReply = action { return keepReply(stillWanted: stillWanted) }
         let origin = if case .script = action { origin } else { await departure(from: origin) }
         guard stillWanted() else { return .abandoned }
         switch action {
-        case .goBack, .repeatSummary:
+        case .goBack, .repeatSummary, .keepReply:
             return .abandoned
         case .window(let window):
             switch await system.focusWindow(window, stillWanted: stillWanted) {
@@ -792,6 +796,25 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     }
 
     static let nothingToRepeat = "There\u{2019}s nothing to repeat yet."
+
+    private func keepReply(stillWanted: @MainActor () -> Bool) -> VoiceCommandOutcome {
+        let command = VoiceCommandAction.keepReply.detail(appName: { _ in nil })
+        guard let sessions else { return .failed(message: Self.nothingToKeep, command: command) }
+        guard stillWanted() else { return .abandoned }
+        switch sessions.keepReply() {
+        case .kept(let name): return .done(summary: "Kept the reply from \(Self.named(name))", command: command)
+        case .reportOnly(let name):
+            return .done(summary: "Kept the text and report of the reply from \(Self.named(name)); its audio was already gone", command: command)
+        case .notSaved(let name):
+            return .failed(message: "The reply from \(Self.named(name)) wasn\u{2019}t saved in History, so it can\u{2019}t be kept.", command: command)
+        case .nothingHeard: return .failed(message: Self.nothingToKeep, command: command)
+        case .failed: return .failed(message: "Couldn\u{2019}t keep the last reply.", command: command)
+        }
+    }
+
+    static let nothingToKeep = "There\u{2019}s no reply in History to keep yet."
+
+    private static func named(_ name: String) -> String { name.isEmpty ? "the agent" : name }
 
     private func goBack(to origin: VoiceCommandOrigin?, stillWanted: @escaping @MainActor () -> Bool) async -> VoiceCommandOutcome {
         let nothing = VoiceCommandOutcome.failed(message: "Nothing to go back to.")

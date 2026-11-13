@@ -239,8 +239,15 @@ in the same `Application Support` folder:
   only, the audio the natural voice generated for each reply History saved, so you can play it again or save it to
   report a reply that sounded wrong. Audio for anything History did not save (a repeat, a notice, a preview) is
   dropped when it stops playing. Saved replies' audio is dropped at once when you delete that History entry or quit,
-  and otherwise an hour after the reply, including when History's own retention removes the entry; it is written to
-  disk only where you choose with **Save Generated Audio…** in History. A spoken reply can include text from the
+  and otherwise an hour after the reply, including when History's own retention removes the entry. It is written to
+  disk where you choose with **Save Generated Audio…** in History, and beside the History entry when you keep a reply
+  with **Sounded Wrong** or "that sounded wrong", or when you use **Render Again**. **Check Audio** in History, or
+  **Check** beside a render, runs your speech model on that generated audio, on your Mac, only when you ask, and saves
+  what it heard and which speech engine listened with the entry or in that render's report. A kept reply's entry also records which voice read the reply and how its text was
+  split into sentences, so **Render Again** can repeat it. Kept audio is deleted with its History entry, and by History's
+  retention. Each natural-voice render's report includes the conditions on your Mac at the time (how long the app and
+  voice had been running, other work in the app, thermal state, memory, and timings), and a separate file keeps
+  recent timings, with no text, so a report can say what is usual. A spoken reply can include text from the
   agent's output, such as a path or a command's result, as plain text. It is never written to logs.
 
 You can inspect, back up, or delete any of it with the Finder or a text editor. Deleting the history

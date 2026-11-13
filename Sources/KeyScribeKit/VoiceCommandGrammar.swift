@@ -10,6 +10,7 @@ public enum VoiceCommandIntent: Equatable, Sendable {
     case runScript(target: String)
     case goBack
     case repeatSummary
+    case keepReply
     case cancel
     case help
 }
@@ -68,6 +69,7 @@ public enum VoiceCommandGrammar {
     static let focusVerbs = runningVerbs + openingVerbs
     public static let goBack = "go back"
     public static let repeatSummary = ["repeat that", "say that again"]
+    public static let keepReply = ["that sounded wrong", "that sounded garbled"]
     static let run = "run"
     public static let cancel = ["cancel", "never mind", "nevermind"]
     public static let help = ["what can I say", "show commands"]
@@ -148,6 +150,7 @@ public enum VoiceCommandGrammar {
         let words = said.joined(separator: " ")
         if words == goBack { return .goBack }
         if repeatSummary.contains(words) { return .repeatSummary }
+        if keepReply.contains(words) { return .keepReply }
         if cancel.contains(words) { return .cancel }
         if help.contains(where: { $0.lowercased() == words }) { return .help }
         if words.hasPrefix(run + " ") {

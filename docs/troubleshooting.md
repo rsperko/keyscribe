@@ -99,8 +99,8 @@ how the text was delivered — if the text also never appeared, treat it as the 
 To try the rewrite again, open the dictation in History and click **Rewrite Again**. It runs the
 mode's AI rewrite, as the mode is set up now, on what was heard, and keeps redaction on if the
 original dictation had it. Nothing from the screen is sent and
-nothing is inserted: the entry becomes `rewritten_later`, and **Copy Result** or **Paste Result** puts the
-new text where you want it.
+nothing is inserted: the entry becomes `rewritten_later`, and **Copy Result** lets you copy the
+new text and paste it where you want it.
 
 ### `rewritten_later`
 

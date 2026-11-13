@@ -250,6 +250,10 @@ These also work without saving anything:
   does not change that destination.
 - **“repeat that”** or **“say that again”** replays the last spoken reply from a coding agent (see
   [Can KeyScribe read an agent's reply aloud?](#can-keyscribe-read-an-agents-reply-aloud)).
+- **“that sounded wrong”** keeps the reply you just heard with its History entry: its audio while it is
+  still held, otherwise only its text and a report. They last until you delete the entry or History's
+  retention removes it. In Coding agent mode it is a command only while reply updates are on and a reply
+  has been heard; otherwise it is sent to the agent.
 - **“cancel”** or **“never mind”** on its own runs nothing. A “please” before or after a command is fine
   (“please open Mail”), except that for a script or shortcut that takes your words, a closing “please” is
   passed along as one of them.
@@ -674,7 +678,17 @@ Audio…**, which saves the generated audio and a report about it into a folder 
 macOS voice read the reply because the natural voice's audio was rejected, **Play Generated Audio** there plays that
 rejected take. Generated audio is kept in memory for at most an hour while KeyScribe is running, only for replies
 History saved.
-KeyScribe does not save replies or summaries. A local service such as oMLX keeps the reply on your Mac.
+To keep a reply that sounded wrong, choose **Sounded Wrong** beside Play, or say **"that sounded wrong"** right after
+hearing it. KeyScribe then keeps that reply's audio, text and a report with its History entry, until you delete the
+entry or History's retention removes it. If the audio was already gone (after an hour, or after quitting), only the text and report are kept. **Check Audio** in Playback details runs your speech model on the generated audio, on your Mac, and says how much of
+the reply it heard; a reply whose audio did not say its words is marked in History. It runs only when you choose it,
+and not while you are dictating. **Render Again** in Playback details makes the reply's audio again and keeps it beside the original, so you can
+compare them; **Check** beside a render checks that audio the same way.
+With History on, what was read aloud (the summary, or a short reply as it was read) and what the service returned
+are saved with the History entry, like a dictation; generated audio is saved only when you choose
+**Sounded Wrong**, which keeps the reply's audio, or **Render Again**, which keeps each new render. Deleting the entry
+or History's retention removes them all.
+A local service such as oMLX keeps the reply on your Mac.
 
 ### Can I type to the agent and still hear when it's done?
 

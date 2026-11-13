@@ -131,7 +131,9 @@ final class DictationController {
     weak var answers: SpokenAnswerOutput?
     var onMemoryPressure: (() -> Void)?
     var spokenAttempts: SpokenAttempts?
+    var keepLastReply: (() -> SessionReturns.KeptReply)?
     private(set) var lastSpokenReplyEntry: String?
+    private(set) var lastHeardReply: (entry: String?, conversation: String)?
     var onSpokenReplyRecorded: ((_ attempt: String?, _ entry: String) -> Void)?
     var agents: AgentHub? {
         didSet {
@@ -157,6 +159,10 @@ final class DictationController {
             replay: { [weak self] in
                 guard let self, self.settings.features.isEnabled(.codingAgents), let spoken = self.spokenUpdates else { return .off }
                 return spoken.repeatLast()
+            },
+            keepReply: { [weak self] in
+                guard let self, self.settings.features.isEnabled(.codingAgents) else { return .nothingHeard }
+                return self.keepLastReply?() ?? .nothingHeard
             })
     }
 
@@ -478,7 +484,28 @@ final class DictationController {
         return await engines.selfTest(engine, gate: transcriber.gate)
     }
 
-    private func awaitSelfTestClearance() async { await engines.awaitSelfTestClearance() }
+    var checkStallSeconds: Double = 10
+
+    private func awaitSelfTestClearance() async {
+        let gate = transcriber.gate
+        guard await engines.checkHolds(gate) else { return await engines.awaitSelfTestClearance(on: gate) }
+        let mode = currentModeName
+        hud.present(.waitingForCheck(mode: mode, stalled: false))
+        let stall = checkStallSeconds
+        let stalled = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(Int(stall * 1000)))
+            guard !Task.isCancelled else { return }
+            self?.hud.present(.waitingForCheck(mode: mode, stalled: true))
+        }
+        await engines.awaitSelfTestClearance(on: gate)
+        stalled.cancel()
+        if !Task.isCancelled { hud.present(.transcribing(mode: mode)) }
+    }
+
+    func listenToSpokenReply(wav: URL) async -> EngineKeeper.Listening {
+        guard !isBusy else { return .busy }
+        return await engines.listen(activeEngine, wav: wav, gate: transcriber.gate)
+    }
 
     private func warmActiveEngine() {
         engines.warm(activeEngine)
@@ -1494,6 +1521,7 @@ final class DictationController {
         let clipboardSnapshot = startClipboardPrefetch()
         do {
             await awaitSelfTestClearance()
+            if Task.isCancelled { try? FileManager.default.removeItem(at: url); return }
             rawFromEngine = try await transcriber.transcribe(
                 audioSeconds: audioSeconds ?? 0, biasTerms: recognitionBiasTerms(), engine: engine, url: url, samples: samples,
                 reading: reading, recovery: recovery)
@@ -1702,6 +1730,7 @@ final class DictationController {
         }, then: { [weak self] entry in
             guard let self else { return }
             self.spokenAttempts?.link(heard.attempt, to: entry)
+            self.lastHeardReply = (entry, heard.name)
             guard let entry else { return }
             self.lastSpokenReplyEntry = entry
             self.onSpokenReplyRecorded?(heard.attempt, entry)

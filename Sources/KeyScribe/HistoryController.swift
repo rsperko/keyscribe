@@ -55,6 +55,8 @@ final class HistoryPaneModel: ObservableObject {
     @Published var selection: HistoryRow.ID? {
         didSet {
             guard selection != oldValue else { return }
+            selectionChanges &+= 1
+            keptFiles = nil
             refreshHints()
             if speaking != nil { stopSpeaking() }
         }
@@ -92,7 +94,6 @@ final class HistoryPaneModel: ObservableObject {
     private let saveReplacement: (String, String, CorrectionDestination.Scope) -> ConfigRepository.AddResult
     var openSettings: (SettingsDestination) -> Void
     var copyText: ((String) -> Void)?
-    var pasteText: ((String) -> Void)?
     enum Speaking: Equatable { case audio, macOSVoice }
     var readWithMacOSVoice: ((String, @escaping () -> Void) -> HistorySpeech.Start)?
     var spokenAudio: ((String) -> SpokenAttempt?)?
@@ -102,6 +103,13 @@ final class HistoryPaneModel: ObservableObject {
     var writeFile: (Data, URL) throws -> Void = { try $0.write(to: $1, options: .withoutOverwriting) }
     var playHeldAudio: ((Data, @escaping () -> Void) -> HistorySpeech.Start)?
     var stopHistorySpeech: (() -> Void)?
+    var diagnostics: SpokenReplyDiagnostics?
+    private var keptFiles: (entry: String, folder: URL?, original: URL?, renders: [URL])?
+    @Published private(set) var renderingAgain = false
+    private(set) var renderTask: Task<Void, Never>?
+    @Published private(set) var checking: (entry: String, render: URL?)?
+    private var selectionChanges = 0
+    private(set) var checkTask: Task<Void, Never>?
     @Published private(set) var speaking: Speaking?
     @Published private(set) var spokenAudioChanges = 0
     var rewriteAgain: ((HistoryEntry) async -> DictationController.RewriteAgain)?
@@ -162,7 +170,7 @@ final class HistoryPaneModel: ObservableObject {
         wantedSelection = nil
         loadGeneration &+= 1
         recomputeTask?.cancel(); searchTask?.cancel(); statusTask?.cancel()
-        selectionTask?.cancel(); reloadTask?.cancel()
+        selectionTask?.cancel(); reloadTask?.cancel(); checkTask?.cancel()
         rows = []
         entryIndex = [:]
         searchCache = nil
@@ -369,16 +377,37 @@ final class HistoryPaneModel: ObservableObject {
     }
 
     func playSpokenAudio() {
-        guard let audio = selectedSpokenAudio?.audio, let playHeldAudio else { return }
+        guard let playHeldAudio else { return }
+        guard let audio = selectedSpokenAudio?.audio ?? selectedKeptOriginal.flatMap({ try? Data(contentsOf: $0) }) else {
+            return flash("Couldn\u{2019}t play the generated audio.")
+        }
         begin(.audio) { playHeldAudio(audio, $0) }
     }
 
-    var canPlaySpokenAudio: Bool { selectedSpokenAudio.map { $0.playback != .playing } ?? false }
+    private var selectedKept: (folder: URL?, original: URL?, renders: [URL])? {
+        guard let entry = selected, let id = entry.id, entry.spokenReply?.kept == true, let diagnostics else { return nil }
+        if let cached = keptFiles, cached.entry == id { return (cached.folder, cached.original, cached.renders) }
+        let found = (folder: diagnostics.folder(entry), original: diagnostics.keptOriginal(entry), renders: diagnostics.renders(entry))
+        keptFiles = (id, found.folder, found.original, found.renders)
+        return found
+    }
 
-    var playsOriginalAudio: Bool { selectedSpokenAudio.map { $0.reader != .macOS } ?? false }
+    var selectedKeptOriginal: URL? { selectedKept?.original }
+
+    var canPlaySpokenAudio: Bool { selectedSpokenAudio.map { $0.playback != .playing } ?? (selectedKeptOriginal != nil) }
+
+    var hasGeneratedAudio: Bool { selectedSpokenAudio != nil || selectedKeptOriginal != nil }
+
+    private var selectedReplyReadByNaturalVoice: Bool {
+        selected?.spokenReply?.voice.flatMap(SpokenAttempt.Reader.init(rawValue:)) == .natural
+    }
+
+    var playsOriginalAudio: Bool {
+        selectedSpokenAudio.map { $0.reader != .macOS } ?? (selectedKeptOriginal != nil && selectedReplyReadByNaturalVoice)
+    }
 
     var originalAudioExpires: Date? {
-        guard playsOriginalAudio, let held = selectedSpokenAudio else { return nil }
+        guard selectedKeptOriginal == nil, playsOriginalAudio, let held = selectedSpokenAudio else { return nil }
         return held.at.addingTimeInterval(SpokenAttemptLog.keptFor)
     }
 
@@ -412,12 +441,98 @@ final class HistoryPaneModel: ObservableObject {
 
     func spokenAudioChanged() { spokenAudioChanges += 1 }
 
+    func diagnosticsChanged() {
+        keptFiles = nil
+        spokenAudioChanges += 1
+        if !rows.isEmpty { reload() }
+    }
+
+    var selectedRenders: [URL] { selectedKept?.renders ?? [] }
+
+    var selectedReplyIsKept: Bool { selectedKept?.folder != nil }
+
+    var canRenderAgain: Bool { diagnostics?.voiceReady() ?? false }
+
+    var selectedReplyStillPlaying: Bool { selectedSpokenAttempt?.playback == .playing }
+
+    func keepSelectedReply() {
+        guard !selectedReplyStillPlaying, let entry = selected, let diagnostics else { return }
+        switch diagnostics.keep(entry) {
+        case .kept, .reportOnly: break
+        case .nothingHeard: flash("This entry was deleted, so nothing was kept.")
+        case .notSaved, .failed: flash("Couldn\u{2019}t keep this reply.")
+        }
+    }
+
+    func showKeptReply() {
+        guard let folder = selectedKept?.folder else { return }
+        revealInFinder(folder)
+    }
+
+    func renderSelectedReplyAgain() {
+        guard !renderingAgain, let entry = selected, entry.spokenReply != nil, let diagnostics else { return }
+        renderingAgain = true
+        renderTask = Task { @MainActor [weak self] in
+            let outcome = await diagnostics.renderAgain(entry)
+            self?.renderingAgain = false
+            guard let self, !Task.isCancelled else { return }
+            switch outcome {
+            case .failed(let reason):
+                self.flash(reason)
+            case .rendered(let number, let wav, let note):
+                self.flash(Self.renderedMessage(number: number, changedInputs: note != nil))
+                if self.selected?.id == entry.id, let playHeldAudio = self.playHeldAudio {
+                    self.begin(.audio) { playHeldAudio(wav, $0) }
+                }
+            }
+        }
+    }
+
+    var canCheckAudio: Bool { diagnostics != nil && hasGeneratedAudio }
+
+    var isCheckingSelected: Bool { checking != nil && checking?.entry == selected?.id }
+
+    func checkSelectedAudio(render: URL? = nil) {
+        guard checking == nil, render != nil || !selectedReplyStillPlaying, let entry = selected, let id = entry.id,
+              let diagnostics else { return }
+        checking = (id, render)
+        let selectedAt = selectionChanges
+        checkTask = Task { @MainActor [weak self] in
+            let outcome = await diagnostics.check(entry, render: render)
+            guard let self else { return }
+            self.checking = nil
+            guard outcome != .cancelled, self.selectionChanges == selectedAt else { return }
+            self.flash(Self.checkedMessage(outcome, render: render.flatMap(SpokenReplyEvidence.number(of:))))
+        }
+    }
+
+    static func checkedMessage(_ outcome: SpokenReplyDiagnostics.Checked, render: Int? = nil) -> String {
+        let audio = render.map { "Render \($0)" } ?? "the generated audio"
+        switch outcome {
+        case .checked(let check):
+            return "Speech recognition heard \(check.percentHeard)% of the reply\u{2019}s text in \(audio)."
+        case .busy: return "The speech model is busy with a dictation. Check again in a moment."
+        case .noAudio: return "The generated audio is gone, so it can\u{2019}t be checked."
+        case .failed, .cancelled: return "Couldn\u{2019}t check \(audio)."
+        }
+    }
+
+    static func renderedMessage(number: Int, changedInputs: Bool) -> String {
+        "Saved Render \(number)\(changedInputs ? " with the current voice" : "")."
+    }
+
+    func playRender(_ url: URL) {
+        guard let playHeldAudio, let wav = try? Data(contentsOf: url) else { return flash("Couldn\u{2019}t play this render.") }
+        begin(.audio) { playHeldAudio(wav, $0) }
+    }
+
     var selectedSpokenAttempt: SpokenAttempt? { selected?.id.flatMap { spokenAudio?($0) } }
 
     var selectedSpokenAudio: SpokenAttempt? { selectedSpokenAttempt?.audio == nil ? nil : selectedSpokenAttempt }
 
     func saveSpokenAudio() {
-        guard let attempt = selectedSpokenAudio, let audio = attempt.audio, let folder = chooseSpokenAudioFolder() else { return }
+        guard !selectedReplyStillPlaying, let attempt = selectedSpokenAudio, let audio = attempt.audio,
+              let folder = chooseSpokenAudioFolder() else { return }
         let base = "Spoken reply \(Self.folderStamp.string(from: attempt.at))"
         var name = base
         var copy = 2
@@ -460,7 +575,6 @@ final class HistoryPaneModel: ObservableObject {
         panel.prompt = "Save Here"
         return panel.runModal() == .OK ? panel.url : nil
     }
-    func pasteResult() { if let r = selected?.result, !r.isEmpty { pasteText?(r) } }
     // Likely mishearings of dictionary words in the selected dictation, for the user to judge. A command or a
     // Coding agent message is left out: its words were not dictated text.
     func refreshHints() {
@@ -522,7 +636,7 @@ final class HistoryPaneModel: ObservableObject {
                     self.flash("The rewrite could not be saved to History. Use Copy Rewrite to keep it.")
                     return
                 }
-                self.flash("Rewritten with \(details.connection). Nothing was inserted: copy or paste the result to use it.")
+                self.flash("Rewritten with \(details.connection). Nothing was inserted: copy the result to use it.")
                 self.reload()
             }
         }
@@ -740,7 +854,7 @@ struct HistoryPaneView: View {
             PaneListSectionHeader("History")
             SettingRow(
                 title: "Keep history on this Mac",
-                help: "Stores transcripts and final text locally so you can search and correct them, and coding agent reply updates as they were given. Audio and password-field dictations are never saved. For other sensitive work, choose a shorter period or exclude a mode in its Result handling.",
+                help: "Stores transcripts and final text locally so you can search and correct them, and coding agent reply updates as they were given. Recordings of your voice and password-field dictations are never saved. A spoken reply kept for diagnosis keeps the audio the natural voice generated with its entry. For other sensitive work, choose a shorter period or exclude a mode in its Result handling.",
                 combinesAccessibilityChildren: false)
             {
                 Toggle("Keep history on this Mac", isOn: $settings.historyEnabled).labelsHidden()
@@ -900,7 +1014,7 @@ struct HistoryPaneView: View {
     }
 
     private var storageTruth: some View {
-        Text("History stays on this Mac. Audio and password-field dictations are never saved. Stored transcripts and final text can still contain sensitive information.")
+        Text("History stays on this Mac. Recordings of your voice and password-field dictations are never saved; a spoken reply kept for diagnosis keeps its generated audio. Stored transcripts and final text can still contain sensitive information.")
             .font(.caption)
             .foregroundStyle(.secondary)
             .padding(10)
@@ -959,7 +1073,15 @@ private struct HistoryDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
-            actionBar
+            if model.canRewriteSelectedAgain {
+                HStack(spacing: 8) {
+                    Button { model.rewriteSelectedAgain() } label: { Label("Rewrite Again", systemImage: "arrow.clockwise") }
+                        .disabled(model.rewritingAgain)
+                        .help("Runs the AI rewrite again on what was heard, with this mode as it is now. Nothing from the screen is sent, and nothing is inserted: the new text replaces this dictation's result.")
+                        .accessibilityIdentifier(AccessibilityID.History.rewriteAgain)
+                    if model.rewritingAgain { ProgressView().controlSize(.small) }
+                }
+            }
             Picker("", selection: $stage) {
                 ForEach(DetailStage.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -976,7 +1098,7 @@ private struct HistoryDetailView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            deleteFooter
+            actionFooter
         }
         .padding(24)
         .confirmationDialog(
@@ -1092,6 +1214,7 @@ private struct HistoryDetailView: View {
             if let connection = reply.connection { detailRow("Summarized by", connection) }
             if let failure = reply.failure { detailRow("No summary", failure) }
             playControl(reply)
+            if let check = reply.check, !check.matched, check.calibrated { mismatchRow(check) }
             if let returned = reply.returned {
                 DisclosureSection("Full summary", isExpanded: $fullSummaryExpanded, headerID: AccessibilityID.History.fullSummary) {
                     Text(returned)
@@ -1121,13 +1244,35 @@ private struct HistoryDetailView: View {
                     .help(busy ? "This reply is still being read aloud." : "")
                     .accessibilityIdentifier(AccessibilityID.History.playReply)
             }
+            if reply.kept != true, Self.reader(reply) == .natural || model.selectedSpokenAudio != nil {
+                Button("Sounded Wrong") { model.keepSelectedReply() }
+                    .disabled(model.selectedReplyStillPlaying)
+                    .help(model.selectedReplyStillPlaying ? "This reply is still being read aloud." : model.selectedSpokenAudio != nil
+                        ? "Keep this reply\u{2019}s audio, text and report with its History entry."
+                        : "The generated audio is gone. Keep this reply\u{2019}s text and report with its History entry.")
+                    .accessibilityIdentifier(AccessibilityID.History.soundedWrong)
+            }
             if let caption = playCaption(reply) {
                 Text(caption).font(.caption).foregroundStyle(.secondary)
             }
         }
     }
 
+    private func mismatchRow(_ check: SpokenReplyCheck.Result) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            IssueText("The generated audio may not match the reply.", severity: .advisory)
+            detailRow("Check", "Speech recognition heard \u{201C}\(check.heard)\u{201D} (\(check.percentHeard)% of the reply\u{2019}s text)")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(AccessibilityID.History.replyCheck)
+    }
+
     private func playCaption(_ reply: HistoryEntry.SpokenReply) -> String? {
+        if reply.kept == true, model.selectedReplyIsKept {
+            return model.selectedKeptOriginal == nil
+                ? "Kept for diagnosis with this entry \u{00B7} text and report only; the audio was gone"
+                : "Kept for diagnosis with this entry"
+        }
         if let expires = model.originalAudioExpires {
             return "Original audio \u{00B7} kept until \(expires.formatted(date: .omitted, time: .shortened)) at most"
         }
@@ -1140,7 +1285,7 @@ private struct HistoryDetailView: View {
     }
 
     private func hasPlaybackDetails(_ reply: HistoryEntry.SpokenReply) -> Bool {
-        Self.reader(reply) != nil || reply.reason != nil || model.selectedSpokenAttempt != nil
+        Self.reader(reply) != nil || reply.reason != nil || model.selectedSpokenAttempt != nil || reply.kept == true
     }
 
     @ViewBuilder private func playbackDetails(_ reply: HistoryEntry.SpokenReply) -> some View {
@@ -1151,26 +1296,71 @@ private struct HistoryDetailView: View {
             }
             if let reason = reply.reason ?? attempt?.macOSReason { detailRow("Why", reason.prefix(1).uppercased() + reason.dropFirst()) }
             if let attempt { detailRow("Playback", Self.playback(attempt.playback)) }
+            if let check = reply.check, check.matched || !check.calibrated {
+                detailRow("Check", "Speech recognition\(check.checkerName.map { " (\($0))" } ?? "") heard \(check.percentHeard)% of the reply\u{2019}s text in the generated audio")
+            }
             WrapLayout(spacing: 8) {
                 if model.playsOriginalAudio {
                     Button("Read with macOS Voice") { model.readReplyWithMacOSVoice() }
                         .disabled(model.speaking != nil)
                         .accessibilityIdentifier(AccessibilityID.History.readWithMacOSVoice)
-                } else if model.selectedSpokenAudio != nil {
+                } else if model.hasGeneratedAudio {
                     Button("Play Generated Audio") { model.playSpokenAudio() }
                         .disabled(model.speaking != nil || !model.canPlaySpokenAudio)
                         .accessibilityIdentifier(AccessibilityID.History.playSpokenAudio)
                 }
                 if model.selectedSpokenAudio != nil {
                     Button("Save Generated Audio\u{2026}") { model.saveSpokenAudio() }
+                        .disabled(model.selectedReplyStillPlaying)
                         .accessibilityIdentifier(AccessibilityID.History.saveSpokenAudio)
                 }
+                if model.canCheckAudio {
+                    Button(model.isCheckingSelected && model.checking?.render == nil ? "Checking\u{2026}" : "Check Audio") {
+                        model.checkSelectedAudio()
+                    }
+                    .disabled(model.checking != nil || model.selectedReplyStillPlaying)
+                    .help("Runs on-device speech recognition on the generated audio and compares what it hears with the reply.")
+                    .accessibilityIdentifier(AccessibilityID.History.checkAudio)
+                }
+                if model.canRenderAgain {
+                    Button(model.renderingAgain ? "Rendering\u{2026}" : "Render Again") { model.renderSelectedReplyAgain() }
+                        .disabled(model.renderingAgain || model.speaking != nil)
+                        .help("Render this reply with the natural voice again and keep the new audio beside the original.")
+                        .accessibilityIdentifier(AccessibilityID.History.renderAgain)
+                }
+                if model.selectedReplyIsKept {
+                    Button("Show in Finder") { model.showKeptReply() }
+                        .accessibilityIdentifier(AccessibilityID.History.showKeptReply)
+                }
             }
-            if let held = model.selectedSpokenAudio {
+            renders
+            if let held = model.selectedSpokenAudio, !model.selectedReplyIsKept {
                 Text(held.reader == .macOS
-                    ? "The generated audio is the natural voice\u{2019}s take that was not played; the macOS voice read the reply. Save it to report a reply that sounded wrong."
-                    : "Save the generated audio to report a reply that sounded wrong.")
+                    ? "The generated audio is the natural voice\u{2019}s take that was not played; the macOS voice read the reply. Choose Sounded Wrong to keep it with this entry."
+                    : "Choose Sounded Wrong to keep the generated audio with this entry.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder private var renders: some View {
+        let renders = model.selectedRenders
+        if !renders.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(renders, id: \.self) { url in
+                    let number = SpokenReplyEvidence.number(of: url) ?? 0
+                    HStack(spacing: 8) {
+                        Text("Render \(number)")
+                        Button("Play") { model.playRender(url) }
+                            .disabled(model.speaking != nil)
+                            .accessibilityIdentifier(AccessibilityID.History.playRender(number))
+                        Button(model.isCheckingSelected && model.checking?.render == url ? "Checking\u{2026}" : "Check") {
+                            model.checkSelectedAudio(render: url)
+                        }
+                        .disabled(model.checking != nil)
+                        .accessibilityIdentifier(AccessibilityID.History.checkRender(number))
+                    }
+                }
             }
         }
     }
@@ -1301,32 +1491,15 @@ private struct HistoryDetailView: View {
     private var canReuseResult: Bool { !entry.result.isEmpty }
     private var canCopyHeard: Bool { !entry.heard.isEmpty && entry.heard != entry.result }
 
-    private var actionBar: some View {
-        WrapLayout(spacing: 8) {
-            if !entry.isSpokenReplyOnly {
-                Button { model.copyResult() } label: { Label("Copy Result", systemImage: "doc.on.doc") }
-                    .disabled(!canReuseResult)
-                    .accessibilityIdentifier(AccessibilityID.History.copyResult)
-            }
-            if entry.spokenReply != nil {
+    private var copyActions: some View {
+        Menu {
+            if !entry.isSpokenReplyOnly, entry.spokenReply != nil {
                 Button { model.copyReply() } label: { Label("Copy Reply", systemImage: "speaker.wave.2") }
                     .accessibilityIdentifier(AccessibilityID.History.copyReply)
-            }
-            if !entry.outcome.isCommand {
-                Button { model.pasteResult() } label: { Label("Paste Result", systemImage: "arrow.down.doc") }
-                    .disabled(!canReuseResult)
-                    .accessibilityIdentifier(AccessibilityID.History.pasteResult)
             }
             if canCopyHeard {
                 Button { model.copyHeard() } label: { Label("Copy Heard", systemImage: "text.quote") }
                     .accessibilityIdentifier(AccessibilityID.History.copyHeard)
-            }
-            if model.canRewriteSelectedAgain {
-                Button { model.rewriteSelectedAgain() } label: { Label("Rewrite Again", systemImage: "arrow.clockwise") }
-                    .disabled(model.rewritingAgain)
-                    .help("Runs the AI rewrite again on what was heard, with this mode as it is now. Nothing from the screen is sent, and nothing is inserted: the new text replaces this dictation's result.")
-                    .accessibilityIdentifier(AccessibilityID.History.rewriteAgain)
-                if model.rewritingAgain { ProgressView().controlSize(.small) }
             }
             if model.selectedUnsavedRewrite != nil {
                 Button { model.copyUnsavedRewrite() } label: { Label("Copy Rewrite", systemImage: "doc.on.doc") }
@@ -1337,19 +1510,30 @@ private struct HistoryDetailView: View {
                     .help("Copies this dictation for a bug report: what you said, the inserted text, the app it was for, your microphone's name, any AI request and reply (which can include your dictionary words, selected text, or text from the app), a coding agent's reply update, and details about your setup.")
                     .accessibilityIdentifier(AccessibilityID.History.copyReport)
             }
+        } label: {
+            Label(entry.isSpokenReplyOnly ? "Copy Reply" : "Copy Result", systemImage: "doc.on.doc")
+        } primaryAction: {
+            if entry.isSpokenReplyOnly { model.copyReply() } else { model.copyResult() }
         }
+        .fixedSize()
+        .help(entry.isSpokenReplyOnly ? "Copies the reply. The arrow holds the other copy actions." : "Copies the result. The arrow holds the other copy actions.")
+        .accessibilityIdentifier(AccessibilityID.History.copyMenu)
     }
 
-    private var deleteFooter: some View {
-        HStack(spacing: 12) {
+    private var actionFooter: some View {
+        VStack(alignment: .leading, spacing: 8) {
             Text(model.statusMessage ?? "")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(2, reservesSpace: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            PaneDeleteButton(title: deleteTitle(entry)) { confirmingDelete = true }
-                .disabled(model.rewritingAgain)
-                .accessibilityIdentifier(AccessibilityID.History.delete)
+            HStack(alignment: .bottom, spacing: 20) {
+                copyActions
+                Spacer(minLength: 20)
+                PaneDeleteButton(title: deleteTitle(entry)) { confirmingDelete = true }
+                    .disabled(model.rewritingAgain)
+                    .accessibilityIdentifier(AccessibilityID.History.delete)
+            }
         }
     }
 

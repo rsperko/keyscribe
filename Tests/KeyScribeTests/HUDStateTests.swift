@@ -7,7 +7,7 @@ import Testing
 struct HUDStateTests {
     @Test func previewFixturesCoverEveryVisibleHUDState() {
         #expect(HUDPreview.names == [
-            "ready", "recording", "recording-latched", "loading-model", "transcribing",
+            "ready", "recording", "recording-latched", "loading-model", "transcribing", "waiting-check", "waiting-check-stalled",
             "rewriting", "rewriting-three-badges", "redacted-rewrite", "rewriting-with-local-transcript",
             "inserted", "copied", "copied-long-reason", "no-speech", "nothing-heard", "failed", "rewrite-fallback",
             "rewrite-fallback-reasoning", "rewrite-fallback-copied", "rewrite-fallback-copied-accessibility", "rewrite-skipped",
@@ -568,6 +568,66 @@ struct HUDStateTests {
         }
         RunLoop.main.run(until: Date().addingTimeInterval(0.05))
         #expect(hits == HUDPreview.choicePrompt.rows.map(\.identity) + ["cancel"])
+        #expect(!window.isKeyWindow)
+        hud.render(.hidden)
+    }
+
+    @Test func waitingForCheckAudioSaysSoAndHowToDiscardTheDictation() throws {
+        let waiting = try #require(HUDPreview.state(named: "waiting-check"))
+        #expect(waiting.secondaryText == "Waiting for Check Audio to finish\u{2026} Esc discards this dictation.")
+        #expect(waiting.offersDiscard)
+        #expect(!waiting.holdsKeyFocus)
+        #expect(!waiting.isPassive)
+        let stalled = try #require(HUDPreview.state(named: "waiting-check-stalled"))
+        #expect(stalled.indicator == .error)
+        #expect(stalled.offersDiscard)
+        let said = try #require(stalled.secondaryText)
+        #expect(said == "Check Audio is taking longer than expected. Your recording is held until it ends; quitting \(Branding.appName) discards it.")
+        #expect(stalled.voiceOverAnnouncement == [stalled.primaryText, said].compactMap { $0 }.joined(separator: ". "))
+    }
+
+    @Test func waitingForCheckAudioClaimsEscapeFromAnyAppWithoutTakingKeyFocus() throws {
+        let escape = FakeChordRegistrar()
+        let hud = HUDController(defaults: UserDefaults(suiteName: "hud-\(UUID().uuidString)")!, escape: escape)
+        defer { hud.render(.hidden) }
+        var cancels = 0
+        hud.canCancel = { true }
+        hud.onEscapeCancel = { cancels += 1 }
+        hud.render(try #require(HUDPreview.state(named: "waiting-check")))
+        #expect(hud.panelCanBecomeKey == false)
+        #expect(escape.lastRegistrations.map(\.keyCode) == [EscapeClaim.keyCode])
+        escape.lastRegistrations.first?.onPressed()
+        #expect(cancels == 1)
+        hud.render(try #require(HUDPreview.state(named: "waiting-check-stalled")))
+        #expect(escape.lastRegistrations.map(\.keyCode) == [EscapeClaim.keyCode])
+        hud.render(.transcribing(mode: "Plain Dictation"))
+        #expect(escape.lastRegistrations.isEmpty)
+    }
+
+    @Test func clickingDiscardDictationDiscardsItWithoutTakingKeyFocus() throws {
+        let hud = HUDController(defaults: UserDefaults(suiteName: "hud-\(UUID().uuidString)")!, escape: FakeChordRegistrar())
+        var discards = 0
+        hud.canCancel = { true }
+        hud.onEscapeCancel = { discards += 1 }
+        hud.render(try #require(HUDPreview.state(named: "waiting-check-stalled")))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        let view = try #require(hud.panelContentView)
+        let window = try #require(view.window)
+        var y = view.bounds.maxY - 2
+        while y > 0, discards == 0 {
+            for x in stride(from: CGFloat(20), to: view.bounds.maxX, by: 20) where discards == 0 {
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    let event = NSEvent.mouseEvent(
+                        with: type, location: NSPoint(x: x, y: y), modifierFlags: [],
+                        timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+                        eventNumber: 0, clickCount: 1, pressure: 1)!
+                    window.sendEvent(event)
+                }
+            }
+            y -= 4
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        #expect(discards == 1)
         #expect(!window.isKeyWindow)
         hud.render(.hidden)
     }

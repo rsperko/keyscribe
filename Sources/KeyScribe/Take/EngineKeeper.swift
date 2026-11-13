@@ -139,8 +139,51 @@ final class EngineKeeper {
         return result
     }
 
-    func awaitSelfTestClearance() async {
+    enum Listening: Equatable { case heard(String, checker: String), busy, cancelled, unavailable }
+
+    var checkTimeout = EngineKeeper.selfTestTimeoutSeconds
+    private var checkGate: SingleFlightDeadline?
+
+    func listen(_ engine: any SpeechEngine, wav: URL, gate: SingleFlightDeadline) async -> Listening {
+        guard !isBusy else { return .busy }
+        do { try await warm(engine).value } catch { return .unavailable }
+        guard !isBusy else { return .busy }
+        let earlier = checkGate
+        checkGate = gate
+        defer { if !isBusy { applyEvictionAfterDictation(engine: engine) } }
+        do {
+            let heard = try await gate.run(seconds: checkTimeout) { try await engine.transcribe(wavURL: wav, biasTerms: []) }
+            if checkGate === gate { checkGate = nil }
+            return .heard(heard, checker: engine.id)
+        } catch is SingleFlightDeadline.Busy {
+            checkGate = earlier
+            return .busy
+        } catch {
+            releaseCheckGateWhenSettled(gate)
+            return Task.isCancelled ? .cancelled : .unavailable
+        }
+    }
+
+    private func releaseCheckGateWhenSettled(_ gate: SingleFlightDeadline) {
+        Task { @MainActor [weak self] in
+            while await gate.isBusy { try? await Task.sleep(for: .milliseconds(Self.selfTestSettlePollMs)) }
+            if self?.checkGate === gate { self?.checkGate = nil }
+        }
+    }
+
+    func checkHolds(_ gate: SingleFlightDeadline) async -> Bool {
+        guard checkGate === gate else { return false }
+        return await gate.isBusy
+    }
+
+    // A check's transcription can outlive its deadline or a cancellation the engine ignores, and the gate stays
+    // closed until it really returns. A commit waits for that with no limit of its own: the engine is serialized,
+    // so nothing could transcribe sooner, and the recording is kept until the user cancels.
+    func awaitSelfTestClearance(on gate: SingleFlightDeadline) async {
         for _ in 0..<Self.selfTestClearancePolls where selfTestUsers > 0 {
+            try? await Task.sleep(for: .milliseconds(Self.selfTestSettlePollMs))
+        }
+        while !Task.isCancelled, checkGate === gate, await gate.isBusy {
             try? await Task.sleep(for: .milliseconds(Self.selfTestSettlePollMs))
         }
     }

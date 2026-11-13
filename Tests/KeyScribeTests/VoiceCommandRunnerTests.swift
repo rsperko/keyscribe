@@ -203,7 +203,9 @@ struct VoiceCommandRunnerTests {
         var handles: [String: String] = ["a": "docs", "b": "backend"]
         var whileOpening: @MainActor () -> Void = {}
         var replay: SpokenResultOutput.Replay = .repeating("docs")
+        var kept: SessionReturns.KeptReply = .kept("docs")
         private(set) var replays = 0
+        private(set) var keeps = 0
         private(set) var opened: [String] = []
         private(set) var reads = 0
         private(set) var wantedAfterOpening: [Bool] = []
@@ -217,7 +219,8 @@ struct VoiceCommandRunnerTests {
                     return self.result
                 },
                 handle: { self.handles[$0] },
-                replay: { self.replays += 1; return self.replay })
+                replay: { self.replays += 1; return self.replay },
+                keepReply: { self.keeps += 1; return self.kept })
         }
     }
 
@@ -234,6 +237,29 @@ struct VoiceCommandRunnerTests {
                 == .failed(message: "Reply updates are off.", command: "Replays the last spoken reply."))
         #expect(await runner.run(transcript: "repeat that", places: [], origin: nil, stillWanted: { false }) == .abandoned)
         #expect(sessions.replays == 2)
+        #expect(system.activatedPids.isEmpty)
+    }
+
+    @Test func thatSoundedWrongKeepsTheLastReplyAndSaysWhenThereIsNone() async {
+        let (runner, system) = make()
+        let command = "Keeps the last spoken reply\u{2019}s audio, text and report with its History entry."
+        #expect(await runner.run(transcript: "that sounded wrong", places: [], origin: nil, stillWanted: { true })
+                == .failed(message: "There\u{2019}s no reply in History to keep yet.", command: command))
+        let sessions = Sessions()
+        runner.returnToSessions(sessions.returns)
+        #expect(await runner.run(transcript: "That sounded wrong.", places: [], origin: nil, stillWanted: { true })
+                == .done(summary: "Kept the reply from docs", command: command))
+        sessions.kept = .reportOnly("docs")
+        #expect(await runner.run(transcript: "that sounded wrong", places: [], origin: nil, stillWanted: { true })
+                == .done(summary: "Kept the text and report of the reply from docs; its audio was already gone", command: command))
+        sessions.kept = .notSaved("docs")
+        #expect(await runner.run(transcript: "that sounded wrong", places: [], origin: nil, stillWanted: { true })
+                == .failed(message: "The reply from docs wasn\u{2019}t saved in History, so it can\u{2019}t be kept.", command: command))
+        sessions.kept = .failed
+        #expect(await runner.run(transcript: "that sounded garbled", places: [], origin: nil, stillWanted: { true })
+                == .failed(message: "Couldn\u{2019}t keep the last reply.", command: command))
+        #expect(await runner.run(transcript: "that sounded wrong", places: [], origin: nil, stillWanted: { false }) == .abandoned)
+        #expect(sessions.keeps == 4)
         #expect(system.activatedPids.isEmpty)
     }
 

@@ -137,7 +137,7 @@ privacy, or output.
 | Replacement | “Change a recognized phrase automatically” | Replacements occur before rewrite; regular expressions are Advanced. |
 | Does (mode summary, read-only) | What the mode does, set by the template it was created from: dictation, replacing the selected text, or answering about it (experimental) | The selection is copied after you finish speaking. Editing sends it to the rewrite service and replaces it; answering sends it with your spoken request, shows and reads the answer aloud, and never changes the selected text. There is no control to change it; create the mode from the matching template instead. |
 | Insertion method | “How finished text reaches the target app” | Paste is the normal Settings behavior; Insert and Type are TOML-only compatibility escapes. |
-| History | “Keep dictations on this Mac” | Audio is never saved; transcript and final text may be sensitive; per-mode exclusion and retention are available. |
+| History | “Keep dictations on this Mac” | Recordings of your voice are never saved (a spoken reply kept for diagnosis keeps its generated audio); transcript and final text may be sensitive; per-mode exclusion and retention are available. |
 
 ### Help writing rules
 
@@ -304,6 +304,7 @@ because opening its mic switches it to call mode.
 | Recording (Coding agent mode, experimental) | “To [name]” for the frozen recipient (“To [name], disconnected” when it is a disconnected conversation in front), or “No recipient yet”, + the level circle | “Listening” as above, then the open sessions as numbered rows (name over agent and project, live state at the trailing edge, the recipient highlighted and marked Current), then one line saying where the recipient came from and how to name another | As Recording; rows are not clickable while recording |
 | Recording, near the limit | Same, plus an orange ring around the level circle that drains to empty | “Stops in 0:SS”, counting down | As Recording |
 | Transcribing | “Transcribing” | Mode name | Cancel when safe |
+| Waiting for Check Audio (a dictation committed while a check the user started in History holds the speech model) | Mode name | “Waiting for Check Audio to finish… Esc discards this dictation.” After 10 seconds (`DictationController.checkStallSeconds`) it turns to the error triangle and says Check Audio is taking longer than expected, the recording is held until the check ends, and quitting the app discards it (quitting cancels the take) | **Discard Dictation**; Escape does the same from any app (claimed without taking key focus, so typing elsewhere is not swallowed). Transcription resumes on its own when the check ends |
 | Voice command opening an app | Mode name | “Opening [app]…” only while “open” starts an app, then “Looking in [app]…” while its tabs or sidebar fill; “switch to” never starts one, so never shows it | None; shown only once the command is acting, so it is not cancellable and does not take key focus away from the app being opened |
 | Rewriting | “Rewriting with [connection name]” | Boundary badges: `Cloud rewrite`, then `Best-effort redaction` or the exact shared context categories | Insert without rewriting after timeout (the shortcut does the same once it is shown) |
 | Answering (a `speak` mode) | “Answering with [connection name]” | Same badges as Rewriting | Escape cancels; nothing is inserted |
@@ -2090,7 +2091,7 @@ is then spoken as unavailable. With no saved services, an advisory saying summar
 and **Open AI Services**, take its place. While a service is chosen, the row's caption
 states the data boundary in one line, naming the service ("Long replies and waiting prompts go to {name}
 after best-effort redaction."); its help adds that short replies are read without any service and that the app, named with
-`Branding.appName`, does not save replies or summaries, with no claim about what the provider keeps.
+`Branding.appName`, saves what was read aloud in History only while History is on, with no claim about what the provider keeps.
 
 **Voice** is one row, with **Preview Voice** beside its control, wrapping below it only when the pane is too
 narrow. Its picker's first choice is **Off — text only**, which shows answers and updates on the panel (§5, The
@@ -2379,8 +2380,8 @@ the entry detail. The section uses the shared uppercase **History** header, foll
 on this Mac** and the subordinate **Keep for** menu. These controls live only here — General has no
 History section. **"Navigated away" equals "closed"**: leaving the pane (or closing Settings)
 releases all parsed transcripts and the search cache, and re-entering reloads (signature-gated,
-so it is free when nothing changed). "Paste Result" hides Settings, pastes into the previously
-focused app, and closes Settings on success (re-presents + copies on failure).
+so it is free when nothing changed). History offers copying for reuse; it does not paste into other apps.
+**Paste Last Dictation** remains available from the menu, shortcut, and HUD.
 
 History uses the standard immediate-apply Settings model. Retention is a menu of readable periods from
 days through one year, so common choices such as two weeks or two months do not require repeated stepper
@@ -2459,8 +2460,8 @@ HUD showed what was heard instead. Clicking a row completes the question's own e
 Cancel button marks it **Choice cancelled**. A take that is only “cancel” or “never mind”, with no question
 waiting, records nothing, in either action mode, like a dictation discarded with “never mind”. An idle timeout records nothing. A failed command adds a **Why it failed** row in Details explaining the
 failure, and a script that reported a result adds a **Reported** row with the message the HUD showed. That row can say more than the compact HUD: an unrecognized command keeps the full “Not a
-command. Say …” guidance there while the HUD shows only “Command not recognized” and what was heard. **Paste Result** is hidden for commands, since there is nothing to insert;
-**Copy Result** stays. **Add to Dictionary** and **Create Replacement** on a command entry write to the
+command. Say …” guidance there while the HUD shows only “Command not recognized” and what was heard.
+**Copy Result** stays available for commands. **Add to Dictionary** and **Create Replacement** on a command entry write to the
 Voice Commands vocabulary, not the global one, since that is what reads commands. While voice commands
 are turned off, a command entry shows no corrections, since that vocabulary cannot be seen or edited. The Voice Commands
 editor carries its own **Do not save this mode in history** toggle.
@@ -2493,8 +2494,8 @@ and the service; for a summary cut short, a caption under the line says it was s
 a sanitized reason (the service failed, timed out, returned nothing, or could not be used), never the service's own
 error text. Search matches both, and the text and Markdown exports carry them; the entry's badges add **Reply summary** and **Best-effort redaction**. The line is never
 offered for corrections, since it is the agent's words, not the user's. Search finds it, and the exports carry it. An entry that is only a reply is not a dictation: the History stats, the mishearing search and its count, and
-the diagnostics report leave it out, and its export has no Result line. Its action bar offers **Copy Reply** in
-place of Copy Result and has no Copy Report. A dictation with a reply joined to it offers **Copy Reply** beside
+the diagnostics report leave it out, and its export has no Result line. Its Copy menu offers **Copy Reply** in
+place of Copy Result and has no Copy Report. A dictation with a reply joined to it offers **Copy Reply** alongside
 Copy Result, and its **Copy Report** says it includes the reply.
 
 The **Reply** section has one playback control, **Play**, which replays what the user heard: while the natural
@@ -2521,6 +2522,40 @@ selects the audio in Finder, says so in the status line, and sends nothing anywh
 not offered, since making the audio again would not be the audio that played. The disclosure is absent when there is
 nothing to put in it (a reply shown as text only).
 
+A reply is kept for diagnosis only when the user asks: by **Sounded Wrong**, beside Play, or by saying "that sounded
+wrong", which keeps the reply just heard and names its conversation (or says that reply was not saved in History).
+While the reply is still being read, Sounded Wrong, Check Audio and Save Generated Audio… are disabled, since its
+audio is whole only once playback ends. Keeping writes the held audio of every sentence played
+and a report beside the History entry, where they stay until the entry is deleted or retention drops its day. With the
+audio already gone it keeps the report alone, and Sounded Wrong's help says so before it is chosen.
+
+Once kept, Sounded Wrong gives way to Play's caption, which confirms it in place: "Kept for diagnosis with this entry",
+adding "text and report only; the audio was gone" when that is so. Play plays the kept original audio when the natural
+voice read the reply. When the macOS voice read it, Play keeps the macOS voice, and **Play Generated Audio** plays the
+kept take that was not played.
+
+Playback details offers **Check Audio** while generated audio is held or kept, and each saved render has its own
+**Check** beside its Play. A check runs on-device speech recognition on that audio once, only when chosen; nothing is
+checked in the background. While one runs, every check button is disabled and the one that started reads
+"Checking…". The status line then says, in one sentence, how much of the reply's text was heard, or that the speech
+model is busy with a dictation and to check again in a moment; a check never waits for a dictation. A dictation committed while a
+check runs keeps its recording and waits for the check (the HUD's "Waiting for Check Audio" state), then transcribes
+on its own; Discard Dictation or Escape discards the take. The message
+appears only if the same entry is still selected, and closing History cancels the check without a message. A check of
+the reply is kept with the entry and, for a kept reply, in its report; a check of a render goes into that render's
+report. A mismatch from a calibrated checker (`SpokenReplyCheck.calibratedCheckers`) shows in the reply section: the
+advisory `IssueText` "The generated audio may not match the reply." and what was heard, with the share heard. A
+pass, or a mismatch from a checker not yet calibrated, shows only in Playback details as **Check**, naming the
+speech model. A check keeps nothing by itself.
+
+Playback details also offers **Render Again** while the natural voice is installed. It renders the same sentences with
+the same voice, taken from the entry's recorded `rendering` (written when the reply was kept) once the held audio is
+gone. An entry without one is rendered whole with the current voice, and the status line and report say so. Each
+sentence has a deadline. The new audio and its report are saved beside the original as "Render 2", "Render 3" and so
+on, unless the entry was deleted meanwhile, and the new audio plays. The status line says "Saved Render N." Render
+Again does not check the new audio; its Check does. Playback details also holds **Show in Finder** for a kept reply
+and a list of the renders, each with its own Play and Check.
+
 A dictation in which live edits ran, including a Coding agent message (beside its recipient lines), adds a
 **What happened** row, **Spoken edits**, with the same words as the completion HUD (“new line ×2, scratch that”), so the user can tell afterwards whether a spoken edit fired.
 
@@ -2544,21 +2579,24 @@ Both sheets name where the correction is saved: the global vocabulary for a dict
 a command. A sheet opened with nothing selected does not flag the empty field until the user edits it, and Return
 performs whichever action the sheet's default button shows.
 
-Reuse actions (**Copy Result**, **Paste Result**, **Copy Heard**) lead an action row at the top of the
-detail. On a dictation whose rewrite fell back or was skipped (not a Coding agent message, which was
-already sent), **Rewrite Again** follows them. It runs the AI rewrite again, with the
+A **Copy Result** button at the bottom left of the detail copies the result in one click (**Copy Reply** for an
+entry that is only a reply), and its arrow holds the other copy actions for the selected entry, such as **Copy
+Reply** and **Copy Heard**. The destructive delete action stays separated at the bottom right, on the same row.
+Status messages appear above this footer, in space kept for two lines so a message never moves it. On a dictation whose rewrite fell back
+or was skipped (not a Coding agent message, which was already sent), **Rewrite Again** appears above the
+Result/Details picker. It runs the AI rewrite again, with the
 mode as it is now, on what was heard (less the spoken phrase that chose the mode), without context: the
 original take's context was never stored, and the screen now is not what was dictated into. Redaction
 stays on when the original take had it, even if the mode has turned it off since. It shows a small
 spinner while it runs, Delete Dictation is unavailable until it finishes, and it inserts nothing. On success the entry is updated in place to **Rewritten later, not inserted**, its Result is the
-new text, and the status line says which service rewrote it and to copy or paste the result. When it
+new text, and the status line says which service rewrote it and to copy the result. When it
 cannot run (the mode is gone or has no AI service, the dictation inserted the clipboard, a rule took the
 whole dictation) or the service fails again, the entry is unchanged and the status line says why. If the
 dictation was deleted meanwhile, the rewrite is dropped and the status line says so; if History could not
-save it, **Copy Rewrite** appears beside the other actions so the text is never lost and the clipboard is
+save it, **Copy Rewrite** appears in the Copy menu so the text is never lost and the clipboard is
 changed only when the user asks. An entry that is only a reply offers no corrections, since it holds no words of the
 user's, and its delete action reads **Delete Reply** ("Delete this reply?").
-**Copy Report** follows, which copies that one dictation for a bug report: every field the
+**Copy Report** appears in the Copy menu and copies that one dictation for a bug report: every field the
 entry recorded, including what was said, the request sent to an AI service and its reply, plus the install
 summary Copy Diagnostics produces. Nothing is redacted. The report's first lines, the button's help, and
 the confirmation after copying all say it includes what was said and any AI request and reply (which can
@@ -2576,9 +2614,9 @@ affordance. The storage-truth statement stays pinned regardless.
 
 ### Storage truth
 
-The History pane and its empty state must state: `History stays on this Mac. Audio and
-password-field dictations are never saved. Stored transcripts and final text can still contain
-sensitive information.` Retention and per-mode exclusion are reachable from the pane's inline
+The History pane and its empty state must state: `History stays on this Mac. Recordings of your voice
+and password-field dictations are never saved; a spoken reply kept for diagnosis keeps its generated audio.
+Stored transcripts and final text can still contain sensitive information.` Retention and per-mode exclusion are reachable from the pane's inline
 controls and each mode's Result handling.
 
 ---

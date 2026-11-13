@@ -73,6 +73,7 @@ Say one command per recording. A saved command's name works only after its verb.
 | `open [tab search] [title or site]`<br>Example: `open browser inbox` | Saved **Find a Browser Tab** | Finds the open tab that best matches. |
 | `go back` | After a switch | Returns to the window or app you were in before. |
 | `repeat that` | Reply updates on | Replays the last spoken reply. |
+| `that sounded wrong` | Reply updates on | Keeps the reply you just heard, with its audio and a report, alongside its History entry. |
 | `cancel`<br>Also: `never mind` | Said alone | Runs nothing. |
 | `what can I say?` | Said alone | Shows your apps and saved commands with their verbs. |
 
@@ -107,6 +108,7 @@ the agent in Settings > Modes > Coding agent). [Name] is a conversation name sho
 | `check on all conversations` | Coding agent mode | Names the conversations waiting for you. Sends nothing. |
 | `rename this conversation to [name]` | The current conversation | Renames it. Say only the rename. |
 | `repeat that` | Reply updates on | Replays the last spoken reply and names its conversation. |
+| `that sounded wrong` | Reply updates on | Keeps the reply you just heard, with its audio and a report, alongside its History entry. |
 | `cancel`<br>Also: `never mind` | Said alone | Sends nothing. To send the word, say `tell [name] cancel`. |
 | `what can I say?` | Said alone | Shows these phrases with your conversation names. |
 
