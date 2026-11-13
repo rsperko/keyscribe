@@ -85,9 +85,13 @@ struct AgentTerminalFocus: AgentTerminalFocusing {
     var running: @MainActor @Sendable (_ app: String, _ near: Int) -> (pid: Int, name: String)? = AgentTerminalFocus.running
     var activate: @MainActor @Sendable (Int) -> String? = AppActivation.bringForwardApp(pid:)
 
-    static func plan(_ surfaces: ResolvedSurfaces) -> @Sendable (Int, [String: String]) -> [OpenAction] {
-        { pid, environment in
-            let facts = SystemTerminalFacts(environmentKeys: surfaces.environmentKeys)
+    static func plan(
+        _ surfaces: ResolvedSurfaces,
+        facts: (@Sendable () -> TerminalFacts)? = nil
+    ) -> @Sendable (Int, [String: String]) -> [OpenAction] {
+        let facts = facts ?? { SystemTerminalFacts(environmentKeys: surfaces.environmentKeys) }
+        return { pid, environment in
+            let facts = facts()
             return TerminalRoutes.plan(
                 agent: pid, facts: facts.reporting(environment, for: pid, keeping: surfaces.environmentKeys), routes: surfaces.routes)
         }

@@ -27,3 +27,16 @@ enum FrontProbe {
         return 0
     }
 }
+
+enum PlaceProbe {
+    static func lines(pid: Int, agent: String, session: String, reader: any AgentPlaceReading) async -> [String] {
+        let query = AgentPlaceQuery(id: "probe", agent: agent, native: session, pid: pid)
+        switch await reader.read([query])[query.id] {
+        case .found(let place):
+            let labels = place.labels.map { "\($0.level):\($0.text)" }.joined(separator: ",")
+            return ["read surface=\(place.surface) labels=\(labels.isEmpty ? "none" : labels) containers=\(place.containers.joined(separator: ","))"]
+        case .absent: return ["read=absent"]
+        case .unknown, nil: return ["read=unknown"]
+        }
+    }
+}

@@ -216,7 +216,7 @@ struct AgentTerminalFocusTests {
     }
 
     private static let walkCommands = [
-        PaneCommand(["/bin/zellij", "next"], until: FocusWalk(check: ["/bin/zellij", "clients"], pane: "terminal_2", steps: 2)),
+        PaneCommand(["/bin/zellij", "next"], until: FocusWalk(check: ["/bin/zellij", "clients"], header: ["CLIENT_ID", "ZELLIJ_PANE_ID"], value: "terminal_2", steps: 2)),
     ]
     private static let walk = OpenAction.layer(PaneLayer("Zellij", commands: walkCommands))
 
@@ -234,7 +234,7 @@ struct AgentTerminalFocusTests {
     @Test func aCommandThatAnswersWithAnAcceptedStatusLetsTheWalkContinue() async {
         let hide = OpenAction.layer(PaneLayer("Zellij", commands: [
             PaneCommand(["/bin/zellij", "hide"], accepting: [0, 2]),
-            PaneCommand(["/bin/zellij", "next"], until: FocusWalk(check: ["/bin/zellij", "clients"], pane: "terminal_2", steps: 2)),
+            PaneCommand(["/bin/zellij", "next"], until: FocusWalk(check: ["/bin/zellij", "clients"], header: ["CLIENT_ID", "ZELLIJ_PANE_ID"], value: "terminal_2", steps: 2)),
         ]))
         let calls = Calls()
         let answers = Answers(["/bin/zellij clients": ["terminal_1", "terminal_2"].map(Self.clients)])

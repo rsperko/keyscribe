@@ -43,9 +43,27 @@ struct InjectedIntegrationsTests {
         }
     }
 
+    struct Mux: PaneRoute {
+        let name = "Example Mux"
+        let processName = "xmux"
+        let environmentKeys = ["XMUX_PANE"]
+
+        func open(_ process: TerminalProcess, inner: ArraySlice<TerminalProcess>, facts: TerminalFacts) -> Opening? {
+            guard process.name == processName, process.tty == nil,
+                  let pane = TerminalRoutes.nearest("XMUX_PANE", in: inner)?.environment["XMUX_PANE"]
+            else { return nil }
+            let client = facts.processes(named: processName)?.first(where: isClient)?.pid
+            return Opening([.layer(PaneLayer(name, commands: [PaneCommand(["xmux", "focus", pane])]))], next: client)
+        }
+
+        func isClient(_ process: TerminalProcess) -> Bool { process.name == processName && process.tty != nil }
+        func front(client: TerminalProcess, tty: String, facts: TerminalFacts) -> FrontStep { .unknown(.multiplexer(name)) }
+    }
+
     static func surfaces() throws -> ResolvedSurfaces {
         var surfaces = AgentSurfaces.builtIn
         surfaces.terminals.append(term)
+        surfaces.multiplexers.append(Mux())
         return try surfaces.resolve()
     }
 
@@ -87,5 +105,49 @@ struct InjectedIntegrationsTests {
             facts: { Self.facts }, confirming: false)
         #expect(await front.check(agent: 30) == .shown)
         #expect(calls.calls == ["\(Self.nightly) 10 return front tty"])
+    }
+
+    @Test @MainActor func openingAnAgentInAnInjectedMultiplexerRunsItsStepThenTheInjectedTerminalsScript() async throws {
+        let facts = Facts()
+            .add(10, parent: 1, "term", app: Self.nightly)
+            .add(20, parent: 10, tty: "/dev/ttys001", "xmux")
+            .add(40, parent: 1, "xmux")
+            .add(41, parent: 40, tty: "/dev/ttys008", "claude")
+        let calls = Calls()
+        var focus = AgentTerminalFocus(plan: AgentTerminalFocus.plan(try Self.surfaces(), facts: { facts }))
+        focus.run = { argv in
+            calls.record(argv.joined(separator: " "))
+            return (0, "")
+        }
+        focus.script = { app, pid, body, _, _ in
+            calls.record("script \(app) \(pid) \(body.contains("/dev/ttys001"))")
+            return .selected
+        }
+        focus.running = { app, near in (near, app) }
+        focus.activate = { _ in "Term" }
+        let result = await focus.focus(session: "s1", pid: 41, environment: ["XMUX_PANE": "7", "UNRELATED": "x"], asking: { _ in })
+        #expect(result == .exact)
+        #expect(calls.calls == ["xmux focus 7", "script \(Self.nightly) 10 true"])
+    }
+
+    struct Answering: AgentPlaceReading {
+        let answer: AgentPlaceAnswer?
+        func read(_ queries: [AgentPlaceQuery]) async -> [String: AgentPlaceAnswer] {
+            Dictionary(uniqueKeysWithValues: queries.compactMap { query in answer.map { (query.id, $0) } })
+        }
+    }
+
+    @Test @MainActor func theProbeReadsPlacesThroughTheSameReadersTheAppUses() async throws {
+        let place = AgentPlace(
+            surface: "Example Mux", labels: [.init(text: "builder", level: .pane, container: "mux#1"), .init(text: "Payments", level: .tab, container: "mux#t")],
+            containers: ["mux#1", "mux#t"])
+        let reader = AgentRuntime.places(surfaces: try Self.surfaces(), sources: [Source(place: place)])
+        #expect(await PlaceProbe.lines(pid: Int(Int32.max), agent: "claude", session: "a", reader: reader)
+            == ["read surface=Example Mux labels=pane:builder,tab:Payments containers=mux#1,mux#t"])
+    }
+
+    @Test(arguments: [(AgentPlaceAnswer.absent, "read=absent"), (.unknown, "read=unknown"), (nil, "read=unknown")] as [(AgentPlaceAnswer?, String)])
+    func theProbeSaysWhenNoReaderNamedThePlace(answer: AgentPlaceAnswer?, line: String) async {
+        #expect(await PlaceProbe.lines(pid: 30, agent: "claude", session: "a", reader: Answering(answer: answer)) == [line])
     }
 }

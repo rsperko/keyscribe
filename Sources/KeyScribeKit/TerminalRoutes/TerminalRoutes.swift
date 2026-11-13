@@ -54,6 +54,35 @@ public struct PaneCommand: Equatable, Sendable {
     }
 }
 
+public struct FocusWalk: Equatable, Sendable {
+    public var check: [String]
+    public var header: [String]
+    public var value: String
+    public var steps: Int
+
+    public init(check: [String], header: [String], value: String, steps: Int) {
+        self.check = check
+        self.header = header
+        self.value = value
+        self.steps = steps
+    }
+
+    public var column: String { header.last ?? "" }
+
+    public func reached(_ result: (status: Int32, output: String)) -> Bool? {
+        Self.lastColumn(of: header, in: result)?.contains(value)
+    }
+
+    public static func lastColumn(of header: [String], in result: (status: Int32, output: String)) -> Set<String>? {
+        guard result.status == 0, !header.isEmpty else { return nil }
+        let lines = result.output.split(separator: "\n").map { $0.split(whereSeparator: \.isWhitespace).map(String.init) }
+        guard let first = lines.first, first.starts(with: header) else { return nil }
+        let rows = lines.dropFirst()
+        guard !rows.isEmpty, rows.allSatisfy({ $0.count >= header.count }) else { return nil }
+        return Set(rows.map { $0[header.count - 1] })
+    }
+}
+
 public struct PaneLayer: Equatable, Sendable {
     public var multiplexer: String
     public var commands: [PaneCommand]
