@@ -573,6 +573,24 @@ block's environment to other programs. An agent without the connector only bring
 that was already open when KeyScribe added Rex support does the same until you run `/reload-plugins` in
 Claude Code or `/reload` in Pi, or restart it.
 
+### Can I talk to agents running in bb?
+
+Yes. Turn on **Reach conversations in bb** in **Settings ▸ Modes ▸ Coding agent**. KeyScribe then lists bb's
+threads and sends what you say to them through bb's own `bb` command, whichever agent the thread runs, with
+any image you pasted attached. It runs nothing of bb's until you turn this on, and nothing while bb isn't
+open. Your words are queued behind a turn that is already running rather than injected into it. “Open docs”
+asks bb's open windows to show the thread and brings bb forward. If bb isn't installed, isn't open, or
+couldn't list its threads, Settings says so beside the switch.
+
+KeyScribe checks bb for new threads when you start recording with a Coding agent mode available and while
+Settings is open, and otherwise only every few minutes, so a thread you just started may need one more press
+before you can say its name.
+
+KeyScribe can't yet tell which bb thread is in front or read a bb thread's reply aloud. A thread is called by
+its folder until you rename it in KeyScribe, because bb doesn't say whether you or an AI service wrote its
+title. KeyScribe turns off bb's usage reporting for the commands it runs. A Claude Code thread in bb whose
+connector is installed is also listed on its own, as a separate conversation.
+
 ### How do I rename a conversation?
 
 In the Coding agent mode, switch to the conversation, then say **“rename this conversation to”** and the new

@@ -336,8 +336,17 @@ every rule above applies to it, with these sharpenings:
   itself is an `AgentHost`: its conversations are listed with a host location (`AgentHostLocation`: host,
   instance, native id) and no pid. The conversation id comes from the location alone
   (`AgentHostLocation.conversationKey`), so the same thread id on two instances is two conversations. A host
-  makes no call at all until the user turns it on (`isEnabled`), and its scan runs no more often than
-  `HostDiscovery.fallbackInterval` unless the user asks for a fresh list. A host id must not repeat an agent's
+  makes no call at all until the user turns it on in Settings (`Settings.CodingAgents.hosts`) and its own
+  `isEnabled`, a filesystem-only check that the tool is installed, agrees (`HostDiscovery.isEnabled`); turning
+  it off drops its conversations on the next scan. A host turned on whose tool is not installed lists nothing
+  and says so beside its switch; a host whose list could not be read keeps what it last listed and says so too,
+  each with what to do next. A host is asked for its list
+  only when the user may need it (a press for which a Coding agent mode is eligible, Settings open, Check
+  Again, turning it on),
+  at most once per `HostDiscovery.fallbackInterval`, and otherwise once per `HostDiscovery.idleInterval`; a
+  list that could not be read is asked again after the shorter interval. Another agent's hello or title never
+  asks a host: a host's list is a separate program, and asking it on every event costs a run each time. A
+  host id must not repeat an agent's
   or another host's (`CodingAgentIntegrations.resolve`). Each capability a host's API lacks answers
   unsupported, never a guess.
 - **A hosted conversation is reachable through its host.** It reads as Ready or Working rather than Not
@@ -345,9 +354,12 @@ every rule above applies to it, with these sharpenings:
   remembered name is kept until the host has answered once, so a refresh before the first scan never drops it.
 - **A host call is bounded and never retried.** Delivery is one call with the request id: accepted reads as
   sent, queued as queued, and an uncertain or late answer as uncertain, never as not sent. Open and in-front
-  wait at most `AgentHub.defaultHostDeadline`; a late open is not opened and a late in-front is unknown. A host
-  that cannot take messages says so by name. A clipboard image reaches a host as the file path already in the
-  text. A connector inside a hosted conversation is listed apart from it: joining the two waits for a design
+  wait at most `AgentHub.defaultHostDeadline`; a late open is not opened and a late in-front is unknown. A
+  cancelled call is abandoned at once and its work cancelled, and Open hands the host its `stillWanted` check,
+  which the host makes again after its own work and before it brings anything forward. A host
+  that cannot take messages says so by name. A clipboard image reaches a host with its file path in the text,
+  and as an attachment too when the host says it takes images (`AgentHost.takesImages`); the receipt says
+  which. A connector inside a hosted conversation is listed apart from it: joining the two waits for a design
   that keeps the user's name, current choice and Disconnect across the join.
 - **Agents and setups are isolated at the bridge.** Each enrolled setup has its own installation id
   (`ConnectorSetups`), and retiring one installation's connectors leaves every other setup's and agent's
@@ -372,6 +384,20 @@ every rule above applies to it, with these sharpenings:
   partial, never empty, and only when the process's own name is the agent's; a candidate whose process
   could not be read stays listed. The process table is listed once for every agent's discovery and reused
   until it ages out (`AgentProcessTable`), so the liveness tick never sweeps it per agent.
+- **bb is a host reached through its own `bb` command** (`BBHost`). Every call runs the installed command with a
+  fixed environment that turns bb's telemetry off, never the app's own. Delivery uses `--mode queue`, never the
+  default `steer`, so dictation never lands inside a running turn; bb's `sent` reads as sent, `queued` as
+  queued, its error envelope as refused in plain words, and anything else as uncertain; bb's error code goes to
+  the log as public and its message as private, since a message could echo what was sent. Open only asks:
+  bb's answer counts the clients it broadcast to, not a window that showed the thread, so it reads as requested, and bb is brought forward only when some client took it and the open is
+  still wanted. In-front is unsupported: bb reports no focused thread. While bb's app is not running its
+  command is not run at all; the command never starts bb's server either (it fails at once, measured with bb
+  0.49.0 on 2026-11-14). Its data folder is not watched: bb writes its database every few seconds even while
+  idle (measured 2026-11-14), so a watch would run its command constantly. A thread nested under another
+  is listed like any other: bb's `parentThreadId` is where the thread sits in its sidebar, which the user
+  arranges by dragging, not a sign that an agent started it. A thread's title never becomes its name, since bb does not record whether the user or an AI service
+  wrote it, and a location that is not a thread of this bb's data folder is never passed to the command. A
+  list longer than `HostCLI`'s output cap reads as unreadable, not as the part that fit.
 - **A host's command line runs through `HostCLI.run`.** It starts only an absolute program, in its own
   process group, with content on standard input rather than in the arguments. Standard output (the only
   output parsed) and standard error are kept apart, each capped, and cut output is marked. A deadline or a

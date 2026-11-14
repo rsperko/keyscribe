@@ -107,7 +107,7 @@ struct DownstreamSeamTests {
                 host: AgentHostLocation(host: "downstream", instance: "/run/d.sock", native: "t1"))])
         }
 
-        func deliver(_ text: String, request: String, to location: AgentHostLocation) async -> AgentHostDelivery { .queued }
+        func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery { .queued }
     }
 
     @Test @MainActor func aDownstreamHostIsAddedThroughThePublicSurfaceAlone() async throws {
@@ -116,8 +116,8 @@ struct DownstreamSeamTests {
             kind: AgentKind(id: "downstream", displayName: "Downstream Host", connectorName: "Downstream plugin"), make: { Host() }))
         _ = AppDelegate(codingAgents: integrations)
         #expect(throws: Never.self) { try integrations.resolve() }
-        let host = integrations.hosts[0].make()
-        #expect(await host.open(AgentHostLocation(host: "downstream", instance: "/run/d.sock", native: "t1")) == .unsupported)
+        let host = try #require(integrations.hosts.last).make()
+        #expect(await host.open(AgentHostLocation(host: "downstream", instance: "/run/d.sock", native: "t1"), stillWanted: { true }) == .unsupported)
         #expect(try await HostCLI.run(["/usr/bin/true"], subcommand: "true").status == 0)
     }
 

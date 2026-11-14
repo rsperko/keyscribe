@@ -38,6 +38,26 @@ struct ConnectorSetupsProblemSection: View {
     }
 }
 
+struct AgentHostSection: View {
+    @ObservedObject var model: CodingAgentsSettingsModel
+    let host: AgentKind
+
+    var body: some View {
+        Section(host.displayName) {
+            SettingRow(
+                title: "Reach conversations in \(host.displayName)",
+                help: "Lists the conversations \(host.displayName) runs and sends what you say to them through \(host.displayName)\u{2019}s own command, queued behind any turn already running. \(Branding.appName) runs nothing of \(host.displayName)\u{2019}s until this is on.")
+            {
+                Toggle("", isOn: Binding(get: { model.isTurnedOn(host) }, set: { model.setTurnedOn(host, $0) })).labelsHidden()
+                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.host(host.id))
+            }
+            if let problem = model.problem(of: host) {
+                IssueText(problem, severity: .advisory)
+            }
+        }
+    }
+}
+
 struct AgentConnectorSection: View {
     @ObservedObject var model: AgentConnectorModel
     let onInstall: (ConnectorSetupModel) -> Void

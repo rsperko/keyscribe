@@ -142,10 +142,11 @@ final class AgentHub {
         receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30), checkWait: Duration = AgentHub.defaultCheckWait,
         disconnectGrace: Duration = AgentHub.defaultDisconnectGrace, scanDeadline: Duration = AgentHub.defaultScanDeadline, exclusions: AgentExclusions = AgentExclusions(nil),
         places: (any AgentPlaceReading)? = nil, hosts: [AgentHostIntegration] = [],
+        hostAllowed: @escaping @MainActor (String) -> Bool = { _ in false },
         hostDeadline: Duration = AgentHub.defaultHostDeadline,
         now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString }
     ) {
-        self.hosts = hosts.map { HostDiscovery($0, now: now) }
+        self.hosts = hosts.map { host in HostDiscovery(host, allowed: { hostAllowed(host.kind.id) }, now: now) }
         self.hostDeadline = hostDeadline
         self.exclusions = exclusions
         self.transport = transport
@@ -298,7 +299,7 @@ final class AgentHub {
         if makingCurrent { makeCurrent(id) }
         if let (source, location) = host(of: conversation) {
             guard stillWanted() else { return .none }
-            switch await Self.within(hostDeadline, otherwise: AgentHostOpen.failed, { await source.host.open(location) }) {
+            switch await Self.within(hostDeadline, otherwise: AgentHostOpen.failed, { await source.host.open(location, stillWanted: stillWanted) }) {
             case .opened: return .exact
             case .requested: return .requested(source.kind.displayName)
             case .failed, .unsupported: break
@@ -322,7 +323,7 @@ final class AgentHub {
 
     private func hostInFront() async -> FrontSession? {
         let listed = directory.conversations + disconnected
-        for source in hosts where source.host.isEnabled {
+        for source in hosts where source.isEnabled {
             let mine = listed.filter { $0.host?.host == source.kind.id }
             guard !mine.isEmpty else { continue }
             let locations = mine.compactMap(\.host)
@@ -491,7 +492,13 @@ final class AgentHub {
     private let disconnectGrace: Duration
     private let scanDeadline: Duration
 
-    func rescan(rereadingTitles: Bool = true) async {
+    func refreshHostsForPress() async {
+        guard hosts.contains(where: \.isEnabled) else { return }
+        await rescan(rereadingTitles: false, wantingHosts: true)
+    }
+
+    func rescan(rereadingTitles: Bool = true, wantingHosts: Bool = false) async {
+        if wantingHosts { hosts.forEach { $0.want() } }
         if let scanTask {
             rescanWanted = true
             rereadWanted = rereadWanted || rereadingTitles
@@ -665,7 +672,7 @@ final class AgentHub {
     }
 
     private func host(of conversation: AgentConversation) -> (HostDiscovery, AgentHostLocation)? {
-        guard let location = conversation.host, let source = hosts.first(where: { $0.kind.id == location.host }), source.host.isEnabled
+        guard let location = conversation.host, let source = hosts.first(where: { $0.kind.id == location.host }), source.isEnabled
         else { return nil }
         return (source, location)
     }
@@ -673,33 +680,56 @@ final class AgentHub {
     static let defaultHostDeadline: Duration = .seconds(2)
 
     private static func within<T: Sendable>(_ deadline: Duration, otherwise late: T, _ call: @escaping @MainActor () async -> T) async -> T {
-        await withCheckedContinuation { (continuation: CheckedContinuation<T, Never>) in
-            let answer = Once(continuation)
-            let work = Task { @MainActor in answer.resume(await call()) }
-            Task {
-                try? await Task.sleep(for: deadline)
-                if answer.resume(late) { work.cancel() }
+        let answer = Once<T>()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<T, Never>) in
+                answer.wait(continuation)
+                answer.start(Task { @MainActor in answer.resume(await call()) })
+                Task {
+                    try? await Task.sleep(for: deadline)
+                    answer.giveUp(late)
+                }
             }
+        } onCancel: {
+            answer.giveUp(late)
         }
     }
 
     private final class Once<T: Sendable>: @unchecked Sendable {
         private let lock = NSLock()
         private var continuation: CheckedContinuation<T, Never>?
+        private var early: T?
+        private var done = false
+        private var work: Task<Void, Never>?
 
-        init(_ continuation: CheckedContinuation<T, Never>) {
-            self.continuation = continuation
+        func wait(_ continuation: CheckedContinuation<T, Never>) {
+            let answered = lock.withLock {
+                if early == nil { self.continuation = continuation }
+                return early
+            }
+            if let answered { continuation.resume(returning: answered) }
+        }
+
+        func start(_ task: Task<Void, Never>) {
+            if lock.withLock({ work = task; return done }) { task.cancel() }
         }
 
         @discardableResult
         func resume(_ value: T) -> Bool {
-            let waiting = lock.withLock {
-                let pending = continuation
-                continuation = nil
-                return pending
+            let (won, waiting): (Bool, CheckedContinuation<T, Never>?) = lock.withLock {
+                guard !done else { return (false, nil) }
+                done = true
+                defer { continuation = nil }
+                if continuation == nil { early = value }
+                return (true, continuation)
             }
             waiting?.resume(returning: value)
-            return waiting != nil
+            return won
+        }
+
+        func giveUp(_ late: T) {
+            guard resume(late) else { return }
+            lock.withLock { work }?.cancel()
         }
     }
 
@@ -805,7 +835,7 @@ final class AgentHub {
         if let (source, location) = host(of: conversation) {
             let request = request ?? makeId()
             switch await Self.within(receiptTimeout, otherwise: AgentHostDelivery.uncertain, {
-                await source.host.deliver(text, request: request, to: location)
+                await source.host.deliver(text, images: images, request: request, to: location)
             }) {
             case .accepted: return .sent(handle)
             case .queued: return .queued(handle)
@@ -1295,7 +1325,12 @@ final class AgentHub {
 
     func typedCount(_ session: String) -> Int { typedCounts[session] ?? 0 }
 
-    func takesImages(_ session: String) -> Bool { features[session]?.contains("images") == true }
+    func takesImages(_ session: String) -> Bool {
+        if let conversation = directory.conversations.first(where: { $0.id == session }), let (source, _) = host(of: conversation) {
+            return source.host.takesImages
+        }
+        return features[session]?.contains("images") == true
+    }
 
     static func filled(handle: String, features: Set<String>?) -> AgentReceipt {
         features?.contains("fill") == true ? .kept(handle, reason: .inPromptBox) : .notSent(handle, reason: .stopped)
@@ -1338,7 +1373,8 @@ final class AgentRuntime {
 
     init(
         supportDir: URL, surfaces: ResolvedSurfaces, placeSources: [any AgentPlaceReading], discovery: [any AgentDiscovery],
-        setups: ConnectorSetupRegistry, legacyAgent: String, hosts: [AgentHostIntegration] = []
+        setups: ConnectorSetupRegistry, legacyAgent: String, hosts: [AgentHostIntegration] = [],
+        hostAllowed: @escaping @MainActor (String) -> Bool
     ) throws {
         let directory = Self.bridgeDirectory(supportDir: supportDir)
         let token = try AgentBridgeToken.loadOrCreate(in: directory)
@@ -1371,7 +1407,7 @@ final class AgentRuntime {
                 noun: AgentTerminalFocus.noun(surfaces)),
             front: AgentFront(surfaces: surfaces), glance: AgentFront.confirmingWithoutAsking(surfaces), exclusions: exclusions,
             places: Self.places(surfaces: surfaces, sources: placeSources),
-            hosts: hosts)
+            hosts: hosts, hostAllowed: hostAllowed)
         box.hub = hub
         try server.start()
         hub.onFirstConnection = { [weak self] in
@@ -1397,7 +1433,7 @@ final class AgentRuntime {
 
     private func step() async -> Duration {
         hub.tickPlaces(settingsOpen: settingsOpen)
-        await hub.rescan(rereadingTitles: false)
+        await hub.rescan(rereadingTitles: false, wantingHosts: settingsOpen)
         watch(hub.watchedFolders)
         let interval = Self.rescanInterval(connected: hub.hasConnectedConversation, settingsOpen: settingsOpen)
         quick = interval == Self.rescanInterval(connected: true, settingsOpen: false)

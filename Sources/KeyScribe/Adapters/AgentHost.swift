@@ -43,18 +43,20 @@ public enum AgentHostDelivery: Equatable, Sendable {
 @MainActor
 public protocol AgentHost: AnyObject {
     var isEnabled: Bool { get }
-    var watchedFolders: [URL] { get }
+    var takesImages: Bool { get }
     func scan() async -> AgentHostScan
-    func open(_ location: AgentHostLocation) async -> AgentHostOpen
+    func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen
     func front(among locations: [AgentHostLocation]) async -> AgentHostFront
-    func deliver(_ text: String, request: String, to location: AgentHostLocation) async -> AgentHostDelivery
+    func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery
 }
 
 extension AgentHost {
-    public var watchedFolders: [URL] { [] }
-    public func open(_ location: AgentHostLocation) async -> AgentHostOpen { .unsupported }
+    public var takesImages: Bool { false }
+    public func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen { .unsupported }
     public func front(among locations: [AgentHostLocation]) async -> AgentHostFront { .unsupported }
-    public func deliver(_ text: String, request: String, to location: AgentHostLocation) async -> AgentHostDelivery { .unsupported }
+    public func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
+        .unsupported
+    }
 }
 
 public struct AgentHostIntegration: Sendable {
@@ -70,33 +72,49 @@ public struct AgentHostIntegration: Sendable {
 @MainActor
 final class HostDiscovery: AgentDiscovery {
     static let fallbackInterval: TimeInterval = 10
+    static let idleInterval: TimeInterval = 300
 
     let kind: AgentKind
     let host: any AgentHost
+    private let allowed: @MainActor () -> Bool
     private let now: () -> Date
     private var last: (at: Date, scan: AgentScan)?
     private var answered = false
+    private var wanted = false
 
-    init(_ integration: AgentHostIntegration, now: @escaping () -> Date = Date.init) {
+    init(_ integration: AgentHostIntegration, allowed: @escaping @MainActor () -> Bool, now: @escaping () -> Date = Date.init) {
         kind = integration.kind
         host = integration.make()
+        self.allowed = allowed
         self.now = now
     }
 
-    var watchedFolders: [URL] { host.isEnabled ? host.watchedFolders : [] }
+    var isEnabled: Bool { allowed() && host.isEnabled }
+
+    func want() { wanted = true }
 
     func scan(rereadingTitles: Bool) async -> AgentScan {
-        guard host.isEnabled else {
+        guard allowed() else {
             last = nil
             answered = false
             return .found([])
         }
-        if !rereadingTitles, let last, now().timeIntervalSince(last.at) < Self.fallbackInterval { return last.scan }
+        guard host.isEnabled else {
+            last = nil
+            return .found([], AgentScanExtras(problem: "\(kind.displayName) isn\u{2019}t installed on this Mac. Install it, or turn this off."))
+        }
+        if let last, now().timeIntervalSince(last.at) < interval(after: last.scan) { return last.scan }
+        wanted = false
         let started = now()
         let scan = await fresh()
         last = (started, scan)
-        if case .found = scan, host.isEnabled { answered = true }
+        if case .found = scan, isEnabled { answered = true }
         return scan
+    }
+
+    private func interval(after scan: AgentScan) -> TimeInterval {
+        guard case .found = scan, !wanted else { return Self.fallbackInterval }
+        return Self.idleInterval
     }
 
     private func fresh() async -> AgentScan {
@@ -116,5 +134,5 @@ final class HostDiscovery: AgentDiscovery {
         }
     }
 
-    func stillRunning(_ remembered: RememberedName) -> Bool { !host.isEnabled || !answered }
+    func stillRunning(_ remembered: RememberedName) -> Bool { !isEnabled || !answered }
 }

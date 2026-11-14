@@ -107,6 +107,23 @@ final class CodingAgentsSettingsModel: ObservableObject {
         loadingSpokenResult = false
     }
 
+    @Published private(set) var turnedOnHosts: [String] = []
+    var onHostsChange: (([String]) -> Void)?
+
+    func load(hosts: [String]) {
+        if turnedOnHosts != hosts { turnedOnHosts = hosts }
+    }
+
+    func isTurnedOn(_ host: AgentKind) -> Bool { turnedOnHosts.contains(host.id) }
+
+    func problem(of host: AgentKind) -> String? { isTurnedOn(host) ? discoveryProblems[host.id] : nil }
+
+    func setTurnedOn(_ host: AgentKind, _ on: Bool) {
+        guard on != isTurnedOn(host) else { return }
+        turnedOnHosts = on ? turnedOnHosts + [host.id] : turnedOnHosts.filter { $0 != host.id }
+        onHostsChange?(turnedOnHosts)
+    }
+
     var onRename: ((String, String) throws -> Void)?
     var onReloadNames: (() -> Void)?
     var renameCheck: ((String, String) -> AgentHandles.RenameError?)?
@@ -155,7 +172,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
 
     private let describeTerminal: @Sendable (Int) -> String?
     private var terminals: [Int: String?] = [:]
-    private var discoveryProblems: [String: String] = [:]
+    @Published private var discoveryProblems: [String: String] = [:]
     private var shown: (conversations: [AgentConversation], current: String?)?
     private struct Extras {
         var setups: [String: [String]]
@@ -211,7 +228,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
             readAloud: readAloud, readNextAloud: readNextAloud)
         if setupsProblem != setups.problem { setupsProblem = setups.problem }
         if namesProblem != self.namesProblem { self.namesProblem = namesProblem }
-        if let discoveryProblems { self.discoveryProblems = discoveryProblems }
+        if let discoveryProblems, discoveryProblems != self.discoveryProblems { self.discoveryProblems = discoveryProblems }
         for connector in connectors where connector.discoveryProblem != self.discoveryProblems[connector.kind.id] {
             connector.discoveryProblem = self.discoveryProblems[connector.kind.id]
         }

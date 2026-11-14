@@ -72,18 +72,22 @@ public struct Settings: Codable, Equatable, Sendable {
 
     public struct CodingAgents: Codable, Equatable, Sendable {
         public var spokenResult: SpokenResultSettings
+        public var hosts: [String]
 
         enum CodingKeys: String, CodingKey {
             case spokenResult = "spoken_result"
+            case hosts
         }
 
-        public init(spokenResult: SpokenResultSettings = SpokenResultSettings()) {
+        public init(spokenResult: SpokenResultSettings = SpokenResultSettings(), hosts: [String] = []) {
             self.spokenResult = spokenResult
+            self.hosts = hosts
         }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             spokenResult = try c.decodeIfPresent(SpokenResultSettings.self, forKey: .spokenResult) ?? SpokenResultSettings()
+            hosts = try c.decodeIfPresent([String].self, forKey: .hosts) ?? []
         }
     }
 

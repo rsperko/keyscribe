@@ -1592,6 +1592,11 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 # keep_captures = false                          # debug: retain a copy of each committed capture WAV
 # keep_captures_max_mb = 500                     # soft budget for the archive; oldest pruned first
 
+[coding_agents]                              # Settings ▸ Modes ▸ Coding agent
+# hosts = ["bb"]                                 # ids of the agent hosts the user turned on (an AgentKind id
+                                                 #   from CodingAgentIntegrations.hosts); absent = none: a
+                                                 #   host makes no call until its id is here
+
 [coding_agents.spoken_result]               # Settings ▸ Modes ▸ Coding agent ▸ Replies
 # enabled = true                                 # Reply updates; absent = false
 # connection = "omlx"                            # id of the AI service that summarizes a finished reply

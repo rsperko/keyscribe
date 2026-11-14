@@ -188,6 +188,8 @@ final class SettingsController: NSObject, NSWindowDelegate {
         modes.codingAgents = codingAgents
         codingAgents.load(spokenResult: settings.codingAgents.spokenResult)
         codingAgents.onSpokenResultChange = { [model] in model.setSpokenResult($0) }
+        codingAgents.load(hosts: settings.codingAgents.hosts)
+        codingAgents.onHostsChange = { [model] in model.setHosts($0) }
         aiServices = AIServiceSettingsModel(repository: repository, permits: AIServiceCatalog.permits)
         history = HistoryPaneModel(
             store: historyStore,
@@ -281,6 +283,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     func update(settings: Settings) {
         model.apply(settings)
         codingAgents.load(spokenResult: settings.codingAgents.spokenResult)
+        codingAgents.load(hosts: settings.codingAgents.hosts)
         modes.setVoiceCommandsEnabled(settings.features.isEnabled(.voiceCommands))
         modes.setCodingAgentsEnabled(settings.features.isEnabled(.codingAgents))
         modes.setAskAboutSelectionEnabled(settings.features.isEnabled(.askAboutSelection))
@@ -933,6 +936,12 @@ final class SettingsModel: ObservableObject {
     }
 
     func previewSound() { onPreviewSound(soundVolumePercent) }
+
+    func setHosts(_ value: [String]) {
+        guard settings.codingAgents.hosts != value else { return }
+        settings.codingAgents.hosts = value
+        onChange(settings)
+    }
 
     func setSpokenResult(_ value: SpokenResultSettings) {
         guard settings.codingAgents.spokenResult != value else { return }

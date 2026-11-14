@@ -131,6 +131,16 @@ enum SourceInvariants {
                 + "environment of a command run for one chosen setup; the app's own environment never picks a setup."
         ),
         SourceRule(
+            pattern: #"\bBB[A-Z]|"bb"|\bbb\."#,
+            allowed: [
+                "Sources/KeyScribe/CodingAgentIntegrations.swift": 1,
+            ],
+            reason: "Everything an agent host needs lives in its own Integrations/<Host>/ folder; shared code speaks "
+                + "AgentHost and AgentHostLocation, so another host is another adapter, never a branch "
+                + "(docs/development/areas/voice-commands.md). The composition root lists the hosts.",
+            own: SourceInvariants.integrationTool
+        ),
+        SourceRule(
             pattern: #"(?<![.\w])Pi(?![a-z])"#,
             allowed: [
                 "Sources/KeyScribeKit/Features.swift": 1,

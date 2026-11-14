@@ -230,6 +230,12 @@ in the same `Application Support` folder:
   do so, and the answer stays on your Mac and is not stored. To bring a
   conversation's terminal forward, KeyScribe reads a few terminal and multiplexer variables (such as a
   pane id) from the environment of the processes that hold it; the rest of their environment is ignored.
+  If you turn on **Reach conversations in bb**, KeyScribe runs bb's own `bb` command on your Mac to list bb's
+  threads, to show a thread, and to hand bb what you dictate to a thread, along with any image you pasted,
+  which bb passes to that thread's agent. bb's list also carries each thread's title and opening words;
+  KeyScribe keeps only the ids, folders, status and start times, in memory, and discards the rest without
+  using it. It never asks bb for a thread's prompts or replies, and runs those commands with bb's usage
+  reporting turned off. Until you turn it on, KeyScribe runs nothing of bb's.
   If you turn on **Reply updates** and choose an AI service for it, a longer final reply to an
   instruction you dictated, or to work you asked the agent to have KeyScribe read aloud, is sent to that service, after best-effort redaction, only to be summarized
   into a sentence or two; a reply of a few words is read as it is without any service. KeyScribe keeps

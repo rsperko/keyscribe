@@ -60,6 +60,9 @@ struct ModeEditorView: View {
                 ForEach(codingAgents.connectors) { connector in
                     AgentConnectorSection(model: connector, onInstall: { codingAgents.requestInstall($0, of: connector) })
                 }
+                ForEach(codingAgents.hosts, id: \.id) { host in
+                    AgentHostSection(model: codingAgents, host: host)
+                }
             }
             Section("Words") {
                 modeVocabularyRow

@@ -318,6 +318,7 @@ enum AccessibilityID {
         }
 
         enum CodingAgents {
+            static func host(_ id: String) -> String { "mode.codingAgents.host.\(id)" }
             static let connectorStatus = "mode.codingAgents.connectorStatus"
             static let currentRecipient = "mode.codingAgents.currentRecipient"
             static let phrases = "mode.codingAgents.phrases"

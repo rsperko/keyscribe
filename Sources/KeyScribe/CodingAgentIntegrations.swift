@@ -52,6 +52,8 @@ public struct CodingAgentIntegrations: Sendable {
     }
 
     public static var builtIn: CodingAgentIntegrations {
-        CodingAgentIntegrations(surfaces: .builtIn, placeSources: [{ HerdrPlaceReader() }])
+        var integrations = CodingAgentIntegrations(surfaces: .builtIn, placeSources: [{ HerdrPlaceReader() }])
+        integrations.hosts = [BBHost.integration]
+        return integrations
     }
 }

@@ -2190,6 +2190,14 @@ run on their own queue, so agents finishing never delay a voice command's termin
 summary plays when the front cannot be confirmed. A value
 redaction hid from the service is spoken as "a hidden value", never read aloud.
 
+Each agent host (`CodingAgentIntegrations.hosts`) has a section after the connectors, named by the host, holding
+one `SettingRow` switch, **Reach conversations in {host}**, off by default. Its help says the host's conversations
+are listed and sent to through the host's own command, queued behind a turn already running, and that
+{appName} runs nothing of the host's until the switch is on. Turning it off removes the host's conversations
+from the list on the next scan. While the switch is on, a reason the host's list is missing (the tool isn't
+installed or isn't open, or its list couldn't be read) shows under the switch as an advisory `IssueText` that
+says what to do next, whether or not other conversations are listed.
+
 Connector setup is one section per agent, each drawn from that agent's own adapter, holding one block per
 setup: the folder an agent loads its configuration from (Pi's agent folder, Claude Code's config folder). The
 setups shown are the default one, the ones a connector is installed in, and the ones open conversations were

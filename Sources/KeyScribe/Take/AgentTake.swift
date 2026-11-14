@@ -94,6 +94,7 @@ final class AgentTake {
         else { return }
         agents.refresh()
         agents.readPlaces()
+        Task { await agents.refreshHostsForPress() }
         let snapshot = AgentSnapshot(
             names: agents.names, conversations: agents.recordingOrder, current: agents.current,
             namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames, shared: agents.sharedNames)

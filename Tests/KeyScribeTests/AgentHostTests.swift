@@ -14,6 +14,7 @@ struct AgentHostTests {
 
     final class FakeHost: AgentHost {
         var isEnabled = true
+        var takesImages = true
         var conversations: [AgentSession] = []
         var answers = true
         var hangs = false
@@ -24,6 +25,9 @@ struct AgentHostTests {
         private(set) var opened: [AgentHostLocation] = []
         private(set) var asked: [[AgentHostLocation]] = []
         private(set) var delivered: [(String, String, AgentHostLocation)] = []
+        private(set) var deliveredImages: [[String]] = []
+        private(set) var openSawCancelled = false
+        private(set) var openSawWanted: [Bool] = []
 
         var calls: Int { scans + opened.count + asked.count + delivered.count }
 
@@ -37,9 +41,11 @@ struct AgentHostTests {
             return answers ? .found(conversations) : .unreadable("not running")
         }
 
-        func open(_ location: AgentHostLocation) async -> AgentHostOpen {
+        func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen {
             opened.append(location)
             await stall()
+            openSawCancelled = Task.isCancelled
+            openSawWanted.append(stillWanted())
             return opening
         }
 
@@ -49,8 +55,9 @@ struct AgentHostTests {
             return front
         }
 
-        func deliver(_ text: String, request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
+        func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
             delivered.append((text, request, location))
+            deliveredImages.append(images)
             await stall()
             return delivery
         }
@@ -73,24 +80,54 @@ struct AgentHostTests {
 
     private func makeHub(
         _ host: FakeHost, transport: FakeTransport = FakeTransport(), focus: FakeFocus? = nil, front: FakeFront? = nil,
-        names: AgentNameStore? = nil, now: @escaping () -> Date = Date.init
+        names: AgentNameStore? = nil, allowed: @escaping @MainActor (String) -> Bool = { _ in true }, hostDeadline: Duration = .milliseconds(50),
+        now: @escaping () -> Date = Date.init
     ) -> AgentHub {
         AgentHub(
             transport: transport, discovery: [FakeDiscovery(kind: .claude)], names: names, focus: focus, front: front,
             receiptTimeout: .milliseconds(50), scanDeadline: .seconds(30),
-            hosts: [AgentHostIntegration(kind: Self.kind, make: { host })], hostDeadline: .milliseconds(50), now: now, makeId: { "r1" })
+            hosts: [AgentHostIntegration(kind: Self.kind, make: { host })], hostAllowed: allowed, hostDeadline: hostDeadline, now: now,
+            makeId: { "r1" })
     }
 
-    @Test func aHostTheUserHasNotTurnedOnIsNeverCalled() async {
+    @Test func aHostIsCalledOnlyWhileTheUserHasItTurnedOn() async {
         let host = FakeHost()
-        host.isEnabled = false
         host.conversations = [Self.thread("t1")]
-        let hub = makeHub(host)
+        var turnedOn: Set<String> = []
+        let hub = makeHub(host, allowed: { turnedOn.contains($0) })
         await hub.rescan()
         #expect(hub.directory.conversations.isEmpty)
         #expect(await hub.sessionInFront() == nil)
         #expect(await hub.open(Self.id("t1")) == .none)
         #expect(host.calls == 0)
+        turnedOn = ["example"]
+        await hub.rescan()
+        #expect(hub.directory.conversations.map(\.id) == [Self.id("t1")])
+        turnedOn = []
+        #expect(await hub.deliver("hi", to: Self.id("t1")) != .sent("docs"))
+        await hub.rescan()
+        #expect(hub.directory.conversations.isEmpty)
+        #expect(host.calls == 1)
+    }
+
+    @Test func aHostWhoseToolIsNotInstalledIsNeverCalledListsNothingAndSaysSoOnlyWhileTurnedOn() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        var turnedOn = true
+        let hub = makeHub(host, allowed: { _ in turnedOn })
+        await hub.rescan()
+        #expect(hub.directory.conversations.map(\.id) == [Self.id("t1")])
+        host.isEnabled = false
+        let calls = host.calls
+        await hub.rescan()
+        #expect(hub.directory.conversations.isEmpty)
+        #expect(await hub.sessionInFront() == nil)
+        #expect(await hub.open(Self.id("t1")) == .none)
+        #expect(host.calls == calls)
+        #expect(hub.discoveryProblems["example"] == "Example isn\u{2019}t installed on this Mac. Install it, or turn this off.")
+        turnedOn = false
+        await hub.rescan()
+        #expect(hub.discoveryProblems["example"] == nil)
     }
 
     @Test func aHostedConversationIsListedReadyWithoutAProcessAndOpenedThroughItsHost() async throws {
@@ -164,7 +201,7 @@ struct AgentHostTests {
         #expect(transport.sent.allSatisfy { if case .status = $0.0 { true } else { false } })
     }
 
-    @Test func aClipboardImageReachesAHostedConversationAsTheFilePathInTheText() async {
+    @Test func aClipboardImageReachesAHostedConversationAttachedWithItsPathStillInTheText() async {
         let host = FakeHost()
         host.conversations = [Self.thread("t1")]
         let hub = makeHub(host)
@@ -172,6 +209,19 @@ struct AgentHostTests {
         let text = "look at /tmp/clip.png"
         #expect(await hub.deliver(text, to: Self.id("t1"), images: ["/tmp/clip.png"]) == .sent("docs"))
         #expect(host.delivered.map(\.0) == [text])
+        #expect(host.deliveredImages == [["/tmp/clip.png"]])
+        #expect(hub.takesImages(Self.id("t1")))
+        let note = AgentOutput.ClipboardNote(images: 1, files: 0, attached: hub.takesImages(Self.id("t1")))
+        #expect(AgentOutput.receiptState(.sent("docs"), mode: "Agent", heard: "", clipboard: note)
+            == .commandDone(summary: "Sent to docs with 1 image", detail: "Agent"))
+    }
+
+    @Test func aHostThatTakesNoImagesIsSaidToSendOnlyThePath() async {
+        let host = FakeHost()
+        host.takesImages = false
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host)
+        await hub.rescan()
         #expect(!hub.takesImages(Self.id("t1")))
     }
 
@@ -226,11 +276,13 @@ struct AgentHostTests {
         let restarted = FakeHost()
         restarted.answers = false
         restarted.conversations = [Self.thread("t2", startedAt: 200)]
-        let second = makeHub(restarted, names: AgentNameStore(directory: dir))
+        var clock = Date(timeIntervalSince1970: 1000)
+        let second = makeHub(restarted, names: AgentNameStore(directory: dir), now: { clock })
         second.refresh()
         await second.rescan()
         restarted.answers = true
-        await second.rescan(rereadingTitles: true)
+        clock = clock.addingTimeInterval(HostDiscovery.fallbackInterval)
+        await second.rescan(rereadingTitles: false)
         #expect(second.names == ["docs blue": Self.id("t2")])
     }
 
@@ -239,13 +291,14 @@ struct AgentHostTests {
         defer { try? FileManager.default.removeItem(at: dir) }
         let host = FakeHost()
         host.conversations = [Self.thread("t1", startedAt: 100), Self.thread("t2", startedAt: 200)]
-        let hub = makeHub(host, names: AgentNameStore(directory: dir))
+        var turnedOn = true
+        let hub = makeHub(host, names: AgentNameStore(directory: dir), allowed: { _ in turnedOn })
         await hub.rescan()
         #expect(hub.names == ["docs": Self.id("t1"), "docs blue": Self.id("t2")])
-        host.isEnabled = false
+        turnedOn = false
         await hub.rescan(rereadingTitles: true)
         #expect(hub.names.isEmpty)
-        host.isEnabled = true
+        turnedOn = true
         hub.refresh()
 
         let restarted = FakeHost()
@@ -255,8 +308,28 @@ struct AgentHostTests {
         #expect(second.names == ["docs blue": Self.id("t2")])
     }
 
-    @Test func theHostIsAskedForItsConversationsNoMoreOftenThanTheFallbackIntervalUnlessTheUserAsks() async {
+    @Test func theHostIsAskedForItsConversationsWhenTheUserNeedsThemAndOtherwiseOnlyAfterTheIdleInterval() async {
         let host = FakeHost()
+        var clock = Date(timeIntervalSince1970: 1000)
+        let hub = makeHub(host, now: { clock })
+        await hub.rescan(rereadingTitles: false)
+        await hub.rescan(rereadingTitles: true)
+        #expect(host.scans == 1)
+        clock = clock.addingTimeInterval(HostDiscovery.fallbackInterval)
+        await hub.rescan(rereadingTitles: true)
+        #expect(host.scans == 1)
+        await hub.rescan(rereadingTitles: false, wantingHosts: true)
+        #expect(host.scans == 2)
+        await hub.rescan(rereadingTitles: false, wantingHosts: true)
+        #expect(host.scans == 2)
+        clock = clock.addingTimeInterval(HostDiscovery.idleInterval)
+        await hub.rescan(rereadingTitles: false)
+        #expect(host.scans == 3)
+    }
+
+    @Test func aHostThatCouldNotListIsAskedAgainAfterTheFallbackIntervalNotTheIdleOne() async {
+        let host = FakeHost()
+        host.answers = false
         var clock = Date(timeIntervalSince1970: 1000)
         let hub = makeHub(host, now: { clock })
         await hub.rescan(rereadingTitles: false)
@@ -265,8 +338,50 @@ struct AgentHostTests {
         clock = clock.addingTimeInterval(HostDiscovery.fallbackInterval)
         await hub.rescan(rereadingTitles: false)
         #expect(host.scans == 2)
-        await hub.rescan(rereadingTitles: true)
-        #expect(host.scans == 3)
+    }
+
+    @Test func aPressAsksAnEnabledHostForItsConversationsAndNoHostMeansNoScan() async {
+        let host = FakeHost()
+        var clock = Date(timeIntervalSince1970: 1000)
+        var turnedOn = true
+        let hub = makeHub(host, allowed: { _ in turnedOn }, now: { clock })
+        await hub.rescan()
+        clock = clock.addingTimeInterval(HostDiscovery.fallbackInterval)
+        await hub.refreshHostsForPress()
+        #expect(host.scans == 2)
+        turnedOn = false
+        clock = clock.addingTimeInterval(HostDiscovery.fallbackInterval)
+        await hub.refreshHostsForPress()
+        #expect(host.scans == 2)
+    }
+
+    @Test func openPassesOnWhetherItIsStillWantedSoTheHostCanStopBeforeShowingAnything() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host)
+        await hub.rescan()
+        var asked = 0
+        _ = await hub.open(Self.id("t1"), stillWanted: {
+            asked += 1
+            return asked == 1
+        })
+        #expect(host.openSawWanted == [false])
+    }
+
+    @Test func cancellingAnOpenWhileTheHostIsWorkingCancelsTheHostsWorkAndReturnsAtOnce() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host, hostDeadline: .seconds(30))
+        await hub.rescan()
+        host.hangs = true
+        let started = ContinuousClock.now
+        let open = Task { await hub.open(Self.id("t1")) }
+        try? await Task.sleep(for: .milliseconds(50))
+        open.cancel()
+        #expect(await open.value == .none)
+        #expect(ContinuousClock.now - started < .seconds(5))
+        for _ in 0..<100 where !host.openSawCancelled { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(host.openSawCancelled)
     }
 
     @Test func aHostCannotListAConversationAsAnotherHostsOrAsAProcess() async {

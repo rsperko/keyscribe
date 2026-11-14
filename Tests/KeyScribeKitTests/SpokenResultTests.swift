@@ -241,3 +241,22 @@ struct SpokenSummaryLengthTests {
         #expect(held.text == "Done. " + words(SpokenResult.runawayWordLimit - 1) + "…")
     }
 }
+
+struct AgentHostSettingsTests {
+    @Test func noHostIsOnUntilTheUserTurnsItOn() throws {
+        #expect(try SettingsStore.decode(from: "schema_version = 1").codingAgents.hosts == [])
+        let saved = try SettingsStore.decode(from: """
+        schema_version = 1
+
+        [coding_agents]
+        hosts = ["bb", "other"]
+        """)
+        #expect(saved.codingAgents.hosts == ["bb", "other"])
+    }
+
+    @Test func turnedOnHostsSurviveARoundTrip() throws {
+        var settings = Settings.defaults
+        settings.codingAgents.hosts = ["bb"]
+        #expect(try SettingsStore.decode(from: SettingsStore.encode(settings)).codingAgents.hosts == ["bb"])
+    }
+}

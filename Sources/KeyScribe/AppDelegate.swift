@@ -841,7 +841,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 let runtime = try AgentRuntime(
                     supportDir: KeyScribePaths.supportDir, surfaces: surfaces, placeSources: codingAgents.placeSources.map { $0() },
                     discovery: codingAgents.discoveries(setups: setups, processes: processes), setups: setups,
-                    legacyAgent: AgentKind.claude.id, hosts: codingAgents.hosts)
+                    legacyAgent: AgentKind.claude.id, hosts: codingAgents.hosts,
+                    hostAllowed: { [weak self] in self?.settings.codingAgents.hosts.contains($0) ?? false })
                 runtime.hub.onNotice = { [weak self] in self?.controller.showAgentNotice($0, request: $1, conversation: $2) }
                 runtime.hub.onForget = { [weak self] in self?.controller.forgetAgentReceipt(request: $0) }
                 runtime.hub.onDelivery = { [weak self] in self?.controller.recordAgentDelivery($1, request: $0) }
@@ -860,7 +861,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 settingsController.codingAgents.onRetrySavingExclusions = { [weak hub = runtime.hub] in hub?.retrySavingExclusions() }
                 settingsController.codingAgents.onShow = { [weak hub = runtime.hub] id in Task { _ = await hub?.open(id, makingCurrent: false) } }
                 settingsController.codingAgents.onCancelReadAloud = { [weak hub = runtime.hub] in hub?.cancelReadAloud($0) }
-                settingsController.codingAgents.onCheckAgain = { [weak hub = runtime.hub] in Task { await hub?.rescan(rereadingTitles: true) } }
+                settingsController.codingAgents.onCheckAgain = { [weak hub = runtime.hub] in Task { await hub?.rescan(rereadingTitles: true, wantingHosts: true) } }
                 showCodingAgents(runtime.hub)
                 let spoken = SpokenResultOutput(
                     client: llmClient, permits: AIServiceCatalog.permits, speech: spokenVoice.makeSpeech(attempts: spokenAttempts),
@@ -1059,6 +1060,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let voiceCommandsChanged = updated.features.isEnabled(.voiceCommands) != settings.features.isEnabled(.voiceCommands)
         let codingAgentsChanged = updated.features.isEnabled(.codingAgents) != settings.features.isEnabled(.codingAgents)
         let previousAudio = settings.audio
+        let hostsChanged = updated.codingAgents.hosts != settings.codingAgents.hosts
         // Compared against the provider, not the old setting: launch already activated a replacement for a
         // retired saved id, and persisting it must not evict the engine that preload is warming.
         if updated.stt.engine != provider.active.id {
@@ -1073,6 +1075,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         spokenResult?.settingsChanged()
         answers?.settingsChanged()
         if !updated.codingAgents.spokenResult.enabled { agentRuntime?.hub.speechTurnedOff() }
+        if hostsChanged, let hub = agentRuntime?.hub { Task { await hub.rescan(wantingHosts: true) } }
         if updated.history != previousHistory {
             history?.applyRetention(retentionDays: updated.history.retentionDays)
             excludeHistoryFromBackups(updated.history)
