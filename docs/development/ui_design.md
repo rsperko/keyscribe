@@ -2196,7 +2196,17 @@ are listed and sent to through the host's own command, queued behind a turn alre
 {appName} runs nothing of the host's until the switch is on. Turning it off removes the host's conversations
 from the list on the next scan. While the switch is on, a reason the host's list is missing (the tool isn't
 installed or isn't open, or its list couldn't be read) shows under the switch as an advisory `IssueText` that
-says what to do next, whether or not other conversations are listed.
+says what to do next, whether or not other conversations are listed. A host whose integration brings its own
+connector (`AgentHostIntegration.connector`, bb's plugin) is turned on in one step: turning the switch on, while
+the host's tool is installed and its default setup is not enrolled, shows the connector consent sheet in its host
+form (**Connect {host}?**, what turning it on does, that it installs the plugin and keeps it up to date, and where
+Uninstall is), and **Connect {host}** turns the switch on and installs; Cancel leaves it off. Below the switch,
+while it is on, that connector's setup blocks are drawn like an agent's connector setup below, titled
+**Plugin** and without the line naming the conversations that use the folder; the connector gets no section of
+its own, and it is neither checked nor updated while the switch is off. While the switch is off and the plugin is
+still installed, a caption says so and that it sends only each conversation's identity, with the same **Uninstall Plugin…** action and
+confirmation. A plugin the host reports as installed but failing reads **Not working**, with the host's reason as
+an `IssueText` and a **Repair** action that installs the current files again; Uninstall stays offered.
 
 Connector setup is one section per agent, each drawn from that agent's own adapter, holding one block per
 setup: the folder an agent loads its configuration from (Pi's agent folder, Claude Code's config folder). The

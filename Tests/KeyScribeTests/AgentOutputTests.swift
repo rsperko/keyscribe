@@ -84,5 +84,6 @@ struct AgentOutputTests {
         func forget(session: String) {}
         func withdraw(_ id: String) -> Bool { false }
         func rehello(session: String) {}
+        func silence(agents: Set<String>) {}
     }
 }

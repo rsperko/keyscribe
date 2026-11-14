@@ -238,6 +238,14 @@ in the same `Application Support` folder:
   reporting turned off. Until you turn it on, KeyScribe runs nothing of bb's. While it is on, KeyScribe also
   reads bb's thread id and thread folder from the environment of each coding agent process it lists, so an
   agent bb started is shown as that bb thread rather than a second time.
+  Turning it on also installs KeyScribe's bb plugin, which runs inside bb and reports to KeyScribe, over the same local
+  connection the connectors use, when each bb thread starts and finishes a turn, with the reply to that turn
+  and a short fingerprint of the prompt it started with, never the prompt itself. To make that fingerprint it
+  reads the thread's queued message or its most recent prompts inside bb, and keeps nothing it read. KeyScribe
+  uses a reply only to read aloud the answer to what you dictated, under the same rules as a connector's.
+  While KeyScribe isn't running the plugin sends nothing and drops what it would have sent, and for a thread
+  you disconnected it sends nothing but that thread's identity. To show whether the plugin is running,
+  KeyScribe reads bb's list of installed plugins while bb is turned on.
   The Claude Code connector reports a short fingerprint of the prompt each turn starts with, never the prompt
   itself, so KeyScribe can tell which turn answers what you dictated. The fingerprint stays in memory and is
   not stored.

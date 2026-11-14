@@ -59,6 +59,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
         let connector: AgentConnectorModel
         let setup: ConnectorSetupModel
         var reconnecting: String?
+        var turningOn: AgentKind?
     }
 
     let connectors: [AgentConnectorModel]
@@ -120,8 +121,29 @@ final class CodingAgentsSettingsModel: ObservableObject {
 
     func setTurnedOn(_ host: AgentKind, _ on: Bool) {
         guard on != isTurnedOn(host) else { return }
+        guard on, let connector = connector(of: host), connector.connector.locateTool() != nil,
+              connector.setups.first(where: \.isDefault)?.isEnrolled != true
+        else { return apply(host, on) }
+        Task {
+            await connector.refresh()
+            guard !isTurnedOn(host) else { return }
+            guard let setup = connector.setups.first(where: \.isDefault), !setup.isEnrolled else { return apply(host, true) }
+            consent = ConsentRequest(connector: connector, setup: setup, turningOn: host)
+        }
+    }
+
+    private func apply(_ host: AgentKind, _ on: Bool) {
+        guard on != isTurnedOn(host) else { return }
         turnedOnHosts = on ? turnedOnHosts + [host.id] : turnedOnHosts.filter { $0 != host.id }
         onHostsChange?(turnedOnHosts)
+        if on, let connector = connector(of: host) { Task { await connector.maintain() } }
+    }
+
+    private func connector(of host: AgentKind) -> AgentConnectorModel? { connectors.first { $0.kind.id == host.id } }
+
+    private func isAllowed(_ connector: AgentConnectorModel) -> Bool {
+        guard let host = hosts.first(where: { $0.id == connector.kind.id }) else { return true }
+        return isTurnedOn(host)
     }
 
     var onRename: ((String, String) throws -> Void)?
@@ -203,11 +225,11 @@ final class CodingAgentsSettingsModel: ObservableObject {
 
     func refresh() async {
         if setupsProblem != setups.problem { setupsProblem = setups.problem }
-        for connector in connectors { await connector.refresh() }
+        for connector in connectors where isAllowed(connector) { await connector.refresh() }
     }
 
     func maintain() async {
-        for connector in connectors { await connector.maintain() }
+        for connector in connectors where isAllowed(connector) { await connector.maintain() }
     }
 
     var namesFile: URL { agentsDir.appendingPathComponent(AgentNameStore.fileName) }
@@ -403,6 +425,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
 
     func confirm(_ request: ConsentRequest) {
         consent = nil
+        if let host = request.turningOn { apply(host, true) }
         Task {
             await request.setup.install()
             if let id = request.reconnecting, request.setup.isEnrolled, request.setup.isInstalled { onReconnect?(id) }

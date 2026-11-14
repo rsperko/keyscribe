@@ -208,6 +208,95 @@ struct AgentHostConsentModelTests {
         #expect(reported == [["other", "bb"], ["other"]])
     }
 
+    private func pluginModel(_ calls: BBPluginConnectorTests.Calls) -> (CodingAgentsSettingsModel, URL) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ks-bbconsent-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        let home = root.appendingPathComponent("home", isDirectory: true)
+        try? FileManager.default.createDirectory(at: home.appendingPathComponent(".bb/bin"), withIntermediateDirectories: true)
+        let agents = root.appendingPathComponent("agents", isDirectory: true)
+        let plugin = BBPluginConnector(
+            agentsDir: agents, pluginName: "keyscribe-dev", home: home, sources: BBPluginConnectorTests.sources, isExecutable: { _ in true },
+            run: { argv, subcommand, _, environment in
+                calls.record(argv, environment)
+                return calls.answer(subcommand)
+            })
+        let model = CodingAgentsSettingsModel(
+            describeTerminal: { _ in nil }, agentsDir: agents, setups: ConnectorSetupRegistry(directory: agents), connectors: [plugin],
+            hosts: [BBHost.kind])
+        return (model, agents)
+    }
+
+    private func settled(_ condition: () -> Bool) async -> Bool {
+        for _ in 0..<2000 where !condition() { try? await Task.sleep(for: .milliseconds(5)) }
+        return condition()
+    }
+
+    @Test func turningOnAHostWithAPluginAsksOnceThenTurnsItOnAndInstallsTheTwoTogether() async throws {
+        let calls = BBPluginConnectorTests.Calls()
+        let (model, agents) = pluginModel(calls)
+        var reported: [[String]] = []
+        model.onHostsChange = { reported.append($0) }
+        model.setTurnedOn(BBHost.kind, true)
+        #expect(await settled { model.consent != nil })
+        let request = try #require(model.consent)
+        #expect(request.turningOn == BBHost.kind)
+        #expect(!model.isTurnedOn(BBHost.kind))
+        #expect(calls.all.isEmpty)
+        model.confirm(request)
+        #expect(model.isTurnedOn(BBHost.kind))
+        #expect(reported == [["bb"]])
+        #expect(await settled { calls.all.contains { $0.0.contains("install") } })
+        #expect(FileManager.default.fileExists(atPath: agents.appendingPathComponent("bb-plugin/keyscribe.json").path))
+    }
+
+    @Test func cancellingTheHostsConsentLeavesItOffAndInstallsNothing() async throws {
+        let calls = BBPluginConnectorTests.Calls()
+        let (model, _) = pluginModel(calls)
+        model.setTurnedOn(BBHost.kind, true)
+        #expect(await settled { model.consent != nil })
+        model.consent = nil
+        #expect(!model.isTurnedOn(BBHost.kind))
+        await model.refresh()
+        await model.maintain()
+        #expect(calls.all.isEmpty)
+    }
+
+    @Test func aHostsPluginIsCheckedOnlyWhileTheHostIsOn() async throws {
+        let calls = BBPluginConnectorTests.Calls()
+        let (model, _) = pluginModel(calls)
+        model.setTurnedOn(BBHost.kind, true)
+        #expect(await settled { model.consent != nil })
+        model.confirm(try #require(model.consent))
+        #expect(await settled { calls.all.contains { $0.0.contains("install") } })
+        model.setTurnedOn(BBHost.kind, false)
+        let made = calls.all.count
+        await model.refresh()
+        await model.maintain()
+        #expect(calls.all.count == made)
+        model.setTurnedOn(BBHost.kind, true)
+        #expect(model.isTurnedOn(BBHost.kind))
+        #expect(model.consent == nil)
+    }
+
+    @Test func aPluginLeftInstalledWhileItsHostIsOffCanStillBeUninstalledAndNothingElseIsAsked() async throws {
+        let calls = BBPluginConnectorTests.Calls()
+        let (model, agents) = pluginModel(calls)
+        model.setTurnedOn(BBHost.kind, true)
+        #expect(await settled { model.consent != nil })
+        model.confirm(try #require(model.consent))
+        #expect(await settled { calls.all.contains { $0.0.contains("install") } })
+        model.setTurnedOn(BBHost.kind, false)
+        let connector = try #require(model.connectors.first)
+        connector.listSetups()
+        let leftover = try #require(connector.setups.first { $0.isEnrolled })
+        #expect(await settled { leftover.operation == nil })
+        let made = calls.all.count
+        await leftover.remove()
+        #expect(calls.all.dropFirst(made).map { $0.0.dropFirst().joined(separator: " ") } == ["plugin remove keyscribe-dev --json"])
+        #expect(!FileManager.default.fileExists(atPath: agents.appendingPathComponent("bb-plugin").path))
+        connector.listSetups()
+        #expect(connector.setups.filter(\.isEnrolled).isEmpty)
+    }
+
     @Test func aHostsListingProblemIsShownBesideItsSwitchOnlyWhileItIsOn() {
         let model = CodingAgentsSettingsModel(
             describeTerminal: { _ in nil }, agentsDir: FileManager.default.temporaryDirectory, connectors: [], hosts: [BBHost.kind])

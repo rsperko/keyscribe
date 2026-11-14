@@ -66,6 +66,7 @@ extension AgentHost {
 public struct AgentHostIntegration: Sendable {
     public var kind: AgentKind
     public var make: @MainActor @Sendable () -> any AgentHost
+    var connector: (@MainActor @Sendable (_ agentsDir: URL, _ pluginName: String) -> any AgentConnector)?
 
     public init(kind: AgentKind, make: @escaping @MainActor @Sendable () -> any AgentHost) {
         self.kind = kind

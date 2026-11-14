@@ -14,9 +14,9 @@ enum ConnectorResources {
         return places.compactMap { $0?.appendingPathComponent(bundleName, isDirectory: true) }
     }
 
-    static func text(named name: String, extension ext: String, searching bundles: [URL] = bundleLocations()) -> String? {
+    static func text(named name: String, extension ext: String, subdirectory: String? = nil, searching bundles: [URL] = bundleLocations()) -> String? {
         for url in bundles {
-            guard let bundle = Bundle(url: url), let file = bundle.url(forResource: name, withExtension: ext),
+            guard let bundle = Bundle(url: url), let file = bundle.url(forResource: name, withExtension: ext, subdirectory: subdirectory),
                   let text = try? String(contentsOf: file, encoding: .utf8)
             else { continue }
             return text

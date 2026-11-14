@@ -23,6 +23,8 @@ struct AgentHubTests {
         func forget(session: String) { forgotten.append(session) }
         var rehelloed: [String] = []
         func rehello(session: String) { rehelloed.append(session) }
+        var silenced: [Set<String>] = []
+        func silence(agents: Set<String>) { silenced.append(agents) }
     }
 
     final class Registry: @unchecked Sendable {

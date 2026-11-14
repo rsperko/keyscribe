@@ -382,6 +382,95 @@ struct AgentHostTests {
         #expect(replies.isEmpty)
     }
 
+    static func hostHello(_ native: String) -> AgentEvent.Hello {
+        AgentEvent.Hello(
+            protocolVersion: 3, agent: "example", agentVersion: "", instance: "plugin/\(native)", session: id(native), pid: 0,
+            features: ["promptDigest"], connection: "plugin", installation: "inst-2")
+    }
+
+    @Test func theHostsOwnConnectorHoldsItsConversationAndSendsBackAnAgentFiledThere() async {
+        let transport = FakeTransport()
+        let hub = await joined(FakeHost(), transport: transport)
+        #expect(hub.filing(for: Self.hostHello("t1")) == nil)
+        #expect(transport.rehelloed == [Self.id("t1")])
+        #expect(hub.filing(for: Self.hello("claude:s1")) == nil)
+        await hub.rescan()
+        #expect(transport.rehelloed == [Self.id("t1")])
+    }
+
+    @Test func anAgentIsFiledUnderItsHostedConversationAgainOnceTheHostsOwnConnectorStops() async {
+        let transport = FakeTransport()
+        let hub = await joined(FakeHost(), transport: transport)
+        #expect(hub.filing(for: Self.hostHello("t1")) == nil)
+        #expect(hub.filing(for: Self.hello("claude:s1")) == nil)
+        transport.live = ["claude:s1"]
+        await hub.rescan()
+        #expect(transport.rehelloed == [Self.id("t1"), "claude:s1"])
+        #expect(hub.filing(for: Self.hello("claude:s1")) == Self.id("t1"))
+    }
+
+    @Test func aConversationTheHostsOwnConnectorHoldsStillSaysItNeedsYouFromTheHostsOwnList() async throws {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let transport = FakeTransport()
+        var at = Date(timeIntervalSince1970: 1000)
+        let hub = makeHub(host, transport: transport, now: { at })
+        await hub.rescan()
+        #expect(hub.filing(for: Self.hostHello("t1")) == nil)
+        transport.live.insert(Self.id("t1"))
+        hub.handle(.hello(Self.hostHello("t1")))
+        #expect(hub.directory.conversations.map(\.id) == [Self.id("t1")])
+        #expect(hub.directory.conversations.first?.connectorLive == true)
+        var attention: [AgentAttention?] = []
+        hub.onAttention = { _, _, wanted, _ in attention.append(wanted) }
+        _ = await hub.deliver("run the migration", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("run the migration")))
+        var waiting = Self.thread("t1")
+        waiting.state = .waitingQuestion
+        host.conversations = [waiting]
+        at += HostDiscovery.fallbackInterval + 1
+        await hub.rescan(wantingHosts: true)
+        #expect(hub.directory.conversations.first?.state == .waitingQuestion)
+        #expect(attention.last == .question)
+    }
+
+    @Test func whileItsHostIsOffTheHostsOwnConnectorIsAnsweredQuietly() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let transport = FakeTransport()
+        var on = false
+        var at = Date(timeIntervalSince1970: 1000)
+        let hub = makeHub(host, transport: transport, allowed: { _ in on }, now: { at })
+        #expect(transport.silenced == [["example"]])
+        await hub.rescan()
+        #expect(transport.silenced == [["example"]])
+        on = true
+        at += HostDiscovery.fallbackInterval + 1
+        await hub.rescan(wantingHosts: true)
+        #expect(transport.silenced == [["example"], []])
+        on = false
+        await hub.rescan()
+        #expect(transport.silenced == [["example"], [], ["example"]])
+        _ = hub
+    }
+
+    @Test func theHostsOwnConnectorIsNeverComparedWithTheVersionOfTheAgentRunningInTheConversation() async {
+        let hub = await joined(FakeHost())
+        var hello = Self.hostHello("t1")
+        hello.version = "0.1.0-plugin"
+        #expect(hub.filing(for: hello) == nil)
+        hub.handle(.hello(hello))
+        #expect(hub.loadedVersions[Self.id("t1")] == nil)
+    }
+
+    @Test func theHostsOwnConnectorHoldsNothingForAConversationItsHostDoesNotList() async {
+        let transport = FakeTransport()
+        let hub = await joined(FakeHost(), transport: transport)
+        #expect(hub.filing(for: Self.hostHello("t9")) == nil)
+        #expect(transport.rehelloed.isEmpty)
+        #expect(hub.filing(for: Self.hello("claude:s1")) == Self.id("t1"))
+    }
+
     @Test func theSameConnectorSayingHelloAsANewSessionStaysFiledUnderItsConversation() async {
         let claude = FakeDiscovery(kind: .claude)
         let hub = await joined(FakeHost(), claude: claude)

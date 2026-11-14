@@ -19,6 +19,8 @@ struct AgentConnectorCopy {
     var stillConnected: (Int) -> String
     var toolTooOldLabel = ""
     var toolTooOldAdvice: (String) -> String = { _ in "" }
+    var setupTitle = "Connector"
+    var describesUse = true
 }
 
 struct AgentConnectorError: Error {
@@ -121,7 +123,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
 
     var isInstalled: Bool {
         switch state {
-        case .status(.ready), .status(.outdated), .status(.disabled): true
+        case .status(.ready), .status(.outdated), .status(.disabled), .broken: true
         default: false
         }
     }
@@ -132,7 +134,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
 
     var hasError: Bool {
         switch state {
-        case .unavailable, .failed, .removalUnfinished: true
+        case .unavailable, .failed, .removalUnfinished, .broken: true
         default: false
         }
     }
@@ -260,6 +262,7 @@ final class AgentConnectorModel: ObservableObject, Identifiable {
         case status(AgentConnectorStatus)
         case removalUnfinished(String?)
         case failed(String)
+        case broken(String)
     }
 
     struct Use: Equatable {
@@ -311,9 +314,14 @@ final class AgentConnectorModel: ObservableObject, Identifiable {
         rebuild()
         for setup in setups where setup.isEnrolled {
             await setup.refresh()
-            if case .status(.outdated) = setup.state { await setup.update() }
+            switch setup.state {
+            case .status(.outdated), .broken: await setup.update()
+            default: break
+            }
         }
     }
+
+    func listSetups() { rebuild() }
 
     func refresh() async {
         hasRefreshed = true

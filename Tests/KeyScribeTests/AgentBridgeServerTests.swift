@@ -354,6 +354,115 @@ struct AgentBridgeServerTests {
         #expect(asked.all.isEmpty)
     }
 
+    private func pollAll(_ dir: URL, _ members: [(session: String, instance: String)], connection: String = "c1") throws -> (Int, String) {
+        let list = members.map { #"{"session":"\#($0.session)","instance":"\#($0.instance)"}"# }.joined(separator: ",")
+        return try request(dir, path: "/poll", body: #"{"members":[\#(list)],"connection":"\#(connection)"}"#)
+    }
+
+    private func answer(_ body: String) throws -> (commands: [AgentCommand], unknown: [String]) {
+        let json = try #require(try JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
+        let commands = try AgentBridgeCodec.decodeCommands(JSONSerialization.data(withJSONObject: json["commands"] ?? []))
+        return (commands, json["unknown"] as? [String] ?? [])
+    }
+
+    @Test func onePollServesEveryConversationOfAConnectionEachUnderItsOwnSession() throws {
+        let (server, _, dir) = try makeServer()
+        defer { server.stop() }
+        try hello(dir, session: "t1", instance: "c1/t1", connection: "c1", agent: "bb")
+        try hello(dir, session: "t2", instance: "c1/t2", connection: "c1", agent: "bb")
+        server.enqueue(.status(id: "r1", expectedSession: "bb:t1", text: "one"), for: "bb:t1")
+        server.enqueue(.status(id: "r2", expectedSession: "bb:t2", text: "two"), for: "bb:t2")
+        let (status, body) = try pollAll(dir, [("t1", "c1/t1"), ("t2", "c1/t2")])
+        #expect(status == 200)
+        let answered = try answer(body)
+        #expect(Set(answered.commands.map(\.id)) == ["r1", "r2"])
+        #expect(answered.commands.contains(.status(id: "r1", expectedSession: "t1", text: "one")))
+        #expect(answered.commands.contains(.status(id: "r2", expectedSession: "t2", text: "two")))
+        #expect(answered.unknown.isEmpty)
+    }
+
+    @Test func aParkedPollForSeveralConversationsKeepsEachLiveAndWakesForAnyOfThem() async throws {
+        let (server, _, dir) = try makeServer(pollHold: 3, activeWindow: 0.5)
+        defer { server.stop() }
+        try hello(dir, session: "t1", instance: "c1/t1", connection: "c1", agent: "bb")
+        try hello(dir, session: "t2", instance: "c1/t2", connection: "c1", agent: "bb")
+        async let polled = Task.detached { try self.pollAll(dir, [("t1", "c1/t1"), ("t2", "c1/t2")]) }.value
+        try await Task.sleep(for: .milliseconds(1200))
+        #expect(server.isLive(session: "bb:t1"))
+        #expect(server.isLive(session: "bb:t2"))
+        server.enqueue(.status(id: "r2", expectedSession: "bb:t2", text: "two"), for: "bb:t2")
+        let (status, body) = try await polled
+        #expect(status == 200)
+        #expect(try answer(body).commands == [.status(id: "r2", expectedSession: "t2", text: "two")])
+    }
+
+    @Test func aConversationTheBridgeDoesNotKnowIsNamedWhileTheOthersAreServed() throws {
+        let (server, _, dir) = try makeServer()
+        defer { server.stop() }
+        try hello(dir, session: "t1", instance: "c1/t1", connection: "c1", agent: "bb")
+        server.enqueue(.status(id: "r1", expectedSession: "bb:t1", text: "one"), for: "bb:t1")
+        let (status, body) = try pollAll(dir, [("t1", "c1/t1"), ("t2", "c1/t2")])
+        #expect(status == 200)
+        let answered = try answer(body)
+        #expect(answered.commands.map(\.id) == ["r1"])
+        #expect(answered.unknown == ["c1/t2"])
+        #expect(try pollAll(dir, [("t3", "c1/t3")]).0 == 409)
+    }
+
+    @Test func askingOneConversationOfAParkedPollToSayHelloAgainAnswersThePollNamingIt() async throws {
+        let (server, _, dir) = try makeServer(pollHold: 5)
+        defer { server.stop() }
+        try hello(dir, session: "t1", instance: "c1/t1", connection: "c1", agent: "bb")
+        try hello(dir, session: "t2", instance: "c1/t2", connection: "c1", agent: "bb")
+        async let polled = Task.detached { try self.pollAll(dir, [("t1", "c1/t1"), ("t2", "c1/t2")]) }.value
+        try await Task.sleep(for: .milliseconds(300))
+        server.rehello(session: "bb:t2")
+        let (status, body) = try await polled
+        #expect(status == 200)
+        #expect(try answer(body).unknown == ["c1/t2"])
+        #expect(try answer(body).commands.isEmpty)
+    }
+
+    @Test func retiringAnswersAParkedPollForSeveralConversationsWithRetire() async throws {
+        let (server, _, dir) = try makeServer(pollHold: 5)
+        defer { server.stop() }
+        try hello(dir, session: "t1", instance: "c1/t1", connection: "c1", agent: "bb")
+        async let polled = Task.detached { try self.pollAll(dir, [("t1", "c1/t1")]) }.value
+        try await Task.sleep(for: .milliseconds(300))
+        server.retire(installation: "inst-1")
+        let (status, body) = try await polled
+        #expect(status == 200)
+        #expect(body.contains(#""op":"retire""#))
+    }
+
+    @Test func aSilencedAgentIsAnsweredQuietlyAndSentBackWheneverItsSilenceChanges() async throws {
+        let (server, events, dir) = try makeServer(pollHold: 5)
+        defer { server.stop() }
+        try hello(dir, session: "t1", instance: "c1/t1", connection: "c1", agent: "bb")
+        try hello(dir, session: "s1", instance: "i1")
+        async let polled = Task.detached { try self.pollAll(dir, [("t1", "c1/t1")]) }.value
+        try await Task.sleep(for: .milliseconds(300))
+        server.silence(agents: ["bb"])
+        #expect(try answer(await polled.1).unknown == ["c1/t1"])
+        let quiet = #"{"op":"hello","protocol":3,"agent":"bb","instance":"c1/t1","session":"t1","pid":0,"connection":"c1","installation":"inst-1","title":"secret"}"#
+        let (status, body) = try request(dir, path: "/event", body: quiet)
+        #expect(status == 200)
+        #expect(body.contains(#""quiet":true"#))
+        guard case .hello(let heard)? = events.all.last else {
+            Issue.record("no hello reached the app")
+            return
+        }
+        #expect(heard.title == nil)
+        let turn = #"{"op":"turnComplete","session":"t1","reason":"complete","answer":"secret","instance":"c1/t1","connection":"c1"}"#
+        #expect(try request(dir, path: "/event", body: turn).1.contains(#""quiet":true"#))
+        #expect(!events.all.contains { if case .turnComplete = $0 { true } else { false } })
+        server.enqueue(.status(id: "r1", expectedSession: "claude:s1", text: "x"), for: "claude:s1")
+        #expect(try poll(dir).1.contains("r1"))
+        server.silence(agents: [])
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(try pollAll(dir, [("t1", "c1/t1")]).0 == 409)
+    }
+
     @Test func aQueuedCommandIsReturnedByThePoll() throws {
         let (server, _, dir) = try makeServer()
         defer { server.stop() }

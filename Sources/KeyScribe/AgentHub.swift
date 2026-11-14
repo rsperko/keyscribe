@@ -7,6 +7,7 @@ protocol AgentTransport: AnyObject {
     func withdraw(_ id: String) -> Bool
     func forget(session: String)
     func rehello(session: String)
+    func silence(agents: Set<String>)
 }
 
 extension AgentBridgeServer: AgentTransport {
@@ -186,9 +187,18 @@ final class AgentHub {
             AgentPlaceTracker(reader: reader, now: now) { [weak self] in self?.placeQueries ?? [] }
         }
         placeTracker?.onChange = { [weak self] in self?.refresh() }
+        silenceHostsTurnedOff()
     }
 
     private(set) var placeTracker: AgentPlaceTracker?
+    private var silencedHosts: Set<String>?
+
+    private func silenceHostsTurnedOff() {
+        let off = Set(hosts.filter { !$0.isEnabled }.map(\.kind.id))
+        guard off != silencedHosts else { return }
+        silencedHosts = off
+        transport.silence(agents: off)
+    }
 
     private static func isGenerated(_ reported: String?, _ title: AgentTitle) -> Bool {
         guard let reported, let generated = title.generatedTitle, title.explicitName == nil else { return false }
@@ -645,7 +655,7 @@ final class AgentHub {
         var entries: [AgentSession] = []
         var shown: [String: String] = [:]
         var nativeNames: [String: String?] = [:]
-        let hidden = Set(inHosts.keys).union(filed.values.map(\.session))
+        let hidden = Set(inHosts.keys).union(filed.filter { $0.key != $0.value.session }.values.map(\.session))
         let inner = Dictionary(
             (lastScan.values.joined()).compactMap { entry -> (String, AgentSession)? in
                 inHosts[AgentSessionID.make(agent: entry.agent, native: entry.id)].map { ($0, entry) }
@@ -952,7 +962,7 @@ final class AgentHub {
         guard !stopped, let event = local(event) else { return }
         if let session = event.session, let agent = AgentSessionID.agent(of: session) {
             discoveries.first { $0.kind.id == agent }?.observe(event.renamingSession(AgentSessionID.native))
-            if let inner = filed[session]?.session, let (innerAgent, innerNative) = AgentSessionID.split(inner) {
+            if let inner = filed[session]?.session, inner != session, let (innerAgent, innerNative) = AgentSessionID.split(inner) {
                 discoveries.first { $0.kind.id == innerAgent }?.observe(event.renamingSession { _ in innerNative })
             }
         }
@@ -968,7 +978,7 @@ final class AgentHub {
             resume(hello)
             features[hello.session] = Set(hello.features)
             installations[hello.session] = hello.installation
-            loadedVersions[hello.session] = hello.version
+            loadedVersions[hello.session] = hosts.contains { $0.kind.id == hello.agent } ? nil : hello.version
             environments[hello.session] = hello.environment
             prompts[hello.session] = hello.prompts
             waitingPrompts[hello.session] = hello.waiting
@@ -1174,6 +1184,14 @@ final class AgentHub {
     }
 
     func filing(for hello: AgentEvent.Hello) -> String? {
+        if isHostsOwn(hello) {
+            if let holder = filed[hello.session], holder.instance != hello.instance {
+                filed[hello.session] = nil
+                transport.rehello(session: hello.session)
+            }
+            filed[hello.session] = Filing(session: hello.session, instance: hello.instance)
+            return nil
+        }
         filed = filed.filter { $0.value.session != hello.session }
         guard let claimed = hostedConversation(claimedBy: hello.session) else {
             rehelloAsked.remove(hello.session)
@@ -1189,6 +1207,7 @@ final class AgentHub {
     }
 
     private func settleFiling() {
+        silenceHostsTurnedOff()
         let identities = hosts.filter { $0.isEnabled && !$0.host.identityKeys.isEmpty }
         let hosted = Set(hosts.flatMap { source in
             source.isEnabled ? (lastScan[source.kind.id] ?? []).map { AgentSessionID.make(agent: $0.agent, native: $0.id) } : []
@@ -1196,6 +1215,11 @@ final class AgentHub {
         for (conversation, _) in filed where !hosted.contains(conversation) {
             filed[conversation] = nil
             if transport.isLive(session: conversation) { transport.rehello(session: conversation) }
+        }
+        var released: Set<String> = []
+        for (conversation, holder) in filed where holder.session == conversation && !transport.isLive(session: conversation) {
+            filed[conversation] = nil
+            released.insert(conversation)
         }
         var claims: [String: String] = [:]
         var seen: Set<String> = []
@@ -1207,7 +1231,8 @@ final class AgentHub {
                     if let key = processKey(entry) { seen.insert(key) }
                     guard let conversation = hostedConversation(claimedBy: session, among: hosted) else { continue }
                     claims[session] = conversation
-                    guard filed[conversation]?.session != session, !rehelloAsked.contains(session), transport.isLive(session: session)
+                    guard filed[conversation]?.session != session, !rehelloAsked.contains(session) || released.contains(conversation),
+                          transport.isLive(session: session)
                     else { continue }
                     rehelloAsked.insert(session)
                     transport.rehello(session: session)
@@ -1222,6 +1247,13 @@ final class AgentHub {
         }
         inHosts = claims
         for (session, conversation) in claims { linked[conversation] = session }
+    }
+
+    private func isHostsOwn(_ hello: AgentEvent.Hello) -> Bool {
+        guard AgentSessionID.agent(of: hello.session) == hello.agent,
+              let source = hosts.first(where: { $0.kind.id == hello.agent }), source.isEnabled
+        else { return false }
+        return (lastScan[source.kind.id] ?? []).contains { AgentSessionID.make(agent: $0.agent, native: $0.id) == hello.session }
     }
 
     private func counterpart(of id: String) -> String? {

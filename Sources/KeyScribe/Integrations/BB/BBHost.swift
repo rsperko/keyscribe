@@ -6,9 +6,13 @@ import KeyScribeKit
 final class BBHost: AgentHost {
     typealias Run = @Sendable (_ argv: [String], _ subcommand: String, _ input: Data?, _ environment: [String: String]) async throws -> HostCLI.Output
 
-    nonisolated static let kind = AgentKind(id: "bb", displayName: "bb", connectorName: "bb")
+    nonisolated static let kind = AgentKind(id: "bb", displayName: "bb", connectorName: "bb plugin")
     nonisolated static let app = "dev.bb.desktop"
-    nonisolated static let integration = AgentHostIntegration(kind: kind, make: { BBHost() })
+    nonisolated static let integration: AgentHostIntegration = {
+        var integration = AgentHostIntegration(kind: kind, make: { BBHost() })
+        integration.connector = { BBPluginConnector(agentsDir: $0, pluginName: $1) }
+        return integration
+    }()
 
     private let home: String
     private let installed: (String) -> Bool

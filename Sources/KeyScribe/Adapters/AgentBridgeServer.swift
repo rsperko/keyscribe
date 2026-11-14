@@ -5,12 +5,18 @@ import KeyScribeKit
 final class AgentBridgeServer: @unchecked Sendable {
     enum StartError: Error { case pathTooLong, socket(Int32) }
 
-    private struct Parked {
-        var fd: Int32
+    private struct Member: Equatable {
         var session: String
         var instance: String
+    }
+
+    private struct Parked {
+        var fd: Int32
+        var members: [Member]
         var connection: String
         var deadline: Date
+        var shared: Bool
+        var unknown: [String] = []
     }
 
     let directory: URL
@@ -39,6 +45,7 @@ final class AgentBridgeServer: @unchecked Sendable {
     private var filedByInstance: [String: (id: String, native: String)] = [:]
     private var sessionByInstance: [String: String] = [:]
     private var commands: AgentCommandQueue
+    private var silenced: Set<String> = []
 
     init(
         directory: URL, token: String, admits: @escaping @Sendable (_ agent: String, _ installation: String?) -> Bool,
@@ -182,8 +189,8 @@ final class AgentBridgeServer: @unchecked Sendable {
                 self.filedByInstance[instance] = nil
                 self.sessionByInstance[instance] = nil
             }
-            let waiting = self.parked.filter { instances.contains($0.instance) }
-            self.parked.removeAll { instances.contains($0.instance) }
+            let waiting = self.parked.filter { $0.members.contains { instances.contains($0.instance) } }
+            self.parked.removeAll { $0.members.contains { instances.contains($0.instance) } }
             self.answerRetired(self.commands.retire(instances: instances), parked: waiting)
             self.reschedule()
         }
@@ -194,6 +201,19 @@ final class AgentBridgeServer: @unchecked Sendable {
             onEvent(.undelivered(request: refusal.command.id, reason: refusal.reason.rawValue, handedOff: refusal.handedOff))
         }
         for p in waiting { respond(p.fd, status: 200, body: Data(#"[{"op":"retire","id":"retire"}]"#.utf8)) }
+    }
+
+    func silence(agents: Set<String>) {
+        queue.async {
+            let changed = self.silenced.symmetricDifference(agents)
+            self.silenced = agents
+            self.sendBack(Set(self.agentByInstance.filter { changed.contains($0.value) }.keys))
+            self.reschedule()
+        }
+    }
+
+    private func quiets(_ session: String) -> Bool {
+        excludes(session) || AgentSessionID.agent(of: session).map(silenced.contains) == true
     }
 
     func rehello(session: String) {
@@ -210,9 +230,15 @@ final class AgentBridgeServer: @unchecked Sendable {
             filedByInstance[instance] = nil
             sessionByInstance[instance] = nil
         }
-        let waiting = parked.filter { instances.contains($0.instance) }
-        parked.removeAll { instances.contains($0.instance) }
-        for p in waiting { respond(p.fd, status: 409) }
+        var kept: [Parked] = []
+        for var p in parked {
+            guard p.members.contains(where: { instances.contains($0.instance) }) else { kept.append(p); continue }
+            guard p.shared else { respond(p.fd, status: 409); continue }
+            p.unknown += p.members.filter { instances.contains($0.instance) }.map(\.instance)
+            p.members.removeAll { instances.contains($0.instance) }
+            answer(p, with: [])
+        }
+        parked = kept
     }
 
     private func session(native: String, instance: String, agent: String) -> String {
@@ -244,7 +270,9 @@ final class AgentBridgeServer: @unchecked Sendable {
     var nextWake: Date? { queue.sync { wake } }
 
     private func touchParked(at now: Date) {
-        for p in parked { commands.touch(instance: p.instance, connection: p.connection, at: min(now, p.deadline)) }
+        for p in parked {
+            for member in p.members { commands.touch(instance: member.instance, connection: p.connection, at: min(now, p.deadline)) }
+        }
     }
 
     private func reschedule() {
@@ -294,22 +322,45 @@ final class AgentBridgeServer: @unchecked Sendable {
     }
 
     private func handlePoll(_ body: Data, on fd: Int32) {
-        guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-              let native = json["session"] as? String, let instance = json["instance"] as? String,
-              let connection = json["connection"] as? String
+        guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any], let connection = json["connection"] as? String
         else { return respond(fd, status: 400) }
-        guard let agent = agentByInstance[instance] else { return respond(fd, status: 409) }
-        if let filed = filedByInstance[instance], filed.native != native { return respond(fd, status: 409) }
-        let session = self.session(native: native, instance: instance, agent: agent)
+        let asked: [(native: String, instance: String)]
+        let shared = json["members"] != nil
+        if shared {
+            guard let list = json["members"] as? [[String: Any]], !list.isEmpty else { return respond(fd, status: 400) }
+            let pairs = list.compactMap { item in
+                (item["session"] as? String).flatMap { native in (item["instance"] as? String).map { (native, $0) } }
+            }
+            guard pairs.count == list.count else { return respond(fd, status: 400) }
+            asked = pairs
+        } else {
+            guard let native = json["session"] as? String, let instance = json["instance"] as? String else { return respond(fd, status: 400) }
+            asked = [(native, instance)]
+        }
         let now = Date()
         touchParked(at: now)
-        guard let ready = commands.poll(session: session, instance: instance, connection: connection, at: now) else {
-            return respond(fd, status: 409)
+        var members: [Member] = []
+        var unknown: [String] = []
+        var ready: [(Member, [AgentCommand])] = []
+        for (native, instance) in asked {
+            guard let agent = agentByInstance[instance], filedByInstance[instance].map({ $0.native == native }) ?? true else {
+                unknown.append(instance)
+                continue
+            }
+            let member = Member(session: self.session(native: native, instance: instance, agent: agent), instance: instance)
+            guard let found = commands.poll(session: member.session, instance: instance, connection: connection, at: now) else {
+                unknown.append(instance)
+                continue
+            }
+            members.append(member)
+            if !found.isEmpty { ready.append((member, found)) }
         }
-        if ready.isEmpty {
-            parked.append(Parked(fd: fd, session: session, instance: instance, connection: connection, deadline: now.addingTimeInterval(pollHold)))
+        guard !members.isEmpty else { return respond(fd, status: 409) }
+        let p = Parked(fd: fd, members: members, connection: connection, deadline: now.addingTimeInterval(pollHold), shared: shared, unknown: unknown)
+        if ready.isEmpty && unknown.isEmpty {
+            parked.append(p)
         } else {
-            send(ready, to: fd, instance: instance)
+            answer(p, with: ready)
         }
     }
 
@@ -328,7 +379,7 @@ final class AgentBridgeServer: @unchecked Sendable {
                   commands.isCurrent(instance: instance, connection: connection), let agent = agentByInstance[instance]
             else { return respond(fd, status: 409) }
             event = received.renamingSession { self.session(native: $0, instance: instance, agent: agent) }
-            if let session = event.session, excludes(session) {
+            if let session = event.session, quiets(session) {
                 return respond(fd, status: 200, body: Data(#"{"ok":true,"quiet":true}"#.utf8))
             }
         }
@@ -365,8 +416,8 @@ final class AgentBridgeServer: @unchecked Sendable {
         }
         let expired = parked.filter { $0.deadline <= now }
         parked.removeAll { $0.deadline <= now }
-        for p in expired { send([], to: p.fd, instance: p.instance) }
-        for session in Set(parked.map(\.session)) { flush(session: session) }
+        for p in expired { answer(p, with: []) }
+        for session in Set(parked.flatMap { $0.members.map(\.session) }) { flush(session: session) }
         reschedule()
     }
 
@@ -374,12 +425,24 @@ final class AgentBridgeServer: @unchecked Sendable {
         let now = Date()
         touchParked(at: now)
         var stillParked: [Parked] = []
-        for p in parked {
-            guard p.session == session else { stillParked.append(p); continue }
-            switch commands.poll(session: session, instance: p.instance, connection: p.connection, at: now) {
-            case nil: respond(p.fd, status: 409)
-            case let ready? where ready.isEmpty: stillParked.append(p)
-            case let ready?: send(ready, to: p.fd, instance: p.instance)
+        for var p in parked {
+            guard p.members.contains(where: { $0.session == session }) else { stillParked.append(p); continue }
+            var ready: [(Member, [AgentCommand])] = []
+            for member in p.members where member.session == session {
+                switch commands.poll(session: session, instance: member.instance, connection: p.connection, at: now) {
+                case nil:
+                    p.unknown.append(member.instance)
+                    p.members.removeAll { $0 == member }
+                case let found? where found.isEmpty: break
+                case let found?: ready.append((member, found))
+                }
+            }
+            if !p.shared, !p.unknown.isEmpty {
+                respond(p.fd, status: 409)
+            } else if ready.isEmpty && p.unknown.isEmpty {
+                stillParked.append(p)
+            } else {
+                answer(p, with: ready)
             }
         }
         parked = stillParked
@@ -407,11 +470,11 @@ final class AgentBridgeServer: @unchecked Sendable {
         for refusal in commands.hello(session: hello.session, instance: hello.instance, connection: hello.connection ?? "", at: Date()) {
             onEvent(.undelivered(request: refusal.command.id, reason: refusal.reason.rawValue, handedOff: refusal.handedOff))
         }
-        let earlier = parked.filter { $0.session == hello.session }
-        parked.removeAll { $0.session == hello.session }
-        for p in earlier { send([], to: p.fd, instance: p.instance) }
+        let earlier = parked.filter { $0.members.contains { $0.session == hello.session } }
+        parked.removeAll { $0.members.contains { $0.session == hello.session } }
+        for p in earlier { answer(p, with: []) }
         reschedule()
-        if excludes(hello.session) {
+        if quiets(hello.session) {
             onEvent(.hello(hello.withoutContent))
             respond(fd, status: 200, body: Data(#"{"ok":true,"quiet":true}"#.utf8))
         } else {
@@ -420,9 +483,12 @@ final class AgentBridgeServer: @unchecked Sendable {
         }
     }
 
-    private func send(_ commands: [AgentCommand], to fd: Int32, instance: String) {
-        let wire = commands.map { $0.renamingSession { self.native(of: $0, on: instance) } }
-        respond(fd, status: 200, body: (try? AgentBridgeCodec.encode(wire)) ?? Data("[]".utf8))
+    private func answer(_ p: Parked, with ready: [(Member, [AgentCommand])]) {
+        let wire = ready.flatMap { member, commands in commands.map { $0.renamingSession { self.native(of: $0, on: member.instance) } } }
+        let encoded = (try? AgentBridgeCodec.encode(wire)) ?? Data("[]".utf8)
+        guard p.shared else { return respond(p.fd, status: 200, body: encoded) }
+        let unknown = (try? JSONSerialization.data(withJSONObject: p.unknown)) ?? Data("[]".utf8)
+        respond(p.fd, status: 200, body: Data(#"{"commands":"#.utf8) + encoded + Data(#","unknown":"#.utf8) + unknown + Data("}".utf8))
     }
 
     private func respond(_ fd: Int32, status: Int, body: Data = Data()) {

@@ -57,11 +57,11 @@ struct ModeEditorView: View {
                     model: codingAgents, shortcut: ModeSummary.triggerDescriptors(mode).first?.displayString, scroll: scroll)
                 SpokenResultSection(model: codingAgents, connections: connections)
                 ConnectorSetupsProblemSection(model: codingAgents)
-                ForEach(codingAgents.connectors) { connector in
+                ForEach(codingAgents.connectors.filter { connector in !codingAgents.hosts.contains { $0.id == connector.kind.id } }) { connector in
                     AgentConnectorSection(model: connector, onInstall: { codingAgents.requestInstall($0, of: connector) })
                 }
                 ForEach(codingAgents.hosts, id: \.id) { host in
-                    AgentHostSection(model: codingAgents, host: host)
+                    AgentHostSection(model: codingAgents, host: host, connector: codingAgents.connectors.first { $0.kind.id == host.id })
                 }
             }
             Section("Words") {

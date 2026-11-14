@@ -13,7 +13,7 @@ struct ConnectorConsentSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Connect conversations using this \(agent) setup?").font(.title2.bold())
+            Text(request.turningOn.map { "Connect \($0.displayName)?" } ?? "Connect conversations using this \(agent) setup?").font(.title2.bold())
             ScrollView {
                 details
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -26,7 +26,7 @@ struct ConnectorConsentSheet: View {
                 Button("Cancel", role: .cancel) { model.consent = nil }
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.consentCancel)
-                Button("Install and Connect") { model.confirm(request) }
+                Button(request.turningOn.map { "Connect \($0.displayName)" } ?? "Install and Connect") { model.confirm(request) }
                     .keyboardShortcut(.defaultAction)
                     .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.consentInstall)
             }
@@ -34,7 +34,26 @@ struct ConnectorConsentSheet: View {
         .padding(24).frame(width: 460)
     }
 
-    private var details: some View {
+    @ViewBuilder private var details: some View {
+        if let host = request.turningOn {
+            hostDetails(host)
+        } else {
+            setupDetails
+        }
+    }
+
+    private func hostDetails(_ host: AgentKind) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("\(Branding.appName) lists the conversations \(host.displayName) runs and sends what you dictate to them through \(host.displayName)\u{2019}s own command, queued behind any turn already running.")
+                .fixedSize(horizontal: false, vertical: true)
+            Text("It also installs a small plugin in \(host.displayName) so the reply to what you dictate is read aloud. Every conversation connects on its own, and you can disconnect any of them later.")
+                .fixedSize(horizontal: false, vertical: true)
+            Text("\(Branding.appName) keeps the plugin up to date. To remove it, choose Uninstall below the switch.")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var setupDetails: some View {
         let affected = model.affected(by: request)
         let excluded = model.stayingDisconnected(by: request)
         return VStack(alignment: .leading, spacing: 14) {

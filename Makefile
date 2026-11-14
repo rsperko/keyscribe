@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test test-kit test-connector test-pi-connector check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major cheatsheet test-cheatsheet
+.PHONY: help build run release publish ship cask test test-kit test-connector test-pi-connector test-bb-plugin check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major cheatsheet test-cheatsheet
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -49,6 +49,9 @@ test-connector: ## Run the Claude Code connector's behavior tests (needs the cla
 
 test-pi-connector: ## Run the Pi connector's behavior tests (needs Node 22.18 or later; never needed to build)
 	./scripts/test-pi-connector.sh
+
+test-bb-plugin: ## Run the bb plugin's behavior tests (needs Node 22.18 or later; never needed to build)
+	./scripts/test-bb-plugin.sh
 
 check-deps: ## Detect upstream dependency mutation (moved tags, re-uploaded binary assets)
 	./scripts/check-binary-artifacts.py

@@ -248,6 +248,22 @@ chk_a_pi_connector_tests() {
 }
 guard a-pi-connector-tests "$(sig_source)" chk_a_pi_connector_tests
 
+chk_a_bb_plugin_tests() {
+  # The bb plugin runs inside bb's server under Node, so its behavior tests run under Node against a stubbed
+  # plugin API. A machine without a recent Node can still build and ship the app: a loud skip.
+  timeout --foreground 600 ./scripts/test-bb-plugin.sh >/tmp/preflight-bb-plugin.log 2>&1
+  local status=$?
+  if [ "$status" = 0 ]; then
+    result pass "bb plugin tests — $(head -1 /tmp/preflight-bb-plugin.log | sed 's/^test-bb-plugin: //')"
+  elif [ "$status" = 2 ]; then
+    result skip "bb plugin tests — $(tail -1 /tmp/preflight-bb-plugin.log | sed 's/^test-bb-plugin: //'); run make test-bb-plugin on a machine with a recent node"
+  else
+    tail -20 /tmp/preflight-bb-plugin.log
+    result fail "bb plugin tests — see /tmp/preflight-bb-plugin.log"
+  fi
+}
+guard a-bb-plugin-tests "$(sig_source)" chk_a_bb_plugin_tests
+
 chk_a_cheatsheet() {
   # The printable desk reference renders through its own Python dependencies. A machine without uv can
   # still ship the app, so that is a loud skip; a sheet that no longer renders or fits its pages fails.

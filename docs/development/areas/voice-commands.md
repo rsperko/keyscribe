@@ -433,6 +433,37 @@ every rule above applies to it, with these sharpenings:
   folder in this bb's data folder (`BBThreads.thread(in:instance:)`); bb passes the dictated text to the agent
   unchanged, so its digest matches (checked with Claude Code in bb 0.49.0, 2026-11-14), while bb's own
   messages to a parent thread arrive as turns of their own and are never followed.
+- **bb's plugin is a connector for every bb thread** (`BBPluginConnector`, sources in `Resources/BBPlugin`). It is
+  installed like a connector, by the consent sheet's enrollment for bb's data folder, which turning bb on asks for
+  (`CodingAgentsSettingsModel.setTurnedOn`): KeyScribe writes its sources and settings into its own support folder,
+  then has bb install it from there (`bb plugin install`, which builds a path source itself and runs `server.ts`
+  from that folder, so the settings file sits beside it). An update rewrites the files and asks bb to reload the
+  plugin (`bb plugin reload`), which keeps the running copy if the new one fails to load; it runs at launch while
+  bb is turned on. Each copy of the app installs its own plugin id, the variant's connector slug, so release and
+  development builds coexist. Installed means what `bb plugin list` reports for that id from that folder (missing,
+  disabled, failed, or running), read only while bb is turned on; a bb that does not answer reads as unknown. The
+  plugin registers its teardown with bb (`bb.onDispose`), so a reload, disable or removal stops its connection and
+  timers, and it logs connecting, waiting and stopping to bb's plugin log. Without its settings it marks itself as
+  needing configuration rather than retrying; refused by the app (403 or 426) it stops. While the app is not running
+  it watches the app's bridge folder and connects as soon as the app is ready, with a capped backoff besides. It
+  honours Disconnect at the source: a quiet hello or a `quiet` command stops its reports for that thread until
+  `admit`. While its host is turned off the bridge answers it as it answers a disconnected conversation
+  (`AgentBridgeServer.silence(agents:)`, set by the hub at start and after each scan), and every change of that
+  sends it back to say hello again, so an off switch means it sends only identity. It greets at most a few threads
+  at a time, so a large bb never overruns the bridge's listen backlog. A plugin bb reports failing, or running an
+  earlier version after a failed reload (bb's status detail `reload failed:` on a running plugin), is installed but broken: Repair reinstalls it, launch maintenance tries
+  once, and Uninstall stays offered. Inside
+  bb it says hello once per thread as agent `bb` under the hosted conversation's own id, so it needs no filing, and
+  one long poll serves all of them (a poll that lists `members` is answered with every member's commands and the
+  members the bridge no longer knows, which say hello again on their own). It reports only what it saw: a
+  `turnStarted` whose `prompt` is the digest of the queued row bb dispatched, or else of the newest prompt in the
+  thread's history that is not still queued, and none for a row bb itself queued; a `turnComplete` only for a turn
+  it saw start. Delivery stays bb's command, so the hub's digest follow matches the dictation exactly as for an
+  agent's own connector. While it is live for a thread it holds that thread: an agent's own connector there is sent
+  back and not filed until the plugin stops, so a thread never reports its turns twice; approvals still show,
+  because a hosted conversation's state comes from bb's own list. It lists bb's threads page by page, and a thread
+  it had not listed says hello as soon as bb reports it working. Events the app cannot take are dropped, never
+  replayed.
 - **A host's command line runs through `HostCLI.run`.** It starts only an absolute program, in its own
   process group, with content on standard input rather than in the arguments. Standard output (the only
   output parsed) and standard error are kept apart, each capped, and cut output is marked. A deadline or a

@@ -588,8 +588,17 @@ before you can say its name.
 
 A Claude Code thread in bb whose connector is installed is listed once, as the bb thread, keeping the name,
 Disconnect and current choice you gave it before. When the connector is up to date, the reply to what you dictate there is read aloud as it is for a terminal, and so is
-work you ask it to have KeyScribe read aloud. KeyScribe can't yet tell which bb thread is in front, or read
-aloud a reply in a bb thread run by another agent. A thread is called by its folder until you rename it in
+work you ask it to have KeyScribe read aloud.
+
+Turning the switch on asks once, and then also installs a small KeyScribe plugin in bb with bb's own `bb plugin`
+command, so the reply to what you dictate to any bb thread is read aloud, whichever agent the thread runs.
+KeyScribe keeps the plugin up to date on its own, and shows below the switch whether bb has it running, with a
+Repair button if bb reports it failing; Uninstall there removes it from bb again. Turning the switch off stops the
+plugin sending replies or prompt fingerprints, and Uninstall stays available below the switch while it is still installed. While KeyScribe isn't running the plugin waits quietly and picks up
+as soon as KeyScribe starts. Where a thread's agent has its own connector too, the plugin speaks for that
+thread. KeyScribe can't yet tell which bb thread is in front.
+
+A thread is called by its folder until you rename it in
 KeyScribe, because bb doesn't say whether you or an AI service wrote its title. KeyScribe turns off bb's usage
 reporting for the commands it runs.
 

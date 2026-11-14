@@ -35,7 +35,7 @@ public struct CodingAgentIntegrations: Sendable {
     }
 
     @MainActor func connectors(agentsDir: URL, pluginName: String, surfaces: ConnectorSurfaces) -> [any AgentConnector] {
-        agents.map { $0.connector(agentsDir, pluginName, surfaces) }
+        agents.map { $0.connector(agentsDir, pluginName, surfaces) } + hosts.compactMap { $0.connector?(agentsDir, pluginName) }
     }
 
     static func describe(_ conflict: Error) -> String {
