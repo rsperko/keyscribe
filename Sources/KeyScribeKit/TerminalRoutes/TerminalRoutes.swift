@@ -289,6 +289,17 @@ public enum TerminalRoutes {
         clients.first { $0 == pid } ?? clients.min()
     }
 
+    public static func decode<T: Decodable>(_ type: T.Type, _ result: (status: Int32, output: String)) -> T? {
+        guard result.status == 0 else { return nil }
+        return try? JSONDecoder().decode(type, from: Data(result.output.utf8))
+    }
+
+    public static func describe(app: String?, multiplexers: [String]) -> String? {
+        let shown = multiplexers.filter { multiplexer in app.map { $0 != multiplexer && !$0.hasPrefix(multiplexer + " ") } ?? true }
+        let parts = [app].compactMap(\.self) + shown
+        return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
+    }
+
     public static func ttys(of processes: ArraySlice<TerminalProcess>) -> [String] {
         var seen: [String] = []
         for tty in processes.reversed().compactMap(\.tty) where !seen.contains(tty) { seen.append(tty) }

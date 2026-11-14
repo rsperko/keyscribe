@@ -560,6 +560,19 @@ listen_on unix:/tmp/kitty
 kitty then listens on a socket only your user account can open, and any program running as you can control
 kitty through it, not just KeyScribe. KeyScribe never changes kitty's settings itself.
 
+### Can “open” select a conversation in Rex?
+
+Yes. “Open docs” focuses the block docs runs in and has Rex show that block's session. The first time you open a
+conversation in Rex, macOS asks whether KeyScribe may control Rex (Automation); without that, KeyScribe
+brings Rex forward and asks you to allow it, and it can't tell whether a Rex conversation is in front. Rex's Remote Control setting is not needed. KeyScribe never
+changes Rex's settings and never starts the Rex server, so when the Rex app isn't open, “open” can't bring
+the conversation forward.
+
+KeyScribe finds the block from inside the agent, through its connector, because macOS doesn't show a Rex
+block's environment to other programs. An agent without the connector only brings Rex forward. A conversation
+that was already open when KeyScribe added Rex support does the same until you run `/reload-plugins` in
+Claude Code or `/reload` in Pi, or restart it.
+
 ### How do I rename a conversation?
 
 In the Coding agent mode, switch to the conversation, then say **“rename this conversation to”** and the new

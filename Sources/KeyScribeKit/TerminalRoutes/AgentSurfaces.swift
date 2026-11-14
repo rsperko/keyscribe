@@ -11,8 +11,8 @@ public struct AgentSurfaces: Sendable {
 
     public static var builtIn: AgentSurfaces {
         AgentSurfaces(
-            terminals: [ScriptedTerminalRoute.ghostty, ScriptedTerminalRoute.terminal, ScriptedTerminalRoute.iterm, WarpRoute.route, CmuxRoute(), WezTermRoute.route, KittyRoute.route],
-            multiplexers: [HerdrRoute(), TmuxRoute(), ZellijRoute()])
+            terminals: [ScriptedTerminalRoute.ghostty, ScriptedTerminalRoute.terminal, ScriptedTerminalRoute.iterm, WarpRoute.route, CmuxRoute(), WezTermRoute.route, KittyRoute.route, RexAppRoute()],
+            multiplexers: [HerdrRoute(), TmuxRoute(), ZellijRoute(), RexRoute()])
     }
 
     public enum Conflict: Error, Equatable, Sendable {
