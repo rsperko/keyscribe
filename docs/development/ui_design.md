@@ -660,7 +660,18 @@ raise another of its windows, so a pane in a window behind the front one reads �
 Couldn’t find docs’s pane”. kitty is selected the same way, and also raises the window, but only once the
 user has turned on its remote control (`allow_remote_control` and `listen_on`, which the FAQ explains);
 until then it only comes forward (“Select docs’s terminal yourself”), and KeyScribe never edits its
-configuration. When no process shows the agent's surface id, the agent's connector is asked instead:
+configuration. Rex is a multiplexer whose server runs apart from its app: Open focuses the agent's block through
+the Rex command line, against the server the agent's block reports and only when that is the server the
+process tree reaches, which also makes the block's tab the session's active one. The one Rex app attached to that
+session is then always asked through its scripting dictionary to show the session, like any scripted terminal
+(Automation, “session” as its noun), because the app may be showing a session on another host that the local
+server does not list. When no
+app is attached to the session, or the block cannot be addressed, the one connected Rex app still comes
+forward; with several, none is guessed. Rex hides a block's environment from other processes, so the block is
+known only from the agent's connector report; without one the Rex pane is unresolved and Rex only comes
+forward. In front, the app reports the local session it shows, and the agent counts as shown only when its
+block is the focused block of that session's active tab. A place's description leaves out a multiplexer the app's
+name already starts with (“Rex Beta”, not “Rex Beta · Rex”; `TerminalRoutes.describe`). When no process shows the agent's surface id, the agent's connector is asked instead:
 KeyScribe asks it to run the terminal's own focus command for its surface, and only a connector that announced it can is asked. An older
 connector says how to get there: “Brought cmux forward. Update the Claude Code connector in Settings, then run
 /reload-plugins in docs to open its tab”. Every layer is found by something stable — a pane id, a tty, or the terminal's own

@@ -9,7 +9,6 @@ enum TerminalDescription {
             NSRunningApplication.runningApplications(withBundleIdentifier: bundle).first?.localizedName
                 ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundle)?.deletingPathExtension().lastPathComponent
         }
-        let parts = [name].compactMap(\.self) + multiplexers
-        return parts.isEmpty ? nil : parts.joined(separator: " \u{00B7} ")
+        return TerminalRoutes.describe(app: name, multiplexers: multiplexers)
     }
 }

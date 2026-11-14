@@ -42,20 +42,15 @@ enum WezTermRoute {
 
     private static func front(_ terminal: TerminalProcess, socket: String, facts: TerminalFacts) -> FrontStep {
         let wezterm = cli(terminal, socket: socket)
-        guard let clients = decode([Client].self, facts.run(wezterm + ["list-clients", "--format", "json"])) else {
+        guard let clients = TerminalRoutes.decode([Client].self, facts.run(wezterm + ["list-clients", "--format", "json"])) else {
             return .unknown(.unreadable(name))
         }
         let own = clients.filter { $0.pid == terminal.pid }
         guard own.count == 1 else { return own.isEmpty ? .unknown(.unreported(name)) : .unknown(.ambiguous) }
-        guard let panes = decode([Pane].self, facts.run(wezterm + ["list", "--format", "json"])) else { return .unknown(.unreadable(name)) }
+        guard let panes = TerminalRoutes.decode([Pane].self, facts.run(wezterm + ["list", "--format", "json"])) else { return .unknown(.unreadable(name)) }
         guard let pane = own[0].focused_pane_id else { return .unknown(.unreported(name)) }
         let focused = panes.filter { $0.pane_id == pane }
         guard focused.count == 1, let tty = focused[0].tty_name, !tty.isEmpty else { return .unknown(.unreported(name)) }
         return .tty(tty)
-    }
-
-    private static func decode<T: Decodable>(_ type: T.Type, _ result: (status: Int32, output: String)) -> T? {
-        guard result.status == 0 else { return nil }
-        return try? JSONDecoder().decode(type, from: Data(result.output.utf8))
     }
 }

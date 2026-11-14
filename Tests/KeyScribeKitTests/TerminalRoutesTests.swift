@@ -496,10 +496,22 @@ struct TerminalRoutesTests {
         #expect(TerminalRoutes.layers(of: []).app == nil)
     }
 
+    @Test(arguments: [
+        (String?.some("Ghostty"), ["herdr", "tmux"], String?.some("Ghostty \u{00B7} herdr \u{00B7} tmux")),
+        ("Rex Beta", ["Rex"], "Rex Beta"),
+        ("Rex", ["Rex"], "Rex"),
+        ("Rexford", ["Rex"], "Rexford \u{00B7} Rex"),
+        (nil, ["tmux"], "tmux"),
+        (nil, [], nil),
+    ])
+    func aPlaceIsDescribedByItsAppAndEveryMultiplexerTheAppIsNotAlreadyNamedFor(app: String?, multiplexers: [String], described: String?) {
+        #expect(TerminalRoutes.describe(app: app, multiplexers: multiplexers) == described)
+    }
+
     @Test func onlyTheEnvironmentOpenAndTheFrontCheckReadIsKept() {
         #expect(ResolvedSurfaces.builtIn.environmentKeys == [
             "HERDR_SOCKET_PATH", "HERDR_PANE_ID", "TMUX", "ZELLIJ_PANE_ID", "WARP_FOCUS_URL", "CMUX_SURFACE_ID",
-            "WEZTERM_PANE", "WEZTERM_UNIX_SOCKET", "KITTY_WINDOW_ID", "KITTY_LISTEN_ON",
+            "WEZTERM_PANE", "WEZTERM_UNIX_SOCKET", "KITTY_WINDOW_ID", "KITTY_LISTEN_ON", "REX_SERVER", "REX_SESSION", "REX_BLOCK",
         ])
     }
 }

@@ -39,7 +39,7 @@ struct HerdrRoute: PaneRoute {
     }
 
     private func client(of socket: String, server: TerminalProcess, facts: TerminalFacts) -> Int? {
-        guard let list = Self.decode(Sessions.self, facts.run([server.executable, "session", "list", "--json"])),
+        guard let list = TerminalRoutes.decode(Sessions.self, facts.run([server.executable, "session", "list", "--json"])),
               let name = list.sessions.first(where: { $0.socket_path == socket })?.name,
               let herdrs = facts.processes(named: processName)
         else { return nil }
@@ -75,20 +75,15 @@ struct HerdrRoute: PaneRoute {
     }
 
     private static func focusedTTY(executable: String, session: String, facts: TerminalFacts) -> String? {
-        guard let sessions = decode(Sessions.self, facts.run([executable, "session", "list", "--json"])),
+        guard let sessions = TerminalRoutes.decode(Sessions.self, facts.run([executable, "session", "list", "--json"])),
               let socket = sessions.sessions.first(where: { $0.name == session })?.socket_path
         else { return nil }
         let herdr = ["/usr/bin/env", "-u", paneKey, "\(socketKey)=\(socket)", executable]
-        guard let panes = decode(Panes.self, facts.run(herdr + ["pane", "list"])) else { return nil }
+        guard let panes = TerminalRoutes.decode(Panes.self, facts.run(herdr + ["pane", "list"])) else { return nil }
         let focused = panes.result.panes.filter(\.focused)
         guard focused.count == 1,
-              let info = decode(ProcessInfo.self, facts.run(herdr + ["pane", "process-info", "--pane", focused[0].pane_id]))
+              let info = TerminalRoutes.decode(ProcessInfo.self, facts.run(herdr + ["pane", "process-info", "--pane", focused[0].pane_id]))
         else { return nil }
         return facts.process(info.result.process_info.shell_pid)?.tty
-    }
-
-    private static func decode<T: Decodable>(_ type: T.Type, _ result: (status: Int32, output: String)) -> T? {
-        guard result.status == 0 else { return nil }
-        return try? JSONDecoder().decode(type, from: Data(result.output.utf8))
     }
 }
