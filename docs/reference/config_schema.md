@@ -452,7 +452,9 @@ state, and a write to it does not reload configuration.
   agent's pid and the start time recorded for that process (the one Claude Code recorded, or for Pi the
   process's own start time)
   (`"remembered": {"<session id>": {"name": "keyscribe blue", "pid": 4821, "started_at": 1793454517559, "native": null}}`).
-  After a KeyScribe restart a conversation gets its remembered name back only when the same process is
+  A conversation an agent host owns has no process of its own, so its entry has no `pid`; it gets its name
+  back when the host lists it again with the same start time. The entry is kept while the host is turned off
+  or has not answered yet, and dropped once the host answers without it. After a KeyScribe restart a conversation gets its remembered name back only when the same process is
   still running, so names do not move between open sessions. A session missing from a scan keeps its
   entry, and its name stays reserved, while that process runs: a missing registry file is not a closed
   session. Once the process has exited, or its pid belongs to a process started at another time, the

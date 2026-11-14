@@ -268,7 +268,7 @@ public enum DevCLI {
         }
 
         let resolvedSurfaces = {
-            do { return try codingAgents.surfaces.resolve() } catch {
+            do { return try codingAgents.resolve() } catch {
                 print("coding agent integrations do not resolve: \(error)")
                 exit(1)
             }

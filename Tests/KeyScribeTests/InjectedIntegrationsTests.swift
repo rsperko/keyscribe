@@ -150,4 +150,37 @@ struct InjectedIntegrationsTests {
     func theProbeSaysWhenNoReaderNamedThePlace(answer: AgentPlaceAnswer?, line: String) async {
         #expect(await PlaceProbe.lines(pid: 30, agent: "claude", session: "a", reader: Answering(answer: answer)) == [line])
     }
+
+    @Test @MainActor func settingsAndTheRuntimeBuildTheirAgentsFromTheSameList() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let setups = ConnectorSetupRegistry(directory: dir)
+        let processes = AgentProcessTable(list: { _ in [] })
+        let surfaces = ConnectorSurfaces(environmentKeys: [])
+        let builtIn = CodingAgentIntegrations.builtIn
+        #expect(builtIn.discoveries(setups: setups, processes: processes).map(\.kind.id) == ["claude", "pi"])
+        #expect(builtIn.connectors(agentsDir: dir, pluginName: "p", surfaces: surfaces).map(\.kind.id) == ["claude", "pi"])
+        let fake = AgentKind(id: "fake", displayName: "Fake", connectorName: "Fake connector")
+        var extended = builtIn
+        extended.agents.append(AgentIntegration(
+            kind: fake, discovery: { _, _ in AgentHubTests.FakeDiscovery(kind: fake) },
+            connector: { AgentIntegration.pi.connector($0, $1, $2) }))
+        #expect(extended.discoveries(setups: setups, processes: processes).map(\.kind.id) == ["claude", "pi", "fake"])
+        #expect(extended.connectors(agentsDir: dir, pluginName: "p", surfaces: surfaces).count == 3)
+    }
+
+    @Test @MainActor func aHostWhoseIdAnotherAgentOrHostUsesIsRejectedBeforeAnythingStarts() throws {
+        var integrations = CodingAgentIntegrations.builtIn
+        _ = try integrations.resolve()
+        integrations.hosts.append(AgentHostIntegration(kind: AgentHostTests.kind, make: { AgentHostTests.FakeHost() }))
+        _ = try integrations.resolve()
+        var twice = integrations
+        twice.hosts.append(AgentHostIntegration(kind: AgentHostTests.kind, make: { AgentHostTests.FakeHost() }))
+        #expect(throws: AgentSurfaces.Conflict.kind("example")) { try twice.resolve() }
+        var asAgent = integrations
+        asAgent.hosts.append(AgentHostIntegration(kind: .claude, make: { AgentHostTests.FakeHost() }))
+        #expect(throws: AgentSurfaces.Conflict.kind("claude")) { try asAgent.resolve() }
+        var separator = integrations
+        separator.hosts[0].kind = AgentKind(id: "ex:ample", displayName: "Example", connectorName: "")
+        #expect(throws: AgentSurfaces.Conflict.kind("ex:ample")) { try separator.resolve() }
+    }
 }

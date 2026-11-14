@@ -51,7 +51,10 @@ own target** with its own identity, signing, entry file (`main.swift` that sets 
 export options — it never edits upstream source. A downstream that adds coding agent integrations builds one
 `CodingAgentIntegrations` value (start from `.builtIn`, append its own) and passes that same value to both
 `DevCLI.handleFlags(codingAgents:)` and `AppDelegate(codingAgents:)`; passing it to only one makes the dev
-probes and the app disagree about which terminals exist. A route's `open`, `place`, `front`, and `check` only
+probes and the app disagree about which terminals exist. An app that owns agent conversations itself is an
+`AgentHostIntegration` appended to `hosts`: its kind and a factory for an `AgentHost`, which makes no
+call until the user turns it on and answers unsupported for every capability its own API lacks. A host runs its
+command line through the public `HostCLI.run`. A route's `open`, `place`, `front`, and `check` only
 read: they run on every plan, every in-front read, and every probe, so anything that changes a terminal or
 multiplexer belongs in the `PaneCommand`s `open` returns. A surface only the agent's own process can select
 declares a `FocusDefinition` (its environment keys and the argv that focuses it) and has `open` return

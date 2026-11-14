@@ -203,6 +203,7 @@ final class AgentOutput {
             case .expired: "\(it) timed out"
             case .refused: "\(it) wouldn\u{2019}t accept it"
             case .disconnected: "\(it)\u{2019}s disconnected"
+            case .hostTakesNoMessages(let host): "\(host) doesn\u{2019}t take messages from \(Branding.appName)"
             }
             return handle.map { "\($0) didn\u{2019}t take that: \(why)" } ?? "Your message wasn\u{2019}t sent: \(why)"
         }
@@ -386,6 +387,7 @@ final class AgentOutput {
             case .expired: "\(name) didn\u{2019}t take it in time. \(nothingSent)"
             case .refused: "\(name) refused the message. \(nothingSent)"
             case .disconnected: "\(name) is disconnected. \(nothingSent)"
+            case .hostTakesNoMessages(let host): "\(name) is in \(host), which doesn\u{2019}t take messages from \(Branding.appName). \(nothingSent)"
             }
             let action: HUDErrorAction? = switch reason {
             case .connectorNotRunning, .disconnected: settingsMode.map { HUDErrorAction.openCodingAgents($0) }

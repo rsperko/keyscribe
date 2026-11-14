@@ -21,6 +21,12 @@ public struct AgentSurfaces: Sendable {
         case processName(String)
         case focusDefinition(String)
         case environmentKey(String)
+        case kind(String)
+    }
+
+    public static func checkKinds(_ ids: [String]) throws {
+        var seen: Set<String> = []
+        for id in ids where id.isEmpty || id.contains(AgentSessionID.separator) || !seen.insert(id).inserted { throw Conflict.kind(id) }
     }
 
     public static func isPlainName(_ key: String) -> Bool {

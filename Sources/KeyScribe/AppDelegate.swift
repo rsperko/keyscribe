@@ -6,7 +6,7 @@ import KeyScribeKit
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate {
     private let codingAgents: CodingAgentIntegrations
-    private lazy var surfaces: Result<ResolvedSurfaces, Error> = Result { try codingAgents.surfaces.resolve() }
+    private lazy var surfaces: Result<ResolvedSurfaces, Error> = Result { try codingAgents.resolve() }
 
     public init(codingAgents: CodingAgentIntegrations = .builtIn) {
         self.codingAgents = codingAgents
@@ -390,7 +390,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         settingsController = SettingsController(
             settings: settings, speechModels: speechModels, repository: configRepository, surfaces: resolvedSurfaces,
-            historyStore: history,
+            agents: codingAgents, historyStore: history,
             onChange: { [weak self] updated in self?.applySettings(updated) },
             onReload: { [weak self] in self?.reloadConfig() },
             onResetHUDPosition: { [weak self] in self?.hud.resetAnchor() },
@@ -839,8 +839,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 let processes = AgentProcessTable(surfaces: surfaces)
                 let runtime = try AgentRuntime(
                     supportDir: KeyScribePaths.supportDir, surfaces: surfaces, placeSources: codingAgents.placeSources.map { $0() },
-                    discovery: [ClaudeDiscovery(setups: setups, processes: processes), PiDiscovery(processes: { processes.found(.pi) })], setups: setups,
-                    legacyAgent: AgentKind.claude.id)
+                    discovery: codingAgents.discoveries(setups: setups, processes: processes), setups: setups,
+                    legacyAgent: AgentKind.claude.id, hosts: codingAgents.hosts)
                 runtime.hub.onNotice = { [weak self] in self?.controller.showAgentNotice($0, request: $1, conversation: $2) }
                 runtime.hub.onForget = { [weak self] in self?.controller.forgetAgentReceipt(request: $0) }
                 runtime.hub.onDelivery = { [weak self] in self?.controller.recordAgentDelivery($1, request: $0) }

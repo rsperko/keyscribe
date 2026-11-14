@@ -150,7 +150,7 @@ struct PiDiscoveryTests {
         discovery.observe(hello("s1", pid: 10))
         discovery.observe(hello("s1", pid: 11))
         let found = sessions(await discovery.scan(rereadingTitles: false))
-        #expect(found.map { ($0.pid, $0.startedAt) }.map { "\($0.0) \($0.1 ?? 0)" } == ["11 1700000050000"])
+        #expect(found.map { ($0.pid, $0.startedAt) }.map { "\($0.0 ?? 0) \($0.1 ?? 0)" } == ["11 1700000050000"])
     }
 
     @Test func retiringForgetsOnlyTheRetiredSessions() async {

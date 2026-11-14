@@ -105,7 +105,7 @@ struct CodingAgentRecipientSection: View {
             }
             HStack(spacing: 8) {
                 if model.showsAgentType {
-                    Text(model.connector(for: row)?.kind.displayName ?? row.agent).fixedSize()
+                    Text(model.agentName(row)).fixedSize()
                 }
                 directory(row)
                     .frame(maxWidth: .infinity, alignment: .leading)

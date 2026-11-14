@@ -394,7 +394,7 @@ final class AgentTake {
                 let listed = agents.recordingOrder.filter { !agents.isExcluded($0.id) }
                 let names = listed.filter { !stale.contains($0.id) && AgentRoster.isWaitingForInput($0) }.map(\.handle)
                 let complete = agents.discoveryProblems.isEmpty
-                    && listed.allSatisfy { !stale.contains($0.id) && ($0.connectorLive || AgentRoster.isWaitingForInput($0)) }
+                    && listed.allSatisfy { !stale.contains($0.id) && ($0.reachable || AgentRoster.isWaitingForInput($0)) }
                 return (names, complete)
             }
             let reported = report()
@@ -456,7 +456,7 @@ final class AgentTake {
         guard let now = observed() else { return fail("That conversation has ended. \(AgentOutput.nothingSent)") }
         if now.prompt != before.prompt || now.conversation.state != before.conversation.state { description = nil }
         let handle = now.conversation.handle
-        let connected = now.conversation.connectorLive
+        let connected = now.conversation.reachable
         let current = !agents.lastSeen.contains(id)
         let line = AgentStatusAnswer.status(
             handle: handle, state: now.conversation.state, connected: connected, current: current, prompt: now.prompt,
@@ -466,7 +466,7 @@ final class AgentTake {
         answered(line, shown: shown, conversation: id, handle: handle, summary: "Checked \(handle)", heard: heard, facts: facts,
                  whileTrue: {
                      observed().map {
-                         $0.prompt == now.prompt && $0.conversation.state == now.conversation.state && $0.conversation.connectorLive == connected
+                         $0.prompt == now.prompt && $0.conversation.state == now.conversation.state && $0.conversation.reachable == connected
                              && agents.lastSeen.contains(id) != current
                      } ?? false
                  })
