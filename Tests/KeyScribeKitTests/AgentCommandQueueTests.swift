@@ -361,6 +361,24 @@ struct AgentBridgeCodecTests {
         #expect(try AgentBridgeCodec.decodeEvent(Data(odd.utf8)) == .checked(request: "r1", check: "c1", report: AgentDeliveryReport(state: .unknown)))
     }
 
+    @Test func aTurnStartCarriesTheDigestOfItsPromptOnlyWhenTheConnectorSendsOne() throws {
+        let plain = #"{"op":"turnStarted","session":"s1","turn":"t1"}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(plain.utf8)) == .turnStarted(session: "s1", turn: "t1"))
+        let digested = #"{"op":"turnStarted","session":"s1","turn":"t1","prompt":"af63dc4c8601ec8c"}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(digested.utf8)) == .turnStarted(session: "s1", turn: "t1", prompt: "af63dc4c8601ec8c"))
+        #expect(AgentEvent.turnStarted(session: "s1", turn: "t1", prompt: "p").renamingSession { "claude:" + $0 }
+            == .turnStarted(session: "claude:s1", turn: "t1", prompt: "p"))
+    }
+
+    @Test func aPromptDigestIsFNV1a64OfThePromptAsTheAgentStartedIt() {
+        #expect(AgentPromptDigest.of("") == "cbf29ce484222325")
+        #expect(AgentPromptDigest.of("a") == "af63dc4c8601ec8c")
+        #expect(AgentPromptDigest.of("  a\n") == "af63dc4c8601ec8c")
+        #expect(AgentPromptDigest.of("\u{200B}/clear") == AgentPromptDigest.of("/clear"))
+        #expect(AgentPromptDigest.of("run the tests") != AgentPromptDigest.of("run the test"))
+        #expect(AgentPromptDigest.of("caf\u{E9}") == "48e8823acfa40d89")
+    }
+
     @Test func aCheckAnswerThatDoesNotNameItsCheckIsMalformed() {
         #expect(throws: AgentBridgeCodec.CodecError.malformed) {
             try AgentBridgeCodec.decodeEvent(Data(#"{"op":"checked","request":"r1","state":"seen"}"#.utf8))

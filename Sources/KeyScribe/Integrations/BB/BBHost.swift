@@ -40,6 +40,12 @@ final class BBHost: AgentHost {
 
     var takesImages: Bool { true }
 
+    var identityKeys: [String] { [BBThreads.threadKey, BBThreads.storageKey] }
+
+    func location(in environment: [String: String]) -> AgentHostLocation? {
+        BBThreads.thread(in: environment, instance: dataDirectory).map { AgentHostLocation(host: Self.kind.id, instance: dataDirectory, native: $0) }
+    }
+
     func scan() async -> AgentHostScan {
         guard running() else { return .unreadable("bb isn\u{2019}t open. Open bb to reach its threads.") }
         let unreadable = AgentHostScan.unreadable("bb could not list its threads. Try again in a moment.")

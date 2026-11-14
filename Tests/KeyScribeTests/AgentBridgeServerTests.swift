@@ -25,7 +25,7 @@ struct AgentBridgeServerTests {
     private func makeServer(
         pollHold: TimeInterval = 2, activeWindow: TimeInterval = 0.5, installation: Installation = Installation(),
         installationFor: (@Sendable (String) -> String?)? = nil, excludes: @escaping @Sendable (String) -> Bool = { _ in false },
-        onHello: @escaping @Sendable (AgentEvent.Hello, @escaping @Sendable () -> Void) -> Void = { $1() },
+        onHello: @escaping @Sendable (AgentEvent.Hello, @escaping @Sendable (String?) -> Void) -> Void = { $1(nil) },
         onNotify: @escaping @Sendable (AgentEvent, @escaping @Sendable (Bool) -> Void) -> Void = { $1(false) }
     ) throws -> (AgentBridgeServer, Events, URL) {
         let dir = URL(fileURLWithPath: "/tmp/ks-bridge-\(UUID().uuidString.prefix(8))", isDirectory: true)
@@ -127,6 +127,60 @@ struct AgentBridgeServerTests {
         #expect(events.all.contains { if case .hello(let other) = $0 { other.session == "claude:s2" && !other.quiet } else { false } })
     }
 
+    @Test func aConnectorTheAppFilesUnderAHostedConversationReportsAndPollsAsItWhileItsOwnSessionStaysOnTheWire() async throws {
+        let filed = "bb:thr_1@/Users/a/.bb"
+        let (server, events, dir) = try makeServer(pollHold: 5, onHello: { _, done in done(filed) })
+        defer { server.stop() }
+        #expect(try hello(dir) == 200)
+        guard case .hello(let greeted) = events.all.first else { Issue.record("no hello"); return }
+        #expect(greeted.session == filed)
+        let turn = #"{"op":"turnStarted","session":"s1","turn":"t1","prompt":"abc","instance":"i1","connection":"i1"}"#
+        #expect(try request(dir, path: "/event", body: turn).0 == 200)
+        #expect(events.all.last == .turnStarted(session: filed, turn: "t1", prompt: "abc"))
+        server.enqueue(.status(id: "q1", expectedSession: filed, text: "label"), for: filed)
+        let (status, body) = try poll(dir)
+        #expect(status == 200)
+        let frame = try JSONSerialization.jsonObject(with: Data(body.utf8)) as? [[String: Any]]
+        #expect(frame?.first?["expectedSession"] as? String == "s1")
+        #expect(server.isLive(session: filed))
+        #expect(!server.isLive(session: "claude:s1"))
+    }
+
+    @Test func aConnectorFiledInPlaceOfAnEarlierOneTakesItsCommandsUnderItsOwnSessionAndTheEarlierOneMustSayHelloAgain() async throws {
+        let (server, _, dir) = try makeServer(pollHold: 1, onHello: { _, done in done("bb:thr_1@/i") })
+        defer { server.stop() }
+        try hello(dir, session: "s1", instance: "i1")
+        try hello(dir, session: "s2", instance: "i2")
+        #expect(try poll(dir, session: "s1", instance: "i1").0 == 409)
+        server.enqueue(.status(id: "q1", expectedSession: "bb:thr_1@/i", text: "label"), for: "bb:thr_1@/i")
+        let (status, body) = try poll(dir, session: "s2", instance: "i2")
+        #expect(status == 200)
+        let frame = try JSONSerialization.jsonObject(with: Data(body.utf8)) as? [[String: Any]]
+        #expect(frame?.first?["expectedSession"] as? String == "s2")
+    }
+
+    @Test func aFiledConnectorPollingAsAnotherSessionOfItsOwnMustSayHelloAgain() async throws {
+        let (server, _, dir) = try makeServer(pollHold: 1, onHello: { _, done in done("bb:thr_1@/i") })
+        defer { server.stop() }
+        try hello(dir)
+        #expect(try poll(dir, session: "s2").0 == 409)
+    }
+
+    @Test func askingAConnectorToSayHelloAgainAnswersItsNextPollAndEventWithAConflict() async throws {
+        let (server, events, dir) = try makeServer(pollHold: 5)
+        defer { server.stop() }
+        try hello(dir)
+        try hello(dir, session: "s2", instance: "i2")
+        server.rehello(session: "claude:s1")
+        #expect(try poll(dir).0 == 409)
+        let turn = #"{"op":"turnStarted","session":"s1","turn":"t1","instance":"i1","connection":"i1"}"#
+        #expect(try request(dir, path: "/event", body: turn).0 == 409)
+        server.enqueue(.status(id: "q2", expectedSession: "claude:s2", text: "x"), for: "claude:s2")
+        #expect(try poll(dir, session: "s2", instance: "i2").1.contains("q2"))
+        #expect(try hello(dir) == 200)
+        #expect(events.all.filter { if case .hello = $0 { true } else { false } }.count == 3)
+    }
+
     @Test func quietAndAdmitTravelAsCommandsToTheConversation() async throws {
         let (server, _, dir) = try makeServer(pollHold: 5)
         defer { server.stop() }
@@ -179,7 +233,7 @@ struct AgentBridgeServerTests {
 
     @Test func aHelloTheBridgeRefusesNeverReachesTheHub() throws {
         let greeted = Events()
-        let (server, _, dir) = try makeServer(onHello: { hello, done in greeted.append(.hello(hello)); done() })
+        let (server, _, dir) = try makeServer(onHello: { hello, done in greeted.append(.hello(hello)); done(nil) })
         defer { server.stop() }
         #expect(try hello(dir, installation: "stale") == 403)
         #expect(greeted.all.isEmpty)
@@ -425,7 +479,7 @@ struct AgentBridgeServerTests {
     @Test func theAppReconcilesBeforeAHelloIsRegisteredOrAnswered() async throws {
         final class Gate: @unchecked Sendable {
             let lock = NSLock()
-            var release: (@Sendable () -> Void)?
+            var release: (@Sendable (String?) -> Void)?
         }
         let gate = Gate()
         let (server, _, dir) = try makeServer(onHello: { _, done in gate.lock.withLock { gate.release = done } })
@@ -435,7 +489,7 @@ struct AgentBridgeServerTests {
         while Date() < deadline, gate.lock.withLock({ gate.release == nil }) { try await Task.sleep(for: .milliseconds(10)) }
         try await Task.sleep(for: .milliseconds(200))
         #expect(!server.isLive(session: "claude:s1"))
-        gate.lock.withLock { gate.release }?()
+        gate.lock.withLock { gate.release }?(nil)
         #expect(try await answered == 200)
         #expect(server.isLive(session: "claude:s1"))
     }
@@ -443,7 +497,7 @@ struct AgentBridgeServerTests {
     @Test func aHelloStillBeingPreparedWhenTheInstallationIsRemovedIsRefused() async throws {
         final class Gate: @unchecked Sendable {
             let lock = NSLock()
-            var release: (@Sendable () -> Void)?
+            var release: (@Sendable (String?) -> Void)?
         }
         let gate = Gate()
         let installation = Installation()
@@ -454,7 +508,7 @@ struct AgentBridgeServerTests {
         while Date() < deadline, gate.lock.withLock({ gate.release == nil }) { try await Task.sleep(for: .milliseconds(10)) }
         installation.current = nil
         server.retire()
-        gate.lock.withLock { gate.release }?()
+        gate.lock.withLock { gate.release }?(nil)
         #expect(try await answered == 403)
         #expect(!server.isLive(session: "claude:s1"))
         #expect(!events.all.contains { if case .hello = $0 { true } else { false } })
@@ -483,7 +537,7 @@ struct AgentBridgeServerTests {
         let dir = URL(fileURLWithPath: "/tmp/ks-bridge-\(UUID().uuidString.prefix(8))", isDirectory: true)
         let server = AgentBridgeServer(
             directory: dir, token: "secret", admits: { $1 == "inst-1" }, pollHold: 0.3, activeWindow: 5,
-            onHello: { hello, done in Task { @MainActor in box.hub?.prepare(for: hello); done() } }
+            onHello: { hello, done in Task { @MainActor in box.hub?.prepare(for: hello); done(nil) } }
         ) { event in Task { @MainActor in box.hub?.handle(event) } }
         try server.start()
         defer { server.stop() }
@@ -652,7 +706,7 @@ struct AgentBridgeServerTests {
         let (server, _, dir) = try makeServer(onHello: { _, done in
             entered.signal()
             gate.wait()
-            done()
+            done(nil)
         })
         defer { server.stop() }
         nonisolated(unsafe) var greeted = 0

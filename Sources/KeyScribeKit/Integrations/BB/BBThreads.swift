@@ -81,6 +81,15 @@ public enum BBThreads {
         return (try? JSONDecoder().decode(Opened.self, from: stdout))?.delivered
     }
 
+    public static let threadKey = "BB_THREAD_ID"
+    public static let storageKey = "BB_THREAD_STORAGE"
+
+    public static func thread(in environment: [String: String], instance: String) -> String? {
+        guard let id = environment[threadKey], isThreadId(id), let storage = environment[storageKey] else { return nil }
+        let root = instance.hasSuffix("/") ? String(instance.dropLast()) : instance
+        return storage == "\(root)/thread-storage/\(id)" ? id : nil
+    }
+
     public static func isThreadId(_ id: String) -> Bool {
         id.hasPrefix("thr_") && id.count > 4 && id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }
     }

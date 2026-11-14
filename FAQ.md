@@ -586,10 +586,12 @@ KeyScribe checks bb for new threads when you start recording with a Coding agent
 Settings is open, and otherwise only every few minutes, so a thread you just started may need one more press
 before you can say its name.
 
-KeyScribe can't yet tell which bb thread is in front or read a bb thread's reply aloud. A thread is called by
-its folder until you rename it in KeyScribe, because bb doesn't say whether you or an AI service wrote its
-title. KeyScribe turns off bb's usage reporting for the commands it runs. A Claude Code thread in bb whose
-connector is installed is also listed on its own, as a separate conversation.
+A Claude Code thread in bb whose connector is installed is listed once, as the bb thread, keeping the name,
+Disconnect and current choice you gave it before. When the connector is up to date, the reply to what you dictate there is read aloud as it is for a terminal, and so is
+work you ask it to have KeyScribe read aloud. KeyScribe can't yet tell which bb thread is in front, or read
+aloud a reply in a bb thread run by another agent. A thread is called by its folder until you rename it in
+KeyScribe, because bb doesn't say whether you or an AI service wrote its title. KeyScribe turns off bb's usage
+reporting for the commands it runs.
 
 ### How do I rename a conversation?
 

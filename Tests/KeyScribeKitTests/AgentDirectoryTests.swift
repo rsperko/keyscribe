@@ -347,6 +347,37 @@ struct AgentDirectoryTests {
         #expect(directory.conversation(handle: "keyscribe")?.id == "claude:a")
     }
 
+    @Test func aChosenNameMovesToTheConversationThatNowStandsForTheSameOneAndBack() throws {
+        let inner = AgentSession(agent: "claude", id: "s1", pid: 10, cwd: "/src/keyscribe", state: .idle)
+        let hosted = AgentSession(agent: "bb", id: "t1@/i", pid: nil, cwd: "/src/keyscribe", state: .idle)
+        var directory = AgentDirectory()
+        directory.update(entries: [inner], live: [])
+        try directory.rename("claude:s1", to: "billing")
+        directory.update(entries: [hosted], live: [])
+        let moved1 = directory.carryChosenName(from: "claude:s1", to: "bb:t1@/i")
+        #expect(moved1)
+        #expect(directory.conversation(handle: "billing")?.id == "bb:t1@/i")
+        #expect(directory.chosenNames == ["bb:t1@/i": "billing"])
+        directory.update(entries: [inner], live: [])
+        let moved2 = directory.carryChosenName(from: "bb:t1@/i", to: "claude:s1")
+        #expect(moved2)
+        #expect(directory.conversation(handle: "billing")?.id == "claude:s1")
+        let moved3 = directory.carryChosenName(from: "bb:t1@/i", to: "claude:s1")
+        #expect(!moved3)
+    }
+
+    @Test func aChosenNameNeverReplacesOneTheOtherConversationAlreadyHas() throws {
+        let one = AgentSession(agent: "claude", id: "s1", pid: 10, cwd: "/src/keyscribe", state: .idle)
+        let two = AgentSession(agent: "bb", id: "t1@/i", pid: nil, cwd: "/src/site", state: .idle)
+        var directory = AgentDirectory()
+        directory.update(entries: [one, two], live: [])
+        try directory.rename("claude:s1", to: "billing")
+        try directory.rename("bb:t1@/i", to: "docs")
+        let moved4 = directory.carryChosenName(from: "claude:s1", to: "bb:t1@/i")
+        #expect(!moved4)
+        #expect(directory.conversation(handle: "docs")?.id == "bb:t1@/i")
+    }
+
     @Test func aHandleSurvivesTheProcessRestartingWithTheSameSession() {
         var directory = AgentDirectory()
         directory.update(claude: [claude(10, "a")], live: [])

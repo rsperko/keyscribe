@@ -235,7 +235,12 @@ in the same `Application Support` folder:
   which bb passes to that thread's agent. bb's list also carries each thread's title and opening words;
   KeyScribe keeps only the ids, folders, status and start times, in memory, and discards the rest without
   using it. It never asks bb for a thread's prompts or replies, and runs those commands with bb's usage
-  reporting turned off. Until you turn it on, KeyScribe runs nothing of bb's.
+  reporting turned off. Until you turn it on, KeyScribe runs nothing of bb's. While it is on, KeyScribe also
+  reads bb's thread id and thread folder from the environment of each coding agent process it lists, so an
+  agent bb started is shown as that bb thread rather than a second time.
+  The Claude Code connector reports a short fingerprint of the prompt each turn starts with, never the prompt
+  itself, so KeyScribe can tell which turn answers what you dictated. The fingerprint stays in memory and is
+  not stored.
   If you turn on **Reply updates** and choose an AI service for it, a longer final reply to an
   instruction you dictated, or to work you asked the agent to have KeyScribe read aloud, is sent to that service, after best-effort redaction, only to be summarized
   into a sentence or two; a reply of a few words is read as it is without any service. KeyScribe keeps

@@ -241,7 +241,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
                 id: conversation.id, number: index + 1, name: conversation.handle, folder: conversation.cwd,
                 state: lastSeen ? "Last seen" : AgentRoster.stateLabel(conversation),
                 connected: conversation.reachable,
-                current: conversation.id == current, agent: conversation.agent, terminal: conversation.pid.flatMap { terminals[$0] ?? nil },
+                current: conversation.id == current, agent: conversation.runningAgent, terminal: conversation.pid.flatMap { terminals[$0] ?? nil },
                 title: conversation.title, setup: conversation.setup,
                 key: conversation.pid.map { Self.key(pid: $0, milliseconds: conversation.startedAt.map { Int(($0.timeIntervalSince1970 * 1000).rounded()) }) } ?? conversation.id,
                 lastSeen: lastSeen, olderConnector: runsOlderConnector(conversation, loadedVersions: loadedVersions), startedAt: conversation.startedAt,
@@ -260,7 +260,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
         let away = namesProblem != nil ? [] : disconnected.map { conversation in
             Row(
                 id: conversation.id, number: 0, name: conversation.handle, folder: conversation.cwd, state: "Disconnected", connected: false,
-                current: false, agent: conversation.agent, terminal: conversation.pid.flatMap { terminals[$0] ?? nil }, title: conversation.title,
+                current: false, agent: conversation.runningAgent, terminal: conversation.pid.flatMap { terminals[$0] ?? nil }, title: conversation.title,
                 setup: conversation.setup, key: conversation.id, place: conversation.placeName,
                 renamed: conversation.nameSource == .chosen, surface: conversation.placeSurface, otherNames: conversation.otherNames,
                 unreadSince: conversation.placeUnreadSince)
@@ -268,7 +268,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
         if away != disconnectedRows { disconnectedRows = away }
         for connector in connectors {
             let uses = conversations.compactMap { conversation -> AgentConnectorModel.Use? in
-                guard conversation.agent == connector.kind.id, let setup = conversation.setup else { return nil }
+                guard conversation.runningAgent == connector.kind.id, let setup = conversation.setup else { return nil }
                 return AgentConnectorModel.Use(
                     folder: setup, name: conversation.handle, connected: conversation.connectorLive,
                     older: runsOlderConnector(conversation, loadedVersions: loadedVersions))
@@ -312,7 +312,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
 
     private func runsOlderConnector(_ conversation: AgentConversation, loadedVersions: [String: String]) -> Bool {
         conversation.connectorLive && Self.older(
-            loadedVersions[conversation.id], than: connectors.first { $0.kind.id == conversation.agent }?.connector.bundledVersion)
+            loadedVersions[conversation.id], than: connectors.first { $0.kind.id == conversation.runningAgent }?.connector.bundledVersion)
     }
 
     private func name(of candidate: AgentCandidate) -> String {

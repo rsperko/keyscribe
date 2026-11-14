@@ -36,6 +36,7 @@ struct AgentDeliveryWiringTests {
         var unreachable: Set<String> = []
         var refusal: String?
         weak var hub: AgentHub?
+        func rehello(session: String) {}
         func enqueue(_ command: AgentCommand, for session: String) {
             sent.append((command, session))
             if let refusal, case .submit = command {

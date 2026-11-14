@@ -21,6 +21,8 @@ struct AgentHubTests {
         func isLive(session: String) -> Bool { live.contains(session) }
         var forgotten: [String] = []
         func forget(session: String) { forgotten.append(session) }
+        var rehelloed: [String] = []
+        func rehello(session: String) { rehelloed.append(session) }
     }
 
     final class Registry: @unchecked Sendable {

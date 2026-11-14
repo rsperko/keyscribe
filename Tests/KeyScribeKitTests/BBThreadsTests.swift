@@ -91,6 +91,21 @@ struct BBThreadsTests {
         #expect(BBThreads.delivery(status: 1, stdout: data(#"{"ok":true,"delivery":"sent"}"#)) == .unclear)
     }
 
+    @Test func anAgentBBStartedNamesItsThreadOnlyWhenItsStorageIsThatThreadsFolderInThisBB() {
+        let environment = ["BB_THREAD_ID": "thr_9e", "BB_THREAD_STORAGE": "/Users/a/.bb/thread-storage/thr_9e"]
+        #expect(BBThreads.thread(in: environment, instance: "/Users/a/.bb") == "thr_9e")
+        #expect(BBThreads.thread(in: environment, instance: "/Users/a/.bb/") == "thr_9e")
+        #expect(BBThreads.thread(in: environment, instance: "/Users/b/.bb") == nil)
+        #expect(BBThreads.thread(in: ["BB_THREAD_ID": "thr_9e"], instance: "/Users/a/.bb") == nil)
+        #expect(BBThreads.thread(in: ["BB_THREAD_STORAGE": "/Users/a/.bb/thread-storage/thr_9e"], instance: "/Users/a/.bb") == nil)
+        let other = ["BB_THREAD_ID": "thr_9e", "BB_THREAD_STORAGE": "/Users/a/.bb/thread-storage/thr_1"]
+        #expect(BBThreads.thread(in: other, instance: "/Users/a/.bb") == nil)
+        let odd = ["BB_THREAD_ID": "--split", "BB_THREAD_STORAGE": "/Users/a/.bb/thread-storage/--split"]
+        #expect(BBThreads.thread(in: odd, instance: "/Users/a/.bb") == nil)
+        let climbing = ["BB_THREAD_ID": "thr_9e", "BB_THREAD_STORAGE": "/Users/a/x/../.bb/thread-storage/thr_9e"]
+        #expect(BBThreads.thread(in: climbing, instance: "/Users/a/.bb") == nil)
+    }
+
     @Test func openCountsTheWindowsBBReached() {
         #expect(BBThreads.openedWindows(status: 0, stdout: data(#"{"threadId":"thr_1","split":"replace","file":null,"delivered":2,"inputPath":null}"#)) == 2)
         #expect(BBThreads.openedWindows(status: 0, stdout: data(#"{"threadId":"thr_1","delivered":0}"#)) == 0)

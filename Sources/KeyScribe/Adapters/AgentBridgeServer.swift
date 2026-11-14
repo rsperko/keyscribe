@@ -23,7 +23,7 @@ final class AgentBridgeServer: @unchecked Sendable {
     private let excludes: @Sendable (_ session: String) -> Bool
     private let pollHold: TimeInterval
     private let onEvent: @Sendable (AgentEvent) -> Void
-    private let onHello: @Sendable (AgentEvent.Hello, @escaping @Sendable () -> Void) -> Void
+    private let onHello: @Sendable (AgentEvent.Hello, @escaping @Sendable (_ filedUnder: String?) -> Void) -> Void
     private let onNotify: @Sendable (AgentEvent, @escaping @Sendable (Bool) -> Void) -> Void
     private let queue = DispatchQueue(label: "com.keyscribe.agent-bridge")
     private var listenFD: Int32 = -1
@@ -36,13 +36,15 @@ final class AgentBridgeServer: @unchecked Sendable {
     private var greeting: Set<Int32> = []
     private var agentByInstance: [String: String] = [:]
     private var installationByInstance: [String: String] = [:]
+    private var filedByInstance: [String: (id: String, native: String)] = [:]
+    private var sessionByInstance: [String: String] = [:]
     private var commands: AgentCommandQueue
 
     init(
         directory: URL, token: String, admits: @escaping @Sendable (_ agent: String, _ installation: String?) -> Bool,
         excludes: @escaping @Sendable (_ session: String) -> Bool = { _ in false }, pollHold: TimeInterval = 25,
         activeWindow: TimeInterval = AgentCommandQueue.activeWindow,
-        onHello: @escaping @Sendable (AgentEvent.Hello, @escaping @Sendable () -> Void) -> Void = { $1() },
+        onHello: @escaping @Sendable (AgentEvent.Hello, @escaping @Sendable (_ filedUnder: String?) -> Void) -> Void = { $1(nil) },
         onNotify: @escaping @Sendable (AgentEvent, @escaping @Sendable (Bool) -> Void) -> Void = { $1(false) },
         onEvent: @escaping @Sendable (AgentEvent) -> Void
     ) {
@@ -162,6 +164,8 @@ final class AgentBridgeServer: @unchecked Sendable {
         queue.async {
             self.agentByInstance = [:]
             self.installationByInstance = [:]
+            self.filedByInstance = [:]
+            self.sessionByInstance = [:]
             self.answerRetired(self.commands.retire(), parked: self.parked)
             self.parked = []
             self.reschedule()
@@ -175,6 +179,8 @@ final class AgentBridgeServer: @unchecked Sendable {
             for instance in instances {
                 self.agentByInstance[instance] = nil
                 self.installationByInstance[instance] = nil
+                self.filedByInstance[instance] = nil
+                self.sessionByInstance[instance] = nil
             }
             let waiting = self.parked.filter { instances.contains($0.instance) }
             self.parked.removeAll { instances.contains($0.instance) }
@@ -188,6 +194,35 @@ final class AgentBridgeServer: @unchecked Sendable {
             onEvent(.undelivered(request: refusal.command.id, reason: refusal.reason.rawValue, handedOff: refusal.handedOff))
         }
         for p in waiting { respond(p.fd, status: 200, body: Data(#"[{"op":"retire","id":"retire"}]"#.utf8)) }
+    }
+
+    func rehello(session: String) {
+        queue.async {
+            self.sendBack(Set(self.sessionByInstance.filter { $0.value == session }.keys))
+            self.reschedule()
+        }
+    }
+
+    private func sendBack(_ instances: Set<String>) {
+        guard !instances.isEmpty else { return }
+        for instance in instances {
+            agentByInstance[instance] = nil
+            filedByInstance[instance] = nil
+            sessionByInstance[instance] = nil
+        }
+        let waiting = parked.filter { instances.contains($0.instance) }
+        parked.removeAll { instances.contains($0.instance) }
+        for p in waiting { respond(p.fd, status: 409) }
+    }
+
+    private func session(native: String, instance: String, agent: String) -> String {
+        guard let filed = filedByInstance[instance], filed.native == native else { return AgentSessionID.make(agent: agent, native: native) }
+        return filed.id
+    }
+
+    private func native(of session: String, on instance: String) -> String {
+        guard let filed = filedByInstance[instance], filed.id == session else { return AgentSessionID.native(session) }
+        return filed.native
     }
 
     func withdraw(_ id: String) -> Bool {
@@ -264,7 +299,8 @@ final class AgentBridgeServer: @unchecked Sendable {
               let connection = json["connection"] as? String
         else { return respond(fd, status: 400) }
         guard let agent = agentByInstance[instance] else { return respond(fd, status: 409) }
-        let session = AgentSessionID.make(agent: agent, native: native)
+        if let filed = filedByInstance[instance], filed.native != native { return respond(fd, status: 409) }
+        let session = self.session(native: native, instance: instance, agent: agent)
         let now = Date()
         touchParked(at: now)
         guard let ready = commands.poll(session: session, instance: instance, connection: connection, at: now) else {
@@ -273,7 +309,7 @@ final class AgentBridgeServer: @unchecked Sendable {
         if ready.isEmpty {
             parked.append(Parked(fd: fd, session: session, instance: instance, connection: connection, deadline: now.addingTimeInterval(pollHold)))
         } else {
-            send(ready, to: fd)
+            send(ready, to: fd, instance: instance)
         }
     }
 
@@ -291,7 +327,7 @@ final class AgentBridgeServer: @unchecked Sendable {
             guard let instance = envelope.instance, let connection = envelope.connection,
                   commands.isCurrent(instance: instance, connection: connection), let agent = agentByInstance[instance]
             else { return respond(fd, status: 409) }
-            event = received.renamingSession { AgentSessionID.make(agent: agent, native: $0) }
+            event = received.renamingSession { self.session(native: $0, instance: instance, agent: agent) }
             if let session = event.session, excludes(session) {
                 return respond(fd, status: 200, body: Data(#"{"ok":true,"quiet":true}"#.utf8))
             }
@@ -299,8 +335,8 @@ final class AgentBridgeServer: @unchecked Sendable {
         switch event {
         case .hello(let hello):
             greeting.insert(fd)
-            onHello(hello) { [weak self] in
-                self?.queue.async { self?.register(hello, answering: fd) }
+            onHello(hello) { [weak self] filed in
+                self?.queue.async { self?.register(hello, filedUnder: filed, answering: fd) }
             }
             return
         case .ack(let request), .submitted(let request, _, _), .refused(let request, _), .focused(let request):
@@ -329,7 +365,7 @@ final class AgentBridgeServer: @unchecked Sendable {
         }
         let expired = parked.filter { $0.deadline <= now }
         parked.removeAll { $0.deadline <= now }
-        for p in expired { send([], to: p.fd) }
+        for p in expired { send([], to: p.fd, instance: p.instance) }
         for session in Set(parked.map(\.session)) { flush(session: session) }
         reschedule()
     }
@@ -343,17 +379,26 @@ final class AgentBridgeServer: @unchecked Sendable {
             switch commands.poll(session: session, instance: p.instance, connection: p.connection, at: now) {
             case nil: respond(p.fd, status: 409)
             case let ready? where ready.isEmpty: stillParked.append(p)
-            case let ready?: send(ready, to: p.fd)
+            case let ready?: send(ready, to: p.fd, instance: p.instance)
             }
         }
         parked = stillParked
     }
 
-    private func register(_ hello: AgentEvent.Hello, answering fd: Int32) {
+    private func register(_ greeted: AgentEvent.Hello, filedUnder filed: String?, answering fd: Int32) {
         guard greeting.remove(fd) != nil else { return }
-        guard admits(hello.agent, hello.installation) else { return respond(fd, status: 403) }
+        guard admits(greeted.agent, greeted.installation) else { return respond(fd, status: 403) }
+        var hello = greeted
+        if let filed {
+            sendBack(Set(filedByInstance.filter { $0.key != hello.instance && $0.value.id == filed }.keys))
+            filedByInstance[hello.instance] = (filed, AgentSessionID.native(greeted.session))
+            hello.session = filed
+        } else {
+            filedByInstance[hello.instance] = nil
+        }
         agentByInstance[hello.instance] = hello.agent
         installationByInstance[hello.instance] = hello.installation
+        sessionByInstance[hello.instance] = hello.session
         if hello.resumesAfterGap {
             for refusal in commands.connectionGap(session: hello.session, instance: hello.instance) {
                 onEvent(.undelivered(request: refusal.command.id, reason: refusal.reason.rawValue, handedOff: refusal.handedOff))
@@ -364,7 +409,7 @@ final class AgentBridgeServer: @unchecked Sendable {
         }
         let earlier = parked.filter { $0.session == hello.session }
         parked.removeAll { $0.session == hello.session }
-        for p in earlier { send([], to: p.fd) }
+        for p in earlier { send([], to: p.fd, instance: p.instance) }
         reschedule()
         if excludes(hello.session) {
             onEvent(.hello(hello.withoutContent))
@@ -375,8 +420,8 @@ final class AgentBridgeServer: @unchecked Sendable {
         }
     }
 
-    private func send(_ commands: [AgentCommand], to fd: Int32) {
-        let wire = commands.map { $0.renamingSession(AgentSessionID.native) }
+    private func send(_ commands: [AgentCommand], to fd: Int32, instance: String) {
+        let wire = commands.map { $0.renamingSession { self.native(of: $0, on: instance) } }
         respond(fd, status: 200, body: (try? AgentBridgeCodec.encode(wire)) ?? Data("[]".utf8))
     }
 

@@ -27,11 +27,13 @@ public struct AgentSession: Equatable, Sendable {
     public var title: AgentTitle
     public var setup: String?
     public var host: AgentHostLocation?
+    public var innerAgent: String?
 
     public init(
         agent: String, id: String, pid: Int?, cwd: String, explicitName: String? = nil, state: AgentLiveState, startedAt: Int? = nil,
-        title: AgentTitle = AgentTitle(), setup: String? = nil, host: AgentHostLocation? = nil
+        title: AgentTitle = AgentTitle(), setup: String? = nil, host: AgentHostLocation? = nil, innerAgent: String? = nil
     ) {
+        self.innerAgent = innerAgent
         self.host = host
         self.setup = setup
         self.agent = agent

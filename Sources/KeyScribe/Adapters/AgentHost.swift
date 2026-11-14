@@ -44,6 +44,8 @@ public enum AgentHostDelivery: Equatable, Sendable {
 public protocol AgentHost: AnyObject {
     var isEnabled: Bool { get }
     var takesImages: Bool { get }
+    var identityKeys: [String] { get }
+    func location(in environment: [String: String]) -> AgentHostLocation?
     func scan() async -> AgentHostScan
     func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen
     func front(among locations: [AgentHostLocation]) async -> AgentHostFront
@@ -52,6 +54,8 @@ public protocol AgentHost: AnyObject {
 
 extension AgentHost {
     public var takesImages: Bool { false }
+    public var identityKeys: [String] { [] }
+    public func location(in environment: [String: String]) -> AgentHostLocation? { nil }
     public func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen { .unsupported }
     public func front(among locations: [AgentHostLocation]) async -> AgentHostFront { .unsupported }
     public func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
@@ -92,6 +96,8 @@ final class HostDiscovery: AgentDiscovery {
     var isEnabled: Bool { allowed() && host.isEnabled }
 
     func want() { wanted = true }
+
+    func expect() { last = nil }
 
     func scan(rereadingTitles: Bool) async -> AgentScan {
         guard allowed() else {

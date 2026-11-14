@@ -359,8 +359,39 @@ every rule above applies to it, with these sharpenings:
   which the host makes again after its own work and before it brings anything forward. A host
   that cannot take messages says so by name. A clipboard image reaches a host with its file path in the text,
   and as an attachment too when the host says it takes images (`AgentHost.takesImages`); the receipt says
-  which. A connector inside a hosted conversation is listed apart from it: joining the two waits for a design
-  that keeps the user's name, current choice and Disconnect across the join.
+  which.
+- **An agent running inside a hosted conversation is filed under it.** A host names the environment keys
+  that place a process in one of its conversations (`AgentHost.identityKeys`, `AgentHost.location(in:)`).
+  While the host is turned on, an agent process whose environment places it in a conversation the host
+  lists, and whose parent process is not placed in that same conversation (so only the agent the host
+  started, never one that agent started), is not listed on its own. The hosted row keeps that agent's kind,
+  setup and live state (`AgentConversation.innerAgent`), so connector updates, reload steps and setups still
+  name the agent and an approval or dialog reads as it does in a terminal. Its connector is filed under the hosted conversation's id: the hub decides on each hello
+  (`AgentHub.filing(for:)`), keyed by the connector's instance so the same connector moving to a new session
+  stays filed, and the bridge then renames that connector's events and polls to the hosted id while its
+  commands carry the session id of the instance that polls; its events also reach its own agent's discovery
+  under its own session id, so an agent whose state comes from those events stays current. A connector filed in place of an earlier one
+  sends the earlier one back to say hello. A connector that said hello before its host listed the
+  conversation, or one filed under a host turned off since, is answered with a conflict
+  (`AgentTransport.rehello`) so it says hello again and is filed afresh; a process placed in a conversation
+  its host does not list yet has that host asked again at once, once per conversation. A second connector
+  claiming a conversation another live connector instance holds is not filed. When an agent moves into its
+  host's conversation, and back out when the host stops listing it, its Disconnect, chosen name, current
+  choice and last use move with it (`AgentDirectory.carryChosenName`). The two ids stay linked for the rest
+  of the run, so Disconnect and reconnect on either one apply to both, in either direction. An agent's process environment, and its parent's, are
+  read only for the host's keys, once per process, and only while a host that names keys is turned on.
+- **A reply is followed only into the turn that carries the dictated text.** A dictation delivered through a
+  host is followed when the conversation's connector is live and reports `promptDigest`: its `turnStarted`
+  carries `AgentPromptDigest.of` the prompt the turn started with, and the hub follows the earliest unmatched
+  dictation with that digest. One the host queued waits however long the host keeps it, until the
+  conversation is no longer listed; one the host took at once, or answered unclearly, waits at most
+  `AgentHub.hostTurnWait`, so a later prompt with the same text is not taken for it. A reply that arrives
+  while the host has not answered yet is held until it does: a refusal, or a Disconnect meanwhile, drops the
+  dictation, the held reply and any turn already followed for it. A wait is checked when a turn starts, not
+  only when the list is refreshed. A matched turn proves arrival, so an unclear answer is then reported
+  as sent. A turn with another prompt, or none (a message the host itself injects), is never followed;
+  messages the host merges into one turn match none and are sent without a spoken reply. Without a
+  connector reporting digests, a hosted dictation is sent and never followed.
 - **Agents and setups are isolated at the bridge.** Each enrolled setup has its own installation id
   (`ConnectorSetups`), and retiring one installation's connectors leaves every other setup's and agent's
   sessions connected. Inside the app a conversation id is
@@ -394,10 +425,14 @@ every rule above applies to it, with these sharpenings:
   command is not run at all; the command never starts bb's server either (it fails at once, measured with bb
   0.49.0 on 2026-11-14). Its data folder is not watched: bb writes its database every few seconds even while
   idle (measured 2026-11-14), so a watch would run its command constantly. A thread nested under another
-  is listed like any other: bb's `parentThreadId` is where the thread sits in its sidebar, which the user
-  arranges by dragging, not a sign that an agent started it. A thread's title never becomes its name, since bb does not record whether the user or an AI service
+  is listed like any other: bb's `parentThreadId` is where the thread sits in its sidebar, which the user can
+  rearrange by dragging, so it does not by itself say an agent started the thread. A thread's title never becomes its name, since bb does not record whether the user or an AI service
   wrote it, and a location that is not a thread of this bb's data folder is never passed to the command. A
-  list longer than `HostCLI`'s output cap reads as unreadable, not as the part that fit.
+  list longer than `HostCLI`'s output cap reads as unreadable, not as the part that fit. An agent bb started
+  is placed in its thread by `BB_THREAD_ID` together with `BB_THREAD_STORAGE`, which must be that thread's
+  folder in this bb's data folder (`BBThreads.thread(in:instance:)`); bb passes the dictated text to the agent
+  unchanged, so its digest matches (checked with Claude Code in bb 0.49.0, 2026-11-14), while bb's own
+  messages to a parent thread arrive as turns of their own and are never followed.
 - **A host's command line runs through `HostCLI.run`.** It starts only an absolute program, in its own
   process group, with content on standard input rather than in the arguments. Standard output (the only
   output parsed) and standard error are kept apart, each capped, and cut output is marked. A deadline or a

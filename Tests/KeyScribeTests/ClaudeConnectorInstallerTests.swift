@@ -276,7 +276,7 @@ struct ClaudeConnectorInstallerTests {
         let source = Self.script
         #expect(!source.contains("$.env.get("))
         #expect(ClaudeConnectorFiles.packagedReader(in: source) == ClaudeConnectorFiles.environmentReader([]))
-        #expect(source.contains("const features = ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check']"))
+        #expect(source.contains("const features = ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest']"))
     }
 
     @Test func anInstalledModReadsExactlyTheKeysItsRoutesNameWithALiteralReadForEach() throws {

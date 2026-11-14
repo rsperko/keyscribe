@@ -17,15 +17,18 @@ public struct AgentConversation: Equatable, Sendable {
     public var placeSurface: String?
     public var otherNames: [String]
     public var placeUnreadSince: Date?
+    public var innerAgent: String?
 
     public var reachable: Bool { connectorLive || host != nil }
+    public var runningAgent: String { innerAgent ?? agent }
 
     public init(
         id: String, agent: String, pid: Int?, cwd: String, handle: String, state: AgentLiveState, connectorLive: Bool,
         title: String? = nil, startedAt: Date? = nil, setup: String? = nil, nameSource: AgentNameSource = .folder,
         placeName: AgentPlaceName? = nil, placeSurface: String? = nil, otherNames: [String] = [], placeUnreadSince: Date? = nil,
-        host: AgentHostLocation? = nil
+        host: AgentHostLocation? = nil, innerAgent: String? = nil
     ) {
+        self.innerAgent = innerAgent
         self.host = host
         self.placeSurface = placeSurface
         self.placeUnreadSince = placeUnreadSince
@@ -263,7 +266,7 @@ public struct AgentDirectory: Sendable {
                 nameSource: chosen[conversationId($0)] != nil ? .chosen : sources[conversationId($0)] ?? .folder,
                 placeName: placeNameById[conversationId($0)],
                 placeSurface: known[conversationId($0)]?.surface, otherNames: otherNames(for: conversationId($0)),
-                placeUnreadSince: unreadSince[conversationId($0)], host: $0.host)
+                placeUnreadSince: unreadSince[conversationId($0)], host: $0.host, innerAgent: $0.innerAgent)
         }.sorted { $0.handle < $1.handle }
         let shown = next.filter { !excluded.contains($0.id) }
         let excludedNow = next.filter { excluded.contains($0.id) }
@@ -382,6 +385,21 @@ public struct AgentDirectory: Sendable {
         handleById[id] = nil
         retired[id] = nil
         revision += 1
+    }
+
+    public mutating func carryChosenName(from old: String, to new: String) -> Bool {
+        guard chosen[new] == nil, handleById[new] != nil, let name = chosen[old] else { return false }
+        chosen[old] = nil
+        remembering[old] = nil
+        handleById[old] = nil
+        retired[old] = nil
+        do {
+            try rename(new, to: name)
+            return true
+        } catch {
+            chosen[old] = name
+            return false
+        }
     }
 
     public mutating func rename(_ id: String, to raw: String) throws {

@@ -86,6 +86,16 @@ struct BBHostTests {
         #expect(activations() == 0)
     }
 
+    @Test func anAgentBBStartedIsPlacedInItsThreadOfThisBBByItsEnvironmentAlone() async {
+        let runner = Runner()
+        let bb = host(runner, running: false).0
+        #expect(bb.identityKeys == ["BB_THREAD_ID", "BB_THREAD_STORAGE"])
+        let environment = ["BB_THREAD_ID": "thr_abc1", "BB_THREAD_STORAGE": "/Users/a/.bb/thread-storage/thr_abc1"]
+        #expect(bb.location(in: environment) == Self.location)
+        #expect(bb.location(in: ["BB_THREAD_ID": "thr_abc1", "BB_THREAD_STORAGE": "/Users/b/.bb/thread-storage/thr_abc1"]) == nil)
+        #expect(runner.calls.isEmpty)
+    }
+
     @Test func bbTakesImages() {
         #expect(host(Runner()).0.takesImages)
     }

@@ -36,7 +36,7 @@ final class PiDiscovery: AgentDiscovery {
             mark(&inTurn, hello.session, !hello.knownIdle)
             mark(&waiting, hello.session, hello.waiting != nil)
             resolve(hello.session)
-        case .turnStarted(let session, _):
+        case .turnStarted(let session, _, _):
             mark(&inTurn, session, true)
             resolve(session)
         case .turnComplete(let session, _, _):

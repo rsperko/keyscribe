@@ -193,6 +193,28 @@ test('events keep their order and a completion carries the final answer', async 
   expect(Object.keys(h.events()[3]).sort()).toEqual(['answer', 'connection', 'instance', 'op', 'reason', 'session'])
 })
 
+test('a turn start names its prompt only by the digest the app matches a sent message against', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: 'reply with the single word fig', turnId: 't1' })
+  await $.turn.start({ text: '\u200b/clear  ', turnId: 't2' })
+  await $.turn.start({ text: 'café', turnId: 't3' })
+  await h.answerEvents()
+
+  const started = h.events().filter((e: any) => e.op === 'turnStarted')
+  expect(started.map((e: any) => e.prompt)).toEqual([
+    'de3139ee91e5afc4', digest('/clear'), '48e8823acfa40d89',
+  ])
+  expect(JSON.stringify(h.events())).not.toContain('fig')
+  expect(h.events()[0].features).toContain('promptDigest')
+})
+
+function digest(text: string) {
+  let hash = 0xcbf29ce484222325n
+  for (const byte of new TextEncoder().encode(text)) hash = ((hash ^ BigInt(byte)) * 0x100000001b3n) & 0xffffffffffffffffn
+  return hash.toString(16).padStart(16, '0')
+}
+
 test('an answer full of characters JSON must escape still fits the event queue and arrives', async ($, on) => {
   const h = harness(on)
   await h.connect($)
@@ -1079,7 +1101,7 @@ test('a session the module saw start says hello as fresh and idle', async ($, on
   await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await h.settle()
-  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check'] })
+  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest'] })
 })
 
 test('hello reports the zellij pane its session runs in, which only its own process can read', async ($, on) => {

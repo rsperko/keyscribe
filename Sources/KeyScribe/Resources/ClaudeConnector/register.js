@@ -16,7 +16,7 @@ const stallRetries = 3
 const late = { late: true }
 const unreachable = { unreachable: true }
 const freshSources = ['startup', 'clear', 'fork']
-const features = ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check']
+const features = ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest']
 const readAloudTool = 'tell_me_when_done'
 
 let config = null
@@ -514,9 +514,18 @@ function refusal(reason) {
   return /the session was stopped/i.test(text) ? 'stopped' : text.slice(0, 500)
 }
 
+function plainPrompt(value) {
+  return String(value || '').replace(/^\u200b/, '').trim()
+}
+
 function ownPrompt(started, sent) {
-  const plain = (value) => String(value || '').replace(/^\u200b/, '').trim()
-  return plain(started) === plain(sent)
+  return plainPrompt(started) === plainPrompt(sent)
+}
+
+function promptDigest(text) {
+  let hash = 0xcbf29ce484222325n
+  for (const byte of new TextEncoder().encode(plainPrompt(text))) hash = ((hash ^ BigInt(byte)) * 0x100000001b3n) & 0xffffffffffffffffn
+  return hash.toString(16).padStart(16, '0')
 }
 
 function refuse($, gen, id, reason) {
@@ -873,7 +882,7 @@ export function register(on) {
       currentTurn = e.turnId
       turnKnown = true
       if (ownSubmit && ownSubmit.turn === null && ownPrompt(e.text, ownSubmit.text)) ownSubmit.turn = e.turnId
-      observe($, { op: 'turnStarted', session, turn: e.turnId })
+      observe($, { op: 'turnStarted', session, turn: e.turnId, prompt: promptDigest(e.text) })
     }
     return next(e)
   })

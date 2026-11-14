@@ -118,7 +118,7 @@ public enum AgentEvent: Equatable, Sendable {
     case checked(request: String, check: String, report: AgentDeliveryReport)
     case refused(request: String, reason: String)
     case typed(session: String, prompts: Int? = nil)
-    case turnStarted(session: String, turn: String)
+    case turnStarted(session: String, turn: String, prompt: String? = nil)
     case turnComplete(session: String, reason: String, answer: String)
     case undelivered(request: String, reason: String, handedOff: Bool)
     case focused(request: String)
@@ -131,7 +131,7 @@ extension AgentEvent {
     public var session: String? {
         switch self {
         case .hello(let hello): hello.session
-        case .typed(let session, _), .turnStarted(let session, _), .turnComplete(let session, _, _), .title(let session, _),
+        case .typed(let session, _), .turnStarted(let session, _, _), .turnComplete(let session, _, _), .title(let session, _),
              .waiting(let session, _), .notify(let session, _, _): session
         case .ack, .submitted, .checked, .refused, .undelivered, .focused: nil
         }
@@ -143,7 +143,7 @@ extension AgentEvent {
             hello.session = rename(hello.session)
             return .hello(hello)
         case .typed(let session, let prompts): return .typed(session: rename(session), prompts: prompts)
-        case .turnStarted(let session, let turn): return .turnStarted(session: rename(session), turn: turn)
+        case .turnStarted(let session, let turn, let prompt): return .turnStarted(session: rename(session), turn: turn, prompt: prompt)
         case .turnComplete(let session, let reason, let answer): return .turnComplete(session: rename(session), reason: reason, answer: answer)
         case .title(let session, let text): return .title(session: rename(session), text: text)
         case .waiting(let session, let prompt): return .waiting(session: rename(session), prompt: prompt)
@@ -184,6 +184,18 @@ extension AgentEvent.Hello {
     public var knownIdle: Bool { features.contains("readiness") && idle == true }
     public var reportsTurn: Bool { features.contains("notify") }
     public var resumesAfterGap: Bool { !features.contains("readiness") || gap != false }
+}
+
+public enum AgentPromptDigest {
+    public static func of(_ prompt: String) -> String {
+        let plain = (prompt.hasPrefix("\u{200B}") ? String(prompt.dropFirst()) : prompt).trimmingCharacters(in: .whitespacesAndNewlines)
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in plain.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return String(format: "%016llx", hash)
+    }
 }
 
 public enum AgentBridgeCodec {
@@ -238,6 +250,7 @@ public enum AgentBridgeCodec {
         var altered: Bool?
         var miss: String?
         var definition: String?
+        var prompt: String?
     }
 
     public static func encode(_ commands: [AgentCommand]) throws -> Data {
@@ -285,7 +298,7 @@ public enum AgentBridgeCodec {
         case "title":
             return .title(session: try required(w.session), text: try required(w.text))
         case "turnStarted":
-            return .turnStarted(session: try required(w.session), turn: try required(w.turn))
+            return .turnStarted(session: try required(w.session), turn: try required(w.turn), prompt: w.prompt)
         case "waiting":
             return .waiting(session: try required(w.session), prompt: w.waiting)
         case "notify":

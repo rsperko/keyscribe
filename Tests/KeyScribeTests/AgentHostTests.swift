@@ -20,6 +20,7 @@ struct AgentHostTests {
         var hangs = false
         var opening = AgentHostOpen.opened
         var front = AgentHostFront.unknown
+        var identityKeys = ["EXAMPLE_THREAD"]
         var delivery = AgentHostDelivery.accepted
         private(set) var scans = 0
         private(set) var opened: [AgentHostLocation] = []
@@ -49,15 +50,22 @@ struct AgentHostTests {
             return opening
         }
 
+        func location(in environment: [String: String]) -> AgentHostLocation? {
+            environment["EXAMPLE_THREAD"].map { AgentHostTests.location($0) }
+        }
+
         func front(among locations: [AgentHostLocation]) async -> AgentHostFront {
             asked.append(locations)
             await stall()
             return front
         }
 
+        var whileDelivering: (@MainActor () -> Void)?
+
         func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
             delivered.append((text, request, location))
             deliveredImages.append(images)
+            whileDelivering?()
             await stall()
             return delivery
         }
@@ -81,12 +89,15 @@ struct AgentHostTests {
     private func makeHub(
         _ host: FakeHost, transport: FakeTransport = FakeTransport(), focus: FakeFocus? = nil, front: FakeFront? = nil,
         names: AgentNameStore? = nil, allowed: @escaping @MainActor (String) -> Bool = { _ in true }, hostDeadline: Duration = .milliseconds(50),
-        now: @escaping () -> Date = Date.init
+        claude: FakeDiscovery = FakeDiscovery(kind: .claude), environments: [Int: [String: String]] = [:], handOffLimit: Duration = .seconds(30),
+        parents: [Int: Int] = [:], now: @escaping () -> Date = Date.init
     ) -> AgentHub {
         AgentHub(
-            transport: transport, discovery: [FakeDiscovery(kind: .claude)], names: names, focus: focus, front: front,
-            receiptTimeout: .milliseconds(50), scanDeadline: .seconds(30),
-            hosts: [AgentHostIntegration(kind: Self.kind, make: { host })], hostAllowed: allowed, hostDeadline: hostDeadline, now: now,
+            transport: transport, discovery: [claude], names: names, focus: focus, front: front,
+            receiptTimeout: .milliseconds(50), handOffLimit: handOffLimit, scanDeadline: .seconds(30),
+            hosts: [AgentHostIntegration(kind: Self.kind, make: { host })], hostAllowed: allowed, hostDeadline: hostDeadline,
+            processEnvironment: { pid, keys in (environments[pid] ?? [:]).filter { keys.contains($0.key) } },
+            processParent: { parents[$0] }, now: now,
             makeId: { "r1" })
     }
 
@@ -199,6 +210,398 @@ struct AgentHostTests {
         #expect(host.delivered.map(\.0) == ["fix the test"])
         #expect(host.delivered.map(\.1) == ["q1"])
         #expect(transport.sent.allSatisfy { if case .status = $0.0 { true } else { false } })
+    }
+
+    static func claudeSession(_ native: String = "s1", pid: Int = 42) -> AgentSession {
+        AgentSession(agent: "claude", id: native, pid: pid, cwd: "/src/docs", state: .idle)
+    }
+
+    static func hello(_ session: String, features: [String] = ["promptDigest"]) -> AgentEvent.Hello {
+        AgentEvent.Hello(
+            protocolVersion: 3, agent: "claude", agentVersion: "", instance: "i1", session: session, pid: 0, features: features,
+            connection: "i1", installation: "inst-1")
+    }
+
+    private func joined(
+        _ host: FakeHost, transport: FakeTransport = FakeTransport(), features: [String] = ["promptDigest"],
+        allowed: @escaping @MainActor (String) -> Bool = { _ in true }, handOffLimit: Duration = .seconds(30),
+        claude: FakeDiscovery = FakeDiscovery(kind: .claude), now: @escaping () -> Date = Date.init
+    ) async -> AgentHub {
+        host.conversations = [Self.thread("t1")]
+        claude.result = .found([Self.claudeSession()])
+        let hub = makeHub(
+            host, transport: transport, allowed: allowed, claude: claude, environments: [42: ["EXAMPLE_THREAD": "t1", "HOME": "/x"]],
+            handOffLimit: handOffLimit, now: now)
+        await hub.rescan()
+        #expect(hub.filing(for: Self.hello("claude:s1", features: features)) == Self.id("t1"))
+        var filed = Self.hello(Self.id("t1"), features: features)
+        filed.agent = "claude"
+        transport.live.insert(Self.id("t1"))
+        hub.handle(.hello(filed))
+        await hub.rescan()
+        return hub
+    }
+
+    @Test func anAgentRunningInsideAHostedConversationIsFiledUnderItSoTheConversationIsListedOnceAndConnected() async throws {
+        let hub = await joined(FakeHost())
+        #expect(hub.directory.conversations.map(\.id) == [Self.id("t1")])
+        let listed = try #require(hub.directory.conversations.first)
+        #expect(listed.connectorLive)
+        #expect(listed.host == Self.location("t1"))
+    }
+
+    @Test func anAgentIsFiledUnderAHostedConversationOnlyWhenTheHostIsOnAndListsIt() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let claude = FakeDiscovery(kind: .claude)
+        claude.result = .found([Self.claudeSession(), Self.claudeSession("s2", pid: 43)])
+        var turnedOn = true
+        let hub = makeHub(
+            host, allowed: { _ in turnedOn }, claude: claude,
+            environments: [42: ["EXAMPLE_THREAD": "t9"], 43: ["EXAMPLE_THREAD": "t1"]])
+        await hub.rescan()
+        #expect(hub.filing(for: Self.hello("claude:s1")) == nil)
+        #expect(hub.filing(for: Self.hello("claude:s9")) == nil)
+        turnedOn = false
+        await hub.rescan()
+        #expect(hub.filing(for: Self.hello("claude:s2")) == nil)
+        #expect(Set(hub.directory.conversations.map(\.id)) == ["claude:s1", "claude:s2"])
+    }
+
+    @Test func anAgentThatSaidHelloBeforeItsHostListedTheConversationIsAskedOnceToSayHelloAgain() async {
+        let host = FakeHost()
+        let claude = FakeDiscovery(kind: .claude)
+        claude.result = .found([Self.claudeSession()])
+        let transport = FakeTransport()
+        transport.live = ["claude:s1"]
+        var at = Date(timeIntervalSince1970: 1000)
+        let hub = makeHub(host, transport: transport, claude: claude, environments: [42: ["EXAMPLE_THREAD": "t1"]], now: { at })
+        await hub.rescan()
+        #expect(transport.rehelloed.isEmpty)
+        #expect(hub.directory.conversations.map(\.id) == ["claude:s1"])
+        host.conversations = [Self.thread("t1")]
+        at += HostDiscovery.idleInterval + 1
+        await hub.rescan()
+        #expect(hub.directory.conversations.map(\.id) == [Self.id("t1")])
+        #expect(transport.rehelloed == ["claude:s1"])
+        hub.refresh()
+        #expect(transport.rehelloed == ["claude:s1"])
+    }
+
+    @Test func turningTheHostOffSendsAnAgentFiledUnderItBackToSayHelloAsItself() async {
+        var turnedOn = true
+        let transport = FakeTransport()
+        let hub = await joined(FakeHost(), transport: transport, allowed: { _ in turnedOn })
+        turnedOn = false
+        await hub.rescan()
+        #expect(transport.rehelloed == [Self.id("t1")])
+        #expect(hub.filing(for: Self.hello("claude:s1")) == nil)
+    }
+
+    @Test(arguments: [AgentHostDelivery.accepted, .queued, .uncertain])
+    func aDictationToAHostedConversationIsFollowedIntoTheTurnThatStartsWithItsTextAndNoOther(answer: AgentHostDelivery) async {
+        let host = FakeHost()
+        host.delivery = answer
+        let hub = await joined(host)
+        var results: [[String?]] = []
+        hub.onResult = { conversation, handle, reply, requested, origin in results.append([conversation, handle, reply, "\(requested)", origin]) }
+        _ = await hub.deliver("say kiwi", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "typed", prompt: AgentPromptDigest.of("something the user typed")))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "not ours"))
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "system", prompt: nil))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "not ours either"))
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "ours", prompt: AgentPromptDigest.of("say kiwi")))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "kiwi"))
+        #expect(results == [[Self.id("t1"), "docs", "kiwi", "false", "q1"]])
+    }
+
+    @Test func twoDictationsWaitingInTheHostEachGetTheReplyToTheirOwnTurn() async {
+        let host = FakeHost()
+        host.delivery = .queued
+        let hub = await joined(host)
+        var origins: [String?] = []
+        var replies: [String] = []
+        hub.onResult = { _, _, reply, _, origin in
+            replies.append(reply)
+            origins.append(origin)
+        }
+        _ = await hub.deliver("first", to: Self.id("t1"), request: "q1")
+        _ = await hub.deliver("second", to: Self.id("t1"), request: "q2")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("first")))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "one"))
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "b", prompt: AgentPromptDigest.of("second")))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "two"))
+        #expect(replies == ["one", "two"])
+        #expect(origins == ["q1", "q2"])
+    }
+
+    @Test func aDictationTheHostQueuesIsStillFollowedWhenItsTurnStartsLongAfterTheHandOffLimit() async throws {
+        let host = FakeHost()
+        host.delivery = .queued
+        let hub = await joined(host, handOffLimit: .milliseconds(5))
+        var replies: [String] = []
+        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        _ = await hub.deliver("later", to: Self.id("t1"), request: "q1")
+        try await Task.sleep(for: .milliseconds(60))
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("later")))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "done"))
+        #expect(replies == ["done"])
+    }
+
+    @Test func aTurnStartedWithTheTextOfARefusedDictationIsNotFollowed() async {
+        let host = FakeHost()
+        let hub = await joined(host)
+        var replies: [String] = []
+        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        host.delivery = .refused("bb no longer has this thread.")
+        host.whileDelivering = { hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("say kiwi"))) }
+        _ = await hub.deliver("say kiwi", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "kiwi"))
+        #expect(replies.isEmpty)
+    }
+
+    @Test func aTurnStartedBeforeTheHostAnswersIsFollowedWhenTheHostTakesTheDictation() async {
+        let host = FakeHost()
+        let hub = await joined(host)
+        var replies: [String] = []
+        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        host.whileDelivering = { hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("say kiwi"))) }
+        _ = await hub.deliver("say kiwi", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "kiwi"))
+        #expect(replies == ["kiwi"])
+    }
+
+    @Test func aDictationIsNotFollowedThroughAnAgentWhoseConnectorCannotNameItsTurnsPrompt() async {
+        let host = FakeHost()
+        let hub = await joined(host, features: [])
+        var replies: [String] = []
+        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        _ = await hub.deliver("say kiwi", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("say kiwi")))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "kiwi"))
+        #expect(replies.isEmpty)
+    }
+
+    @Test func theSameConnectorSayingHelloAsANewSessionStaysFiledUnderItsConversation() async {
+        let claude = FakeDiscovery(kind: .claude)
+        let hub = await joined(FakeHost(), claude: claude)
+        claude.result = .found([Self.claudeSession("s2", pid: 42)])
+        await hub.rescan()
+        #expect(hub.filing(for: Self.hello("claude:s2")) == Self.id("t1"))
+        var elsewhere = Self.hello("claude:s3")
+        elsewhere.instance = "i9"
+        claude.result = .found([Self.claudeSession("s2", pid: 42), Self.claudeSession("s3", pid: 42)])
+        await hub.rescan()
+        #expect(hub.filing(for: elsewhere) == nil)
+    }
+
+    @Test func onlyTheAgentTheHostStartedIsPlacedInItsConversationNeverOneThatAgentStarted() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let claude = FakeDiscovery(kind: .claude)
+        claude.result = .found([Self.claudeSession(), Self.claudeSession("s2", pid: 43)])
+        let thread = ["EXAMPLE_THREAD": "t1"]
+        let hub = makeHub(host, claude: claude, environments: [42: thread, 43: thread], parents: [42: 1, 43: 42])
+        await hub.rescan()
+        #expect(Set(hub.directory.conversations.map(\.id)) == [Self.id("t1"), "claude:s2"])
+        #expect(hub.filing(for: Self.hello("claude:s2")) == nil)
+        #expect(hub.filing(for: Self.hello("claude:s1")) == Self.id("t1"))
+    }
+
+    @Test func aDisconnectANameAndTheCurrentChoiceFollowTheConversationIntoItsHostAndBack() async throws {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1"), Self.thread("t2", cwd: "/src/site")]
+        let claude = FakeDiscovery(kind: .claude)
+        claude.result = .found([Self.claudeSession(), Self.claudeSession("s2", pid: 43)])
+        var turnedOn = false
+        let hub = makeHub(
+            host, allowed: { _ in turnedOn }, claude: claude,
+            environments: [42: ["EXAMPLE_THREAD": "t1"], 43: ["EXAMPLE_THREAD": "t2"]])
+        hub.exclusions.adopt([])
+        await hub.rescan()
+        try hub.rename("claude:s1", to: "billing")
+        hub.makeCurrent("claude:s1")
+        hub.disconnect("claude:s2")
+        turnedOn = true
+        await hub.rescan(wantingHosts: true)
+        #expect(hub.directory.conversations.first { $0.id == Self.id("t1") }?.handle == "billing")
+        #expect(hub.current == Self.id("t1"))
+        #expect(hub.isExcluded(Self.id("t2")))
+        #expect(!hub.directory.conversations.contains { $0.id == Self.id("t2") })
+        turnedOn = false
+        await hub.rescan()
+        #expect(hub.current == "claude:s1")
+        #expect(hub.isExcluded("claude:s2"))
+        #expect(hub.directory.conversations.first { $0.id == "claude:s1" }?.handle == "billing")
+    }
+
+    @Test func reconnectingTheHostedConversationAlsoReconnectsTheAgentInsideIt() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let claude = FakeDiscovery(kind: .claude)
+        claude.result = .found([Self.claudeSession()])
+        var turnedOn = false
+        let hub = makeHub(host, allowed: { _ in turnedOn }, claude: claude, environments: [42: ["EXAMPLE_THREAD": "t1"]])
+        hub.exclusions.adopt([])
+        await hub.rescan()
+        hub.disconnect("claude:s1")
+        turnedOn = true
+        await hub.rescan(wantingHosts: true)
+        hub.reconnect(Self.id("t1"))
+        turnedOn = false
+        await hub.rescan()
+        #expect(!hub.isExcluded("claude:s1"))
+    }
+
+    @Test func theRowOfAHostedConversationAnAgentRunsInKeepsThatAgentAndItsSetup() async throws {
+        let claude = FakeDiscovery(kind: .claude)
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        var session = Self.claudeSession()
+        session.setup = "/Users/a/.claude"
+        claude.result = .found([session])
+        let hub = makeHub(host, claude: claude, environments: [42: ["EXAMPLE_THREAD": "t1"]])
+        await hub.rescan()
+        let row = try #require(hub.directory.conversations.first)
+        #expect(row.id == Self.id("t1"))
+        #expect(row.runningAgent == "claude")
+        #expect(row.setup == "/Users/a/.claude")
+        #expect(hub.kind(of: Self.id("t1")) == .claude)
+    }
+
+    @Test func anAgentPlacedInAConversationItsHostDoesNotListYetHasTheHostAskedAtOnceButOnlyOnce() async throws {
+        let host = FakeHost()
+        let claude = FakeDiscovery(kind: .claude)
+        claude.result = .found([Self.claudeSession()])
+        let hub = makeHub(host, claude: claude, environments: [42: ["EXAMPLE_THREAD": "t1"]])
+        await hub.rescan()
+        host.conversations = [Self.thread("t1")]
+        for _ in 0..<50 where hub.directory.conversations.map(\.id) != [Self.id("t1")] { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(hub.directory.conversations.map(\.id) == [Self.id("t1")])
+        let scans = host.scans
+        #expect(hub.filing(for: Self.hello("claude:s1")) == Self.id("t1"))
+        await hub.rescan()
+        #expect(host.scans == scans)
+    }
+
+    @Test func aDictationTheHostTookAtOnceStopsBeingFollowedIfNoTurnCarriesItInTime() async {
+        var at = Date(timeIntervalSince1970: 1000)
+        let host = FakeHost()
+        let hub = await joined(host, now: { at })
+        var replies: [String] = []
+        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        _ = await hub.deliver("continue", to: Self.id("t1"), request: "q1")
+        host.delivery = .queued
+        _ = await hub.deliver("later", to: Self.id("t1"), request: "q2")
+        at += AgentHub.hostTurnWait + 1
+        hub.refresh()
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("continue")))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "typed again much later"))
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "b", prompt: AgentPromptDigest.of("later")))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "queued reply"))
+        #expect(replies == ["queued reply"])
+    }
+
+    @Test func aReplyThatCompletesBeforeTheHostRefusesTheDictationIsNeverSpoken() async {
+        let host = FakeHost()
+        let hub = await joined(host)
+        var replies: [String] = []
+        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        host.delivery = .refused("bb did not take it.")
+        host.whileDelivering = {
+            hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("say kiwi")))
+            hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "kiwi"))
+        }
+        _ = await hub.deliver("say kiwi", to: Self.id("t1"), request: "q1")
+        #expect(replies.isEmpty)
+        host.delivery = .accepted
+        _ = await hub.deliver("say kiwi", to: Self.id("t1"), request: "q2")
+        #expect(replies == ["kiwi"])
+    }
+
+    @Test func anUncertainDictationIsRecordedAsSentOnceItsOwnTurnStarts() async {
+        let host = FakeHost()
+        host.delivery = .uncertain
+        let hub = await joined(host)
+        var notices: [(AgentReceipt, String)] = []
+        hub.onNotice = { receipt, request, _ in notices.append((receipt, request)) }
+        #expect(await hub.deliver("say kiwi", to: Self.id("t1"), request: "q1") == .uncertain("docs"))
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("say kiwi")))
+        #expect(notices.map(\.0) == [.sent("docs")])
+        #expect(notices.map(\.1) == ["q1"])
+        host.whileDelivering = { hub.handle(.turnStarted(session: Self.id("t1"), turn: "b", prompt: AgentPromptDigest.of("again"))) }
+        #expect(await hub.deliver("again", to: Self.id("t1"), request: "q2") == .sent("docs"))
+    }
+
+    @Test func reconnectingTheAgentAfterItLeftItsHostAlsoReconnectsTheHostedConversation() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let claude = FakeDiscovery(kind: .claude)
+        claude.result = .found([Self.claudeSession()])
+        var turnedOn = true
+        let hub = makeHub(host, allowed: { _ in turnedOn }, claude: claude, environments: [42: ["EXAMPLE_THREAD": "t1"]])
+        hub.exclusions.adopt([])
+        await hub.rescan()
+        hub.disconnect(Self.id("t1"))
+        turnedOn = false
+        await hub.rescan()
+        #expect(hub.isExcluded("claude:s1"))
+        hub.reconnect("claude:s1")
+        turnedOn = true
+        await hub.rescan(wantingHosts: true)
+        #expect(!hub.isExcluded(Self.id("t1")))
+        #expect(hub.directory.conversations.map(\.id) == [Self.id("t1")])
+    }
+
+    @Test(arguments: [AgentLiveState.waitingApproval, .userDialog, .waitingQuestion, .working])
+    func aHostedConversationShowsTheStateOfTheAgentRunningInsideIt(state: AgentLiveState) async throws {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let claude = FakeDiscovery(kind: .claude)
+        var session = Self.claudeSession()
+        session.state = state
+        claude.result = .found([session])
+        let hub = makeHub(host, claude: claude, environments: [42: ["EXAMPLE_THREAD": "t1"]])
+        await hub.rescan()
+        #expect(try #require(hub.directory.conversations.first).state == state)
+    }
+
+    @Test func aReplyHeldWhileTheHostAnswersIsDroppedWhenTheConversationIsDisconnectedMeanwhile() async {
+        let host = FakeHost()
+        let hub = await joined(host)
+        hub.exclusions.adopt([])
+        var replies: [String] = []
+        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        host.whileDelivering = {
+            hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("say kiwi")))
+            hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "kiwi"))
+            hub.disconnect(Self.id("t1"))
+        }
+        _ = await hub.deliver("say kiwi", to: Self.id("t1"), request: "q1")
+        #expect(replies.isEmpty)
+    }
+
+    @Test func aDictationPastItsWaitIsNotMatchedEvenBeforeTheListIsRefreshed() async {
+        var at = Date(timeIntervalSince1970: 1000)
+        let host = FakeHost()
+        let hub = await joined(host, now: { at })
+        var replies: [String] = []
+        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        _ = await hub.deliver("continue", to: Self.id("t1"), request: "q1")
+        at += AgentHub.hostTurnWait + 1
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("continue")))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "typed again much later"))
+        #expect(replies.isEmpty)
+    }
+
+    @Test func eventsFromAConnectorFiledUnderAHostedConversationStillReachItsOwnAgentUnderItsOwnSession() async {
+        let claude = FakeDiscovery(kind: .claude)
+        let hub = await joined(FakeHost(), claude: claude)
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: "p"))
+        hub.handle(.waiting(session: Self.id("t1"), prompt: AgentPrompt(title: "Allow?")))
+        #expect(claude.observed.suffix(2) == [
+            .turnStarted(session: "s1", turn: "a", prompt: "p"), .waiting(session: "s1", prompt: AgentPrompt(title: "Allow?")),
+        ])
     }
 
     @Test func aClipboardImageReachesAHostedConversationAttachedWithItsPathStillInTheText() async {
