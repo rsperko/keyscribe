@@ -179,7 +179,7 @@ will_run() {
 }
 
 # Required checks must each end pass / override / skip (never fail, never un-evaluated) for the stamp.
-REQ_CORE="a-deps a-swift-test $CONNECTOR_CHECKS a-catalog-contract a-min-xcode a-artifact a-codesign a-metallib a-plist a-licenses b-commands b-vad-gate b-benchmark"
+REQ_CORE="a-deps a-swift-test $CONNECTOR_CHECKS a-catalog-contract a-min-xcode a-artifact a-codesign a-metallib a-plist a-licenses a-agent-guide b-commands b-vad-gate b-benchmark"
 REQ_RELEASE="a-gatekeeper a-staple a-entitlements a-dmg a-sparkle c-plain-dictation c-private-rewrite"
 
 if [ "$LIST_ONLY" = 1 ]; then
@@ -367,6 +367,19 @@ chk_a_licenses() {
   fi
 }
 guard a-licenses "$(sig_artifact)" chk_a_licenses
+
+chk_a_agent_guide() {
+  [ -d "$APP_PATH" ] || { result skip "agent guide — artifact missing"; return; }
+  local GUIDE="$APP_PATH/Contents/Resources/KeyScribe_KeyScribeApp.bundle/Contents/Resources/AgentGuide"
+  if [ ! -f "$GUIDE/AGENTS.md" ] || [ ! -f "$GUIDE/README.md" ]; then
+    result fail "agent guide templates missing from the app bundle"
+  elif [ ! -f "$APP_PATH/Contents/Resources/config_schema.md" ]; then
+    result fail "config schema missing from the app bundle (the agent guide points at it)"
+  else
+    result pass "agent guide templates and config schema bundled"
+  fi
+}
+guard a-agent-guide "$(sig_artifact)" chk_a_agent_guide
 
 if [ "$PHASE" = "pre" ]; then
   :

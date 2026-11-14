@@ -522,6 +522,11 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         return categories
     }
 
+    public func lacksConnection(in connections: ConnectionSet) -> Bool {
+        guard let aiRewrite else { return false }
+        return aiRewrite.connection.isEmpty || connections.connection(id: aiRewrite.connection) == nil
+    }
+
     public var invalidRoutingPatternFields: [String] {
         var fields: [String] = []
         for phrase in triggerPhrases {
@@ -800,7 +805,7 @@ public enum ModeStore {
         load(in: dir, previous: []).modes
     }
 
-    public static func load(in dir: URL, previous: [Mode], lkgDir: URL? = nil) -> LoadResult {
+    public static func load(in dir: URL, previous: [Mode], lkgDir: URL? = nil, savesLastKnownGood: Bool = true) -> LoadResult {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else {
             return LoadResult(modes: [], failures: [])
@@ -816,7 +821,7 @@ public enum ModeStore {
                 catch { throw ConfigError.unreadableFile(error.localizedDescription) }
                 let decoded = try decode(from: toml, id: id)
                 modes.append(decoded.isSystem ? decoded.systemNormalized() : decoded)
-                if let lkgDir { saveLKG(toml, id: id, in: lkgDir) }
+                if let lkgDir, savesLastKnownGood { saveLKG(toml, id: id, in: lkgDir) }
             } catch {
                 let configError = (error as? ConfigError) ?? .invalid("\(error)")
                 if let lastGood = prior[id] {

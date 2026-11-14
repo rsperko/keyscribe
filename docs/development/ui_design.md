@@ -2348,7 +2348,9 @@ reset. (Notices live in the separate **About & Notices** window, not here.)
 - **Reveal Config in Finder** opens the support folder (`~/Library/Application Support/KeyScribe/`,
   `config_schema.md`) so a user can read, edit, back up, or version the plain-TOML config
   directly. This is the answer to "where does my config live" — the files are hand-editable on
-  purpose, and revealing the folder removes any need to know the hidden `~/Library` path.
+  purpose, and revealing the folder removes any need to know the hidden `~/Library` path. The caption
+  under the section also says a coding agent opened in that folder can build or edit modes, guided by the
+  folder's `AGENTS.md` (`config_schema.md` "Directory layout").
 - **Reload Configuration** re-reads the config from disk on demand (edits are also picked up
   automatically). Below it, each problem file gets its own entry: a title naming the file by its path
   (`Couldn’t read settings.toml` in red, `modes/notes.toml has a key nothing reads` in amber), a

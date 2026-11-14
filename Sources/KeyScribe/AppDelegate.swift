@@ -178,6 +178,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             Log.models.info("seed reconcile: renamed=\(reconciled.renamed, privacy: .public) offered=\(reconciled.added, privacy: .public) updated=\(reconciled.updated, privacy: .public)")
             loadSettings()
         }
+        AgentGuideWriter.refresh()
         config = ConfigCache(supportDir: KeyScribePaths.supportDir)
         replacementUsage = ReplacementUsageStore(
             supportDir: KeyScribePaths.supportDir,
@@ -1298,8 +1299,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func connectionUnavailable(for mode: Mode) -> Bool {
-        guard let rewrite = mode.aiRewrite else { return false }
-        return rewrite.connection.isEmpty || config.connections.connection(id: rewrite.connection) == nil
+        mode.lacksConnection(in: config.connections)
     }
 
     // The mode is wired to an AI connection whose last Test Connection failed — the mode itself won't

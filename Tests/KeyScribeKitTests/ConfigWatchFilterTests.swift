@@ -48,6 +48,15 @@ final class ConfigWatchFilterTests: XCTestCase {
             changedPath: base + "/fragments/greeting.md", supportDir: base))
     }
 
+    func testAgentInstructionFilesAreIgnored() {
+        for file in ["AGENTS.md", "AGENTS.override.md", "CLAUDE.md", "CLAUDE.local.md", "README.md"] {
+            XCTAssertFalse(ConfigWatchFilter.isConfigRelevant(
+                changedPath: base + "/" + file, supportDir: base), file)
+        }
+        XCTAssertFalse(ConfigWatchFilter.isConfigRelevant(
+            changedPath: base + "/reference/config_schema.md", supportDir: base))
+    }
+
     func testPrivatePrefixNormalization() {
         let tmpBase = "/var/folders/ab/xyz/T/keyscribe-test"
         XCTAssertFalse(ConfigWatchFilter.isConfigRelevant(

@@ -38,6 +38,8 @@ public enum ConfigTreeSnapshot {
             if isDir {
                 if topLevel, ConfigWatchFilter.ignoredSubdirectories.contains(entry.lastPathComponent) { continue }
                 walk(dir: entry, supportDir: supportDir, topLevel: false, into: &stamps)
+            } else if topLevel, ConfigWatchFilter.isIgnoredTopLevelFile(entry.lastPathComponent) {
+                continue
             } else if let stamp = stamp(of: entry) {
                 stamps[relativeKey(for: entry, supportDir: supportDir)] = stamp
             }

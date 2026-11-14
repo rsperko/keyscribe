@@ -65,6 +65,17 @@ struct ResetToolTests {
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
     }
 
+    @Test func configResetKeepsTheUsersOwnAgentInstructions() throws {
+        let dir = try makeSupportDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "mine".write(to: dir.appendingPathComponent("AGENTS.override.md"), atomically: true, encoding: .utf8)
+
+        isolatedTool(dir, ephemeralDefaults()).run(.config)
+
+        #expect(try String(contentsOf: dir.appendingPathComponent("AGENTS.override.md"), encoding: .utf8) == "mine")
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("settings.toml").path))
+    }
+
     @Test func allWipesConfigButKeepsNestedSharedModels() throws {
         let dir = try makeSupportDir()
         defer { try? FileManager.default.removeItem(at: dir) }

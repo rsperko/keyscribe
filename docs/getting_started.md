@@ -298,6 +298,18 @@ KeyScribe inserts text; it does not run shell commands for you.
 
 Checkpoint: duplicate a starter mode instead of editing the original if you want to experiment.
 
+### Have a coding agent build a mode
+
+You can describe a mode instead of building it by hand. Open a coding agent such as Claude Code or Codex
+in `~/Library/Application Support/KeyScribe/` and ask, for example: "Add a mode that turns my dictation
+into a git commit message when I end with 'commit message'." KeyScribe keeps an `AGENTS.md` guide in that
+folder, matched to your installed version, so the agent knows the file format and checks its work. Saved
+changes apply without a restart. To give agents your own standing instructions, put them in
+`AGENTS.override.md`; the folder's `README.md` explains how.
+
+The same folder holds your dictation history. The guide tells agents not to open it, but an agent can read
+any file there and send it to its AI provider, so only do this with an agent you are comfortable with.
+
 ## 8. Rewrite selected text in place
 
 Edit Selection is the fastest way to feel the difference between dictation and voice editing.

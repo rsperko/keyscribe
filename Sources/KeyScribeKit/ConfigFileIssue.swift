@@ -91,7 +91,9 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
         return state + " App-wide settings you change meanwhile aren’t saved yet. They’re saved once the file is fixed, unless the fixed file sets something else, which replaces them. Modes and vocabulary still save normally."
     }
 
-    public var oneLine: String {
+    public var oneLine: String { line(naming: fileName) }
+
+    public func line(naming name: String) -> String {
         switch kind {
         case .unreadable(let recovery):
             let message = [detail, location].compactMap { $0 }.joined(separator: ", ")
@@ -100,11 +102,11 @@ public struct ConfigFileIssue: Equatable, Sendable, Identifiable {
             case .defaults: "using defaults until fixed"
             case .ignored: "ignored until fixed"
             }
-            return "Couldn’t read \(fileName) — \(message) — \(state)"
+            return "Couldn’t read \(name) — \(message) — \(state)"
         case .unusedKeys:
-            return "\(fileName) — \(detail) has no effect"
+            return "\(name) — \(detail) has no effect"
         case .inactiveRules:
-            return "\(fileName) — \(detail) never run"
+            return "\(name) — \(detail) never run"
         }
     }
 

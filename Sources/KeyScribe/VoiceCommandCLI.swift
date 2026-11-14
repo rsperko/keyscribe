@@ -18,7 +18,7 @@ enum VoiceCommandCLI {
         }
         let runner = VoiceCommandRunner(system: system, findsInApps: { findsInApps }, isPreview: true)
         let commands = VoiceCommandStore.loadOrDefault(supportDir: supportDir)
-        let config = ConfigCache(supportDir: supportDir)
+        let config = ConfigCache(supportDir: supportDir, readOnly: true)
         config.voiceCommandsEnabled = true
         let readAs = config.resolved.voiceCommandText(heard: transcript, places: commands.places, scripts: commands.scripts)
         let resolution = await runner.resolve(readAs, places: commands.places, scripts: commands.scripts)

@@ -20,6 +20,8 @@ public enum DevCLI {
 
             Flags:
               -h, --help              Show this help and exit.
+              --check-config          Check the config folder the way the app reads it, print each problem
+                                      (or OK), and exit non-zero if there is any. Honors --config-dir.
               --reset <target>        Clear local state and exit. <target> is one of:
                                         onboarding   Clear the first-run flag.
                                         modes        Re-seed the starter modes (discards edits to defaults).
@@ -158,6 +160,10 @@ public enum DevCLI {
         // first so every path below — including --reset — honors it.
         if let i = CommandLine.arguments.firstIndex(of: "--config-dir"), i + 1 < CommandLine.arguments.count {
             KeyScribePaths.configDirOverride = URL(fileURLWithPath: CommandLine.arguments[i + 1], isDirectory: true)
+        }
+
+        if CommandLine.arguments.contains(ConfigCheck.flag) {
+            exit(MainActor.assumeIsolated { ConfigCheck.run() })
         }
 
         // `--keep-capture <dir>` mirrors the KEYSCRIBE_KEEP_CAPTURE env var. A LaunchServices launch (`open ...`,

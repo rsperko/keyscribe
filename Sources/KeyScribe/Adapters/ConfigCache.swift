@@ -50,8 +50,11 @@ final class ConfigCache {
 
     var findsInAppsEnabled = false
 
-    init(supportDir: URL) {
+    private let readOnly: Bool
+
+    init(supportDir: URL, readOnly: Bool = false) {
         self.supportDir = supportDir
+        self.readOnly = readOnly
     }
 
     func invalidate() {
@@ -213,7 +216,7 @@ final class ConfigCache {
         if let modesCache { return modesCache }
         let result = ModeStore.load(
             in: supportDir.appendingPathComponent("modes", isDirectory: true),
-            previous: lastGoodModes, lkgDir: lkgModesDir)
+            previous: lastGoodModes, lkgDir: lkgModesDir, savesLastKnownGood: !readOnly)
         for failure in result.failures {
             let recovery = failure.usedLastKnownGood ? " — previous version still in use" : " — ignored until fixed"
             log.error("mode '\(failure.id, privacy: .public)' failed to load\(recovery, privacy: .public) (\(failure.error.category, privacy: .public)): \(failure.message, privacy: .private)")

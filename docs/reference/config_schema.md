@@ -11,6 +11,12 @@
 
 ```
 ~/Library/Application Support/KeyScribe/
+  README.md                # app-managed: what this folder is and which files the app rewrites
+  AGENTS.md                # app-managed: instructions for a coding agent opened in this folder
+  CLAUDE.md                # app-managed: `@AGENTS.md`, for Claude Code
+  reference/               # app-managed: this schema, as shipped with the installed version
+  AGENTS.override.md       # yours, optional: your own agent instructions; the app never touches it
+  CLAUDE.local.md          # yours, optional: the same for Claude Code
   settings.toml            # general settings + active STT engine
   connections.toml         # named LLM connections (BYOK)
   dictionary.toml          # global dictionary
@@ -44,6 +50,23 @@
     parakeet-tdt-0.6b-v3/
 ```
 
+- **App-managed files are rewritten on launch** whenever they differ from what the installed version
+  ships, so they always describe the build that reads the folder. Each starts with a `<!-- Managed by`
+  line; a file at one of those paths without that line is the user's, and is moved aside (`.bak-<date>`
+  appended) rather than overwritten. Put your own agent instructions in `AGENTS.override.md` /
+  `CLAUDE.local.md`. Codex reads `AGENTS.override.md` *instead of* `AGENTS.md`, so an override meant for
+  Codex should start by telling it to read `AGENTS.md`. Markdown files at the top level and `reference/`
+  are not config: editing them never reloads it, and `--reset config` keeps them.
+- **The agent guide fences off private data.** It tells agents to work only with the config files and not
+  to read history, usage, the coding agent bridge's folder, or backups. That is guidance an agent can
+  ignore, not access control.
+- **Check the folder from a terminal** with `<app>/Contents/MacOS/KeyScribe --check-config` (honors
+  `--config-dir`). It loads every file the way the app does and prints each file it cannot read, each key
+  nothing reads, each trigger phrase or routing pattern that can never match, each enabled mode whose
+  `[ai_rewrite]` connection is missing, and each shortcut another mode already uses
+  (`TriggerKeyConflicts`; a press made on the way into another mode's chord is a technique note, not a
+  problem), or `OK`; any problem exits non-zero. It writes nothing, and a missing folder is
+  a failure.
 - **Mode id = filename stem** (kebab-case). The id is stable; `name` is the display label and
   can change freely.
 - **System modes use a reserved `_`-prefixed id** (`_direct.toml` = the Direct floor, shown to users

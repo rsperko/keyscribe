@@ -635,7 +635,7 @@ private struct MaintenanceSettingsView: View {
                         issue: issue, fileURL: KeyScribePaths.supportDir.appendingPathComponent(issue.relativePath)))
                         .accessibilityIdentifier(AccessibilityID.Settings.Advanced.configIssue(issue.relativePath))
                 }
-                Text("Config edits are detected automatically. A file that can’t be read, or a key \(Branding.appName) doesn’t recognize, is reported here rather than silently ignored.")
+                Text("Config edits are detected automatically. A file that can’t be read, or a key \(Branding.appName) doesn’t recognize, is reported here rather than silently ignored. To have a coding agent build or edit a mode, open the agent in the config folder; its AGENTS.md explains the format.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

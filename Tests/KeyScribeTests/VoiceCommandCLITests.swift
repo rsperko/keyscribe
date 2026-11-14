@@ -24,6 +24,19 @@ struct VoiceCommandCLITests {
         #expect(system.scriptRuns.isEmpty)
     }
 
+    @Test func previewingWritesNothingToTheConfigFolder() async throws {
+        let dir = try supportDir(voiceCommandsOn: true)
+        let modes = dir.appendingPathComponent("modes")
+        try FileManager.default.createDirectory(at: modes, withIntermediateDirectories: true)
+        try "schema_version = 2\nname = \"Notes\"\n".write(
+            to: modes.appendingPathComponent("notes.toml"), atomically: true, encoding: .utf8)
+        let before = Set(try FileManager.default.subpathsOfDirectory(atPath: dir.path))
+        _ = await VoiceCommandCLI.run(
+            transcript: "run note hello", supportDir: dir, system: VoiceCommandRunnerTests.FakeSystem(), output: { _ in })
+        let after = Set(try FileManager.default.subpathsOfDirectory(atPath: dir.path))
+        #expect(after.subtracting(before).isEmpty, "preview created \(after.subtracting(before).sorted())")
+    }
+
     @Test func theCommandLineNeverOpensAnApp() async throws {
         let system = VoiceCommandRunnerTests.FakeSystem()
         system.installed = [.init(name: "Mail", bundleId: "com.apple.mail")]

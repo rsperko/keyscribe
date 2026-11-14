@@ -65,6 +65,17 @@ struct ConfigSelfWriteGateTests {
         #expect(snap.stamps.keys.contains("fragments/voice.md"))
     }
 
+    @Test func captureSkipsTheAgentInstructionFiles() {
+        let dir = tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        write("x", to: dir.appendingPathComponent("settings.toml"))
+        write("a", to: dir.appendingPathComponent("AGENTS.override.md"))
+        write("r", to: dir.appendingPathComponent("reference/config_schema.md"))
+
+        let snap = ConfigTreeSnapshot.capture(supportDir: dir)
+        #expect(Set(snap.stamps.keys) == ["settings.toml"])
+    }
+
     @Test func capturePrunesHistoryLkgAndModels() {
         let dir = tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

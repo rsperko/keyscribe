@@ -109,10 +109,10 @@ struct ResetTool {
         var actions: [String] = []
         let kept = "models"
         let contents = (try? fileManager.contentsOfDirectory(at: supportDir, includingPropertiesForKeys: nil)) ?? []
-        for item in contents where item.lastPathComponent != kept {
+        for item in contents where item.lastPathComponent != kept && !ConfigWatchFilter.isIgnoredTopLevelFile(item.lastPathComponent) {
             try? fileManager.removeItem(at: item)
         }
-        actions.append("Wiped config under \(supportDir.path) (kept \(kept)/).")
+        actions.append("Wiped config under \(supportDir.path) (kept \(kept)/ and the agent instruction files).")
         actions += clearOnboarding()
         actions += clearHUDPosition()
         return actions

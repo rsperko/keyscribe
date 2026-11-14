@@ -6,7 +6,11 @@ import Foundation
 // Without this filter every dictation re-reads all config, recompiles stages, and rebuilds the hotkey
 // monitor, defeating "a normal dictation does zero config I/O".
 public enum ConfigWatchFilter {
-    public static let ignoredSubdirectories: Set<String> = ["history", "usage", "lkg", "models", "agents"]
+    public static let ignoredSubdirectories: Set<String> = ["history", "usage", "lkg", "models", "agents", AgentGuide.referenceDirectory]
+
+    public static func isIgnoredTopLevelFile(_ name: String) -> Bool {
+        name.lowercased().hasSuffix(".md")
+    }
 
     // True if a change at `changedPath` (absolute) is relevant to configuration, given the watched
     // `supportDir` (absolute). A path under an ignored first-level subdirectory is not relevant.
@@ -16,7 +20,9 @@ public enum ConfigWatchFilter {
         let path = normalize(changedPath)
         guard path == base || path.hasPrefix(base + "/") else { return true }
         let relative = path.dropFirst(base.count).drop { $0 == "/" }
-        guard let first = relative.split(separator: "/").first else { return true }
+        let components = relative.split(separator: "/")
+        guard let first = components.first else { return true }
+        if components.count == 1, isIgnoredTopLevelFile(String(first)) { return false }
         return !ignoredSubdirectories.contains(String(first))
     }
 

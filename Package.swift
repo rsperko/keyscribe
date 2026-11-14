@@ -51,7 +51,10 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
             ],
             path: "Sources/KeyScribe",
-            resources: [.copy("Resources/ClaudeConnector/register.js"), .copy("Resources/PiConnector/index.ts")]
+            resources: [
+                .copy("Resources/ClaudeConnector/register.js"), .copy("Resources/PiConnector/index.ts"),
+                .copy("Resources/AgentGuide"),
+            ]
         ),
         .target(
             name: "KeyScribeSparkle",

@@ -26,9 +26,11 @@ not a legal privacy policy.
 - **No telemetry, no analytics, no crash reporting.** KeyScribe does not collect or transmit speech,
   transcripts, usage data, or diagnostics. There is no account and no sign-in.
 - **History stays local.** Past dictations are stored as plain JSONL files under
-  `~/Library/Application Support/KeyScribe/` and are never uploaded. History is on by default and
+  `~/Library/Application Support/KeyScribe/` and KeyScribe never uploads them. History is on by default and
   keeps a limited number of days, which you can change or turn off in Settings. The history folder is
-  excluded from Time Machine backups.
+  excluded from Time Machine backups. Other programs you run can still read it: if you open a coding agent
+  in that folder to edit your modes, it can read your history and send it to its AI provider. The folder's
+  `AGENTS.md` tells agents not to open history, but that is an instruction, not a lock.
 - **Your saved API keys stay in the Keychain.** BYOK provider keys are stored in the macOS
   Keychain. The on-disk config holds only a reference to a key, never the key material itself.
 - **Command-generated tokens are not persisted.** OpenAI-compatible endpoints can use a command that

@@ -49,6 +49,24 @@ struct ModeLoadTests {
         #expect(result.failures.first?.usedLastKnownGood == false)
     }
 
+    @Test func aLoadThatSavesNoRecoveryCopiesStillRecoversFromAnExistingOne() throws {
+        let dir = try tempDir()
+        let lkg = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir); try? FileManager.default.removeItem(at: lkg) }
+        let good = makeMode(id: "alpha")
+        try ModeStore.write(good, to: dir)
+        _ = ModeStore.load(in: dir, previous: [], lkgDir: lkg)
+        try ModeStore.write(makeMode(id: "beta"), to: dir)
+        try "this is not = valid [toml".write(
+            to: dir.appendingPathComponent("alpha.toml"), atomically: true, encoding: .utf8)
+
+        let result = ModeStore.load(in: dir, previous: [], lkgDir: lkg, savesLastKnownGood: false)
+
+        #expect(result.modes.map(\.id) == ["alpha", "beta"])
+        #expect(result.failures.first?.usedLastKnownGood == true)
+        #expect(!FileManager.default.fileExists(atPath: lkg.appendingPathComponent("beta.toml").path))
+    }
+
     @Test func diskLKGRecoversWhenFileMalformedAtLaunchWithNoMemory() throws {
         let dir = try tempDir()
         let lkg = try tempDir()

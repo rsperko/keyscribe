@@ -59,6 +59,8 @@ targetTemplates:
         buildPhase: resources
       - path: ../Resources/start-cue.wav
         buildPhase: resources
+      - path: ../docs/reference/config_schema.md
+        buildPhase: resources
     dependencies:
       - package: KeyScribe
         product: KeyScribeApp
