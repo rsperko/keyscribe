@@ -53,9 +53,9 @@ final class PiDiscovery: AgentDiscovery {
     }
 
     func scan(rereadingTitles: Bool) async -> AgentScan {
-        let (pids, isRunning, processes) = (Set(sessions.values.map(\.pid)), isRunning, processes)
+        let (pids, isRunning, processes) = (Set(sessions.values.compactMap(\.pid)), isRunning, processes)
         let (alive, found) = await Task.detached { (pids.filter(isRunning), processes()) }.value
-        sessions = sessions.filter { !pids.contains($0.value.pid) || alive.contains($0.value.pid) }
+        sessions = sessions.filter { $0.value.pid.map { !pids.contains($0) || alive.contains($0) } ?? true }
         inTurn.formIntersection(sessions.keys)
         waiting.formIntersection(sessions.keys)
         let candidates = found.candidates

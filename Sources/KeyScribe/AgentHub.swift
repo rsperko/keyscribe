@@ -16,7 +16,7 @@ extension AgentBridgeServer: AgentTransport {
 
 enum AgentReceipt: Equatable {
     enum KeptReason: Equatable { case composing, typedSince, interrupted, connectionGap, dialog, inPromptBox }
-    enum NotSentReason: Equatable { case conversationEnded, connectorNotRunning, conversationChanged, stopped, expired, disconnected, refused(String) }
+    enum NotSentReason: Equatable { case conversationEnded, connectorNotRunning, conversationChanged, stopped, expired, disconnected, refused(String), hostTakesNoMessages(String) }
 
     case sent(String)
     case queued(String, waitingOn: AgentDeliveryDecision.QueueReason = .working)
@@ -112,6 +112,8 @@ final class AgentHub {
     private let front: AgentFronting?
     private let glance: AgentFronting?
     private let discoveries: [any AgentDiscovery]
+    private let hosts: [HostDiscovery]
+    private let hostDeadline: Duration
     private let receiptTimeout: Duration
     private let handOffLimit: Duration
     private let checkWait: Duration
@@ -139,9 +141,12 @@ final class AgentHub {
         focus: AgentTerminalFocusing? = nil, front: AgentFronting? = nil, glance: AgentFronting? = nil,
         receiptTimeout: Duration = .seconds(8), handOffLimit: Duration = .seconds(30), checkWait: Duration = AgentHub.defaultCheckWait,
         disconnectGrace: Duration = AgentHub.defaultDisconnectGrace, scanDeadline: Duration = AgentHub.defaultScanDeadline, exclusions: AgentExclusions = AgentExclusions(nil),
-        places: (any AgentPlaceReading)? = nil,
+        places: (any AgentPlaceReading)? = nil, hosts: [AgentHostIntegration] = [],
+        hostDeadline: Duration = AgentHub.defaultHostDeadline,
         now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString }
     ) {
+        self.hosts = hosts.map { HostDiscovery($0, now: now) }
+        self.hostDeadline = hostDeadline
         self.exclusions = exclusions
         self.transport = transport
         self.disconnectGrace = disconnectGrace
@@ -150,7 +155,7 @@ final class AgentHub {
         self.focus = focus
         self.front = front
         self.glance = glance
-        discoveries = discovery
+        discoveries = discovery + self.hosts
         self.receiptTimeout = receiptTimeout
         self.handOffLimit = handOffLimit
         self.checkWait = checkWait
@@ -172,9 +177,10 @@ final class AgentHub {
 
     private var placeQueries: [AgentPlaceQuery] {
         (directory.conversations + directory.disconnected).compactMap { conversation in
-            AgentSessionID.split(conversation.id).map {
+            guard let pid = conversation.pid else { return nil }
+            return AgentSessionID.split(conversation.id).map {
                 AgentPlaceQuery(
-                    id: conversation.id, agent: $0.agent, native: $0.native, pid: conversation.pid,
+                    id: conversation.id, agent: $0.agent, native: $0.native, pid: pid,
                     environment: environments[conversation.id] ?? [:], placed: placeTracker?.places[conversation.id] != nil)
             }
         }
@@ -290,23 +296,49 @@ final class AgentHub {
     ) async -> AgentFocusResult {
         guard let conversation = directory.conversations.first(where: { $0.id == id }) else { return .none }
         if makingCurrent { makeCurrent(id) }
+        if let (source, location) = host(of: conversation) {
+            guard stillWanted() else { return .none }
+            switch await Self.within(hostDeadline, otherwise: AgentHostOpen.failed, { await source.host.open(location) }) {
+            case .opened: return .exact
+            case .requested: return .requested(source.kind.displayName)
+            case .failed, .unsupported: break
+            }
+        }
+        guard let pid = conversation.pid else { return .none }
         return await focus?.focus(
-            session: id, pid: conversation.pid, environment: environments[id] ?? [:], stillWanted: stillWanted, asking: asking) ?? .none
+            session: id, pid: pid, environment: environments[id] ?? [:], stillWanted: stillWanted, asking: asking) ?? .none
     }
 
     func sessionInFront(asking: @escaping @MainActor @Sendable (String) -> Void = { _ in }) async -> FrontSession? {
-        guard let front else { return nil }
-        return await front.shown(among: frontCandidates, asking: asking)
+        if let front, let shown = await front.shown(among: frontCandidates, asking: asking) { return shown }
+        return await hostInFront()
     }
 
     func sessionInFrontWithoutAsking() async -> FrontSession? {
         let candidates = frontCandidates
-        guard let glance, !candidates.isEmpty else { return nil }
-        return await glance.shown(among: candidates) { _ in }
+        if let glance, !candidates.isEmpty, let shown = await glance.shown(among: candidates, asking: { _ in }) { return shown }
+        return await hostInFront()
+    }
+
+    private func hostInFront() async -> FrontSession? {
+        let listed = directory.conversations + disconnected
+        for source in hosts where source.host.isEnabled {
+            let mine = listed.filter { $0.host?.host == source.kind.id }
+            guard !mine.isEmpty else { continue }
+            let locations = mine.compactMap(\.host)
+            guard case .shown(let location, let app) = await Self.within(
+                hostDeadline, otherwise: AgentHostFront.unknown, { await source.host.front(among: locations) }),
+                  let shown = mine.first(where: { $0.host == location })
+            else { continue }
+            return FrontSession(id: shown.id, app: FrontApp(bundle: app.bundle, pid: app.pid, name: app.name))
+        }
+        return nil
     }
 
     var frontCandidates: [AgentFrontCandidate] {
-        (directory.conversations + disconnected).map { AgentFrontCandidate(id: $0.id, pid: $0.pid, environment: environments[$0.id] ?? [:]) }
+        (directory.conversations + disconnected).compactMap { conversation in
+            conversation.pid.map { AgentFrontCandidate(id: conversation.id, pid: $0, environment: environments[conversation.id] ?? [:]) }
+        }
     }
 
     static let focusTimeout: Duration = .seconds(3)
@@ -632,6 +664,45 @@ final class AgentHub {
         if directory.revision != before || namesNotSaved != reported || discoveryProblems != problemsBefore || extrasChanged { onChange?() }
     }
 
+    private func host(of conversation: AgentConversation) -> (HostDiscovery, AgentHostLocation)? {
+        guard let location = conversation.host, let source = hosts.first(where: { $0.kind.id == location.host }), source.host.isEnabled
+        else { return nil }
+        return (source, location)
+    }
+
+    static let defaultHostDeadline: Duration = .seconds(2)
+
+    private static func within<T: Sendable>(_ deadline: Duration, otherwise late: T, _ call: @escaping @MainActor () async -> T) async -> T {
+        await withCheckedContinuation { (continuation: CheckedContinuation<T, Never>) in
+            let answer = Once(continuation)
+            let work = Task { @MainActor in answer.resume(await call()) }
+            Task {
+                try? await Task.sleep(for: deadline)
+                if answer.resume(late) { work.cancel() }
+            }
+        }
+    }
+
+    private final class Once<T: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<T, Never>?
+
+        init(_ continuation: CheckedContinuation<T, Never>) {
+            self.continuation = continuation
+        }
+
+        @discardableResult
+        func resume(_ value: T) -> Bool {
+            let waiting = lock.withLock {
+                let pending = continuation
+                continuation = nil
+                return pending
+            }
+            waiting?.resume(returning: value)
+            return waiting != nil
+        }
+    }
+
     private func reconcileAttention() {
         let tracked = Set(attention.keys).union(awaitingResult.keys)
         for session in Set(attention.keys).union(goneSince.keys).union(awaitedHandles.keys) where awaitingResult[session] == nil {
@@ -730,8 +801,20 @@ final class AgentHub {
             return .notSent(nil, reason: .conversationEnded)
         }
         lastUsed[id] = now()
-        let message = AgentOutbox.Message(id: request ?? makeId(), conversation: id, text: text, images: images)
         let handle = conversation.handle
+        if let (source, location) = host(of: conversation) {
+            let request = request ?? makeId()
+            switch await Self.within(receiptTimeout, otherwise: AgentHostDelivery.uncertain, {
+                await source.host.deliver(text, request: request, to: location)
+            }) {
+            case .accepted: return .sent(handle)
+            case .queued: return .queued(handle)
+            case .uncertain: return .uncertain(handle)
+            case .refused(let why): return .notSent(handle, reason: .refused(why))
+            case .unsupported: break
+            }
+        }
+        let message = AgentOutbox.Message(id: request ?? makeId(), conversation: id, text: text, images: images)
         switch outbox.send(message, state: state(of: id)) {
         case .handOff:
             return await withCheckedContinuation { continuation in
@@ -743,6 +826,7 @@ final class AgentHub {
         case .needsReview(let reason):
             return .kept(handle, reason: Self.kept(reason))
         case .disconnected:
+            if let (source, _) = host(of: conversation) { return .notSent(handle, reason: .hostTakesNoMessages(source.kind.displayName)) }
             return .notSent(handle, reason: .connectorNotRunning)
         }
     }
@@ -1254,7 +1338,7 @@ final class AgentRuntime {
 
     init(
         supportDir: URL, surfaces: ResolvedSurfaces, placeSources: [any AgentPlaceReading], discovery: [any AgentDiscovery],
-        setups: ConnectorSetupRegistry, legacyAgent: String
+        setups: ConnectorSetupRegistry, legacyAgent: String, hosts: [AgentHostIntegration] = []
     ) throws {
         let directory = Self.bridgeDirectory(supportDir: supportDir)
         let token = try AgentBridgeToken.loadOrCreate(in: directory)
@@ -1286,7 +1370,8 @@ final class AgentRuntime {
                 plan: AgentTerminalFocus.plan(surfaces), connector: { session, definition in await box.hub?.focusInPlace(session, definition: definition) ?? .notFound },
                 noun: AgentTerminalFocus.noun(surfaces)),
             front: AgentFront(surfaces: surfaces), glance: AgentFront.confirmingWithoutAsking(surfaces), exclusions: exclusions,
-            places: Self.places(surfaces: surfaces, sources: placeSources))
+            places: Self.places(surfaces: surfaces, sources: placeSources),
+            hosts: hosts)
         box.hub = hub
         try server.start()
         hub.onFirstConnection = { [weak self] in

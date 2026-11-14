@@ -11,6 +11,35 @@ struct AgentDirectoryTests {
         ClaudeRegistryEntry(pid: pid, sessionId: session, cwd: cwd, name: name, status: "idle", waitingFor: nil, nameSource: name == nil ? nil : "user", startedAt: start)
     }
 
+    private func hosted(_ native: String, at start: Int?, cwd: String = "/src/keyscribe") -> AgentSession {
+        AgentSession(
+            agent: "claude", id: native, pid: nil, cwd: cwd, state: .idle, startedAt: start,
+            host: AgentHostLocation(host: "example", instance: "/run/example.sock", native: native))
+    }
+
+    @Test func aConversationAHostOwnsIsListedWithItsLocationAndNoProcess() {
+        var directory = AgentDirectory()
+        directory.update(entries: [hosted("t1", at: 100), started(10, "a", at: 50, cwd: "/src/other").session], live: [])
+        let conversation = directory.conversations.first { $0.id == "claude:t1" }
+        #expect(conversation?.pid == nil)
+        #expect(conversation?.host == AgentHostLocation(host: "example", instance: "/run/example.sock", native: "t1"))
+        #expect(conversation?.handle == "keyscribe")
+        #expect(directory.conversation(pid: 10)?.id == "claude:a")
+    }
+
+    @Test func aHostedConversationsRememberedNameSurvivesARestartAndNoOtherHostedConversationTakesIt() throws {
+        var before = AgentDirectory()
+        before.update(entries: [hosted("t1", at: 100)], live: [])
+        before.update(entries: [hosted("t2", at: 100)], live: [], running: { _ in true })
+        #expect(before.remembered["claude:t1"] == RememberedName(name: "keyscribe", pid: nil, startedAt: 100, native: nil, agent: "claude"))
+        #expect(before.conversations.map(\.handle) != ["keyscribe"])
+        let saved = try JSONEncoder().encode(before.remembered)
+        #expect(String(decoding: saved, as: UTF8.self).contains("pid") == false)
+        var after = AgentDirectory(remembered: try JSONDecoder().decode([String: RememberedName].self, from: saved))
+        after.update(entries: [hosted("t1", at: 100), hosted("t2", at: 100)], live: [], running: { _ in true })
+        #expect(after.conversations.first { $0.id == "claude:t1" }?.handle == "keyscribe")
+    }
+
     @Test func aDisconnectedConversationKeepsItsNameAndNoOtherConversationTakesIt() {
         var directory = AgentDirectory()
         directory.update(claude: [started(10, "a", at: 100), started(20, "b", at: 200)], live: [])

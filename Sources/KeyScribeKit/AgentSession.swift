@@ -19,18 +19,20 @@ public struct AgentKind: Hashable, Sendable {
 public struct AgentSession: Equatable, Sendable {
     public var agent: String
     public var id: String
-    public var pid: Int
+    public var pid: Int?
     public var cwd: String
     public var explicitName: String?
     public var state: AgentLiveState
     public var startedAt: Int?
     public var title: AgentTitle
     public var setup: String?
+    public var host: AgentHostLocation?
 
     public init(
-        agent: String, id: String, pid: Int, cwd: String, explicitName: String? = nil, state: AgentLiveState, startedAt: Int? = nil,
-        title: AgentTitle = AgentTitle(), setup: String? = nil
+        agent: String, id: String, pid: Int?, cwd: String, explicitName: String? = nil, state: AgentLiveState, startedAt: Int? = nil,
+        title: AgentTitle = AgentTitle(), setup: String? = nil, host: AgentHostLocation? = nil
     ) {
+        self.host = host
         self.setup = setup
         self.agent = agent
         self.id = id
@@ -43,6 +45,22 @@ public struct AgentSession: Equatable, Sendable {
     }
 
     public var folder: String { URL(fileURLWithPath: cwd).lastPathComponent }
+}
+
+public struct AgentHostLocation: Hashable, Sendable {
+    public var host: String
+    public var instance: String
+    public var native: String
+
+    public init(host: String, instance: String, native: String) {
+        self.host = host
+        self.instance = instance
+        self.native = native
+    }
+
+    public var conversationKey: String {
+        native.replacingOccurrences(of: "%", with: "%25").replacingOccurrences(of: "@", with: "%40") + "@" + instance
+    }
 }
 
 public struct AgentTitle: Equatable, Sendable {

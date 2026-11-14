@@ -327,10 +327,28 @@ every rule above applies to it, with these sharpenings:
   unchanged reports that edits in that folder take effect at the next session start or `/reload-plugins`. If
   a later Claude Code loads the cached copy instead, a keys-only change needs its own Claude version.
 - **One agent, one adapter.** Everything particular to an agent (how its sessions are found, how its
-  connector is installed and checked, its names, its reload command, its copy) lives in files named for that
-  agent, behind `AgentDiscovery` and `AgentConnector`, with the facts shared code needs carried by
-  `AgentKind` and `AgentSession`. Shared code never branches on an agent's name; a new agent is a new
-  adapter and a line in the composition root. `SourceInvariantsTests` pins the boundary.
+  connector is installed and checked, its names, its reload command, its copy) lives in that agent's own
+  `Integrations/<Agent>/` folder, behind `AgentDiscovery` and `AgentConnector`, with the facts shared code needs
+  carried by `AgentKind` and `AgentSession`. Shared code never branches on an agent's name; a new agent is a
+  new adapter and an `AgentIntegration` in the one list Settings and the runtime both build from
+  (`CodingAgentIntegrations.agents`). `SourceInvariantsTests` pins the boundary.
+- **A host owns conversations that have no process of their own.** An app that runs agent conversations
+  itself is an `AgentHost`: its conversations are listed with a host location (`AgentHostLocation`: host,
+  instance, native id) and no pid. The conversation id comes from the location alone
+  (`AgentHostLocation.conversationKey`), so the same thread id on two instances is two conversations. A host
+  makes no call at all until the user turns it on (`isEnabled`), and its scan runs no more often than
+  `HostDiscovery.fallbackInterval` unless the user asks for a fresh list. A host id must not repeat an agent's
+  or another host's (`CodingAgentIntegrations.resolve`). Each capability a host's API lacks answers
+  unsupported, never a guess.
+- **A hosted conversation is reachable through its host.** It reads as Ready or Working rather than Not
+  connected, offers Disconnect like any connected conversation, and Settings names it by the host. Its
+  remembered name is kept until the host has answered once, so a refresh before the first scan never drops it.
+- **A host call is bounded and never retried.** Delivery is one call with the request id: accepted reads as
+  sent, queued as queued, and an uncertain or late answer as uncertain, never as not sent. Open and in-front
+  wait at most `AgentHub.defaultHostDeadline`; a late open is not opened and a late in-front is unknown. A host
+  that cannot take messages says so by name. A clipboard image reaches a host as the file path already in the
+  text. A connector inside a hosted conversation is listed apart from it: joining the two waits for a design
+  that keeps the user's name, current choice and Disconnect across the join.
 - **Agents and setups are isolated at the bridge.** Each enrolled setup has its own installation id
   (`ConnectorSetups`), and retiring one installation's connectors leaves every other setup's and agent's
   sessions connected. Inside the app a conversation id is
@@ -354,6 +372,11 @@ every rule above applies to it, with these sharpenings:
   partial, never empty, and only when the process's own name is the agent's; a candidate whose process
   could not be read stays listed. The process table is listed once for every agent's discovery and reused
   until it ages out (`AgentProcessTable`), so the liveness tick never sweeps it per agent.
+- **A host's command line runs through `HostCLI.run`.** It starts only an absolute program, in its own
+  process group, with content on standard input rather than in the arguments. Standard output (the only
+  output parsed) and standard error are kept apart, each capped, and cut output is marked. A deadline or a
+  cancelled task kills the whole group, and a descendant that holds the output open cannot hold the call
+  past its grace. A failure names the subcommand, never the arguments.
 - **Discovery never runs on the main actor.** An adapter's `scan` does its reading off the main actor; the
   hub's `rescan` waits for it under a deadline (`AgentHub.defaultScanDeadline`) and treats a scan that does
   not answer like an unreadable one. `refresh` is the synchronous half: it applies the sessions last scanned

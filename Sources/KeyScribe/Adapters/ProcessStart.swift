@@ -27,7 +27,8 @@ enum ProcessStart {
     }
 
     static func stillRunning(_ remembered: RememberedName, lead: TimeInterval, reading: (Int) -> Reading = read(pid:)) -> Bool {
-        switch reading(remembered.pid) {
+        guard let pid = remembered.pid else { return false }
+        switch reading(pid) {
         case .unknown: return true
         case .gone: return false
         case .started(let started):

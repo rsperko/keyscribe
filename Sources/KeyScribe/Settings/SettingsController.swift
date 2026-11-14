@@ -152,7 +152,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     init(
         settings: Settings, speechModels: SpeechModelsModel, repository: ConfigRepository, surfaces: ResolvedSurfaces,
-        historyStore: HistoryStore,
+        agents: CodingAgentIntegrations = .builtIn, historyStore: HistoryStore,
         onChange: @escaping (Settings) -> Void, onReload: @escaping () -> Void,
         onResetHUDPosition: @escaping () -> Void,
         onPreviewSound: @escaping (Int) -> Void,
@@ -182,10 +182,9 @@ final class SettingsController: NSObject, NSWindowDelegate {
         codingAgents = CodingAgentsSettingsModel(
             describeTerminal: { TerminalDescription.describe(pid: $0, surfaces: surfaces) },
             agentsDir: agentsDir, setups: ConnectorSetupRegistry(directory: agentsDir),
-            connectors: [
-                ClaudeConnector(agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug, surfaces: ConnectorSurfaces(surfaces)),
-                PiConnector(agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug, surfaces: ConnectorSurfaces(surfaces)),
-            ])
+            connectors: agents.connectors(
+                agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug, surfaces: ConnectorSurfaces(surfaces)),
+            hosts: agents.hosts.map(\.kind))
         modes.codingAgents = codingAgents
         codingAgents.load(spokenResult: settings.codingAgents.spokenResult)
         codingAgents.onSpokenResultChange = { [model] in model.setSpokenResult($0) }

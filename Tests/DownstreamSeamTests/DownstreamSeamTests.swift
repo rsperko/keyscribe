@@ -98,6 +98,29 @@ struct DownstreamSeamTests {
         _ = handle
     }
 
+    @MainActor final class Host: AgentHost {
+        var isEnabled = false
+
+        func scan() async -> AgentHostScan {
+            .found([AgentSession(
+                agent: "downstream", id: "t1", pid: nil, cwd: "/src", state: .idle,
+                host: AgentHostLocation(host: "downstream", instance: "/run/d.sock", native: "t1"))])
+        }
+
+        func deliver(_ text: String, request: String, to location: AgentHostLocation) async -> AgentHostDelivery { .queued }
+    }
+
+    @Test @MainActor func aDownstreamHostIsAddedThroughThePublicSurfaceAlone() async throws {
+        var integrations = Self.integrations()
+        integrations.hosts.append(AgentHostIntegration(
+            kind: AgentKind(id: "downstream", displayName: "Downstream Host", connectorName: "Downstream plugin"), make: { Host() }))
+        _ = AppDelegate(codingAgents: integrations)
+        #expect(throws: Never.self) { try integrations.resolve() }
+        let host = integrations.hosts[0].make()
+        #expect(await host.open(AgentHostLocation(host: "downstream", instance: "/run/d.sock", native: "t1")) == .unsupported)
+        #expect(try await HostCLI.run(["/usr/bin/true"], subcommand: "true").status == 0)
+    }
+
     @Test func aConflictingDownstreamRouteIsRejectedBeforeAnythingStarts() {
         var integrations = Self.integrations()
         integrations.surfaces.terminals.append(Self.term)

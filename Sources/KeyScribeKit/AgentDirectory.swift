@@ -3,7 +3,8 @@ import Foundation
 public struct AgentConversation: Equatable, Sendable {
     public var id: String
     public var agent: String
-    public var pid: Int
+    public var pid: Int?
+    public var host: AgentHostLocation?
     public var cwd: String
     public var handle: String
     public var state: AgentLiveState
@@ -17,11 +18,15 @@ public struct AgentConversation: Equatable, Sendable {
     public var otherNames: [String]
     public var placeUnreadSince: Date?
 
+    public var reachable: Bool { connectorLive || host != nil }
+
     public init(
-        id: String, agent: String, pid: Int, cwd: String, handle: String, state: AgentLiveState, connectorLive: Bool,
+        id: String, agent: String, pid: Int?, cwd: String, handle: String, state: AgentLiveState, connectorLive: Bool,
         title: String? = nil, startedAt: Date? = nil, setup: String? = nil, nameSource: AgentNameSource = .folder,
-        placeName: AgentPlaceName? = nil, placeSurface: String? = nil, otherNames: [String] = [], placeUnreadSince: Date? = nil
+        placeName: AgentPlaceName? = nil, placeSurface: String? = nil, otherNames: [String] = [], placeUnreadSince: Date? = nil,
+        host: AgentHostLocation? = nil
     ) {
+        self.host = host
         self.placeSurface = placeSurface
         self.placeUnreadSince = placeUnreadSince
         self.otherNames = otherNames
@@ -60,12 +65,12 @@ public struct AgentPlaceName: Equatable, Sendable {
 
 public struct RememberedName: Codable, Equatable, Sendable {
     public var name: String
-    public var pid: Int
+    public var pid: Int?
     public var startedAt: Int
     public var native: String?
     public var agent: String
 
-    public init(name: String, pid: Int, startedAt: Int, native: String?, agent: String = "") {
+    public init(name: String, pid: Int?, startedAt: Int, native: String?, agent: String = "") {
         self.name = name
         self.pid = pid
         self.startedAt = startedAt
@@ -81,7 +86,7 @@ public struct RememberedName: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         name = try c.decode(String.self, forKey: .name)
-        pid = try c.decode(Int.self, forKey: .pid)
+        pid = try c.decodeIfPresent(Int.self, forKey: .pid)
         startedAt = try c.decode(Int.self, forKey: .startedAt)
         native = try c.decodeIfPresent(String.self, forKey: .native)
         agent = try c.decodeIfPresent(String.self, forKey: .agent) ?? ""
@@ -182,7 +187,7 @@ public struct AgentDirectory: Sendable {
         }
         remembering = remembering.filter { id, saved in
             guard !liveIds.contains(id) else { return true }
-            let replaced = entries.contains { $0.pid == saved.pid && $0.startedAt == saved.startedAt }
+            let replaced = saved.pid != nil && entries.contains { $0.pid == saved.pid && $0.startedAt == saved.startedAt }
             return !replaced && running(saved)
         }
         for (id, handle) in handleById where !liveIds.contains(id) {
@@ -258,7 +263,7 @@ public struct AgentDirectory: Sendable {
                 nameSource: chosen[conversationId($0)] != nil ? .chosen : sources[conversationId($0)] ?? .folder,
                 placeName: placeNameById[conversationId($0)],
                 placeSurface: known[conversationId($0)]?.surface, otherNames: otherNames(for: conversationId($0)),
-                placeUnreadSince: unreadSince[conversationId($0)])
+                placeUnreadSince: unreadSince[conversationId($0)], host: $0.host)
         }.sorted { $0.handle < $1.handle }
         let shown = next.filter { !excluded.contains($0.id) }
         let excludedNow = next.filter { excluded.contains($0.id) }

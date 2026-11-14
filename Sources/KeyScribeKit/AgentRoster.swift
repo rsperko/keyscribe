@@ -78,11 +78,11 @@ public struct AgentRoster: Equatable, Sendable {
     }
 
     public static func isAvailable(_ conversation: AgentConversation) -> Bool {
-        conversation.connectorLive && conversation.state != .disconnected
+        conversation.reachable && conversation.state != .disconnected
     }
 
     public static func stateLabel(_ conversation: AgentConversation) -> String {
-        guard conversation.connectorLive else { return "Not connected" }
+        guard conversation.reachable else { return "Not connected" }
         switch conversation.state {
         case .idle: return "Ready"
         case .working: return "Working"

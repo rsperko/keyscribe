@@ -169,11 +169,13 @@ final class CodingAgentsSettingsModel: ObservableObject {
     private var shownExtras: Extras?
     let agentsDir: URL
     let setups: ConnectorSetupRegistry
+    let hosts: [AgentKind]
 
     init(
         describeTerminal: @escaping @Sendable (Int) -> String?,
-        agentsDir: URL, setups: ConnectorSetupRegistry? = nil, connectors: [any AgentConnector]
+        agentsDir: URL, setups: ConnectorSetupRegistry? = nil, connectors: [any AgentConnector], hosts: [AgentKind] = []
     ) {
+        self.hosts = hosts
         self.describeTerminal = describeTerminal
         self.agentsDir = agentsDir
         let registry = setups ?? ConnectorSetupRegistry(directory: agentsDir)
@@ -215,15 +217,16 @@ final class CodingAgentsSettingsModel: ObservableObject {
         }
         if namesNotSaved != self.namesNotSaved { self.namesNotSaved = namesNotSaved }
         shown = (conversations, current)
-        describeNewTerminals(conversations.map(\.pid) + candidates.map(\.pid) + disconnected.map(\.pid))
+        describeNewTerminals(conversations.compactMap(\.pid) + candidates.map(\.pid) + disconnected.compactMap(\.pid))
         var next = conversations.enumerated().map { index, conversation in
-            let lastSeen = !conversation.connectorLive && lastSeen.contains(conversation.id)
+            let lastSeen = !conversation.reachable && lastSeen.contains(conversation.id)
             return Row(
                 id: conversation.id, number: index + 1, name: conversation.handle, folder: conversation.cwd,
                 state: lastSeen ? "Last seen" : AgentRoster.stateLabel(conversation),
-                connected: conversation.connectorLive,
-                current: conversation.id == current, agent: conversation.agent, terminal: terminals[conversation.pid] ?? nil,
-                title: conversation.title, setup: conversation.setup, key: Self.key(pid: conversation.pid, milliseconds: conversation.startedAt.map { Int(($0.timeIntervalSince1970 * 1000).rounded()) }),
+                connected: conversation.reachable,
+                current: conversation.id == current, agent: conversation.agent, terminal: conversation.pid.flatMap { terminals[$0] ?? nil },
+                title: conversation.title, setup: conversation.setup,
+                key: conversation.pid.map { Self.key(pid: $0, milliseconds: conversation.startedAt.map { Int(($0.timeIntervalSince1970 * 1000).rounded()) }) } ?? conversation.id,
                 lastSeen: lastSeen, olderConnector: runsOlderConnector(conversation, loadedVersions: loadedVersions), startedAt: conversation.startedAt,
                 readAloud: readAloud.contains(conversation.id) ? .thisReply : readNextAloud.contains(conversation.id) ? .nextReply : nil,
                 place: conversation.placeName, renamed: conversation.nameSource == .chosen,
@@ -240,7 +243,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
         let away = namesProblem != nil ? [] : disconnected.map { conversation in
             Row(
                 id: conversation.id, number: 0, name: conversation.handle, folder: conversation.cwd, state: "Disconnected", connected: false,
-                current: false, agent: conversation.agent, terminal: terminals[conversation.pid] ?? nil, title: conversation.title,
+                current: false, agent: conversation.agent, terminal: conversation.pid.flatMap { terminals[$0] ?? nil }, title: conversation.title,
                 setup: conversation.setup, key: conversation.id, place: conversation.placeName,
                 renamed: conversation.nameSource == .chosen, surface: conversation.placeSurface, otherNames: conversation.otherNames,
                 unreadSince: conversation.placeUnreadSince)
@@ -300,6 +303,10 @@ final class CodingAgentsSettingsModel: ObservableObject {
     }
 
     func connector(for row: Row) -> AgentConnectorModel? { connectors.first { $0.kind.id == row.agent } }
+
+    func agentName(_ row: Row) -> String {
+        connector(for: row)?.kind.displayName ?? hosts.first { $0.id == row.agent }?.displayName ?? row.agent
+    }
 
     func setup(for row: Row) -> ConnectorSetupModel? {
         guard let setup = row.setup else { return nil }

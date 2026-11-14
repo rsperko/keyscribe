@@ -98,24 +98,24 @@ enum SourceInvariants {
         SourceRule(
             pattern: #"(?i)claude"#,
             allowed: [
-                "Sources/KeyScribe/AppDelegate.swift": 2,
+                "Sources/KeyScribe/AppDelegate.swift": 1,
+                "Sources/KeyScribe/CodingAgentIntegrations.swift": 1,
                 "Sources/KeyScribe/HUD/HUDPreview.swift": 1,
-                "Sources/KeyScribe/Settings/SettingsController.swift": 1,
                 "Sources/KeyScribeKit/AIServiceCatalog.swift": 1,
                 "Sources/KeyScribeKit/Features.swift": 1,
             ],
-            reason: "Everything one coding agent needs lives in that agent's adapter files (named for the agent); shared "
+            reason: "Everything one coding agent needs lives in that agent's own Integrations/<Agent>/ folder; shared "
                 + "code speaks AgentKind, AgentSession, AgentDiscovery and AgentConnector, so another agent is another "
-                + "adapter, never a branch (docs/development/areas/voice-commands.md). The composition root wires the "
-                + "adapters and names the legacy agent for saved names, and the LLM catalog names a model provider.",
-            exempt: { ($0 as NSString).lastPathComponent.hasPrefix("Claude") }
+                + "adapter, never a branch (docs/development/areas/voice-commands.md). The composition root lists the "
+                + "agents and names the legacy agent for saved names, and the LLM catalog names a model provider.",
+            own: SourceInvariants.integrationTool
         ),
         SourceRule(
             pattern: #""(PI_CODING_AGENT_DIR|CLAUDE_CONFIG_DIR)""#,
             allowed: [
-                "Sources/KeyScribe/Adapters/ClaudeConnector.swift": 1,
-                "Sources/KeyScribeKit/PiAgent.swift": 1,
-                "Sources/KeyScribeKit/ClaudeRegistry.swift": 1,
+                "Sources/KeyScribe/Integrations/Claude/ClaudeConnector.swift": 1,
+                "Sources/KeyScribeKit/Integrations/Pi/PiAgent.swift": 1,
+                "Sources/KeyScribeKit/Integrations/Claude/ClaudeRegistry.swift": 1,
             ],
             reason: "An agent's setup folder comes from the conversation's own process, an enrolled setup, or a folder the "
                 + "user chose; never from the app's own environment, which differs between a Finder and a terminal launch "
@@ -124,7 +124,7 @@ enum SourceInvariants {
         SourceRule(
             pattern: #"environment\[setupVariable\]"#,
             allowed: [
-                "Sources/KeyScribe/Adapters/ClaudeConnector.swift": 1,
+                "Sources/KeyScribe/Integrations/Claude/ClaudeConnector.swift": 1,
                 "Sources/KeyScribeKit/AgentProcesses.swift": 1,
             ],
             reason: "A setup variable is read only from a scanned process's environment and written only into the "
@@ -133,14 +133,11 @@ enum SourceInvariants {
         SourceRule(
             pattern: #"(?<![.\w])Pi(?![a-z])"#,
             allowed: [
-                "Sources/KeyScribe/AppDelegate.swift": 1,
-                "Sources/KeyScribe/Settings/SettingsController.swift": 1,
                 "Sources/KeyScribeKit/Features.swift": 1,
             ],
-            reason: "Everything Pi needs lives in its adapter files (named for it); shared code never names an agent "
-                + "(docs/development/areas/voice-commands.md). The composition root wires the adapter, and the feature "
-                + "summary names the agents it works with.",
-            exempt: { ($0 as NSString).lastPathComponent.hasPrefix("Pi") }
+            reason: "Everything Pi needs lives in its own Integrations/Pi/ folder; shared code never names an agent "
+                + "(docs/development/areas/voice-commands.md). The feature summary names the agents it works with.",
+            own: SourceInvariants.integrationTool
         ),
     ]
 

@@ -145,8 +145,8 @@ it as a shared type — never a one-off inline pattern. (Anatomy, behavior, and 
 | `Reasoning`, `Recommended — least reasoning`, `Model default` | thinking, effort, reasoning effort, auto |
 | `Minimum output allowance` (with `tokens` beside the field) | max tokens, max_tokens, token limit |
 | `Installed` (a connector's files are in a setup) | Ready, connected (for files alone) |
-| `Ready` (a conversation whose own connector connected) | Installed, active (for a conversation) |
-| `Not connected` (no connector has connected for it) | offline, inactive, disabled |
+| `Ready` (a conversation whose own connector connected, or whose agent host can reach it) | Installed, active (for a conversation) |
+| `Not connected` (no connector has connected for it and no agent host reaches it) | offline, inactive, disabled |
 | `Disconnected` (the user disconnected it; stays so when reopened) | excluded, blocked, muted |
 | `Last seen` (shown from an earlier check that could not be repeated) | stale, cached |
 | `setup` / `setup folder` (where an agent loads its connector) | profile, scope, target, install location |
