@@ -101,13 +101,16 @@ function harness(on: any) {
   on('turn.start', ($: any, e: any) => ({ turnId: e.turnId }))
   on('turn.complete', () => downstream['turn.complete'] ?? { text: '' })
   on('turn.abort', () => ({ value: undefined }))
+  on('tool.check', { tool: 'Bash' }, () => ({ decision: 'ask' }))
+  on('prompt.attachment', ($: any, e: any) => ({ text: e.text }))
   const fills: string[] = []
-  const fillRefusal: { reason?: string } = {}
+  const fillRefusal: { reason?: string; typedFirst?: string } = {}
   on('prompt.fill', ($: any, e: any) => {
     fills.push(e.text)
-    if (fillRefusal.reason) return { isFilled: false, refusal: fillRefusal.reason }
-    box.text = e.text
-    return { isFilled: true }
+    if (fillRefusal.reason) return { isFilled: false, refusal: fillRefusal.reason, text: box.text }
+    if (fillRefusal.typedFirst) box.text += fillRefusal.typedFirst
+    box.text = e.mode === 'append' ? box.text + e.text : e.text
+    return { isFilled: true, text: box.text }
   })
   on('prompt.read', () => {
     const answer = () => ({ value: { text: box.text, cursor: box.text.length } })
@@ -549,13 +552,14 @@ test('a submission Claude Code turns away because a stop stands is put in the em
   expect(outcome(h)).toEqual(['ack', 'filled'])
 })
 
-test('a stopped submission keeps a slash command from running when the box is sent', async ($, on) => {
+test('a stopped submission that starts with a slash is never put in the box, where Return would run it as a command', async ($, on) => {
   const h = harness(on)
   h.downstream['prompt.submit'] = { drop: stopped }
   await h.connect($)
   await h.deliver([submitCommand('/resume')])
   await h.answerEvents()
-  expect(h.fills).toEqual(['\u200b/resume'])
+  expect(h.fills).toEqual([])
+  expect(outcome(h)).toEqual(['ack', 'stopped'])
 })
 
 test('a stopped submission never fills over what the user started typing meanwhile', async ($, on) => {
@@ -590,6 +594,225 @@ test('a submission turned away for any other reason never touches the prompt box
   await h.answerEvents()
   expect(h.fills).toEqual([])
   expect(outcome(h)).toEqual(['ack', 'another plugin dropped it'])
+})
+
+const boxCommand = (text = 'run the tests') => ({ ...submitCommand(text), box: true })
+
+test('a dictation for the conversation in front, sent while a turn runs, is put in the empty prompt box for Return', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  await h.deliver([boxCommand()])
+  await h.answerEvents()
+  expect(h.submits).toEqual([])
+  expect(h.fills).toEqual(['run the tests'])
+  expect(outcome(h)).toEqual(['ack', 'filled'])
+})
+
+test('a dictation that starts with a slash never goes in the prompt box, where Return would run it as a command', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  await h.deliver([boxCommand('/resume')])
+  await h.answerEvents()
+  expect(h.fills).toEqual([])
+  expect(outcome(h)).toEqual(['ack', 'working'])
+})
+
+const checkCommand = (id: string) => ({ op: 'check', id, expectedSession: 's1', request: 'r1', expiresAt: Number.MAX_SAFE_INTEGER })
+const promptBox = (h: any, check: string) => h.events().find((b: any) => b.op === 'checked' && b.check === check)?.promptBox
+
+test('a filled prompt box is ready for Return only while it holds exactly the dictation and takes the keys', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  await h.deliver([boxCommand()])
+  await h.answerEvents()
+  await h.deliver([checkCommand('c1')])
+  await h.answerEvents()
+  expect(promptBox(h, 'c1')).toBe('ready')
+  h.box.text = 'run the tests and'
+  await h.deliver([checkCommand('c2')])
+  await h.answerEvents()
+  expect(promptBox(h, 'c2')).toBe('changed')
+  h.box.text = 'run the tests'
+  h.fillRefusal.reason = 'dialog'
+  await h.deliver([checkCommand('c3')])
+  await h.answerEvents()
+  expect(promptBox(h, 'c3')).not.toBe('ready')
+  expect(h.box.text).toBe('run the tests')
+})
+
+const ask = ($: any) => $.tool.check({ tool: 'Bash', input: { command: 'touch x' }, tool_use_id: 'u1' } as any)
+
+const readyBox = async ($: any, h: any) => {
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  await h.deliver([boxCommand()])
+  await h.answerEvents()
+  await h.deliver([checkCommand('c1')])
+  await h.answerEvents()
+  expect(promptBox(h, 'c1')).toBe('ready')
+}
+
+test('an approval the agent asks for right after the box is ready waits until the Return has landed', async ($, on) => {
+  const h = harness(on)
+  await readyBox($, h)
+  let answered = false
+  const verdict = ask($).then((v: any) => { answered = true; return v })
+  await h.settle()
+  expect(answered).toBe(false)
+  await h.typed($, 'run the tests')
+  await h.settle()
+  expect((await verdict).decision).toBe('ask')
+})
+
+test('an approval held for a Return that never lands is let through after a second', async ($, on) => {
+  const h = harness(on)
+  await readyBox($, h)
+  let answered = false
+  const verdict = ask($).then((v: any) => { answered = true; return v })
+  await h.settle()
+  expect(answered).toBe(false)
+  await h.clock.advance(1000)
+  await h.settle()
+  expect((await verdict).decision).toBe('ask')
+})
+
+test('an approval with no Return about to land is never held', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  expect((await ask($)).decision).toBe('ask')
+})
+
+test('a box is not ready for Return just after the agent asked for an approval that may not be drawn yet', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  await h.deliver([boxCommand()])
+  await h.answerEvents()
+  await ask($)
+  await h.deliver([checkCommand('c1')])
+  await h.answerEvents()
+  expect(promptBox(h, 'c1')).not.toBe('ready')
+  await h.clock.advance(500)
+  await h.deliver([checkCommand('c2')])
+  await h.answerEvents()
+  expect(promptBox(h, 'c2')).toBe('ready')
+})
+
+const absorbedText = (text: string) => `The user sent a new message while you were working:\n${text}\n\nThis is how Claude Code surfaces messages the user sends mid-turn.`
+
+test('a prompt-box dictation the running turn takes in is reported as absorbed into that turn', async ($, on) => {
+  const h = harness(on)
+  await readyBox($, h)
+  await h.typed($, 'run the tests')
+  await $.prompt.attachment({ type: 'queued_command', text: absorbedText('run the tests'), origin: { kind: 'engine' } } as any)
+  await h.answerEvents()
+  expect(h.events().filter((b: any) => b.op === 'absorbed')).toMatchObject([{ op: 'absorbed', session: 's1', turn: 't1', prompt: expect.any(String) }])
+})
+
+test('another message the running turn takes in is never reported as the dictation', async ($, on) => {
+  const h = harness(on)
+  await readyBox($, h)
+  await $.prompt.attachment({ type: 'queued_command', text: absorbedText('something else'), origin: { kind: 'engine' } } as any)
+  await h.answerEvents()
+  expect(h.events().filter((b: any) => b.op === 'absorbed')).toEqual([])
+})
+
+test('a dictation that starts with an exclamation mark never goes in the prompt box, where Return would run it in the shell', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  await h.deliver([boxCommand('!echo hi')])
+  await h.answerEvents()
+  expect(h.fills).toEqual([])
+  expect(outcome(h)).toEqual(['ack', 'working'])
+})
+
+test('a dictation for the prompt box whose clock read is pending when its session is cleared never fills the next session', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  h.box.held = true
+  await h.deliver([boxCommand()])
+  await h.answerEvents()
+  h.clockHold.on = true
+  h.reads[0]()
+  await h.settle()
+  expect(h.clockHold.held.length).toBeGreaterThan(0)
+  h.clockHold.on = false
+  await $.session.end({ reason: 'clear', sessionId: 's1', resume: { id: 's1' } })
+  await $.classic.SessionStart({ source: 'clear', session_id: 's2' })
+  h.live.session = 's2'
+  await h.settle()
+  for (const release of h.clockHold.held.splice(0)) release()
+  await h.settle()
+  await h.answerEvents()
+  expect(h.fills).toEqual([])
+})
+
+test('a submission that was never put in the prompt box reports no prompt box state', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await h.deliver([submitCommand()])
+  await h.answerEvents()
+  await h.deliver([checkCommand('c1')])
+  await h.answerEvents()
+  expect(promptBox(h, 'c1')).toBeUndefined()
+})
+
+test('a dictation for the prompt box never fills over what the user is typing', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  h.box.text = 'half a thought'
+  await h.deliver([boxCommand()])
+  await h.answerEvents()
+  expect(h.fills).toEqual([])
+  expect(h.box.text).toBe('half a thought')
+  expect(outcome(h)).toEqual(['ack', 'draft'])
+})
+
+test('a dictation for the prompt box keeps what the user typed as it was filled, and is not sent', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  h.fillRefusal.typedFirst = 'half '
+  await h.deliver([boxCommand()])
+  await h.answerEvents()
+  expect(h.box.text).toBe('half run the tests')
+  expect(outcome(h)).toEqual(['ack', 'added'])
+})
+
+test('a dictation the prompt box will not take waits for the turn', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  h.fillRefusal.reason = 'no_composer'
+  await h.deliver([boxCommand()])
+  await h.answerEvents()
+  expect(outcome(h)).toEqual(['ack', 'working'])
+})
+
+test('a dictation for the prompt box that expired is never filled', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  await h.deliver([{ ...boxCommand(), expiresAt: 0 }])
+  await h.answerEvents()
+  expect(h.fills).toEqual([])
+  expect(outcome(h)).toEqual(['ack', 'expired'])
+})
+
+test('a dictation for the prompt box with no turn running is submitted as usual', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await h.deliver([boxCommand()])
+  await h.answerEvents()
+  expect(h.fills).toEqual([])
+  expect(h.submits).toEqual(['run the tests'])
+  expect(outcome(h)).toEqual(['ack', 'submitted'])
 })
 
 test('a submission that goes through never touches the prompt box', async ($, on) => {
@@ -1101,7 +1324,7 @@ test('a session the module saw start says hello as fresh and idle', async ($, on
   await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await h.settle()
-  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest'] })
+  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest', 'box'] })
 })
 
 test('hello reports the zellij pane its session runs in, which only its own process can read', async ($, on) => {

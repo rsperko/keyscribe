@@ -33,17 +33,23 @@ public struct AgentOutbox: Sendable {
 
     public var held: [Message] { queue.map(\.message) }
 
-    public mutating func send(_ message: Message, state: AgentLiveState?) -> AgentDeliveryDecision {
+    public mutating func send(
+        _ message: Message, state: AgentLiveState?, canEnterPromptBox: Bool = false, canSteer: Bool = false
+    ) -> AgentDeliveryDecision {
         var context = AgentDeliveryContext(state: state ?? .disconnected)
+        context.canEnterPromptBox = canEnterPromptBox
+        context.canSteer = canSteer
         if state != nil, queue.contains(where: { $0.message.conversation == message.conversation }) {
-            context.state = .working
+            if ![.waitingApproval, .waitingQuestion, .userDialog].contains(context.state) { context.state = .working }
+            context.canEnterPromptBox = false
+            context.canSteer = false
         }
         let decision = AgentDeliveryPolicy.decide(context)
         if case .queue = decision { queue.append(Held(message: message)) }
         return decision
     }
 
-    public mutating func release(state: (String) -> AgentLiveState?) -> [Release] {
+    public mutating func release(state: (String) -> AgentLiveState?, canSteer: (String) -> Bool = { _ in false }) -> [Release] {
         var released: [Release] = []
         var seen: Set<String> = []
         var remaining: [Held] = []
@@ -57,6 +63,7 @@ public struct AgentOutbox: Sendable {
             context.typedSinceQueued = held.typedSince
             context.interruptedSinceQueued = held.interruptedSince
             context.connectionGapSinceQueued = held.connectionGapSince
+            context.canSteer = canSteer(conversation)
             let decision = AgentDeliveryPolicy.decide(context)
             if case .queue = decision {
                 remaining.append(held)

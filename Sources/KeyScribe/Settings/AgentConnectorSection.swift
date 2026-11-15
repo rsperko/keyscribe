@@ -117,10 +117,13 @@ private struct ConnectorSetupBlock: View {
             }
         }
         .confirmationDialog(setup.copy.uninstallTitle, isPresented: $confirmingRemove, titleVisibility: .visible) {
+            if setup.undoesOnUninstall {
+                Button(setup.copy.undoOnUninstallLabel, role: .destructive) { Task { await setup.remove(undoing: true) } }
+            }
             Button("Uninstall", role: .destructive) { Task { await setup.remove() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(setup.copy.uninstallMessage)
+            Text(setup.undoesOnUninstall ? setup.copy.uninstallMessage + " " + setup.copy.undoOnUninstallNote : setup.copy.uninstallMessage)
         }
     }
 

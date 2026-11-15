@@ -35,11 +35,11 @@ final class AgentOutput {
     }
 
     func deliver(
-        _ text: String, to id: String, via agents: AgentHub, images: [String] = []
+        _ text: String, to id: String, via agents: AgentHub, images: [String] = [], inFront: Bool = false
     ) async -> (request: String, receipt: AgentReceipt) {
         let request = UUID().uuidString
         awaited[request] = AwaitedReceipt()
-        return (request, await agents.deliver(text, to: id, request: request, images: images))
+        return (request, await agents.deliver(text, to: id, request: request, images: images, inFront: inFront))
     }
 
     func noteRecorded(_ entry: HistoryEntry, request: String) {
@@ -374,7 +374,9 @@ final class AgentOutput {
             case .interrupted: "its last turn was stopped"
             case .dialog: "it has a dialog open"
             case .connectionGap: "it lost its connection to \(Branding.appName) while this waited"
-            case .inPromptBox: "its last turn was interrupted, so the message is waiting in its prompt box. Press Return there to send it"
+            case .inPromptBox(.afterStop): "its last turn was interrupted, so the message is waiting in its prompt box. Press Return there to send it"
+            case .inPromptBox(.awaitingReturn): "the message is in its prompt box. Review it there and press Return to send it"
+            case .inPromptBox(.besideText): "the message was added to its prompt box after text already there. Review it there and press Return to send it"
             }
             return .advisory(message: "Not sent to \(handle): \(why)")
         case .notSent(let handle, let reason):

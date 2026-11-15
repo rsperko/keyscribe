@@ -9,6 +9,8 @@ public struct AgentDeliveryContext: Equatable, Sendable {
     public var typedSinceQueued = false
     public var interruptedSinceQueued = false
     public var connectionGapSinceQueued = false
+    public var canEnterPromptBox = false
+    public var canSteer = false
 
     public init(state: AgentLiveState) {
         self.state = state
@@ -20,6 +22,7 @@ public enum AgentDeliveryDecision: Equatable, Sendable {
     public enum ReviewReason: Equatable, Sendable { case typedSince, interrupted, connectionGap }
 
     case handOff
+    case enterPromptBox
     case queue(QueueReason)
     case needsReview(ReviewReason)
     case disconnected
@@ -35,7 +38,7 @@ public enum AgentDeliveryPolicy {
         case .waitingApproval: return .queue(.approval)
         case .waitingQuestion: return .queue(.question)
         case .userDialog: return .queue(.userDialog)
-        case .working: return .queue(.working)
+        case .working: return c.canSteer ? .handOff : c.canEnterPromptBox ? .enterPromptBox : .queue(.working)
         case .idle, .disconnected: return .handOff
         }
     }

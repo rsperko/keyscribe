@@ -1714,6 +1714,9 @@ final class DictationController {
     var promptBoxConfirmation: Duration {
         get { agentTake.promptBoxConfirmation } set { agentTake.promptBoxConfirmation = newValue }
     }
+    var frontApp: @MainActor () -> FrontApp? {
+        get { agentTake.frontApp } set { agentTake.frontApp = newValue }
+    }
 
     static func unconnectedLine(_ meant: [AgentHub.Unconnected]) -> String { AgentTake.unconnectedLine(meant) }
 

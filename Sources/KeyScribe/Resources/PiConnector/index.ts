@@ -87,7 +87,7 @@ const backoff = [30000, 60000, 120000, 300000]
 const late = { late: true } as const
 const unreachable = { unreachable: true } as const
 const freshReasons = ["startup", "new", "fork"]
-const features = ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check"]
+const features = ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check", "steer"]
 
 const readAloudTool = "tell_me_when_done"
 
@@ -624,7 +624,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
       if (quiet) return "disconnected"
       if (!(host.now() < (cmd.expiresAt || 0))) return "expired"
       if (typeof cmd.expectedPrompts === "number" && cmd.expectedPrompts !== prompts) return "typedSince"
-      if (!idle() || pending.some((item) => !item.late)) return "working"
+      if (pending.some((item) => !item.late)) return "working"
       if (promptsOpen > 0) return "dialog"
       if (ctx && ctx.ui.getEditorText().trim()) return "draft"
       return null
@@ -645,7 +645,8 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     pending.push(item)
     track(cmd.id, { state: "handed", handedAt: host.now() })
     try {
-      const sent: unknown = pi.sendUserMessage(attached.length ? [{ type: "text", text }, ...attached] : text, { deliverAs: "followUp" })
+      const deliverAs = idle() ? "followUp" : "steer"
+      const sent: unknown = pi.sendUserMessage(attached.length ? [{ type: "text", text }, ...attached] : text, { deliverAs })
       if (sent && typeof (sent as Promise<void>).then === "function") {
         (sent as Promise<void>).then(undefined, (err: unknown) => {
           const index = pending.indexOf(item)
@@ -693,7 +694,10 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   }
 
   function received(message: unknown): void {
-    const text = messageText(message)
+    receivedText(messageText(message))
+  }
+
+  function receivedText(text: string): void {
     const serialIn = markedSerial(text)
     const index = serialIn === null ? -1 : pending.findIndex((item) => item.serial === serialIn)
     if (index < 0) {
@@ -939,6 +943,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
 
   pi.on("input", (event) => {
     if (!session) return
+    if (event.source === "extension" && event.streamingBehavior === "steer") receivedText(event.text || "")
     if (event.source === "interactive") {
       if (currentTurn !== null && ctx && ctx.isIdle()) closeStaleTurn()
       prompts += 1

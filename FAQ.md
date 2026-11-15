@@ -540,6 +540,15 @@ isn't connected), nothing is sent and your words are kept: **Paste Last Dictatio
 **“Cancel”** or **“never mind”** on its own sends nothing; to send that word to an
 agent, for example to answer its prompt, say “tell docs cancel”.
 
+### What happens if I talk to an agent while it's working?
+
+The agent reads it while it works, the same as anything you type there. Pi and bb take it wherever the
+conversation is. Claude Code takes it only when the conversation is in front of you: KeyScribe puts it in the
+prompt box and presses Return for you, and only while the box holds just your message and no dialog of the
+agent's is open. A Claude Code conversation that is not in front gets the message when it finishes, and so does an
+agent whose connector is out of date. A conversation waiting on you, for an approval or an answer, holds the
+message until you respond.
+
 ### Can “open” select a conversation in kitty or WezTerm?
 
 WezTerm works with no setup. “Open docs” switches to the pane docs runs in, but WezTerm cannot raise
@@ -589,6 +598,14 @@ KeyScribe name; then the title still works after “open”, “go to”, “tel
 yet shows its first message instead; that works only said in full after one of those words, so “Ask what time
 is it, what time it is in London” reaches the thread whose first message was “what time is it?”.
 
+When you rename a bb thread in KeyScribe, by voice or in Settings, KeyScribe also sets that name as its bb
+title, so bb's sidebar shows what to call it. Names KeyScribe picked on its own are never written to bb. A name
+you give stays fixed even if bb later changes the thread's title. Under any thread whose bb title says
+something else, bb's sidebar shows the name to say: installing the plugin turns on bb's thread row details
+(**Organize ▸ Rows ▸ Metadata**, which bb still calls experimental), unless they were already on. If you turn
+them off, KeyScribe leaves them off. When you uninstall the plugin, KeyScribe offers to turn them back off,
+but only if it was the one that turned them on.
+
 A Claude Code thread in bb whose connector is installed is listed once, as the bb thread, keeping the name,
 Disconnect and current choice you gave it before. When the connector is up to date, the reply to what you dictate there is read aloud as it is for a terminal, and so is
 work you ask it to have KeyScribe read aloud.
@@ -612,7 +629,7 @@ KeyScribe turns off bb's usage reporting for the commands it runs.
 
 In the Coding agent mode, switch to the conversation, then say **“rename this conversation to”** and the new
 name, such as “rename this conversation to auth refactor”, as the whole dictation (“session” works in place of
-“conversation”). Only the conversation you are
+“conversation”, and “rename conversation to auth refactor” works too). Only the conversation you are
 talking to is renamed; the panel shows the new name, and you say that name from then on. The name can be up
 to four words, and it can't be one another conversation already has. Say the name on its own: if anything
 follows it, nothing is renamed or sent, and the panel says why. You can also choose **Rename…** beside a conversation

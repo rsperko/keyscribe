@@ -94,7 +94,7 @@ final class BBHost: AgentHost {
         let output: HostCLI.Output
         do {
             output = try await call(
-                ["thread", "tell", thread, "--message-file", "-", "--mode", "queue", "--json"] + images.flatMap { ["--image", $0] },
+                ["thread", "tell", thread, "--message-file", "-", "--mode", "auto", "--json"] + images.flatMap { ["--image", $0] },
                 subcommand: "thread tell", input: Data(text.utf8))
         } catch HostCLI.Failure.couldNotStart {
             return .refused("bb could not start.")
@@ -109,6 +109,13 @@ final class BBHost: AgentHost {
             return .refused(why)
         case .unclear: return .uncertain
         }
+    }
+
+    func rename(_ location: AgentHostLocation, to name: String) async -> Bool {
+        guard let thread = thread(at: location), running(),
+              let output = try? await call(["thread", "update", thread, "--title=\(name)", "--json"], subcommand: "thread update")
+        else { return false }
+        return output.status == 0
     }
 
     private func thread(at location: AgentHostLocation) -> String? {

@@ -22,6 +22,9 @@ struct AgentConnectorCopy {
     var setupTitle = "Connector"
     var describesUse = true
     var purpose: String?
+    var installNote: String?
+    var undoOnUninstallLabel = ""
+    var undoOnUninstallNote = ""
 }
 
 struct AgentConnectorError: Error {
@@ -50,6 +53,13 @@ protocol AgentConnector: AnyObject {
     func install(tool: String, target: ConnectorTarget) async throws
     func update(tool: String, target: ConnectorTarget) async throws
     func uninstall(tool: String, target: ConnectorTarget) async throws
+    func undoesOnUninstall(in target: ConnectorTarget) -> Bool
+    func uninstall(tool: String, target: ConnectorTarget, undoing: Bool) async throws
+}
+
+extension AgentConnector {
+    func undoesOnUninstall(in target: ConnectorTarget) -> Bool { false }
+    func uninstall(tool: String, target: ConnectorTarget, undoing: Bool) async throws { try await uninstall(tool: tool, target: target) }
 }
 
 enum ConnectorFolders {
@@ -78,11 +88,11 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
         }
 
         @MainActor
-        func run(_ connector: any AgentConnector, tool: String, target: ConnectorTarget) async throws {
+        func run(_ connector: any AgentConnector, tool: String, target: ConnectorTarget, undoing: Bool) async throws {
             switch self {
             case .install: try await connector.install(tool: tool, target: target)
             case .update: try await connector.update(tool: tool, target: target)
-            case .remove: try await connector.uninstall(tool: tool, target: target)
+            case .remove: try await connector.uninstall(tool: tool, target: target, undoing: undoing)
             }
         }
     }
@@ -99,6 +109,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
     @Published fileprivate(set) var lingering = 0
     @Published fileprivate(set) var olderCount = 0
     private(set) var failedOperation: Operation?
+    private var undoingRemoval = false
     private let retire: (String) -> Void
     private var refreshes = 0
 
@@ -180,7 +191,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
         switch failedOperation {
         case .install: await install()
         case .update: await update()
-        case .remove: await remove()
+        case .remove: await remove(undoing: undoingRemoval)
         case nil: await refresh()
         }
     }
@@ -198,8 +209,11 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
 
     func update() async { await perform(.update) }
 
-    func remove() async {
+    var undoesOnUninstall: Bool { !copy.undoOnUninstallLabel.isEmpty && connector.undoesOnUninstall(in: target) }
+
+    func remove(undoing: Bool = false) async {
         guard operation == nil else { return }
+        undoingRemoval = undoing
         let installation = target.installation
         var unsaved: String?
         do {
@@ -244,7 +258,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
         refreshes += 1
         var failure: String?
         do {
-            try await kind.run(connector, tool: tool, target: target)
+            try await kind.run(connector, tool: tool, target: target, undoing: undoingRemoval)
         } catch let error as AgentConnectorError {
             failure = error.message
         } catch {

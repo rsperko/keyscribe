@@ -284,6 +284,40 @@ every rule above applies to it, with these sharpenings:
   longer take, replacement or dictionary output that equals a live session name addresses that session.
 - **Cancel withdraws the request itself, not just its HUD.** A message the user cancelled must not
   still send, and a cancelled message must not stay visible as if it will.
+- **An agent that takes messages during a turn gets the dictation at once, wherever it is.** A connector whose
+  hello lists `steer` (Pi's, which sends with Pi's own `deliverAs: "steer"`) and bb (`--mode auto`) put the message
+  into the running turn the way typing there does, with no keystroke, so focus plays no part. The policy hands it
+  off (`AgentDeliveryContext.canSteer`) only while the agent works rather than waits on the user and nothing for that
+  conversation is held or still being handed off; a held message is released to it the same way, oldest first,
+  once the earlier one's receipt arrives (`AgentHub.confirm` frees the hand-off for a connector that steers, since a
+  steer starts no turn). Pi drains every steering message before its run ends (`agent-loop.js`), so the connector
+  confirms a steer when Pi's `input` event accepts it rather than waiting for the next tool boundary.
+- **A dictation reaches a running turn only as the user's own prompt, so only in front.** A connector's own
+  prompt runs once the agent is idle (Claude Code queues a plugin's prompt behind the turn; measured on 2.1.325,
+  2026-11-14), and only a prompt the user enters joins the turn as theirs. So for the conversation in front,
+  while its agent works rather than waits on the user, the policy enters it (`AgentDeliveryDecision.enterPromptBox`,
+  eligibility in `AgentHub.takesPromptBox`): the connector adds the text to the empty prompt box, never replacing
+  what is there, and the take presses Return (`AgentTake.sendFromPromptBox`) only after three checks, in order:
+  the conversation is the one in front; the connector answers that the box holds exactly the text and takes the
+  keys (`promptBoxReady`); and the window that read confirmed still has focus. The `typed` count confirms it
+  afterwards. Ask the engine whether a dialog holds the keys, with an empty append (`fill` refuses `dialog`):
+  measured on 2.1.325 (2026-11-15), it refuses within about 120 ms of an approval or question opening and accepts
+  again the moment it is answered, including while an approved tool runs, which tracking `tool.check` verdicts
+  cannot match. A box answered as ready arms a guard for up to a second, until the user's prompt arrives: an
+  approval or question decided meanwhile (a `tool.check` verdict of `ask`) and an MCP input request
+  (`Elicitation`) wait in the connector's hook, so the dialog is drawn after the Return lands, never under it
+  (measured on 2.1.325, 2026-11-15: a held `ask` drew nothing until released). A box is not ready within half a
+  second of an `ask`, which may not be drawn yet (draws took 120–360 ms). This bends “hooks never wait”: the wait
+  is local, bounded, and happens only right after a steered dictation. A dialog that comes through neither hook
+  is not held. Never fill
+  text that starts with `/` or `!`: Return runs them as a command or in the shell, and the box drops the invisible
+  character that keeps a submitted slash from running (measured on 2.1.325, 2026-11-15). A steered take follows
+  only a turn that read it: the running turn once the connector reports it absorbed (the engine's `queued_command`
+  attachment carrying the text, reported as `absorbed`), or the turn the message starts when the running one ended
+  first, matched by its prompt digest (`followSteer`). It never claims a turn that did not read it, so its reply is
+  heard once. A message for that conversation
+  already held or still being handed off, an attached image, a connector without `box`, or a conversation not
+  confirmed in front keeps the hold.
 - **A lost receipt is not a lost message.** A connector keeps the receipt of a submission the agent already
   has across a lost connection and sends it on the next one, and a deadline overrun by the agent's own stall
   is restarted, not counted as a lost connection. The match is the connector's own mark, never the text or
@@ -418,8 +452,9 @@ every rule above applies to it, with these sharpenings:
   could not be read stays listed. The process table is listed once for every agent's discovery and reused
   until it ages out (`AgentProcessTable`), so the liveness tick never sweeps it per agent.
 - **bb is a host reached through its own `bb` command** (`BBHost`). Every call runs the installed command with a
-  fixed environment that turns bb's telemetry off, never the app's own. Delivery uses `--mode queue`, never the
-  default `steer`, so dictation never lands inside a running turn; bb's `sent` reads as sent, `queued` as
+  fixed environment that turns bb's telemetry off, never the app's own. Delivery uses `--mode auto`, which steers a
+  running turn and starts one when the thread is idle, as typing in bb does; bb's `sent` reads as sent, and a
+  dictation it steers into a running turn follows that turn's reply, `queued` as
   queued, its error envelope as refused in plain words, and anything else as uncertain; bb's error code goes to
   the log as public and its message as private, since a message could echo what was sent. Open only asks:
   bb's answer counts the clients it broadcast to, not a window that showed the thread, so it reads as requested, and bb is brought forward only when some client took it and the open is
@@ -436,7 +471,18 @@ every rule above applies to it, with these sharpenings:
   agent never writes it. For a thread with no title bb shows its opening words (`titleFallback`) instead;
   they are what the user sees, so they reach the thread, but only said in full after a verb and never as its
   shown name (`AgentPlace.Label.onlyAfterVerb`, from `AgentHostScan.found`'s `shownInstead`), since they are a
-  task phrase everyday instructions start with. A location that is not a thread of this bb's data folder is never passed to the command. A
+  task phrase everyday instructions start with. A name the user gives a hosted conversation (spoken or in
+  Settings) is also written to the host (`AgentHost.rename`; for bb, `bb thread update --title=`), so the
+  thread's bb title says what to call it; the write runs after the name is saved, never delays the rename,
+  and a failed write leaves the KeyScribe name in place. KeyScribe never writes a name it made up, so an
+  untitled thread keeps showing its opening words. The bb plugin advertises `label` and draws the name it
+  is sent on the thread's sidebar row, only when bb's title says something else (`rowLabel`), through bb's
+  experimental row metadata slot. bb draws that slot only while its `threadRowMetadata` experiment and the
+  thread list's `showRowMetadata` are on, so the first install or update turns on whichever is off
+  (`BBSidebarSwitch`) and records what it changed in the plugin folder. The record keeps it from ever doing
+  this again, so a switch the user turns off stays off. A switch bb could not read is left alone and tried at
+  the next update, and a failed change never fails the install. Uninstalling turns off only recorded
+  switches, and only when the user picks that button (`AgentConnector.undoesOnUninstall`). A location that is not a thread of this bb's data folder is never passed to the command. A
   list longer than `HostCLI`'s output cap reads as unreadable, not as the part that fit. An agent bb started
   is placed in its thread by `BB_THREAD_ID` together with `BB_THREAD_STORAGE`, which must be that thread's
   folder in this bb's data folder (`BBThreads.thread(in:instance:)`); bb passes the dictated text to the agent

@@ -14,6 +14,9 @@ running it waits and sends nothing.
 - A spoken line saying what a thread waits on when it stops for your approval or an answer.
 - A tool every thread's agent can call when you ask it to have the app read its reply aloud. bb adds it when it
   next starts a thread's agent.
+- The name to say for a thread, under its title in the sidebar, when its title says something else. The app turns
+  on bb's thread row details (Organize ▸ Rows ▸ Metadata) when it installs this plugin, unless they were already
+  on, and offers to turn them back off when you uninstall it.
 
 ## How it works
 

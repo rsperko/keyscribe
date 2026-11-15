@@ -74,6 +74,7 @@ final class AgentTake {
     var frontReadingGrace: Duration = .seconds(1)
     var placeNamesGrace: Duration = .seconds(1)
     var promptBoxConfirmation: Duration = .seconds(2)
+    var frontApp: @MainActor () -> FrontApp? = { AgentFront.frontmost() }
 
     init(
         hud: HUDChannel, output: AgentOutput, voiceCommands: VoiceCommandRunning,
@@ -551,9 +552,13 @@ final class AgentTake {
         host.rememberResult(text)
         hud.present(.transcribing(mode: mode.name, status: "Sending to \(agents.handle(of: id) ?? "it")"))
         let clipboard = agentClipboard.note(for: text, attached: agents.takesImages(id))
-        var (request, receipt) = await output.deliver(text, to: id, via: agents, images: agentClipboard.images(in: text))
-        if case .kept(let handle, .inPromptBox) = receipt,
-           let sent = await sendFromPromptBox(id, handle: handle, through: agents, lease: lease, request: request) {
+        let images = agentClipboard.images(in: text)
+        let inFront = agents.takesPromptBox(id, images: images) ? await agents.sessionInFrontWithoutAsking()?.id == id : false
+        guard lease.keepActing() else { return }
+        var (request, receipt) = await output.deliver(text, to: id, via: agents, images: images, inFront: inFront)
+        if case .kept(let handle, .inPromptBox(let cause)) = receipt, cause != .besideText,
+           let sent = await sendFromPromptBox(
+               id, handle: handle, steering: cause == .awaitingReturn ? text : nil, through: agents, lease: lease, request: request) {
             receipt = sent
         }
         finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id, clipboard: clipboard),
@@ -563,14 +568,21 @@ final class AgentTake {
         speakRefusal(receipt, conversation: id)
     }
 
-    // After a Stop, Claude Code takes only a prompt the user enters, so the connector left the message in the
-    // empty box. Return goes only to that conversation, and only when it is the one in front.
+    // Claude Code takes a prompt mid-turn, or after a Stop, only when the user enters it, so the connector left
+    // the message in the empty box. Return goes only to that conversation, only when it is the one in front, and,
+    // where the connector can say, only while the box holds just the message and no approval is open.
     private func sendFromPromptBox(
-        _ id: String, handle: String, through agents: AgentHub, lease: TakeLease, request: String
+        _ id: String, handle: String, steering: String?, through agents: AgentHub, lease: TakeLease, request: String
     ) async -> AgentReceipt? {
-        guard lease.keepActing(), await agents.sessionInFrontWithoutAsking()?.id == id, lease.keepActing() else { return nil }
+        guard lease.keepActing(), let shown = await agents.sessionInFrontWithoutAsking(), shown.id == id, lease.keepActing()
+        else { return nil }
+        if agents.checksPromptBox(id) {
+            guard await agents.promptBoxReady(request, in: id), lease.keepActing(),
+                  let focused = frontApp(), focused.pid == shown.app.pid, shown.app.window == nil || focused.window == shown.app.window
+            else { return nil }
+        }
         let typedBefore = agents.typedCount(id)
-        agents.awaitTypedTurn(of: id, request: request)
+        if steering == nil { agents.awaitTypedTurn(of: id, request: request) }
         await submitKey(.return)
         let deadline = ContinuousClock.now + promptBoxConfirmation
         while agents.typedCount(id) == typedBefore, ContinuousClock.now < deadline {
@@ -580,6 +592,7 @@ final class AgentTake {
             agents.forgetTypedTurn(of: id, request: request)
             return .uncertain(handle)
         }
+        if let steering { agents.followSteer(of: id, for: request, text: steering) }
         return .sent(handle)
     }
 

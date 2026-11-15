@@ -24,6 +24,7 @@ struct AgentHostTests {
         var front = AgentHostFront.unknown
         var identityKeys = ["EXAMPLE_THREAD"]
         var delivery = AgentHostDelivery.accepted
+        private(set) var retitled: [(AgentHostLocation, String)] = []
         private(set) var scans = 0
         private(set) var opened: [AgentHostLocation] = []
         private(set) var asked: [[AgentHostLocation]] = []
@@ -62,6 +63,11 @@ struct AgentHostTests {
             self.reported.append(reported)
             await stall()
             return front
+        }
+
+        func rename(_ location: AgentHostLocation, to name: String) async -> Bool {
+            retitled.append((location, name))
+            return true
         }
 
         var whileDelivering: (@MainActor () -> Void)?
@@ -103,6 +109,40 @@ struct AgentHostTests {
             processEnvironment: { pid, keys in (environments[pid] ?? [:]).filter { keys.contains($0.key) } },
             processParent: { parents[$0] }, now: now,
             makeId: { "r1" })
+    }
+
+    @Test func aHostedConversationNeverLeavesConversationNamesUnread() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let reader = AgentPlaceTrackerTests.Reader()
+        let hub = makeHub(host, places: reader)
+        await hub.rescan()
+        for _ in 0..<50 {
+            if let reading = hub.placeTracker?.reading { await reading.value } else { await Task.yield() }
+        }
+        #expect(hub.directory.conversations.map(\.id).contains(Self.id("t1")))
+        #expect(!hub.placesUnread(hub.directory.conversations.map(\.id)))
+    }
+
+    @Test func aHostedConversationNeverKeepsPlacesBeingReadAgain() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let claude = FakeDiscovery(kind: .claude)
+        claude.result = .found([Self.claudeSession()])
+        let reader = AgentPlaceTrackerTests.Reader()
+        let hub = makeHub(host, places: reader, claude: claude)
+        await hub.rescan()
+        for _ in 0..<50 {
+            if let reading = hub.placeTracker?.reading { await reading.value } else { await Task.yield() }
+        }
+        let settled = reader.reads
+        for _ in 0..<5 { hub.refresh() }
+        for _ in 0..<50 {
+            if let reading = hub.placeTracker?.reading { await reading.value } else { await Task.yield() }
+        }
+        #expect(hub.directory.conversations.map(\.id).contains(Self.id("t1")))
+        #expect(settled > 0)
+        #expect(reader.reads == settled)
     }
 
     @Test func aHostIsCalledOnlyWhileTheUserHasItTurnedOn() async {
@@ -374,6 +414,30 @@ struct AgentHostTests {
         #expect(results == [[Self.id("t1"), "docs", "kiwi", "false", "q1"]])
     }
 
+    @Test func aDictationTheHostSteersIntoARunningTurnIsFollowedIntoThatTurn() async {
+        let host = FakeHost()
+        host.delivery = .accepted
+        let hub = await joined(host)
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "running", prompt: AgentPromptDigest.of("the earlier work")))
+        var results: [[String?]] = []
+        hub.onResult = { _, _, reply, _, origin in results.append([reply, origin]) }
+        _ = await hub.deliver("use the other file", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "used it"))
+        #expect(results == [["used it", "q1"]])
+    }
+
+    @Test func aDictationTheHostQueuesBehindARunningTurnIsNeverTakenForThatTurn() async {
+        let host = FakeHost()
+        host.delivery = .queued
+        let hub = await joined(host)
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "running", prompt: AgentPromptDigest.of("the earlier work")))
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        _ = await hub.deliver("use the other file", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "the earlier answer"))
+        #expect(!origins.contains("q1"))
+    }
+
     @Test func twoDictationsWaitingInTheHostEachGetTheReplyToTheirOwnTurn() async {
         let host = FakeHost()
         host.delivery = .queued
@@ -504,6 +568,77 @@ struct AgentHostTests {
         hub.handle(.hello(Self.hello("claude:s1")))
         hub.speaks = { true }
         return hub
+    }
+
+    @Test func aNameTheUserGivesAHostedConversationIsAlsoGivenToItsHost() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let claude = FakeDiscovery(kind: .claude)
+        claude.result = .found([Self.claudeSession()])
+        let hub = makeHub(host, names: AgentNameStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)), claude: claude)
+        await hub.rescan()
+        let scansBefore = host.scans
+        #expect(throws: Never.self) { try hub.rename(Self.id("t1"), to: "alpha") }
+        #expect(throws: Never.self) { try hub.rename("claude:s1", to: "beta") }
+        #expect(hub.handle(of: Self.id("t1")) == "alpha")
+        for _ in 0..<50 where host.retitled.isEmpty || host.scans == scansBefore { await Task.yield() }
+        #expect(host.retitled.map { "\($0.0.native)=\($0.1)" } == ["t1=alpha"])
+        #expect(host.scans > scansBefore)
+    }
+
+    @Test(arguments: [
+        (AgentLiveState.waitingApproval, AgentDeliveryDecision.QueueReason.approval), (.waitingQuestion, .question),
+        (.userDialog, .userDialog), (.working, .working),
+    ])
+    func aMessageTheHostQueuedSaysWhatTheConversationWaitsOn(state: AgentLiveState, reason: AgentDeliveryDecision.QueueReason) async {
+        let host = FakeHost()
+        var thread = Self.thread("t1")
+        thread.state = state
+        host.conversations = [thread]
+        host.delivery = .queued
+        let hub = makeHub(host)
+        await hub.rescan()
+        let handle = hub.directory.conversations.first { $0.id == Self.id("t1") }?.handle ?? ""
+        #expect(await hub.deliver("use the other file", to: Self.id("t1")) == .queued(handle, waitingOn: reason))
+    }
+
+    @Test func aHostedConversationWhosePluginShowsNamesIsToldItsName() async {
+        let transport = FakeTransport()
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host, transport: transport)
+        await hub.rescan()
+        var hello = Self.pluginHello("t1")
+        hello.features.append("label")
+        hub.prepare(for: hello)
+        transport.live.insert(Self.id("t1"))
+        hub.handle(.hello(hello))
+        let handle = hub.directory.conversations.first { $0.id == Self.id("t1") }?.handle
+        #expect(handle != nil)
+        let told = transport.sent.compactMap { command, session -> String? in
+            if case .status(_, let expected, let text) = command, session == Self.id("t1"), expected == Self.id("t1") { return text }
+            return nil
+        }
+        #expect(told == ["\u{201C}\(handle ?? "")\u{201D}"])
+    }
+
+    @Test func aHostedConversationIsToldItsNewNameAsSoonAsItIsRenamed() async throws {
+        let transport = FakeTransport()
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host, transport: transport, names: AgentNameStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
+        await hub.rescan()
+        var hello = Self.pluginHello("t1")
+        hello.features.append("label")
+        hub.prepare(for: hello)
+        transport.live.insert(Self.id("t1"))
+        hub.handle(.hello(hello))
+        try hub.rename(Self.id("t1"), to: "orange thread")
+        let told = transport.sent.compactMap { command, session -> String? in
+            if case .status(_, _, let text) = command, session == Self.id("t1") { return text }
+            return nil
+        }
+        #expect(told.last == "\u{201C}orange thread\u{201D}")
     }
 
     @Test func readAloudAskedThroughTheAgentsOwnConnectorFollowsATurnTheAppOnlyLearnedFromTheHello() async {

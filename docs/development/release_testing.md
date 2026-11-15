@@ -91,6 +91,9 @@ actually catches the list above.
 - **The printable cheat sheet renders** (`make test-cheatsheet`) with one page per section on Letter
   and A4; a machine without `uv` skips it loudly. Separately, `swift test` checks every phrase the sheet
   teaches against the real parsers (`CheatSheetPhraseTests`), so the sheet cannot drift from the grammar.
+- **Every coding-agent connector's own tests pass** (`CONNECTOR_CHECKS` in `scripts/preflight.sh`): each
+  connector runs inside its agent under Node, so these run there against a stubbed agent API. A machine
+  without a recent Node skips them loudly.
 - Artifact present, and `codesign --verify --deep --strict` passes (nested resource bundles/xcframeworks too).
 - **MLX runs from the bundled shader library** (`--mlx-smoke`) — the silent Qwen killer.
 - `Info.plist` stamped: real `CFBundleShortVersionString` / `CFBundleVersion` / bundle id (no `__PLACEHOLDER__`).
@@ -150,8 +153,12 @@ without that smoke coverage.
 
 Then **spot-checks you run only for the subsystem you changed** (Enter past the rest): the trigger
 matrix (modifier / chord / mouse) if you touched hotkey code, Qwen loading + the `--raw` silence guard
-if you touched STT, edit-in-place if you touched insertion. A routine release with no subsystem change
-is just the two dictations.
+if you touched STT, edit-in-place if you touched insertion, and the coding agents if you touched agent
+delivery, a connector, or the bb plugin. The coding-agent check gives each agent you ship a long-running
+task and dictates to it mid-turn. It confirms that Claude Code in front takes the dictation as your own
+queued prompt, that Pi and bb take it while not in front, and that a dictation never answers an open
+approval. For bb it also checks that an idle thread starts a turn and that a spoken rename sets the thread's
+bb title. A routine release with no subsystem change is just the two dictations.
 
 `scripts/verify-live.sh` remains the standalone companion — the same on-disk artifact checks plus the
 Settings commit-on-blur check — for when you want to exercise these outside a release.

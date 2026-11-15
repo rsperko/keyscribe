@@ -17,7 +17,8 @@ extension AgentBridgeServer: AgentTransport {
 }
 
 enum AgentReceipt: Equatable {
-    enum KeptReason: Equatable { case composing, typedSince, interrupted, connectionGap, dialog, inPromptBox }
+    enum PromptBoxCause: Equatable { case afterStop, awaitingReturn, besideText }
+    enum KeptReason: Equatable { case composing, typedSince, interrupted, connectionGap, dialog, inPromptBox(PromptBoxCause) }
     enum NotSentReason: Equatable { case conversationEnded, connectorNotRunning, conversationChanged, stopped, expired, disconnected, refused(String), hostTakesNoMessages(String) }
 
     case sent(String)
@@ -34,6 +35,7 @@ final class AgentHub {
         let handle: String
         let attempt: Int
         let retry: Int
+        var box = false
         var timedOut = false
         var check: String?
         var turnDuringHandOff: TurnDuringHandOff?
@@ -89,6 +91,7 @@ final class AgentHub {
     private struct TypedTurn {
         var request: String
         var typedAt: Date?
+        var prompt: String?
     }
     var typedTurnWindow: TimeInterval = 5
     private var requested: Set<String> = []
@@ -145,6 +148,12 @@ final class AgentHub {
     private var environments: [String: [String: String]] = [:]
     private var prompts: [String: Int] = [:]
     private var typedCounts: [String: Int] = [:]
+    private var absorbed: [String: (turn: String, prompt: String)] = [:]
+    private var filledWires: [String: String] = [:] {
+        didSet { if filledWires.count > Self.keptDeliveries { filledWires.remove(at: filledWires.startIndex) } }
+    }
+    private var promptBoxChecks: [String: CheckedContinuation<Bool, Never>] = [:]
+    var promptBoxCheckWait: Duration = .seconds(1)
     private var connectorNames: [String: String?] = [:]
     private var registryNames: [String: String?] = [:]
     private var labels: [String: String] = [:]
@@ -233,7 +242,8 @@ final class AgentHub {
     }
 
     func placesUnread(_ ids: [String]) -> Bool {
-        placeTracker.map { !$0.unattempted(ids).isEmpty } ?? false
+        let readable = Set(placeQueries.map(\.id))
+        return placeTracker.map { !$0.unattempted(ids.filter(readable.contains)).isEmpty } ?? false
     }
 
     func readPlaces() {
@@ -430,6 +440,14 @@ final class AgentHub {
         directory = renamed
         sendLabels()
         onChange?()
+        if let conversation = directory.conversations.first(where: { $0.id == id }), let (source, location) = host(of: conversation) {
+            let name = conversation.handle
+            Task { [weak self] in
+                guard await source.host.rename(location, to: name) else { return }
+                source.expect()
+                await self?.rescan(rereadingTitles: false)
+            }
+        }
     }
 
     func isExcluded(_ id: String) -> Bool { exclusions.excludes(id) }
@@ -726,7 +744,7 @@ final class AgentHub {
         lastUsed = lastUsed.filter { handle(of: $0.key) != nil }
         let listed = Set((directory.conversations + directory.disconnected).map(\.id))
         pruneHostFollows(listed: listed)
-        placeTracker?.notice(listed)
+        placeTracker?.notice(Set(placeQueries.map(\.id)))
         let ended = connectorStateSessions.filter { !listed.contains($0) && !transport.isLive(session: $0) }
         forgetConnectorState(keepingEnvironments: { !ended.contains($0) }) { !ended.contains($0) && !exclusions.excludes($0) }
         installations = installations.filter { !ended.contains($0.key) }
@@ -899,7 +917,7 @@ final class AgentHub {
         }
     }
 
-    func deliver(_ text: String, to id: String, request: String? = nil, images: [String] = []) async -> AgentReceipt {
+    func deliver(_ text: String, to id: String, request: String? = nil, images: [String] = [], inFront: Bool = false) async -> AgentReceipt {
         if exclusions.excludes(id) { return .notSent(disconnected.first { $0.id == id }?.handle, reason: .disconnected) }
         guard let conversation = directory.conversations.first(where: { $0.id == id }) else {
             return .notSent(nil, reason: .conversationEnded)
@@ -922,9 +940,12 @@ final class AgentHub {
             switch answer {
             case .accepted:
                 settleHostDelivery(request, in: id, expires: waitEnds)
+                if follows, running[id] != nil, let turn = turns[id] { follow(turn, of: id, for: request) }
                 return .sent(handle)
             case .queued:
                 settleHostDelivery(request, in: id, expires: nil)
+                let waiting = directory.conversations.first { $0.id == id }?.state ?? .working
+                if case .queue(let reason) = AgentDeliveryPolicy.decide(AgentDeliveryContext(state: waiting)) { return .queued(handle, waitingOn: reason) }
                 return .queued(handle)
             case .uncertain where arrived:
                 settleHostDelivery(request, in: id, expires: waitEnds)
@@ -941,11 +962,18 @@ final class AgentHub {
             }
         }
         let message = AgentOutbox.Message(id: request ?? makeId(), conversation: id, text: text, images: images)
-        switch outbox.send(message, state: state(of: id)) {
+        switch outbox.send(
+            message, state: state(of: id), canEnterPromptBox: inFront && takesPromptBox(id, images: images), canSteer: steers(id)
+        ) {
         case .handOff:
             return await withCheckedContinuation { continuation in
                 waiters[message.id] = continuation
                 handOff(message, handle: handle)
+            }
+        case .enterPromptBox:
+            return await withCheckedContinuation { continuation in
+                waiters[message.id] = continuation
+                handOff(message, handle: handle, box: true)
             }
         case .queue(let reason):
             return .queued(handle, waitingOn: reason)
@@ -971,6 +999,7 @@ final class AgentHub {
         awaitingResult = awaitingResult.filter { kept($0.key) }
         awaitedRequests = awaitedRequests.filter { kept($0.key) }
         nextTyped = nextTyped.filter { kept($0.key) }
+        absorbed = absorbed.filter { kept($0.key) }
         requested = requested.filter(kept)
         nextRequested = nextRequested.filter(kept)
         waitingPrompts = waitingPrompts.filter { kept($0.key) }
@@ -1037,6 +1066,10 @@ final class AgentHub {
             break
         case .submitted(let request, let turn, let report):
             confirm(request, turn: turn, report: report)
+        case .checked(_, let check, let report) where promptBoxChecks[check] != nil:
+            promptBoxChecks.removeValue(forKey: check)?.resume(returning: report.promptBox == "ready")
+        case .refused(let check, _) where promptBoxChecks[check] != nil, .undelivered(let check, _, _) where promptBoxChecks[check] != nil:
+            promptBoxChecks.removeValue(forKey: check)?.resume(returning: false)
         case .checked(let request, let check, let report):
             guard requests[request]?.check == check else { break }
             trace(request) {
@@ -1071,6 +1104,13 @@ final class AgentHub {
             clearHandOff(request)
             settle(request, .notSent(requests[request]?.handle, reason: .connectorNotRunning))
             releaseHeld()
+        case .absorbed(let session, let turn, let prompt):
+            if let pending = nextTyped[session], pending.prompt == prompt {
+                nextTyped[session] = nil
+                follow(turn, of: session, for: pending.request)
+            } else {
+                absorbed[session] = (turn, prompt)
+            }
         case .typed(let session, let count):
             typedCounts[session, default: 0] += 1
             if let pending = nextTyped[session] {
@@ -1088,7 +1128,7 @@ final class AgentHub {
             if nextRequested.remove(session) != nil { waitForReply(turn, of: session, requested: true) }
             if let prompt { followHosted(turn, of: session, prompt: prompt) }
             if let pending = nextTyped.removeValue(forKey: session), let typedAt = pending.typedAt,
-               now().timeIntervalSince(typedAt) <= typedTurnWindow {
+               pending.prompt.map { $0 == prompt } ?? (now().timeIntervalSince(typedAt) <= typedTurnWindow) {
                 waitForReply(turn, of: session, requested: false)
                 awaitedRequests[session] = pending.request
             }
@@ -1101,6 +1141,7 @@ final class AgentHub {
             running[session] = now()
             turns[session] = turn
         case .turnComplete(let session, let reason, let answer):
+            absorbed[session] = nil
             handingOff[session] = nil
             for (id, entry) in requests where entry.message.conversation == session && entry.turnDuringHandOff != nil {
                 requests[id]?.turnDuringHandOff = .ended
@@ -1420,7 +1461,8 @@ final class AgentHub {
 
     private func state(of id: String) -> AgentLiveState? {
         guard let conversation = directory.conversations.first(where: { $0.id == id }), conversation.connectorLive else { return nil }
-        if handingOff[id] != nil || running[id] != nil { return .working }
+        if handingOff[id] != nil { return .working }
+        if running[id] != nil, conversation.state == .idle { return .working }
         return conversation.state
     }
 
@@ -1461,12 +1503,17 @@ final class AgentHub {
         if late, let fact = deliveryFact(of: request) {
             Log.agents.notice("delivery confirmed late: \(fact.value, privacy: .public)")
         }
-        if let conversation = requests[request]?.message.conversation, !turn.isEmpty, awaitingResult[conversation] != turn {
+        let conversation = requests[request]?.message.conversation
+        if let conversation, !turn.isEmpty, awaitingResult[conversation] != turn {
             stopAwaiting(conversation)
             awaitingResult[conversation] = turn
             awaitedRequests[conversation] = request
         }
         settle(request, .sent(requests[request]?.handle ?? ""))
+        if let conversation, handingOff[conversation] == request, features[conversation]?.contains("steer") == true {
+            handingOff[conversation] = nil
+            releaseHeld()
+        }
     }
 
     private func follow(_ turn: String, of conversation: String, for request: String) {
@@ -1512,17 +1559,66 @@ final class AgentHub {
             return
         case "typedSince": settle(request, .kept(handle, reason: .typedSince))
         case "draft": settle(request, .kept(handle, reason: .composing))
-        case "filled": settle(request, Self.filled(handle: handle, features: features[entry.message.conversation]))
+        case "dialog" where entry.box && !entry.timedOut:
+            requests[request] = nil
+            retries[request] = entry.retry + 1
+            _ = outbox.send(entry.message, state: .userDialog)
+            report(.queued(handle, waitingOn: .userDialog), for: request, in: entry.message.conversation)
+            return
+        case "filled" where entry.box:
+            filledWires[request] = entry.wire
+            settle(request, .kept(handle, reason: .inPromptBox(.awaitingReturn)))
+        case "added": settle(request, .kept(handle, reason: .inPromptBox(.besideText)))
+        case "filled":
+            filledWires[request] = entry.wire
+            settle(request, Self.filled(handle: handle, features: features[entry.message.conversation]))
         case "dialog": settle(request, .kept(handle, reason: .dialog))
         default: settle(request, .notSent(handle, reason: Self.notSent(reason)))
         }
         releaseHeld()
     }
 
-    private func handOff(_ message: AgentOutbox.Message, handle: String) {
+    func takesPromptBox(_ id: String, images: [String]) -> Bool {
+        images.isEmpty && checksPromptBox(id) && busyAndFree(id)
+    }
+
+    private func steers(_ id: String) -> Bool {
+        features[id]?.contains("steer") == true && busyAndFree(id)
+    }
+
+    private func busyAndFree(_ id: String) -> Bool {
+        guard handingOff[id] == nil, let conversation = directory.conversations.first(where: { $0.id == id }), conversation.connectorLive
+        else { return false }
+        return conversation.state == .working || (conversation.state == .idle && running[id] != nil)
+    }
+
+    func checksPromptBox(_ id: String) -> Bool { features[id]?.contains("box") == true }
+
+    func promptBoxReady(_ request: String, in conversation: String) async -> Bool {
+        guard let wire = filledWires.removeValue(forKey: request) else { return false }
+        let check = makeId()
+        let wait = promptBoxCheckWait
+        transport.enqueue(.check(id: check, expectedSession: conversation, request: wire, expiresAt: deadline(after: wait)), for: conversation)
+        Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            self?.promptBoxChecks.removeValue(forKey: check)?.resume(returning: false)
+        }
+        return await withCheckedContinuation { promptBoxChecks[check] = $0 }
+    }
+
+    func followSteer(of conversation: String, for request: String, text: String) {
+        let prompt = AgentPromptDigest.of(text)
+        if let early = absorbed.removeValue(forKey: conversation), early.prompt == prompt {
+            follow(early.turn, of: conversation, for: request)
+            return
+        }
+        nextTyped[conversation] = TypedTurn(request: request, typedAt: now(), prompt: prompt)
+    }
+
+    private func handOff(_ message: AgentOutbox.Message, handle: String, box: Bool = false) {
         attempts += 1
         let attempt = attempts
-        let entry = Request(message: message, handle: handle, attempt: attempt, retry: retries.removeValue(forKey: message.id) ?? 0)
+        let entry = Request(message: message, handle: handle, attempt: attempt, retry: retries.removeValue(forKey: message.id) ?? 0, box: box)
         requests[message.id] = entry
         startTrace(message.id, in: message.conversation)
         handingOff[message.conversation] = message.id
@@ -1530,7 +1626,7 @@ final class AgentHub {
             .submit(
                 id: entry.wire, expectedSession: message.conversation, text: message.text,
                 expectedPrompts: prompts[message.conversation], expiresAt: deadline(after: receiptTimeout),
-                images: takesImages(message.conversation) ? message.images : []),
+                images: takesImages(message.conversation) ? message.images : [], box: box),
             for: message.conversation)
         let timeout = receiptTimeout
         Task { [weak self] in
@@ -1618,10 +1714,10 @@ final class AgentHub {
     }
 
     private func releaseHeld() {
-        for release in outbox.release(state: state(of:)) {
+        for release in outbox.release(state: state(of:), canSteer: steers) {
             let handle = handle(of: release.message.conversation)
             switch release.decision {
-            case .handOff:
+            case .handOff, .enterPromptBox:
                 handOff(release.message, handle: handle ?? "")
             case .needsReview(let reason):
                 retries[release.message.id] = nil
@@ -1653,7 +1749,7 @@ final class AgentHub {
     }
 
     static func filled(handle: String, features: Set<String>?) -> AgentReceipt {
-        features?.contains("fill") == true ? .kept(handle, reason: .inPromptBox) : .notSent(handle, reason: .stopped)
+        features?.contains("fill") == true ? .kept(handle, reason: .inPromptBox(.afterStop)) : .notSent(handle, reason: .stopped)
     }
 
     private static func notSent(_ reason: String) -> AgentReceipt.NotSentReason {

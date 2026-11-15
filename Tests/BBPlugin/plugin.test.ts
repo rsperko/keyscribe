@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { keyscribe, promptDigest, readAloudReply, shownThread, waitingFor, type Bb, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
+import { keyscribe, promptDigest, readAloudReply, rowLabel, shownThread, waitingFor, type Bb, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
 
 type Request = { path: string; body: any; auth: string; answer: (status: number, text?: string) => void; settled: boolean; cancelled: boolean }
 
@@ -26,6 +26,7 @@ function harness(options: { threads?: { id: string; status: string }[]; history?
   const history = options.history ?? {}
   const interactions: Record<string, string | Error> = {}
   const checked: string[] = []
+  let labelChanges = 0
   const bb: Bb = {
     listThreads: async () => threads,
     history: async (thread) => history[thread] ?? [],
@@ -75,6 +76,7 @@ function harness(options: { threads?: { id: string; status: string }[]; history?
       watchers.push(watcher)
       return () => { watcher.stopped = true }
     },
+    labelled: () => { labelChanges += 1 },
   }
   const settle = async () => { for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r)) }
   const advance = async (ms: number) => {
@@ -108,7 +110,7 @@ function harness(options: { threads?: { id: string; status: string }[]; history?
   }
   return {
     bb, host, files, requests, open, sent, emit, settle, advance, answerHellos, answerEvents, timers, logs, configuration, watchers, appStarted,
-    interactions, checked,
+    interactions, checked, labelChanges: () => labelChanges,
   }
 }
 
@@ -136,7 +138,7 @@ test("says hello for every thread under its conversation key with what it knows,
   assert.equal(a.installation, "I9")
   assert.equal(a.pid, 0)
   assert.equal(a.idle, true)
-  assert.deepEqual(a.features, ["promptDigest", "readiness", "shown", "notify"])
+  assert.deepEqual(a.features, ["promptDigest", "readiness", "shown", "notify", "label"])
   assert.equal(hellos.find((b) => b.session === session("thr_b")).idle, false)
   assert.equal(new Set(hellos.map((b) => b.connection)).size, 1)
   assert.equal(new Set(hellos.map((b) => b.instance)).size, 2)
@@ -236,6 +238,37 @@ test("every command a poll brings is acknowledged by the thread it was for, and 
   const ack = h.sent("ack")
   assert.deepEqual(ack.map((b) => [b.request, b.instance, b.connection]), [["c1", member.instance, poll.body.connection]])
   assert.equal(h.open("poll").length, 1)
+})
+
+test("the name the app gives a thread is kept for that thread, acknowledged, and redrawn", async () => {
+  const h = await connected()
+  assert.deepEqual(h.plugin.labels(["thr_a", "thr_b"]), { thr_a: null, thr_b: null })
+  h.open("poll")[0].answer(200, JSON.stringify({ commands: [{ op: "status", id: "c1", expectedSession: session("thr_b"), text: "“scratch repo blue”" }], unknown: [] }))
+  await h.settle()
+  assert.deepEqual(h.plugin.labels(["thr_a", "thr_b", "thr_gone"]), { thr_a: null, thr_b: "“scratch repo blue”", thr_gone: null })
+  assert.equal(h.labelChanges(), 1)
+  assert.deepEqual(h.sent("ack").map((b) => b.request), ["c1"])
+  h.open("poll")[0].answer(200, JSON.stringify({ commands: [{ op: "status", id: "c2", expectedSession: session("thr_b"), text: "“scratch repo blue”" }], unknown: [] }))
+  await h.settle()
+  assert.equal(h.labelChanges(), 1)
+  h.open("poll")[0].answer(200, JSON.stringify({ commands: [{ op: "status", id: "c3", expectedSession: session("thr_b"), text: 7 }], unknown: [] }))
+  await h.settle()
+  assert.deepEqual(h.plugin.labels(["thr_b"]), { thr_b: "“scratch repo blue”" })
+  await h.emit("thread.archived", { thread: { id: "thr_b" } })
+  assert.deepEqual(h.plugin.labels(["thr_b"]), { thr_b: null })
+})
+
+test("a name is drawn beside a thread only when it says something its bb title does not", () => {
+  assert.equal(rowLabel("“scratch repo blue”", null), "scratch repo blue")
+  assert.equal(rowLabel("“scratch repo blue”", "what time is it?"), "scratch repo blue")
+  assert.equal(rowLabel("“Docs”", "  docs "), null)
+  assert.equal(rowLabel("“Docs  Fix”", "docs fix"), null)
+  assert.equal(rowLabel("“ks probe claude”", "ks-probe claude"), null)
+  assert.equal(rowLabel("“ks probe”", "Ks: probe!"), null)
+  assert.equal(rowLabel("“ks probe two”", "ks-probe claude"), "ks probe two")
+  assert.equal(rowLabel(null, "docs"), null)
+  assert.equal(rowLabel(undefined, null), null)
+  assert.equal(rowLabel("“ ”", null), null)
 })
 
 test("a thread the bridge no longer knows says hello again on its own", async () => {

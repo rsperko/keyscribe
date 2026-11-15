@@ -108,6 +108,7 @@ struct CheatSheetPhraseTests {
             "rename this session to backend": .rename("backend"),
             "name this conversation backend": .rename("backend"),
             "call this conversation backend": .rename("backend"),
+            "rename conversation to backend": .rename("backend"),
             "repeat that": .intent(.repeatSummary),
             "that sounded wrong": .intent(.keepReply),
             "cancel": .intent(.cancel),

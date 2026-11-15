@@ -52,6 +52,7 @@ public protocol AgentHost: AnyObject {
     func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen
     func front(among locations: [AgentHostLocation], reported: AgentHostLocation?) async -> AgentHostFront
     func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery
+    func rename(_ location: AgentHostLocation, to name: String) async -> Bool
 }
 
 extension AgentHost {
@@ -63,6 +64,7 @@ extension AgentHost {
     public func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
         .unsupported
     }
+    public func rename(_ location: AgentHostLocation, to name: String) async -> Bool { false }
 }
 
 public struct AgentHostIntegration: Sendable {

@@ -127,7 +127,7 @@ led_write()  { printf '%s\t%s\t%s\n' "$2" "$3" "$4" > "$LEDGER_DIR/$1"; }
 
 only_match() { [ -z "$ONLY" ] && return 0; case ",${ONLY//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
 force_id()   { [ "$FORCE_ALL" = 1 ] && return 0; case ",${FORCE_LIST//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
-CONNECTOR_CHECKS="a-connector-tests a-pi-connector-tests"
+CONNECTOR_CHECKS="a-connector-tests a-pi-connector-tests a-bb-plugin-tests"
 # The pre-notarize phase runs only these — swift test + Tier B. It must NOT run the Tier A packaging /
 # notarization checks (they need the notarized artifact, which does not exist yet) or Tier C (human).
 PRE_CHECKS=" a-deps a-swift-test $CONNECTOR_CHECKS a-catalog-contract a-min-xcode b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
@@ -184,7 +184,7 @@ REQ_RELEASE="a-gatekeeper a-staple a-entitlements a-dmg a-sparkle c-plain-dictat
 
 if [ "$LIST_ONLY" = 1 ]; then
   bold "checks (tier A/B automated, tier C human):"
-  for id in $REQ_CORE $REQ_RELEASE b-coverage b-capture-probe c-trigger-matrix c-qwen-hardened c-edit-in-place c-quarantine; do
+  for id in $REQ_CORE $REQ_RELEASE b-coverage b-capture-probe c-trigger-matrix c-qwen-hardened c-edit-in-place c-coding-agents c-quarantine; do
     printf '  %s\n' "$id"
   done
   exit 0
@@ -609,7 +609,7 @@ else
   AS="$(sig_artifact)"
   if will_run c-plain-dictation "$AS" || will_run c-private-rewrite "$AS" \
      || will_run c-trigger-matrix "$AS" || will_run c-qwen-hardened "$AS" \
-     || will_run c-edit-in-place "$AS" || will_run c-quarantine "$AS"; then
+     || will_run c-edit-in-place "$AS" || will_run c-coding-agents "$AS" || will_run c-quarantine "$AS"; then
     info "This runs against a THROWAWAY config dir — your real KeyScribe config, modes, and history are"
     info "untouched, and this sandbox is deleted when preflight exits. Shared (and safe): downloaded"
     info "models (read-only), and the Mic/Accessibility grants + any BYOK key (bundle-scoped, additive)."
@@ -704,6 +704,17 @@ else
     if ask "  edit-in-place (select text → replace-selection mode) rewrites the selection"; then result pass "edit-in-place"; else result fail "edit-in-place did not replace the selection"; fi
   }
   guard c-edit-in-place "$AS" chk_c_edit_in_place
+
+  chk_c_coding_agents() {
+    if ! ask "Changed coding-agent delivery, connectors, or the bb plugin this release?"; then result skip "coding agents (agent code unchanged)"; return; fi
+    info "  Expected: give each agent you ship a long task (a Bash loop that waits for a file), then dictate to it while it runs."
+    info "  Claude Code in front: the dictation shows as your own queued prompt and the agent answers it after the current step."
+    info "  Pi or a bb thread, not in front: the HUD says Sent and the agent answers after the current step."
+    info "  Any agent stopped on an approval: dictating never answers it; the HUD says it waits for approval; after you answer, the message goes through."
+    info "  bb: an idle thread starts a turn; renaming a thread by voice sets its bb title, and its sidebar chip disappears."
+    if ask "  every agent took the dictation mid-turn, and no approval was ever answered by a dictation"; then result pass "coding agents"; else result fail "a coding agent check failed"; fi
+  }
+  guard c-coding-agents "$AS" chk_c_coding_agents
 
   chk_c_quarantine() {
     if ! ask "Validate quarantined launch of the repo-local release app too?"; then result skip "quarantine launch skipped (spctl in Tier A already proved notarization)"; return; fi

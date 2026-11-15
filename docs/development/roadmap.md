@@ -13,6 +13,8 @@ intentionally short. It records work with a concrete user outcome, not a running
 - Continue visual and keyboard/VoiceOver checks of first run, the menu bar, Settings, HUD, History,
   and error recovery. The interaction contract is
   [`ui_design.md`](ui_design.md); treat it as the source of truth rather than historical UI plans.
+- Recheck bb's thread names in its sidebar after each bb update. They are drawn through bb's experimental row
+  metadata, which bb can change or drop; dictation does not depend on them.
 
 ### Make the writing loop better
 

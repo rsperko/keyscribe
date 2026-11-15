@@ -399,7 +399,7 @@ final class AgentBridgeServer: @unchecked Sendable {
                 self?.queue.async { self?.respond(fd, status: 200, body: Data(#"{"ok":true,"spoken":\#(spoken)}"#.utf8)) }
             }
             return
-        case .typed, .turnStarted, .turnComplete, .undelivered, .title, .waiting, .checked, .shown:
+        case .typed, .turnStarted, .absorbed, .turnComplete, .undelivered, .title, .waiting, .checked, .shown:
             break
         }
         onEvent(event)

@@ -266,7 +266,7 @@ test("a session start says hello with the process, its directory, its name and w
   assert.equal(hello.cwd, "/work")
   assert.equal(hello.session, "s1")
   assert.equal(hello.title, "frontend")
-  assert.deepEqual(hello.features, ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check"])
+  assert.deepEqual(hello.features, ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check", "steer"])
   assert.equal(hello.prompts, 0)
   assert.equal(hello.idle, true)
   assert.equal(hello.gap, false)
@@ -828,43 +828,56 @@ test("a message the agent rejects outright is refused with its words", async () 
   assert.deepEqual(h.replies().map((b) => [b.op, b.reason]), [["ack", undefined], ["refused", "agent is busy"]])
 })
 
-test("dictation is refused while a turn runs and accepted again once it settles", async () => {
+test("dictation sent while a turn runs steers it, and is confirmed once Pi takes it in", async () => {
   const h = harness()
   await h.connect()
   h.live.idle = false
   h.emit("agent_start")
   await h.settle()
-  await h.deliver([h.submit("r1")])
-  assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["working"])
-  assert.equal(h.sends.length, 0)
-  await h.finished()
-  await h.answerEvents()
-  assert.equal(h.open("/poll").length, 1)
-  await h.deliver([h.submit("r2")])
+  await h.deliver([h.submit("r1", "use the other file")])
   assert.equal(h.sends.length, 1)
+  assert.deepEqual(h.sends[0].options, { deliverAs: "steer" })
+  assert.deepEqual(h.replies().map((b) => b.op), ["ack"])
+  h.emit("input", { text: h.sends[0].text, source: "extension", streamingBehavior: "steer" })
+  await h.settle()
+  await h.answerEvents()
+  const submitted = h.replies().find((b) => b.op === "submitted")
+  assert.equal(submitted?.request, "r1")
+  assert.equal(submitted?.turn, h.turn(1))
 })
 
-test("a dictation refused as working is delivered when sent again as its next attempt, never under its first id", async () => {
+test("a steer is confirmed only by its own mark, never by another message Pi takes in", async () => {
   const h = harness()
   await h.connect()
   h.live.idle = false
   h.emit("agent_start")
   await h.settle()
-  await h.deliver([h.submit("r1")])
-  await h.finished()
+  await h.deliver([h.submit("r1", "use the other file")])
+  h.emit("input", { text: "use the other file", source: "extension", streamingBehavior: "steer" })
+  await h.settle()
   await h.answerEvents()
-  await h.deliver([h.submit("r1")])
-  assert.equal(h.sends.length, 0)
-  await h.deliver([h.submit("r1~1")])
-  assert.equal(h.sends.length, 1)
+  assert.deepEqual(h.replies().map((b) => b.op), ["ack"])
 })
 
-test("an agent that is busy without a known turn still refuses as working", async () => {
+test("an agent that is busy without a known turn is steered", async () => {
   const h = harness()
   await h.connect()
   h.live.idle = false
   await h.deliver([h.submit("r1")])
-  assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["working"])
+  assert.equal(h.sends.length, 1)
+  assert.deepEqual(h.sends[0].options, { deliverAs: "steer" })
+})
+
+test("dictation while a turn waits on a prompt of its own is refused as a dialog, never steered into it", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.idle = false
+  h.emit("agent_start")
+  h.emit("ui_prompt_start", { kind: "confirm", title: "Allow?" })
+  await h.settle()
+  await h.deliver([h.submit("r1")])
+  assert.equal(h.sends.length, 0)
+  assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["dialog"])
 })
 
 test("a second message is refused as working while the first awaits its receipt", async () => {
@@ -1091,7 +1104,7 @@ test("a prompt typed during the hold refuses the dictation as typed since", asyn
   assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["typedSince"])
 })
 
-test("a run starting during the hold refuses the dictation as working", async () => {
+test("a run starting during the hold steers the dictation into it", async () => {
   const h = harness()
   await h.connect()
   await h.key()
@@ -1099,8 +1112,8 @@ test("a run starting during the hold refuses the dictation as working", async ()
   h.live.idle = false
   h.emit("agent_start")
   await h.advance(3_000)
-  assert.equal(h.sends.length, 0)
-  assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["working"])
+  assert.equal(h.sends.length, 1)
+  assert.deepEqual(h.sends[0].options, { deliverAs: "steer" })
 })
 
 test("a session replaced during the hold never submits", async () => {

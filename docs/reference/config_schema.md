@@ -313,7 +313,8 @@ a hello on any other protocol is refused with `426` and is never registered or s
   (`/new`, `/resume`, `/fork`). The start time recorded for such a session is its process's start time; a
   session whose start cannot be read has none, so its name is not remembered across a restart, until a later
   hello reads it. A hello for a known session from another process takes that process's start time.
-  KeyScribe uses only what was announced: `label` for the status-line label naming the conversation, and
+  KeyScribe uses only what was announced: `label` for the label naming the conversation (an agent's status
+  line, a bb thread's sidebar row), and
   `focus` for selecting the connector's own terminal surface during Open when the terminal cannot be
   told which surface from outside (cmux, when no process shows the agent's surface id). A connector that lacks
   `focus` is reported as outdated, with the steps to update it. With `focusDefinitions`, a `focus` command
@@ -342,6 +343,10 @@ a hello on any other protocol is refused with `426` and is never registered or s
   Disconnecting a connected conversation sends it `quiet`; reconnecting sends `admit`, and the connector says
   a full hello again without a reload. Until `names.json` can be read, every conversation is treated as
   disconnected.
+- **Several connectors can answer for one conversation** (a host's plugin and the connector of the agent
+  running inside it). A command that sets state they all keep (`status`, `quiet`, `admit`;
+  `AgentCommand.isState`) goes to each of them; any other command needs a single answer, so it goes to the
+  one connector active for the conversation, and waits while two are.
 - **Each hello opens a new connection.** It carries a fresh `connection` id, and every later poll, event
   and reply carries that id and the connector's `instance`. KeyScribe answers `409` to anything from a
   connection that a newer hello replaced: it is not passed on, and it does not count as that connector
@@ -399,7 +404,26 @@ a hello on any other protocol is refused with `426` and is never registered or s
   connector collects it is never handed over and is reported as not sent (`expired`); one the connector
   had already collected stays uncertain.
 - **A submit is refused as `working`** when a turn is already running in that session; KeyScribe holds
-  the take and sends it when the turn finishes.
+  the take and sends it when the turn finishes. A connector whose hello lists `steer` takes it during the turn
+  instead, the way typing there would (Pi's sends it with `deliverAs: "steer"` and confirms it when Pi accepts
+  it), and refuses as `working` only while an earlier dictation still awaits its receipt.
+- **A submit with `box: true` goes in the prompt box while a turn runs.** KeyScribe sets it only for the
+  conversation in front, while its agent is working, and only for a connector whose hello lists `box`. The
+  connector applies every other check, then adds the text to the empty prompt box and refuses the submit as
+  `filled`, so the agent takes it as the user's own typed prompt once KeyScribe presses Return. It refuses as
+  `dialog` when the agent's dialog holds the keys, and as `working` when the box will not take the text or the
+  text starts with `/` or `!` (in the box, Return would run them as a command or in the shell; the box also drops
+  the invisible character that keeps a submitted slash from running). Text the user typed as it went in refuses
+  it as `added`, with both left in the box. With no turn running, it is an ordinary submit.
+- **Return waits for the connector to say the box is ready.** Right before pressing Return for a filled box,
+  KeyScribe sends a connector that lists `box` a `check` naming the request; the `checked` answer carries
+  `promptBox`: `ready` while the box holds exactly the dictated text and takes the keys (no dialog of the
+  agent's holds them), `changed` or `asking` otherwise. Anything but `ready`, or no answer within a second,
+  leaves the message in the box. A `ready` answer holds any approval, question or MCP input request the agent
+  decides on for up to a second, until the user's prompt arrives, so its dialog is drawn after the Return.
+- **`absorbed` says a prompt-box message joined the running turn.** When the running turn takes in the text a
+  `box` submit filled, the connector sends `absorbed` with the session, that `turn`, and the `prompt` digest of the
+  text; KeyScribe then follows that turn's reply for the take.
 - **A submit is refused as `draft`** when the agent's prompt box holds text the user has not sent; the
   connector leaves that text in place and KeyScribe keeps the take for review. The connector checks the
   prompt count, a running turn, and the session again after reading the box, right before it submits.

@@ -183,11 +183,227 @@ struct AgentHubTests {
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
         hub.handle(.refused(request: "r1", reason: "filled"))
-        #expect(await receipt == .kept("keyscribe", reason: .inPromptBox))
+        #expect(await receipt == .kept("keyscribe", reason: .inPromptBox(.afterStop)))
+    }
+
+    private func working(_ features: [String] = ["readiness", "fill", "box"]) -> AgentEvent.Hello {
+        .init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: features, idle: false, gap: false)
+    }
+
+    @Test func aDictationForTheWorkingConversationInFrontGoesToItsPromptBox() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("use the other file", to: "claude:s1", inFront: true)
+        await untilSent(transport, sentBefore + 1)
+        #expect(transport.sent.last.map(\.0)
+            == .submit(id: "r1", expectedSession: "claude:s1", text: "use the other file", expiresAt: Self.deadline, box: true))
+        hub.handle(.refused(request: "r1", reason: "filled"))
+        #expect(await receipt == .kept("keyscribe", reason: .inPromptBox(.awaitingReturn)))
+    }
+
+    private func steering(_ state: String = "busy") -> AgentEvent.Hello {
+        .init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0,
+              features: ["readiness", "steer"], idle: false, gap: false)
+    }
+
+    @Test func aDictationForAWorkingConversationWhoseAgentSteersIsHandedOffWhereverItIs() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, steering())
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("use the other file", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        #expect(transport.sent.last.map(\.0) == .submit(id: "r1", expectedSession: "claude:s1", text: "use the other file", expiresAt: Self.deadline))
+        hub.handle(.submitted(request: "r1", turn: "t1"))
+        #expect(await receipt == .sent("keyscribe"))
+    }
+
+    @Test func aSteeringAgentWaitingOnTheUserStillHoldsTheDictation() async {
+        let (hub, transport, registry, _) = makeHub()
+        registry.set("s1", status: "waiting", waitingFor: "permission prompt")
+        transport.live.insert("claude:s1")
+        await hub.rescan()
+        greet(hub, steering())
+        #expect(await hub.deliver("use the other file", to: "claude:s1") == .queued("keyscribe", waitingOn: .approval))
+        #expect(transport.sent.isEmpty)
+    }
+
+    @Test func aSteerNeverOvertakesADictationStillBeingHandedOff() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, steering())
+        let sentBefore = transport.sent.count
+        async let first = hub.deliver("first", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        #expect(await hub.deliver("second", to: "claude:s1") == .queued("keyscribe"))
+        #expect(transport.sent.count == sentBefore + 1)
+        hub.handle(.submitted(request: "r1", turn: "t1"))
+        _ = await first
+    }
+
+    @Test func aDictationHeldBehindASteerIsSteeredOnceTheFirstIsConfirmedWithoutWaitingForTheTurn() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, steering())
+        let sentBefore = transport.sent.count
+        async let first = hub.deliver("first", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        #expect(await hub.deliver("second", to: "claude:s1") == .queued("keyscribe"))
+        hub.handle(.submitted(request: "r1", turn: "t1"))
+        _ = await first
+        await untilSent(transport, sentBefore + 2)
+        #expect(transport.sent.last.map(\.0) == .submit(id: "r2", expectedSession: "claude:s1", text: "second", expiresAt: Self.deadline))
+    }
+
+    @Test func aDictationAddedBesideTextTheUserTypedIsKeptForThemToReview() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("use the other file", to: "claude:s1", inFront: true)
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.refused(request: "r1", reason: "added"))
+        #expect(await receipt == .kept("keyscribe", reason: .inPromptBox(.besideText)))
+    }
+
+    @Test func aPromptBoxHeldByADialogQueuesTheDictationAsWaitingOnIt() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("use the other file", to: "claude:s1", inFront: true)
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.refused(request: "r1", reason: "dialog"))
+        #expect(await receipt == .queued("keyscribe", waitingOn: .userDialog))
+    }
+
+    @Test(arguments: [("ready", true), ("changed", false), ("asking", false)])
+    func aFilledPromptBoxIsReadyOnlyWhenTheConnectorSaysSo(_ promptBox: String, _ ready: Bool) async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("use the other file", to: "claude:s1", inFront: true)
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.refused(request: "r1", reason: "filled"))
+        _ = await receipt
+        async let answer = hub.promptBoxReady("r1", in: "claude:s1")
+        await untilSent(transport, sentBefore + 2)
+        guard case .check(let check, "claude:s1", "r1", _)? = transport.sent.last?.0 else { Issue.record("no check"); return }
+        hub.handle(.checked(request: "r1", check: check, report: .init(state: .refused, reason: "filled", promptBox: promptBox)))
+        #expect(await answer == ready)
+    }
+
+    @Test func aSteerTheRunningTurnTookInBeforeItsReturnWasConfirmedStillHasThatTurnsReply() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("use the other file")))
+        hub.followSteer(of: "claude:s1", for: "r9", text: "use the other file")
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Used it."))
+        #expect(origins == ["r9"])
+    }
+
+    @Test func aPromptBoxCheckNobodyAnswersIsNotReady() async {
+        let (hub, transport, registry, _) = makeHub()
+        hub.promptBoxCheckWait = .milliseconds(50)
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("use the other file", to: "claude:s1", inFront: true)
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.refused(request: "r1", reason: "filled"))
+        _ = await receipt
+        #expect(await hub.promptBoxReady("r1", in: "claude:s1") == false)
+        #expect(await hub.promptBoxReady("never-filled", in: "claude:s1") == false)
+    }
+
+    @Test func aDictationForTheWorkingConversationInFrontThatThePromptBoxTurnsAwayWaitsForTheTurn() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("use the other file", to: "claude:s1", inFront: true)
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.refused(request: "r1", reason: "working"))
+        #expect(await receipt == .queued("keyscribe"))
+    }
+
+    @Test func aDictationForAWorkingConversationNotInFrontWaitsForTheTurn() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        #expect(await hub.deliver("use the other file", to: "claude:s1", inFront: false) == .queued("keyscribe"))
+        #expect(transport.sent.isEmpty)
+    }
+
+    @Test func aConnectorThatNeverSaidItTakesThePromptBoxIsNeverAskedTo() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working(["readiness", "fill"]))
+        #expect(await hub.deliver("use the other file", to: "claude:s1", inFront: true) == .queued("keyscribe"))
+        #expect(transport.sent.isEmpty)
+    }
+
+    @Test func aConversationWaitingOnTheUserHoldsADictationEvenInFront() async {
+        let (hub, transport, registry, _) = makeHub()
+        registry.set("s1", status: "waiting", waitingFor: "permission prompt")
+        transport.live.insert("claude:s1")
+        await hub.rescan()
+        greet(hub, working())
+        #expect(await hub.deliver("use the other file", to: "claude:s1", inFront: true) == .queued("keyscribe", waitingOn: .approval))
+        #expect(transport.sent.isEmpty)
+    }
+
+    @Test func aRunningTurnWaitingForApprovalSaysTheDictationWaitsOnTheApproval() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        registry.set("s1", status: "waiting", waitingFor: "permission prompt")
+        await hub.rescan()
+        #expect(await hub.deliver("use the other file", to: "claude:s1", inFront: true) == .queued("keyscribe", waitingOn: .approval))
+        #expect(transport.sent.isEmpty)
+    }
+
+    @Test func aDictationInFrontNeverOvertakesOneAlreadyHeldForTheConversation() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        #expect(await hub.deliver("first", to: "claude:s1", inFront: false) == .queued("keyscribe"))
+        #expect(await hub.deliver("second", to: "claude:s1", inFront: true) == .queued("keyscribe"))
+        #expect(transport.sent.isEmpty)
+    }
+
+    @Test func aDictationInFrontNeverOvertakesOneStillBeingHandedOff() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0,
+                                features: ["readiness", "fill", "box"], idle: true, gap: false)))
+        let sentBefore = transport.sent.count
+        async let first = hub.deliver("first", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        #expect(await hub.deliver("second", to: "claude:s1", inFront: true) == .queued("keyscribe"))
+        #expect(transport.sent.count == sentBefore + 1)
+        hub.handle(.submitted(request: "r1", turn: ""))
+        _ = await first
+    }
+
+    @Test func aDictationWithAnAttachedImageWaitsForTheTurnRatherThanLoseTheAttachment() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working(["readiness", "fill", "box", "images"]))
+        #expect(await hub.deliver("see /tmp/a.png", to: "claude:s1", images: ["/tmp/a.png"], inFront: true) == .queued("keyscribe"))
+        #expect(transport.sent.isEmpty)
     }
 
     @Test func onlyAConnectorThatSaidItFillsThePromptBoxCanLeaveAMessageThere() {
-        #expect(AgentHub.filled(handle: "docs", features: ["focus", "fill"]) == .kept("docs", reason: .inPromptBox))
+        #expect(AgentHub.filled(handle: "docs", features: ["focus", "fill"]) == .kept("docs", reason: .inPromptBox(.afterStop)))
         #expect(AgentHub.filled(handle: "docs", features: ["focus"]) == .notSent("docs", reason: .stopped))
         #expect(AgentHub.filled(handle: "docs", features: nil) == .notSent("docs", reason: .stopped))
     }
@@ -859,7 +1075,7 @@ struct AgentHubTests {
         let sentBefore = transport.sent.count
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
-        if case .submit(let id, _, _, _, _, _) = transport.sent.last?.0 { hub.handle(.submitted(request: id, turn: turn)) }
+        if case .submit(let id, _, _, _, _, _, _) = transport.sent.last?.0 { hub.handle(.submitted(request: id, turn: turn)) }
         _ = await receipt
         hub.handle(.turnStarted(session: "claude:s1", turn: turn))
     }
@@ -1025,7 +1241,7 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
-        if case .submit(let id, _, _, _, _, _) = transport.sent.last?.0 { hub.handle(.refused(request: id, reason: "stopped")) }
+        if case .submit(let id, _, _, _, _, _, _) = transport.sent.last?.0 { hub.handle(.refused(request: id, reason: "stopped")) }
         #expect(await receipt == .notSent("keyscribe", reason: .stopped))
     }
 

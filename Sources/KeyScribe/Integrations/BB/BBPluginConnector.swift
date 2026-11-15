@@ -1,6 +1,35 @@
 import Foundation
 import KeyScribeKit
 
+enum BBSidebarSwitch: String, CaseIterable {
+    case experiment, rowMetadata
+
+    var read: [String] {
+        switch self {
+        case .experiment: ["settings", "show", "--json"]
+        case .rowMetadata: ["thread-list", "prefs", "get", "showRowMetadata", "--json"]
+        }
+    }
+
+    var readSubcommand: String { self == .experiment ? "settings show" : "thread-list prefs get" }
+    var setSubcommand: String { self == .experiment ? "settings experiment" : "thread-list prefs set" }
+
+    func set(_ on: Bool) -> [String] {
+        switch self {
+        case .experiment: ["settings", "experiment", "threadRowMetadata", on ? "true" : "false", "--json"]
+        case .rowMetadata: ["thread-list", "prefs", "set", "showRowMetadata", on ? "true" : "false", "--json"]
+        }
+    }
+
+    func isOn(_ stdout: Data) -> Bool? {
+        guard let object = BBPluginFiles.json(stdout) else { return nil }
+        switch self {
+        case .experiment: return (object["experiments"] as? [String: Any])?["threadRowMetadata"] as? Bool
+        case .rowMetadata: return object["key"] as? String == "showRowMetadata" ? object["value"] as? Bool : nil
+        }
+    }
+}
+
 enum BBPluginFiles {
     static let names = ["package.json", "server.ts", "keyscribe.ts", "app.tsx", "PLUGIN_OVERVIEW.md"]
 
@@ -19,6 +48,8 @@ enum BBPluginFiles {
     static func version(for sources: [String: String]) -> String {
         ConnectorResources.version(for: names.map { "\($0)\n\(sources[$0] ?? "")" }.joined(separator: "\n"))
     }
+
+    static func json(_ stdout: Data) -> [String: Any]? { (try? JSONSerialization.jsonObject(with: stdout)) as? [String: Any] }
 
     static func manifest(_ text: String, id: String) -> String {
         guard var manifest = (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] else { return text }
@@ -189,6 +220,42 @@ final class BBPluginConnector: AgentConnector {
         } else {
             try await call(tool, ["plugin", "install", folder.path, "--yes", "--json"], subcommand: "plugin install", target: target)
         }
+        await showNamesInSidebar(tool, target: target)
+    }
+
+    private var sidebarURL: URL { pluginDir.appendingPathComponent("sidebar.json") }
+
+    private func turnedOn() -> [BBSidebarSwitch]? {
+        guard let data = FileManager.default.contents(atPath: sidebarURL.path),
+              let names = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["turnedOn"] as? [String]
+        else { return nil }
+        return names.compactMap(BBSidebarSwitch.init(rawValue:))
+    }
+
+    private func showNamesInSidebar(_ tool: String, target: ConnectorTarget) async {
+        guard turnedOn() == nil else { return }
+        var states: [BBSidebarSwitch: Bool] = [:]
+        for item in BBSidebarSwitch.allCases {
+            guard let read = try? await output(tool, item.read, subcommand: item.readSubcommand, target: target), read.status == 0,
+                  let on = item.isOn(read.stdout)
+            else { return }
+            states[item] = on
+        }
+        var changed: [BBSidebarSwitch] = []
+        for item in BBSidebarSwitch.allCases where states[item] == false {
+            if (try? await call(tool, item.set(true), subcommand: item.setSubcommand, target: target)) != nil { changed.append(item) }
+        }
+        let record = try? JSONSerialization.data(withJSONObject: ["turnedOn": changed.map(\.rawValue)])
+        try? record?.write(to: sidebarURL, options: .atomic)
+    }
+
+    func undoesOnUninstall(in target: ConnectorTarget) -> Bool { !(turnedOn() ?? []).isEmpty }
+
+    func uninstall(tool: String, target: ConnectorTarget, undoing: Bool) async throws {
+        if undoing {
+            for item in turnedOn() ?? [] { try? await call(tool, item.set(false), subcommand: item.setSubcommand, target: target) }
+        }
+        try await uninstall(tool: tool, target: target)
     }
 
     func update(tool: String, target: ConnectorTarget) async throws {
@@ -251,5 +318,8 @@ final class BBPluginConnector: AgentConnector {
                 : "The plugin was removed outside \(Branding.appName), so \(count) bb threads are still connected until bb restarts the plugin."
         },
         setupTitle: "Plugin", describesUse: false,
-        purpose: "Dictate to the bb thread you are looking at and hear its replies read aloud.")
+        purpose: "Dictate to the bb thread you are looking at and hear its replies read aloud.",
+        installNote: "To show the name to say for each thread, it turns on bb\u{2019}s thread row details (Organize \u{25B8} Rows \u{25B8} Metadata, which bb still calls experimental); a thread whose bb title already says its name shows nothing extra.",
+        undoOnUninstallLabel: "Uninstall and Turn Off Row Details",
+        undoOnUninstallNote: "\(Branding.appName) turned on bb\u{2019}s thread row details to show thread names. Choose whether to turn them back off; other plugins also draw there.")
 }

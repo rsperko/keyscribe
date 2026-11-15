@@ -13,6 +13,7 @@ public enum AgentRename: Equatable, Sendable {
     public static let nameWords = 4
 
     private static let currentObjects = [["this", "session"], ["this", "conversation"]]
+    private static let looseObjects = [["the", "conversation"], ["conversation"]]
     private static let renameLinks: Set<String> = ["to", "too"]
     private static let clauseEnds: Set<Character> = [".", "!", "?", ";", ":", ","]
 
@@ -28,9 +29,14 @@ public enum AgentRename: Equatable, Sendable {
         let spoken = VoiceCommandGrammar.spokenWords(transcript)
         let words = Array(spoken.dropFirst(spoken.prefix { $0.key == VoiceCommandGrammar.polite }.count))
         let keys = words.map(\.key)
-        guard let verb = keys.first, ["rename", "name", "call"].contains(verb),
-              let object = currentObjects.first(where: { Array(keys.dropFirst().prefix($0.count)) == $0 })
-        else { return nil }
+        guard let verb = keys.first, ["rename", "name", "call"].contains(verb) else { return nil }
+        let names: ([String]) -> Bool = { Array(keys.dropFirst().prefix($0.count)) == $0 }
+        guard let object = currentObjects.first(where: names) else {
+            guard verb == "rename", let loose = looseObjects.first(where: names),
+                  loose.count + 1 < keys.count, renameLinks.contains(keys[loose.count + 1])
+            else { return nil }
+            return .success(transcript[words[loose.count + 1].end...])
+        }
         var commandEnd = object.count
         if verb == "rename" {
             guard commandEnd + 1 < keys.count, renameLinks.contains(keys[commandEnd + 1]) else { return .failure(.noName) }

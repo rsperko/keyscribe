@@ -23,6 +23,29 @@ struct AgentDeliveryPolicyTests {
         #expect(decide { $0.state = state } == expected)
     }
 
+    @Test func aWorkingConversationWhosePromptBoxCanTakeItGetsItEnteredThere() {
+        #expect(decide { $0.state = .working; $0.canEnterPromptBox = true } == .enterPromptBox)
+    }
+
+    @Test(arguments: [AgentLiveState.idle, .waitingApproval, .waitingQuestion, .userDialog, .disconnected])
+    func onlyAWorkingConversationIsEverEnteredInItsPromptBox(state: AgentLiveState) {
+        #expect(decide { $0.state = state; $0.canEnterPromptBox = true } != .enterPromptBox)
+    }
+
+    @Test func aWorkingConversationWhoseAgentSteersGetsItRightAway() {
+        #expect(decide { $0.state = .working; $0.canSteer = true } == .handOff)
+        #expect(decide { $0.state = .working; $0.canSteer = true; $0.canEnterPromptBox = true } == .handOff)
+    }
+
+    @Test(arguments: [AgentLiveState.waitingApproval, .waitingQuestion, .userDialog, .disconnected])
+    func aConversationWaitingOnTheUserIsNeverSteered(state: AgentLiveState) {
+        #expect(decide { $0.state = state; $0.canSteer = true } != .handOff)
+    }
+
+    @Test func aReviewOutranksThePromptBox() {
+        #expect(decide { $0.state = .working; $0.canEnterPromptBox = true; $0.typedSinceQueued = true } == .needsReview(.typedSince))
+    }
+
     @Test func aDisconnectedConversationIsNotSent() {
         #expect(decide { $0.state = .disconnected } == .disconnected)
     }

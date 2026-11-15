@@ -40,6 +40,40 @@ struct AgentCommandQueueTests {
         #expect(queue.isSettled)
     }
 
+    @Test(arguments: [
+        AgentCommand.status(id: "c1", expectedSession: "s1", text: "\u{201C}docs\u{201D}"),
+        .quiet(id: "c1", expectedSession: "s1"), .admit(id: "c1", expectedSession: "s1"),
+    ])
+    func aStateEveryConnectorOfAConversationKeepsReachesEachOfThem(_ state: AgentCommand) {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "plugin", connection: "plugin", at: t0)
+        queue.hello(session: "s1", instance: "agent", connection: "agent", at: at(1))
+        queue.enqueue(state, for: "s1", at: at(2))
+        #expect(queue.poll(session: "s1", instance: "plugin", connection: "plugin", at: at(3)) == [state])
+        #expect(queue.poll(session: "s1", instance: "agent", connection: "agent", at: at(3)) == [state])
+        queue.ack("c1", instance: "plugin", connection: "plugin")
+        queue.ack("c1", instance: "agent", connection: "agent")
+        #expect(queue.isSettled)
+        #expect(queue.undeliverable(at: at(60)).isEmpty)
+    }
+
+    @Test func aRequestForOneAnswerIsNeverHandedToTwoConnectorsOfAConversation() {
+        var queue = AgentCommandQueue()
+        queue.hello(session: "s1", instance: "plugin", connection: "plugin", at: t0)
+        queue.hello(session: "s1", instance: "agent", connection: "agent", at: at(1))
+        queue.enqueue(command("r1"), for: "s1", at: at(2))
+        #expect(queue.poll(session: "s1", instance: "plugin", connection: "plugin", at: at(3)) == [])
+        #expect(queue.poll(session: "s1", instance: "agent", connection: "agent", at: at(3)) == [])
+    }
+
+    @Test func aStateQueuedBeforeAnyConnectorIsActiveGoesToTheFirstOneThatPolls() {
+        var queue = AgentCommandQueue()
+        let label = AgentCommand.status(id: "c1", expectedSession: "s1", text: "\u{201C}docs\u{201D}")
+        queue.enqueue(label, for: "s1", at: t0)
+        queue.hello(session: "s1", instance: "plugin", connection: "plugin", at: at(1))
+        #expect(queue.poll(session: "s1", instance: "plugin", connection: "plugin", at: at(1)) == [label])
+    }
+
     @Test func aQueuedCommandIsDeliveredToThePollingInstance() {
         var queue = AgentCommandQueue()
         queue.hello(session: "s1", instance: "i1", connection: "i1", at: t0)
@@ -486,6 +520,35 @@ struct AgentBridgeCodecTests {
         #expect(!String(decoding: plain, as: UTF8.self).contains("images"))
         let renamed = attached[0].renamingSession { "pi:" + $0 }
         #expect(renamed == .submit(id: "r1", expectedSession: "pi:s1", text: "see /tmp/a.png", expiresAt: .distantFuture, images: ["/tmp/a.png"]))
+    }
+
+    @Test func aSubmitForThePromptBoxSaysSoOnlyWhenItIs() throws {
+        let boxed: [AgentCommand] = [.submit(id: "r1", expectedSession: "s1", text: "x", expiresAt: .distantFuture, box: true)]
+        let data = try AgentBridgeCodec.encode(boxed)
+        #expect(String(decoding: data, as: UTF8.self).contains(#""box":true"#))
+        #expect(try AgentBridgeCodec.decodeCommands(data) == boxed)
+        let plain = try AgentBridgeCodec.encode([.submit(id: "r1", expectedSession: "s1", text: "x", expiresAt: .distantFuture)])
+        #expect(!String(decoding: plain, as: UTF8.self).contains("box"))
+        #expect(try AgentBridgeCodec.decodeCommands(plain) == [.submit(id: "r1", expectedSession: "s1", text: "x", expiresAt: .distantFuture)])
+        #expect(boxed[0].renamingSession { "claude:" + $0 }
+            == .submit(id: "r1", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture, box: true))
+    }
+
+    @Test func aCheckSaysWhetherTheFilledPromptBoxIsReadyForReturn() throws {
+        let ready = #"{"op":"checked","request":"r1","check":"c1","state":"refused","reason":"filled","promptBox":"ready"}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(ready.utf8))
+            == .checked(request: "r1", check: "c1", report: AgentDeliveryReport(state: .refused, reason: "filled", promptBox: "ready")))
+        let none = #"{"op":"checked","request":"r1","check":"c1","state":"seen"}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(none.utf8)) == .checked(request: "r1", check: "c1", report: AgentDeliveryReport(state: .seen)))
+    }
+
+    @Test func aDictationTheRunningTurnTookInIsReportedWithThatTurnAndItsPrompt() throws {
+        let json = #"{"op":"absorbed","session":"s1","turn":"t1","prompt":"abc"}"#
+        let event = try AgentBridgeCodec.decodeEvent(Data(json.utf8))
+        #expect(event == .absorbed(session: "s1", turn: "t1", prompt: "abc"))
+        #expect(event.session == "s1")
+        #expect(event.renamingSession { "claude:" + $0 } == .absorbed(session: "claude:s1", turn: "t1", prompt: "abc"))
+        #expect(throws: (any Error).self) { try AgentBridgeCodec.decodeEvent(Data(#"{"op":"absorbed","session":"s1","turn":"t1"}"#.utf8)) }
     }
 
     @Test func aSubmitWithoutADeadlineIsMalformed() {

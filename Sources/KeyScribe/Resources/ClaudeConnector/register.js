@@ -16,7 +16,7 @@ const stallRetries = 3
 const late = { late: true }
 const unreachable = { unreachable: true }
 const freshSources = ['startup', 'clear', 'fork']
-const features = ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest']
+const features = ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest', 'box']
 const readAloudTool = 'tell_me_when_done'
 
 let config = null
@@ -44,6 +44,11 @@ let nudge = null
 let connection = null
 const admitted = new Set()
 const submissions = new Map()
+const returnGuard = 1000
+const drawGrace = 500
+let guard = null
+let lastAskAt = -Infinity
+let steer = null
 const receipts = []
 let loadedFrom = null
 const appLabel = null
@@ -557,6 +562,62 @@ async function submit($, id, text, expiresAt, gen, expected) {
   return confirm($, id, seenAt)
 }
 
+async function fillBox($, id, text, expiresAt, gen, expected) {
+  if (/^[/!]/.test(text)) return refuse($, gen, id, 'working')
+  const now = await $.clock.now()
+  if (!(now < expiresAt)) return refuse($, gen, id, 'expired')
+  if (!current(expected, gen)) return refuse($, gen, id, 'sessionChanged')
+  if (quiet) return refuse($, gen, id, 'disconnected')
+  track(id, { state: 'handed', handedAt: now })
+  let filled
+  try {
+    filled = await $.prompt.fill({ text, mode: 'append' })
+  } catch (err) {
+    return
+  }
+  if (!filled || !filled.isFilled) return refuse($, gen, id, filled && filled.refusal === 'dialog' ? 'dialog' : 'working')
+  if (filled.text !== text) return refuse($, gen, id, 'added')
+  track(id, { box: text })
+  steer = { text }
+  return refuse($, gen, id, 'filled')
+}
+
+async function promptBoxState($, id) {
+  const sub = submissions.get(id)
+  if (!sub || sub.box === undefined) return undefined
+  armGuard(await $.clock.now())
+  let state
+  try {
+    const box = await $.prompt.fill({ text: '', mode: 'append' })
+    if (!box || !box.isFilled) state = box && box.refusal === 'dialog' ? 'asking' : 'changed'
+    else state = box.text === sub.box ? 'ready' : 'changed'
+  } catch (err) {
+    state = 'changed'
+  }
+  if (state === 'ready' && (await $.clock.now()) - lastAskAt < drawGrace) state = 'asking'
+  if (state !== 'ready') dropGuard()
+  return state
+}
+
+function armGuard(now) {
+  dropGuard()
+  let release
+  const done = new Promise((resolve) => { release = resolve })
+  guard = { until: now + returnGuard, release, done }
+}
+
+function dropGuard() {
+  if (guard) guard.release()
+  guard = null
+}
+
+async function heldForReturn($) {
+  const held = guard
+  if (!held) return
+  const left = held.until - await $.clock.now()
+  if (left > 0) await Promise.race([held.done, $.clock.sleep(left)])
+}
+
 async function refused($, gen, id, text, reason) {
   if (reason === 'stopped' && await leftInEmptyBox($, id, text)) reason = 'filled'
   if (!submissions.has(id)) return
@@ -564,10 +625,12 @@ async function refused($, gen, id, text, reason) {
 }
 
 async function leftInEmptyBox($, id, text) {
+  if (/^\u200b?[/!]/.test(text)) return false
   try {
     const box = await $.prompt.read()
     if (box.text.trim() || !submissions.has(id)) return false
     const filled = await $.prompt.fill({ text })
+    if (filled && filled.isFilled && filled.text === text) track(id, { box: text })
     return Boolean(filled && filled.isFilled)
   } catch (err) {
     return false
@@ -627,16 +690,20 @@ async function handle($, cmd, gen) {
     const hold = () => {
       if (quiet) return 'disconnected'
       if (typeof cmd.expectedPrompts === 'number' && cmd.expectedPrompts !== prompts) return 'typedSince'
-      if (currentTurn) return 'working'
+      if (currentTurn && !cmd.box) return 'working'
       return null
     }
     if (hold()) return refuse($, gen, cmd.id, hold())
     const box = await $.prompt.read()
     if (hold()) return refuse($, gen, cmd.id, hold())
     if (box.text.trim()) return refuse($, gen, cmd.id, 'draft')
+    if (cmd.box && currentTurn) return fillBox($, cmd.id, cmd.text, cmd.expiresAt, gen, cmd.expectedSession)
     return submit($, cmd.id, cmd.text, cmd.expiresAt, gen, cmd.expectedSession)
   }
-  if (cmd.op === 'check') return reply($, gen, { op: 'checked', request: cmd.request || '', check: cmd.id, ...report(cmd.request || '') })
+  if (cmd.op === 'check') {
+    const request = cmd.request || ''
+    return reply($, gen, { op: 'checked', request, check: cmd.id, ...report(request), promptBox: await promptBoxState($, request) })
+  }
   if (cmd.op === 'focus') return focus($, cmd.id, cmd.definition, cmd.expiresAt, gen, cmd.expectedSession)
   if (cmd.op === 'status') {
     ownedStatus = Boolean(cmd.text)
@@ -869,8 +936,33 @@ export function register(on) {
     return result
   })
 
+  on('tool.check', async ($, e, next) => {
+    const verdict = await next(e)
+    if (verdict && verdict.decision === 'ask') {
+      lastAskAt = await $.clock.now()
+      await heldForReturn($)
+    }
+    return verdict
+  })
+
+  on('classic.Elicitation', async ($, e, next) => {
+    await heldForReturn($)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  on('prompt.attachment', { type: 'queued_command' }, async ($, e, next) => {
+    const result = await next(e)
+    if (steer && typeof e.text === 'string' && e.text.includes(steer.text)) {
+      const text = steer.text
+      steer = null
+      observe($, { op: 'absorbed', session, turn: currentTurn || '', prompt: promptDigest(text) })
+    }
+    return result
+  })
+
   on('prompt.submit', ($, e, next) => {
     if (typedByUser(e)) {
+      dropGuard()
       prompts += 1
       observe($, { op: 'typed', session, prompts })
     }
@@ -890,6 +982,7 @@ export function register(on) {
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     if (e.agentId === undefined && (currentTurn === null || currentTurn === e.turnId)) {
+      steer = null
       currentTurn = null
       turnKnown = true
       observe($, { op: 'turnComplete', session, reason: e.reason, answer: boundedAnswer(e.answer) })

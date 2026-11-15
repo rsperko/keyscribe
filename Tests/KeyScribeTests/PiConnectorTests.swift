@@ -171,7 +171,7 @@ struct PiConnectorInstallerTests {
         #expect(!source.contains("KeyScribeDev"))
         #expect(source.contains("const configPath: string | null = null"))
         #expect(source.contains("const loadedFrom: string | null = null"))
-        #expect(source.contains("const features = [\"focus\", \"focusDefinitions\", \"label\", \"readiness\", \"notify\", \"images\", \"check\"]"))
+        #expect(source.contains("const features = [\"focus\", \"focusDefinitions\", \"label\", \"readiness\", \"notify\", \"images\", \"check\", \"steer\"]"))
         #expect(!source.contains("host.env(\""))
         #expect(source.matches(of: try Regex(#"host\.env\(key\)"#)).count == 2)
         #expect(source.contains("const keys = (config && config.environmentKeys) || []"))

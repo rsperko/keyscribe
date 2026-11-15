@@ -74,6 +74,7 @@ struct BBThreadsTests {
     @Test func deliveryReadsSentAndQueuedAndNothingElseAsSettled() {
         #expect(BBThreads.delivery(status: 0, stdout: data(#"{"threadId":"thr_1","ok":true,"delivery":"sent","mode":"queue"}"#)) == .sent)
         #expect(BBThreads.delivery(status: 0, stdout: data(#"{"threadId":"thr_1","ok":true,"delivery":"queued","mode":"queue"}"#)) == .queued)
+        #expect(BBThreads.delivery(status: 0, stdout: data(#"{"threadId":"thr_1","ok":true,"delivery":"sent","mode":"steer"}"#)) == .sent)
         #expect(BBThreads.delivery(status: 0, stdout: data(#"{"threadId":"thr_1","ok":true,"delivery":"scheduled"}"#)) == .unclear)
         #expect(BBThreads.delivery(status: 0, stdout: data(#"{"threadId":"thr_1","ok":true}"#)) == .unclear)
         #expect(BBThreads.delivery(status: 0, stdout: data("garbage")) == .unclear)

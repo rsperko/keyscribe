@@ -73,7 +73,7 @@ struct BBPluginConnectorTests {
         #expect(config["protocol"] as? Int == AgentBridgeCodec.protocolVersion)
         #expect(config["version"] as? String == plugin.bundledVersion)
         #expect(config["appName"] as? String == Branding.appName)
-        #expect(calls.all.map(\.0) == [[tool, "plugin", "list", "--json"], [tool, "plugin", "install", folder.path, "--yes", "--json"]])
+        #expect(calls.all.map(\.0).filter { $0[1] == "plugin" } == [[tool, "plugin", "list", "--json"], [tool, "plugin", "install", folder.path, "--yes", "--json"]])
         for (_, environment) in calls.all {
             #expect(environment["BB_TELEMETRY"] == "false")
             #expect(environment["BB_DATA_DIR"] == home.appendingPathComponent(".bb").path)
@@ -89,7 +89,7 @@ struct BBPluginConnectorTests {
         let plugin = connector(home, agents, calls: calls)
         let tool = try #require(plugin.locateTool())
         try await plugin.update(tool: tool, target: target(home))
-        #expect(calls.all.map { Array($0.0.dropFirst()) } == [["plugin", "list", "--json"], ["plugin", "reload", "keyscribe-dev", "--json"]])
+        #expect(calls.all.map { Array($0.0.dropFirst()) }.filter { $0[0] == "plugin" } == [["plugin", "list", "--json"], ["plugin", "reload", "keyscribe-dev", "--json"]])
     }
 
     @Test func bbRefusingTheInstallSaysWhyInItsOwnWords() async throws {
@@ -173,6 +173,107 @@ struct BBPluginConnectorTests {
         try await plugin.install(tool: tool, target: target(home))
         calls.set("plugin remove", status: 1, #"{"ok":false,"error":{"code":"plugin_not_found","message":"no such plugin"}}"#)
         try await plugin.uninstall(tool: tool, target: target(home, removing: true))
+        #expect(!plugin.hasFiles(in: target(home)))
+    }
+
+    private static let sidebarOff = (settings: #"{"experiments":{"threadRowMetadata":false,"timelinePush":false}}"#, rows: #"{"key":"showRowMetadata","value":false}"#)
+    private static let sidebarOn = (settings: #"{"experiments":{"threadRowMetadata":true}}"#, rows: #"{"key":"showRowMetadata","value":true}"#)
+
+    private func sidebarCalls(_ calls: Calls, _ tool: String) -> [[String]] {
+        calls.all.map(\.0).filter { $0.count > 1 && ($0[1] == "settings" || $0[1] == "thread-list") }
+    }
+
+    @Test func installingTurnsOnBbsRowDetailsSoThreadsShowTheirNamesAndRemembersWhatItTurnedOn() async throws {
+        let (home, agents) = scratch()
+        let calls = Calls()
+        calls.set("settings show", Self.sidebarOff.settings)
+        calls.set("thread-list prefs get", Self.sidebarOff.rows)
+        let plugin = connector(home, agents, calls: calls)
+        let tool = try #require(plugin.locateTool())
+        try await plugin.install(tool: tool, target: target(home))
+        #expect(sidebarCalls(calls, tool) == [
+            [tool, "settings", "show", "--json"],
+            [tool, "thread-list", "prefs", "get", "showRowMetadata", "--json"],
+            [tool, "settings", "experiment", "threadRowMetadata", "true", "--json"],
+            [tool, "thread-list", "prefs", "set", "showRowMetadata", "true", "--json"],
+        ])
+        #expect(plugin.undoesOnUninstall(in: target(home)))
+    }
+
+    @Test func rowDetailsAlreadyOnAreLeftAloneAndNeverOfferedForTurningOff() async throws {
+        let (home, agents) = scratch()
+        let calls = Calls()
+        calls.set("settings show", Self.sidebarOn.settings)
+        calls.set("thread-list prefs get", Self.sidebarOn.rows)
+        let plugin = connector(home, agents, calls: calls)
+        let tool = try #require(plugin.locateTool())
+        try await plugin.install(tool: tool, target: target(home))
+        #expect(sidebarCalls(calls, tool).count == 2)
+        #expect(!plugin.undoesOnUninstall(in: target(home)))
+        try await plugin.uninstall(tool: tool, target: target(home, removing: true), undoing: true)
+        #expect(sidebarCalls(calls, tool).count == 2)
+    }
+
+    @Test func rowDetailsAreTurnedOnOnceSoTurningThemOffLaterSticksThroughUpdates() async throws {
+        let (home, agents) = scratch()
+        let calls = Calls()
+        calls.set("plugin list", listing(agents))
+        calls.set("settings show", Self.sidebarOff.settings)
+        calls.set("thread-list prefs get", Self.sidebarOff.rows)
+        let plugin = connector(home, agents, calls: calls)
+        let tool = try #require(plugin.locateTool())
+        try await plugin.update(tool: tool, target: target(home))
+        #expect(sidebarCalls(calls, tool).count == 4)
+        try await plugin.update(tool: tool, target: target(home))
+        #expect(sidebarCalls(calls, tool).count == 4)
+    }
+
+    @Test func rowDetailsBbCouldNotReportAreLeftAloneAndTriedAgainNextTime() async throws {
+        let (home, agents) = scratch()
+        let calls = Calls()
+        calls.set("settings show", status: 1, #"{"ok":false,"error":{"code":"server_unavailable","message":"bb is not running"}}"#)
+        calls.set("thread-list prefs get", Self.sidebarOff.rows)
+        let plugin = connector(home, agents, calls: calls)
+        let tool = try #require(plugin.locateTool())
+        try await plugin.install(tool: tool, target: target(home))
+        #expect(sidebarCalls(calls, tool).count == 1)
+        calls.set("settings show", Self.sidebarOff.settings)
+        try await plugin.install(tool: tool, target: target(home))
+        #expect(sidebarCalls(calls, tool).count == 5)
+    }
+
+    @Test func aFailedRowDetailsChangeNeverFailsTheInstall() async throws {
+        let (home, agents) = scratch()
+        let calls = Calls()
+        calls.set("settings show", Self.sidebarOff.settings)
+        calls.set("thread-list prefs get", Self.sidebarOff.rows)
+        calls.set("settings experiment", status: 1, #"{"ok":false,"error":{"code":"x","message":"no"}}"#)
+        let plugin = connector(home, agents, calls: calls)
+        let tool = try #require(plugin.locateTool())
+        try await plugin.install(tool: tool, target: target(home))
+        #expect(plugin.undoesOnUninstall(in: target(home)))
+        try await plugin.uninstall(tool: tool, target: target(home, removing: true), undoing: true)
+        #expect(sidebarCalls(calls, tool).last == [tool, "thread-list", "prefs", "set", "showRowMetadata", "false", "--json"])
+    }
+
+    @Test func uninstallingTurnsOffOnlyWhatInstallingTurnedOnAndOnlyWhenAsked() async throws {
+        let (home, agents) = scratch()
+        let calls = Calls()
+        calls.set("settings show", Self.sidebarOn.settings)
+        calls.set("thread-list prefs get", Self.sidebarOff.rows)
+        let plugin = connector(home, agents, calls: calls)
+        let tool = try #require(plugin.locateTool())
+        try await plugin.install(tool: tool, target: target(home))
+        let kept = connector(home, agents, calls: calls)
+        try await kept.uninstall(tool: tool, target: target(home, removing: true), undoing: false)
+        #expect(sidebarCalls(calls, tool).count == 3)
+        #expect(!kept.undoesOnUninstall(in: target(home)))
+        try await plugin.install(tool: tool, target: target(home))
+        try await plugin.uninstall(tool: tool, target: target(home, removing: true), undoing: true)
+        let after = sidebarCalls(calls, tool)
+        #expect(after.last == [tool, "thread-list", "prefs", "set", "showRowMetadata", "false", "--json"])
+        #expect(!after.contains([tool, "settings", "experiment", "threadRowMetadata", "false", "--json"]))
+        #expect(calls.all.last?.0 == [tool, "plugin", "remove", "keyscribe-dev", "--json"])
         #expect(!plugin.hasFiles(in: target(home)))
     }
 

@@ -39,6 +39,24 @@ struct BBHostTests {
         return (host, { activations })
     }
 
+    @Test func aNameTheUserGivesAThreadBecomesItsBbTitle() async {
+        let runner = Runner()
+        runner.answers["thread update"] = Self.output(#"{"id":"thr_abc1","title":"-docs fix"}"#)
+        #expect(await host(runner).0.rename(Self.location, to: "-docs fix"))
+        #expect(runner.calls.map(\.argv) == [[Self.cli, "thread", "update", "thr_abc1", "--title=-docs fix", "--json"]])
+    }
+
+    @Test func aThreadIsRetitledOnlyWhileBbIsOpenAndListsIt() async {
+        let runner = Runner()
+        runner.answers["thread update"] = Self.output("{}", status: 1)
+        #expect(await !host(runner).0.rename(Self.location, to: "docs"))
+        #expect(await !host(runner, running: false).0.rename(Self.location, to: "docs"))
+        let elsewhere = AgentHostLocation(host: "bb", instance: "/Users/b/.bb", native: "thr_abc1")
+        #expect(await !host(runner).0.rename(elsewhere, to: "docs"))
+        #expect(await !host(Runner()).0.rename(Self.location, to: "docs"))
+        #expect(runner.calls.count == 1)
+    }
+
     @Test func bbIsAvailableOnlyWhileItsCommandIsInstalled() {
         #expect(host(Runner()).0.isEnabled)
         #expect(!host(Runner(), installed: false).0.isEnabled)
@@ -115,7 +133,7 @@ struct BBHostTests {
         let delivered = await host(runner).0.deliver("run the tests; $(rm -rf ~)", images: [], request: "r1", to: Self.location)
         #expect(delivered == .accepted)
         let call = try! #require(runner.calls.first)
-        #expect(call.argv == [Self.cli, "thread", "tell", "thr_abc1", "--message-file", "-", "--mode", "queue", "--json"])
+        #expect(call.argv == [Self.cli, "thread", "tell", "thr_abc1", "--message-file", "-", "--mode", "auto", "--json"])
         #expect(call.input == "run the tests; $(rm -rf ~)")
     }
 
@@ -124,7 +142,7 @@ struct BBHostTests {
         runner.answers["thread tell"] = Self.output(#"{"ok":true,"delivery":"sent"}"#)
         _ = await host(runner).0.deliver("see /tmp/a.png and /tmp/b.png", images: ["/tmp/a.png", "/tmp/b.png"], request: "r1", to: Self.location)
         #expect(runner.calls.first?.argv == [
-            Self.cli, "thread", "tell", "thr_abc1", "--message-file", "-", "--mode", "queue", "--json", "--image", "/tmp/a.png", "--image", "/tmp/b.png",
+            Self.cli, "thread", "tell", "thr_abc1", "--message-file", "-", "--mode", "auto", "--json", "--image", "/tmp/a.png", "--image", "/tmp/b.png",
         ])
     }
 
@@ -318,6 +336,34 @@ struct AgentHostConsentModelTests {
         await setup.remove()
         #expect(!FileManager.default.fileExists(atPath: agents.appendingPathComponent("bb-plugin").path))
         #expect(!model.isTurnedOn(BBHost.kind))
+    }
+
+    @Test func uninstallOffersToTurnOffWhatInstallingTurnedOnUntilTheUninstallFinishes() async throws {
+        let calls = BBPluginConnectorTests.Calls()
+        calls.set("settings show", #"{"experiments":{"threadRowMetadata":true}}"#)
+        calls.set("thread-list prefs get", #"{"key":"showRowMetadata","value":false}"#)
+        let (_, setup, _) = installed(calls)
+        await setup.install()
+        #expect(setup.undoesOnUninstall)
+        let turnOff = ["thread-list", "prefs", "set", "showRowMetadata", "false", "--json"]
+        calls.set("plugin remove", status: 1, #"{"ok":false,"error":{"code":"server_unavailable","message":"bb is not running"}}"#)
+        await setup.remove(undoing: true)
+        #expect(calls.all.filter { Array($0.0.dropFirst()) == turnOff }.count == 1)
+        #expect(setup.undoesOnUninstall)
+        calls.set("plugin remove", #"{"ok":true}"#)
+        await setup.remove(undoing: true)
+        #expect(calls.all.filter { Array($0.0.dropFirst()) == turnOff }.count == 2)
+        #expect(!setup.undoesOnUninstall)
+    }
+
+    @Test func uninstallingWithoutTheOfferLeavesBbsRowDetailsAsTheyAre() async throws {
+        let calls = BBPluginConnectorTests.Calls()
+        calls.set("settings show", #"{"experiments":{"threadRowMetadata":false}}"#)
+        calls.set("thread-list prefs get", #"{"key":"showRowMetadata","value":false}"#)
+        let (_, setup, _) = installed(calls)
+        await setup.install()
+        await setup.remove()
+        #expect(!calls.all.contains { $0.0.contains("false") })
     }
 
     @Test func aFailedInstallKeepsTheHostConnectedAndOffersUninstall() async throws {

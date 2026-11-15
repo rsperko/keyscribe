@@ -9,6 +9,7 @@ export type Host = {
   log: (message: string) => void
   needsConfiguration: (message: string) => void
   watch: (path: string, fn: () => void) => () => void
+  labelled: () => void
 }
 export type Thread = { id: string; status: string }
 export type WindowReport = { window: string; focused: boolean; thread: string | null }
@@ -36,7 +37,8 @@ type Member = {
   resay: boolean
 }
 
-const features = ["promptDigest", "readiness", "shown", "notify"]
+const features = ["promptDigest", "readiness", "shown", "notify", "label"]
+const labelLimit = 200
 const busy = new Set(["active", "starting", "stopping"])
 const answerLimit = 8192
 const eventDeadline = 2000
@@ -106,6 +108,48 @@ export function shownThread(route: string | null, panes: Pane[] | null): string 
   return !focused || focused.threadId === route ? route : null
 }
 
+type Checked<T> = { value: T } | { issues: { message: string }[] }
+type Schema<T> = { readonly "~standard": { readonly version: 1; readonly vendor: string; readonly validate: (value: unknown) => Checked<T> } }
+
+function schema<T>(accepts: (value: unknown) => value is T, message: string): Schema<T> {
+  return { "~standard": { version: 1, vendor: "keyscribe", validate: (value) => accepts(value) ? { value } : { issues: [{ message }] } } }
+}
+
+function isWindowReport(value: unknown): value is WindowReport {
+  if (!value || typeof value !== "object") return false
+  const report = value as Record<string, unknown>
+  return typeof report.window === "string" && report.window.length > 0 && report.window.length <= 64 && typeof report.focused === "boolean"
+    && (report.thread === null || (typeof report.thread === "string" && report.thread.length <= 128))
+}
+
+function isThreadKeys(value: unknown): value is { keys: string[] } {
+  if (!value || typeof value !== "object") return false
+  const keys = (value as Record<string, unknown>).keys
+  return Array.isArray(keys) && keys.length <= 1000 && keys.every((key) => typeof key === "string" && key.length <= 128)
+}
+
+function isLabels(value: unknown): value is Record<string, string | null> {
+  return !!value && typeof value === "object" && Object.values(value).every((label) => label === null || typeof label === "string")
+}
+
+export const rpcContract = {
+  window: {
+    input: schema(isWindowReport, "expected { window, focused, thread }"),
+    output: schema((value): value is null => value === null, "expected null"),
+  },
+  labels: {
+    input: schema(isThreadKeys, "expected { keys }"),
+    output: schema(isLabels, "expected a name or null for each key"),
+  },
+}
+
+export function rowLabel(label: string | null | undefined, title: string | null): string | null {
+  const name = (label ?? "").replace(/^[\s“"]+|[\s”"]+$/g, "")
+  if (!name) return null
+  const plain = (text: string) => text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()
+  return title !== null && plain(title) === plain(name) ? null : name
+}
+
 export function promptDigest(text: string): string {
   const plain = (text.startsWith("​") ? text.slice(1) : text).trim()
   let hash = 0xcbf29ce484222325n
@@ -132,10 +176,12 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
   stop: () => void
   window: (report: WindowReport) => void
   readAloud: (thread: string) => Promise<ReadAloud>
+  labels: (threads: string[]) => Record<string, string | null>
   settings: Promise<{ appName?: string; instance?: string } | null>
 } {
   const connection = "bb-" + host.random()
   const members = new Map<string, Member>()
+  const names = new Map<string, string>()
   const queued = new Map<string, { thread: string; text: string }>()
   let config: Config | null = null
   let token = ""
@@ -378,6 +424,10 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
         told = undefined
         if (command.op === "admit" && m.unsaid) readmitted.push(thread)
       }
+      if (command.op === "status" && typeof command.text === "string" && names.get(thread) !== command.text.slice(0, labelLimit)) {
+        names.set(thread, command.text.slice(0, labelLimit))
+        host.labelled()
+      }
       void post("/event", { op: "ack", request: command.id, instance: instanceOf(thread), connection }, eventDeadline)
     }
     const unknown: string[] = Array.isArray(parsed?.unknown) ? parsed.unknown : []
@@ -515,6 +565,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     members.get(thread.id)?.waiting?.stop()
     if (!members.delete(thread.id)) return
     for (const [id, q] of queued) if (q.thread === thread.id) queued.delete(id)
+    names.delete(thread.id)
     changed()
   }
   bb.on("thread.archived", leave)
@@ -624,5 +675,6 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
   bb.on("thread.failed", ({ thread }) => ended(thread, "error", ""))
 
   void connect()
-  return { stop: () => stop(), window, readAloud, settings }
+  const labels = (threads: string[]) => Object.fromEntries(threads.map((thread) => [thread, names.get(thread) ?? null]))
+  return { stop: () => stop(), window, readAloud, labels, settings }
 }

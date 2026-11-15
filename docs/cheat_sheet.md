@@ -156,5 +156,5 @@ These work too. The phrases on the earlier pages are the ones worth remembering.
 | `select conversation two`<br>Also: `open session two`, `check on conversation two` | While recording | Picks, opens, or checks by number. |
 | `check on this conversation` | The current conversation | Checks the recipient. |
 | `who needs me?` | Coding agent mode | Same as `check on all conversations`. |
-| `rename this session to [name]`<br>Also: `name this conversation [name]`, `call this conversation [name]` | The current conversation | Same as `rename this conversation to`. |
+| `rename this session to [name]`<br>Also: `rename conversation to [name]`, `name this conversation [name]`, `call this conversation [name]` | The current conversation | Same as `rename this conversation to`. |
 | `switch to [name]`<br>Also: `go to [name]` | Known conversation | Same as `open [name]`. |

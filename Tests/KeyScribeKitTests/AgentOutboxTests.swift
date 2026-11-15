@@ -24,6 +24,45 @@ struct AgentOutboxTests {
         #expect(outbox.held.isEmpty)
     }
 
+    @Test func aMessageForAPromptBoxIsEnteredThereAndNotHeld() {
+        var outbox = AgentOutbox()
+        #expect(outbox.send(message("m1"), state: .working, canEnterPromptBox: true) == .enterPromptBox)
+        #expect(outbox.held.isEmpty)
+    }
+
+    @Test(arguments: [
+        (AgentLiveState.waitingApproval, AgentDeliveryDecision.QueueReason.approval),
+        (.waitingQuestion, .question), (.userDialog, .userDialog), (.idle, .working), (.working, .working),
+    ])
+    func aMessageHeldBehindAnotherSaysWhatTheConversationWaitsOn(state: AgentLiveState, reason: AgentDeliveryDecision.QueueReason) {
+        var outbox = AgentOutbox()
+        #expect(outbox.send(message("m1"), state: .working) == .queue(.working))
+        #expect(outbox.send(message("m2"), state: state, canEnterPromptBox: true, canSteer: true) == .queue(reason))
+        #expect(outbox.held.map(\.id) == ["m1", "m2"])
+    }
+
+    @Test func aMessageNeverOvertakesOneHeldForTheSameConversationThroughThePromptBox() {
+        var outbox = AgentOutbox()
+        #expect(outbox.send(message("m1"), state: .working) == .queue(.working))
+        #expect(outbox.send(message("m2"), state: .working, canEnterPromptBox: true) == .queue(.working))
+        #expect(outbox.send(message("m3", to: "s2"), state: .working, canEnterPromptBox: true) == .enterPromptBox)
+        #expect(outbox.held.map(\.id) == ["m1", "m2"])
+    }
+
+    @Test func aMessageNeverOvertakesOneHeldForTheSameConversationBySteering() {
+        var outbox = AgentOutbox()
+        #expect(outbox.send(message("m1"), state: .working) == .queue(.working))
+        #expect(outbox.send(message("m2"), state: .working, canSteer: true) == .queue(.working))
+        #expect(outbox.send(message("m3", to: "s2"), state: .working, canSteer: true) == .handOff)
+    }
+
+    @Test func aHeldMessageForAnAgentThatSteersIsReleasedWhileItWorks() {
+        var outbox = AgentOutbox()
+        #expect(outbox.send(message("m1"), state: .working) == .queue(.working))
+        #expect(outbox.release(state: { _ in .working }).isEmpty)
+        #expect(outbox.release(state: { _ in .working }, canSteer: { _ in true }) == [.init(message: message("m1"), decision: .handOff)])
+    }
+
     @Test func aMissingConversationIsNotSentAndNotHeld() {
         var outbox = AgentOutbox()
         #expect(outbox.send(message("m1"), state: nil) == .disconnected)

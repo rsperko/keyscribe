@@ -40,7 +40,7 @@ test("bb's windows report to the server through one method whose input is checke
   const bb = fakeBb({ rpc: { register: (contract: any, handlers: any) => registered.push({ contract, handlers }) } })
   await plugin(bb)
   assert.equal(registered.length, 1)
-  assert.deepEqual(Object.keys(registered[0].contract), ["window"])
+  assert.deepEqual(Object.keys(registered[0].contract), ["window", "labels"])
   assert.equal(registered[0].handlers.window({ window: "w1", focused: true, thread: "thr_a" }), null)
   const check = (value: unknown) => rpcContract.window.input["~standard"].validate(value)
   assert.deepEqual(check({ window: "w1", focused: true, thread: null }), { value: { window: "w1", focused: true, thread: null } })
@@ -49,6 +49,30 @@ test("bb's windows report to the server through one method whose input is checke
     assert.ok("issues" in (check(bad) as object))
   }
   assert.deepEqual(rpcContract.window.output["~standard"].validate(null), { value: null })
+})
+
+test("bb's sidebar reads every row's name in one keyed read whose keys are checked before they are used", async () => {
+  const registered: Array<{ handlers: any }> = []
+  const bb = fakeBb({ rpc: { register: (_contract: any, handlers: any) => registered.push({ handlers }) } })
+  await plugin(bb)
+  assert.deepEqual(registered[0].handlers.labels({ keys: ["thr_a", "thr_b"] }), { thr_a: null, thr_b: null })
+  const check = (value: unknown) => rpcContract.labels.input["~standard"].validate(value)
+  assert.deepEqual(check({ keys: ["thr_a"] }), { value: { keys: ["thr_a"] } })
+  for (const bad of [null, {}, { keys: "thr_a" }, { keys: [1] }, { keys: ["t".repeat(129)] }, { keys: Array(1001).fill("t") }]) {
+    assert.ok("issues" in (check(bad) as object))
+  }
+  const answer = (value: unknown) => rpcContract.labels.output["~standard"].validate(value)
+  assert.ok("value" in (answer({ thr_a: "“docs”", thr_b: null }) as object))
+  assert.ok("issues" in (answer({ thr_a: 3 }) as object))
+})
+
+test("a new name from the app redraws bb's rows", async () => {
+  let invalidated = 0
+  const bb = fakeBb({ rpc: { register: () => {}, experimental_invalidateAll: () => { invalidated += 1 } } })
+  const { labelsChanged } = await import("../../Sources/KeyScribe/Resources/BBPlugin/server.ts")
+  labelsChanged(bb)
+  assert.equal(invalidated, 1)
+  labelsChanged(fakeBb())
 })
 
 test("every bb agent is offered a tool, named for this copy of the plugin, that asks the app to read the turn aloud", async () => {

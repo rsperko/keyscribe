@@ -12,6 +12,9 @@ struct AgentRenameTests {
         ("Please rename this conversation to docs", "docs"),
         ("rename this conversation to docs please", "docs"),
         ("Rename this conversation to docs, please.", "docs"),
+        ("Rename conversation to lime thread", "lime thread"),
+        ("rename the conversation to lime thread.", "lime thread"),
+        ("Please rename conversation too docs", "docs"),
     ])
     func aWholeTakeRenamesTheCurrentConversation(text: String, name: String) {
         #expect(AgentRename.parse(text) == .rename(name))
@@ -26,6 +29,11 @@ struct AgentRenameTests {
         "Call the session handler from main",
         "Rename session two to docs",
         "Session timeout is too short",
+        "Rename conversation handler to chatHandler",
+        "rename the conversation model to Thread",
+        "Rename conversation",
+        "Call the conversation endpoint first",
+        "Name conversation docs",
     ])
     func anythingWithoutTheRenamePrefixIsNotARename(text: String) {
         #expect(AgentRename.parse(text) == nil)

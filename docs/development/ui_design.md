@@ -446,7 +446,12 @@ name (one the user gave it, else the one the agent generated), and the project f
 show it labels its own session with the same name (the name in quotes on the agent's status line, after the
 connector's name, which Claude Code adds and the Pi connector writes itself), so the
 terminal on screen can be matched to its row; the label is display only and never renames the agent's
-conversation. The user can address a conversation by starting the take with “tell” and its name or its number (“tell docs run the
+conversation. A bb thread shows the same name on its row in bb's sidebar when its bb title differs.
+Installing the bb plugin turns on bb's row details for that, says so in the consent sheet, and records
+which of bb's switches it changed. The switches are changed once, so a user who later turns them off keeps
+them off. Uninstalling offers a second destructive button, "Uninstall and Turn Off Row Details", but only when
+the install changed something; plain Uninstall leaves bb's switches as they are. Renaming a bb thread, spoken or in Settings, also sets its bb title,
+because there the user chose the name; a name KeyScribe made up is never written to bb. The user can address a conversation by starting the take with “tell” and its name or its number (“tell docs run the
 tests”, “tell conversation two …”); the “tell” (or “please tell”) is optional (“docs, run the tests”), and “conversation” or
 “session”, which mean the same everywhere the spoken grammar takes that word, may come before a name as before a number (“session docs,
 run the tests”, “open conversation docs”) — a sentence about sessions, such as “Session timeout is too short”, is
@@ -586,7 +591,10 @@ long, changing generated names are hard to say right for one in the background: 
 name may run to `AgentRename.nameWords` words and is stored as it will be said (“auth 2” becomes “auth
 two”). Once a take starts with “rename this conversation” (or session), it is never sent: no name, a longer one, or more words
 after the name's clause ends (“rename this conversation to docs. Run the tests.”) is held with the reason,
-so an instruction never becomes part of a name. A take without “this conversation” or “this session” (“rename this to
+so an instruction never becomes part of a name. “Rename conversation to” and “rename the conversation to” rename
+too, but only when “to” follows “conversation” at once, so “rename conversation handler to chatHandler” stays a
+message. Without “this”, “session” is not enough (“rename session to token” is a message), because to a coding
+agent that is often a variable. Any other take without “this conversation” or “this session” (“rename this to
 parseConfig”, “rename this function to parseConfig”) is a message for the agent, and the command is recognized from the words as heard, so replacements never
 change it. The mode's local text stages (spoken edits, replacements, numbers), without the AI rewrite, then
 run on the words after it before the name is read (`AgentRename.request`, then `AgentRename.name`): “never
@@ -753,7 +761,9 @@ only above fits, the same rule as the spoken-reply panel and “What you can say
 sits, VoiceOver reaches the header first. Ordinary dictation never shows the list.
 
 **Coding agent delivery.** A take is sent only to a conversation that is ready for it. While a turn is
-running, the take waits and is sent when the turn finishes (“Queued for docs”, “Sends when it finishes”).
+running, the take goes into that turn when the agent takes messages during a turn, the way typing there does
+(“Sent to docs”); otherwise it waits and is sent when the turn finishes (“Queued for docs”, “Sends when it
+finishes”), unless that conversation is the one in front and its connector can enter it for the user, below.
 When the conversation is waiting on the user instead (an approval, a question, or a dialog), the take still
 waits for the turn, and the receipt says what it waits on, how to respond, and what happens to the message
 (“Waiting for approval. Say “open docs” to respond; this message stays queued”).
@@ -776,7 +786,8 @@ get replaced by that conversation's replies, and is not added to History again.
 
 After the user interrupts a Claude Code turn, Claude Code takes only a prompt the user enters until one is
 sent, and refuses one the connector submits. The connector then puts the message in the prompt box, only
-when the box is empty and only for that refusal; every other refusal leaves the box alone. When that
+when the box is empty, never when it starts with `/` or `!` (Return would run it as a command or in the shell), and only for that
+refusal; every other refusal leaves the box alone. When that
 conversation is confirmed as the one in front, the app presses Return for the user and reports “Sent to
 docs” once the connector sees the prompt arrive, or “May not have reached docs” when it does not. Otherwise
 Return is never pressed and the advisory says the message is waiting (“Not sent to docs: its last turn was
@@ -786,6 +797,22 @@ prompt is not seen before the confirmation runs out, when another prompt is type
 (a slash command), no later turn is read as the take's. A connector that
 could not fill the box reports “docs’s last turn was interrupted, so it takes only a message you
 type. Nothing sent. Type one there, then dictate again.”.
+
+A take for the conversation in front while its turn runs is entered the same way, so the agent reads it as a
+message the user typed: during the turn, where it reads typed text, and as the user's own. The connector puts it
+in the prompt box only when the box is empty, the agent is working rather than waiting on the user, and the text
+does not start with `/` or `!`. Right before pressing Return, the app checks that the conversation is the one in
+front, asks the connector whether the box still holds exactly the message with no dialog holding the keys, and
+checks that the same window still has focus; only then is Return pressed, and the receipt is “Sent to docs”. Otherwise the message stays in the box (“Not sent to docs: the
+message is in its prompt box. Review it there and press Return to send it”). Text the user types while the message
+goes in stays in the box with it, and Return is never pressed (“Not sent to docs: the message was added to its
+prompt box after text already there. Review it there and press Return to send it”). A take for a conversation that
+is not in front, that waits on the user, that has an earlier message still on its way or waiting, or that carries
+an attached image waits for the turn as above, and so does one the box will not take; one turned away because an
+approval just opened waits on it (“Dialog open…”). An approval or question the agent decides on in the moment
+before Return lands is held back until it has, so Return never answers it. The take's spoken reply is the reply of
+the turn that read the message: the running turn when it took it in, unless an earlier take already claimed that
+reply, or the turn the message starts when the running one ended first; it is heard once.
 
 A take addressed to a conversation that is not connected, or that the user disconnected, says so by name
 (“docs isn’t connected to {app}. Nothing sent.”, “docs is disconnected. Nothing sent.”, or “The conversation in front is
