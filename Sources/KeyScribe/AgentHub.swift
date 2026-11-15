@@ -151,6 +151,7 @@ final class AgentHub {
     private var handingOff: [String: String] = [:]
     private var running: [String: Date] = [:]
     private var lastUsed: [String: Date] = [:]
+    private var shownByHost: [String: String] = [:]
 
     init(
         transport: AgentTransport, discovery: [any AgentDiscovery], names: AgentNameStore? = nil,
@@ -198,6 +199,20 @@ final class AgentHub {
         guard off != silencedHosts else { return }
         silencedHosts = off
         transport.silence(agents: off)
+    }
+
+    private static func newestOfEach(_ entries: [AgentSession]) -> [AgentSession] {
+        var kept: [String: Int] = [:]
+        var result: [AgentSession] = []
+        for entry in entries {
+            guard let index = kept[entry.id] else {
+                kept[entry.id] = result.count
+                result.append(entry)
+                continue
+            }
+            if (entry.startedAt ?? .min) > (result[index].startedAt ?? .min) { result[index] = entry }
+        }
+        return result
     }
 
     private static func isGenerated(_ reported: String?, _ title: AgentTitle) -> Bool {
@@ -356,11 +371,12 @@ final class AgentHub {
             let mine = listed.filter { $0.host?.host == source.kind.id }
             guard !mine.isEmpty else { continue }
             let locations = mine.compactMap(\.host)
+            let reported = shownByHost[source.kind.id].flatMap { id in transport.isLive(session: id) ? mine.first { $0.id == id }?.host : nil }
             guard case .shown(let location, let app) = await Self.within(
-                hostDeadline, otherwise: AgentHostFront.unknown, { await source.host.front(among: locations) }),
+                hostDeadline, otherwise: AgentHostFront.unknown, { await source.host.front(among: locations, reported: reported) }),
                   let shown = mine.first(where: { $0.host == location })
             else { continue }
-            return FrontSession(id: shown.id, app: FrontApp(bundle: app.bundle, pid: app.pid, name: app.name))
+            return FrontSession(id: shown.id, app: FrontApp(bundle: app.bundle, pid: app.pid, name: app.name, window: app.window))
         }
         return nil
     }
@@ -430,6 +446,7 @@ final class AgentHub {
         if let other = counterpart(of: id) { exclusions.insert(other) }
         for (request, conversation) in delivering where conversation == id { stopFollowingHosted(request, in: id) }
         hostFollows[id] = nil
+        shownByHost = shownByHost.filter { $0.value != id && $0.value != counterpart(of: id) }
         saveExclusions()
         if current == id { current = nil }
         for message in outbox.withdraw(conversation: id) {
@@ -661,7 +678,7 @@ final class AgentHub {
                 inHosts[AgentSessionID.make(agent: entry.agent, native: entry.id)].map { ($0, entry) }
             }, uniquingKeysWith: { first, _ in first })
         for discovery in discoveries {
-            let found = (lastScan[discovery.kind.id] ?? []).compactMap { entry -> AgentSession? in
+            let found = Self.newestOfEach(lastScan[discovery.kind.id] ?? []).compactMap { entry -> AgentSession? in
                 let id = AgentSessionID.make(agent: entry.agent, native: entry.id)
                 guard !hidden.contains(id) else { return nil }
                 guard let process = inner[id] else { return entry }
@@ -1007,6 +1024,9 @@ final class AgentHub {
             Task { [weak self] in await self?.rescan(rereadingTitles: false) }
         case .notify(let session, let turn, let on):
             _ = notify(session: session, turn: turn, on: on)
+        case .shown(let session, let on):
+            guard let host = AgentSessionID.split(session)?.agent, hosts.contains(where: { $0.kind.id == host }) else { break }
+            shownByHost[host] = on ? session : nil
         case .focused(let request):
             focusWaiters.removeValue(forKey: request)?.resume(returning: .selected)
         case .ack:

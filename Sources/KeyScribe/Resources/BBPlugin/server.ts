@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises"
 import { request } from "node:http"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { keyscribe, type Exchange, type Response } from "./keyscribe.ts"
+import { keyscribe, type Exchange, type Response, type WindowReport } from "./keyscribe.ts"
 
 const pageSize = 200
 const pageLimit = 10
@@ -15,6 +15,27 @@ const responseLimit = 512 * 1024
 export function configPaths(moduleURL: string): string[] {
   const here = dirname(fileURLToPath(moduleURL))
   return [join(here, "keyscribe.json"), join(dirname(here), "keyscribe.json")]
+}
+
+type Checked<T> = { value: T } | { issues: { message: string }[] }
+type Schema<T> = { readonly "~standard": { readonly version: 1; readonly vendor: string; readonly validate: (value: unknown) => Checked<T> } }
+
+function schema<T>(accepts: (value: unknown) => value is T, message: string): Schema<T> {
+  return { "~standard": { version: 1, vendor: "keyscribe", validate: (value) => accepts(value) ? { value } : { issues: [{ message }] } } }
+}
+
+function isWindowReport(value: unknown): value is WindowReport {
+  if (!value || typeof value !== "object") return false
+  const report = value as Record<string, unknown>
+  return typeof report.window === "string" && report.window.length > 0 && report.window.length <= 64 && typeof report.focused === "boolean"
+    && (report.thread === null || (typeof report.thread === "string" && report.thread.length <= 128))
+}
+
+export const rpcContract = {
+  window: {
+    input: schema(isWindowReport, "expected { window, focused, thread }"),
+    output: schema((value): value is null => value === null, "expected null"),
+  },
 }
 
 function said(input: unknown): string {
@@ -84,5 +105,6 @@ export default async function plugin(bb: BbPluginApi) {
       }
     },
   }, configPaths(import.meta.url))
+  bb.rpc.register(rpcContract as never, { window: (report: WindowReport) => { plugin.window(report); return null } } as never)
   bb.onDispose(() => plugin.stop())
 }

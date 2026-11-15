@@ -35,9 +35,9 @@ struct CombinedPlaceReader: AgentPlaceReading {
     func read(_ queries: [AgentPlaceQuery]) async -> [String: AgentPlaceAnswer] {
         var answers: [[String: AgentPlaceAnswer]] = []
         for reader in readers { answers.append(await reader.read(queries)) }
-        return Dictionary(uniqueKeysWithValues: queries.map { query in
+        return Dictionary(queries.map { query in
             (query.id, Self.merge(answers.map { $0[query.id] ?? .absent }))
-        })
+        }, uniquingKeysWith: { first, _ in first })
     }
 
     static func merge(_ answers: [AgentPlaceAnswer]) -> AgentPlaceAnswer {
@@ -96,7 +96,7 @@ struct TerminalPlaceReader: AgentPlaceReading {
             case .notAllowed: break
             }
         }
-        return Dictionary(uniqueKeysWithValues: walks.map { item in
+        return Dictionary(walks.map { item in
             let unreadable: AgentPlaceAnswer = item.query.placed ? .unknown : .absent
             guard let walk = item.walk else { return (item.query.id, unreadable) }
             if walk.layers.contains(where: \.unresolved) { return (item.query.id, unreadable) }
@@ -109,7 +109,7 @@ struct TerminalPlaceReader: AgentPlaceReading {
             let labels = layers.flatMap(\.labels), containers = layers.flatMap(\.containers)
             guard !containers.isEmpty, let surface = walk.surface else { return (item.query.id, .absent) }
             return (item.query.id, .found(AgentPlace(surface: surface, labels: labels, containers: containers)))
-        })
+        }, uniquingKeysWith: { first, _ in first })
     }
 }
 

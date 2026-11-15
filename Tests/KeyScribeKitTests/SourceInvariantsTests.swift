@@ -11,6 +11,7 @@ struct SourceInvariantsTests {
         let connectors = [
             "Sources/KeyScribe/Resources/ClaudeConnector/register.js", "Sources/KeyScribe/Resources/PiConnector/index.ts",
             "Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts", "Sources/KeyScribe/Resources/BBPlugin/server.ts",
+            "Sources/KeyScribe/Resources/BBPlugin/app.tsx",
         ]
         var sources: [String: String] = [:]
         for path in connectors { sources[path] = try String(contentsOf: Self.repoRoot.appendingPathComponent(path), encoding: .utf8) }

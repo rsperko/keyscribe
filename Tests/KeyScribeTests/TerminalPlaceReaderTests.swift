@@ -24,6 +24,14 @@ struct TerminalPlaceReaderTests {
         #expect(place.surface == "tmux")
     }
 
+    @Test func aConversationAskedAboutTwiceIsAnsweredOnceInsteadOfStoppingTheApp() async {
+        let walk = TerminalPlaceWalk(host: host, surface: "Ghostty")
+        let answers = await reader(walk: walk, read: .value(answer)).read([query, query])
+        #expect(answers.count == 1)
+        let combined = await CombinedPlaceReader(readers: [reader(walk: walk, read: .value(answer))]).read([query, query])
+        #expect(combined.count == 1)
+    }
+
     @Test func aTerminalThatCannotBeReadWithoutAskingAddsNoNameAndAsksNothing() async {
         let walk = TerminalPlaceWalk(host: host, surface: "Ghostty")
         #expect(await reader(walk: walk, read: .notAllowed).read([query])[query.id] == .absent)

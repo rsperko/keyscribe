@@ -9,6 +9,8 @@ struct AgentPlaceTrackerTests {
         private let lock = NSLock()
         private var _answers: [String: AgentPlaceAnswer] = [:]
         private var _reads = 0
+        private var _asked: [[String]] = []
+        var asked: [[String]] { lock.withLock { _asked } }
         var answers: [String: AgentPlaceAnswer] {
             get { lock.withLock { _answers } }
             set { lock.withLock { _answers = newValue } }
@@ -17,6 +19,7 @@ struct AgentPlaceTrackerTests {
         func read(_ queries: [AgentPlaceQuery]) -> [String: AgentPlaceAnswer] {
             lock.withLock {
                 _reads += 1
+                _asked.append(queries.map(\.id))
                 return Dictionary(uniqueKeysWithValues: queries.map { ($0.id, _answers[$0.id] ?? .absent) })
             }
         }
@@ -50,6 +53,19 @@ struct AgentPlaceTrackerTests {
         for _ in 0..<50 {
             if let reading = hub.placeTracker?.reading { await reading.value } else { await Task.yield() }
         }
+    }
+
+    @Test func aSessionTwoProcessesClaimIsOneConversationOfTheNewerProcessAndIsAskedAboutOnce() async {
+        let reader = Reader()
+        let (hub, registry) = makeHub(reader)
+        let entry = registry.entries[0]
+        registry.entries = [ClaudeRegistryEntry(pid: 11, sessionId: "a", cwd: "/src/home", name: nil, status: "idle", waitingFor: nil, startedAt: 200), entry]
+        await hub.rescan()
+        await settle(hub)
+        #expect(hub.directory.conversations.map(\.id) == ["claude:a"])
+        #expect(hub.directory.conversations.first?.pid == 11)
+        #expect(hub.frontCandidates.map(\.id) == ["claude:a"])
+        #expect(reader.asked.last == ["claude:a"])
     }
 
     @Test func aPaneLabelReadInTheBackgroundNamesTheConversation() async {

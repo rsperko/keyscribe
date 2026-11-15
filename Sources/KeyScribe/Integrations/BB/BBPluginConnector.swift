@@ -2,7 +2,7 @@ import Foundation
 import KeyScribeKit
 
 enum BBPluginFiles {
-    static let names = ["package.json", "server.ts", "keyscribe.ts", "PLUGIN_OVERVIEW.md"]
+    static let names = ["package.json", "server.ts", "keyscribe.ts", "app.tsx", "PLUGIN_OVERVIEW.md"]
 
     static let sources: [String: String]? = {
         var found: [String: String] = [:]
@@ -25,7 +25,7 @@ enum BBPluginFiles {
         manifest["name"] = "bb-plugin-\(id)"
         var bb = manifest["bb"] as? [String: Any] ?? [:]
         bb["name"] = Branding.appName
-        bb["description"] = "Reads aloud, with \(Branding.appName), the replies to what you dictate to bb threads."
+        bb["description"] = "Lets \(Branding.appName) read aloud the replies to what you dictate to bb threads, and know which thread you are looking at."
         manifest["bb"] = bb
         return ConnectorResources.json(manifest)
     }
@@ -231,7 +231,7 @@ final class BBPluginConnector: AgentConnector {
     }
 
     let copy = AgentConnectorCopy(
-        help: "With a small plugin installed in bb, \(Branding.appName) lists the threads bb runs, sends what you say to them through bb\u{2019}s own command, queued behind any turn already running, and hears how they answer. Every thread connects on its own unless you disconnect it. \(Branding.appName) runs nothing of bb\u{2019}s until you connect bb. If bb loses the plugin, dictation still reaches its threads but replies are not read aloud until you reinstall it.",
+        help: "With a small plugin installed in bb, \(Branding.appName) lists the threads bb runs, sends what you say to them through bb\u{2019}s own command, queued behind any turn already running, and hears how they answer; each bb window tells the plugin which thread it shows, so dictation goes to the thread you are looking at. Every thread connects on its own unless you disconnect it. \(Branding.appName) runs nothing of bb\u{2019}s until you connect bb. If bb loses the plugin, dictation still reaches its threads by name, but replies are not read aloud and \(Branding.appName) no longer knows which thread is in front until you reinstall it.",
         reloadHint: "",
         uninstallTitle: "Uninstall the plugin from bb?",
         uninstallMessage: "\(Branding.appName) stops listing bb threads and sending to them. Your conversation names, disconnected conversations and other \(Branding.appName) settings are kept.",
@@ -251,5 +251,5 @@ final class BBPluginConnector: AgentConnector {
                 : "The plugin was removed outside \(Branding.appName), so \(count) bb threads are still connected until bb restarts the plugin."
         },
         setupTitle: "Plugin", describesUse: false,
-        purpose: "Dictate to bb threads and hear their replies read aloud.")
+        purpose: "Dictate to the bb thread you are looking at and hear its replies read aloud.")
 }

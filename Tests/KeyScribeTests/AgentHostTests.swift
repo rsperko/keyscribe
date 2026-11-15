@@ -27,6 +27,7 @@ struct AgentHostTests {
         private(set) var scans = 0
         private(set) var opened: [AgentHostLocation] = []
         private(set) var asked: [[AgentHostLocation]] = []
+        private(set) var reported: [AgentHostLocation?] = []
         private(set) var delivered: [(String, String, AgentHostLocation)] = []
         private(set) var deliveredImages: [[String]] = []
         private(set) var openSawCancelled = false
@@ -56,8 +57,9 @@ struct AgentHostTests {
             environment["EXAMPLE_THREAD"].map { AgentHostTests.location($0) }
         }
 
-        func front(among locations: [AgentHostLocation]) async -> AgentHostFront {
+        func front(among locations: [AgentHostLocation], reported: AgentHostLocation?) async -> AgentHostFront {
             asked.append(locations)
+            self.reported.append(reported)
             await stall()
             return front
         }
@@ -185,6 +187,8 @@ struct AgentHostTests {
         host.front = .shown(Self.location("t2"), in: app)
         #expect(await hub.sessionInFront() == FrontSession(id: Self.id("t2"), app: FrontApp(bundle: "dev.example.app", pid: 50, name: "Example")))
         #expect(host.asked.last?.map(\.native).sorted() == ["t1", "t2"])
+        host.front = .shown(Self.location("t2"), in: AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: "cg:7"))
+        #expect(await hub.sessionInFront()?.app.window == "cg:7")
         host.front = .unknown
         #expect(await hub.sessionInFront() == nil)
         let terminal = FrontSession(id: "claude:s1", app: FrontApp(bundle: "com.mitchellh.ghostty", pid: 9, name: "Ghostty"))
@@ -192,6 +196,59 @@ struct AgentHostTests {
         let asked = host.asked.count
         #expect(await hub.sessionInFront() == terminal)
         #expect(host.asked.count == asked)
+    }
+
+    @Test func theHostIsToldWhichConversationItsOwnConnectorLastSaidItsWindowShowsWhileThatConnectorIsLive() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1"), Self.thread("t2", cwd: "/src/site")]
+        let transport = FakeTransport()
+        let hub = makeHub(host, transport: transport)
+        await hub.rescan()
+        _ = await hub.sessionInFront()
+        #expect(host.reported.last == .some(nil))
+        transport.live = [Self.id("t1"), Self.id("t2")]
+        hub.handle(.shown(session: Self.id("t1"), on: true))
+        _ = await hub.sessionInFront()
+        #expect(host.reported.last == Self.location("t1"))
+        hub.handle(.shown(session: Self.id("t2"), on: true))
+        _ = await hub.sessionInFront()
+        #expect(host.reported.last == Self.location("t2"))
+        transport.live = [Self.id("t1")]
+        _ = await hub.sessionInFront()
+        #expect(host.reported.last == .some(nil))
+        transport.live = [Self.id("t1"), Self.id("t2")]
+        hub.handle(.shown(session: Self.id("t1"), on: false))
+        _ = await hub.sessionInFront()
+        #expect(host.reported.last == .some(nil))
+        hub.handle(.shown(session: Self.id("t2"), on: true))
+        hub.handle(.shown(session: "claude:s9", on: false))
+        _ = await hub.sessionInFront()
+        #expect(host.reported.last == Self.location("t2"))
+    }
+
+    @Test func disconnectingTheOnlyConversationShownForgetsItAndALaterReportForItIsIgnored() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let transport = FakeTransport()
+        let hub = makeHub(host, transport: transport, names: AgentNameStore(directory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("ks-shown-\(UUID().uuidString)")))
+        await hub.rescan()
+        transport.live = [Self.id("t1")]
+        hub.handle(.shown(session: Self.id("t1"), on: true))
+        _ = await hub.sessionInFront()
+        #expect(host.reported.last == Self.location("t1"))
+        hub.disconnect(Self.id("t1"))
+        _ = await hub.sessionInFront()
+        #expect(host.reported.last == .some(nil))
+        hub.handle(.shown(session: Self.id("t1"), on: true))
+        _ = await hub.sessionInFront()
+        #expect(host.reported.last == .some(nil))
+        hub.reconnect(Self.id("t1"))
+        _ = await hub.sessionInFront()
+        #expect(host.reported.last == .some(nil))
+        hub.handle(.shown(session: Self.id("t1"), on: true))
+        _ = await hub.sessionInFront()
+        #expect(host.reported.last == Self.location("t1"))
     }
 
     @Test(arguments: [

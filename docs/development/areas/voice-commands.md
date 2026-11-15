@@ -440,6 +440,10 @@ every rule above applies to it, with these sharpenings:
   folder in this bb's data folder (`BBThreads.thread(in:instance:)`); bb passes the dictated text to the agent
   unchanged, so its digest matches (checked with Claude Code in bb 0.49.0, 2026-11-14), while bb's own
   messages to a parent thread arrive as turns of their own and are never followed.
+- **One conversation per session id.** A discovery can list a session twice for a moment, for example while bb
+  restarts a thread's Claude Code and the old process has not exited, so the hub keeps only the newest-started
+  entry for each id as it assembles the list (`AgentHub.newestOfEach`), before anything downstream builds a
+  dictionary keyed by conversation.
 - **bb's plugin is a connector for every bb thread** (`BBPluginConnector`, sources in `Resources/BBPlugin`). It is
   installed like a connector, by the consent sheet's enrollment for bb's data folder, and bb is on exactly while
   that setup is enrolled, read from the enrollment itself, never copied into settings
@@ -464,9 +468,9 @@ every rule above applies to it, with these sharpenings:
   `admit`. While its host is turned off the bridge answers it as it answers a disconnected conversation
   (`AgentBridgeServer.silence(agents:)`, set by the hub at start and after each scan), and every change of that
   sends it back to say hello again, so a host turned off means it sends only identity. It greets at most a few threads
-  at a time, so a large bb never overruns the bridge's listen backlog. A plugin bb reports failing, or running an
-  earlier version after a failed reload (bb's status detail `reload failed:` on a running plugin), is installed but broken: Repair reinstalls it, launch maintenance tries
-  once, and Uninstall stays offered. Inside
+  at a time, so a large bb never overruns the bridge's listen backlog. A plugin bb reports failing, or running
+  an earlier version after a failed reload (bb's status detail `reload failed:` on a running plugin), is
+  installed but broken: Repair reinstalls it, launch maintenance tries once, and Uninstall stays offered. Inside
   bb it says hello once per thread as agent `bb` under the hosted conversation's own id, so it needs no filing, and
   one long poll serves all of them (a poll that lists `members` is answered with every member's commands and the
   members the bridge no longer knows, which say hello again on their own). It reports only what it saw: a
@@ -478,6 +482,20 @@ every rule above applies to it, with these sharpenings:
   because a hosted conversation's state comes from bb's own list. It lists bb's threads page by page, and a thread
   it had not listed says hello as soon as bb reports it working. Events the app cannot take are dropped, never
   replayed.
+- **bb's plugin says which thread you are looking at.** Its window half (`app.tsx`, an `experimental_appOverlay`
+  mounted once per bb window, which bb builds when it installs or reloads the plugin) reports over bb's plugin
+  RPC whether the window has focus and which thread it shows: a thread only on a thread page, and in a split
+  only once the focused pane and the page agree (`shownThread`; they disagree for a few milliseconds during a
+  switch, measured 2026-11-14), on every change and every few seconds while visible. The server half forgets a
+  window silent past its heartbeat (a window reloaded with ⌘R never sends a blur), prefers a window focused now
+  over focus history (a lost blur must not keep the old window), and says `shown` for that window's thread, or
+  that none is shown, on one ordered path: retried until the app takes it, and said again after every connect,
+  every hello and every Disconnect or Reconnect. The hub keeps one shown conversation per host, which an `on`
+  replaces and an `off` clears, and forgets when that conversation is disconnected, since the plugin may have no
+  connected thread left to send the clear through (a disconnected conversation's events never reach it). It hands
+  it to the host only while that connector is live (`AgentHost.front(among:reported:)`). `BBHost` answers it only while bb is the frontmost app with a focused
+  window, read on KeyScribe's side like a terminal's, since a window's own focus drops whenever another app is
+  key, and the take then checks that window is the one focused at the press.
 - **A host's command line runs through `HostCLI.run`.** It starts only an absolute program, in its own
   process group, with content on standard input rather than in the arguments. Standard output (the only
   output parsed) and standard error are kept apart, each capped, and cut output is marked. A deadline or a

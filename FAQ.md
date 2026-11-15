@@ -600,7 +600,8 @@ failing. If bb loses the plugin, for example after you remove it in bb, dictatio
 but replies aren't read aloud until you choose Reinstall. Uninstalling it in KeyScribe removes it from bb and
 disconnects bb: KeyScribe no longer lists bb's threads or sends to them. While KeyScribe isn't running the plugin waits quietly and picks up
 as soon as KeyScribe starts. Where a thread's agent has its own connector too, the plugin speaks for that
-thread. KeyScribe can't yet tell which bb thread is in front.
+thread. While bb is the app in front, dictation without a name goes to the thread its window shows, the
+focused pane of a split included, as it does for the terminal tab in front.
 
 KeyScribe turns off bb's usage reporting for the commands it runs.
 

@@ -17,11 +17,13 @@ public struct AgentHostApp: Equatable, Sendable {
     public var bundle: String
     public var pid: Int
     public var name: String
+    public var window: String?
 
-    public init(bundle: String, pid: Int, name: String) {
+    public init(bundle: String, pid: Int, name: String, window: String? = nil) {
         self.bundle = bundle
         self.pid = pid
         self.name = name
+        self.window = window
     }
 }
 
@@ -48,7 +50,7 @@ public protocol AgentHost: AnyObject {
     func location(in environment: [String: String]) -> AgentHostLocation?
     func scan() async -> AgentHostScan
     func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen
-    func front(among locations: [AgentHostLocation]) async -> AgentHostFront
+    func front(among locations: [AgentHostLocation], reported: AgentHostLocation?) async -> AgentHostFront
     func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery
 }
 
@@ -57,7 +59,7 @@ extension AgentHost {
     public var identityKeys: [String] { [] }
     public func location(in environment: [String: String]) -> AgentHostLocation? { nil }
     public func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen { .unsupported }
-    public func front(among locations: [AgentHostLocation]) async -> AgentHostFront { .unsupported }
+    public func front(among locations: [AgentHostLocation], reported: AgentHostLocation?) async -> AgentHostFront { .unsupported }
     public func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
         .unsupported
     }

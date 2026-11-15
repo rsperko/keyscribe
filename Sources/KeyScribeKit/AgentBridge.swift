@@ -125,6 +125,7 @@ public enum AgentEvent: Equatable, Sendable {
     case title(session: String, text: String)
     case waiting(session: String, prompt: AgentPrompt?)
     case notify(session: String, turn: String, on: Bool)
+    case shown(session: String, on: Bool)
 }
 
 extension AgentEvent {
@@ -132,7 +133,7 @@ extension AgentEvent {
         switch self {
         case .hello(let hello): hello.session
         case .typed(let session, _), .turnStarted(let session, _, _), .turnComplete(let session, _, _), .title(let session, _),
-             .waiting(let session, _), .notify(let session, _, _): session
+             .waiting(let session, _), .notify(let session, _, _), .shown(let session, _): session
         case .ack, .submitted, .checked, .refused, .undelivered, .focused: nil
         }
     }
@@ -148,6 +149,7 @@ extension AgentEvent {
         case .title(let session, let text): return .title(session: rename(session), text: text)
         case .waiting(let session, let prompt): return .waiting(session: rename(session), prompt: prompt)
         case .notify(let session, let turn, let on): return .notify(session: rename(session), turn: turn, on: on)
+        case .shown(let session, let on): return .shown(session: rename(session), on: on)
         case .ack, .submitted, .checked, .refused, .undelivered, .focused: return self
         }
     }
@@ -304,6 +306,9 @@ public enum AgentBridgeCodec {
         case "notify":
             guard let on = w.on else { throw CodecError.malformed }
             return .notify(session: try required(w.session), turn: w.turn ?? "", on: on)
+        case "shown":
+            guard let on = w.on else { throw CodecError.malformed }
+            return .shown(session: try required(w.session), on: on)
         case "turnComplete":
             return .turnComplete(session: try required(w.session), reason: w.reason ?? "", answer: w.answer ?? "")
         default:

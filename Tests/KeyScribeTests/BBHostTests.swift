@@ -28,12 +28,14 @@ struct BBHostTests {
     static let cli = "/Users/a/.bb/bin/bb"
     static let location = AgentHostLocation(host: "bb", instance: "/Users/a/.bb", native: "thr_abc1")
 
-    private func host(_ runner: Runner, installed: Bool = true, running: Bool = true) -> (BBHost, () -> Int) {
+    private func host(
+        _ runner: Runner, installed: Bool = true, running: Bool = true, frontmost: @escaping @MainActor () -> AgentHostApp? = { nil }
+    ) -> (BBHost, () -> Int) {
         var activations = 0
         let host = BBHost(
             home: Self.home, installed: { $0 == Self.cli && installed }, running: { running },
             run: { try await runner.run($0, subcommand: $1, input: $2, environment: $3) },
-            activate: { activations += 1 })
+            activate: { activations += 1 }, frontmost: frontmost)
         return (host, { activations })
     }
 
@@ -194,8 +196,21 @@ struct BBHostTests {
         #expect(activations() == 0)
     }
 
-    @Test func whatIsInFrontInBBIsUnsupported() async {
-        #expect(await host(Runner()).0.front(among: [Self.location]) == .unsupported)
+    @Test func theThreadInFrontIsTheOneThePluginLastSaidBbShowsAndOnlyWhileBbIsTheAppInFront() async {
+        let bb = AgentHostApp(bundle: BBHost.app, pid: 31, name: "bb", window: "cg:4")
+        let other = AgentHostApp(bundle: "com.apple.Safari", pid: 32, name: "Safari")
+        var front: AgentHostApp? = bb
+        let (host, _) = host(Runner(), frontmost: { front })
+        let elsewhere = AgentHostLocation(host: "bb", instance: "/Users/a/.bb", native: "thr_other")
+        #expect(await host.front(among: [Self.location], reported: Self.location) == .shown(Self.location, in: bb))
+        #expect(await host.front(among: [Self.location], reported: nil) == .unknown)
+        #expect(await host.front(among: [Self.location], reported: elsewhere) == .unknown)
+        front = other
+        #expect(await host.front(among: [Self.location], reported: Self.location) == .elsewhere)
+        front = nil
+        #expect(await host.front(among: [Self.location], reported: Self.location) == .unknown)
+        front = AgentHostApp(bundle: BBHost.app, pid: 31, name: "bb")
+        #expect(await host.front(among: [Self.location], reported: Self.location) == .unknown)
     }
 }
 

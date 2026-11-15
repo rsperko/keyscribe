@@ -19,19 +19,22 @@ final class BBHost: AgentHost {
     private let running: @MainActor () -> Bool
     private let run: Run
     private let activate: @MainActor () -> Void
+    private let frontmost: @MainActor () -> AgentHostApp?
 
     init(
         home: String = FileManager.default.homeDirectoryForCurrentUser.path,
         installed: @escaping (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
         running: @escaping @MainActor () -> Bool = { BBHost.runningApp != nil },
         run: @escaping Run = { try await HostCLI.run($0, subcommand: $1, input: $2, environment: $3) },
-        activate: @escaping @MainActor () -> Void = BBHost.bringForward
+        activate: @escaping @MainActor () -> Void = BBHost.bringForward,
+        frontmost: @escaping @MainActor () -> AgentHostApp? = BBHost.frontmostApp
     ) {
         self.home = home
         self.installed = installed
         self.running = running
         self.run = run
         self.activate = activate
+        self.frontmost = frontmost
     }
 
     private var dataDirectory: String { (home as NSString).appendingPathComponent(".bb") }
@@ -77,6 +80,14 @@ final class BBHost: AgentHost {
         return .requested
     }
 
+    func front(among locations: [AgentHostLocation], reported: AgentHostLocation?) async -> AgentHostFront {
+        guard let front = frontmost() else { return .unknown }
+        guard front.bundle == Self.app else { return .elsewhere }
+        guard front.window != nil else { return .unknown }
+        guard let reported, locations.contains(reported), thread(at: reported) != nil else { return .unknown }
+        return .shown(reported, in: front)
+    }
+
     func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
         guard let thread = thread(at: location) else { return .refused("bb no longer lists this thread.") }
         guard running() else { return .refused("bb isn\u{2019}t open.") }
@@ -111,6 +122,10 @@ final class BBHost: AgentHost {
 
     private static var runningApp: NSRunningApplication? {
         NSRunningApplication.runningApplications(withBundleIdentifier: app).first
+    }
+
+    private static func frontmostApp() -> AgentHostApp? {
+        AgentFront.frontmost().map { AgentHostApp(bundle: $0.bundle, pid: $0.pid, name: $0.name, window: $0.window) }
     }
 
     private static func bringForward() {

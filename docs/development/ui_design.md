@@ -708,7 +708,11 @@ in front: when recording starts, KeyScribe reads which conversation the front te
 same terminal and multiplexer routes that “open” and “go back” use, reading twice and checking that the app
 stayed in front. Exactly one listed conversation must be confirmed there, in the app and window that had
 focus at the press, for it to be this take's recipient. The read never asks for Automation access, so a
-terminal not yet allowed reads as unknown. Unknown, no terminal in front, a different app or window, or a
+terminal not yet allowed reads as unknown. A bb thread is in front when bb is the app in front with the
+same window focused as at the press, and bb's plugin last said the window you used most recently shows that
+thread on its page (in a split, once the focused pane agrees with the page); a bb page that shows no thread, such as its
+settings, has no conversation in front. Being in front also means its reply is not read aloud while you look
+at it, as for a terminal. Unknown, no terminal in front, a different app or window, or a
 front view that could belong to another session leaves the current recipient. The read runs beside the
 recording, and a reading that lands more than a moment after release is ignored, however long transcription
 takes. A spoken name or conversation number still wins and never waits for the read; a mode with a fixed

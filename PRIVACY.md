@@ -248,7 +248,10 @@ in the same `Application Support` folder:
   and a short fingerprint of the prompt it started with, never the prompt itself. To make that fingerprint it
   reads the thread's queued message or its most recent prompts inside bb, and keeps nothing it read. KeyScribe
   uses a reply only to read aloud the answer to what you dictated, under the same rules as a connector's.
-  While KeyScribe isn't running the plugin sends nothing and drops what it would have sent, and for a thread
+  Each bb window also tells the plugin whether it has focus and which thread its page shows (in a split, only
+  once the focused pane shows the same thread), and the
+  plugin tells KeyScribe which thread the window you used last shows; KeyScribe keeps only that, in memory,
+  and uses it only while bb is the app in front. While KeyScribe isn't running the plugin sends nothing and drops what it would have sent, and for a thread
   you disconnected it sends nothing but that thread's identity. To show whether the plugin is running,
   KeyScribe reads bb's list of installed plugins while bb is connected.
   The Claude Code connector reports a short fingerprint of the prompt each turn starts with, never the prompt

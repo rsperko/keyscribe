@@ -11,6 +11,8 @@ export type Host = {
   watch: (path: string, fn: () => void) => () => void
 }
 export type Thread = { id: string; status: string }
+export type WindowReport = { window: string; focused: boolean; thread: string | null }
+export type Pane = { threadId: string | null; isFocused: boolean }
 export type Bb = {
   listThreads: () => Promise<Thread[]>
   history: (thread: string) => Promise<string[]>
@@ -28,13 +30,22 @@ type Member = {
   chain: Promise<void>
 }
 
-const features = ["promptDigest", "readiness"]
+const features = ["promptDigest", "readiness", "shown"]
 const busy = new Set(["active", "starting", "stopping"])
 const answerLimit = 8192
 const eventDeadline = 2000
 const pollDeadline = 30000
 const backoff = [10000, 30000, 60000]
 const greetingLimit = 8
+const windowSilence = 15000
+const windowSweep = 5000
+const shownRetry = 5000
+
+export function shownThread(route: string | null, panes: Pane[] | null): string | null {
+  if (!route) return null
+  const focused = panes?.find((pane) => pane.isFocused)
+  return !focused || focused.threadId === route ? route : null
+}
 
 export function promptDigest(text: string): string {
   const plain = (text.startsWith("​") ? text.slice(1) : text).trim()
@@ -58,7 +69,7 @@ function folder(path: string): string {
   return index > 0 ? path.slice(0, index) : "/"
 }
 
-export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: () => void } {
+export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: () => void; window: (report: WindowReport) => void } {
   const connection = "bb-" + host.random()
   const members = new Map<string, Member>()
   const queued = new Map<string, { thread: string; text: string }>()
@@ -73,6 +84,13 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
   let retry: (() => void) | null = null
   let unwatch: (() => void) | null = null
   let polling: { cancel: () => void } | null = null
+  const windows = new Map<string, { thread: string | null; focused: boolean; focusedAt: number; seenAt: number }>()
+  let focusings = 0
+  let wanted: string | null = null
+  let told: string | null | undefined
+  let telling = false
+  let retelling: (() => void) | null = null
+  let sweeping: (() => void) | null = null
 
   const instanceOf = (thread: string) => `${connection}/${thread}`
   const sessionOf = (thread: string) => key(thread, config ? config.instance : "")
@@ -130,6 +148,10 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
     retry = null
     unwatch?.()
     unwatch = null
+    sweeping?.()
+    sweeping = null
+    retelling?.()
+    retelling = null
   }
 
   async function readConfig(): Promise<Config | null> {
@@ -196,6 +218,8 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
     if (refused !== undefined) return stop(`the app refused this plugin (${refused}); install it again from the app's settings`)
     if (results.some((r) => r === "failed")) return fail()
     failures = 0
+    told = undefined
+    tell()
     repoll()
   }
 
@@ -259,13 +283,16 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
       const thread = [...members.keys()].find((t) => sessionOf(t) === command?.expectedSession)
       if (!thread || typeof command.id !== "string") continue
       const m = members.get(thread)!
-      if (command.op === "quiet") m.quiet = true
-      if (command.op === "admit") m.quiet = false
+      if (command.op === "quiet" || command.op === "admit") {
+        m.quiet = command.op === "quiet"
+        told = undefined
+      }
       void post("/event", { op: "ack", request: command.id, instance: instanceOf(thread), connection }, eventDeadline)
     }
     const unknown: string[] = Array.isArray(parsed?.unknown) ? parsed.unknown : []
     for (const [thread, m] of members) if (unknown.includes(instanceOf(thread))) m.helloed = false
     if (unknown.length) return greetAll()
+    tell()
     repoll()
   }
 
@@ -295,9 +322,77 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
     }
   }
 
+  function front(): string | null {
+    const now = host.now()
+    for (const [id, w] of windows) if (now - w.seenAt > windowSilence) windows.delete(id)
+    const fresh = [...windows.values()]
+    const focusedNow = fresh.filter((w) => w.focused)
+    const pool = (focusedNow.length ? focusedNow : fresh).filter((w) => w.focusedAt > 0)
+    let best: { thread: string | null; focusedAt: number } | null = null
+    for (const w of pool) if (!best || w.focusedAt > best.focusedAt) best = w
+    return best?.thread ?? null
+  }
+
+  function reachable(thread: string | null | undefined): thread is string {
+    const m = thread ? members.get(thread) : undefined
+    return !!m && m.helloed && !m.quiet
+  }
+
+  function tell() {
+    if (!connected || stopped || telling || !config) return
+    const target = reachable(wanted) ? wanted : null
+    if (told !== undefined && told === target) return
+    const via = target ?? (reachable(told) ? told : [...members.keys()].find(reachable))
+    if (!via) {
+      told = target
+      return
+    }
+    telling = true
+    retelling?.()
+    retelling = null
+    void post("/event", { op: "shown", session: sessionOf(via), on: target !== null, instance: instanceOf(via), connection }, eventDeadline).then((response) => {
+      telling = false
+      if (response?.ok) {
+        told = target
+        return tell()
+      }
+      if (response?.status === 409 && members.get(via)) {
+        members.get(via)!.helloed = false
+        return void greetAll()
+      }
+      if (!stopped && !retelling) retelling = host.after(shownRetry, () => { retelling = null; tell() })
+    })
+  }
+
+  function settleFront() {
+    wanted = front()
+    tell()
+    if (windows.size && !sweeping && !stopped) {
+      sweeping = host.after(windowSweep, () => {
+        sweeping = null
+        settleFront()
+      })
+    }
+  }
+
+  function window(report: WindowReport) {
+    if (stopped || typeof report?.window !== "string") return
+    const now = host.now()
+    const known = windows.get(report.window)
+    if (!known) host.log("a bb window started reporting")
+    windows.set(report.window, {
+      thread: typeof report.thread === "string" ? report.thread : null,
+      focused: report.focused === true,
+      focusedAt: report.focused === true && !known?.focused ? ++focusings : known?.focusedAt ?? 0,
+      seenAt: now,
+    })
+    settleFront()
+  }
+
   function changed() {
     if (stopped || !connected) return
     if ([...members.values()].some((m) => !m.helloed && !m.greeting)) return void greetAll()
+    tell()
     repoll()
   }
 
@@ -356,5 +451,5 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
   bb.on("thread.failed", ({ thread }) => ended(thread, "error", ""))
 
   void connect()
-  return { stop: () => stop() }
+  return { stop: () => stop(), window }
 }

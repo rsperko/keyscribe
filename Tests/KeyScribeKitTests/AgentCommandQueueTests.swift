@@ -433,6 +433,14 @@ struct AgentBridgeCodecTests {
         #expect(plain.cwd == nil)
     }
 
+    @Test func aHostsConnectorSaysWhichOfItsConversationsItsWindowShowsAndWhenItStops() throws {
+        #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"shown","session":"s1","on":true}"#.utf8)) == .shown(session: "s1", on: true))
+        #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"shown","session":"s1","on":false}"#.utf8)) == .shown(session: "s1", on: false))
+        #expect(throws: AgentBridgeCodec.CodecError.malformed) { try AgentBridgeCodec.decodeEvent(Data(#"{"op":"shown","session":"s1"}"#.utf8)) }
+        #expect(AgentEvent.shown(session: "s1", on: true).renamingSession { "bb:" + $0 } == .shown(session: "bb:s1", on: true))
+        #expect(AgentEvent.shown(session: "bb:s1", on: false).session == "bb:s1")
+    }
+
     @Test func aConnectorAsksForTheReplyToBeReadAloudAndReportsItsRunningTurnOnHello() throws {
         #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"notify","session":"s1","turn":"t4","on":true}"#.utf8))
             == .notify(session: "s1", turn: "t4", on: true))

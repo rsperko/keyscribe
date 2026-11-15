@@ -8,16 +8,18 @@
   },
   "bb": {
     "name": "KeyScribe",
-    "description": "Speaks the replies to what you dictate to bb threads.",
+    "description": "Reads aloud the replies to what you dictate to bb threads, and knows which thread you are looking at.",
     "branding": {
       "icon": "Mic"
     },
-    "server": "./server.ts"
+    "server": "./server.ts",
+    "app": "./app.tsx"
   },
   "dependencies": {},
   "devDependencies": {
     "@get-bb/plugin-sdk": "0.6.132",
     "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
     "typescript": "^5.7.0"
   }
 }

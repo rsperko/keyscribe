@@ -56,7 +56,7 @@ struct ConnectorConsentSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("\(Branding.appName) lists the conversations \(host.displayName) runs and sends what you dictate to them through \(host.displayName)\u{2019}s own command, queued behind any turn already running.")
                 .fixedSize(horizontal: false, vertical: true)
-            Text("It also installs a small plugin in \(host.displayName) so the reply to what you dictate is read aloud. Every conversation connects on its own, and you can disconnect any of them later.")
+            Text("It also installs a small plugin in \(host.displayName) so the reply to what you dictate is read aloud, and so dictation can go to the conversation you are looking at: each \(host.displayName) window tells the plugin which conversation it shows. Every conversation connects on its own, and you can disconnect any of them later.")
                 .fixedSize(horizontal: false, vertical: true)
             Text("\(Branding.appName) runs nothing of \(host.displayName)\u{2019}s until you connect it, and keeps the plugin up to date. Uninstalling the plugin disconnects \(host.displayName).")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

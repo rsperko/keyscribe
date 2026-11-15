@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { keyscribe, promptDigest, type Bb, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
+import { keyscribe, promptDigest, shownThread, type Bb, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
 
 type Request = { path: string; body: any; auth: string; answer: (status: number, text?: string) => void; settled: boolean; cancelled: boolean }
 
@@ -108,6 +108,8 @@ async function connected(options: Parameters<typeof harness>[0] = {}) {
   const plugin = keyscribe(h.bb, h.host, ["/p/keyscribe.json"])
   await h.settle()
   await h.answerHellos()
+  for (const r of h.requests.filter((r) => !r.settled && r.path === "/event" && r.body.op === "shown")) r.answer(200, '{"ok":true}')
+  await h.settle()
   return Object.assign(h, { plugin })
 }
 
@@ -123,7 +125,7 @@ test("says hello for every thread under its conversation key with what it knows,
   assert.equal(a.installation, "I9")
   assert.equal(a.pid, 0)
   assert.equal(a.idle, true)
-  assert.deepEqual(a.features, ["promptDigest", "readiness"])
+  assert.deepEqual(a.features, ["promptDigest", "readiness", "shown"])
   assert.equal(hellos.find((b) => b.session === session("thr_b")).idle, false)
   assert.equal(new Set(hellos.map((b) => b.connection)).size, 1)
   assert.equal(new Set(hellos.map((b) => b.instance)).size, 2)
@@ -390,4 +392,153 @@ test("the digest is the one the app computes", () => {
   assert.equal(promptDigest("a"), "af63dc4c8601ec8c")
   assert.equal(promptDigest("café"), "48e8823acfa40d89")
   assert.equal(promptDigest("​  a \n"), "af63dc4c8601ec8c")
+})
+
+const shownEvents = (h: { sent: (op: string) => any[] }) => h.sent("shown").slice(1).map((b) => [b.session, b.on])
+
+async function answerShown(h: Awaited<ReturnType<typeof connected>>, status = 200) {
+  for (const r of h.requests.filter((r) => !r.settled && r.path === "/event" && r.body.op === "shown")) r.answer(status, '{"ok":true}')
+  await h.settle()
+}
+
+test("on connecting it first says that no thread is shown, since an earlier copy of it may have said one was", async () => {
+  const h = await connected()
+  assert.deepEqual(h.sent("shown").map((b) => b.on), [false])
+})
+
+test("a window shows a thread only on a thread page, and inside a split only once its focused pane agrees with the page", () => {
+  assert.equal(shownThread("thr_a", null), "thr_a")
+  assert.equal(shownThread(null, null), null)
+  assert.equal(shownThread(null, [{ threadId: "thr_a", isFocused: true }, { threadId: "thr_b", isFocused: false }]), null)
+  assert.equal(shownThread(null, [{ threadId: null, isFocused: true }, { threadId: "thr_b", isFocused: false }]), null)
+  assert.equal(shownThread("thr_b", [{ threadId: "thr_a", isFocused: false }, { threadId: "thr_b", isFocused: true }]), "thr_b")
+  assert.equal(shownThread("thr_a", [{ threadId: "thr_a", isFocused: false }, { threadId: "thr_b", isFocused: true }]), null)
+  assert.equal(shownThread("thr_a", [{ threadId: "thr_a", isFocused: false }, { threadId: "thr_b", isFocused: false }]), "thr_a")
+})
+
+test("says which thread the most recently focused bb window shows, one at a time and in order, and nothing when none", async () => {
+  const h = await connected()
+  h.plugin.window({ window: "w1", focused: true, thread: "thr_a" })
+  await h.settle()
+  assert.deepEqual(shownEvents(h), [[session("thr_a"), true]])
+  assert.equal(h.logs.filter((l) => l === "a bb window started reporting").length, 1)
+  h.plugin.window({ window: "w2", focused: true, thread: "thr_b" })
+  h.plugin.window({ window: "w1", focused: false, thread: "thr_a" })
+  assert.equal(h.logs.filter((l) => l === "a bb window started reporting").length, 2)
+  await h.settle()
+  assert.equal(shownEvents(h).length, 1)
+  await answerShown(h)
+  assert.deepEqual(shownEvents(h).slice(1), [[session("thr_b"), true]])
+  await answerShown(h)
+  h.plugin.window({ window: "w2", focused: false, thread: "thr_b" })
+  await h.settle()
+  assert.equal(shownEvents(h).length, 2)
+  h.plugin.window({ window: "w2", focused: false, thread: "thr_a" })
+  await h.settle()
+  assert.deepEqual(shownEvents(h).slice(2), [[session("thr_a"), true]])
+  await answerShown(h)
+  h.plugin.window({ window: "w2", focused: true, thread: null })
+  await h.settle()
+  assert.deepEqual(shownEvents(h).slice(3), [[session("thr_a"), false]])
+})
+
+test("a window focused now beats one whose blur was lost", async () => {
+  const h = await connected()
+  h.plugin.window({ window: "A", focused: true, thread: "thr_a" })
+  await h.settle()
+  await answerShown(h)
+  h.plugin.window({ window: "B", focused: true, thread: "thr_b" })
+  await h.settle()
+  await answerShown(h)
+  h.plugin.window({ window: "B", focused: false, thread: "thr_b" })
+  h.plugin.window({ window: "A", focused: true, thread: "thr_a" })
+  await h.settle()
+  assert.deepEqual(shownEvents(h), [[session("thr_a"), true], [session("thr_b"), true], [session("thr_a"), true]])
+})
+
+test("a report the app did not take is sent again, and only the latest is sent", async () => {
+  const h = await connected()
+  h.plugin.window({ window: "w1", focused: true, thread: "thr_a" })
+  await h.settle()
+  await answerShown(h, 500)
+  h.plugin.window({ window: "w1", focused: true, thread: "thr_b" })
+  await h.settle()
+  assert.deepEqual(shownEvents(h), [[session("thr_a"), true], [session("thr_b"), true]])
+  for (const r of h.requests.filter((r) => !r.settled && r.body.op === "shown")) r.answer(0)
+  await h.settle()
+  await h.advance(5_000)
+  assert.deepEqual(shownEvents(h).slice(2), [[session("thr_b"), true]])
+  await answerShown(h)
+  await h.advance(10_000)
+  assert.equal(shownEvents(h).length, 3)
+})
+
+test("after the connection comes back it says again what is shown, even when focus moved while it was down", async () => {
+  const h = await connected()
+  h.plugin.window({ window: "w1", focused: true, thread: "thr_a" })
+  await h.settle()
+  await answerShown(h)
+  h.open("poll")[0].answer(500)
+  await h.settle()
+  h.plugin.window({ window: "w1", focused: true, thread: "thr_b" })
+  await h.settle()
+  assert.equal(shownEvents(h).length, 1)
+  await h.advance(10_000)
+  await h.answerHellos()
+  assert.deepEqual(shownEvents(h).slice(1), [[session("thr_b"), true]])
+})
+
+test("after the app asks every thread to say hello again, it says again which thread is shown, or that none is", async () => {
+  const h = await connected()
+  h.plugin.window({ window: "w1", focused: true, thread: "thr_a" })
+  await h.settle()
+  await answerShown(h)
+  h.open("poll")[0].answer(409)
+  await h.settle()
+  await h.answerHellos()
+  assert.deepEqual(shownEvents(h), [[session("thr_a"), true], [session("thr_a"), true]])
+  await answerShown(h)
+  h.plugin.window({ window: "w1", focused: true, thread: null })
+  await h.settle()
+  await answerShown(h)
+  h.open("poll")[0].answer(409)
+  await h.settle()
+  await h.answerHellos()
+  assert.deepEqual(shownEvents(h).slice(2), [[session("thr_a"), false], [session("thr_a"), false]])
+})
+
+test("a disconnected thread is never reported as shown, and is once it is reconnected", async () => {
+  const h = await connected()
+  h.open("poll")[0].answer(200, JSON.stringify({ commands: [{ op: "quiet", id: "c1", expectedSession: session("thr_a") }] }))
+  await h.settle()
+  h.plugin.window({ window: "w1", focused: true, thread: "thr_a" })
+  await h.settle()
+  assert.deepEqual(shownEvents(h), [[session("thr_b"), false]])
+  await answerShown(h)
+  h.open("poll")[0].answer(200, JSON.stringify({ commands: [{ op: "admit", id: "c2", expectedSession: session("thr_a") }] }))
+  await h.settle()
+  assert.deepEqual(shownEvents(h).slice(1), [[session("thr_a"), true]])
+})
+
+test("a thread bb had not listed is reported as shown once it arrives", async () => {
+  const h = await connected()
+  h.plugin.window({ window: "w1", focused: true, thread: "thr_new" })
+  await h.settle()
+  assert.deepEqual(shownEvents(h), [])
+  await h.emit("thread.created", { thread: { id: "thr_new", status: "idle" } })
+  await h.answerHellos()
+  assert.deepEqual(shownEvents(h), [[session("thr_new"), true]])
+})
+
+test("a window that stops reporting is forgotten, so a reloaded window never stays in front", async () => {
+  const h = await connected()
+  h.plugin.window({ window: "w1", focused: true, thread: "thr_a" })
+  await h.settle()
+  await answerShown(h)
+  await h.advance(10_000)
+  h.plugin.window({ window: "w1", focused: true, thread: "thr_a" })
+  await h.advance(10_000)
+  assert.deepEqual(shownEvents(h), [[session("thr_a"), true]])
+  await h.advance(10_000)
+  assert.deepEqual(shownEvents(h), [[session("thr_a"), true], [session("thr_a"), false]])
 })
