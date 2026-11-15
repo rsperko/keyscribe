@@ -426,22 +426,36 @@ every rule above applies to it, with these sharpenings:
   0.49.0 on 2026-11-14). Its data folder is not watched: bb writes its database every few seconds even while
   idle (measured 2026-11-14), so a watch would run its command constantly. A thread nested under another
   is listed like any other: bb's `parentThreadId` is where the thread sits in its sidebar, which the user can
-  rearrange by dragging, so it does not by itself say an agent started the thread. A thread's title never becomes its name, since bb does not record whether the user or an AI service
-  wrote it, and a location that is not a thread of this bb's data folder is never passed to the command. A
+  rearrange by dragging, so it does not by itself say an agent started the thread. A thread's title is the label bb shows for it, so it names the
+  conversation as a herdr pane title does: an `AgentPlace` `.title` label the scan carries
+  (`AgentHostScan.found`'s `places`, kept through an unreadable list like any place), outranked only by a
+  KeyScribe name, after which it still reaches the thread said in full after a verb. bb does not record
+  whether the user or its title service wrote it, the same uncertainty a hook-set herdr title has; the
+  agent never writes it. For a thread with no title bb shows its opening words (`titleFallback`) instead;
+  they are what the user sees, so they reach the thread, but only said in full after a verb and never as its
+  shown name (`AgentPlace.Label.onlyAfterVerb`, from `AgentHostScan.found`'s `shownInstead`), since they are a
+  task phrase everyday instructions start with. A location that is not a thread of this bb's data folder is never passed to the command. A
   list longer than `HostCLI`'s output cap reads as unreadable, not as the part that fit. An agent bb started
   is placed in its thread by `BB_THREAD_ID` together with `BB_THREAD_STORAGE`, which must be that thread's
   folder in this bb's data folder (`BBThreads.thread(in:instance:)`); bb passes the dictated text to the agent
   unchanged, so its digest matches (checked with Claude Code in bb 0.49.0, 2026-11-14), while bb's own
   messages to a parent thread arrive as turns of their own and are never followed.
 - **bb's plugin is a connector for every bb thread** (`BBPluginConnector`, sources in `Resources/BBPlugin`). It is
-  installed like a connector, by the consent sheet's enrollment for bb's data folder, which turning bb on asks for
-  (`CodingAgentsSettingsModel.setTurnedOn`): KeyScribe writes its sources and settings into its own support folder,
+  installed like a connector, by the consent sheet's enrollment for bb's data folder, and bb is on exactly while
+  that setup is enrolled, read from the enrollment itself, never copied into settings
+  (`CodingAgentsSettingsModel.isTurnedOn`; the hub rescans on every enrollment change,
+  `ConnectorSetupRegistry.onChange`). Enrollment, not bb's report, decides it: a failed install or a plugin removed
+  inside bb keeps bb on, reads Not installed, and offers Reinstall without asking again, and an enrolled setup always
+  offers Uninstall. A revocation that could not be saved still holds in memory and is written before any reload reads the
+  file (`ConnectorSetupRegistry.reload`); a grant that could not be saved changes nothing, so the file stays in
+  charge. An unreadable setups file keeps the enrollment already loaded; at a launch that finds it unreadable, nothing is
+  loaded yet, so bb reads as off until the file is fixed, as every connector is refused then. KeyScribe writes its sources and settings into its own support folder,
   then has bb install it from there (`bb plugin install`, which builds a path source itself and runs `server.ts`
   from that folder, so the settings file sits beside it). An update rewrites the files and asks bb to reload the
   plugin (`bb plugin reload`), which keeps the running copy if the new one fails to load; it runs at launch while
-  bb is turned on. Each copy of the app installs its own plugin id, the variant's connector slug, so release and
+  bb is connected. Each copy of the app installs its own plugin id, the variant's connector slug, so release and
   development builds coexist. Installed means what `bb plugin list` reports for that id from that folder (missing,
-  disabled, failed, or running), read only while bb is turned on; a bb that does not answer reads as unknown. The
+  disabled, failed, or running), read only while bb is connected; a bb that does not answer reads as unknown. The
   plugin registers its teardown with bb (`bb.onDispose`), so a reload, disable or removal stops its connection and
   timers, and it logs connecting, waiting and stopping to bb's plugin log. Without its settings it marks itself as
   needing configuration rather than retrying; refused by the app (403 or 426) it stops. While the app is not running
@@ -449,7 +463,7 @@ every rule above applies to it, with these sharpenings:
   honours Disconnect at the source: a quiet hello or a `quiet` command stops its reports for that thread until
   `admit`. While its host is turned off the bridge answers it as it answers a disconnected conversation
   (`AgentBridgeServer.silence(agents:)`, set by the hub at start and after each scan), and every change of that
-  sends it back to say hello again, so an off switch means it sends only identity. It greets at most a few threads
+  sends it back to say hello again, so a host turned off means it sends only identity. It greets at most a few threads
   at a time, so a large bb never overruns the bridge's listen backlog. A plugin bb reports failing, or running an
   earlier version after a failed reload (bb's status detail `reload failed:` on a running plugin), is installed but broken: Repair reinstalls it, launch maintenance tries
   once, and Uninstall stays offered. Inside

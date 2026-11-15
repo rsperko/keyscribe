@@ -575,32 +575,34 @@ Claude Code or `/reload` in Pi, or restart it.
 
 ### Can I talk to agents running in bb?
 
-Yes. Turn on **Reach conversations in bb** in **Settings ▸ Modes ▸ Coding agent**. KeyScribe then lists bb's
+Yes. Install the plugin under **bb** in **Settings ▸ Modes ▸ Coding agent**. KeyScribe then lists bb's
 threads and sends what you say to them through bb's own `bb` command, whichever agent the thread runs, with
-any image you pasted attached. It runs nothing of bb's until you turn this on, and nothing while bb isn't
+any image you pasted attached. It runs nothing of bb's until you connect bb this way, and nothing while bb isn't
 open. Your words are queued behind a turn that is already running rather than injected into it. “Open docs”
 asks bb's open windows to show the thread and brings bb forward. If bb isn't installed, isn't open, or
-couldn't list its threads, Settings says so beside the switch.
+couldn't list its threads, Settings says so under the plugin.
 
 KeyScribe checks bb for new threads when you start recording with a Coding agent mode available and while
 Settings is open, and otherwise only every few minutes, so a thread you just started may need one more press
-before you can say its name.
+before you can say its name. A bb thread is named by the title bb shows for it, unless you give it a
+KeyScribe name; then the title still works after “open”, “go to”, “tell” or “ask”. A thread bb hasn't titled
+yet shows its first message instead; that works only said in full after one of those words, so “Ask what time
+is it, what time it is in London” reaches the thread whose first message was “what time is it?”.
 
 A Claude Code thread in bb whose connector is installed is listed once, as the bb thread, keeping the name,
 Disconnect and current choice you gave it before. When the connector is up to date, the reply to what you dictate there is read aloud as it is for a terminal, and so is
 work you ask it to have KeyScribe read aloud.
 
-Turning the switch on asks once, and then also installs a small KeyScribe plugin in bb with bb's own `bb plugin`
-command, so the reply to what you dictate to any bb thread is read aloud, whichever agent the thread runs.
-KeyScribe keeps the plugin up to date on its own, and shows below the switch whether bb has it running, with a
-Repair button if bb reports it failing; Uninstall there removes it from bb again. Turning the switch off stops the
-plugin sending replies or prompt fingerprints, and Uninstall stays available below the switch while it is still installed. While KeyScribe isn't running the plugin waits quietly and picks up
+Installing asks once, then installs a small KeyScribe plugin in bb with bb's own `bb plugin` command, so the
+reply to what you dictate to any bb thread is read aloud, whichever agent the thread runs. KeyScribe keeps the
+plugin up to date on its own, and shows whether bb has it running, with a Repair button if bb reports it
+failing. If bb loses the plugin, for example after you remove it in bb, dictation still reaches bb's threads,
+but replies aren't read aloud until you choose Reinstall. Uninstalling it in KeyScribe removes it from bb and
+disconnects bb: KeyScribe no longer lists bb's threads or sends to them. While KeyScribe isn't running the plugin waits quietly and picks up
 as soon as KeyScribe starts. Where a thread's agent has its own connector too, the plugin speaks for that
 thread. KeyScribe can't yet tell which bb thread is in front.
 
-A thread is called by its folder until you rename it in
-KeyScribe, because bb doesn't say whether you or an AI service wrote its title. KeyScribe turns off bb's usage
-reporting for the commands it runs.
+KeyScribe turns off bb's usage reporting for the commands it runs.
 
 ### How do I rename a conversation?
 

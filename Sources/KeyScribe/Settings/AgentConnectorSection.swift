@@ -44,83 +44,22 @@ struct AgentHostSection: View {
     var connector: AgentConnectorModel?
 
     var body: some View {
-        Section(host.displayName) {
-            SettingRow(
-                title: "Reach conversations in \(host.displayName)",
-                help: "Lists the conversations \(host.displayName) runs and sends what you say to them through \(host.displayName)\u{2019}s own command, queued behind any turn already running. \(Branding.appName) runs nothing of \(host.displayName)\u{2019}s until this is on.")
-            {
-                Toggle("", isOn: Binding(get: { model.isTurnedOn(host) }, set: { model.setTurnedOn(host, $0) })).labelsHidden()
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.host(host.id))
-            }
-            if let problem = model.problem(of: host) {
-                IssueText(problem, severity: .advisory)
-            }
-            if let connector {
-                if model.isTurnedOn(host) {
-                    HostConnectorSetups(model: connector, onInstall: { model.requestInstall($0, of: connector) })
-                } else {
-                    HostConnectorLeftovers(model: connector, host: host)
+        if let connector {
+            AgentConnectorSection(model: connector, onInstall: { model.requestInstall($0, of: connector) })
+        } else {
+            Section(host.displayName) {
+                SettingRow(
+                    title: "Reach conversations in \(host.displayName)",
+                    help: "Lists the conversations \(host.displayName) runs and sends what you say to them through \(host.displayName)\u{2019}s own command, queued behind any turn already running. \(Branding.appName) runs nothing of \(host.displayName)\u{2019}s until this is on.")
+                {
+                    Toggle("", isOn: Binding(get: { model.isTurnedOn(host) }, set: { model.setTurnedOn(host, $0) })).labelsHidden()
+                        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.host(host.id))
+                }
+                if let problem = model.problem(of: host) {
+                    IssueText(problem, severity: .advisory)
                 }
             }
         }
-    }
-}
-
-private struct HostConnectorLeftovers: View {
-    @ObservedObject var model: AgentConnectorModel
-    let host: AgentKind
-
-    var body: some View {
-        ForEach(model.setups.filter(\.isEnrolled)) { setup in
-            HostConnectorLeftover(setup: setup, host: host)
-        }
-        .task { model.listSetups() }
-    }
-}
-
-private struct HostConnectorLeftover: View {
-    @ObservedObject var setup: ConnectorSetupModel
-    let host: AgentKind
-    @State private var confirmingRemove = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("The \(setup.copy.setupTitle.lowercased()) is still installed in \(host.displayName). While this is off it sends only each conversation\u{2019}s identity.")
-                .font(.caption).foregroundStyle(.secondary)
-            if let operation = setup.operation {
-                Text(operation).font(.caption).foregroundStyle(.secondary)
-            }
-            if case .failed(let message) = setup.state {
-                IssueText(message.isEmpty ? setup.copy.noReason : message)
-            }
-            HStack {
-                Spacer()
-                Button("Uninstall \(setup.copy.setupTitle)\u{2026}", role: .destructive) { confirmingRemove = true }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .disabled(setup.operation != nil)
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.remove)
-            }
-        }
-        .confirmationDialog(setup.copy.uninstallTitle, isPresented: $confirmingRemove, titleVisibility: .visible) {
-            Button("Uninstall", role: .destructive) { Task { await setup.remove() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(setup.copy.uninstallMessage)
-        }
-    }
-}
-
-private struct HostConnectorSetups: View {
-    @ObservedObject var model: AgentConnectorModel
-    let onInstall: (ConnectorSetupModel) -> Void
-
-    var body: some View {
-        ForEach(model.setups) { setup in
-            ConnectorSetupBlock(setup: setup, showsFolderInTitle: model.setups.count > 1, onInstall: { onInstall(setup) })
-        }
-        .task { await model.refresh() }
     }
 }
 
@@ -153,6 +92,9 @@ private struct ConnectorSetupBlock: View {
                 primaryAction
             }
             .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.connectorStatus)
+            if let purpose = setup.copy.purpose, !setup.isEnrolled {
+                Text(purpose).font(.caption).foregroundStyle(.secondary)
+            }
             CopyableValue(setup.display, value: setup.folder.path, what: "folder", of: "this setup")
                 .font(.caption)
                 .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.setupFolder)
@@ -182,6 +124,10 @@ private struct ConnectorSetupBlock: View {
         }
     }
 
+    private var setupName: String {
+        "\(setup.connector.kind.displayName) \(setup.copy.setupTitle.lowercased()) in \(setup.display)"
+    }
+
     private var title: String {
         showsFolderInTitle ? "\(setup.copy.setupTitle) in \(setup.display)" : setup.copy.setupTitle
     }
@@ -202,7 +148,7 @@ private struct ConnectorSetupBlock: View {
                 .font(.caption)
                 .foregroundStyle(.red)
                 .disabled(setup.operation != nil)
-                .accessibilityLabel("Uninstall \(setup.connector.kind.displayName) connector in \(setup.display)")
+                .accessibilityLabel("Uninstall \(setupName)")
                 .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.remove)
         }
     }
@@ -241,25 +187,29 @@ private struct ConnectorSetupBlock: View {
     @ViewBuilder private var primaryAction: some View {
         if setup.operation == nil {
             switch setup.state {
+            case .status(.notInstalled) where setup.offersReinstall:
+                Button("Reinstall") { Task { await setup.install() } }
+                    .accessibilityLabel("Reinstall \(setupName)")
+                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.install)
             case .status(.notInstalled):
                 Button("Install\u{2026}", action: onInstall)
-                    .accessibilityLabel("Install \(setup.connector.kind.displayName) connector in \(setup.display)")
+                    .accessibilityLabel("Install \(setupName)")
                     .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.install)
             case .failed:
                 Button("Try Again") { Task { await setup.retry() } }
-                    .accessibilityLabel("Try again for \(setup.connector.kind.displayName) connector in \(setup.display)")
+                    .accessibilityLabel("Try again for \(setupName)")
                     .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.tryAgain)
             case .status(.outdated):
                 Button("Update") { Task { await setup.update() } }
-                    .accessibilityLabel("Update \(setup.connector.kind.displayName) connector in \(setup.display)")
+                    .accessibilityLabel("Update \(setupName)")
                     .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.update)
             case .broken:
                 Button("Repair") { Task { await setup.update() } }
-                    .accessibilityLabel("Repair \(setup.connector.kind.displayName) connector in \(setup.display)")
+                    .accessibilityLabel("Repair \(setupName)")
                     .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.update)
             case .removalUnfinished:
                 Button("Finish Uninstalling") { Task { await setup.remove() } }
-                    .accessibilityLabel("Finish uninstalling \(setup.connector.kind.displayName) connector in \(setup.display)")
+                    .accessibilityLabel("Finish uninstalling \(setupName)")
                     .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.finishUninstalling)
             default:
                 EmptyView()

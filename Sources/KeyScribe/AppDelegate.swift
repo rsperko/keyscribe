@@ -842,7 +842,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                     supportDir: KeyScribePaths.supportDir, surfaces: surfaces, placeSources: codingAgents.placeSources.map { $0() },
                     discovery: codingAgents.discoveries(setups: setups, processes: processes), setups: setups,
                     legacyAgent: AgentKind.claude.id, hosts: codingAgents.hosts,
-                    hostAllowed: { [weak self] in self?.settings.codingAgents.hosts.contains($0) ?? false })
+                    hostAllowed: { [weak codingAgents = settingsController.codingAgents] in codingAgents?.isTurnedOn(id: $0) ?? false })
+                setups.onChange = { [weak hub = runtime.hub] in Task { @MainActor in await hub?.rescan(wantingHosts: true) } }
                 runtime.hub.onNotice = { [weak self] in self?.controller.showAgentNotice($0, request: $1, conversation: $2) }
                 runtime.hub.onForget = { [weak self] in self?.controller.forgetAgentReceipt(request: $0) }
                 runtime.hub.onDelivery = { [weak self] in self?.controller.recordAgentDelivery($1, request: $0) }
@@ -910,6 +911,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             agentRuntime?.stop()
             agentRuntime = nil
+            settingsController.codingAgents.setups.onChange = nil
             settingsController.onOpenChange = nil
             spokenResult?.stop()
             spokenResult = nil

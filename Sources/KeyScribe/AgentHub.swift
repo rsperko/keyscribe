@@ -691,11 +691,16 @@ final class AgentHub {
         }
         let excluded = Set(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }.filter(exclusions.excludes))
         let live = Set(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }.filter { !excluded.contains($0) && transport.isLive(session: $0) })
+        let hostPlaces = lastExtras.values.reduce(into: [String: AgentPlace]()) { places, extras in
+            places.merge(extras.places) { kept, _ in kept }
+        }
+        let hostListed = lastExtras.values.reduce(into: Set<String>()) { $0.formUnion($1.listed) }
         directory.update(
             entries: entries, live: live, titles: shown, nativeNames: nativeNames, running: stillRunning, excluded: excluded,
-            places: placeTracker?.places ?? [:],
+            places: (placeTracker?.places ?? [:]).merging(hostPlaces) { tracked, _ in tracked },
             unplaced: placeTracker.map { tracker in
-                tracker.unchecked(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) }).subtracting(tracker.places.keys)
+                tracker.unchecked(entries.map { AgentSessionID.make(agent: $0.agent, native: $0.id) })
+                    .subtracting(tracker.places.keys).subtracting(hostListed)
             } ?? [], unreadSince: placeTracker?.failingSince ?? [:])
         let reported = namesNotSaved
         rememberNames()

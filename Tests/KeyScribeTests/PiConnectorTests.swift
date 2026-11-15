@@ -232,6 +232,29 @@ struct PiConnectorStatusTests {
         #expect(await connector.check(tool: "/bin/pi-test", target: target(folder)) == .status(.ready))
     }
 
+    @MainActor @Test func aConnectorLostOutsideTheAppOffersReinstallAndUninstallWhileItsSetupIsEnrolled() async throws {
+        let (connector, cli, agents, folder) = make()
+        let setup = ConnectorSetupModel(
+            folder: folder, isDefault: true, connector: connector, registry: ConnectorSetupRegistry(directory: agents), retire: { _ in })
+        cli.status = 1
+        await setup.install()
+        #expect(setup.hasError)
+        #expect(!setup.isInstalled)
+        #expect(setup.isEnrolled)
+        #expect(setup.offersUninstall)
+        cli.status = 0
+        await setup.retry()
+        #expect(setup.state == .status(.ready))
+        #expect(!setup.offersReinstall)
+        try FileManager.default.removeItem(at: folder.appendingPathComponent("extensions/keyscribe-dev"))
+        await setup.refresh()
+        #expect(setup.state == .status(.notInstalled))
+        #expect(setup.offersReinstall)
+        #expect(setup.offersUninstall)
+        await setup.install()
+        #expect(setup.state == .status(.ready))
+    }
+
     @Test func filesFromAnotherInstallationAreNotThisSetupsConnector() async throws {
         let (connector, _, _, folder) = make()
         try await connector.install(tool: "/bin/pi-test", target: target(folder, installation: "old"))

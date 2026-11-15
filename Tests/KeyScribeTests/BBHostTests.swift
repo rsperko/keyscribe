@@ -53,14 +53,21 @@ struct BBHostTests {
         ])
     }
 
-    @Test func threadsAreListedAsHostedConversationsOfThisBB() async {
+    @Test func threadsAreListedAsHostedConversationsOfThisBBEachLabelledWithTheTitleBbShows() async {
         let runner = Runner()
         runner.answers["thread list"] = Self.output("""
-            [{"id":"thr_abc1","title":"A title bb wrote","status":"active","visibility":"visible","archivedAt":null,"deletedAt":null,
-              "environmentPath":"/src/app","hasPendingInteraction":false,"createdAt":1794629582057}]
+            [{"id":"thr_abc1","title":"ks-probe pi","titleFallback":"Reply with ready","status":"active","visibility":"visible",
+              "archivedAt":null,"deletedAt":null,"environmentPath":"/src/app","hasPendingInteraction":false,"createdAt":1794629582057},
+             {"id":"thr_abc2","title":null,"titleFallback":"Reply with ready","status":"idle","visibility":"visible",
+              "archivedAt":null,"deletedAt":null,"environmentPath":"/src/app","hasPendingInteraction":false,"createdAt":1794629582058}]
             """)
-        #expect(await host(runner).0.scan() == .found([AgentSession(
-            agent: "bb", id: "thr_abc1", pid: nil, cwd: "/src/app", state: .working, startedAt: 1794629582057, host: Self.location)]))
+        let second = AgentHostLocation(host: "bb", instance: "/Users/a/.bb", native: "thr_abc2")
+        #expect(await host(runner).0.scan() == .found(
+            [
+                AgentSession(agent: "bb", id: "thr_abc1", pid: nil, cwd: "/src/app", state: .working, startedAt: 1794629582057, host: Self.location),
+                AgentSession(agent: "bb", id: "thr_abc2", pid: nil, cwd: "/src/app", state: .idle, startedAt: 1794629582058, host: second),
+            ],
+            titles: ["thr_abc1": "ks-probe pi"], shownInstead: ["thr_abc2": "Reply with ready"]))
     }
 
     @Test func aListThatCannotBeReadIsUnreadableNotEmptyAndSaysWhatToTry() async {
@@ -230,71 +237,112 @@ struct AgentHostConsentModelTests {
         return condition()
     }
 
-    @Test func turningOnAHostWithAPluginAsksOnceThenTurnsItOnAndInstallsTheTwoTogether() async throws {
+    private func pluginSetup(_ model: CodingAgentsSettingsModel) throws -> (AgentConnectorModel, ConnectorSetupModel) {
+        let connector = try #require(model.connectors.first)
+        let setup = try #require(connector.setups.first { $0.isDefault })
+        return (connector, setup)
+    }
+
+    private func installed(_ calls: BBPluginConnectorTests.Calls) -> (CodingAgentsSettingsModel, ConnectorSetupModel, URL) {
+        let (model, agents) = pluginModel(calls)
+        let setup = model.connectors[0].setups.first { $0.isDefault }!
+        return (model, setup, agents)
+    }
+
+    private static let listed = #"{"plugins":[{"id":"keyscribe-dev","enabled":true,"status":"running","source":"path:AGENTS/bb-plugin"}]}"#
+
+    @Test func installingAHostsPluginAsksOnceInTheHostsOwnWordsThenConnectsIt() async throws {
         let calls = BBPluginConnectorTests.Calls()
         let (model, agents) = pluginModel(calls)
         var reported: [[String]] = []
         model.onHostsChange = { reported.append($0) }
-        model.setTurnedOn(BBHost.kind, true)
-        #expect(await settled { model.consent != nil })
+        let (connector, setup) = try pluginSetup(model)
+        model.requestInstall(setup, of: connector)
         let request = try #require(model.consent)
-        #expect(request.turningOn == BBHost.kind)
+        #expect(model.host(of: request.connector) == BBHost.kind)
         #expect(!model.isTurnedOn(BBHost.kind))
         #expect(calls.all.isEmpty)
         model.confirm(request)
+        #expect(await settled { calls.all.contains { $0.0.contains("install") } && setup.operation == nil })
         #expect(model.isTurnedOn(BBHost.kind))
-        #expect(reported == [["bb"]])
-        #expect(await settled { calls.all.contains { $0.0.contains("install") } })
+        #expect(model.isTurnedOn(id: "bb"))
+        #expect(reported.isEmpty)
         #expect(FileManager.default.fileExists(atPath: agents.appendingPathComponent("bb-plugin/keyscribe.json").path))
     }
 
-    @Test func cancellingTheHostsConsentLeavesItOffAndInstallsNothing() async throws {
+    @Test func cancellingTheHostsConsentLeavesItOffAndRunsNothing() async throws {
         let calls = BBPluginConnectorTests.Calls()
         let (model, _) = pluginModel(calls)
-        model.setTurnedOn(BBHost.kind, true)
-        #expect(await settled { model.consent != nil })
+        let (connector, setup) = try pluginSetup(model)
+        model.requestInstall(setup, of: connector)
         model.consent = nil
-        #expect(!model.isTurnedOn(BBHost.kind))
         await model.refresh()
         await model.maintain()
+        #expect(!model.isTurnedOn(BBHost.kind))
         #expect(calls.all.isEmpty)
     }
 
-    @Test func aHostsPluginIsCheckedOnlyWhileTheHostIsOn() async throws {
-        let calls = BBPluginConnectorTests.Calls()
-        let (model, _) = pluginModel(calls)
+    @Test func aHostWithAPluginIgnoresTheSavedHostList() {
+        let (model, _) = pluginModel(BBPluginConnectorTests.Calls())
+        model.load(hosts: ["bb"])
+        #expect(!model.isTurnedOn(BBHost.kind))
         model.setTurnedOn(BBHost.kind, true)
-        #expect(await settled { model.consent != nil })
-        model.confirm(try #require(model.consent))
-        #expect(await settled { calls.all.contains { $0.0.contains("install") } })
-        model.setTurnedOn(BBHost.kind, false)
-        let made = calls.all.count
-        await model.refresh()
-        await model.maintain()
-        #expect(calls.all.count == made)
-        model.setTurnedOn(BBHost.kind, true)
-        #expect(model.isTurnedOn(BBHost.kind))
-        #expect(model.consent == nil)
+        #expect(!model.isTurnedOn(BBHost.kind))
     }
 
-    @Test func aPluginLeftInstalledWhileItsHostIsOffCanStillBeUninstalledAndNothingElseIsAsked() async throws {
+    @Test func uninstallingAHostsPluginDisconnectsTheHostHoweverTheUninstallIsReached() async throws {
         let calls = BBPluginConnectorTests.Calls()
-        let (model, agents) = pluginModel(calls)
-        model.setTurnedOn(BBHost.kind, true)
-        #expect(await settled { model.consent != nil })
-        model.confirm(try #require(model.consent))
-        #expect(await settled { calls.all.contains { $0.0.contains("install") } })
-        model.setTurnedOn(BBHost.kind, false)
-        let connector = try #require(model.connectors.first)
-        connector.listSetups()
-        let leftover = try #require(connector.setups.first { $0.isEnrolled })
-        #expect(await settled { leftover.operation == nil })
-        let made = calls.all.count
-        await leftover.remove()
-        #expect(calls.all.dropFirst(made).map { $0.0.dropFirst().joined(separator: " ") } == ["plugin remove keyscribe-dev --json"])
+        let (model, setup, agents) = installed(calls)
+        await setup.install()
+        #expect(model.isTurnedOn(BBHost.kind))
+        calls.set("plugin remove", status: 1, #"{"ok":false,"error":{"code":"server_unavailable","message":"bb is not running"}}"#)
+        await setup.remove()
+        #expect(setup.state == .removalUnfinished("bb is not running"))
+        #expect(!model.isTurnedOn(BBHost.kind))
+        calls.set("plugin remove", #"{"ok":true}"#)
+        await setup.remove()
         #expect(!FileManager.default.fileExists(atPath: agents.appendingPathComponent("bb-plugin").path))
-        connector.listSetups()
-        #expect(connector.setups.filter(\.isEnrolled).isEmpty)
+        #expect(!model.isTurnedOn(BBHost.kind))
+    }
+
+    @Test func aFailedInstallKeepsTheHostConnectedAndOffersUninstall() async throws {
+        let calls = BBPluginConnectorTests.Calls()
+        let (model, setup, _) = installed(calls)
+        calls.set("plugin install", status: 1, #"{"ok":false,"error":{"code":"server_unavailable","message":"bb is not running"}}"#)
+        await setup.install()
+        #expect(setup.state == .failed("bb is not running"))
+        #expect(model.isTurnedOn(BBHost.kind))
+        #expect(setup.offersUninstall)
+    }
+
+    @Test func aPluginRemovedInsideTheHostReadsAsAReinstallNotANewConsent() async throws {
+        let calls = BBPluginConnectorTests.Calls()
+        let (model, setup, agents) = installed(calls)
+        await setup.install()
+        calls.set("plugin list", Self.listed.replacingOccurrences(of: "AGENTS", with: agents.path))
+        await setup.refresh()
+        #expect(setup.state == .status(.ready))
+        #expect(!setup.offersReinstall)
+        calls.set("plugin list", #"{"plugins":[]}"#)
+        await setup.refresh()
+        #expect(setup.state == .status(.notInstalled))
+        #expect(model.isTurnedOn(BBHost.kind))
+        #expect(setup.offersReinstall)
+        #expect(setup.offersUninstall)
+    }
+
+    @Test func anUnreadableSetupsFileNeverTurnsAConnectedHostOff() async throws {
+        let calls = BBPluginConnectorTests.Calls()
+        let (model, setup, agents) = installed(calls)
+        var reported: [[String]] = []
+        model.onHostsChange = { reported.append($0) }
+        await setup.install()
+        try Data("not json".utf8).write(to: agents.appendingPathComponent(ConnectorSetupRegistry.fileName))
+        model.setups.reload()
+        await model.refresh()
+        await model.maintain()
+        #expect(model.isTurnedOn(BBHost.kind))
+        #expect(reported.isEmpty)
     }
 
     @Test func aHostsListingProblemIsShownBesideItsSwitchOnlyWhileItIsOn() {

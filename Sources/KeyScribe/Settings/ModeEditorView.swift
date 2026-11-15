@@ -103,6 +103,7 @@ struct ModeEditorView: View {
         }
         .formStyle(.grouped)
         .padding(16)
+        .background { if let codingAgents { ConnectorConsentPresenter(model: codingAgents) } }
     }
 
     private var systemBody: some View {

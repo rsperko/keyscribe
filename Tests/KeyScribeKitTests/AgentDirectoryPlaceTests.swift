@@ -135,6 +135,29 @@ struct AgentDirectoryPlaceTests {
         ])
     }
 
+    @Test(arguments: [
+        ("Ask what time is it, what time it is in London", "bb:t1", "what time it is in London"),
+        ("Tell what time is it to check London", "bb:t1", "to check London"),
+        ("what time is it in London", "pi:b", "what time is it in London"),
+    ])
+    func textShownOnlyInPlaceOfATitleNeverNamesItsConversationButReachesItSaidInFullAfterAVerb(text: String, id: String, body: String) {
+        var directory = AgentDirectory()
+        let label = AgentPlace.Label(
+            text: "what time is it?", level: .title, container: "bb#t1", surface: "bb", term: "first message", onlyAfterVerb: true)
+        directory.update(
+            entries: [session("bb", "t1", cwd: "/src/scratch"), session("pi", "b", pid: 20)], live: [],
+            places: ["bb:t1": AgentPlace(surface: "bb", labels: [label], containers: ["bb#t1"])])
+        #expect(handles(directory) == ["bb:t1": "scratch", "pi:b": "home"])
+        #expect(directory.conversations.first { $0.id == "bb:t1" }?.nameSource == .folder)
+        #expect(directory.sharedPlaceNames["what time is it"] == AgentRecipient.SharedName(names: ["scratch"], kind: .afterVerb("bb first message")))
+        let names = Dictionary(uniqueKeysWithValues: directory.conversations.map { ($0.handle, $0.id) })
+        let shared = directory.sharedPlaceNames
+        let address = AgentAddress.parse(
+            text, names: AgentRecipient.spokenNames(names, shared: shared), afterVerb: AgentRecipient.afterVerbNames(shared))
+        let resolved = AgentRecipient.resolve(address, frozen: .init(id: "pi:b", source: .current), rows: ["bb:t1", "pi:b"], names: names, shared: shared)
+        #expect(resolved == .deliver(id: id, body: body, source: id == "pi:b" ? .current : .spoken))
+    }
+
     @Test func twoPanesShowingTheSameTitleAreQualifiedAndTheBareTitleAsks() {
         var directory = AgentDirectory()
         directory.update(

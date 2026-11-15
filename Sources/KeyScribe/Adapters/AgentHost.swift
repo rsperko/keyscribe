@@ -2,7 +2,7 @@ import Foundation
 import KeyScribeKit
 
 public enum AgentHostScan: Equatable, Sendable {
-    case found([AgentSession])
+    case found([AgentSession], titles: [String: String] = [:], shownInstead: [String: String] = [:])
     case unreadable(String)
 }
 
@@ -126,16 +126,29 @@ final class HostDiscovery: AgentDiscovery {
 
     private func fresh() async -> AgentScan {
         switch await host.scan() {
-        case .found(let sessions):
+        case .found(let sessions, let titles, let shownInstead):
             var seen: Set<String> = []
-            return .found(sessions.compactMap { session in
+            var placed: [String: AgentPlace] = [:]
+            let owned: [AgentSession] = sessions.compactMap { session in
                 guard let location = session.host, location.host == kind.id, seen.insert(location.conversationKey).inserted else { return nil }
                 var owned = session
                 owned.agent = kind.id
                 owned.id = location.conversationKey
                 owned.pid = nil
+                let labels = [
+                    titles[location.native].map { AgentPlace.Label(text: $0, level: .title, container: location.conversationKey, surface: kind.displayName, term: "title") },
+                    shownInstead[location.native].map {
+                        AgentPlace.Label(
+                            text: $0, level: .title, container: location.conversationKey, surface: kind.displayName, term: "title", onlyAfterVerb: true)
+                    },
+                ].compactMap { $0 }
+                if !labels.isEmpty {
+                    placed[AgentSessionID.make(agent: kind.id, native: owned.id)] = AgentPlace(
+                        surface: kind.displayName, labels: labels, containers: [location.conversationKey])
+                }
                 return owned
-            })
+            }
+            return .found(owned, AgentScanExtras(places: placed, listed: Set(owned.map { AgentSessionID.make(agent: kind.id, native: $0.id) })))
         case .unreadable(let why):
             return .unreadable(why)
         }

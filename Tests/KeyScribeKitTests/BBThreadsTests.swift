@@ -21,9 +21,12 @@ struct BBThreadsTests {
         #expect(BBThreads.parse(data("[]")) == [])
     }
 
-    @Test func aThreadIsListedByItsFolderWithNoNameFromItsTitle() {
-        #expect(BBThreads.parse(data("[\(thread(title: nil))]")) == [BBThreads.Thread(id: "thr_a1", folder: "/src/app", state: .idle)])
-        #expect(BBThreads.parse(data("[\(thread(title: "Fix the build"))]")) == [BBThreads.Thread(id: "thr_a1", folder: "/src/app", state: .idle)])
+    @Test func aThreadKeepsTheTitleBbShowsAndOnlyWithoutOneTheOpeningWordsBbShowsInstead() {
+        #expect(BBThreads.parse(data("[\(thread(title: nil))]")) == [BBThreads.Thread(id: "thr_a1", folder: "/src/app", state: .idle, shownInstead: "first prompt")])
+        #expect(BBThreads.parse(data("[\(thread(title: "  "))]")) == [BBThreads.Thread(id: "thr_a1", folder: "/src/app", state: .idle, shownInstead: "first prompt")])
+        #expect(
+            BBThreads.parse(data("[\(thread(title: " Fix the build "))]"))
+                == [BBThreads.Thread(id: "thr_a1", folder: "/src/app", state: .idle, title: "Fix the build")])
     }
 
     @Test func statusesMapToLiveStatesAndAnUnknownStatusIsNotWorking() {

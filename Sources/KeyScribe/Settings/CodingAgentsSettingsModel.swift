@@ -59,7 +59,6 @@ final class CodingAgentsSettingsModel: ObservableObject {
         let connector: AgentConnectorModel
         let setup: ConnectorSetupModel
         var reconnecting: String?
-        var turningOn: AgentKind?
     }
 
     let connectors: [AgentConnectorModel]
@@ -115,36 +114,24 @@ final class CodingAgentsSettingsModel: ObservableObject {
         if turnedOnHosts != hosts { turnedOnHosts = hosts }
     }
 
-    func isTurnedOn(_ host: AgentKind) -> Bool { turnedOnHosts.contains(host.id) }
+    func isTurnedOn(_ host: AgentKind) -> Bool {
+        guard let connector = connector(of: host) else { return turnedOnHosts.contains(host.id) }
+        return connector.setups.first(where: \.isDefault)?.isEnrolled == true
+    }
+
+    func isTurnedOn(id: String) -> Bool { hosts.first { $0.id == id }.map(isTurnedOn) ?? false }
 
     func problem(of host: AgentKind) -> String? { isTurnedOn(host) ? discoveryProblems[host.id] : nil }
 
     func setTurnedOn(_ host: AgentKind, _ on: Bool) {
-        guard on != isTurnedOn(host) else { return }
-        guard on, let connector = connector(of: host), connector.connector.locateTool() != nil,
-              connector.setups.first(where: \.isDefault)?.isEnrolled != true
-        else { return apply(host, on) }
-        Task {
-            await connector.refresh()
-            guard !isTurnedOn(host) else { return }
-            guard let setup = connector.setups.first(where: \.isDefault), !setup.isEnrolled else { return apply(host, true) }
-            consent = ConsentRequest(connector: connector, setup: setup, turningOn: host)
-        }
-    }
-
-    private func apply(_ host: AgentKind, _ on: Bool) {
-        guard on != isTurnedOn(host) else { return }
+        guard connector(of: host) == nil, on != isTurnedOn(host) else { return }
         turnedOnHosts = on ? turnedOnHosts + [host.id] : turnedOnHosts.filter { $0 != host.id }
         onHostsChange?(turnedOnHosts)
-        if on, let connector = connector(of: host) { Task { await connector.maintain() } }
     }
+
+    func host(of connector: AgentConnectorModel) -> AgentKind? { hosts.first { $0.id == connector.kind.id } }
 
     private func connector(of host: AgentKind) -> AgentConnectorModel? { connectors.first { $0.kind.id == host.id } }
-
-    private func isAllowed(_ connector: AgentConnectorModel) -> Bool {
-        guard let host = hosts.first(where: { $0.id == connector.kind.id }) else { return true }
-        return isTurnedOn(host)
-    }
 
     var onRename: ((String, String) throws -> Void)?
     var onReloadNames: (() -> Void)?
@@ -225,11 +212,11 @@ final class CodingAgentsSettingsModel: ObservableObject {
 
     func refresh() async {
         if setupsProblem != setups.problem { setupsProblem = setups.problem }
-        for connector in connectors where isAllowed(connector) { await connector.refresh() }
+        for connector in connectors { await connector.refresh() }
     }
 
     func maintain() async {
-        for connector in connectors where isAllowed(connector) { await connector.maintain() }
+        for connector in connectors { await connector.maintain() }
     }
 
     var namesFile: URL { agentsDir.appendingPathComponent(AgentNameStore.fileName) }
@@ -425,7 +412,6 @@ final class CodingAgentsSettingsModel: ObservableObject {
 
     func confirm(_ request: ConsentRequest) {
         consent = nil
-        if let host = request.turningOn { apply(host, true) }
         Task {
             await request.setup.install()
             if let id = request.reconnecting, request.setup.isEnrolled, request.setup.isInstalled { onReconnect?(id) }
@@ -492,7 +478,9 @@ final class CodingAgentsSettingsModel: ObservableObject {
         guard let surface = row.place?.surface ?? row.surface else { return nil }
         if row.renamed { return "This name follows this conversation, including when you resume it." }
         switch row.place?.level {
-        case .title?: return "This name is the title a \(surface) hook shows on its pane, so it changes when the hook changes it. Rename it here to keep a name of your own."
+        case .title?:
+            let word = row.place?.word ?? "title"
+            return "This name is the \(word) \(surface) shows, so it changes when \(surface) changes it. Rename it here to keep a name of your own."
         case .agent?: return "This name follows this agent. To change it, rename the agent in \(surface)."
         default:
             let word = row.place?.word ?? "pane"

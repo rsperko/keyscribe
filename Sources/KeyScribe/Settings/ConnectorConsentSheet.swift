@@ -1,6 +1,16 @@
 import KeyScribeKit
 import SwiftUI
 
+struct ConnectorConsentPresenter: View {
+    @ObservedObject var model: CodingAgentsSettingsModel
+
+    var body: some View {
+        Color.clear.sheet(item: $model.consent) { request in
+            ConnectorConsentSheet(model: model, request: request)
+        }
+    }
+}
+
 struct ConnectorConsentSheet: View {
     @ObservedObject var model: CodingAgentsSettingsModel
     let request: CodingAgentsSettingsModel.ConsentRequest
@@ -13,7 +23,7 @@ struct ConnectorConsentSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(request.turningOn.map { "Connect \($0.displayName)?" } ?? "Connect conversations using this \(agent) setup?").font(.title2.bold())
+            Text(model.host(of: request.connector).map { "Connect \($0.displayName)?" } ?? "Connect conversations using this \(agent) setup?").font(.title2.bold())
             ScrollView {
                 details
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -26,7 +36,7 @@ struct ConnectorConsentSheet: View {
                 Button("Cancel", role: .cancel) { model.consent = nil }
                     .keyboardShortcut(.cancelAction)
                     .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.consentCancel)
-                Button(request.turningOn.map { "Connect \($0.displayName)" } ?? "Install and Connect") { model.confirm(request) }
+                Button(model.host(of: request.connector).map { "Connect \($0.displayName)" } ?? "Install and Connect") { model.confirm(request) }
                     .keyboardShortcut(.defaultAction)
                     .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.consentInstall)
             }
@@ -35,7 +45,7 @@ struct ConnectorConsentSheet: View {
     }
 
     @ViewBuilder private var details: some View {
-        if let host = request.turningOn {
+        if let host = model.host(of: request.connector) {
             hostDetails(host)
         } else {
             setupDetails
@@ -48,7 +58,7 @@ struct ConnectorConsentSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
             Text("It also installs a small plugin in \(host.displayName) so the reply to what you dictate is read aloud. Every conversation connects on its own, and you can disconnect any of them later.")
                 .fixedSize(horizontal: false, vertical: true)
-            Text("\(Branding.appName) keeps the plugin up to date. To remove it, choose Uninstall below the switch.")
+            Text("\(Branding.appName) runs nothing of \(host.displayName)\u{2019}s until you connect it, and keeps the plugin up to date. Uninstalling the plugin disconnects \(host.displayName).")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }
     }

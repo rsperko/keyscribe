@@ -212,7 +212,9 @@ in the same `Application Support` folder:
   feature: an access token the agent connectors use to reach KeyScribe on your Mac, the Claude Code
   connector's files, `connectors.json`, the agent folders you connected and which connector installation
   may connect from each, and `names.json`, the names you chose for conversations along with their agent
-  session ids and the conversations you disconnected. The Pi connector's files live in the extensions
+  session ids and the conversations you disconnected. A conversation's name, whether you chose it or it came
+  from its folder, a terminal tab or pane label, or a bb thread's title, may also be remembered there, and
+  appears in Settings, in History lines about that conversation, and in KeyScribe's logs on this Mac. The Pi connector's files live in the extensions
   folder of each Pi folder you connected, because that is where Pi loads them from; they hold the same
   connection settings and nothing else. To find the conversations on your Mac and the folders their agents
   use, KeyScribe looks at your own running Pi and Claude Code processes: their working folder, start time,
@@ -230,22 +232,25 @@ in the same `Application Support` folder:
   do so, and the answer stays on your Mac and is not stored. To bring a
   conversation's terminal forward, KeyScribe reads a few terminal and multiplexer variables (such as a
   pane id) from the environment of the processes that hold it; the rest of their environment is ignored.
-  If you turn on **Reach conversations in bb**, KeyScribe runs bb's own `bb` command on your Mac to list bb's
+  If you install KeyScribe's plugin in bb, KeyScribe runs bb's own `bb` command on your Mac to list bb's
   threads, to show a thread, and to hand bb what you dictate to a thread, along with any image you pasted,
   which bb passes to that thread's agent. bb's list also carries each thread's title and opening words;
-  KeyScribe keeps only the ids, folders, status and start times, in memory, and discards the rest without
-  using it. It never asks bb for a thread's prompts or replies, and runs those commands with bb's usage
-  reporting turned off. Until you turn it on, KeyScribe runs nothing of bb's. While it is on, KeyScribe also
+  KeyScribe keeps the ids, folders, status, start times and the title bb shows for each thread, which it uses
+  as that conversation's name like a terminal tab's label (see `names.json` above). For a thread bb has not
+  titled, bb shows its opening words instead; KeyScribe keeps those in memory only, to recognize them when
+  you say them in full after “ask”, “tell”, “open” or “go to”, and lists them in Settings among the names
+  that conversation also answers to; it never saves them, logs them, or uses them as the conversation's name. It never asks bb for a thread's prompts or replies, and runs those commands with bb's usage
+  reporting turned off. Until you connect bb by installing the plugin, KeyScribe runs nothing of bb's. While bb is connected, KeyScribe also
   reads bb's thread id and thread folder from the environment of each coding agent process it lists, so an
   agent bb started is shown as that bb thread rather than a second time.
-  Turning it on also installs KeyScribe's bb plugin, which runs inside bb and reports to KeyScribe, over the same local
+  The plugin runs inside bb and reports to KeyScribe, over the same local
   connection the connectors use, when each bb thread starts and finishes a turn, with the reply to that turn
   and a short fingerprint of the prompt it started with, never the prompt itself. To make that fingerprint it
   reads the thread's queued message or its most recent prompts inside bb, and keeps nothing it read. KeyScribe
   uses a reply only to read aloud the answer to what you dictated, under the same rules as a connector's.
   While KeyScribe isn't running the plugin sends nothing and drops what it would have sent, and for a thread
   you disconnected it sends nothing but that thread's identity. To show whether the plugin is running,
-  KeyScribe reads bb's list of installed plugins while bb is turned on.
+  KeyScribe reads bb's list of installed plugins while bb is connected.
   The Claude Code connector reports a short fingerprint of the prompt each turn starts with, never the prompt
   itself, so KeyScribe can tell which turn answers what you dictated. The fingerprint stays in memory and is
   not stored.

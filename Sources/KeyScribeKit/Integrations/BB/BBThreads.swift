@@ -6,12 +6,18 @@ public enum BBThreads {
         public var folder: String
         public var state: AgentLiveState
         public var createdAt: Int?
+        public var title: String?
+        public var shownInstead: String?
 
-        public init(id: String, folder: String, state: AgentLiveState, createdAt: Int? = nil) {
+        public init(
+            id: String, folder: String, state: AgentLiveState, createdAt: Int? = nil, title: String? = nil, shownInstead: String? = nil
+        ) {
             self.id = id
             self.folder = folder
             self.state = state
             self.createdAt = createdAt
+            self.title = title
+            self.shownInstead = shownInstead
         }
     }
 
@@ -31,6 +37,8 @@ public enum BBThreads {
         var environmentPath: String?
         var hasPendingInteraction: Bool?
         var createdAt: Double?
+        var title: String?
+        var titleFallback: String?
     }
 
     private struct Told: Decodable {
@@ -56,9 +64,16 @@ public enum BBThreads {
         return listed.compactMap { thread in
             guard isThreadId(thread.id), thread.archivedAt == nil, thread.deletedAt == nil, (thread.visibility ?? "visible") == "visible"
             else { return nil }
+            let title = present(thread.title)
             return Thread(
-                id: thread.id, folder: thread.environmentPath ?? "", state: state(thread), createdAt: thread.createdAt.flatMap { Int(exactly: $0) })
+                id: thread.id, folder: thread.environmentPath ?? "", state: state(thread), createdAt: thread.createdAt.flatMap { Int(exactly: $0) },
+                title: title, shownInstead: title == nil ? present(thread.titleFallback) : nil)
         }
+    }
+
+    private static func present(_ text: String?) -> String? {
+        guard let trimmed = text?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
+        return trimmed
     }
 
     public static func delivery(status: Int32, stdout: Data) -> Delivery {

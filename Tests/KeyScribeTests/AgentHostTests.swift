@@ -16,6 +16,8 @@ struct AgentHostTests {
         var isEnabled = true
         var takesImages = true
         var conversations: [AgentSession] = []
+        var titles: [String: String] = [:]
+        var shownInstead: [String: String] = [:]
         var answers = true
         var hangs = false
         var opening = AgentHostOpen.opened
@@ -39,7 +41,7 @@ struct AgentHostTests {
 
         func scan() async -> AgentHostScan {
             scans += 1
-            return answers ? .found(conversations) : .unreadable("not running")
+            return answers ? .found(conversations, titles: titles, shownInstead: shownInstead) : .unreadable("not running")
         }
 
         func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen {
@@ -88,13 +90,13 @@ struct AgentHostTests {
 
     private func makeHub(
         _ host: FakeHost, transport: FakeTransport = FakeTransport(), focus: FakeFocus? = nil, front: FakeFront? = nil,
-        names: AgentNameStore? = nil, allowed: @escaping @MainActor (String) -> Bool = { _ in true }, hostDeadline: Duration = .milliseconds(50),
+        names: AgentNameStore? = nil, places: (any AgentPlaceReading)? = nil, allowed: @escaping @MainActor (String) -> Bool = { _ in true }, hostDeadline: Duration = .milliseconds(50),
         claude: FakeDiscovery = FakeDiscovery(kind: .claude), environments: [Int: [String: String]] = [:], handOffLimit: Duration = .seconds(30),
         parents: [Int: Int] = [:], now: @escaping () -> Date = Date.init
     ) -> AgentHub {
         AgentHub(
             transport: transport, discovery: [claude], names: names, focus: focus, front: front,
-            receiptTimeout: .milliseconds(50), handOffLimit: handOffLimit, scanDeadline: .seconds(30),
+            receiptTimeout: .milliseconds(50), handOffLimit: handOffLimit, scanDeadline: .seconds(30), places: places,
             hosts: [AgentHostIntegration(kind: Self.kind, make: { host })], hostAllowed: allowed, hostDeadline: hostDeadline,
             processEnvironment: { pid, keys in (environments[pid] ?? [:]).filter { keys.contains($0.key) } },
             processParent: { parents[$0] }, now: now,
@@ -754,6 +756,65 @@ struct AgentHostTests {
         _ = await hub.deliver("two", to: Self.id("t1"))
         #expect(host.delivered.map(\.0) == ["one", "two"])
         #expect(host.delivered.map(\.2.instance) == [other, Self.instance])
+    }
+
+    @Test func aTitleTheHostShowsNamesItsConversationLikeAPaneTitleAndAFailedListKeepsIt() async throws {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        var clock = Date(timeIntervalSince1970: 1000)
+        let hub = makeHub(host, now: { clock })
+        await hub.rescan()
+        #expect(hub.names == ["docs": Self.id("t1")])
+        host.titles = ["t1": "release notes"]
+        clock = clock.addingTimeInterval(HostDiscovery.idleInterval)
+        await hub.rescan()
+        #expect(hub.names == ["release notes": Self.id("t1")])
+        host.answers = false
+        clock = clock.addingTimeInterval(HostDiscovery.idleInterval)
+        await hub.rescan()
+        #expect(hub.names == ["release notes": Self.id("t1")])
+    }
+
+    @Test func aTitleTheHostClearsGivesTheConversationBackItsFolderNameEvenWithAPlaceReader() async throws {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        host.titles = ["t1": "release notes"]
+        var clock = Date(timeIntervalSince1970: 1000)
+        let hub = makeHub(host, places: AgentPlaceTrackerTests.Reader(), now: { clock })
+        await hub.rescan()
+        #expect(hub.names == ["release notes": Self.id("t1")])
+        let place = try #require(hub.directory.conversations.first?.placeName)
+        #expect(place.surface == "Example")
+        #expect(place.word == "title")
+        host.titles = [:]
+        clock = clock.addingTimeInterval(HostDiscovery.idleInterval)
+        await hub.rescan()
+        #expect(hub.names == ["docs": Self.id("t1")])
+    }
+
+    @Test func whatTheHostShowsInPlaceOfATitleNeverNamesTheConversationButStillReachesItAfterAVerb() async throws {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        host.shownInstead = ["t1": "what time is it?"]
+        let hub = makeHub(host)
+        await hub.rescan()
+        #expect(hub.names == ["docs": Self.id("t1")])
+        let listed = try #require(hub.directory.conversations.first)
+        #expect(listed.otherNames == ["what time is it"])
+        #expect(listed.placeName == nil)
+    }
+
+    @Test func aTitleTheHostShowsStillReachesAConversationTheUserNamedWhenSaidAfterAVerb() async throws {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        host.titles = ["t1": "release notes"]
+        let hub = makeHub(host)
+        await hub.rescan()
+        try hub.rename(Self.id("t1"), to: "scratch")
+        await hub.rescan()
+        let listed = try #require(hub.directory.conversations.first)
+        #expect(listed.handle == "scratch")
+        #expect(listed.otherNames == ["release notes"])
     }
 
     @Test func aHostedConversationsNameSurvivesARestartEvenWhenTheListIsRefreshedBeforeTheHostAnswers() async throws {

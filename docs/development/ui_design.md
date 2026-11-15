@@ -363,7 +363,7 @@ deliberate name for one conversation beats a place that can hold several. The sa
 other places a conversation can run in, closest first: a tmux window the user renamed and a tmux session
 the user named (only while tmux shows its status line, and a window name only while tmux does not let
 programs rename windows), a Zellij tab the user renamed (a Zellij pane title follows the program's own
-title, so it is not a name), a Ghostty
+title, so it is not a name), a bb thread's title as bb shows it, a Ghostty
 terminal or tab name the user set (a tab only in a window without splits, since Ghostty does not say which
 split belongs to which tab), and an iTerm tab title the user set. A title a program writes into its
 terminal is never a name, and a terminal app is read only when it already allows the app to script it,
@@ -406,9 +406,10 @@ Each conversation shows one name, and the other names the user deliberately gave
 herdr agent name and its pane label, which reach it like a name. A pane
 titled `marvin` whose agent herdr calls `cos` is shown as `marvin`, and both “Ask Marvin what we should do
 next” and “Ask cos what's outstanding” reach it; a particular agent named `cos` also beats a workspace label
-`cos` several conversations share. A pane title that lost to a KeyScribe name, and the agent's own
+`cos` several conversations share. A pane title or bb thread title that lost to a KeyScribe name, and the agent's own
 conversation name when a herdr name took its place, may be text nobody chose, so they reach it only when
-said in full after “tell”, “ask” or “open”; part of one is ordinary message text, because such names are
+said in full after “tell”, “ask” or “open”, as do the opening words bb shows for a thread it has not titled,
+which are never a shown name; part of one is ordinary message text, because such names are
 task phrases that everyday instructions start with. A tab or workspace label of one conversation that lost to a higher name
 does not deliver: after “tell”, “ask” or “open” it holds, ““chief” is the herdr workspace label of
 “marvin”. Nothing sent. Try “tell marvin, …”” (“ask marvin, …” when the user said “ask”), and History keeps the line without the suggestion, which appears only while
@@ -2190,23 +2191,25 @@ run on their own queue, so agents finishing never delay a voice command's termin
 summary plays when the front cannot be confirmed. A value
 redaction hid from the service is spoken as "a hidden value", never read aloud.
 
-Each agent host (`CodingAgentIntegrations.hosts`) has a section after the connectors, named by the host, holding
-one `SettingRow` switch, **Reach conversations in {host}**, off by default. Its help says the host's conversations
-are listed and sent to through the host's own command, queued behind a turn already running, and that
-{appName} runs nothing of the host's until the switch is on. Turning it off removes the host's conversations
-from the list on the next scan. While the switch is on, a reason the host's list is missing (the tool isn't
-installed or isn't open, or its list couldn't be read) shows under the switch as an advisory `IssueText` that
-says what to do next, whether or not other conversations are listed. A host whose integration brings its own
-connector (`AgentHostIntegration.connector`, bb's plugin) is turned on in one step: turning the switch on, while
-the host's tool is installed and its default setup is not enrolled, shows the connector consent sheet in its host
-form (**Connect {host}?**, what turning it on does, that it installs the plugin and keeps it up to date, and where
-Uninstall is), and **Connect {host}** turns the switch on and installs; Cancel leaves it off. Below the switch,
-while it is on, that connector's setup blocks are drawn like an agent's connector setup below, titled
-**Plugin** and without the line naming the conversations that use the folder; the connector gets no section of
-its own, and it is neither checked nor updated while the switch is off. While the switch is off and the plugin is
-still installed, a caption says so and that it sends only each conversation's identity, with the same **Uninstall Plugin…** action and
-confirmation. A plugin the host reports as installed but failing reads **Not working**, with the host's reason as
-an `IssueText` and a **Repair** action that installs the current files again; Uninstall stays offered.
+Each agent host (`CodingAgentIntegrations.hosts`) has a section after the connectors, named by the host. A host
+whose integration brings its own connector (`AgentHostIntegration.connector`, bb's plugin) has no switch: its
+section is that connector's section, drawn like an agent's connector setup below, titled **Plugin** and without
+the line naming the conversations that use the folder, and the host is on exactly while its default setup is
+enrolled; its id in `coding_agents.hosts` is ignored. **Install…** shows the connector consent sheet in its host form (**Connect {host}?**, what the host
+integration does, that it installs the plugin and keeps it up to date, and that uninstalling stops all of it);
+**Connect {host}** turns the host on and installs, and Cancel leaves it off. While the host is off, a caption under
+the row says what the plugin gets you (the connector copy's `purpose`). **Uninstall Plugin…**, after its
+confirmation, removes the plugin and turns the host off. A failed install, or a plugin the host itself lost,
+leaves the host on and reads **Not installed** with **Reinstall**, which installs again without the consent sheet;
+Uninstall stays offered for any enrolled setup. A plugin the host reports as
+installed but failing reads **Not working**, with the host's reason as an `IssueText` and a **Repair** action that
+installs the current files again; Uninstall stays offered. A host without its own connector has one `SettingRow`
+switch instead, **Reach conversations in {host}**, off by default. Its help says the host's conversations are
+listed and sent to through the host's own command, queued behind a turn already running, and that {appName} runs
+nothing of the host's until the switch is on. Turning it off removes the host's conversations from the list on
+the next scan. While the host is on, a reason the host's list is missing (the tool isn't installed or isn't
+open, or its list couldn't be read) shows in its section as an advisory `IssueText` that says what to do next,
+whether or not other conversations are listed.
 
 Connector setup is one section per agent, each drawn from that agent's own adapter, holding one block per
 setup: the folder an agent loads its configuration from (Pi's agent folder, Claude Code's config folder). The
@@ -2245,7 +2248,10 @@ and no result sheet. Progress and the outcome appear in the setup's block and th
 A setup's status says what its files show: **Installed**, **Update available**, **Not installed**, the
 agent's own turned-off wording when the agent's configuration turns the connector off, **Uninstall not
 finished** with **Finish Uninstalling**, or a failure with what went wrong and **Try Again**, which repeats
-the step that failed. A failed install is not Installed: its conversations still offer **Connect…**. Installed is
+the step that failed. A failed install is not Installed: its conversations still offer **Connect…**. A setup
+that is enrolled (its consent was given) but reads **Not installed**, because its files went missing outside the
+app, offers **Reinstall**, which installs again without the consent sheet; and any enrolled setup that reads
+failed, unknown or not installed still offers its Uninstall action, so a consent can always be taken back. Installed is
 never Ready: a conversation is Ready only when its own connector has connected. When the app starts it
 updates the connector in every setup it is installed in, never one it is not installed in or one the agent
 has turned off; a conversation still running the previous connector says so under its row, and that
@@ -2322,13 +2328,16 @@ text available on hover and selectable for copying. Empty,
 reserved and already-used names are explained beside the field before submission. A save failure
 keeps the sheet and draft open for correction or retry, with the diagnostic reason under Technical
 details; Cancel makes no change. Under the field a quiet line says where the name comes from (“This name
-comes from its herdr workspace.”, or “from its herdr pane title.”); when the conversation has a KeyScribe name, it names the name it would
+comes from its herdr workspace.”, “from its herdr pane title.”, or “from its bb title.”); when the conversation has a KeyScribe name, it names the name it would
 have without one, with any distinguishing word it would need (“Default name: cos claude, from its herdr
 workspace.”). When the conversation has a KeyScribe name, **Use Default
 Name** leads the action row: it drops that name, saved first, and closes the sheet; a save failure keeps
 the name and the sheet open with the same explanation as a failed rename. When the conversation runs in a
 herdr pane, labelled or not, the sheet adds “This name follows this conversation, including when you resume it. To name
-future conversations in this pane, rename the pane in herdr.” Renaming changes the
+future conversations in this pane, rename the pane in herdr.” When the name is a title the surface shows (a
+herdr pane title, a bb thread title), it says instead that the name is that title, so it changes when the
+surface changes it (“This name is the title bb shows, so it changes when bb changes it. Rename it here to keep
+a name of your own.”). Renaming changes the
 name used in KeyScribe and leaves Claude Code's own title alone. A chosen name stays with its session
 across restarts of either app and is held for it while it is closed. A name KeyScribe gave a session
 stays with it across KeyScribe restarts while that session keeps running, and is free once it closes. If those names

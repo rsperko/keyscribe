@@ -231,10 +231,10 @@ final class BBPluginConnector: AgentConnector {
     }
 
     let copy = AgentConnectorCopy(
-        help: "\(Branding.appName) hears how bb threads answer through a small plugin installed in bb. Installed means the plugin is in place; every thread in bb then reports its replies, unless you disconnect it.",
+        help: "With a small plugin installed in bb, \(Branding.appName) lists the threads bb runs, sends what you say to them through bb\u{2019}s own command, queued behind any turn already running, and hears how they answer. Every thread connects on its own unless you disconnect it. \(Branding.appName) runs nothing of bb\u{2019}s until you connect bb. If bb loses the plugin, dictation still reaches its threads but replies are not read aloud until you reinstall it.",
         reloadHint: "",
         uninstallTitle: "Uninstall the plugin from bb?",
-        uninstallMessage: "bb threads stop reporting their replies to \(Branding.appName) now. Dictation still reaches them. Your conversation names, disconnected conversations and other \(Branding.appName) settings are kept.",
+        uninstallMessage: "\(Branding.appName) stops listing bb threads and sending to them. Your conversation names, disconnected conversations and other \(Branding.appName) settings are kept.",
         toolNotFoundLabel: "bb not found",
         toolNotFoundAdvice: "Install bb, then come back here. \(Branding.appName) looks for bb in its usual folder.",
         unavailable: "This copy of \(Branding.appName) is missing its bb plugin. Reinstall \(Branding.appName) to add it.",
@@ -250,5 +250,6 @@ final class BBPluginConnector: AgentConnector {
                 ? "The plugin was removed outside \(Branding.appName), so 1 bb thread is still connected until bb restarts the plugin."
                 : "The plugin was removed outside \(Branding.appName), so \(count) bb threads are still connected until bb restarts the plugin."
         },
-        setupTitle: "Plugin", describesUse: false)
+        setupTitle: "Plugin", describesUse: false,
+        purpose: "Dictate to bb threads and hear their replies read aloud.")
 }

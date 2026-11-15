@@ -858,7 +858,8 @@ struct CodingAgentsSettingsModelTests {
     }
 
     @Test(arguments: [
-        (AgentPlace.Level.title, nil as String?, "herdr", "This name is the title a herdr hook shows on its pane, so it changes when the hook changes it. Rename it here to keep a name of your own."),
+        (AgentPlace.Level.title, nil as String?, "herdr", "This name is the pane title herdr shows, so it changes when herdr changes it. Rename it here to keep a name of your own."),
+        (.title, "title", "bb", "This name is the title bb shows, so it changes when bb changes it. Rename it here to keep a name of your own."),
         (.agent, nil, "herdr", "This name follows this agent. To change it, rename the agent in herdr."),
         (.pane, nil, "herdr", "This name follows this conversation, including when you resume it. To name future conversations in this pane, rename the pane in herdr."),
         (.tab, "window", "tmux", "This name follows this conversation, including when you resume it. To name future conversations in this window, rename the window in tmux."),

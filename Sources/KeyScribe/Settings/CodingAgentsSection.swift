@@ -68,9 +68,6 @@ struct CodingAgentRecipientSection: View {
         .sheet(item: $renaming, onDismiss: { model.clearRenameProblem() }) { row in
             ConversationNameEditor(row: row, model: model) { renaming = nil }
         }
-        .sheet(item: $model.consent) { request in
-            ConnectorConsentSheet(model: model, request: request)
-        }
         .fileImporter(
             isPresented: Binding(get: { choosingFolder != nil }, set: { if !$0 { choosingFolder = nil } }),
             allowedContentTypes: [.folder]

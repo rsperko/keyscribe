@@ -57,11 +57,14 @@ final class BBHost: AgentHost {
               let threads = BBThreads.parse(output.stdout)
         else { return unreadable }
         let instance = dataDirectory
-        return .found(threads.map { thread in
+        let sessions = threads.map { thread in
             AgentSession(
                 agent: Self.kind.id, id: thread.id, pid: nil, cwd: thread.folder, state: thread.state, startedAt: thread.createdAt,
                 host: AgentHostLocation(host: Self.kind.id, instance: instance, native: thread.id))
-        })
+        }
+        return .found(
+            sessions, titles: threads.reduce(into: [:]) { titles, thread in titles[thread.id] = thread.title },
+            shownInstead: threads.reduce(into: [:]) { shown, thread in shown[thread.id] = thread.shownInstead })
     }
 
     func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen {

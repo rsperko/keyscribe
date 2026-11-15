@@ -14,7 +14,9 @@ final class ConnectorSetupRegistry: @unchecked Sendable {
     private let lock = NSLock()
     private var loaded: ConnectorSetups?
     private var loadProblem: String?
+    private var unsaved = false
     private let makeInstallation: @Sendable () -> String
+    var onChange: (@Sendable () -> Void)?
 
     init(directory: URL, makeInstallation: @escaping @Sendable () -> String = { UUID().uuidString }) {
         self.directory = directory
@@ -30,27 +32,42 @@ final class ConnectorSetupRegistry: @unchecked Sendable {
     }
 
     func reload() {
+        let pending: Bool = lock.withLock {
+            guard unsaved, let loaded else { return false }
+            guard (try? write(loaded)) != nil else { return true }
+            unsaved = false
+            return false
+        }
+        guard !pending else { return }
         let read = Self.read(url)
-        lock.withLock {
+        let changed = lock.withLock {
             switch read {
             case .success(let setups):
-                loaded = setups
+                defer { loaded = setups }
                 loadProblem = nil
+                return loaded != setups
             case .failure(let problem):
                 loadProblem = problem.reason
+                return false
             }
         }
+        if changed { onChange?() }
     }
 
     @discardableResult
     func grant(agent: String, folder: String) throws -> ConnectorSetup {
-        try lock.withLock {
+        let (setup, changed) = try lock.withLock {
             guard var next = loaded else { throw Unavailable(reason: loadProblem ?? "\(Self.fileName) could not be read.") }
             let setup = next.enroll(agent: agent, folder: folder, makeInstallation: makeInstallation)
+            let changed = next != loaded
+            guard changed || unsaved else { return (setup, false) }
             try write(next)
             loaded = next
-            return setup
+            unsaved = false
+            return (setup, changed)
         }
+        if changed { onChange?() }
+        return setup
     }
 
     func beginRemoval(agent: String, folder: String) throws {
@@ -62,11 +79,17 @@ final class ConnectorSetupRegistry: @unchecked Sendable {
     }
 
     private func revoke(_ change: (inout ConnectorSetups) -> Void) throws {
+        var changed = false
+        defer { if changed { onChange?() } }
         try lock.withLock {
             guard var next = loaded else { throw Unavailable(reason: loadProblem ?? "\(Self.fileName) could not be read.") }
             change(&next)
+            changed = next != loaded
+            guard changed || unsaved else { return }
             loaded = next
+            unsaved = true
             try write(next)
+            unsaved = false
         }
     }
 

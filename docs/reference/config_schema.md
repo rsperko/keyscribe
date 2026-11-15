@@ -1595,7 +1595,9 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 [coding_agents]                              # Settings ▸ Modes ▸ Coding agent
 # hosts = ["bb"]                                 # ids of the agent hosts the user turned on (an AgentKind id
                                                  #   from CodingAgentIntegrations.hosts); absent = none: a
-                                                 #   host makes no call until its id is here
+                                                 #   host makes no call until its id is here. A host that
+                                                 #   brings its own plugin (bb) ignores this list: it is on
+                                                 #   while its plugin is connected (connectors.json)
 
 [coding_agents.spoken_result]               # Settings ▸ Modes ▸ Coding agent ▸ Replies
 # enabled = true                                 # Reply updates; absent = false

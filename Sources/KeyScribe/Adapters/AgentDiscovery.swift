@@ -6,6 +6,8 @@ struct AgentScanExtras: Equatable, Sendable {
     var setups: [String] = []
     var problem: String?
     var carried: Set<String> = []
+    var places: [String: AgentPlace] = [:]
+    var listed: Set<String> = []
 }
 
 enum AgentScan: Equatable, Sendable {

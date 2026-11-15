@@ -155,7 +155,7 @@ public struct AgentDirectory: Sendable {
         var labelled: [(entry: AgentSession, place: AgentPlace, label: AgentPlace.Label, base: String, key: String, members: [String])] = []
         for entry in entries {
             let id = conversationId(entry)
-            guard let place = known[id], let label = place.labels.first(where: { usable($0.text) != nil }),
+            guard let place = known[id], let label = place.labels.first(where: { !$0.onlyAfterVerb && usable($0.text) != nil }),
                   let base = usable(label.text)
             else { continue }
             let members = label.level == .agent
@@ -287,6 +287,7 @@ public struct AgentDirectory: Sendable {
             guard let place = places[id], handleById[id] != nil else { continue }
             let fromPlace: [(text: String, kind: AgentRecipient.SharedName.Kind)] = place.labels.compactMap { label in
                 let seenAs = "\(label.surface ?? place.surface) \([.agent, .title].contains(label.level) || label.term != nil ? label.word : "\(label.word) label")"
+                if label.onlyAfterVerb { return (label.text, .afterVerb(seenAs)) }
                 switch label.level {
                 case .agent, .pane: return (label.text, .also(seenAs))
                 case .title: return (label.text, .afterVerb(seenAs))

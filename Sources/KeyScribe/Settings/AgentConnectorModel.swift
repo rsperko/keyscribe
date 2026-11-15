@@ -21,6 +21,7 @@ struct AgentConnectorCopy {
     var toolTooOldAdvice: (String) -> String = { _ in "" }
     var setupTitle = "Connector"
     var describesUse = true
+    var purpose: String?
 }
 
 struct AgentConnectorError: Error {
@@ -148,7 +149,16 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
 
     var offersUninstall: Bool {
         if case .toolTooOld = state { return connector.hasFiles(in: target) }
-        return isInstalled || canUninstallWithoutTool
+        return isInstalled || canUninstallWithoutTool || (isEnrolled && isUnconfirmed)
+    }
+
+    var offersReinstall: Bool { isEnrolled && state == .status(.notInstalled) }
+
+    private var isUnconfirmed: Bool {
+        switch state {
+        case .status(.notInstalled), .status(.unknown), .failed: true
+        default: false
+        }
     }
 
     var manualUninstallLead: String? {
@@ -320,8 +330,6 @@ final class AgentConnectorModel: ObservableObject, Identifiable {
             }
         }
     }
-
-    func listSetups() { rebuild() }
 
     func refresh() async {
         hasRefreshed = true

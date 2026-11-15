@@ -9,13 +9,15 @@ public struct AgentPlace: Equatable, Sendable {
         public var container: String
         public var surface: String?
         public var term: String?
+        public var onlyAfterVerb: Bool
 
-        public init(text: String, level: Level, container: String, surface: String? = nil, term: String? = nil) {
+        public init(text: String, level: Level, container: String, surface: String? = nil, term: String? = nil, onlyAfterVerb: Bool = false) {
             self.text = text
             self.level = level
             self.container = container
             self.surface = surface
             self.term = term
+            self.onlyAfterVerb = onlyAfterVerb
         }
 
         public var word: String { term ?? level.rawValue }

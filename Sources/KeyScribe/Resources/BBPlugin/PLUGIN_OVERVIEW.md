@@ -5,5 +5,5 @@ something you dictated to a thread can be read aloud. It reports the reply and a
 prompt that started the turn, never the prompt itself, and only over a connection on this Mac. While the app
 isn't running it waits and sends nothing.
 
-The app installs and updates this plugin. To remove it, choose Uninstall below the bb switch in the app's
+The app installs and updates this plugin. To remove it, choose Uninstall Plugin under bb in the app's
 Coding agent settings.
