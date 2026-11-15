@@ -587,7 +587,8 @@ Claude Code or `/reload` in Pi, or restart it.
 Yes. Install the plugin under **bb** in **Settings ▸ Modes ▸ Coding agent**. KeyScribe then lists bb's
 threads and sends what you say to them through bb's own `bb` command, whichever agent the thread runs, with
 any image you pasted attached. It runs nothing of bb's until you connect bb this way, and nothing while bb isn't
-open. Your words are queued behind a turn that is already running rather than injected into it. “Open docs”
+open. Your words reach a turn that is already running the way typing in bb would; bb keeps them in its own queue while
+the thread waits on your approval, and sends them once you answer. “Open docs”
 asks bb's open windows to show the thread and brings bb forward. If bb isn't installed, isn't open, or
 couldn't list its threads, Settings says so under the plugin.
 

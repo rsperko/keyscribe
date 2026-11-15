@@ -828,22 +828,77 @@ test("a message the agent rejects outright is refused with its words", async () 
   assert.deepEqual(h.replies().map((b) => [b.op, b.reason]), [["ack", undefined], ["refused", "agent is busy"]])
 })
 
-test("dictation sent while a turn runs steers it, and is confirmed once Pi takes it in", async () => {
-  const h = harness()
+const digest = (text: string) => {
+  let hash = 0xcbf29ce484222325n
+  for (const byte of new TextEncoder().encode(text.trim())) hash = ((hash ^ BigInt(byte)) * 0x100000001b3n) & 0xffffffffffffffffn
+  return hash.toString(16).padStart(16, "0")
+}
+
+const steering = async (h: any) => {
   await h.connect()
   h.live.idle = false
   h.emit("agent_start")
   await h.settle()
   await h.deliver([h.submit("r1", "use the other file")])
-  assert.equal(h.sends.length, 1)
   assert.deepEqual(h.sends[0].options, { deliverAs: "steer" })
+}
+
+const accepted = (h: any) => h.emit("input", { text: h.sends[0].text, source: "extension", streamingBehavior: "steer" })
+const takenIn = (h: any) => h.emit("message_start", { message: { role: "user", content: [{ type: "text", text: h.sends[0].text }] } })
+
+test("a steer is confirmed as soon as Pi accepts it, without a turn, however long the running tool takes", async () => {
+  const h = harness()
+  await steering(h)
   assert.deepEqual(h.replies().map((b) => b.op), ["ack"])
-  h.emit("input", { text: h.sends[0].text, source: "extension", streamingBehavior: "steer" })
+  accepted(h)
   await h.settle()
   await h.answerEvents()
   const submitted = h.replies().find((b) => b.op === "submitted")
   assert.equal(submitted?.request, "r1")
-  assert.equal(submitted?.turn, h.turn(1))
+  assert.equal(submitted?.turn, "")
+})
+
+test("a steer is reported taken into the turn running when it enters the conversation", async () => {
+  const h = harness()
+  await steering(h)
+  accepted(h)
+  await h.settle()
+  takenIn(h)
+  await h.settle()
+  await h.answerEvents()
+  assert.deepEqual(h.events().filter((b) => b.op === "absorbed").map((b) => [b.turn, b.prompt]), [[h.turn(1), digest("use the other file")]])
+  assert.equal(h.replies().filter((b) => b.op === "submitted").length, 1)
+})
+
+test("a steer Pi carries into a new run is reported taken into that run", async () => {
+  const h = harness()
+  await steering(h)
+  accepted(h)
+  h.emit("agent_settled", { aborted: false })
+  h.emit("agent_start")
+  await h.settle()
+  takenIn(h)
+  await h.settle()
+  await h.answerEvents()
+  assert.deepEqual(h.events().filter((b) => b.op === "absorbed").map((b) => b.turn), [h.turn(2)])
+})
+
+test("a steer another extension consumed after Pi accepted it is never reported taken in", async () => {
+  const h = harness()
+  await steering(h)
+  accepted(h)
+  await h.settle()
+  await h.answerEvents()
+  assert.deepEqual(h.events().filter((b) => b.op === "absorbed"), [])
+})
+
+test("a steer that enters the conversation without an input event is still confirmed with its turn", async () => {
+  const h = harness()
+  await steering(h)
+  takenIn(h)
+  await h.settle()
+  await h.answerEvents()
+  assert.equal(h.replies().find((b) => b.op === "submitted")?.turn, h.turn(1))
 })
 
 test("a steer is confirmed only by its own mark, never by another message Pi takes in", async () => {

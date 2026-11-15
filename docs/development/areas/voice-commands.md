@@ -290,8 +290,12 @@ every rule above applies to it, with these sharpenings:
   off (`AgentDeliveryContext.canSteer`) only while the agent works rather than waits on the user and nothing for that
   conversation is held or still being handed off; a held message is released to it the same way, oldest first,
   once the earlier one's receipt arrives (`AgentHub.confirm` frees the hand-off for a connector that steers, since a
-  steer starts no turn). Pi drains every steering message before its run ends (`agent-loop.js`), so the connector
-  confirms a steer when Pi's `input` event accepts it rather than waiting for the next tool boundary.
+  steer starts no turn). Pi takes a steer in only after the running tool calls finish, which can be minutes, so the
+  connector confirms the receipt when Pi's `input` event accepts it, with no turn, and names the turn only when the
+  steer enters the conversation, as `absorbed` at the `message_start` Pi emits while draining steering messages into
+  the run (`agent-loop.js`). A steer Pi carries into a new run belongs to that run; a run that starts without a
+  prompt digest keeps waiting for the `absorbed` (`AgentHub` `.turnStarted`). A later extension can still consume an
+  accepted steer: it reads as sent, and no reply follows it.
 - **A dictation reaches a running turn only as the user's own prompt, so only in front.** A connector's own
   prompt runs once the agent is idle (Claude Code queues a plugin's prompt behind the turn; measured on 2.1.325,
   2026-11-14), and only a prompt the user enters joins the turn as theirs. So for the conversation in front,
@@ -299,15 +303,17 @@ every rule above applies to it, with these sharpenings:
   eligibility in `AgentHub.takesPromptBox`): the connector adds the text to the empty prompt box, never replacing
   what is there, and the take presses Return (`AgentTake.sendFromPromptBox`) only after three checks, in order:
   the conversation is the one in front; the connector answers that the box holds exactly the text and takes the
-  keys (`promptBoxReady`); and the window that read confirmed still has focus. The `typed` count confirms it
+  keys (`promptBoxReady`); and, read again after that answer, the same conversation is still the one in front
+  in the same window, since switching tabs or panes keeps the app and window. The `typed` count confirms it
   afterwards. Ask the engine whether a dialog holds the keys, with an empty append (`fill` refuses `dialog`):
   measured on 2.1.325 (2026-11-15), it refuses within about 120 ms of an approval or question opening and accepts
   again the moment it is answered, including while an approved tool runs, which tracking `tool.check` verdicts
   cannot match. A box answered as ready arms a guard for up to a second, until the user's prompt arrives: an
-  approval or question decided meanwhile (a `tool.check` verdict of `ask`) and an MCP input request
-  (`Elicitation`) wait in the connector's hook, so the dialog is drawn after the Return lands, never under it
-  (measured on 2.1.325, 2026-11-15: a held `ask` drew nothing until released). A box is not ready within half a
-  second of an `ask`, which may not be drawn yet (draws took 120–360 ms). This bends “hooks never wait”: the wait
+  approval or question decided meanwhile and an MCP input request (`Elicitation`) wait in the connector's hook, so
+  the dialog is drawn after the Return lands, never under it (measured on 2.1.325, 2026-11-15: a held `ask` drew
+  nothing until released). That covers a `tool.check` verdict of `ask` and any check of a tool that always puts
+  its dialog to the person (`personTools`: a question, a plan to approve), whose dialog opens whatever the verdict.
+  A box is not ready within half a second of any of these, which may not be drawn yet (draws took 120–360 ms). This bends “hooks never wait”: the wait
   is local, bounded, and happens only right after a steered dictation. A dialog that comes through neither hook
   is not held. Never fill
   text that starts with `/` or `!`: Return runs them as a command or in the shell, and the box drops the invisible
@@ -453,7 +459,12 @@ every rule above applies to it, with these sharpenings:
   until it ages out (`AgentProcessTable`), so the liveness tick never sweeps it per agent.
 - **bb is a host reached through its own `bb` command** (`BBHost`). Every call runs the installed command with a
   fixed environment that turns bb's telemetry off, never the app's own. Delivery uses `--mode auto`, which steers a
-  running turn and starts one when the thread is idle, as typing in bb does; bb's `sent` reads as sent, and a
+  running turn and starts one when the thread is idle, as typing in bb does. The hub holds nothing back for an open
+  approval: bb queues the message itself and answers `queued` (measured with bb 0.49.0 on 2026-11-15, Claude Code in
+  a thread stopped on a command approval). The approval stayed open, the message sat in bb's queue as
+  `waitingOn: interaction`, and once the approval was denied bb delivered it into the same turn. If a later bb
+  steers into an open approval instead, the hub must hold the take as it does for a terminal agent. A queued
+  answer's receipt names what the thread waits on, from the thread's state in bb's list. bb's `sent` reads as sent, and a
   dictation it steers into a running turn follows that turn's reply, `queued` as
   queued, its error envelope as refused in plain words, and anything else as uncertain; bb's error code goes to
   the log as public and its message as private, since a message could echo what was sent. Open only asks:

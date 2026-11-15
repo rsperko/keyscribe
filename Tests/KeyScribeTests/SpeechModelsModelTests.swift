@@ -180,7 +180,7 @@ final class SpeechModelsModelTests: XCTestCase {
         model.requestDelete("parakeet")
         XCTAssertEqual(model.pendingDeleteId, "parakeet")
         model.confirmDelete()
-        await settleTasks()
+        await waitUntil({ recorder.deferred.count == 1 }, "removal deferred")
 
         XCTAssertEqual(recorder.evicted, ["parakeet"])
         XCTAssertEqual(recorder.markedRemoved, [])
@@ -190,7 +190,7 @@ final class SpeechModelsModelTests: XCTestCase {
         XCTAssertEqual(try row("parakeet", in: model).downloadPhase, "Removing…")
 
         recorder.deferred[0]()
-        await settleTasks()
+        await waitUntil({ recorder.markedRemoved == ["parakeet"] && (try? self.row("parakeet", in: model).isUsable) == false }, "files removed")
 
         XCTAssertEqual(recorder.removed, ["parakeet"])
         XCTAssertEqual(recorder.markedRemoved, ["parakeet"])

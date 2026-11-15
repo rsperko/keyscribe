@@ -102,11 +102,15 @@ function harness(on: any) {
   on('turn.complete', () => downstream['turn.complete'] ?? { text: '' })
   on('turn.abort', () => ({ value: undefined }))
   on('tool.check', { tool: 'Bash' }, () => ({ decision: 'ask' }))
+  on('tool.check', { tool: 'AskUserQuestion' }, () => ({ decision: 'allow' }))
+  on('tool.check', { tool: 'ExitPlanMode' }, () => ({ decision: 'allow' }))
+  on('classic.Elicitation', () => ({}))
   on('prompt.attachment', ($: any, e: any) => ({ text: e.text }))
   const fills: string[] = []
-  const fillRefusal: { reason?: string; typedFirst?: string } = {}
+  const fillRefusal: { reason?: string; typedFirst?: string; throws?: boolean } = {}
   on('prompt.fill', ($: any, e: any) => {
     fills.push(e.text)
+    if (fillRefusal.throws && e.text) throw new Error('fill failed')
     if (fillRefusal.reason) return { isFilled: false, refusal: fillRefusal.reason, text: box.text }
     if (fillRefusal.typedFirst) box.text += fillRefusal.typedFirst
     box.text = e.mode === 'append' ? box.text + e.text : e.text
@@ -619,6 +623,19 @@ test('a dictation that starts with a slash never goes in the prompt box, where R
   expect(outcome(h)).toEqual(['ack', 'working'])
 })
 
+test('a fill that fails sends no answer, so the take reads uncertain rather than refused and is never entered twice', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  h.fillRefusal.throws = true
+  await h.deliver([boxCommand()])
+  await h.answerEvents()
+  expect(h.events().filter((b: any) => ['refused', 'submitted'].includes(b.op))).toEqual([])
+  await h.deliver([{ op: 'check', id: 'c1', expectedSession: 's1', request: 'r1', expiresAt: Number.MAX_SAFE_INTEGER }])
+  await h.answerEvents()
+  expect(h.events().find((b: any) => b.op === 'checked' && b.check === 'c1')).toMatchObject({ state: 'handed' })
+})
+
 const checkCommand = (id: string) => ({ op: 'check', id, expectedSession: 's1', request: 'r1', expiresAt: Number.MAX_SAFE_INTEGER })
 const promptBox = (h: any, check: string) => h.events().find((b: any) => b.op === 'checked' && b.check === check)?.promptBox
 
@@ -692,6 +709,49 @@ test('a box is not ready for Return just after the agent asked for an approval t
   await h.deliver([boxCommand()])
   await h.answerEvents()
   await ask($)
+  await h.deliver([checkCommand('c1')])
+  await h.answerEvents()
+  expect(promptBox(h, 'c1')).not.toBe('ready')
+  await h.clock.advance(500)
+  await h.deliver([checkCommand('c2')])
+  await h.answerEvents()
+  expect(promptBox(h, 'c2')).toBe('ready')
+})
+
+for (const tool of ['AskUserQuestion', 'ExitPlanMode']) {
+  test(`a ${tool} dialog core allows still waits until the Return has landed`, async ($, on) => {
+    const h = harness(on)
+    await readyBox($, h)
+    let answered = false
+    const verdict = $.tool.check({ tool, input: {}, tool_use_id: 'u2' } as any).then((v: any) => { answered = true; return v })
+    await h.settle()
+    expect(answered).toBe(false)
+    await h.typed($, 'run the tests')
+    await h.settle()
+    expect(answered).toBe(true)
+    await verdict
+  })
+
+  test(`a box is not ready for Return just after a ${tool} dialog core allows`, async ($, on) => {
+    const h = harness(on)
+    await h.connect($)
+    await $.turn.start({ text: '', turnId: 't1' })
+    await h.deliver([boxCommand()])
+    await h.answerEvents()
+    await $.tool.check({ tool, input: {}, tool_use_id: 'u2' } as any)
+    await h.deliver([checkCommand('c1')])
+    await h.answerEvents()
+    expect(promptBox(h, 'c1')).not.toBe('ready')
+  })
+}
+
+test('an MCP question keeps the box from reading ready while it may not be drawn yet', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  await h.deliver([boxCommand()])
+  await h.answerEvents()
+  await $.classic.Elicitation({ mcp_server_name: 'docs', message: 'Pick one' } as any)
   await h.deliver([checkCommand('c1')])
   await h.answerEvents()
   expect(promptBox(h, 'c1')).not.toBe('ready')

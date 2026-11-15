@@ -34,7 +34,7 @@ type Config = {
 type FocusDefinition = { id: string; requiresEnv: string[]; argv: string[] }
 type ReadAloud = boolean | "quiet" | null
 type Ready = { launch: string; protocol: number }
-type Pending = { id: string; generation: number; text: string; serial: number; late: boolean; cancel: () => void }
+type Pending = { id: string; generation: number; text: string; serial: number; late: boolean; cancel: () => void; prompt: string; steer: boolean }
 type Submission = { state: "holding" | "handed" | "seen" | "refused"; reason?: string; turn?: string; handedAt?: number; seenAt?: number; altered?: boolean; miss?: string }
 type Receipt = { id: string; at: number; sending: boolean }
 type Item = {
@@ -112,6 +112,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   const tools: { id: string; name: string; args: unknown }[] = []
   let lastKeyAt: number | null = null
   const pending: Pending[] = []
+  const steered: Pending[] = []
   const submissions = new Map<string, Submission>()
   const receipts: Receipt[] = []
   let lastAnswer = ""
@@ -640,12 +641,13 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     }
     serial += 1
     const text = (cmd.text || "") + nonce + mark(serial)
-    const item: Pending = { id: cmd.id, generation: gen, text, serial, late: false, cancel: () => {} }
+    const item: Pending = { id: cmd.id, generation: gen, text, serial, late: false, cancel: () => {}, prompt: promptDigest(cmd.text || ""), steer: false }
     while (pending.length >= lateLimit) pending.shift()!.cancel()
     pending.push(item)
     track(cmd.id, { state: "handed", handedAt: host.now() })
     try {
       const deliverAs = idle() ? "followUp" : "steer"
+      item.steer = deliverAs === "steer"
       const sent: unknown = pi.sendUserMessage(attached.length ? [{ type: "text", text }, ...attached] : text, { deliverAs })
       if (sent && typeof (sent as Promise<void>).then === "function") {
         (sent as Promise<void>).then(undefined, (err: unknown) => {
@@ -694,19 +696,39 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   }
 
   function received(message: unknown): void {
-    receivedText(messageText(message))
+    const text = messageText(message)
+    const serialIn = markedSerial(text)
+    const taken = serialIn === null ? -1 : steered.findIndex((item) => item.serial === serialIn)
+    if (taken >= 0) {
+      const [item] = steered.splice(taken, 1)
+      if (session) observe({ op: "absorbed", session, turn: currentTurn || "", prompt: item.prompt })
+      return
+    }
+    const item = take(text, serialIn)
+    if (item) settleSeen(item, text, currentTurn || "")
   }
 
-  function receivedText(text: string): void {
-    const serialIn = markedSerial(text)
+  function accepted(text: string): void {
+    const item = take(text, markedSerial(text))
+    if (!item || !item.steer) return
+    steered.push(item)
+    while (steered.length > lateLimit) steered.shift()
+    settleSeen(item, text, "")
+  }
+
+  function take(text: string, serialIn: number | null): Pending | null {
     const index = serialIn === null ? -1 : pending.findIndex((item) => item.serial === serialIn)
     if (index < 0) {
       if (serialIn === null) for (const item of pending) track(item.id, { miss: "other" })
-      return
+      return null
     }
     const [item] = pending.splice(index, 1)
     item.cancel()
-    track(item.id, { state: "seen", turn: currentTurn || "", seenAt: host.now(), altered: text !== item.text })
+    return item
+  }
+
+  function settleSeen(item: Pending, text: string, turn: string): void {
+    track(item.id, { state: "seen", turn, seenAt: host.now(), altered: text !== item.text })
     confirm(item.id)
   }
 
@@ -943,7 +965,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
 
   pi.on("input", (event) => {
     if (!session) return
-    if (event.source === "extension" && event.streamingBehavior === "steer") receivedText(event.text || "")
+    if (event.source === "extension" && event.streamingBehavior === "steer") accepted(event.text || "")
     if (event.source === "interactive") {
       if (currentTurn !== null && ctx && ctx.isIdle()) closeStaleTurn()
       prompts += 1
@@ -1070,6 +1092,13 @@ function boundedAnswer(text: string): string {
     cut = text.slice(0, head) + gap + text.slice(text.length - Math.max(0, budget - head - gap.length))
   }
   return cut
+}
+
+function promptDigest(text: string): string {
+  const plain = (text.startsWith("\u200b") ? text.slice(1) : text).trim()
+  let hash = 0xcbf29ce484222325n
+  for (const byte of new TextEncoder().encode(plain)) hash = ((hash ^ BigInt(byte)) * 0x100000001b3n) & 0xffffffffffffffffn
+  return hash.toString(16).padStart(16, "0")
 }
 
 function messageText(message: unknown): string {

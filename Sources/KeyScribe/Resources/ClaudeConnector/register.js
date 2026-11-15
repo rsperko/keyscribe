@@ -46,6 +46,7 @@ const admitted = new Set()
 const submissions = new Map()
 const returnGuard = 1000
 const drawGrace = 500
+const personTools = new Set(['AskUserQuestion', 'ExitPlanMode'])
 let guard = null
 let lastAskAt = -Infinity
 let steer = null
@@ -938,7 +939,7 @@ export function register(on) {
 
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
-    if (verdict && verdict.decision === 'ask') {
+    if ((verdict && verdict.decision === 'ask') || personTools.has(e.tool)) {
       lastAskAt = await $.clock.now()
       await heldForReturn($)
     }
@@ -946,6 +947,7 @@ export function register(on) {
   })
 
   on('classic.Elicitation', async ($, e, next) => {
+    lastAskAt = await $.clock.now()
     await heldForReturn($)
     return next(e)
   }).catch(($, e, next) => next(e))

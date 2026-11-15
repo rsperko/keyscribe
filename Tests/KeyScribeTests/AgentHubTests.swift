@@ -220,6 +220,25 @@ struct AgentHubTests {
         #expect(await receipt == .sent("keyscribe"))
     }
 
+    @Test func aSteerAcceptedBeforeItsTurnIsKnownIsSentAndHasTheReplyOfTheTurnThatTakesItIn() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, steering())
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("use the other file", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.submitted(request: "r1", turn: ""))
+        #expect(await receipt == .sent("keyscribe"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Not that one."))
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t2"))
+        hub.handle(.absorbed(session: "claude:s1", turn: "t2", prompt: AgentPromptDigest.of("use the other file")))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Used it."))
+        #expect(origins == ["r1"])
+    }
+
     @Test func aSteeringAgentWaitingOnTheUserStillHoldsTheDictation() async {
         let (hub, transport, registry, _) = makeHub()
         registry.set("s1", status: "waiting", waitingFor: "permission prompt")
@@ -307,6 +326,36 @@ struct AgentHubTests {
         hub.followSteer(of: "claude:s1", for: "r9", text: "use the other file")
         hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Used it."))
         #expect(origins == ["r9"])
+    }
+
+    @Test func twoSteersIntoOneTurnSentBeforeEitherIsTakenInHaveItsReplyHeardOnce() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.followSteer(of: "claude:s1", for: "r8", text: "use the other file")
+        hub.followSteer(of: "claude:s1", for: "r9", text: "and keep the tests")
+        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("use the other file")))
+        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("and keep the tests")))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Used it and kept them."))
+        #expect(origins == ["r9"])
+    }
+
+    @Test func twoSteersIntoOneTurnHaveItsReplyHeardOnceForTheFirst() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("use the other file")))
+        hub.followSteer(of: "claude:s1", for: "r8", text: "use the other file")
+        hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("and keep the tests")))
+        hub.followSteer(of: "claude:s1", for: "r9", text: "and keep the tests")
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Used it and kept them."))
+        #expect(origins == ["r8"])
     }
 
     @Test func aPromptBoxCheckNobodyAnswersIsNotReady() async {

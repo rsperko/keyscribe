@@ -509,6 +509,19 @@ struct AgentDeliveryWiringTests {
         #expect(rig.hud.states.last == AgentOutput.receiptState(.kept("keyscribe", reason: .inPromptBox(.awaitingReturn)), mode: "Coding agent", heard: ""))
     }
 
+    @Test func returnIsNeverPressedWhenAnotherPaneOfTheSameWindowComesToFrontWhileTheBoxIsChecked() async {
+        let front = Front("claude:s1")
+        let rig = await workingRig(front)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        let app = front.answer?.app
+        rig.controller.frontApp = { app }
+        rig.transport.onCheck = { front.answer = app.map { FrontSession(id: "claude:s2", app: $0) } }
+        await take(rig)
+        #expect(boxed(rig) == [true])
+        #expect(rig.returns.pressed.isEmpty)
+        #expect(rig.hud.states.last == AgentOutput.receiptState(.kept("keyscribe", reason: .inPromptBox(.awaitingReturn)), mode: "Coding agent", heard: ""))
+    }
+
     @Test func aDictationAddedBesideTextTheUserTypedIsLeftForThemToReview() async {
         let rig = await workingRig(Front("claude:s1"))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }

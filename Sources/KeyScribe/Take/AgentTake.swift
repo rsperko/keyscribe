@@ -578,6 +578,7 @@ final class AgentTake {
         else { return nil }
         if agents.checksPromptBox(id) {
             guard await agents.promptBoxReady(request, in: id), lease.keepActing(),
+                  let still = await agents.sessionInFrontWithoutAsking(), still.id == id, still.app == shown.app, lease.keepActing(),
                   let focused = frontApp(), focused.pid == shown.app.pid, shown.app.window == nil || focused.window == shown.app.window
             else { return nil }
         }

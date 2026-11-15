@@ -2248,7 +2248,7 @@ Uninstall stays offered for any enrolled setup. A plugin the host reports as
 installed but failing reads **Not working**, with the host's reason as an `IssueText` and a **Repair** action that
 installs the current files again; Uninstall stays offered. A host without its own connector has one `SettingRow`
 switch instead, **Reach conversations in {host}**, off by default. Its help says the host's conversations are
-listed and sent to through the host's own command, queued behind a turn already running, and that {appName} runs
+listed and sent to through the host's own command, into a turn already running the way typing there would, and that {appName} runs
 nothing of the host's until the switch is on. Turning it off removes the host's conversations from the list on
 the next scan. While the host is on, a reason the host's list is missing (the tool isn't installed or isn't
 open, or its list couldn't be read) shows in its section as an advisory `IssueText` that says what to do next,

@@ -298,7 +298,7 @@ final class BBPluginConnector: AgentConnector {
     }
 
     let copy = AgentConnectorCopy(
-        help: "With a small plugin installed in bb, \(Branding.appName) lists the threads bb runs, sends what you say to them through bb\u{2019}s own command, queued behind any turn already running, and hears how they answer and what they stop to ask you; each bb window tells the plugin which thread it shows, so dictation goes to the thread you are looking at. Every thread connects on its own unless you disconnect it. \(Branding.appName) runs nothing of bb\u{2019}s until you connect bb. If bb loses the plugin, dictation still reaches its threads by name, but replies are not read aloud and \(Branding.appName) no longer knows which thread is in front until you reinstall it.",
+        help: "With a small plugin installed in bb, \(Branding.appName) lists the threads bb runs, sends what you say to them through bb\u{2019}s own command, into a turn already running the way typing in bb would, and hears how they answer and what they stop to ask you; each bb window tells the plugin which thread it shows, so dictation goes to the thread you are looking at. Every thread connects on its own unless you disconnect it. \(Branding.appName) runs nothing of bb\u{2019}s until you connect bb. If bb loses the plugin, dictation still reaches its threads by name, but replies are not read aloud and \(Branding.appName) no longer knows which thread is in front until you reinstall it.",
         reloadHint: "",
         uninstallTitle: "Uninstall the plugin from bb?",
         uninstallMessage: "\(Branding.appName) stops listing bb threads and sending to them. Your conversation names, disconnected conversations and other \(Branding.appName) settings are kept.",

@@ -54,7 +54,7 @@ struct ConnectorConsentSheet: View {
 
     private func hostDetails(_ host: AgentKind) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("\(Branding.appName) lists the conversations \(host.displayName) runs and sends what you dictate to them through \(host.displayName)\u{2019}s own command, queued behind any turn already running.")
+            Text("\(Branding.appName) lists the conversations \(host.displayName) runs and sends what you dictate to them through \(host.displayName)\u{2019}s own command, into a turn already running the way typing there would.")
                 .fixedSize(horizontal: false, vertical: true)
             Text("It also installs a small plugin in \(host.displayName) so the reply to what you dictate is read aloud, and so dictation can go to the conversation you are looking at: each \(host.displayName) window tells the plugin which conversation it shows. Every conversation connects on its own, and you can disconnect any of them later.")
                 .fixedSize(horizontal: false, vertical: true)

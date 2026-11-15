@@ -1127,7 +1127,8 @@ final class AgentHub {
             if let awaited = awaitingResult[session], awaited != turn { stopAwaiting(session) }
             if nextRequested.remove(session) != nil { waitForReply(turn, of: session, requested: true) }
             if let prompt { followHosted(turn, of: session, prompt: prompt) }
-            if let pending = nextTyped.removeValue(forKey: session), let typedAt = pending.typedAt,
+            let awaitsAbsorbed = prompt == nil && nextTyped[session]?.prompt != nil
+            if !awaitsAbsorbed, let pending = nextTyped.removeValue(forKey: session), let typedAt = pending.typedAt,
                pending.prompt.map { $0 == prompt } ?? (now().timeIntervalSince(typedAt) <= typedTurnWindow) {
                 waitForReply(turn, of: session, requested: false)
                 awaitedRequests[session] = pending.request
@@ -1504,6 +1505,9 @@ final class AgentHub {
             Log.agents.notice("delivery confirmed late: \(fact.value, privacy: .public)")
         }
         let conversation = requests[request]?.message.conversation
+        if let conversation, turn.isEmpty, features[conversation]?.contains("steer") == true, let text = requests[request]?.message.text {
+            followSteer(of: conversation, for: request, text: text)
+        }
         if let conversation, !turn.isEmpty, awaitingResult[conversation] != turn {
             stopAwaiting(conversation)
             awaitingResult[conversation] = turn

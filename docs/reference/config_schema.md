@@ -405,8 +405,8 @@ a hello on any other protocol is refused with `426` and is never registered or s
   had already collected stays uncertain.
 - **A submit is refused as `working`** when a turn is already running in that session; KeyScribe holds
   the take and sends it when the turn finishes. A connector whose hello lists `steer` takes it during the turn
-  instead, the way typing there would (Pi's sends it with `deliverAs: "steer"` and confirms it when Pi accepts
-  it), and refuses as `working` only while an earlier dictation still awaits its receipt.
+  instead, the way typing there would (Pi's sends it with `deliverAs: "steer"`, confirms it when Pi accepts it,
+  and reports the turn with `absorbed`), and refuses as `working` only while an earlier dictation still awaits its receipt.
 - **A submit with `box: true` goes in the prompt box while a turn runs.** KeyScribe sets it only for the
   conversation in front, while its agent is working, and only for a connector whose hello lists `box`. The
   connector applies every other check, then adds the text to the empty prompt box and refuses the submit as
@@ -414,16 +414,22 @@ a hello on any other protocol is refused with `426` and is never registered or s
   `dialog` when the agent's dialog holds the keys, and as `working` when the box will not take the text or the
   text starts with `/` or `!` (in the box, Return would run them as a command or in the shell; the box also drops
   the invisible character that keeps a submitted slash from running). Text the user typed as it went in refuses
-  it as `added`, with both left in the box. With no turn running, it is an ordinary submit.
+  it as `added`, with both left in the box. A fill that fails sends no answer, on purpose: the connector cannot
+  tell whether the text reached the box, and a refusal would let KeyScribe send it again and enter it twice, so
+  the take stays handed and reads as uncertain once its receipt wait ends. With no turn running, it is an
+  ordinary submit.
 - **Return waits for the connector to say the box is ready.** Right before pressing Return for a filled box,
   KeyScribe sends a connector that lists `box` a `check` naming the request; the `checked` answer carries
   `promptBox`: `ready` while the box holds exactly the dictated text and takes the keys (no dialog of the
   agent's holds them), `changed` or `asking` otherwise. Anything but `ready`, or no answer within a second,
   leaves the message in the box. A `ready` answer holds any approval, question or MCP input request the agent
   decides on for up to a second, until the user's prompt arrives, so its dialog is drawn after the Return.
-- **`absorbed` says a prompt-box message joined the running turn.** When the running turn takes in the text a
-  `box` submit filled, the connector sends `absorbed` with the session, that `turn`, and the `prompt` digest of the
-  text; KeyScribe then follows that turn's reply for the take.
+- **`absorbed` says a message joined a turn.** When the running turn takes in the text a `box` submit filled, or
+  a steer the agent accepted earlier enters the conversation, the connector sends `absorbed` with the session,
+  that `turn`, and the `prompt` digest of the text; KeyScribe then follows that turn's reply for the take. A
+  steering connector answers `submitted` with an empty `turn` as soon as the agent accepts the steer, since the
+  agent may not take it in until a long tool call finishes; the turn comes with `absorbed`. An accepted steer
+  that never enters the conversation (another extension consumed it) still reads as sent, but no reply follows.
 - **A submit is refused as `draft`** when the agent's prompt box holds text the user has not sent; the
   connector leaves that text in place and KeyScribe keeps the take for review. The connector checks the
   prompt count, a running turn, and the session again after reading the box, right before it submits.
