@@ -16,7 +16,7 @@ final class ConfigWatchFilterTests: XCTestCase {
             changedPath: base + "/lkg/modes/_direct.toml", supportDir: base))
     }
 
-    func testCodingAgentBridgeStateIsIgnored() {
+    func testAgentBridgeStateIsIgnored() {
         XCTAssertFalse(ConfigWatchFilter.isConfigRelevant(
             changedPath: base + "/agents/names.json", supportDir: base))
     }

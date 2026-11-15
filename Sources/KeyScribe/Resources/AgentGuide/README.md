@@ -5,9 +5,9 @@
 This folder holds your {{app_name}} modes, AI services, vocabulary, and settings. You can change them in
 {{app_name}}'s Settings or by editing the files here; the app picks up saved edits without a restart.
 
-## Using a coding agent
+## Using an agent
 
-Open a coding agent (Claude Code, Codex, or similar) in this folder and describe the mode you want, for
+Open an agent (Claude Code, Codex, or similar) in this folder and describe the mode you want, for
 example: "Add a mode that turns my dictation into a git commit message when I say 'commit message'." The
 agent finds its instructions in `AGENTS.md`.
 
@@ -22,7 +22,7 @@ would be lost. If one of these names already held a file you wrote, it is kept n
 `.bak-` and the date added to its name.
 
 - `README.md` (this file)
-- `AGENTS.md`: instructions for coding agents
+- `AGENTS.md`: instructions for agents
 - `CLAUDE.md`: points Claude Code at `AGENTS.md`
 - `reference/`: the full configuration format reference
 

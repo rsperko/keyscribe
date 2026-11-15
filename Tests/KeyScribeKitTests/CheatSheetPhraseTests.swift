@@ -87,7 +87,7 @@ struct CheatSheetPhraseTests {
             "the second one": .answer(.select(1)),
             "the last one": .answer(.select(1)),
         ],
-        "Talk to coding agents": [
+        "Talk to agents": [
             "tell backend run the tests": .address(toBackend),
             "backend, run the tests": .address(toBackend),
             "ask backend what changed": .address(.name("backend", body: "what changed")),

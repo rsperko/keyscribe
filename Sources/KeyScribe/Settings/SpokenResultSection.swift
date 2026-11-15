@@ -2,7 +2,7 @@ import KeyScribeKit
 import SwiftUI
 
 struct SpokenResultSection: View {
-    @ObservedObject var model: CodingAgentsSettingsModel
+    @ObservedObject var model: AgentsSettingsModel
     let connections: [Connection]
     @State private var advancedExpanded = false
 
@@ -14,7 +14,7 @@ struct SpokenResultSection: View {
             {
                 Toggle("", isOn: enabled)
                     .labelsHidden().toggleStyle(.switch)
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenResultEnabled)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenResultEnabled)
             }
             if model.spokenResult.enabled {
                 serviceRows
@@ -23,25 +23,25 @@ struct SpokenResultSection: View {
                         voice: voice, selection: $model.voiceChoice, spokenVoice: model.chosenVoice,
                         sharedNote: "This choice also applies to Ask modes\u{2019} answers.")
                 }
-                DisclosureSection(isExpanded: $advancedExpanded, headerID: AccessibilityID.Mode.CodingAgents.spokenResultAdvanced) {
+                DisclosureSection(isExpanded: $advancedExpanded, headerID: AccessibilityID.Mode.Agents.spokenResultAdvanced) {
                     DisclosureSummaryLabel(title: "Advanced", summary: "Summary instruction and voice files")
                 } content: {
                     PromptEditor(
                         title: "Summary instruction",
                         placeholder: "How the AI should sum up a reply\u{2026}",
                         text: model.spokenResult.effectivePrompt,
-                        expandID: AccessibilityID.Mode.CodingAgents.spokenResultPromptExpand,
-                        expandDoneID: AccessibilityID.Mode.CodingAgents.spokenResultPromptExpandDone
+                        expandID: AccessibilityID.Mode.Agents.spokenResultPromptExpand,
+                        expandDoneID: AccessibilityID.Mode.Agents.spokenResultPromptExpandDone
                     ) { value in
                         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
                         model.spokenResult.prompt = trimmed.isEmpty || trimmed == SpokenResultSettings.defaultPrompt ? nil : value
                     }
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenResultPrompt)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenResultPrompt)
                     HStack {
                         Spacer()
                         Button("Reset to Default") { model.spokenResult.prompt = nil }
                             .disabled(model.spokenResult.prompt == nil)
-                            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenResultReset)
+                            .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenResultReset)
                     }
                     if let voice = model.voice {
                         SpokenVoiceFiles(voice: voice)
@@ -56,7 +56,7 @@ struct SpokenResultSection: View {
             IssueText("Add an AI service to hear summaries of longer replies and what a waiting prompt asks. Without one, a longer reply is announced without a summary.", severity: .advisory)
             HStack {
                 Button("Open AI Services") { model.onOpenAIServices?() }
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenResultOpenAIServices)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenResultOpenAIServices)
                 Spacer()
             }
         } else {
@@ -71,7 +71,7 @@ struct SpokenResultSection: View {
                     }
                 }
                 .labelsHidden().fixedSize()
-                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenResultService)
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenResultService)
             }
             if missing {
                 IssueText("That AI service no longer exists. Choose another.")
@@ -112,13 +112,13 @@ struct SpokenVoiceRows: View {
     private static let help = "Speech is made on this Mac; what it reads is never sent anywhere. With Off \u{2014} text only, results are shown without being read aloud."
     static let textOnlyLabel = "Off \u{2014} text only"
     private var size: String { ByteCountFormatter.fileStyle.string(fromByteCount: SpokenVoiceModel.approxDownloadBytes) }
-    private var textOnly: Bool { selection.wrappedValue == CodingAgentsSettingsModel.textOnlyChoice }
+    private var textOnly: Bool { selection.wrappedValue == AgentsSettingsModel.textOnlyChoice }
 
     var body: some View {
         voiceRow
         Text(sharedNote)
             .font(.caption).foregroundStyle(.secondary)
-            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenResultVoiceShared)
+            .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenResultVoiceShared)
         if textOnly {
             EmptyView()
         } else if let error = voice.error {
@@ -129,7 +129,7 @@ struct SpokenVoiceRows: View {
                 if let entry = voice.fallbackEntry, let show = voice.showEntry {
                     Button("Show in History") { show(entry) }
                         .buttonStyle(.link)
-                        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenVoiceShowInHistory)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenVoiceShowInHistory)
                 }
             }
         }
@@ -159,7 +159,7 @@ struct SpokenVoiceRows: View {
                     Button("Download English \u{00B7} \(size)") { voice.download() }
                         .buttonStyle(.borderedProminent)
                         .accessibilityLabel("Download the English voice, \(size)")
-                        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenVoiceDownload)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenVoiceDownload)
                 }
             }
         case .downloading(let phase, let fraction):
@@ -173,7 +173,7 @@ struct SpokenVoiceRows: View {
                 wrapping {
                     picker
                     Button("Reinstall voice") { voice.reinstall() }
-                        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenVoiceReinstall)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenVoiceReinstall)
                 }
             }
         }
@@ -181,14 +181,14 @@ struct SpokenVoiceRows: View {
 
     private var picker: some View {
         Picker("Voice", selection: selection) {
-            Text(Self.textOnlyLabel).tag(CodingAgentsSettingsModel.textOnlyChoice)
+            Text(Self.textOnlyLabel).tag(AgentsSettingsModel.textOnlyChoice)
             Divider()
             ForEach(SpokenVoices.all) { option in
                 Text(option.label).tag(option.id)
             }
         }
         .labelsHidden()
-        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenResultVoice)
+        .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenResultVoice)
     }
 
     private func wrapping(@ViewBuilder _ content: () -> some View) -> some View {
@@ -201,7 +201,7 @@ struct SpokenVoiceRows: View {
 
     private var previewButton: some View {
         Button("Preview Voice") { playPreview() }
-            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenResultPreview)
+            .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenResultPreview)
     }
 
     private func playPreview() {
@@ -239,7 +239,7 @@ private struct SpokenVoiceFiles: View {
             HStack {
                 Spacer()
                 PaneDeleteButton(title: "Delete Voice") { voice.requestDelete() }
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenVoiceDelete)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenVoiceDelete)
             }
             .confirmationDialog(
                 "Delete the voice?",
@@ -247,9 +247,9 @@ private struct SpokenVoiceFiles: View {
                 titleVisibility: .visible
             ) {
                 Button("Delete", role: .destructive) { voice.confirmDelete() }
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenVoiceDeleteConfirm)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenVoiceDeleteConfirm)
                 Button("Cancel", role: .cancel) { voice.cancelDelete() }
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.spokenVoiceDeleteCancel)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenVoiceDeleteCancel)
             } message: {
                 Text("Replies are read in the macOS voice until you download it again.")
             }

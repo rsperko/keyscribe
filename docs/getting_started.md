@@ -184,7 +184,7 @@ point. Two guarantees:
 If the clipboard has no text — for example you copied an image or files — nothing is pasted and the
 words "insert clipboard contents" are left in place so you can see it and fix it.
 
-In the Coding agent mode, the clipboard can hold more than text:
+In the Agent mode, the clipboard can hold more than text:
 
 - **Copied files** (from the Finder, for example) are inserted as their full paths, so the agent can
   open them.
@@ -298,9 +298,9 @@ KeyScribe inserts text; it does not run shell commands for you.
 
 Checkpoint: duplicate a starter mode instead of editing the original if you want to experiment.
 
-### Have a coding agent build a mode
+### Have an agent build a mode
 
-You can describe a mode instead of building it by hand. Open a coding agent such as Claude Code or Codex
+You can describe a mode instead of building it by hand. Open an agent such as Claude Code or Codex
 in `~/Library/Application Support/KeyScribe/` and ask, for example: "Add a mode that turns my dictation
 into a git commit message when I end with 'commit message'." KeyScribe keeps an `AGENTS.md` guide in that
 folder, matched to your installed version, so the agent knows the file format and checks its work. Saved

@@ -19,7 +19,7 @@ enum SettingsProblem: Equatable, CaseIterable {
     case modeUsesFailedConnection
     case hotkeyConflict
     case modeTriggerUnreachable
-    case codingAgentConnectionFailed
+    case agentConnectionFailed
 
     var pane: SettingsDestination {
         switch self {
@@ -27,7 +27,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         case .microphonePermission, .accessibilityPermission, .accessibilityNeedsRelaunch: .permissions
         case .activeEngineUnavailable, .modelSelfTestFailed: .speechModels
         case .aiConnectionTestFailed, .aiConnectionMisconfigured: .aiServices
-        case .modeNeedsAIService, .modeUsesFailedConnection, .modeTriggerUnreachable, .codingAgentConnectionFailed: .modes
+        case .modeNeedsAIService, .modeUsesFailedConnection, .modeTriggerUnreachable, .agentConnectionFailed: .modes
         case .hotkeyConflict: .general
         }
     }
@@ -46,7 +46,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         modeUsesFailedConnection: Bool = false,
         hotkeyConflict: Bool = false,
         modeTriggerUnreachable: Bool = false,
-        codingAgentConnectionFailed: Bool = false
+        agentConnectionFailed: Bool = false
     ) -> [SettingsProblem] {
         var problems: [SettingsProblem] = []
         if hasConfigError { problems.append(.malformedConfig) }
@@ -61,7 +61,7 @@ enum SettingsProblem: Equatable, CaseIterable {
         if modeUsesFailedConnection { problems.append(.modeUsesFailedConnection) }
         if hotkeyConflict { problems.append(.hotkeyConflict) }
         if modeTriggerUnreachable { problems.append(.modeTriggerUnreachable) }
-        if codingAgentConnectionFailed { problems.append(.codingAgentConnectionFailed) }
+        if agentConnectionFailed { problems.append(.agentConnectionFailed) }
         return problems
     }
 }
@@ -83,13 +83,13 @@ final class SettingsNavigationModel: ObservableObject {
 @MainActor
 final class SettingsProblemModel: ObservableObject {
     @Published var flaggedPanes: Set<SettingsDestination> = []
-    @Published private(set) var codingAgentHasError = false
+    @Published private(set) var agentHasError = false
     // The menu-bar dot reads this, never its own detection, so the Settings poll moves both together.
     var onErrorsChanged: ((Bool) -> Void)?
     // Only republish when the set changes, so unchanged poll ticks don't re-render the whole split view.
     func update(_ problems: [SettingsProblem]) {
-        let codingAgentFailed = problems.contains(.codingAgentConnectionFailed)
-        if codingAgentHasError != codingAgentFailed { codingAgentHasError = codingAgentFailed }
+        let agentFailed = problems.contains(.agentConnectionFailed)
+        if agentHasError != agentFailed { agentHasError = agentFailed }
         let panes = Set(problems.map(\.pane))
         guard panes != flaggedPanes else { return }
         let hadErrors = !flaggedPanes.isEmpty
@@ -120,7 +120,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     private let replacements: ReplacementsSettingsModel
     private let shared: SharedVocabulariesModel
     private let modes: ModesSettingsModel
-    let codingAgents: CodingAgentsSettingsModel
+    let agents: AgentsSettingsModel
     private let aiServices: AIServiceSettingsModel
     let history: HistoryPaneModel
     var rewriteAgain: ((HistoryEntry) async -> DictationController.RewriteAgain)? {
@@ -152,7 +152,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     init(
         settings: Settings, speechModels: SpeechModelsModel, repository: ConfigRepository, surfaces: ResolvedSurfaces,
-        agents: CodingAgentIntegrations = .builtIn, historyStore: HistoryStore,
+        agentIntegrations: AgentIntegrations = .builtIn, historyStore: HistoryStore,
         onChange: @escaping (Settings) -> Void, onReload: @escaping () -> Void,
         onResetHUDPosition: @escaping () -> Void,
         onPreviewSound: @escaping (Int) -> Void,
@@ -176,20 +176,20 @@ final class SettingsController: NSObject, NSWindowDelegate {
         shared = SharedVocabulariesModel(repository: repository)
         modes = ModesSettingsModel(
             repository: repository, voiceCommandsEnabled: settings.features.isEnabled(.voiceCommands),
-            codingAgentsEnabled: settings.features.isEnabled(.codingAgents))
+            agentsEnabled: settings.features.isEnabled(.agents))
         modes.setAskAboutSelectionEnabled(settings.features.isEnabled(.askAboutSelection))
         let agentsDir = AgentRuntime.bridgeDirectory(supportDir: repository.supportDir)
-        codingAgents = CodingAgentsSettingsModel(
+        agents = AgentsSettingsModel(
             describeTerminal: { TerminalDescription.describe(pid: $0, surfaces: surfaces) },
             agentsDir: agentsDir, setups: ConnectorSetupRegistry(directory: agentsDir),
-            connectors: agents.connectors(
+            connectors: agentIntegrations.connectors(
                 agentsDir: agentsDir, pluginName: KeyScribePaths.variant.connectorSlug, surfaces: ConnectorSurfaces(surfaces)),
-            hosts: agents.hosts.map(\.kind))
-        modes.codingAgents = codingAgents
-        codingAgents.load(spokenResult: settings.codingAgents.spokenResult)
-        codingAgents.onSpokenResultChange = { [model] in model.setSpokenResult($0) }
-        codingAgents.load(hosts: settings.codingAgents.hosts)
-        codingAgents.onHostsChange = { [model] in model.setHosts($0) }
+            hosts: agentIntegrations.hosts.map(\.kind))
+        modes.agents = agents
+        agents.load(spokenResult: settings.agents.spokenResult)
+        agents.onSpokenResultChange = { [model] in model.setSpokenResult($0) }
+        agents.load(hosts: settings.agents.hosts)
+        agents.onHostsChange = { [model] in model.setHosts($0) }
         aiServices = AIServiceSettingsModel(repository: repository, permits: AIServiceCatalog.permits)
         history = HistoryPaneModel(
             store: historyStore,
@@ -247,7 +247,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
             }
         }
         history.openSettings = { [weak self] destination in self?.navigation.destination = destination }
-        codingAgents.onOpenAIServices = { [weak self] in self?.navigation.destination = .aiServices }
+        agents.onOpenAIServices = { [weak self] in self?.navigation.destination = .aiServices }
         history.voiceCommandsEnabled = { repository.voiceCommandsEnabled }
         modes.voiceCommands.previousApp = { [weak self] in self?.historyPreviousApp }
         history.copyText = { TextInserter.copyToClipboard($0) }
@@ -282,10 +282,10 @@ final class SettingsController: NSObject, NSWindowDelegate {
 
     func update(settings: Settings) {
         model.apply(settings)
-        codingAgents.load(spokenResult: settings.codingAgents.spokenResult)
-        codingAgents.load(hosts: settings.codingAgents.hosts)
+        agents.load(spokenResult: settings.agents.spokenResult)
+        agents.load(hosts: settings.agents.hosts)
         modes.setVoiceCommandsEnabled(settings.features.isEnabled(.voiceCommands))
-        modes.setCodingAgentsEnabled(settings.features.isEnabled(.codingAgents))
+        modes.setAgentsEnabled(settings.features.isEnabled(.agents))
         modes.setAskAboutSelectionEnabled(settings.features.isEnabled(.askAboutSelection))
         speechModels.syncActive(settings.stt.engine)
         speechModels.syncSTT(settings.stt)
@@ -544,7 +544,7 @@ struct SettingsRootView: View {
             case .aiServices:
                 AIServiceSettingsView(model: aiServices)
             case .modes:
-                ModesSettingsView(model: modes, brokenConnectionIds: aiServices.failedTestIds, codingAgentHasError: problems.codingAgentHasError) { modeID in
+                ModesSettingsView(model: modes, brokenConnectionIds: aiServices.failedTestIds, agentHasError: problems.agentHasError) { modeID in
                     navigation.openVocabulary(for: modeID)
                 }
             case .history:
@@ -638,7 +638,7 @@ private struct MaintenanceSettingsView: View {
                         issue: issue, fileURL: KeyScribePaths.supportDir.appendingPathComponent(issue.relativePath)))
                         .accessibilityIdentifier(AccessibilityID.Settings.Advanced.configIssue(issue.relativePath))
                 }
-                Text("Config edits are detected automatically. A file that can’t be read, or a key \(Branding.appName) doesn’t recognize, is reported here rather than silently ignored. To have a coding agent build or edit a mode, open the agent in the config folder; its AGENTS.md explains the format.")
+                Text("Config edits are detected automatically. A file that can’t be read, or a key \(Branding.appName) doesn’t recognize, is reported here rather than silently ignored. To have an agent build or edit a mode, open the agent in the config folder; its AGENTS.md explains the format.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -938,14 +938,14 @@ final class SettingsModel: ObservableObject {
     func previewSound() { onPreviewSound(soundVolumePercent) }
 
     func setHosts(_ value: [String]) {
-        guard settings.codingAgents.hosts != value else { return }
-        settings.codingAgents.hosts = value
+        guard settings.agents.hosts != value else { return }
+        settings.agents.hosts = value
         onChange(settings)
     }
 
     func setSpokenResult(_ value: SpokenResultSettings) {
-        guard settings.codingAgents.spokenResult != value else { return }
-        settings.codingAgents.spokenResult = value
+        guard settings.agents.spokenResult != value else { return }
+        settings.agents.spokenResult = value
         onChange(settings)
     }
 

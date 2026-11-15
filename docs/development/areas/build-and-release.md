@@ -48,9 +48,9 @@ stable self-signed cert (**`KeyScribe Local`**) for persistent TCC, else ad-hoc;
 Xcode signs Sparkle's helpers, the framework, the binary, and the bundle inside-out with hardened runtime
 itself, so there is no re-sign block. **A downstream distribution `include:`s the template and adds its
 own target** with its own identity, signing, entry file (`main.swift` that sets `delegate.updater`), and
-export options — it never edits upstream source. A downstream that adds coding agent integrations builds one
-`CodingAgentIntegrations` value (start from `.builtIn`, append its own) and passes that same value to both
-`DevCLI.handleFlags(codingAgents:)` and `AppDelegate(codingAgents:)`; passing it to only one makes the dev
+export options — it never edits upstream source. A downstream that adds agent integrations builds one
+`AgentIntegrations` value (start from `.builtIn`, append its own) and passes that same value to both
+`DevCLI.handleFlags(agentIntegrations:)` and `AppDelegate(agentIntegrations:)`; passing it to only one makes the dev
 probes and the app disagree about which terminals exist. An app that owns agent conversations itself is an
 `AgentHostIntegration` appended to `hosts`: its kind and a factory for an `AgentHost`, which makes no
 call until the user turns it on and answers unsupported for every capability its own API lacks. A host runs its

@@ -78,7 +78,7 @@ struct ResetTool {
         let contents = (try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
         try? fileManager.removeItem(at: folder)
         guard !contents.isEmpty else { return [] }
-        return ["Erased \(contents.count) clipboard file\(contents.count == 1 ? "" : "s") saved for coding agents."]
+        return ["Erased \(contents.count) clipboard file\(contents.count == 1 ? "" : "s") saved for agents."]
     }
 
     private static func eraseKeychainKeys() -> [String] {

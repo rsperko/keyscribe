@@ -111,7 +111,7 @@ final class AgentClipboard {
             try files.setAttributes([.posixPermissions: 0o600, .modificationDate: now()], ofItemAtPath: url.path)
             return url.path
         } catch {
-            Log.agents.error("couldn't save the clipboard for a coding agent: \(error.localizedDescription, privacy: .public)")
+            Log.agents.error("couldn't save the clipboard for an agent: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }

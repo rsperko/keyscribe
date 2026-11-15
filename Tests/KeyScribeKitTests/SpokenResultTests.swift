@@ -140,24 +140,24 @@ struct SpokenResultTests {
 struct SpokenResultSettingsDecodeTests {
     @Test func spokenResultSettingsAreReadFromTheirOwnTableAndDefaultWhenAbsent() throws {
         let absent = try SettingsStore.decode(from: "schema_version = 1")
-        #expect(absent.codingAgents.spokenResult == SpokenResultSettings())
+        #expect(absent.agents.spokenResult == SpokenResultSettings())
         let present = try SettingsStore.decode(from: """
         schema_version = 1
 
-        [coding_agents.spoken_result]
+        [agents.spoken_result]
         connection = "omlx"
         prompt = "Two sentences."
         voice = "com.apple.voice.compact.en-US.Samantha"
         """)
-        #expect(present.codingAgents.spokenResult == SpokenResultSettings(connection: "omlx", prompt: "Two sentences.", voice: "com.apple.voice.compact.en-US.Samantha"))
+        #expect(present.agents.spokenResult == SpokenResultSettings(connection: "omlx", prompt: "Two sentences.", voice: "com.apple.voice.compact.en-US.Samantha"))
     }
 }
 
 struct SpokenResultEnablementTests {
     @Test func textOnlyIsSavedBesideTheChosenVoice() throws {
         var settings = Settings.defaults
-        settings.codingAgents.spokenResult = SpokenResultSettings(enabled: true, voice: "bf_emma", textOnly: true)
-        let reread = try SettingsStore.decode(from: SettingsStore.encode(settings)).codingAgents.spokenResult
+        settings.agents.spokenResult = SpokenResultSettings(enabled: true, voice: "bf_emma", textOnly: true)
+        let reread = try SettingsStore.decode(from: SettingsStore.encode(settings)).agents.spokenResult
         #expect(reread.textOnly && reread.voice == "bf_emma" && reread.enabled)
     }
 
@@ -174,10 +174,10 @@ struct SpokenResultEnablementTests {
         let saved = try SettingsStore.decode(from: """
         schema_version = 1
 
-        [coding_agents.spoken_result]
+        [agents.spoken_result]
         connection = "omlx"
         """)
-        #expect(!saved.codingAgents.spokenResult.enabled)
+        #expect(!saved.agents.spokenResult.enabled)
         #expect(!SpokenResultSettings(connection: "omlx").enabled)
     }
 
@@ -252,19 +252,19 @@ struct SpokenSummaryLengthTests {
 
 struct AgentHostSettingsTests {
     @Test func noHostIsOnUntilTheUserTurnsItOn() throws {
-        #expect(try SettingsStore.decode(from: "schema_version = 1").codingAgents.hosts == [])
+        #expect(try SettingsStore.decode(from: "schema_version = 1").agents.hosts == [])
         let saved = try SettingsStore.decode(from: """
         schema_version = 1
 
-        [coding_agents]
+        [agents]
         hosts = ["bb", "other"]
         """)
-        #expect(saved.codingAgents.hosts == ["bb", "other"])
+        #expect(saved.agents.hosts == ["bb", "other"])
     }
 
     @Test func turnedOnHostsSurviveARoundTrip() throws {
         var settings = Settings.defaults
-        settings.codingAgents.hosts = ["bb"]
-        #expect(try SettingsStore.decode(from: SettingsStore.encode(settings)).codingAgents.hosts == ["bb"])
+        settings.agents.hosts = ["bb"]
+        #expect(try SettingsStore.decode(from: SettingsStore.encode(settings)).agents.hosts == ["bb"])
     }
 }

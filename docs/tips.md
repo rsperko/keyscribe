@@ -87,9 +87,9 @@ point. Two guarantees make this useful for sensitive material:
 
 Handy when you want a polished, rewritten sentence *around* a value that must stay untouched. Say
 `insert clipboard as code` instead to put the clipboard in a Markdown code fence, such as an error
-message for a coding agent.
+message for an agent.
 
-In the Coding agent mode you can also copy a screenshot or a file and say `insert clipboard contents`:
+In the Agent mode you can also copy a screenshot or a file and say `insert clipboard contents`:
 the agent gets the file's path, and an image or PDF is saved to a file first so the agent can open it.
 
 ## Keep words literal when they sound like commands

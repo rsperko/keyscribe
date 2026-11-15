@@ -117,14 +117,14 @@ struct HistoryStatsTests {
     }
 
     private static func open() -> HistoryEntry {
-        var open = entry("", heard: "open back end", mode: "Coding agent")
+        var open = entry("", heard: "open back end", mode: "Agent")
         open.summary = "Opened backend"
         open.facts = [.init(label: "Command", value: "Open"), .init(label: "Conversation", value: "backend \u{00B7} claude \u{00B7} s1")]
         return open
     }
 
     private static func queuedThenSent() -> HistoryEntry {
-        var sent = entry("run the tests", heard: "run the tests", mode: "Coding agent")
+        var sent = entry("run the tests", heard: "run the tests", mode: "Agent")
         sent.summary = "Sent to backend"
         sent.facts = [.init(label: "Command", value: "Send message")]
         sent.steps = [.init(at: Date(timeIntervalSince1970: 1_700_000_000), text: "Queued for backend"),
@@ -149,7 +149,7 @@ struct HistoryStatsTests {
     @Test(arguments: [HistoryExport.Format.text, .markdown])
     func readableExportsUseTheSummaryAndKeepWhatHappened(format: HistoryExport.Format) {
         let out = HistoryExport.export([Self.open(), Self.queuedThenSent()], format: format, formatting: utc(), appName: "KeyScribe")
-        #expect(out.contains("Coding agent \u{00B7} Opened backend"))
+        #expect(out.contains("Agent \u{00B7} Opened backend"))
         #expect(!out.contains("Inserted"))
         #expect(out.contains("Command: Open"))
         #expect(out.contains("Conversation: backend \u{00B7} claude \u{00B7} s1"))

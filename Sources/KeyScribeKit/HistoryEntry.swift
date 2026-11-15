@@ -35,7 +35,7 @@ public struct HistoryEntry: Codable, Equatable, Sendable {
         }
     }
 
-    // A line a coding agent's spoken reply read aloud, exactly as it was heard, kept apart from `heard` and
+    // A line an agent's spoken reply read aloud, exactly as it was heard, kept apart from `heard` and
     // `result` so nothing that learns from the user's own speech ever reads an agent's words.
     public struct SpokenReply: Codable, Equatable, Sendable {
         public var at: Date

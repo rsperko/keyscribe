@@ -25,4 +25,4 @@ tells the app which thread the most recently focused window shows, and forgets a
 The app trusts that only while bb is the app in front.
 
 The app installs and updates this plugin. To remove it, choose Uninstall Plugin under bb in the app's
-Coding agent settings.
+Agent settings.

@@ -20,7 +20,7 @@ public struct Settings: Codable, Equatable, Sendable {
     public var insertion: Insertion
     public var hud: HUD
     public var features: Features
-    public var codingAgents: CodingAgents
+    public var agents: Agents
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -33,7 +33,7 @@ public struct Settings: Codable, Equatable, Sendable {
         case insertion
         case hud
         case features
-        case codingAgents = "coding_agents"
+        case agents = "agents"
     }
 
     public init(from decoder: Decoder) throws {
@@ -48,14 +48,14 @@ public struct Settings: Codable, Equatable, Sendable {
         insertion = try c.decodeIfPresent(Insertion.self, forKey: .insertion) ?? Settings.defaults.insertion
         hud = try c.decodeIfPresent(HUD.self, forKey: .hud) ?? Settings.defaults.hud
         features = try c.decodeIfPresent(Features.self, forKey: .features) ?? Settings.defaults.features
-        codingAgents = try c.decodeIfPresent(CodingAgents.self, forKey: .codingAgents) ?? Settings.defaults.codingAgents
+        agents = try c.decodeIfPresent(Agents.self, forKey: .agents) ?? Settings.defaults.agents
     }
 
     public init(
         schemaVersion: Int, loadOnLogin: Bool,
         stt: STT, duringDictation: DuringDictation, history: History,
         shortcuts: Shortcuts = Shortcuts(), audio: Audio = Audio(), insertion: Insertion = Insertion(),
-        hud: HUD = HUD(), features: Features = Features(), codingAgents: CodingAgents = CodingAgents()
+        hud: HUD = HUD(), features: Features = Features(), agents: Agents = Agents()
     ) {
         self.schemaVersion = schemaVersion
         self.loadOnLogin = loadOnLogin
@@ -67,10 +67,10 @@ public struct Settings: Codable, Equatable, Sendable {
         self.insertion = insertion
         self.hud = hud
         self.features = features
-        self.codingAgents = codingAgents
+        self.agents = agents
     }
 
-    public struct CodingAgents: Codable, Equatable, Sendable {
+    public struct Agents: Codable, Equatable, Sendable {
         public var spokenResult: SpokenResultSettings
         public var hosts: [String]
 
@@ -421,7 +421,7 @@ public struct Settings: Codable, Equatable, Sendable {
         insertion: Insertion(),
         hud: HUD(),
         features: Features(),
-        codingAgents: CodingAgents()
+        agents: Agents()
     )
 
     func validate() throws {

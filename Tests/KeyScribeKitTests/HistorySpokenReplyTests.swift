@@ -7,7 +7,7 @@ struct HistorySpokenReplyTests {
 
     private func entry(heard: String = "", result: String = "", reply: HistoryEntry.SpokenReply?) -> HistoryEntry {
         var entry = HistoryEntry(
-            timestamp: Date(timeIntervalSince1970: 1_700_000_000), modeName: "Coding agent", heard: heard, result: result,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000), modeName: "Agent", heard: heard, result: result,
             outcome: .command, cloudInvolved: false, redaction: false, contextCategories: [])
         entry.spokenReply = reply
         return entry
@@ -133,6 +133,6 @@ struct HistorySpokenReplyTests {
     }
 
     @Test func theSupportReportWarningMentionsTheReplyUpdate() {
-        #expect(SupportReport.warning.contains("for a coding agent its reply update"))
+        #expect(SupportReport.warning.contains("for an agent its reply update"))
     }
 }

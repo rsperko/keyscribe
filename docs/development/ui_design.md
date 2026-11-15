@@ -303,7 +303,7 @@ because opening its mic switches it to call mode.
 |---|---|---|---|
 | Ready (one-shot mode picked from the menu) | Mode name | “Next dictation” | None; replaced when recording starts |
 | Recording | Mode name + a red level circle (halo + dot; Reduce Motion: intensity-only dot) | “Listening”, or “Listening — tap [trigger] again to stop” for a latched tap-to-toggle recording | Stop if tap-to-toggle |
-| Recording (Coding agent mode, experimental) | “To [name]” for the frozen recipient (“To [name], disconnected” when it is a disconnected conversation in front), or “No recipient yet”, + the level circle | “Listening” as above, then the open sessions as numbered rows (name over agent and project, live state at the trailing edge, the recipient highlighted and marked Current), then one line saying where the recipient came from and how to name another | As Recording; rows are not clickable while recording |
+| Recording (Agent mode, experimental) | “To [name]” for the frozen recipient (“To [name], disconnected” when it is a disconnected conversation in front), or “No recipient yet”, + the level circle | “Listening” as above, then the open sessions as numbered rows (name over agent and project, live state at the trailing edge, the recipient highlighted and marked Current), then one line saying where the recipient came from and how to name another | As Recording; rows are not clickable while recording |
 | Recording, near the limit | Same, plus an orange ring around the level circle that drains to empty | “Stops in 0:SS”, counting down | As Recording |
 | Transcribing | “Transcribing” | Mode name | Cancel when safe |
 | Waiting for Check Audio (a dictation committed while a check the user started in History holds the speech model) | Mode name | “Waiting for Check Audio to finish… Esc discards this dictation.” After 10 seconds (`DictationController.checkStallSeconds`) it turns to the error triangle and says Check Audio is taking longer than expected, the recording is held until the check ends, and quitting the app discards it (quitting cancels the take) | **Discard Dictation**; Escape does the same from any app (claimed without taking key focus, so typing elsewhere is not swallowed). Transcription resumes on its own when the check ends |
@@ -316,7 +316,7 @@ because opening its mic switches it to call mode.
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | A short cause, such as “The model reached its output limit while reasoning.”, or “Rewrite could not be completed” when none was recorded. History keeps the full reason and advice. When copied, the focus-change or Accessibility explanation comes first. Stays five seconds when it carries a reason | AI Service Settings… opens the affected service when the failure names one. Paste last dictation also remains available when copied and Accessibility permits it |
 | Rewrite skipped | “Inserted without rewriting” — or “Copied without rewriting”; “Dictation failed” when the local text then could not be inserted | “You skipped the rewrite after 17.5 seconds.”, timed from when the rewrite started. The user chose this, so a delivered skip has its own neutral indicator, never success or failure styling; a failed delivery shows the failure styling first and keeps this line as context. When copied, the focus-change or Accessibility explanation comes first. Stays five seconds | No AI Service Settings… action. Paste last dictation remains available when copied and Accessibility permits it |
 | Reasoning setting not applied | The completed state’s own title (“Inserted”, or “Copied instead of inserted”) | “Reasoning setting not applied.” followed by a plain explanation naming the service and model — e.g. “[service] didn't accept a reasoning setting for [model], so the model uses its own. Rewrites may be slower.” Stays five seconds | None. Carried by the completion itself — never a second, delayed HUD that a following dictation could cancel unseen — once per connection and model each time the app runs. Shown when a requested reasoning setting had to be dropped and the service did not confirm the model used no reasoning, when no lower level was accepted, or when the model reasoned with reasoning off. Also shown when an OpenRouter route could only be found without guaranteeing the setting. Never after a fallback, whose reason already says what happened. On a copied completion it follows the explanation of where the text went, which is read first |
-| What you can say (any mode) | The mode's name with a neutral `info.circle` in the recording icon's place (no green, no pulse), and “What you can say” beneath it; a Coding agent mode adds “Recipient: name” or “No recipient selected” | The phrases for that mode (`SpokenHelp`), each with what it does, in one list sorted alphabetically by the phrase as shown, with other modes’ spoken suffixes in a final group headed “End your dictation with” (sorted the same way, each shown as “… ” and the configured phrase exactly as written, one per mode, and only a phrase that routes there from this mode; a pattern phrase is left out): in Voice Commands “open” and “switch to” with apps that are running and the first saved place and action with their verbs; the Coding agent phrases with the recipient's name, or another conversation's when none is selected, and without the name-led phrases when there is no conversation; spoken edits, “insert clipboard contents”, “insert clipboard as code” and “begin verbatim … end verbatim” when spoken edits are on, in a Coding agent mode too, worded for the message being sent; never an invented app or conversation name. A mode with no phrase and no suffix to show says so (“No spoken commands in this mode. Turn on spoken edits in its settings to add some.”) instead of an empty list. Also and the mode's replacement rules as verified examples (`RuleExample`: a pattern rule shows the phrases its own pattern matches completely, an open-ended capture as “…”; a pattern outside the supported forms is left out), each kept only when running it through the mode's own text stages, up to and including its rules, gives that output, so a rule a spoken edit or help itself would beat is not shown, while later polishing (numbers, the dictionary) never hides a rule that works. An edit-selection mode shows no rows, only how to give an instruction (“Select text first, then say how to change it …”), since its words are an instruction, not text the stages change. The list keeps the HUD's usual width, and the header with the close button never scrolls. A list that fits is as tall as its rows; a longer one scrolls from the first view at the shared list cap (`HUDAnchor.listCap`, about half the screen's height within fixed bounds), with the scroll bar at the panel's trailing edge. There is no “Show more”. Invisible output reads “New line”, “New paragraph”, “Tab”, “then presses Return”; a whole-take rule notes “Say alone”, and “repeat that” notes “There’s nothing to repeat yet” when there is nothing to repeat. The rows grow toward the screen's middle, above the header when the HUD sits at the bottom | Close button; closes after about 15 seconds, held while the pointer is over it and not timed at all while VoiceOver runs; Escape closes it from any app while it shows (the Escape claim is released when it closes); the next recording replaces it. Never takes key focus, never read aloud, nothing sent, run, inserted or recorded in History. Shown for a whole take of “what can I say” or “show commands” (optional “please”, `VoiceCommandGrammar.help`), checked before any rule runs; a longer take is ordinary text. While a voice command choice waits, the request is that choice's answer: the choice stays and its note says how to answer |
+| What you can say (any mode) | The mode's name with a neutral `info.circle` in the recording icon's place (no green, no pulse), and “What you can say” beneath it; an agent mode adds “Recipient: name” or “No recipient selected” | The phrases for that mode (`SpokenHelp`), each with what it does, in one list sorted alphabetically by the phrase as shown, with other modes’ spoken suffixes in a final group headed “End your dictation with” (sorted the same way, each shown as “… ” and the configured phrase exactly as written, one per mode, and only a phrase that routes there from this mode; a pattern phrase is left out): in Voice Commands “open” and “switch to” with apps that are running and the first saved place and action with their verbs; the Agent phrases with the recipient's name, or another conversation's when none is selected, and without the name-led phrases when there is no conversation; spoken edits, “insert clipboard contents”, “insert clipboard as code” and “begin verbatim … end verbatim” when spoken edits are on, in an agent mode too, worded for the message being sent; never an invented app or conversation name. A mode with no phrase and no suffix to show says so (“No spoken commands in this mode. Turn on spoken edits in its settings to add some.”) instead of an empty list. Also and the mode's replacement rules as verified examples (`RuleExample`: a pattern rule shows the phrases its own pattern matches completely, an open-ended capture as “…”; a pattern outside the supported forms is left out), each kept only when running it through the mode's own text stages, up to and including its rules, gives that output, so a rule a spoken edit or help itself would beat is not shown, while later polishing (numbers, the dictionary) never hides a rule that works. An edit-selection mode shows no rows, only how to give an instruction (“Select text first, then say how to change it …”), since its words are an instruction, not text the stages change. The list keeps the HUD's usual width, and the header with the close button never scrolls. A list that fits is as tall as its rows; a longer one scrolls from the first view at the shared list cap (`HUDAnchor.listCap`, about half the screen's height within fixed bounds), with the scroll bar at the panel's trailing edge. There is no “Show more”. Invisible output reads “New line”, “New paragraph”, “Tab”, “then presses Return”; a whole-take rule notes “Say alone”, and “repeat that” notes “There’s nothing to repeat yet” when there is nothing to repeat. The rows grow toward the screen's middle, above the header when the HUD sits at the bottom | Close button; closes after about 15 seconds, held while the pointer is over it and not timed at all while VoiceOver runs; Escape closes it from any app while it shows (the Escape claim is released when it closes); the next recording replaces it. Never takes key focus, never read aloud, nothing sent, run, inserted or recorded in History. Shown for a whole take of “what can I say” or “show commands” (optional “please”, `VoiceCommandGrammar.help`), checked before any rule runs; a longer take is ordinary text. While a voice command choice waits, the request is that choice's answer: the choice stays and its note says how to answer |
 | Voice command ran (Voice Commands mode, experimental) | Where it went — the app, the place and its browser (“Gmail · Google Chrome”), or the window and its app (“Budget — Numbers · Numbers”) — or the script or shortcut it ran (“Deploy”); a script that reported a result shows that message instead (“Switched to Inbox”) | “Voice command”, or “Started, still running” when the action has not finished; under a reported result, the script's name. A script's informational result (“Nothing waiting”) shows as an Advisory instead, with no failure styling. A window that closed, moved to another desktop, or could not be confirmed in front, and a search where some app did not list its windows, show an Error saying so (Accessibility off adds **Open Accessibility Settings**). A browser that refused control, and a script whose error output carries the Apple Events not-permitted code (`-1743`) on an error line, show an Error with **Open Automation Settings** (“Manager couldn’t control another app. Check Automation access for KeyScribe.”, followed by the script's denial line, which names the app that refused, even when later error lines follow); the button only opens that pane, never retries or asks again; if an action later fails, an Error naming the failure follows unless a dictation is in progress or a voice command choice is on screen, in which case History alone records it | None; dismiss automatically |
 | Voice command needs a choice (Voice Commands mode) | “Which one?” for apps, places, and a script's own options, “Which action?” for `run` | Numbered rows, each a name over a detail that tells it apart (app, browser and host, app identity where names repeat, a window's app plus its document or site when two titles are the same, Script/Shortcut, or the name of the script that offered the option), then how to answer with the actual Voice Commands shortcut, led by one line when window rows still read the same (“Same name; the lower number is further forward.” within one app instance, else “Same name; these windows can’t be told apart.”) | Click a row; Cancel. Stays until answered, dismissed, or idle for the timeout |
 | Voice command not recognized (Voice Commands mode) | “Command not recognized” | What the speech model heard, before any replacement: “Heard “stitch to Mail”” — omitted when the target was a password field or could not be confirmed | None; dismiss automatically |
@@ -348,12 +348,12 @@ says so as an Error. It adds that what was said is in History only once that ent
 confirmed saved — this one write waits for the disk rather than being queued like every other
 History write, so a failed save never sends the user looking for an entry that does not exist. A take
 stopped by the limit never presses the mode's Return, including a take that is only a spoken Return
-command; the latter reports “Stopped at the [limit] limit — Return not pressed”. A Coding agent take stopped
+command; the latter reports “Stopped at the [limit] limit — Return not pressed”. An agent take stopped
 by the limit is never sent, since sending submits it: an Error says so and points to Paste last dictation for
-what was captured. A Coding agent take whose microphone stopped never selects or opens a conversation either;
+what was captured. An agent take whose microphone stopped never selects or opens a conversation either;
 it reports that the command did not run.
 
-**Coding agent session list.** A recording in the Coding agent mode lists the open sessions so the user
+**Agent session list.** A recording in the Agent mode lists the open sessions so the user
 can address one. Its displayed and spoken name is the name the user sees for it: the user's KeyScribe
 override, else what herdr shows on its pane (the pane title a herdr hook sets, else the pane's label), else
 the name the user gave the agent in herdr, else the agent's explicit conversation name, else its herdr tab,
@@ -420,7 +420,7 @@ is refused as taken. The conversation list shows the other names under the place
 display text a hook can change: a take uses the names frozen when its recording started.
 
 Place labels are read in the background when a conversation connects, when the listed conversations
-change, and when a recording that could go to a coding agent starts; while Settings is open they are also
+change, and when a recording that could go to an agent starts; while Settings is open they are also
 read every few seconds while a conversation runs in a named place and less often otherwise. A tab renamed
 since the last read takes its new name at the next recording, which reads the labels again. A take resolves
 against the names frozen when its recording started, plus any new name a read during the recording gave
@@ -486,7 +486,7 @@ message retry offers only a conversation that can take a message now (its connec
 offers any conversation still running, since bringing a terminal forward needs no connector. Disconnected
 conversations are never offered, and when none qualifies the line ends at the problem. A conversation is
 offered under its current name, so a pane renamed during the take is offered by its new label, never the one
-it left. Its Open Coding Agent
+it left. Its Open Agent
 Settings button shows every name and renames a conversation; the spoken rename is not offered here, because
 a mode with a fixed recipient renames that recipient, not the conversation in front. History records only
 “No conversation named “architect”. Nothing sent.”, since the names offered change as conversations come and go. A status
@@ -572,7 +572,7 @@ toggle. A return the user stopped, or that the feature or a system sleep stopped
 command and leaves the destination for another try. A conversation that has ended
 or that nothing could show returns to its app and window instead; a terminal that came forward without
 selecting the conversation reports that and keeps the destination for another try. A take that is only “go
-back” in the Coding agent mode is that return, never a message: it moves focus and nothing else, keeps the
+back” in the Agent mode is that return, never a message: it moves focus and nothing else, keeps the
 current recipient, sends no pending dictation, and reports what Voice Commands would (“Nothing to go back
 to.” when there is no destination). “Go back” inside a longer take, or after “tell” and a name, is ordinary
 message text. A take that is only “repeat that” or “say that again” (`VoiceCommandGrammar.repeatSummary`) is
@@ -593,8 +593,8 @@ two”). Once a take starts with “rename this conversation” (or session), it
 after the name's clause ends (“rename this conversation to docs. Run the tests.”) is held with the reason,
 so an instruction never becomes part of a name. “Rename conversation to” and “rename the conversation to” rename
 too, but only when “to” follows “conversation” at once, so “rename conversation handler to chatHandler” stays a
-message. Without “this”, “session” is not enough (“rename session to token” is a message), because to a coding
-agent that is often a variable. Any other take without “this conversation” or “this session” (“rename this to
+message. Without “this”, “session” is not enough (“rename session to token” is a message), because in
+code that is often a variable. Any other take without “this conversation” or “this session” (“rename this to
 parseConfig”, “rename this function to parseConfig”) is a message for the agent, and the command is recognized from the words as heard, so replacements never
 change it. The mode's local text stages (spoken edits, replacements, numbers), without the AI rewrite, then
 run on the words after it before the name is read (`AgentRename.request`, then `AgentRename.name`): “never
@@ -602,7 +602,7 @@ mind” at the end discards the take (nothing in History), and “rename this co
 notes” names it notes. The HUD shows “Renamed keyscribe to auth refactor” long enough to read, so a misheard name is caught
 and fixed by saying it again. A name another conversation holds, or a row name such as “conversation three” or “session three”,
 is refused with the reason and nothing changes; with no recipient it says “Switch to a conversation, then
-say the rename command again” with **Open Coding Agent Settings**. History records Rename, the conversation, the new name and how it was chosen. After “tell” and a
+say the rename command again” with **Open Agent Settings**. History records Rename, the conversation, the new name and how it was chosen. After “tell” and a
 name it is message text.
 
 A status check is an explicit command, never a question: questions are what people say to agents, so a
@@ -621,7 +621,7 @@ name when they are no longer than a conversation name can be, with the reason an
 (“check on the deploy before we merge today”) are a message. A conversation named with an everyday word makes
 “check on” that word a status check, so “tell” is how to say it to the agent. With no recipient, “check on
 this conversation” says “No recipient selected. Nothing sent. Say “check on” and a conversation’s name.” with
-**Open Coding Agent Settings**.
+**Open Agent Settings**.
 
 Every answer starts with “Status for docs:” and says “Nothing sent.” after what is reported (the HUD's
 “open” hint follows it), the same words every held take uses. It says only what is reported,
@@ -642,7 +642,7 @@ even with the conversation in front; speech that has to wait (for the dictation 
 prepared) is dropped if what it reports stopped being true, its state, prompt, connection or freshness,
 while “repeat that” still replays it as heard. An answer replaces a notice about the same conversation that
 is still waiting to play or being described, so the same news is not heard twice; finished replies stay
-queued. A conversation the user disconnected is reported as disconnected, with **Open Coding Agent
+queued. A conversation the user disconnected is reported as disconnected, with **Open Agent
 Settings**. Checking all conversations counts the conversations waiting for input, typed turns and
 conversations without a connector included, and names them in recording order (“Status for all
 conversations: two need you: docs and backend. Nothing sent.”); a state carried over from an earlier
@@ -656,7 +656,7 @@ status and the conversation (or all conversations), never the answer.
 An opening “please”, “hey”, “so” or “okay” is skipped before “tell”, “ask” or a conversation's name, so “hey
 docs, run the tests” addresses docs.
 
-With the Coding agent feature off, a remembered conversation is only its app and window. While
+With the Agent feature off, a remembered conversation is only its app and window. While
 it looks, the HUD says so (“Opening docs…”). It follows the agent's processes outward and
 selects each layer it passes through: the multiplexer pane showing the agent (herdr or tmux, for example — the
 `PaneRoute`s in `AgentSurfaces`), then the terminal tab and split holding that pane (or holding the agent directly),
@@ -714,7 +714,7 @@ choose one as an address does.
 Settings has no Open or Talk to button: Settings configures the integration, and choosing or opening a
 conversation belongs where the user is already working.
 
-A take that starts with a Coding agent mode whose target is the current recipient follows the conversation
+A take that starts with an agent mode whose target is the current recipient follows the conversation
 in front: when recording starts, KeyScribe reads which conversation the front terminal shows, through the
 same terminal and multiplexer routes that “open” and “go back” use, reading twice and checking that the app
 stayed in front. Exactly one listed conversation must be confirmed there, in the app and window that had
@@ -760,7 +760,7 @@ the header. At the middle of a screen edge the header stays at the anchor and th
 only above fits, the same rule as the spoken-reply panel and “What you can say”. Wherever the list
 sits, VoiceOver reaches the header first. Ordinary dictation never shows the list.
 
-**Coding agent delivery.** A take is sent only to a conversation that is ready for it. While a turn is
+**Agent delivery.** A take is sent only to a conversation that is ready for it. While a turn is
 running, the take goes into that turn when the agent takes messages during a turn, the way typing there does
 (“Sent to docs”); otherwise it waits and is sent when the turn finishes (“Queued for docs”, “Sends when it
 finishes”), unless that conversation is the one in front and its connector can enter it for the user, below.
@@ -816,25 +816,25 @@ reply, or the turn the message starts when the running one ended first; it is he
 
 A take addressed to a conversation that is not connected, or that the user disconnected, says so by name
 (“docs isn’t connected to {app}. Nothing sent.”, “docs is disconnected. Nothing sent.”, or “The conversation in front is
-disconnected”) with **Open Coding Agent Settings**, and never falls through to another recipient. A
+disconnected”) with **Open Agent Settings**, and never falls through to another recipient. A
 disconnected conversation's name is still recognized for this, but it never appears in the numbered list.
 "The conversation in front is disconnected" needs the conversation's terminal facts, which only a connected
 conversation sends; one disconnected since before the app last started, in a multiplexer pane, may not be
 recognized as the one in front, and the take then asks for a name.
 A running agent whose connector has not connected has no name the app could match, so a spoken name meant for
 it asks like any unknown name. While such a process is listed in Settings, a spoken name that matches no
-conversation, or only sounds like one, says so with **Open Coding Agent Settings**, where the process's row says
+conversation, or only sounds like one, says so with **Open Agent Settings**, where the process's row says
 what to do. When the name is that process's folder, or its whole description, only it is named (“Pi in
 reviews isn’t connected yet. Nothing sent.”); when several processes share that name, all of them are named and none is
 picked (“Claude Code in reviews and 2 Pi conversations in reviews aren’t connected yet. Nothing sent.”). The button
 scrolls Settings to the first named row and highlights every named row briefly (no animation with Reduce
 Motion); a row that has not appeared within a few seconds, because its process ended, is not waited for. Otherwise the line adds what is running but not connected, as Settings describes
 it (the first two, then how many more), in place of the retry example (“… Pi in reviews is running but not
-connected. Coding agent settings shows how to connect it”). It never connects, reloads or enrolls anything, and never sends to it.
+connected. Agent settings shows how to connect it”). It never connects, reloads or enrolls anything, and never sends to it.
 What was said is kept for Paste last dictation, and connecting the conversation never sends it.
 
-**The clipboard in a Coding agent message.** “Insert clipboard contents” and “insert clipboard as code” work
-in a Coding agent message as they do in any dictation when the clipboard holds text. When it holds copied
+**The clipboard in an agent message.** “Insert clipboard contents” and “insert clipboard as code” work
+in an agent message as they do in any dictation when the clipboard holds text. When it holds copied
 files, the message gets their full paths; when it holds an image or a PDF, the app saves it as a file in the
 temporary folder and the message gets that path. A saved file is deleted once it is a day old: by an hourly
 check while the app runs, at launch, and on the next save. History keeps the message as sent, path
@@ -903,7 +903,7 @@ governs it (KeyScribe does not currently distinguish a "polishing on this Mac" s
 
 ### The speaking panel
 
-A spoken reply (§7 Coding agent) has its own small panel, separate from the dictation HUD and drawn with the
+A spoken reply (§7 Agent) has its own small panel, separate from the dictation HUD and drawn with the
 same card, appearance and anchor, at the dictation HUD's normal width (`SpeakingHUDLayout.width`) whether or
 not the summary is shown. Its header shows a stop button, the exact name of the conversation being read with
 "Speaking · Esc stops playback" beneath it, and a small trailing chevron; a long name wraps within that width. The
@@ -923,7 +923,7 @@ at that boundary even when the caption scrolls and is absent when the caption is
 in the caption's height budget. The outer card padding also stays outside the viewport while text scrolls.
 
 Showing or hiding the text changes only the panel's height, and never moves the stop button: the header keeps
-its screen position and the text opens away from the anchored edge, the same way the Coding agent session list
+its screen position and the text opens away from the anchored edge, the same way the Agent session list
 does in the dictation HUD: above the header for a bottom anchor, below it for a top anchor, and below it for a
 side anchor unless only above fits. The chevron points toward the text: down when it opens below, up when it
 opens above, right when collapsed. The panel always stays within the screen. On a screen too short for the
@@ -969,11 +969,11 @@ reply summary needs it. An answer interrupts a reply summary or notice that is p
 interrupted notice is read again, from its start, once the answer ends; an interrupted reply summary is
 not, and "repeat that" replays it. Queued replies wait until the answer ends. Stop or Escape stops the
 answer only. The answer's voice is the one chosen for reply updates; a `speak`
-mode's editor shows the same voice picker under **Answer**, says that the choice also applies to coding agent
-reply updates, and lets it be chosen without the Coding agent feature.
+mode's editor shows the same voice picker under **Answer**, says that the choice also applies to agent
+reply updates, and lets it be chosen without the Agent feature.
 
 **Text only.** When the shared voice picker is set to **Off — text only**
-(`[coding_agents.spoken_result] text_only`), answers and reply updates (summaries, notices, refusals, "repeat
+(`[agents.spoken_result] text_only`), answers and reply updates (summaries, notices, refusals, "repeat
 that" and agent answers) use the answer panel without speech. The panel appears with the full text expanded,
 the mode's or conversation's name in the header, the close and copy buttons, and the status "Text only · Esc
 closes" ("Text only" when Escape cannot be claimed). The chevron reads "Show text" or "Hide text". Nothing about speech happens: no voice is warmed or made,
@@ -1125,8 +1125,8 @@ disabled while it cannot open.
 > affordance, rendered only when the updater reports one. The public build uses Sparkle (EdDSA-verified);
 > a build with no injected updater shows neither.
 
-**Agent Reply Updates** is shown only while the Coding agent feature is on. Its checkmark is the **Reply
-updates** switch (§7 Coding agent), with the same effects: off stops playback, closes a shown update and drops
+**Agent Reply Updates** is shown only while the Agent feature is on. Its checkmark is the **Reply
+updates** switch (§7 Agent), with the same effects: off stops playback, closes a shown update and drops
 waiting and in-progress reply updates, on keeps the configuration and replays nothing. It needs no AI service, since notices are spoken
 without one.
 
@@ -1303,7 +1303,7 @@ Show the few choices a new user is most likely to need:
 The warm-up tier lives behind a `Keep speech recognition ready` disclosure pinned above the model
 list in Speech Models (collapsed by default; the collapsed row shows the current tier's benefit, such as `Fastest start-up`). Explain Fastest,
 Balanced, and Frugal as a memory/first-response tradeoff (it governs the STT model's memory
-residency, the natural voice that reads Coding agent replies, and idle microphone warm-up), not as cache
+residency, the natural voice that reads Agent replies, and idle microphone warm-up), not as cache
 terminology. The footer copy **never shows a raw
 byte count** — it describes behavior, not size.
 
@@ -1445,7 +1445,7 @@ the shared vocabulary's) opens that vocabulary; each replacement says where it a
 its row offers **Show All** to read it whole in place. A mode's own word or replacement offers **Move to
 Shared Vocabulary…** in its context menu and as an accessibility action, and the replacement editor shows
 it beside **Cancel** (disabled, with a reason, while the editor holds unsaved changes). Its sheet picks an existing shared vocabulary or names a new one, then says
-“Move this replacement to Programming?”, who uses it (“Programming is used by Coding agent and Markdown.
+“Move this replacement to Programming?”, who uses it (“Programming is used by Agent and Markdown.
 Future edits will apply to both.”), and what else the mode starts using; the mode is attached to the
 vocabulary so it keeps the entry. A different entry already in the destination blocks **Move** and is
 never overwritten. A vocabulary created for a move that then fails is removed again. Mode editors keep an
@@ -2049,10 +2049,10 @@ Its sections are, in order:
    default. Its help says saved commands include what was said, what ran (including input), and any
    error message, which may include text from a script or shortcut.
 
-**Coding agent** (experimental, shown only while its flag is on) opens, after its shortcut, with **What you
+**Agent** (experimental, shown only while its flag is on) opens, after its shortcut, with **What you
 can say**, built like the Voice Commands section of that name: one introduction (“Start with “tell” and a
 conversation’s name to send it an instruction.”), then short examples with what each does
-(`CodingAgentPhrasesSection.examples`): “tell” and a name with an instruction, “select” and a name, “open” and a
+(`AgentPhrasesSection.examples`): “tell” and a name with an instruction, “select” and a name, “open” and a
 name, “check on” a name, “check on all conversations”, “go back”, “cancel”, and “repeat that” only while
 **Reply updates** is on. The examples use the name of the conversation the
 guidance below would use, a placeholder when there is none, and “conversation two” while names are unavailable.
@@ -2081,7 +2081,7 @@ the title is the one the user gave the conversation, reported by the connector, 
 Claude Code generated, read best effort from the end of the session's own transcript (only the title is kept,
 and it is never logged); a brand-new conversation has neither yet. An empty
 list explains how to open a conversation instead of inventing a name to say. Choosing or opening a
-conversation is done by voice (see the Coding agent session list in §5), and
+conversation is done by voice (see the Agent session list in §5), and
 the current one is marked Current. The guidance names only what can be said. The list remains available
 while connector setup is unavailable, so a connected conversation never disappears behind installation
 status or a collapsed disclosure.
@@ -2168,7 +2168,7 @@ speaking panel) without reading them aloud; it is stored as its own setting besi
 (`text_only`), so choosing a speaker again turns speech back on with that speaker. While it is chosen, **Preview
 Voice** and the macOS-voice advisories are hidden. The same picker shows whether or not the voice is installed;
 before it is, a chosen speaker is read by the macOS voice. A caption under the row states the shared effect: in
-the Coding agent pane, "This choice also applies to Ask modes’ answers."; in an Ask mode's **Answer** section, "This choice also applies to coding agent reply updates, so
+the Agent pane, "This choice also applies to Ask modes’ answers."; in an Ask mode's **Answer** section, "This choice also applies to agent reply updates, so
 changing it here changes it there." Preview speaks a sample in whichever voice would read a summary now, never while recording, and
 interrupts a summary rather than overlapping one. Before the voice is installed, the row's caption reads
 "Using the macOS voice. Download the natural voice for better speech." and its prominent button names the
@@ -2234,11 +2234,11 @@ run on their own queue, so agents finishing never delay a voice command's termin
 summary plays when the front cannot be confirmed. A value
 redaction hid from the service is spoken as "a hidden value", never read aloud.
 
-Each agent host (`CodingAgentIntegrations.hosts`) has a section after the connectors, named by the host. A host
+Each agent host (`AgentIntegrations.hosts`) has a section after the connectors, named by the host. A host
 whose integration brings its own connector (`AgentHostIntegration.connector`, bb's plugin) has no switch: its
 section is that connector's section, drawn like an agent's connector setup below, titled **Plugin** and without
 the line naming the conversations that use the folder, and the host is on exactly while its default setup is
-enrolled; its id in `coding_agents.hosts` is ignored. **Install…** shows the connector consent sheet in its host form (**Connect {host}?**, what the host
+enrolled; its id in `agents.hosts` is ignored. **Install…** shows the connector consent sheet in its host form (**Connect {host}?**, what the host
 integration does, that it installs the plugin and keeps it up to date, and that uninstalling stops all of it);
 **Connect {host}** turns the host on and installs, and Cancel leaves it off. While the host is off, a caption under
 the row says what the plugin gets you (the connector copy's `purpose`). **Uninstall Plugin…**, after its
@@ -2269,9 +2269,9 @@ agent's conversations. When an agent's conversations cannot all be checked, its 
 advisory and the conversations last seen stay listed rather than vanishing; only those are marked Last
 seen. When `connectors.json` cannot be read, a **Connectors** section above the agents says no connector
 can connect, shows why, explains that removing the file means installing every connector again, and offers
-**Try Again**, which reads the file again, and **Show in Finder**. When the build's own coding agent
+**Try Again**, which reads the file again, and **Show in Finder**. When the build's own agent
 integrations conflict (two terminals or multiplexers with one name, two terminals claiming one app, or two
-multiplexers claiming one process), an **Integrations** section above it says coding agents are off, names the
+multiplexers claiming one process), an **Integrations** section above it says agents are off, names the
 conflict, and says the fix belongs to whoever made the build; nothing in Settings can fix it, so it offers
 no action.
 
@@ -2301,7 +2301,7 @@ has turned off; a conversation still running the previous connector says so unde
 connector keeps working until the conversation reloads.
 
 Failed connector operations and unreadable or unsaved conversation choices use the same error-marker
-chain as other Settings failures: the connector label where applicable, Coding agent in the mode list,
+chain as other Settings failures: the connector label where applicable, Agent in the mode list,
 Modes in the sidebar, and Settings in the menu. Not installed, Not connected and deliberate disconnections
 do not create errors. Lifecycle and help buttons retain their own action names in accessibility.
 
@@ -2440,7 +2440,7 @@ reset. (Notices live in the separate **About & Notices** window, not here.)
   `config_schema.md`) so a user can read, edit, back up, or version the plain-TOML config
   directly. This is the answer to "where does my config live" — the files are hand-editable on
   purpose, and revealing the folder removes any need to know the hidden `~/Library` path. The caption
-  under the section also says a coding agent opened in that folder can build or edit modes, guided by the
+  under the section also says an agent opened in that folder can build or edit modes, guided by the
   folder's `AGENTS.md` (`config_schema.md` "Directory layout").
 - **Reload Configuration** re-reads the config from disk on demand (edits are also picked up
   automatically). Below it, each problem file gets its own entry: a title naming the file by its path
@@ -2506,7 +2506,7 @@ when nothing matches); without one it reads **Export All…**. Each row contains
 - time and mode;
 - outcome (`Inserted`, `Copied`, `Local fallback`, `Rewrite skipped`, `Rewritten later, not inserted`, or `Failed`; a voice command reads `Command`,
   `Command failed`, `Command started`, `Needs a choice`, or `Choice cancelled`);
-  an entry that recorded its own summary shows that instead, so a Coding agent take reads `Sent to backend`,
+  an entry that recorded its own summary shows that instead, so an agent take reads `Sent to backend`,
   `Queued for backend`, `Opened backend`, or why nothing was sent, never a generic `Inserted`;
 - data-boundary badges relevant to that dictation;
 - no audio indicator because audio is never stored.
@@ -2568,7 +2568,7 @@ Voice Commands vocabulary, not the global one, since that is what reads commands
 are turned off, a command entry shows no corrections, since that vocabulary cannot be seen or edited. The Voice Commands
 editor carries its own **Do not save this mode in history** toggle.
 
-A **Coding agent** entry is an attempted action, not a text transformation, so every one of them (Open,
+An **Agent** entry is an attempted action, not a text transformation, so every one of them (Open,
 choosing a recipient, a sent, queued, kept or refused message) uses one presentation instead of the
 comparison. Its Result view leads with the outcome in large type, red when it failed (*Sent to backend*,
 *Opened backend*, *Start with a conversation’s name. Nothing sent.*). The header carries no outcome badge or
@@ -2582,11 +2582,11 @@ rewrite** offers the usual comparison, collapsed, with the final text called **R
 rewrite fell back or was skipped stays **Local fallback** or **Rewrite skipped** after it is sent. The
 text and Markdown exports carry the same summary and lines, and say why local text was kept.
 
-What a reply update (§7 Coding agent) gave is kept as it was heard or seen, once it was audible, or, with the
+What a reply update (§7 Agent) gave is kept as it was heard or seen, once it was audible, or, with the
 voice set to **Off — text only**, once its panel was on screen: never a reply
 withdrawn or skipped before it played, and never a second copy for “repeat that”. A reply to a message the user
 dictated joins that message's entry, and only when that entry was kept; a reply the user asked for from inside
-the agent is an entry of its own under the Coding agent mode, reading *Reply from backend*, kept only while
+the agent is an entry of its own under the Agent mode, reading *Reply from backend*, kept only while
 History is on and the mode is not left out of History. A notice (an approval or a wait) is not kept: a long
 session would fill History with them, and the agent's own screen already shows them. Either way a
 **Reply** section shows the line, selectable, then **From** with the conversation it came from and when it was
@@ -2658,10 +2658,10 @@ on, unless the entry was deleted meanwhile, and the new audio plays. The status 
 Again does not check the new audio; its Check does. Playback details also holds **Show in Finder** for a kept reply
 and a list of the renders, each with its own Play and Check.
 
-A dictation in which live edits ran, including a Coding agent message (beside its recipient lines), adds a
+A dictation in which live edits ran, including an agent message (beside its recipient lines), adds a
 **What happened** row, **Spoken edits**, with the same words as the completion HUD (“new line ×2, scratch that”), so the user can tell afterwards whether a spoken edit fired.
 
-Under the comparison of a dictation (not a command or a Coding agent message), a line names each likely
+Under the comparison of a dictation (not a command or an agent message), a line names each likely
 mishearing of a dictionary word that applied to it and that no rule or near match already fixes:
 **“Cryden” may be “Kryten”**, with **Review Mishearings…**, which opens the **Mishearings of “Kryten”**
 sheet in the scope the word lives in (Global, or the mode whose own dictionary holds it). One line per
@@ -2685,7 +2685,7 @@ A **Copy Result** button at the bottom left of the detail copies the result in o
 entry that is only a reply), and its arrow holds the other copy actions for the selected entry, such as **Copy
 Reply** and **Copy Heard**. The destructive delete action stays separated at the bottom right, on the same row.
 Status messages appear above this footer, in space kept for two lines so a message never moves it. On a dictation whose rewrite fell back
-or was skipped (not a Coding agent message, which was already sent), **Rewrite Again** appears above the
+or was skipped (not an agent message, which was already sent), **Rewrite Again** appears above the
 Result/Details picker. It runs the AI rewrite again, with the
 mode as it is now, on what was heard (less the spoken phrase that chose the mode), without context: the
 original take's context was never stored, and the screen now is not what was dictated into. Redaction

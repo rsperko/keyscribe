@@ -72,7 +72,7 @@ struct SpokenReplyCheckTests {
 
     @Test func theResultRoundTripsThroughHistory() throws {
         var entry = HistoryEntry(
-            timestamp: Date(timeIntervalSince1970: 1_800_000_000), modeName: "Coding agent", heard: "", result: "", outcome: .inserted,
+            timestamp: Date(timeIntervalSince1970: 1_800_000_000), modeName: "Agent", heard: "", result: "", outcome: .inserted,
             cloudInvolved: false, redaction: false, contextCategories: [])
         entry.spokenReply = .init(at: Date(timeIntervalSince1970: 1_800_000_000), conversation: "docs", text: "Done.")
         entry.spokenReply?.check = .init(heard: "done", errorRate: 0, checker: "parakeet-ultra")
@@ -236,7 +236,7 @@ struct SpokenReplyEvidenceTests {
     @Test func deletingTheEntryDeletesItsEvidence() throws {
         let store = try store()
         var entry = HistoryEntry(
-            id: "e1", timestamp: at, modeName: "Coding agent", heard: "", result: "", outcome: .inserted, cloudInvolved: false,
+            id: "e1", timestamp: at, modeName: "Agent", heard: "", result: "", outcome: .inserted, cloudInvolved: false,
             redaction: false, contextCategories: [])
         entry.spokenReply = .init(at: at, conversation: "docs", text: "Done.")
         try store.append(entry, today: HistoryStore.todayString(date: at))
@@ -258,7 +258,7 @@ struct SpokenReplyEvidenceTests {
 
     private func reply(in store: HistoryStore) throws -> HistoryEntry {
         var entry = HistoryEntry(
-            id: "e1", timestamp: at, modeName: "Coding agent", heard: "", result: "", outcome: .inserted, cloudInvolved: false,
+            id: "e1", timestamp: at, modeName: "Agent", heard: "", result: "", outcome: .inserted, cloudInvolved: false,
             redaction: false, contextCategories: [])
         entry.spokenReply = .init(at: at, conversation: "docs", text: "Done.")
         try store.append(entry, today: HistoryStore.todayString(date: at))

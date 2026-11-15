@@ -59,7 +59,7 @@ pin exists precisely so that a future SDK bump does not force that question.
 
 ### The spoken result voice (Kokoro) — re-check on every FluidAudio bump
 
-FluidAudio also supplies the Kokoro voice behind the Coding agent spoken result (`KokoroVoice`). It
+FluidAudio also supplies the Kokoro voice behind the Agent spoken result (`KokoroVoice`). It
 cannot tell us these at runtime, so a bump re-checks them by hand:
 
 - **Which speakers to offer.** `SpokenVoices.all` is a hand-kept list: only English speakers that

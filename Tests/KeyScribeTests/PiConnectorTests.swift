@@ -318,7 +318,7 @@ struct PiConnectorStatusTests {
 
     @Test func theSettingsModelInstallsIntoOneSetupAndUninstallLeavesItsRecordGone() async throws {
         let (connector, _, agents, folder) = make()
-        let model = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
+        let model = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
         await model.refresh()
         let setup = try #require(model.connectors[0].setups.first)
         #expect(setup.folder.path == ConnectorFolders.canonical(folder).path)
@@ -339,7 +339,7 @@ struct PiConnectorStatusTests {
     @Test(arguments: [false, true])
     func aRouteThatAddsKeysUpdatesTheFilesAndAsksOpenConversationsToReloadOnlyWhenItAddsAFocusCommand(addsFocus: Bool) async throws {
         let (before, _, agents, folder) = make()
-        let model = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [before])
+        let model = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [before])
         await model.refresh()
         await model.connectors[0].setups[0].install()
         let loaded = try #require(before.bundledVersion)
@@ -350,20 +350,20 @@ struct PiConnectorStatusTests {
             locate: { "/bin/pi-test" }, run: CLI().run, agentsDir: agents, pluginName: "keyscribe-dev",
             surfaces: ConnectorSurfaces(environmentKeys: ResolvedSurfaces.builtIn.environmentKeys.union(["MUX_PANE"]), focusDefinitions: definitions),
             script: PiConnectorFiles.indexTS, home: folder.deletingLastPathComponent().deletingLastPathComponent())
-        let updated = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [after])
+        let updated = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [after])
         await updated.refresh()
         let setup = updated.connectors[0].setups[0]
         #expect(setup.state == .status(.outdated(installed: loaded)))
         await setup.update()
         #expect(setup.state == .status(.ready))
-        #expect(CodingAgentsSettingsModel.older(loaded, than: after.bundledVersion) == addsFocus)
-        #expect(!CodingAgentsSettingsModel.older(after.bundledVersion, than: after.bundledVersion))
+        #expect(AgentsSettingsModel.older(loaded, than: after.bundledVersion) == addsFocus)
+        #expect(!AgentsSettingsModel.older(after.bundledVersion, than: after.bundledVersion))
     }
 
     @Test func installingOneSetupLeavesAnotherUntouched() async throws {
         let (connector, _, agents, folder) = make()
         let other = agents.deletingLastPathComponent().appendingPathComponent("pi-work")
-        let model = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
+        let model = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
         model.show([], current: nil, discoveredSetups: ["pi": [ConnectorFolders.canonical(other).path]])
         let work = try #require(model.connectors[0].setup(for: ConnectorFolders.canonical(other).path))
         await work.install()
@@ -374,13 +374,13 @@ struct PiConnectorStatusTests {
 
     @Test func withoutPiAnInstalledConnectorStillOffersTheCommandToFinishByHand() async throws {
         let (installed, _, agents, folder) = make()
-        let model = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [installed])
+        let model = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [installed])
         await model.refresh()
         await model.connectors[0].setups[0].install()
         let connector = PiConnector(
             locate: { nil }, run: { _ in (0, "") }, agentsDir: agents, pluginName: "keyscribe-dev", surfaces: .builtIn, script: PiConnectorFiles.indexTS,
             home: folder.deletingLastPathComponent().deletingLastPathComponent())
-        let without = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
+        let without = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
         await without.refresh()
         #expect(without.connectors[0].setups[0].state == .toolNotFound)
         #expect(without.connectors[0].setups[0].manualUninstall.first?.hasPrefix("rm -r ") == true)

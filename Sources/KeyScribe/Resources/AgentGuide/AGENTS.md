@@ -1,6 +1,6 @@
 <!-- Managed by {{app_name}} {{version}}. Rewritten on every launch; edits here are lost. Put your own instructions in AGENTS.override.md. -->
 
-# {{app_name}} configuration: guide for coding agents
+# {{app_name}} configuration: guide for agents
 
 This folder holds the configuration of {{app_name}}, an on-device voice dictation app for macOS. You are
 probably here to create, edit, or improve a **mode**: a named set of settings that decides how a dictation

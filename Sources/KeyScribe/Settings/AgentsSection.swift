@@ -3,13 +3,13 @@ import KeyScribeKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct CodingAgentRecipientSection: View {
-    @ObservedObject var model: CodingAgentsSettingsModel
+struct AgentRecipientSection: View {
+    @ObservedObject var model: AgentsSettingsModel
     let shortcut: String?
     var scroll: ScrollViewProxy?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var highlighted: Set<String> = []
-    @State private var renaming: CodingAgentsSettingsModel.Row?
+    @State private var renaming: AgentsSettingsModel.Row?
     @State private var showingNameDetails = false
     @State private var showingDisconnected = false
     @State private var showingMissing = false
@@ -24,7 +24,7 @@ struct CodingAgentRecipientSection: View {
                 Text(model.recipientGuidance(shortcut: shortcut))
                     .font(.caption).foregroundStyle(.secondary)
             }
-            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.currentRecipient)
+            .accessibilityIdentifier(AccessibilityID.Mode.Agents.currentRecipient)
             if let problem = model.namesProblem {
                 namesUnavailable(problem)
             } else if let reason = model.namesNotSaved {
@@ -33,16 +33,16 @@ struct CodingAgentRecipientSection: View {
                     Text(reason).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.namesNotSaved)
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.namesNotSaved)
             }
             if let reason = model.exclusionsNotSaved {
                 VStack(alignment: .leading, spacing: 6) {
                     IssueText("Disconnected for now. Couldn\u{2019}t save this choice for the next launch.")
                     Text(reason).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                     Button("Try Again") { model.onRetrySavingExclusions?() }
-                        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.tryAgain)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.tryAgain)
                 }
-                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.exclusionsProblem)
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.exclusionsProblem)
             }
             if model.rows.isEmpty {
                 Text(model.emptyState).font(.caption).foregroundStyle(.secondary)
@@ -51,7 +51,7 @@ struct CodingAgentRecipientSection: View {
                 conversationRow(row)
             }
             if !model.disconnectedRows.isEmpty {
-                DisclosureSection("Disconnected conversations", isExpanded: $showingDisconnected, headerID: AccessibilityID.Mode.CodingAgents.disconnected) {
+                DisclosureSection("Disconnected conversations", isExpanded: $showingDisconnected, headerID: AccessibilityID.Mode.Agents.disconnected) {
                     Text("These conversations stay disconnected when reopened. New conversations connect normally.")
                         .font(.caption).foregroundStyle(.secondary)
                     ForEach(model.disconnectedRows, id: \.key) { row in
@@ -59,7 +59,7 @@ struct CodingAgentRecipientSection: View {
                     }
                 }
             }
-            DisclosureSection("Conversation missing?", isExpanded: $showingMissing, hasError: folderProblem != nil, headerID: AccessibilityID.Mode.CodingAgents.missing) {
+            DisclosureSection("Conversation missing?", isExpanded: $showingMissing, hasError: folderProblem != nil, headerID: AccessibilityID.Mode.Agents.missing) {
                 missingHelp
             }
         }
@@ -92,7 +92,7 @@ struct CodingAgentRecipientSection: View {
         }
     }
 
-    private func conversationRow(_ row: CodingAgentsSettingsModel.Row) -> some View {
+    private func conversationRow(_ row: AgentsSettingsModel.Row) -> some View {
         let action = model.action(for: row)
         return VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .top, spacing: 12) {
@@ -115,7 +115,7 @@ struct CodingAgentRecipientSection: View {
             if let others = model.alsoAnswers(row) {
                 Text(others).font(.caption).foregroundStyle(.secondary)
             }
-            if let trouble = CodingAgentsSettingsModel.placeTrouble(row) {
+            if let trouble = AgentsSettingsModel.placeTrouble(row) {
                 Text(trouble).font(.caption).foregroundStyle(.secondary)
             }
             if let context = model.recognitionContext(for: row) {
@@ -133,22 +133,22 @@ struct CodingAgentRecipientSection: View {
                     Button("Cancel") { model.cancelReadAloud(row) }
                         .buttonStyle(.link).controlSize(.small).font(.caption)
                         .accessibilityLabel("Don\u{2019}t report \(row.name)\u{2019}s reply")
-                        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.cancelReadAloud)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.cancelReadAloud)
                 }
             }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
             [
-                row.name, row.state, row.folder, row.location, model.alsoAnswers(row), CodingAgentsSettingsModel.placeTrouble(row),
+                row.name, row.state, row.folder, row.location, model.alsoAnswers(row), AgentsSettingsModel.placeTrouble(row),
                 model.recognitionContext(for: row), row.readAloud?.note,
             ]
                 .compactMap { $0 }.joined(separator: ", "))
-        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.conversation)
+        .accessibilityIdentifier(AccessibilityID.Mode.Agents.conversation)
         .listRowBackground(highlighted.contains(row.key) ? Color.accentColor.opacity(0.15) : nil)
     }
 
-    private func conversationHeading(_ row: CodingAgentsSettingsModel.Row) -> some View {
+    private func conversationHeading(_ row: AgentsSettingsModel.Row) -> some View {
         let title = PaneListRow(title: row.name, badges: {
             if row.current { PaneBadge("Current", kind: .prominent).fixedSize() }
         })
@@ -169,12 +169,12 @@ struct CodingAgentRecipientSection: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder private func rowButtons(_ row: CodingAgentsSettingsModel.Row, action: CodingAgentsSettingsModel.RowAction) -> some View {
+    @ViewBuilder private func rowButtons(_ row: AgentsSettingsModel.Row, action: AgentsSettingsModel.RowAction) -> some View {
         if action == .connect {
             Button("Connect\u{2026}") { model.connect(row) }
                 .buttonStyle(.bordered).controlSize(.small).fixedSize()
                 .accessibilityLabel("Connect \(row.name)")
-                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.connect)
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.connect)
         }
         if row.identified {
             Button("Rename\u{2026}") {
@@ -186,7 +186,7 @@ struct CodingAgentRecipientSection: View {
             .fixedSize()
             .disabled(model.namesProblem != nil)
             .accessibilityLabel("Rename \(row.name)")
-            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.rename)
+            .accessibilityIdentifier(AccessibilityID.Mode.Agents.rename)
         }
         if action == .connected {
             Button("Disconnect") {
@@ -197,40 +197,40 @@ struct CodingAgentRecipientSection: View {
             .buttonStyle(.bordered).controlSize(.small).fixedSize()
             .disabled(model.namesProblem != nil)
             .accessibilityLabel("Disconnect \(row.name)")
-            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.disconnect)
+            .accessibilityIdentifier(AccessibilityID.Mode.Agents.disconnect)
         }
     }
 
-    private func recovery(_ row: CodingAgentsSettingsModel.Row, reload: String?) -> some View {
+    private func recovery(_ row: AgentsSettingsModel.Row, reload: String?) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             if let reload {
                 Text("Connector installed. Run \(reload) in this conversation.").font(.caption)
                 CopyableValue(reload, value: reload, what: "command", of: row.name)
                     .font(.caption.monospaced())
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.reloadCommand)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.reloadCommand)
             } else {
                 Text("Connector installed, but this conversation hasn\u{2019}t connected yet.").font(.caption)
             }
             HStack {
                 if row.identified {
                     Button("Show Conversation") { model.onShow?(row.id) }
-                        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.showConversation)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.showConversation)
                 }
                 Button("Try Again") { model.onCheckAgain?() }
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.checkAgain)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.checkAgain)
             }
             .controlSize(.small)
         }
         .padding(.top, 2)
-        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.recovery)
+        .accessibilityIdentifier(AccessibilityID.Mode.Agents.recovery)
     }
 
-    private func olderConnectorNote(_ row: CodingAgentsSettingsModel.Row) -> String {
+    private func olderConnectorNote(_ row: AgentsSettingsModel.Row) -> String {
         let reload = model.connector(for: row)?.kind.reloadCommand.map { "Run \($0) in it when convenient." } ?? "Restart it when convenient."
         return "Still using the previous connector, which keeps working. \(reload)"
     }
 
-    private func disconnectedRow(_ row: CodingAgentsSettingsModel.Row) -> some View {
+    private func disconnectedRow(_ row: AgentsSettingsModel.Row) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(row.name).lineLimit(1)
@@ -242,7 +242,7 @@ struct CodingAgentRecipientSection: View {
                 .buttonStyle(.bordered).controlSize(.small)
                 .disabled(model.namesProblem != nil)
                 .accessibilityLabel("Reconnect \(row.name)")
-                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.reconnect)
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.reconnect)
                 .accessibilityFocused($focusedReconnect, equals: row.id)
         }
         .accessibilityElement(children: .contain)
@@ -269,26 +269,26 @@ struct CodingAgentRecipientSection: View {
     private var missingActions: some View {
         Group {
             Button("Try Again") { model.onCheckAgain?() }
-                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.checkAgain)
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.checkAgain)
             ForEach(model.connectors) { connector in
                 Button("Choose \(connector.kind.displayName) Setup Folder\u{2026}") { choosingFolder = connector }
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.chooseSetupFolder)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.chooseSetupFolder)
             }
         }
     }
 
-    private func directory(_ row: CodingAgentsSettingsModel.Row) -> some View {
+    private func directory(_ row: AgentsSettingsModel.Row) -> some View {
         CopyableValue((row.folder as NSString).abbreviatingWithTildeInPath, value: row.folder, what: "directory", of: row.name)
-            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.copyDirectory)
+            .accessibilityIdentifier(AccessibilityID.Mode.Agents.copyDirectory)
     }
 
     private func namesUnavailable(_ problem: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             IssueText("Saved conversation names could not be loaded.")
-                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.namesProblem)
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.namesProblem)
             HStack {
                 Button("Try Again") { model.reloadNames() }
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.reloadNames)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.reloadNames)
                 Spacer()
             }
             DisclosureSection("Details", isExpanded: $showingNameDetails) {
@@ -296,21 +296,21 @@ struct CodingAgentRecipientSection: View {
                 Text("Until it can be read, conversations stay disconnected. Restore the names file, then try again. If you remove it, your chosen names and the conversations you disconnected will be forgotten.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([model.namesFile]) }
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.showNamesFile)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.showNamesFile)
             }
         }
     }
 }
 
 private struct ConversationNameEditor: View {
-    let row: CodingAgentsSettingsModel.Row
-    @ObservedObject var model: CodingAgentsSettingsModel
+    let row: AgentsSettingsModel.Row
+    @ObservedObject var model: AgentsSettingsModel
     let onDone: () -> Void
     @State private var name: String
     @State private var showingFailureDetails = false
     @FocusState private var nameFocused: Bool
 
-    init(row: CodingAgentsSettingsModel.Row, model: CodingAgentsSettingsModel, onDone: @escaping () -> Void) {
+    init(row: AgentsSettingsModel.Row, model: AgentsSettingsModel, onDone: @escaping () -> Void) {
         self.row = row
         self.model = model
         self.onDone = onDone
@@ -336,10 +336,10 @@ private struct ConversationNameEditor: View {
                 TextField("Name you say", text: $name)
                     .focused($nameFocused)
                     .formFieldLabel("Name you say")
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.renameName)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.renameName)
                     .onSubmit(commit)
                 if let issue {
-                    IssueText(issue).accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.renameProblem)
+                    IssueText(issue).accessibilityIdentifier(AccessibilityID.Mode.Agents.renameProblem)
                 } else {
                     Text(model.renameExample(row.id, name: name))
                         .font(.caption).foregroundStyle(.secondary)
@@ -354,12 +354,12 @@ private struct ConversationNameEditor: View {
             .frame(height: model.renameDetails == nil ? 130 : showingFailureDetails ? 260 : 190)
             VStack(alignment: .leading, spacing: 4) {
                 if let note = model.defaultNameNote(row) {
-                    Text(note).accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.defaultName)
+                    Text(note).accessibilityIdentifier(AccessibilityID.Mode.Agents.defaultName)
                 }
-                if let note = CodingAgentsSettingsModel.placeNote(row) {
+                if let note = AgentsSettingsModel.placeNote(row) {
                     Text(note)
                 }
-                if let trouble = CodingAgentsSettingsModel.placeTrouble(row) {
+                if let trouble = AgentsSettingsModel.placeTrouble(row) {
                     Text(trouble)
                 }
             }
@@ -370,16 +370,16 @@ private struct ConversationNameEditor: View {
                         if model.useDefaultName(row.id) { onDone() }
                     }
                     .disabled(model.namesProblem != nil)
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.useDefaultName)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.useDefaultName)
                 }
                 Spacer()
                 Button("Cancel", role: .cancel, action: onDone)
                     .keyboardShortcut(.cancelAction)
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.renameCancel)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.renameCancel)
                 Button("Rename", action: commit)
                     .keyboardShortcut(.defaultAction)
                     .disabled(model.renameIssue(row.id, name: name) != nil || model.namesProblem != nil)
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.renameSave)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.renameSave)
             }
         }
         .padding(24).frame(width: 440)
@@ -393,13 +393,13 @@ private struct ConversationNameEditor: View {
     }
 }
 
-struct CodingAgentPhrasesSection: View {
-    @ObservedObject var model: CodingAgentsSettingsModel
+struct AgentPhrasesSection: View {
+    @ObservedObject var model: AgentsSettingsModel
 
     static let renameExample = "\u{201C}rename this conversation to API\u{201D}"
 
     nonisolated static func examples(name: String, readsReplies: Bool) -> [(phrase: String, meaning: String)] {
-        SpokenHelp.codingAgentPhrases(name: name, readsReplies: readsReplies).map { ("\u{201C}\($0.said)\u{201D}", $0.effect) }
+        SpokenHelp.agentPhrases(name: name, readsReplies: readsReplies).map { ("\u{201C}\($0.said)\u{201D}", $0.effect) }
     }
 
     private var exampleName: String {
@@ -425,6 +425,6 @@ struct CodingAgentPhrasesSection: View {
             Text("Say \(Self.renameExample) to give the conversation an instruction would go to a name of your own.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.phrases)
+        .accessibilityIdentifier(AccessibilityID.Mode.Agents.phrases)
     }
 }

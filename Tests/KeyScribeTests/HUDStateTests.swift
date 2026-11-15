@@ -509,11 +509,11 @@ struct HUDStateTests {
         defer { hud.render(.hidden) }
 
         screens.focused = 1
-        hud.render(.recording(mode: "Coding agent", level: 0, latchedTrigger: nil, agents: roster))
+        hud.render(.recording(mode: "Agent", level: 0, latchedTrigger: nil, agents: roster))
         let short = try #require(hud.panelFrame)
-        hud.render(.transcribing(mode: "Coding agent"))
+        hud.render(.transcribing(mode: "Agent"))
         screens.focused = 2
-        hud.render(.recording(mode: "Coding agent", level: 0, latchedTrigger: nil, agents: roster))
+        hud.render(.recording(mode: "Agent", level: 0, latchedTrigger: nil, agents: roster))
         let tall = try #require(hud.panelFrame)
         #expect(screens.frames[2]!.contains(tall))
         #expect(tall.height > short.height)
@@ -521,7 +521,7 @@ struct HUDStateTests {
         let fresh = HUDController(
             defaults: UserDefaults(suiteName: "hud-\(UUID().uuidString)")!, escape: FakeChordRegistrar(), displays: screens.displays)
         defer { fresh.render(.hidden) }
-        fresh.render(.recording(mode: "Coding agent", level: 0, latchedTrigger: nil, agents: roster))
+        fresh.render(.recording(mode: "Agent", level: 0, latchedTrigger: nil, agents: roster))
         #expect(try #require(fresh.panelFrame).height == tall.height)
     }
 

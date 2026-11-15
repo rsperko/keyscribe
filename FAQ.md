@@ -63,7 +63,7 @@ downloads include the required bundled artifact.
 
 Speech recognition is always on-device — your audio is never sent anywhere. The only things that can
 leave your Mac are optional, you-keyed LLM calls over a redacted payload: a mode's cleanup of your
-transcript, and, in the experimental Coding agent feature, the summary of an agent's reply that Spoken
+transcript, and, in the experimental Agent feature, the summary of an agent's reply that Spoken
 summaries reads aloud. Both are off unless you enable them. See [PRIVACY.md](PRIVACY.md) for the full picture.
 
 ### Which speech model should I pick?
@@ -248,11 +248,11 @@ These also work without saving anything:
 - **“go back”** returns to the window you were using before your last switch by voice, even in the
   same app. Say it again to switch back. It never starts an app that has since quit. Running an action
   does not change that destination.
-- **“repeat that”** or **“say that again”** replays the last spoken reply from a coding agent (see
+- **“repeat that”** or **“say that again”** replays the last spoken reply from an agent (see
   [Can KeyScribe read an agent's reply aloud?](#can-keyscribe-read-an-agents-reply-aloud)).
 - **“that sounded wrong”** keeps the reply you just heard with its History entry: its audio while it is
   still held, otherwise only its text and a report. They last until you delete the entry or History's
-  retention removes it. In Coding agent mode it is a command only while reply updates are on and a reply
+  retention removes it. In Agent mode it is a command only while reply updates are on and a reply
   has been heard; otherwise it is sent to the agent.
 - **“cancel”** or **“never mind”** on its own runs nothing. A “please” before or after a command is fine
   (“please open Mail”), except that for a script or shortcut that takes your words, a closing “please” is
@@ -501,21 +501,21 @@ and give it a shortcut. Select text in any app, use the shortcut, and ask someth
 selected text and your request are sent to the service, after best-effort redaction. The answer stays on
 screen for a few moments after it is read, longer for a long answer, with a button to copy it; hovering over
 it keeps it open. Press Escape once to stop the voice and again to close the answer. The voice is set in the mode's **Answer** section and is the same one that reads
-coding agent replies.
+agent replies.
 
 ### Can I get answers and agent updates without hearing them?
 
 Yes. Set **Voice** to **Off — text only**, either in an Ask mode's **Answer** section or under **Settings ▸ Modes ▸
-Coding agent ▸ Replies**. It is one shared choice, so it applies to both. Answers and agent updates then appear on
+Agent ▸ Replies**. It is one shared choice, so it applies to both. Answers and agent updates then appear on
 screen with their text, a copy button and a close button, and close themselves after time to read them; hovering
 keeps one open, and Escape closes it. Nothing is spoken and other audio is left alone. Agent updates still arrive
 one at a time, in order: the next appears when the current one closes, and they wait while you dictate.
 Choosing Off — text only while something is being read stops the voice and leaves the text on screen. Choose a voice again to hear them; your
 earlier voice is remembered.
 
-### How do I connect a coding agent conversation?
+### How do I connect an agent conversation?
 
-In **Settings ▸ Modes ▸ Coding agent**, find the conversation in **Conversations** and choose **Connect…**,
+In **Settings ▸ Modes ▸ Agent**, find the conversation in **Conversations** and choose **Connect…**,
 or choose **Install…** in the agent's section. KeyScribe finds the folder that conversation's agent loads its
 configuration from (for Pi usually `~/.pi/agent`, for Claude Code `~/.claude`, or whatever folder that
 agent was started with), and asks before installing there. Connecting a folder connects the conversations
@@ -530,7 +530,7 @@ through an unusual wrapper or hosted inside another program.
 
 ### How do I choose which conversation hears me?
 
-In the Coding agent mode, say **“tell”** and the conversation's name with your instruction, such as “tell
+In the Agent mode, say **“tell”** and the conversation's name with your instruction, such as “tell
 docs run the tests”; later dictation without a name goes there too. To choose a conversation without sending
 anything, say **“select docs”** (or “choose docs”); **“open docs”** also brings its terminal forward. While
 recording, conversations are numbered, so “tell conversation two …” and “select conversation two” work too,
@@ -584,7 +584,7 @@ Claude Code or `/reload` in Pi, or restart it.
 
 ### Can I talk to agents running in bb?
 
-Yes. Install the plugin under **bb** in **Settings ▸ Modes ▸ Coding agent**. KeyScribe then lists bb's
+Yes. Install the plugin under **bb** in **Settings ▸ Modes ▸ Agent**. KeyScribe then lists bb's
 threads and sends what you say to them through bb's own `bb` command, whichever agent the thread runs, with
 any image you pasted attached. It runs nothing of bb's until you connect bb this way, and nothing while bb isn't
 open. Your words reach a turn that is already running the way typing in bb would; bb keeps them in its own queue while
@@ -592,7 +592,7 @@ the thread waits on your approval, and sends them once you answer. “Open docs�
 asks bb's open windows to show the thread and brings bb forward. If bb isn't installed, isn't open, or
 couldn't list its threads, Settings says so under the plugin.
 
-KeyScribe checks bb for new threads when you start recording with a Coding agent mode available and while
+KeyScribe checks bb for new threads when you start recording with an agent mode available and while
 Settings is open, and otherwise only every few minutes, so a thread you just started may need one more press
 before you can say its name. A bb thread is named by the title bb shows for it, unless you give it a
 KeyScribe name; then the title still works after “open”, “go to”, “tell” or “ask”. A thread bb hasn't titled
@@ -628,13 +628,13 @@ KeyScribe turns off bb's usage reporting for the commands it runs.
 
 ### How do I rename a conversation?
 
-In the Coding agent mode, switch to the conversation, then say **“rename this conversation to”** and the new
+In the Agent mode, switch to the conversation, then say **“rename this conversation to”** and the new
 name, such as “rename this conversation to auth refactor”, as the whole dictation (“session” works in place of
 “conversation”, and “rename conversation to auth refactor” works too). Only the conversation you are
 talking to is renamed; the panel shows the new name, and you say that name from then on. The name can be up
 to four words, and it can't be one another conversation already has. Say the name on its own: if anything
 follows it, nothing is renamed or sent, and the panel says why. You can also choose **Rename…** beside a conversation
-in **Settings ▸ Modes ▸ Coding agent ▸ Conversations**. Renaming only changes the name you say to KeyScribe;
+in **Settings ▸ Modes ▸ Agent ▸ Conversations**. Renaming only changes the name you say to KeyScribe;
 the agent's own title for the conversation stays as it was. **Use Default Name** in the same sheet goes back
 to the name KeyScribe would choose on its own.
 
@@ -664,7 +664,7 @@ reading has failed.
 
 ### How do I check what a conversation needs without sending anything?
 
-In the Coding agent mode, say **“check on docs”** as the whole dictation, or **“check on this
+In the Agent mode, say **“check on docs”** as the whole dictation, or **“check on this
 conversation”** for the one you are talking to. KeyScribe answers from what the agent reports and sends
 nothing: the question it is asking when it is short, else a description (with an AI service chosen under
 Spoken replies), else that it is waiting for approval or an answer, with “open docs” to bring it forward.
@@ -717,7 +717,7 @@ keep the version they loaded, which keeps working, until you reload them; their 
 
 ### Can KeyScribe read an agent's reply aloud?
 
-Yes. In **Settings ▸ Modes ▸ Coding agent ▸ Replies**, turn on **Reply updates**. For messages
+Yes. In **Settings ▸ Modes ▸ Agent ▸ Replies**, turn on **Reply updates**. For messages
 you dictate, KeyScribe reads short replies and can summarize longer ones. It also tells you when a
 conversation you spoke to is waiting for your approval or an answer: KeyScribe says its name and "Waiting for
 approval." or "Waiting for an answer."; if its connector goes away before it finishes, you hear
@@ -753,8 +753,8 @@ Starting a dictation also stops it, and waiting summaries play once the dictatio
 Both only stop the speech: the agent keeps working. The
 **Agent Reply Updates** item in the menu bar menu turns the feature off and on. Only instructions you dictated, and
 work you asked the agent to have KeyScribe read aloud (below), are spoken about. To hear the last one again, say **"repeat that"** or **"say that
-again"** as the whole dictation, with either the Coding agent or the Voice Commands shortcut; with the Coding
-agent shortcut, a longer dictation that starts that way is sent to the agent as usual. A conversation that is in front of you when it finishes is
+again"** as the whole dictation, with either the Agent or the Voice Commands shortcut; with the Agent
+shortcut, a longer dictation that starts that way is sent to the agent as usual. A conversation that is in front of you when it finishes is
 skipped, since you can already see its reply, unless you asked for that reply to be read aloud. If KeyScribe can't tell what is in front, for example because
 your terminal hasn't been given Automation access for voice commands yet, the summary still plays.
 If a reply sounded wrong, choose **Last Reply in History…** in the menu bar menu. **Play** replays what you heard:
@@ -820,11 +820,11 @@ Two for everyday dictation, granted in **System Settings ▸ Privacy & Security*
 A third, **Automation**, lets KeyScribe control another app. KeyScribe itself uses it to ask your browser for
 the current tab's address for a mode that routes by website, or, with the experimental voice commands, for the
 open tabs' addresses and titles (in every window, which can include private ones) so it can switch to a saved web
-page. With the experimental Coding agent feature, it also asks your terminal (such as Ghostty, Terminal, or
+page. With the experimental Agent feature, it also asks your terminal (such as Ghostty, Terminal, or
 iTerm2) to select a conversation's tab when you say "open" and its name, and to tell which conversation you
 are leaving so that "go back" can return to it; that request is made the first time you open a conversation
 in, or from, that terminal. Once it is allowed, KeyScribe also asks the terminal which conversation is in front
-when you start a Coding agent dictation, so what you say goes to the conversation you are looking at; that check
+when you start an agent dictation, so what you say goes to the conversation you are looking at; that check
 never asks for permission itself. Those reads stay on your Mac. A script or shortcut you run by voice can also cause an Automation
 request, which may name KeyScribe, and may reuse a permission you already gave KeyScribe without asking
 again ([details](PRIVACY.md#programs-and-shortcuts-you-run-by-voice)).

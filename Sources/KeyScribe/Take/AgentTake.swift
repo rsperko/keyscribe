@@ -25,7 +25,7 @@ protocol AgentTakeHost: AnyObject {
     var agents: AgentHub? { get }
     var spokenUpdates: SpokenResultOutput? { get }
     var lastHeardReply: (entry: String?, conversation: String)? { get }
-    var codingAgentsEnabled: Bool { get }
+    var agentsEnabled: Bool { get }
     var isBusy: Bool { get }
     var takeIdentity: AnyObject? { get }
     var takeMode: Mode? { get }
@@ -90,7 +90,7 @@ final class AgentTake {
     }
 
     func freezeRecipient() {
-        guard let host, let agents = host.agents, host.codingAgentsEnabled,
+        guard let host, let agents = host.agents, host.agentsEnabled,
               host.eligibleModes?.contains(where: { $0.output == .agent }) == true
         else { return }
         agents.refresh()
@@ -145,8 +145,8 @@ final class AgentTake {
 
     func finish(routed: PhaseBResult, heard: String, mode: Mode) async {
         guard let host else { return }
-        guard let agents = host.agents, host.codingAgentsEnabled else {
-            host.finishError("Talking to coding agents is turned off", action: nil)
+        guard let agents = host.agents, host.agentsEnabled else {
+            host.finishError("Talking to agents is turned off", action: nil)
             return
         }
         guard !routed.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -232,7 +232,7 @@ final class AgentTake {
         if let (id, front, body) = Self.target(of: resolution), snapshot.disconnected.values.contains(id) || agents.isExcluded(id) {
             let name = snapshot.disconnected.first { $0.value == id }?.key ?? "That conversation"
             let line = (front ? "The conversation in front is disconnected" : "\(name) is disconnected") + ". " + AgentOutput.nothingSent
-            finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: .openCodingAgents(mode.id), heard: HeardExcerpt(heard: body)),
+            finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: .openAgents(mode.id), heard: HeardExcerpt(heard: body)),
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
             return
         }
@@ -245,7 +245,7 @@ final class AgentTake {
         case .open(let id):
             let handle = agents.handle(of: id) ?? "it"
             hud.present(.transcribing(mode: mode.name, status: "Opening \(handle)\u{2026}"))
-            let lease = host.lease(for: .codingAgents, stopsAtPress: nil)
+            let lease = host.lease(for: .agents, stopsAtPress: nil)
             let place = host.captureOrigin
             let shown = place == nil ? nil : await agents.sessionInFront { [weak self] app in
                 guard !Task.isCancelled else { return }
@@ -275,7 +275,7 @@ final class AgentTake {
             let meant = Self.spokenName(reason).map { spoken in unconnected.filter { Self.names(spoken, $0) } } ?? []
             if !meant.isEmpty {
                 let shown = Self.unconnectedLine(meant)
-                let action = HUDErrorAction.openCodingAgents(mode.id, reveal: meant.map(\.row))
+                let action = HUDErrorAction.openAgents(mode.id, reveal: meant.map(\.row))
                 finishAgent(state: .error(message: AgentOutput.kept(shown, body: body), action: action, heard: HeardExcerpt(heard: body)),
                             outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: shown, facts: facts)
                 return
@@ -283,7 +283,7 @@ final class AgentTake {
             let hint = AgentOutput.unconnectedHint(unconnected.map(\.name))
             let shown = hint.isEmpty
                 ? line(reason, retry, reachable(snapshot, agents, for: retry), frozen?.id) : AgentOutput.withHint(line(reason, nil, [:], nil), hint)
-            let action = hint.isEmpty ? Self.askAction(reason, mode: mode) : .openCodingAgents(mode.id)
+            let action = hint.isEmpty ? Self.askAction(reason, mode: mode) : .openAgents(mode.id)
             finishAgent(state: .error(message: AgentOutput.kept(shown, body: body), action: action, heard: HeardExcerpt(heard: body)),
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil,
                         recorded: AgentOutput.withHint(line(reason, nil, [:], nil), hint), facts: facts)
@@ -352,13 +352,13 @@ final class AgentTake {
             finishAgent(state: .error(message: message, action: action, heard: HeardExcerpt(heard: heard)),
                         outcome: .failed, heard: heard, body: "", transformed: nil, rewrite: nil, transitioned: true, facts: facts)
         }
-        let lease = host.lease(for: .codingAgents, stopsAtPress: nil)
+        let lease = host.lease(for: .agents, stopsAtPress: nil)
         guard lease.keepActing() else {
             host.cancelQuietly()
             return
         }
         guard let id = frozen?.id else {
-            return fail("Switch to a conversation, then say the rename command again", action: .openCodingAgents(mode.id))
+            return fail("Switch to a conversation, then say the rename command again", action: .openAgents(mode.id))
         }
         guard let old = agents.handle(of: id) else { return fail("That conversation has ended") }
         do {
@@ -366,7 +366,7 @@ final class AgentTake {
         } catch let error as AgentHandles.RenameError {
             return fail(Self.renameProblem(error, name: name))
         } catch {
-            return fail("Couldn\u{2019}t save the new name. \(old) is unchanged", action: .openCodingAgents(mode.id))
+            return fail("Couldn\u{2019}t save the new name. \(old) is unchanged", action: .openAgents(mode.id))
         }
         agents.makeCurrent(id)
         finishAgent(state: .commandDone(summary: "Renamed \(old) to \(name)", detail: mode.name), outcome: .inserted, heard: heard,
@@ -390,7 +390,7 @@ final class AgentTake {
         switch query {
         case .all:
             host.agentFrontTask?.cancel()
-            guard host.lease(for: .codingAgents, stopsAtPress: nil).keepActing() else { return stopQuietly() }
+            guard host.lease(for: .agents, stopsAtPress: nil).keepActing() else { return stopQuietly() }
             func report() -> (names: [String], complete: Bool) {
                 let stale = agents.lastSeen
                 let listed = agents.recordingOrder.filter { !agents.isExcluded($0.id) }
@@ -426,7 +426,7 @@ final class AgentTake {
             finishAgent(state: .error(message: AgentOutput.kept(message, body: body), action: action, heard: HeardExcerpt(heard: heard)),
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, transitioned: true, facts: facts)
         }
-        let lease = host.lease(for: .codingAgents, stopsAtPress: nil)
+        let lease = host.lease(for: .agents, stopsAtPress: nil)
         guard lease.keepActing() else { return stopQuietly() }
         guard let id = resolution.recipient else {
             if case .ask(_, let reason) = resolution, reason != .noRecipient {
@@ -434,14 +434,14 @@ final class AgentTake {
                     return fail("Couldn\u{2019}t check conversation names yet. \(AgentOutput.nothingSent) Say it again, or say \u{201C}check on conversation\u{201D} and its number.",
                                 keepingWords: true)
                 }
-                return fail(AgentOutput.askLine(reason), action: .openCodingAgents(mode.id), keepingWords: true)
+                return fail(AgentOutput.askLine(reason), action: .openAgents(mode.id), keepingWords: true)
             }
             return fail("No recipient selected. \(AgentOutput.nothingSent) Say \u{201C}check on\u{201D} and a conversation\u{2019}s name.",
-                        action: .openCodingAgents(mode.id))
+                        action: .openAgents(mode.id))
         }
         let name = agents.handle(of: id) ?? snapshot.disconnected.first { $0.value == id }?.key ?? "That conversation"
         if snapshot.disconnected.values.contains(id) || agents.isExcluded(id) {
-            return fail("\(name) is disconnected. \(AgentOutput.nothingSent)", action: .openCodingAgents(mode.id))
+            return fail("\(name) is disconnected. \(AgentOutput.nothingSent)", action: .openAgents(mode.id))
         }
         func observed() -> (conversation: AgentConversation, prompt: AgentPrompt?)? {
             guard let conversation = agents.directory.conversations.first(where: { $0.id == id }) else { return nil }
@@ -478,7 +478,7 @@ final class AgentTake {
         _ line: String, shown: String, conversation: String, handle: String, summary: String, heard: String, facts: [HistoryEntry.Fact],
         whileTrue stillTrue: @escaping () -> Bool
     ) {
-        let enabled = { [weak host] in host?.codingAgentsEnabled == true }
+        let enabled = { [weak host] in host?.agentsEnabled == true }
         _ = host?.spokenUpdates?.answer(conversation: conversation, handle: handle, line, whileTrue: { enabled() && stillTrue() })
         finishAgent(state: .advisory(message: shown), outcome: .inserted, heard: heard, body: "", transformed: nil, rewrite: nil,
                     transitioned: true, hideAfter: 8, summary: summary, facts: facts)
@@ -502,7 +502,7 @@ final class AgentTake {
 
     private func builtInFromAgent(_ transcript: String, heard: String, facts: [HistoryEntry.Fact]) async {
         guard let host else { return }
-        let lease = host.lease(for: .codingAgents, stopsAtPress: host.voiceCommandStopsAtPress)
+        let lease = host.lease(for: .agents, stopsAtPress: host.voiceCommandStopsAtPress)
         guard lease.keepActing() else { return }
         let outcome = await voiceCommands.run(
             transcript: transcript, places: [], scripts: [], origin: host.captureOrigin,
@@ -534,8 +534,8 @@ final class AgentTake {
             host.finishNoSpeech()
             return
         }
-        guard let agents = host.agents, let mode = host.takeMode, host.codingAgentsEnabled else {
-            finishAgent(state: .error(message: "Talking to coding agents was turned off. Nothing sent.", action: nil, heard: HeardExcerpt(heard: text)),
+        guard let agents = host.agents, let mode = host.takeMode, host.agentsEnabled else {
+            finishAgent(state: .error(message: "Talking to agents was turned off. Nothing sent.", action: nil, heard: HeardExcerpt(heard: text)),
                         outcome: .failed, heard: heard, body: text, transformed: transformed, rewrite: rewrite, facts: facts)
             return
         }
@@ -547,7 +547,7 @@ final class AgentTake {
                 outcome: .failed, heard: heard, body: text, transformed: transformed, rewrite: rewrite, facts: facts)
             return
         }
-        let lease = host.lease(for: .codingAgents, stopsAtPress: nil)
+        let lease = host.lease(for: .agents, stopsAtPress: nil)
         guard lease.keepActing() else { return }
         host.rememberResult(text)
         hud.present(.transcribing(mode: mode.name, status: "Sending to \(agents.handle(of: id) ?? "it")"))
@@ -628,7 +628,7 @@ final class AgentTake {
     }
 
     private static func askAction(_ reason: AgentRecipient.AskReason, mode: Mode) -> HUDErrorAction? {
-        if case .unknownName = reason { .openCodingAgents(mode.id) } else { nil }
+        if case .unknownName = reason { .openAgents(mode.id) } else { nil }
     }
 
     private func finishAgent(

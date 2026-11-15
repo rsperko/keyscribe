@@ -269,7 +269,7 @@ struct ModeResolverTests {
         #expect(ModeResolver.strippingRoutingPhrase(phrase, from: "no phrase here") == "no phrase here")
     }
 
-    @Test func aSpokenPhraseNeverRoutesIntoACodingAgentMode() {
+    @Test func aSpokenPhraseNeverRoutesIntoAAgentMode() {
         var agent = mode("agent", phrases: [#"(?i)\bto the agent$"#])
         agent.output = .agent
         let r = ModeResolver.resolvePhaseB(eligibleModes: [agent], transcript: "run the tests to the agent")

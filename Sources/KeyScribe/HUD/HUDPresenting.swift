@@ -10,7 +10,7 @@ enum HUDErrorAction: Equatable {
     case openAutomationSettings
     case openSpeechModels
     case openAIService(String)
-    case openCodingAgents(String, reveal: [String] = [])
+    case openAgents(String, reveal: [String] = [])
 
     var buttonTitle: String {
         switch self {
@@ -19,7 +19,7 @@ enum HUDErrorAction: Equatable {
         case .openAutomationSettings: "Open Automation Settings"
         case .openSpeechModels: "Open Speech Models"
         case .openAIService: "AI Service Settings…"
-        case .openCodingAgents: "Open Coding Agent Settings"
+        case .openAgents: "Open Agent Settings"
         }
     }
 }
@@ -403,7 +403,7 @@ extension HUDState {
 
     var agentRosterHint: String? {
         guard let agents = agentRoster else { return nil }
-        guard let first = agents.rows.first else { return "No coding agent sessions are running." }
+        guard let first = agents.rows.first else { return "No agent sessions are running." }
         let namesOff = "Names are off until they can be loaded"
         let example = agents.namesAvailable ? Self.addressExample : Self.rowExample
         let source: String

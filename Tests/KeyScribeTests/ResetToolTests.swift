@@ -130,7 +130,7 @@ struct ResetToolTests {
         #expect(defaults.bool(forKey: ResetTool.firstRunKey) == false)
     }
 
-    @Test func eraseAllRemovesClipboardFilesSavedForCodingAgents() throws {
+    @Test func eraseAllRemovesClipboardFilesSavedForAgents() throws {
         let dir = try makeSupportDir()
         let tool = isolatedTool(dir, ephemeralDefaults())
         defer { for url in [dir, tool.temporaryDir] { try? FileManager.default.removeItem(at: url) } }

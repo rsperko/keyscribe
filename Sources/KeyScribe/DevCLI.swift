@@ -7,7 +7,7 @@ import Synchronization
 public enum DevCLI {
     // Handles any dev/admin flag present in the process arguments and exits; returns only when the
     // invocation is a plain menu-bar app launch.
-    public static func handleFlags(codingAgents: CodingAgentIntegrations = .builtIn) {
+    public static func handleFlags(agentIntegrations: AgentIntegrations = .builtIn) {
         // `--help` / `-h`: print the CLI surface and exit. No arguments launches the menu-bar app.
         if CommandLine.arguments.contains("--help") || CommandLine.arguments.contains("-h") {
             print("""
@@ -111,7 +111,7 @@ public enum DevCLI {
                                       Automation access to the front terminal.
                 --after <s>             Wait this long before the first read.
                 --samples <n>           Read n times, a second apart (default 1).
-              --route-probe <pid>     Print how Open would reach the coding agent running as <pid> (its process
+              --route-probe <pid>     Print how Open would reach the agent running as <pid> (its process
                                       chain, each multiplexer and terminal step) and the places it reads, then
                                       exit. Runs each route's planning and place reads (the built-in ones only
                                       list), never a step of the plan, a terminal's place script, or a place
@@ -274,8 +274,8 @@ public enum DevCLI {
         }
 
         let resolvedSurfaces = {
-            do { return try codingAgents.resolve() } catch {
-                print("coding agent integrations do not resolve: \(error)")
+            do { return try agentIntegrations.resolve() } catch {
+                print("agent integrations do not resolve: \(error)")
                 exit(1)
             }
         }
@@ -305,7 +305,7 @@ public enum DevCLI {
                 exit(0)
             }
             let agent = agentName ?? facts.process(pid)?.name ?? ""
-            let sources = codingAgents.placeSources
+            let sources = agentIntegrations.placeSources
             Task { @MainActor in
                 let reader = AgentRuntime.places(surfaces: surfaces, sources: sources.map { $0() })
                 for line in lines where line != RouteProbe.skipped { print(line) }

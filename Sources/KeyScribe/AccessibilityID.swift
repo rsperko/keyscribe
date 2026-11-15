@@ -317,69 +317,69 @@ enum AccessibilityID {
             static func scriptEdit(_ scriptKey: String) -> String { "mode.voiceCommands.script.edit.\(scriptKey)" }
         }
 
-        enum CodingAgents {
-            static func host(_ id: String) -> String { "mode.codingAgents.host.\(id)" }
-            static let connectorStatus = "mode.codingAgents.connectorStatus"
-            static let currentRecipient = "mode.codingAgents.currentRecipient"
-            static let phrases = "mode.codingAgents.phrases"
-            static let cancelReadAloud = "mode.codingAgents.cancelReadAloud"
-            static let summary = "mode.codingAgents.summary"
-            static let install = "mode.codingAgents.install"
-            static let update = "mode.codingAgents.update"
-            static let remove = "mode.codingAgents.remove"
-            static let finishUninstalling = "mode.codingAgents.finishUninstalling"
-            static let manualUninstall = "mode.codingAgents.manualUninstall"
-            static let setupFolder = "mode.codingAgents.setupFolder"
-            static let tryAgain = "mode.codingAgents.tryAgain"
-            static let connect = "mode.codingAgents.connect"
-            static let disconnect = "mode.codingAgents.disconnect"
-            static let reconnect = "mode.codingAgents.reconnect"
-            static let disconnected = "mode.codingAgents.disconnected"
-            static let exclusionsProblem = "mode.codingAgents.exclusionsProblem"
-            static let integrationsProblem = "mode.codingAgents.integrationsProblem"
-            static let recovery = "mode.codingAgents.recovery"
-            static let reloadCommand = "mode.codingAgents.reloadCommand"
-            static let showConversation = "mode.codingAgents.showConversation"
-            static let checkAgain = "mode.codingAgents.checkAgain"
-            static let missing = "mode.codingAgents.missing"
-            static let chooseSetupFolder = "mode.codingAgents.chooseSetupFolder"
-            static let consentInstall = "mode.codingAgents.consentInstall"
-            static let consentCancel = "mode.codingAgents.consentCancel"
-            static let consentFolder = "mode.codingAgents.consentFolder"
-            static let consentConversations = "mode.codingAgents.consentConversations"
-            static let conversation = "mode.codingAgents.conversation"
-            static let copyDirectory = "mode.codingAgents.copyDirectory"
-            static let rename = "mode.codingAgents.rename"
-            static let renameProblem = "mode.codingAgents.renameProblem"
-            static let namesProblem = "mode.codingAgents.namesProblem"
-            static let namesNotSaved = "mode.codingAgents.namesNotSaved"
-            static let reloadNames = "mode.codingAgents.reloadNames"
-            static let showNamesFile = "mode.codingAgents.showNamesFile"
-            static let setupsProblem = "mode.codingAgents.setupsProblem"
-            static let reloadSetups = "mode.codingAgents.reloadSetups"
-            static let showSetupsFile = "mode.codingAgents.showSetupsFile"
-            static let renameName = "mode.codingAgents.renameName"
-            static let renameSave = "mode.codingAgents.renameSave"
-            static let renameCancel = "mode.codingAgents.renameCancel"
-            static let defaultName = "mode.codingAgents.defaultName"
-            static let useDefaultName = "mode.codingAgents.useDefaultName"
-            static let spokenResultEnabled = "mode.codingAgents.spokenResultEnabled"
-            static let spokenResultService = "mode.codingAgents.spokenResultService"
-            static let spokenResultOpenAIServices = "mode.codingAgents.spokenResultOpenAIServices"
-            static let spokenResultAdvanced = "mode.codingAgents.spokenResultAdvanced"
-            static let spokenResultPrompt = "mode.codingAgents.spokenResultPrompt"
-            static let spokenResultPromptExpand = "mode.codingAgents.spokenResultPromptExpand"
-            static let spokenResultPromptExpandDone = "mode.codingAgents.spokenResultPromptExpandDone"
-            static let spokenResultReset = "mode.codingAgents.spokenResultReset"
-            static let spokenResultVoice = "mode.codingAgents.spokenResultVoice"
-            static let spokenResultVoiceShared = "mode.codingAgents.spokenResultVoiceShared"
-            static let spokenResultPreview = "mode.codingAgents.spokenResultPreview"
-            static let spokenVoiceDownload = "mode.codingAgents.spokenVoiceDownload"
-            static let spokenVoiceReinstall = "mode.codingAgents.spokenVoiceReinstall"
-            static let spokenVoiceShowInHistory = "mode.codingAgents.spokenVoiceShowInHistory"
-            static let spokenVoiceDelete = "mode.codingAgents.spokenVoiceDelete"
-            static let spokenVoiceDeleteConfirm = "mode.codingAgents.spokenVoiceDeleteConfirm"
-            static let spokenVoiceDeleteCancel = "mode.codingAgents.spokenVoiceDeleteCancel"
+        enum Agents {
+            static func host(_ id: String) -> String { "mode.agents.host.\(id)" }
+            static let connectorStatus = "mode.agents.connectorStatus"
+            static let currentRecipient = "mode.agents.currentRecipient"
+            static let phrases = "mode.agents.phrases"
+            static let cancelReadAloud = "mode.agents.cancelReadAloud"
+            static let summary = "mode.agents.summary"
+            static let install = "mode.agents.install"
+            static let update = "mode.agents.update"
+            static let remove = "mode.agents.remove"
+            static let finishUninstalling = "mode.agents.finishUninstalling"
+            static let manualUninstall = "mode.agents.manualUninstall"
+            static let setupFolder = "mode.agents.setupFolder"
+            static let tryAgain = "mode.agents.tryAgain"
+            static let connect = "mode.agents.connect"
+            static let disconnect = "mode.agents.disconnect"
+            static let reconnect = "mode.agents.reconnect"
+            static let disconnected = "mode.agents.disconnected"
+            static let exclusionsProblem = "mode.agents.exclusionsProblem"
+            static let integrationsProblem = "mode.agents.integrationsProblem"
+            static let recovery = "mode.agents.recovery"
+            static let reloadCommand = "mode.agents.reloadCommand"
+            static let showConversation = "mode.agents.showConversation"
+            static let checkAgain = "mode.agents.checkAgain"
+            static let missing = "mode.agents.missing"
+            static let chooseSetupFolder = "mode.agents.chooseSetupFolder"
+            static let consentInstall = "mode.agents.consentInstall"
+            static let consentCancel = "mode.agents.consentCancel"
+            static let consentFolder = "mode.agents.consentFolder"
+            static let consentConversations = "mode.agents.consentConversations"
+            static let conversation = "mode.agents.conversation"
+            static let copyDirectory = "mode.agents.copyDirectory"
+            static let rename = "mode.agents.rename"
+            static let renameProblem = "mode.agents.renameProblem"
+            static let namesProblem = "mode.agents.namesProblem"
+            static let namesNotSaved = "mode.agents.namesNotSaved"
+            static let reloadNames = "mode.agents.reloadNames"
+            static let showNamesFile = "mode.agents.showNamesFile"
+            static let setupsProblem = "mode.agents.setupsProblem"
+            static let reloadSetups = "mode.agents.reloadSetups"
+            static let showSetupsFile = "mode.agents.showSetupsFile"
+            static let renameName = "mode.agents.renameName"
+            static let renameSave = "mode.agents.renameSave"
+            static let renameCancel = "mode.agents.renameCancel"
+            static let defaultName = "mode.agents.defaultName"
+            static let useDefaultName = "mode.agents.useDefaultName"
+            static let spokenResultEnabled = "mode.agents.spokenResultEnabled"
+            static let spokenResultService = "mode.agents.spokenResultService"
+            static let spokenResultOpenAIServices = "mode.agents.spokenResultOpenAIServices"
+            static let spokenResultAdvanced = "mode.agents.spokenResultAdvanced"
+            static let spokenResultPrompt = "mode.agents.spokenResultPrompt"
+            static let spokenResultPromptExpand = "mode.agents.spokenResultPromptExpand"
+            static let spokenResultPromptExpandDone = "mode.agents.spokenResultPromptExpandDone"
+            static let spokenResultReset = "mode.agents.spokenResultReset"
+            static let spokenResultVoice = "mode.agents.spokenResultVoice"
+            static let spokenResultVoiceShared = "mode.agents.spokenResultVoiceShared"
+            static let spokenResultPreview = "mode.agents.spokenResultPreview"
+            static let spokenVoiceDownload = "mode.agents.spokenVoiceDownload"
+            static let spokenVoiceReinstall = "mode.agents.spokenVoiceReinstall"
+            static let spokenVoiceShowInHistory = "mode.agents.spokenVoiceShowInHistory"
+            static let spokenVoiceDelete = "mode.agents.spokenVoiceDelete"
+            static let spokenVoiceDeleteConfirm = "mode.agents.spokenVoiceDeleteConfirm"
+            static let spokenVoiceDeleteCancel = "mode.agents.spokenVoiceDeleteCancel"
         }
 
         enum Editor {
@@ -672,17 +672,17 @@ enum AccessibilityID {
         Settings.AI.Editor.delete,
         Settings.Advanced.revealConfig, Settings.Advanced.reloadConfig, Settings.Advanced.resetHUDPosition,
         Settings.Advanced.eraseAllData, Settings.Advanced.eraseConfirmConfirm, Settings.Advanced.eraseConfirmCancel,
-        Mode.CodingAgents.connectorStatus, Mode.CodingAgents.currentRecipient, Mode.CodingAgents.summary,
-        Mode.CodingAgents.install, Mode.CodingAgents.update, Mode.CodingAgents.remove, Mode.CodingAgents.finishUninstalling, Mode.CodingAgents.manualUninstall,
-        Mode.CodingAgents.setupFolder, Mode.CodingAgents.tryAgain, Mode.CodingAgents.connect, Mode.CodingAgents.disconnect,
-        Mode.CodingAgents.reconnect, Mode.CodingAgents.disconnected, Mode.CodingAgents.exclusionsProblem, Mode.CodingAgents.recovery,
-        Mode.CodingAgents.reloadCommand, Mode.CodingAgents.showConversation, Mode.CodingAgents.checkAgain, Mode.CodingAgents.missing,
-        Mode.CodingAgents.chooseSetupFolder, Mode.CodingAgents.consentInstall, Mode.CodingAgents.consentCancel, Mode.CodingAgents.consentFolder, Mode.CodingAgents.consentConversations,
-        Mode.CodingAgents.conversation, Mode.CodingAgents.rename, Mode.CodingAgents.copyDirectory,
-        Mode.CodingAgents.renameProblem, Mode.CodingAgents.namesProblem, Mode.CodingAgents.namesNotSaved, Mode.CodingAgents.reloadNames,
-        Mode.CodingAgents.showNamesFile, Mode.CodingAgents.setupsProblem, Mode.CodingAgents.reloadSetups, Mode.CodingAgents.showSetupsFile,
-        Mode.CodingAgents.renameName, Mode.CodingAgents.renameSave,
-        Mode.CodingAgents.renameCancel,
+        Mode.Agents.connectorStatus, Mode.Agents.currentRecipient, Mode.Agents.summary,
+        Mode.Agents.install, Mode.Agents.update, Mode.Agents.remove, Mode.Agents.finishUninstalling, Mode.Agents.manualUninstall,
+        Mode.Agents.setupFolder, Mode.Agents.tryAgain, Mode.Agents.connect, Mode.Agents.disconnect,
+        Mode.Agents.reconnect, Mode.Agents.disconnected, Mode.Agents.exclusionsProblem, Mode.Agents.recovery,
+        Mode.Agents.reloadCommand, Mode.Agents.showConversation, Mode.Agents.checkAgain, Mode.Agents.missing,
+        Mode.Agents.chooseSetupFolder, Mode.Agents.consentInstall, Mode.Agents.consentCancel, Mode.Agents.consentFolder, Mode.Agents.consentConversations,
+        Mode.Agents.conversation, Mode.Agents.rename, Mode.Agents.copyDirectory,
+        Mode.Agents.renameProblem, Mode.Agents.namesProblem, Mode.Agents.namesNotSaved, Mode.Agents.reloadNames,
+        Mode.Agents.showNamesFile, Mode.Agents.setupsProblem, Mode.Agents.reloadSetups, Mode.Agents.showSetupsFile,
+        Mode.Agents.renameName, Mode.Agents.renameSave,
+        Mode.Agents.renameCancel,
         Mode.List.list, Mode.List.add, Mode.List.addBlank, Mode.List.chooserCancel,
         Mode.List.deleteConfirmConfirm, Mode.List.deleteConfirmCancel,
         Mode.List.moveShortcutConfirm, Mode.List.moveShortcutCancel, Mode.List.moveShortcutUndo,

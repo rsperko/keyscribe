@@ -235,7 +235,7 @@ struct BBHostTests {
 @MainActor
 struct AgentHostConsentModelTests {
     @Test func turningAHostOnOrOffReportsTheWholeListOnceAndLoadingReportsNothing() {
-        let model = CodingAgentsSettingsModel(
+        let model = AgentsSettingsModel(
             describeTerminal: { _ in nil }, agentsDir: FileManager.default.temporaryDirectory, connectors: [], hosts: [BBHost.kind])
         var reported: [[String]] = []
         model.onHostsChange = { reported.append($0) }
@@ -248,7 +248,7 @@ struct AgentHostConsentModelTests {
         #expect(reported == [["other", "bb"], ["other"]])
     }
 
-    private func pluginModel(_ calls: BBPluginConnectorTests.Calls) -> (CodingAgentsSettingsModel, URL) {
+    private func pluginModel(_ calls: BBPluginConnectorTests.Calls) -> (AgentsSettingsModel, URL) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ks-bbconsent-\(UUID().uuidString.prefix(8))", isDirectory: true)
         let home = root.appendingPathComponent("home", isDirectory: true)
         try? FileManager.default.createDirectory(at: home.appendingPathComponent(".bb/bin"), withIntermediateDirectories: true)
@@ -259,7 +259,7 @@ struct AgentHostConsentModelTests {
                 calls.record(argv, environment)
                 return calls.answer(subcommand)
             })
-        let model = CodingAgentsSettingsModel(
+        let model = AgentsSettingsModel(
             describeTerminal: { _ in nil }, agentsDir: agents, setups: ConnectorSetupRegistry(directory: agents), connectors: [plugin],
             hosts: [BBHost.kind])
         return (model, agents)
@@ -270,13 +270,13 @@ struct AgentHostConsentModelTests {
         return condition()
     }
 
-    private func pluginSetup(_ model: CodingAgentsSettingsModel) throws -> (AgentConnectorModel, ConnectorSetupModel) {
+    private func pluginSetup(_ model: AgentsSettingsModel) throws -> (AgentConnectorModel, ConnectorSetupModel) {
         let connector = try #require(model.connectors.first)
         let setup = try #require(connector.setups.first { $0.isDefault })
         return (connector, setup)
     }
 
-    private func installed(_ calls: BBPluginConnectorTests.Calls) -> (CodingAgentsSettingsModel, ConnectorSetupModel, URL) {
+    private func installed(_ calls: BBPluginConnectorTests.Calls) -> (AgentsSettingsModel, ConnectorSetupModel, URL) {
         let (model, agents) = pluginModel(calls)
         let setup = model.connectors[0].setups.first { $0.isDefault }!
         return (model, setup, agents)
@@ -407,7 +407,7 @@ struct AgentHostConsentModelTests {
     }
 
     @Test func aHostsListingProblemIsShownBesideItsSwitchOnlyWhileItIsOn() {
-        let model = CodingAgentsSettingsModel(
+        let model = AgentsSettingsModel(
             describeTerminal: { _ in nil }, agentsDir: FileManager.default.temporaryDirectory, connectors: [], hosts: [BBHost.kind])
         model.show([], current: nil, discoveryProblems: ["bb": "bb isn\u{2019}t open. Open bb to reach its threads."])
         #expect(model.problem(of: BBHost.kind) == nil)

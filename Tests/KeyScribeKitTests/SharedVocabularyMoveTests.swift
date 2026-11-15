@@ -14,7 +14,7 @@ struct SharedVocabularyMoveTests {
     }
 
     private var agent: Mode {
-        var m = Mode(id: "agent", name: "Coding agent")
+        var m = Mode(id: "agent", name: "Agent")
         m.sharedVocabularies = ["programming"]
         return m
     }
@@ -24,7 +24,7 @@ struct SharedVocabularyMoveTests {
 
     @Test func movingNamesWhoWillUseItAndWhatTheModeNewlyGets() {
         let plan = SharedVocabularyMove.plan(.rule(rule("pain", "pane")), from: markdown, to: programming, modes: [agent, markdown])
-        #expect(plan.users == ["Coding agent", "Markdown"])
+        #expect(plan.users == ["Agent", "Markdown"])
         #expect(plan.newlyIncluded == .init(words: 1, rules: 1))
         #expect(plan.conflict == nil)
     }
@@ -33,7 +33,7 @@ struct SharedVocabularyMoveTests {
         var email = agent
         email.enabled = false
         let plan = SharedVocabularyMove.plan(.word("Kubernetes"), from: markdown, to: programming, modes: [email, markdown])
-        #expect(plan.users == ["Coding agent (disabled)", "Markdown"])
+        #expect(plan.users == ["Agent (disabled)", "Markdown"])
     }
 
     @Test func aModeAlreadyUsingTheVocabularyGetsNothingNew() {

@@ -92,10 +92,10 @@ what it would do. Nothing opens or runs. A saved name said alone does nothing an
 
 ---
 
-## Talk to coding agents
+## Talk to agents
 
-Use the **Coding agent shortcut** (Settings > Maintenance > Experimental features turns it on; connect
-the agent in Settings > Modes > Coding agent). [Name] is a conversation name shown there or while recording.
+Use the **Agent shortcut** (Settings > Maintenance > Experimental features turns it on; connect
+the agent in Settings > Modes > Agent). [Name] is a conversation name shown there or while recording.
 
 | Say | Works in | What happens |
 | --- | --- | --- |
@@ -105,7 +105,7 @@ the agent in Settings > Modes > Coding agent). [Name] is a conversation name sho
 | `open [name]` | Known conversation | Brings its terminal forward and makes it the recipient. Sends nothing. |
 | `tell conversation two [instruction]` | While recording | Uses number 2 from the list on screen. Saying "session two" works too. |
 | `check on [name]` | Known conversation | Reports its status. Sends nothing; the recipient stays the same. |
-| `check on all conversations` | Coding agent mode | Names the conversations waiting for you. Sends nothing. |
+| `check on all conversations` | Agent mode | Names the conversations waiting for you. Sends nothing. |
 | `rename this conversation to [name]` | The current conversation | Renames it. Say only the rename. |
 | `repeat that` | Reply updates on | Replays the last spoken reply and names its conversation. |
 | `that sounded wrong` | Reply updates on | Keeps the reply you just heard, with its audio and a report, alongside its History entry. |
@@ -148,13 +148,13 @@ These work too. The phrases on the earlier pages are the ones worth remembering.
 | `number two`<br>Also: `second` | Numbered choice | Same as `two`. |
 | `please open Mail`<br>Also: `open Mail, please` | Any command | A "please" before or after a command changes nothing. |
 
-### Talk to coding agents
+### Talk to agents
 
 | Say | Works in | What happens |
 | --- | --- | --- |
 | `[name], [instruction]` | Connected conversation | Same as `tell [name] [instruction]`. |
 | `select conversation two`<br>Also: `open session two`, `check on conversation two` | While recording | Picks, opens, or checks by number. |
 | `check on this conversation` | The current conversation | Checks the recipient. |
-| `who needs me?` | Coding agent mode | Same as `check on all conversations`. |
+| `who needs me?` | Agent mode | Same as `check on all conversations`. |
 | `rename this session to [name]`<br>Also: `rename conversation to [name]`, `name this conversation [name]`, `call this conversation [name]` | The current conversation | Same as `rename this conversation to`. |
 | `switch to [name]`<br>Also: `go to [name]` | Known conversation | Same as `open [name]`. |

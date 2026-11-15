@@ -6,16 +6,16 @@ import Testing
 struct HUDModelTests {
     @Test func eachRecordingAdmissionResetsScrollingButLiveUpdatesDoNot() {
         let model = HUDModel()
-        let recording = HUDState.recording(mode: "Coding agent", level: 0, latchedTrigger: nil)
+        let recording = HUDState.recording(mode: "Agent", level: 0, latchedTrigger: nil)
         model.state = recording
         let first = model.recordingAdmission
         #expect(first == 1)
-        model.state = .recording(mode: "Coding agent", level: 0.8, latchedTrigger: nil)
+        model.state = .recording(mode: "Agent", level: 0.8, latchedTrigger: nil)
         #expect(model.recordingAdmission == first)
         model.state = .hidden
         model.state = recording
         #expect(model.recordingAdmission == first + 1)
-        model.state = .transcribing(mode: "Coding agent")
+        model.state = .transcribing(mode: "Agent")
         model.state = recording
         #expect(model.recordingAdmission == first + 2)
     }

@@ -28,7 +28,7 @@ not a legal privacy policy.
 - **History stays local.** Past dictations are stored as plain JSONL files under
   `~/Library/Application Support/KeyScribe/` and KeyScribe never uploads them. History is on by default and
   keeps a limited number of days, which you can change or turn off in Settings. The history folder is
-  excluded from Time Machine backups. Other programs you run can still read it: if you open a coding agent
+  excluded from Time Machine backups. Other programs you run can still read it: if you open an agent
   in that folder to edit your modes, it can read your history and send it to its AI provider. The folder's
   `AGENTS.md` tells agents not to open history, but that is an instruction, not a lock.
 - **Your saved API keys stay in the Keychain.** BYOK provider keys are stored in the macOS
@@ -46,7 +46,7 @@ LLM calls** to a service you configured, and all off unless you turn them on:
   for a mode you enabled it for. When a rewrite falls back, **Rewrite Again** in History sends that
   dictation's transcript to the mode's service once more, with no context. It is redacted if the original
   dictation was or the mode is now, so turning redaction off later never sends that dictation unredacted.
-- **Reply updates**, in the experimental Coding agent feature. Notices that a conversation is waiting for you or
+- **Reply updates**, in the experimental Agent feature. Notices that a conversation is waiting for you or
   lost its connector are fixed sentences and send nothing, with one exception: when a Pi conversation or a bb thread you
   dictated to opens a prompt, or you check on one and its prompt has no short
   question to read as it is (whoever started that turn, you typing included), the prompt's kind and title, the tool call it seems to be about (its name and up
@@ -171,8 +171,8 @@ on the text produced by speech recognition, so it can miss content the recognize
 normalizes, such as an email address transcribed as words. Treat it as a safety margin, not a
 boundary you can rely on for regulated or high-stakes data. If something must never reach a
 third-party provider, use Plain Dictation or another mode with LLM cleanup off that places text into an
-app you trust with it. The experimental Coding agent mode is not one: turning cleanup off does not
-prevent agent instructions from reaching a provider. KeyScribe sends your words unredacted to the coding
+app you trust with it. The experimental Agent mode is not one: turning cleanup off does not
+prevent agent instructions from reaching a provider. KeyScribe sends your words unredacted to the
 agent, which uses its own provider settings.
 
 ## Privacy mode and context are mutually exclusive
@@ -187,8 +187,8 @@ Everything KeyScribe persists is a plain file under `~/Library/Application Suppo
 in the same `Application Support` folder:
 
 - **Config** (modes, connections, dictionary, replacements) as TOML.
-- **History** as JSONL, one file per day. Each entry holds what you said and what was inserted, what a
-  coding agent's spoken reply read aloud (see Spoken replies above), and,
+- **History** as JSONL, one file per day. Each entry holds what you said and what was inserted, what an
+  agent's spoken reply read aloud (see Spoken replies above), and,
   for a mode that uses an AI service, the request sent to it. That request can include text from other
   apps: the text you selected for a rewrite mode, and whatever context the mode attaches, such as text
   before the cursor. It is plain text, readable by anything running as you. Each entry also records
@@ -209,7 +209,7 @@ in the same `Application Support` folder:
   voice, its pronunciation files, is stored in `~/.cache/fluidaudio/Models/kokoro`, a folder other apps
   built on the same speech library can share. **Delete Voice** removes the voice and leaves that folder
   alone, because another app may be using it; delete it yourself if nothing else needs it.
-- **Coding agent connection** under `agents/`, only if you turn on the experimental Coding agent
+- **Agent connection** under `agents/`, only if you turn on the experimental Agent
   feature: an access token the agent connectors use to reach KeyScribe on your Mac, the Claude Code
   connector's files, `connectors.json`, the agent folders you connected and which connector installation
   may connect from each, and `names.json`, the names you chose for conversations along with their agent
@@ -227,8 +227,8 @@ in the same `Application Support` folder:
   KeyScribe reads the end of that conversation's own Claude Code transcript on your Mac; it keeps only
   the title, in memory, and never logs or stores the transcript. Pi's titles come from the connector,
   which reads nothing on disk but its own settings. To decide when to hand over what you said, the Pi
-  connector notes the time of the last key pressed in that session, never which key. When you start a
-  Coding agent dictation, KeyScribe asks the terminal in front which tab or pane is selected and reads the same
+  connector notes the time of the last key pressed in that session, never which key. When you start an
+  Agent dictation, KeyScribe asks the terminal in front which tab or pane is selected and reads the same
   process details, so what you say goes to the conversation you are looking at; it never asks for permission to
   do so, and the answer stays on your Mac and is not stored. To bring a
   conversation's terminal forward, KeyScribe reads a few terminal and multiplexer variables (such as a
@@ -242,7 +242,7 @@ in the same `Application Support` folder:
   you say them in full after “ask”, “tell”, “open” or “go to”, and lists them in Settings among the names
   that conversation also answers to; it never saves them, logs them, or uses them as the conversation's name. It never asks bb for a thread's prompts or replies, and runs those commands with bb's usage
   reporting turned off. Until you connect bb by installing the plugin, KeyScribe runs nothing of bb's. While bb is connected, KeyScribe also
-  reads bb's thread id and thread folder from the environment of each coding agent process it lists, so an
+  reads bb's thread id and thread folder from the environment of each agent process it lists, so an
   agent bb started is shown as that bb thread rather than a second time.
   The plugin runs inside bb and reports to KeyScribe, over the same local
   connection the connectors use, when each bb thread starts and finishes a turn, with the reply to that turn
@@ -267,8 +267,8 @@ in the same `Application Support` folder:
   into a sentence or two; a reply of a few words is read as it is without any service. KeyScribe keeps
   the full reply in memory only and never writes it to History or logs; what the service you chose keeps
   is up to that service. What KeyScribe actually reads aloud as a reply or a summary, or shows with the voice set
-  to Off — text only, is saved in History exactly as you heard or saw it, with the service that summarized it, when History is on and the Coding
-  agent mode is not left out of History. A reply to an instruction you dictated is saved with that
+  to Off — text only, is saved in History exactly as you heard or saw it, with the service that summarized it, when History is on and the Agent
+  mode is not left out of History. A reply to an instruction you dictated is saved with that
   dictation, and only when the dictation itself was saved. While KeyScribe is running it also holds, in memory
   only, the audio the natural voice generated for each reply History saved, so you can play it again or save it to
   report a reply that sounded wrong. Audio for anything History did not save (a repeat, a notice, a preview) is
@@ -287,7 +287,7 @@ in the same `Application Support` folder:
 You can inspect, back up, or delete any of it with the Finder or a text editor. Deleting the history
 files removes that history; removing the application support folder resets KeyScribe.
 
-When you say “insert clipboard contents” in a Coding agent message and the clipboard holds an image or a PDF,
+When you say “insert clipboard contents” in an agent message and the clipboard holds an image or a PDF,
 KeyScribe saves it to a file in your Mac's temporary folder so the agent can open it. Once the file is a day
 old, KeyScribe deletes it within the hour while it is running, or the next time it starts. The message names
 that file; Pi also receives the image with the message. Like anything you send an agent, the agent may pass

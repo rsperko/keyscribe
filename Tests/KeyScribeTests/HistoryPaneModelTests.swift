@@ -275,7 +275,7 @@ struct HistoryPaneModelTests {
 
     @Test func aReplyIsDeletedAsAReply() {
         let reply = AgentHistoryFacts.spokenReplyEntry(
-            id: "r1", mode: "Coding agent",
+            id: "r1", mode: "Agent",
             reply: .init(at: Date(timeIntervalSince1970: 1_700_000_000), conversation: "docs", text: "docs: Done."))
         #expect(deleteTitle(reply) == "Delete Reply")
         #expect(deleteTitle(entry("hello")) == "Delete Dictation")
@@ -294,7 +294,7 @@ struct HistoryPaneModelTests {
 
     @Test func aReplyOffersNoCorrections() async throws {
         let reply = AgentHistoryFacts.spokenReplyEntry(
-            id: "r1", mode: "Coding agent",
+            id: "r1", mode: "Agent",
             reply: .init(at: Date(timeIntervalSince1970: 1_700_000_000), conversation: "docs", text: "docs: Done."))
         let model = try await selectingOnly(reply, corrections: Corrections())
         #expect(!model.canCorrect)
@@ -536,7 +536,7 @@ struct HistoryPaneModelTests {
 
     @Test func copyReplyCopiesWhatWasReadAloud() async throws {
         let reply = AgentHistoryFacts.spokenReplyEntry(
-            id: "r1", mode: "Coding agent",
+            id: "r1", mode: "Agent",
             reply: .init(at: Date(timeIntervalSince1970: 1_700_000_000), conversation: "docs", text: "docs: Done."))
         let model = try await selectingOnly(reply, corrections: Corrections())
         var copied: String?
@@ -547,7 +547,7 @@ struct HistoryPaneModelTests {
 
     private func spokenReply() -> HistoryEntry {
         AgentHistoryFacts.spokenReplyEntry(
-            id: "r1", mode: "Coding agent",
+            id: "r1", mode: "Agent",
             reply: .init(at: Date(timeIntervalSince1970: 1_700_000_000), conversation: "docs", text: "docs: Done.", voice: "natural"))
     }
 

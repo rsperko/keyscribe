@@ -40,15 +40,15 @@ final class ModesSettingsModel: ObservableObject {
 
     private(set) var voiceCommandsEnabled: Bool
     let voiceCommands: VoiceCommandsSettingsModel
-    var codingAgents: CodingAgentsSettingsModel?
+    var agents: AgentsSettingsModel?
 
-    private(set) var codingAgentsEnabled: Bool
+    private(set) var agentsEnabled: Bool
     private(set) var askAboutSelectionEnabled = false
 
-    init(repository: ConfigRepository, voiceCommandsEnabled: Bool = false, codingAgentsEnabled: Bool = false) {
+    init(repository: ConfigRepository, voiceCommandsEnabled: Bool = false, agentsEnabled: Bool = false) {
         self.repository = repository
         self.voiceCommandsEnabled = voiceCommandsEnabled
-        self.codingAgentsEnabled = codingAgentsEnabled
+        self.agentsEnabled = agentsEnabled
         voiceCommands = VoiceCommandsSettingsModel(repository: repository)
         reload()
         // Refresh from disk on any external config write (e.g. a mode-scoped term from the correction
@@ -71,9 +71,9 @@ final class ModesSettingsModel: ObservableObject {
         reload(force: true)
     }
 
-    func setCodingAgentsEnabled(_ enabled: Bool) {
-        guard enabled != codingAgentsEnabled else { return }
-        codingAgentsEnabled = enabled
+    func setAgentsEnabled(_ enabled: Bool) {
+        guard enabled != agentsEnabled else { return }
+        agentsEnabled = enabled
         reload(force: true)
     }
 
@@ -89,9 +89,9 @@ final class ModesSettingsModel: ObservableObject {
     func reload(force: Bool = false) {
         guard force || configSignature() != loadedSignature else { return }
         let lkgModesDir = supportDir.appendingPathComponent("lkg", isDirectory: true).appendingPathComponent("modes", isDirectory: true)
-        ModeStore.ensureSystemModes(in: modesDir, voiceCommands: voiceCommandsEnabled, codingAgents: codingAgentsEnabled)
+        ModeStore.ensureSystemModes(in: modesDir, voiceCommands: voiceCommandsEnabled, agents: agentsEnabled)
         let result = ModeStore.load(in: modesDir, previous: modes, lkgDir: lkgModesDir)
-        modes = Mode.visible(result.modes, voiceCommands: voiceCommandsEnabled, codingAgents: codingAgentsEnabled)
+        modes = Mode.visible(result.modes, voiceCommands: voiceCommandsEnabled, agents: agentsEnabled)
         loadFailures = result.failures
         unknownKeys = loadUnknownKeys()
         connections = ConnectionStore.loadOrDefault(supportDir: supportDir).connections

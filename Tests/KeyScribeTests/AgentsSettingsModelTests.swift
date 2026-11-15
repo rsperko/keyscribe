@@ -4,7 +4,7 @@ import Testing
 @testable import KeyScribeApp
 
 @MainActor
-struct CodingAgentsSettingsModelTests {
+struct AgentsSettingsModelTests {
     final class CLI: @unchecked Sendable {
         private let lock = NSLock()
         private var _calls: [[String]] = []
@@ -57,16 +57,16 @@ struct CodingAgentsSettingsModelTests {
     private func makeModel(
         claude: String? = "/bin/claude-test", cli: CLI = CLI(), terminals: Terminals = Terminals(),
         script: String? = ClaudeConnectorFiles.registerJS, dir: URL? = nil
-    ) -> (CodingAgentsSettingsModel, CLI, URL) {
+    ) -> (AgentsSettingsModel, CLI, URL) {
         let dir = dir ?? FileManager.default.temporaryDirectory.appendingPathComponent("ks-agents-model-\(UUID().uuidString)")
         let connector = ClaudeConnector(
             locate: { claude }, run: { argv, _ in cli.run(argv) }, agentsDir: dir, pluginName: "keyscribe-dev", surfaces: .builtIn, script: script,
             home: dir.appendingPathComponent("home"))
-        let model = CodingAgentsSettingsModel(describeTerminal: terminals.describe, agentsDir: dir, connectors: [connector])
+        let model = AgentsSettingsModel(describeTerminal: terminals.describe, agentsDir: dir, connectors: [connector])
         return (model, cli, dir)
     }
 
-    private func setup(_ model: CodingAgentsSettingsModel) -> ConnectorSetupModel { model.connectors[0].setups[0] }
+    private func setup(_ model: AgentsSettingsModel) -> ConnectorSetupModel { model.connectors[0].setups[0] }
 
     private func defaultFolder(_ dir: URL) -> String {
         ConnectorFolders.canonical(dir.appendingPathComponent("home/.claude")).path
@@ -206,7 +206,7 @@ struct CodingAgentsSettingsModelTests {
         var now = Date(timeIntervalSince1970: 1_000)
         model.now = { now }
         model.reveal(["claude:7"])
-        now += CodingAgentsSettingsModel.revealLasts - 1
+        now += AgentsSettingsModel.revealLasts - 1
         #expect(model.pendingReveal == ["claude:7"])
         now += 1
         #expect(model.pendingReveal.isEmpty)
@@ -828,7 +828,7 @@ struct CodingAgentsSettingsModelTests {
 
     @Test func theRenameSheetExplainsWhereTheNameComesFromAndTheDefaultBehindAnOverride() {
         let (model, _, _) = makeModel()
-        let row = CodingAgentsSettingsModel.Row(
+        let row = AgentsSettingsModel.Row(
             id: "a", number: 1, name: "cos claude", folder: "/src/home", state: "Ready", connected: true, current: false, agent: "claude")
         var renamed = row
         renamed.renamed = true
@@ -844,7 +844,7 @@ struct CodingAgentsSettingsModelTests {
 
     @Test func theRenameSheetListsTheOtherNamesThatReachTheConversation() {
         let (model, _, _) = makeModel()
-        var row = CodingAgentsSettingsModel.Row(
+        var row = AgentsSettingsModel.Row(
             id: "a", number: 1, name: "marvin", folder: "/src/home", state: "Ready", connected: true, current: false, agent: "pi")
         row.otherNames = ["cos", "refactor auth"]
         model.defaultName = { _ in
@@ -865,32 +865,32 @@ struct CodingAgentsSettingsModelTests {
         (.tab, "window", "tmux", "This name follows this conversation, including when you resume it. To name future conversations in this window, rename the window in tmux."),
     ])
     func theRenameSheetSaysWhatSetsTheNameItCameFrom(level: AgentPlace.Level, term: String?, surface: String, note: String) {
-        var row = CodingAgentsSettingsModel.Row(
+        var row = AgentsSettingsModel.Row(
             id: "a", number: 1, name: "marvin", folder: "/src/home", state: "Ready", connected: true, current: false, agent: "pi")
         row.surface = surface
         row.place = AgentPlaceName(surface: surface, level: level, label: "marvin", term: term)
-        #expect(CodingAgentsSettingsModel.placeNote(row) == note)
+        #expect(AgentsSettingsModel.placeNote(row) == note)
         row.renamed = true
-        #expect(CodingAgentsSettingsModel.placeNote(row) == "This name follows this conversation, including when you resume it.")
+        #expect(AgentsSettingsModel.placeNote(row) == "This name follows this conversation, including when you resume it.")
         row.renamed = false
         row.place = nil
-        #expect(CodingAgentsSettingsModel.placeNote(row)?.hasSuffix("rename the pane in \(surface).") == true)
+        #expect(AgentsSettingsModel.placeNote(row)?.hasSuffix("rename the pane in \(surface).") == true)
         row.surface = nil
-        #expect(CodingAgentsSettingsModel.placeNote(row) == nil)
+        #expect(AgentsSettingsModel.placeNote(row) == nil)
     }
 
     @Test func aConversationWhosePlaceStoppedReadingSaysSoAndKeepsItsNames() {
-        var row = CodingAgentsSettingsModel.Row(
+        var row = AgentsSettingsModel.Row(
             id: "a", number: 1, name: "marvin", folder: "/src/home", state: "Ready", connected: true, current: false, agent: "pi")
-        #expect(CodingAgentsSettingsModel.placeTrouble(row) == nil)
+        #expect(AgentsSettingsModel.placeTrouble(row) == nil)
         row.surface = "herdr"
         let since = Date(timeIntervalSince1970: 1_800_000_000)
         row.unreadSince = since
         let time = since.formatted(date: .omitted, time: .shortened)
-        #expect(CodingAgentsSettingsModel.placeTrouble(row)
+        #expect(AgentsSettingsModel.placeTrouble(row)
             == "Couldn\u{2019}t read its herdr names since \(time). Using the names last read.")
         row.surface = nil
-        #expect(CodingAgentsSettingsModel.placeTrouble(row)
+        #expect(AgentsSettingsModel.placeTrouble(row)
             == "Couldn\u{2019}t read where it runs since \(time). Using the names last read.")
     }
 

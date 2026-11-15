@@ -30,7 +30,7 @@ review keeps finding the same few of them.
   before acting.** Never act on a positional index, a PID, or a display name alone — windows, tabs,
   and apps reorder between resolution and execution.
 - **An unresolved target holds and asks; it never falls through to the current, first, or default
-  target.** A tie is different: asking interrupts, so a tie takes a predictable order (a Coding agent
+  target.** A tie is different: asking interrupts, so a tie takes a predictable order (an agent
   recipient tie goes to the first name alphabetically unless the name is a place label several
   conversations share, a sidebar tie to the first in sidebar order) and
   asks only when no such order exists or a wrong guess would run the wrong action: different apps,
@@ -43,7 +43,7 @@ review keeps finding the same few of them.
   shortcut follows `run` (`VoiceCommandResolver.route`). A saved name said alone acts on nothing and answers
   with the phrase to say, which is what keeps a saved name from ever taking over a built-in command or
   ordinary speech, so never reintroduce a bare-name match.
-- **A Coding agent recipient changes only on an explicit verb.** `select`/`choose` with an address selects
+- **An agent recipient changes only on an explicit verb.** `select`/`choose` with an address selects
   (`AgentAddress.select`), `open` brings forward, and `tell`/`ask` or a name with a message sends; an address
   alone, or followed only by `please`, holds with the select hint and leaves the recipient as it was. `ask`
   always sends, so a question put to the agent never becomes a local status answer; an unknown name after
@@ -68,9 +68,9 @@ review keeps finding the same few of them.
 - **Strip parsed parts out of the original text; never rebuild the remainder.** Re-casing, re-joining,
   or re-normalizing the leftover corrupts content the user dictated (`npm test` must stay `npm test`).
 
-## Coding agents
+## Agents
 
-The coding-agent bridge (`AgentHub`, `AgentBridge`, `AgentHandles`, `AgentRecipient`, `AgentOutbox`,
+The agent bridge (`AgentHub`, `AgentBridge`, `AgentHandles`, `AgentRecipient`, `AgentOutbox`,
 the terminal routes, the agent adapters and their connectors) delivers dictated text to another program, so
 every rule above applies to it, with these sharpenings:
 
@@ -98,7 +98,7 @@ every rule above applies to it, with these sharpenings:
   hub rescans quickly only while a conversation is connected or Settings is open, and otherwise on a change
   in a watched session folder (`AgentDiscovery.watchedFolders`) plus a slow fallback
   (`AgentRuntime.rescanInterval`); the first conversation to connect ends the slow fallback at once. A press
-  refreshes, reads places and freezes the roster only when a Coding agent mode is eligible for it; the refresh
+  refreshes, reads places and freezes the roster only when an agent mode is eligible for it; the refresh
   stays, because a connector that resumes polling without a hello reports no event. Places are read when
   something needs them (a hello, a change in the listed conversations, that press), and on a timer only while
   Settings is open (`AgentHub.tickPlaces`): a terminal read is AppleScript or a CLI per surface, measured at
@@ -116,7 +116,7 @@ every rule above applies to it, with these sharpenings:
   reader): History keeps that line as heard, in its own field
   (`HistoryEntry.spokenReply`), never in `heard`, `transformed` or `result`, so nothing that learns from the user's
   speech reads it. It joins the dictation that asked for it only when that dictation was kept, and otherwise stands
-  alone only under the Coding agent mode's History choice. It is still never logged.
+  alone only under the Agent mode's History choice. It is still never logged.
 - **Text only changes delivery, never the queue.** With `text_only` on, `SpokenResultOutput.play` shows an item instead
   of speaking it and holds it as the playing item until the panel reports it closed (`dismissed()`), so relevance,
   order, supersession, the in-front skip and stop all stay the code paths a spoken reply takes. A shown item waits
@@ -153,7 +153,7 @@ every rule above applies to it, with these sharpenings:
   Escape claimed without key focus, since the wait can be long; either discards the take. `EngineKeeper.checkGate` marks only a check that
   entered that gate, and clears when its work really ends, so a refused check never holds a later commit.
   A check keeps nothing by itself; only
-  `SpokenReplyCheck.calibratedCheckers` show the advisory. In Coding agent mode, "that sounded wrong" on its own is a
+  `SpokenReplyCheck.calibratedCheckers` show the advisory. In Agent mode, "that sounded wrong" on its own is a
   command only while reply updates are on and a reply has been heard; anything else, including a message addressed
   to a conversation, reaches the agent.
 - **One synthesis at a time on the natural voice.** `KokoroVoice` admits replies, previews and the install check
@@ -164,13 +164,13 @@ every rule above applies to it, with these sharpenings:
   warming, before it waits. The output device is read off the main actor and only when the natural voice made audio. Audio with invalid samples, none, or no audible level (`SpokenAudioCheck`) never
   plays. The check cannot tell intelligible speech from right-length noise, so never word a fallback as having
   detected garbling.
-- **Clipboard files reach an agent by path.** In a Coding agent take, copied files become their paths, and an
+- **Clipboard files reach an agent by path.** In an agent take, copied files become their paths, and an
   image or PDF is saved under `AgentClipboard.defaultFolder` and becomes its path. Files older than
   `AgentClipboard.keptFor` are pruned at launch, every `AgentClipboard.pruneEvery`, and on each save. A saved
   image also rides the `submit` command's `images`, and the hub sends them only to a connector whose hello
   announced `images`; a connector reads each file just before submitting, and one it cannot read is left out
   while the path stays in the text. A send the agent rejects later is reported as refused.
-- **A Coding agent take is delivered whatever field has focus, a password field included.** The text goes
+- **An agent take is delivered whatever field has focus, a password field included.** The text goes
   to the agent the user addressed, not into the field, so the secure-field policy that keeps a dictation
   local does not stop it. The take is still left out of History (`design.md` §4.7), and the turn's reply
   can still go to the summary service like any dictated turn's.
@@ -371,17 +371,17 @@ every rule above applies to it, with these sharpenings:
   `Integrations/<Agent>/` folder, behind `AgentDiscovery` and `AgentConnector`, with the facts shared code needs
   carried by `AgentKind` and `AgentSession`. Shared code never branches on an agent's name; a new agent is a
   new adapter and an `AgentIntegration` in the one list Settings and the runtime both build from
-  (`CodingAgentIntegrations.agents`). `SourceInvariantsTests` pins the boundary.
+  (`AgentIntegrations.agents`). `SourceInvariantsTests` pins the boundary.
 - **A host owns conversations that have no process of their own.** An app that runs agent conversations
   itself is an `AgentHost`: its conversations are listed with a host location (`AgentHostLocation`: host,
   instance, native id) and no pid. The conversation id comes from the location alone
   (`AgentHostLocation.conversationKey`), so the same thread id on two instances is two conversations. A host
-  makes no call at all until the user turns it on in Settings (`Settings.CodingAgents.hosts`) and its own
+  makes no call at all until the user turns it on in Settings (`Settings.Agents.hosts`) and its own
   `isEnabled`, a filesystem-only check that the tool is installed, agrees (`HostDiscovery.isEnabled`); turning
   it off drops its conversations on the next scan. A host turned on whose tool is not installed lists nothing
   and says so beside its switch; a host whose list could not be read keeps what it last listed and says so too,
   each with what to do next. A host is asked for its list
-  only when the user may need it (a press for which a Coding agent mode is eligible, Settings open, Check
+  only when the user may need it (a press for which an agent mode is eligible, Settings open, Check
   Again, turning it on),
   at most once per `HostDiscovery.fallbackInterval`, and otherwise once per `HostDiscovery.idleInterval`; a
   list that could not be read is asked again after the shorter interval. Another agent's hello or title never
@@ -389,7 +389,7 @@ every rule above applies to it, with these sharpenings:
   host's own connector greeting a conversation the host has not listed yet asks it once for that conversation
   (`AgentHub.expectListing`), so a new thread has its name by the time its first reply is read. A
   host id must not repeat an agent's
-  or another host's (`CodingAgentIntegrations.resolve`). Each capability a host's API lacks answers
+  or another host's (`AgentIntegrations.resolve`). Each capability a host's API lacks answers
   unsupported, never a guess.
 - **A hosted conversation is reachable through its host.** It reads as Ready or Working rather than Not
   connected, offers Disconnect like any connected conversation, and Settings names it by the host. Its
@@ -506,7 +506,7 @@ every rule above applies to it, with these sharpenings:
 - **bb's plugin is a connector for every bb thread** (`BBPluginConnector`, sources in `Resources/BBPlugin`). It is
   installed like a connector, by the consent sheet's enrollment for bb's data folder, and bb is on exactly while
   that setup is enrolled, read from the enrollment itself, never copied into settings
-  (`CodingAgentsSettingsModel.isTurnedOn`; the hub rescans on every enrollment change,
+  (`AgentsSettingsModel.isTurnedOn`; the hub rescans on every enrollment change,
   `ConnectorSetupRegistry.onChange`). Enrollment, not bb's report, decides it: a failed install or a plugin removed
   inside bb keeps bb on, reads Not installed, and offers Reinstall without asking again, and an enrolled setup always
   offers Uninstall. A revocation that could not be saved still holds in memory and is written before any reload reads the

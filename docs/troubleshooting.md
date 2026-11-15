@@ -21,7 +21,7 @@ include more history, or `--dictations 0` for none.
 
 The output covers the version you are running, which permissions macOS has granted, your speech
 model, every mode's delivery settings, and how your recent dictations ended. Paste it into a bug
-report — or hand it to whichever coding agent you use, which saves the back-and-forth of being asked
+report — or hand it to whichever agent you use, which saves the back-and-forth of being asked
 for your version and settings one at a time.
 
 One caveat on the permissions it reports: macOS attributes microphone access to whatever launched a

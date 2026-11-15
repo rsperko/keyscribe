@@ -145,23 +145,23 @@ final class DictationController {
     private func sessionReturns(through hub: AgentHub) -> SessionReturns {
         SessionReturns(
             inFront: { [weak self, weak hub] in
-                guard let self, self.settings.features.isEnabled(.codingAgents), let hub else { return nil }
+                guard let self, self.settings.features.isEnabled(.agents), let hub else { return nil }
                 return await hub.sessionInFront()
             },
             open: { [weak self, weak hub] id, stillWanted in
-                guard let self, self.settings.features.isEnabled(.codingAgents), let hub else { return .none }
+                guard let self, self.settings.features.isEnabled(.agents), let hub else { return .none }
                 return await hub.open(id, makingCurrent: false, stillWanted: stillWanted)
             },
             handle: { [weak self, weak hub] id in
-                guard let self, self.settings.features.isEnabled(.codingAgents) else { return nil }
+                guard let self, self.settings.features.isEnabled(.agents) else { return nil }
                 return hub?.handle(of: id)
             },
             replay: { [weak self] in
-                guard let self, self.settings.features.isEnabled(.codingAgents), let spoken = self.spokenUpdates else { return .off }
+                guard let self, self.settings.features.isEnabled(.agents), let spoken = self.spokenUpdates else { return .off }
                 return spoken.repeatLast()
             },
             keepReply: { [weak self] in
-                guard let self, self.settings.features.isEnabled(.codingAgents) else { return .nothingHeard }
+                guard let self, self.settings.features.isEnabled(.agents) else { return .nothingHeard }
                 return self.keepLastReply?() ?? .nothingHeard
             })
     }
@@ -450,7 +450,7 @@ final class DictationController {
         self.settings = settings
         if settings.duringDictation.otherAudio != previousOtherAudio { effects.otherAudioChanged(settings.duringDictation.otherAudio) }
         if !settings.features.isEnabled(.voiceCommands) { stopVoiceCommandChoice() }
-        if !settings.features.isEnabled(.codingAgents) { StopGate.closeAll() }
+        if !settings.features.isEnabled(.agents) { StopGate.closeAll() }
         audio.setPreferredInputUID(settings.audio.inputDeviceUID)
         engines.rescheduleIdleEviction()
         if settings.stt.eviction != previousEviction { reconcileCaptureWarmth() }
@@ -1746,9 +1746,9 @@ final class DictationController {
     func recordSpokenReply(_ heard: SpokenResultOutput.Heard) {
         spokenAttempts?.awaitLink(heard.attempt)
         agentOutput.recordSpokenReply(heard, alone: {
-            let mode = config.modes.first { $0.id == Mode.codingAgentId }
+            let mode = config.modes.first { $0.id == Mode.agentModeId }
             guard !(mode?.excludeFromHistory ?? false) else { return nil }
-            return (mode?.name ?? Mode.codingAgent.name, settings.history.retentionDays)
+            return (mode?.name ?? Mode.agentMode.name, settings.history.retentionDays)
         }, then: { [weak self] entry in
             guard let self else { return }
             self.spokenAttempts?.link(heard.attempt, to: entry)
@@ -2570,7 +2570,7 @@ final class DictationController {
         }
         if mode?.output == .agent {
             let id = session?.agentRecipient?.id ?? agents?.current
-            return SpokenHelp.codingAgent(
+            return SpokenHelp.agent(
                 title: title, recipient: id.flatMap { agents?.handle(of: $0) }, example: agents?.recordingOrder.first?.handle,
                 readsReplies: spokenUpdates?.readsReplies == true, canRepeat: spokenUpdates?.hasReplyToRepeat == true,
                 stages: stages)
@@ -2630,7 +2630,7 @@ extension DictationController: EngineKeeperHost {
 }
 
 extension DictationController: AgentTakeHost {
-    var codingAgentsEnabled: Bool { settings.features.isEnabled(.codingAgents) }
+    var agentsEnabled: Bool { settings.features.isEnabled(.agents) }
     var takeIdentity: AnyObject? { session?.identity }
     var takeMode: Mode? { activeMode }
     var eligibleModes: [Mode]? { session?.eligibleModes }

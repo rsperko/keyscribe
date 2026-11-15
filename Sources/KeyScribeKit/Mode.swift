@@ -412,8 +412,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
 
     public static let directId = "_direct"
     public static let voiceCommandsId = "_voice_commands"
-    public static let codingAgentId = "_coding_agent"
-    public var isSystem: Bool { id == Mode.directId || id == Mode.voiceCommandsId || id == Mode.codingAgentId }
+    public static let agentModeId = "_agent"
+    public var isSystem: Bool { id == Mode.directId || id == Mode.voiceCommandsId || id == Mode.agentModeId }
     public var isDirect: Bool { id == Mode.directId }
     public var runsVoiceCommands: Bool { output == .voiceCommand }
     public var answersAloud: Bool { output == .speak }
@@ -440,17 +440,17 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         return mode
     }
 
-    public static var codingAgent: Mode {
-        var mode = Mode(id: codingAgentId, name: "Coding agent")
+    public static var agentMode: Mode {
+        var mode = Mode(id: agentModeId, name: "Agent")
         mode.output = .agent
         mode.trailing = .none
         mode.commands = Commands(liveEdits: true, numbers: true)
         return mode
     }
 
-    public static func visible(_ modes: [Mode], voiceCommands: Bool, codingAgents: Bool = false, answers: Bool = true) -> [Mode] {
+    public static func visible(_ modes: [Mode], voiceCommands: Bool, agents: Bool = false, answers: Bool = true) -> [Mode] {
         modes.filter {
-            (voiceCommands || $0.id != voiceCommandsId) && (codingAgents || $0.id != codingAgentId) && (answers || !$0.answersAloud)
+            (voiceCommands || $0.id != voiceCommandsId) && (agents || $0.id != agentModeId) && (answers || !$0.answersAloud)
         }
     }
 
@@ -464,8 +464,8 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     }
 
     public func systemNormalized() -> Mode {
-        if id == Mode.codingAgentId {
-            var mode = Mode.codingAgent
+        if id == Mode.agentModeId {
+            var mode = Mode.agentMode
             mode.triggerKeys = triggerKeys
             mode.enabled = enabled
             mode.agent = agent
@@ -574,8 +574,8 @@ public enum ModeStore {
         if mode.output == .voiceCommand && id != Mode.voiceCommandsId {
             throw ConfigError.invalid("output = \"voice_command\" belongs to the built-in Voice Commands mode")
         }
-        if mode.output == .agent && id != Mode.codingAgentId {
-            throw ConfigError.invalid("output = \"agent\" belongs to the built-in Coding agent mode")
+        if mode.output == .agent && id != Mode.agentModeId {
+            throw ConfigError.invalid("output = \"agent\" belongs to the built-in Agent mode")
         }
         if mode.answersAloud && mode.source != .selection {
             throw ConfigError.invalid("output = \"speak\" answers about selected text, so it needs source = \"selection\"")
@@ -863,13 +863,13 @@ public enum ModeStore {
     }
 
     // The Direct file also marks the completed Plain Dictation migration.
-    public static func ensureSystemModes(in dir: URL, voiceCommands: Bool = false, codingAgents: Bool = false) {
+    public static func ensureSystemModes(in dir: URL, voiceCommands: Bool = false, agents: Bool = false) {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         if voiceCommands {
             ensureSystemMode(.voiceCommands, in: dir) { .voiceCommands }
         }
-        if codingAgents {
-            ensureSystemMode(.codingAgent, in: dir) { .codingAgent }
+        if agents {
+            ensureSystemMode(.agentMode, in: dir) { .agentMode }
         }
         ensureSystemMode(.direct, in: dir) { migratedDirect(in: dir) }
     }

@@ -8,7 +8,7 @@ public struct SpokenResultSettings: Codable, Equatable, Sendable {
     public var textOnly: Bool
 
     public static let defaultPrompt = """
-    The text below is a coding agent's reply to a developer. Tell the developer what they most need to know in one \
+    The text below is an agent's reply to a developer. Tell the developer what they most need to know in one \
     or two short spoken sentences, about 25 words in all. Anything that failed, is unverified, or waits on their \
     answer or decision comes first; otherwise the main result. Leave out everything else, even if that drops \
     several points. Speak plainly, as to a colleague, and output only what to say.
@@ -161,7 +161,7 @@ public enum SpokenResult {
     }
 
     public static let waitingPrompt = """
-        A coding agent has paused on a prompt and is waiting for the user. Below are what is known about it: the \
+        An agent has paused on a prompt and is waiting for the user. Below are what is known about it: the \
         prompt's kind (select, confirm, input, editor or custom) and title, the tool call that was running and its \
         arguments, and the agent's last words before it asked. The tool call may be unrelated to the prompt; when \
         they disagree, the prompt's title wins. Say in one spoken sentence of at most twenty-five words what it is \

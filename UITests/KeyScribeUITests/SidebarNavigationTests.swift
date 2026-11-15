@@ -93,7 +93,7 @@ final class SidebarNavigationTests: XCTestCase {
         XCTAssertTrue(window.staticTexts["During dictation"].waitForExistence(timeout: 8),
                       "the audio and system options should say that they apply during dictation")
         let footer = window.staticTexts.matching(
-            NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "These settings apply while you dictate.", "reads coding agent replies aloud"))
+            NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "These settings apply while you dictate.", "reads agent replies aloud"))
         XCTAssertTrue(footer.firstMatch.exists,
                       "the audio and system options should explain their scope, including reading a reply aloud")
     }

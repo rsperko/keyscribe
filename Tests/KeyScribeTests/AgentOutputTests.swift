@@ -21,7 +21,7 @@ struct AgentOutputTests {
         output.showNotice(.uncertain("frontend"))
         output.noticesBlocked = { false }
         for _ in 0..<200 where spy.states.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
-        #expect(spy.states.first == AgentOutput.receiptState(.uncertain("frontend"), mode: "Coding agent", heard: ""))
+        #expect(spy.states.first == AgentOutput.receiptState(.uncertain("frontend"), mode: "Agent", heard: ""))
         #expect(hides.first == 4)
     }
 
@@ -39,7 +39,7 @@ struct AgentOutputTests {
         let (request, _) = await output.deliver("hi", to: "s1", via: hub)
         output.showNotice(.sent("backend"), request: request)
         var entry = HistoryEntry(
-            id: UUID().uuidString, timestamp: Date(), modeName: "Coding agent", heard: "hi", result: "hi", outcome: .inserted,
+            id: UUID().uuidString, timestamp: Date(), modeName: "Agent", heard: "hi", result: "hi", outcome: .inserted,
             cloudInvolved: false, redaction: false, contextCategories: [])
         entry.summary = "Queued for backend"
         reporter.append(entry, retentionDays: 7, confirm: true)
@@ -64,7 +64,7 @@ struct AgentOutputTests {
         let (request, _) = await output.deliver("hi", to: "s1", via: hub)
         output.recordDelivery(.init(label: "Delivery", value: "early"), request: request)
         var entry = HistoryEntry(
-            id: UUID().uuidString, timestamp: Date(), modeName: "Coding agent", heard: "hi", result: "hi", outcome: .failed,
+            id: UUID().uuidString, timestamp: Date(), modeName: "Agent", heard: "hi", result: "hi", outcome: .failed,
             cloudInvolved: false, redaction: false, contextCategories: [])
         entry.facts = [.init(label: "Command", value: "Send message"), .init(label: "Delivery", value: "first")]
         reporter.append(entry, retentionDays: 7, confirm: true)

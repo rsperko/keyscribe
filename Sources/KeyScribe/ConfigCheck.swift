@@ -16,7 +16,7 @@ enum ConfigCheck {
         switch SettingsStore.load(supportDir: supportDir) {
         case .loaded(let settings):
             config.voiceCommandsEnabled = settings.features.isEnabled(.voiceCommands)
-            config.codingAgentsEnabled = settings.features.isEnabled(.codingAgents)
+            config.agentsEnabled = settings.features.isEnabled(.agents)
             config.answersEnabled = settings.features.isEnabled(.askAboutSelection)
         case .failed(let error):
             problems.append(line(.unreadable(SettingsStore.fileName, error: error, recovery: .defaults)))

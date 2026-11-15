@@ -1,8 +1,8 @@
 import Foundation
 
 // Pure search over locally stored text (ui_design.md §8): case-insensitive substring over the
-// heard transcription, the final result, the mode name, why a command failed, the recorded summary, and what a
-// coding agent's reply read aloud. An empty query
+// heard transcription, the final result, the mode name, why a command failed, the recorded summary, and what an
+// agent's reply read aloud. An empty query
 // returns everything.
 public enum HistorySearch {
     public static func matches(_ entry: HistoryEntry, query: String) -> Bool {

@@ -399,7 +399,7 @@ struct SpeakingHUDPreviewTests {
 
 @MainActor
 struct SpokenUpdatesMenuTests {
-    @Test func theToggleAppearsWithCodingAgentsShowsTheSettingAndReportsAClick() throws {
+    @Test func theToggleAppearsWithAgentsShowsTheSettingAndReportsAClick() throws {
         let menu = MenuBarController()
         menu.install()
         let item = menu.spokenUpdatesMenuItem
@@ -421,7 +421,7 @@ struct SpokenUpdatesMenuTests {
 
 @MainActor
 struct SpokenUpdatesMenuAvailabilityTests {
-    @Test func theItemIsHiddenWithoutCodingAgents() {
+    @Test func theItemIsHiddenWithoutAgents() {
         let menu = MenuBarController()
         menu.install()
         menu.setSpokenUpdates(available: false, on: true)

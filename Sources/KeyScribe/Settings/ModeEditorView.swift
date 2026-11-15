@@ -19,7 +19,7 @@ struct ModeEditorView: View {
     var onDuplicate: () -> Void = {}
     var onEditVocabulary: () -> Void = {}
     let onDelete: () -> Void
-    var codingAgents: CodingAgentsSettingsModel?
+    var agents: AgentsSettingsModel?
     var sharedVocabularyNames: [String] = []
 
     private var bind: ModeBinding { ModeBinding(mode: mode, onUpdate: onUpdate) }
@@ -28,14 +28,14 @@ struct ModeEditorView: View {
     }
 
     var body: some View {
-        if mode.id == Mode.codingAgentId { codingAgentBody } else if mode.isSystem { systemBody } else { normalBody }
+        if mode.id == Mode.agentModeId { agentBody } else if mode.isSystem { systemBody } else { normalBody }
     }
 
-    private var codingAgentBody: some View {
-        ScrollViewReader { scroll in codingAgentForm(scroll) }
+    private var agentBody: some View {
+        ScrollViewReader { scroll in agentForm(scroll) }
     }
 
-    private func codingAgentForm(_ scroll: ScrollViewProxy) -> some View {
+    private func agentForm(_ scroll: ScrollViewProxy) -> some View {
         Form {
             Section {
                 PaneDetailHeader(
@@ -51,17 +51,17 @@ struct ModeEditorView: View {
                 TriggerConflictLabel(conflict: trigger.conflict, mode: mode)
                 ExtraTriggersNote(mode: mode)
             }
-            if let codingAgents {
-                CodingAgentPhrasesSection(model: codingAgents)
-                CodingAgentRecipientSection(
-                    model: codingAgents, shortcut: ModeSummary.triggerDescriptors(mode).first?.displayString, scroll: scroll)
-                SpokenResultSection(model: codingAgents, connections: connections)
-                ConnectorSetupsProblemSection(model: codingAgents)
-                ForEach(codingAgents.connectors.filter { connector in !codingAgents.hosts.contains { $0.id == connector.kind.id } }) { connector in
-                    AgentConnectorSection(model: connector, onInstall: { codingAgents.requestInstall($0, of: connector) })
+            if let agents {
+                AgentPhrasesSection(model: agents)
+                AgentRecipientSection(
+                    model: agents, shortcut: ModeSummary.triggerDescriptors(mode).first?.displayString, scroll: scroll)
+                SpokenResultSection(model: agents, connections: connections)
+                ConnectorSetupsProblemSection(model: agents)
+                ForEach(agents.connectors.filter { connector in !agents.hosts.contains { $0.id == connector.kind.id } }) { connector in
+                    AgentConnectorSection(model: connector, onInstall: { agents.requestInstall($0, of: connector) })
                 }
-                ForEach(codingAgents.hosts, id: \.id) { host in
-                    AgentHostSection(model: codingAgents, host: host, connector: codingAgents.connectors.first { $0.kind.id == host.id })
+                ForEach(agents.hosts, id: \.id) { host in
+                    AgentHostSection(model: agents, host: host, connector: agents.connectors.first { $0.kind.id == host.id })
                 }
             }
             Section("Words") {
@@ -80,7 +80,7 @@ struct ModeEditorView: View {
                 Section("Data sent with AI") {
                     SettingRow(
                         title: "Hide recognizable sensitive text",
-                        help: "Best-effort redaction replaces recognizable sensitive spans with tokens before the AI rewrite, then restores them on this Mac. It protects only the rewrite request: the coding agent still receives your words in full.")
+                        help: "Best-effort redaction replaces recognizable sensitive spans with tokens before the AI rewrite, then restores them on this Mac. It protects only the rewrite request: the agent still receives your words in full.")
                     {
                         Toggle("", isOn: privacyMode).labelsHidden()
                             .accessibilityIdentifier(AccessibilityID.Mode.Editor.privacy)
@@ -89,12 +89,12 @@ struct ModeEditorView: View {
             }
             Section("Where it goes") {
                 Label(
-                    "The coding agent receives what you say and sends it to its own AI provider under its own settings. Best-effort redaction does not apply to it.",
+                    "The agent receives what you say and sends it to its own AI provider under its own settings. Best-effort redaction does not apply to it.",
                     systemImage: "arrow.up.forward.app")
                     .font(.caption).foregroundStyle(.secondary)
                 SettingRow(
                     title: "Do not save this mode in history",
-                    help: "When on, what you send to coding agents is never written to local history. Other modes still record per your History setting.")
+                    help: "When on, what you send to agents is never written to local history. Other modes still record per your History setting.")
                 {
                     Toggle("", isOn: bind.binding(\.excludeFromHistory)).labelsHidden()
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.excludeFromHistory)
@@ -103,7 +103,7 @@ struct ModeEditorView: View {
         }
         .formStyle(.grouped)
         .padding(16)
-        .background { if let codingAgents { ConnectorConsentPresenter(model: codingAgents) } }
+        .background { if let agents { ConnectorConsentPresenter(model: agents) } }
     }
 
     private var systemBody: some View {
@@ -205,13 +205,13 @@ struct ModeEditorView: View {
                 onCloseFragment: onCloseFragment,
                 onRevealFragment: onRevealFragment)
             dataSentWithAISection
-            if mode.answersAloud, let codingAgents, let voice = codingAgents.voice {
+            if mode.answersAloud, let agents, let voice = agents.voice {
                 Section("Answer") {
                     SpokenVoiceRows(
                         voice: voice,
-                        selection: Binding(get: { codingAgents.voiceChoice }, set: { codingAgents.voiceChoice = $0 }),
-                        spokenVoice: codingAgents.chosenVoice,
-                        sharedNote: "This choice also applies to coding agent reply updates, so changing it here changes it there.")
+                        selection: Binding(get: { agents.voiceChoice }, set: { agents.voiceChoice = $0 }),
+                        spokenVoice: agents.chosenVoice,
+                        sharedNote: "This choice also applies to agent reply updates, so changing it here changes it there.")
                 }
             }
 

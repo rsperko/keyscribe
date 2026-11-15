@@ -12,7 +12,7 @@
 ```
 ~/Library/Application Support/KeyScribe/
   README.md                # app-managed: what this folder is and which files the app rewrites
-  AGENTS.md                # app-managed: instructions for a coding agent opened in this folder
+  AGENTS.md                # app-managed: instructions for an agent opened in this folder
   CLAUDE.md                # app-managed: `@AGENTS.md`, for Claude Code
   reference/               # app-managed: this schema, as shipped with the installed version
   AGENTS.override.md       # yours, optional: your own agent instructions; the app never touches it
@@ -38,7 +38,7 @@
     baseline.json          #   recent stage timings per second of audio, for "usual" in reports
   usage/                   # replacement use counts (see "Replacement usage")
     replacements.json
-  agents/                  # coding agent bridge (experimental; see "Coding agent names")
+  agents/                  # agent bridge (experimental; see "Agent names")
     token                  #   the access token the Claude Code connector presents
     bridge.sock            #   the local socket the connector talks to
     ready.json             #   present only while KeyScribe is listening on bridge.sock
@@ -58,7 +58,7 @@
   Codex should start by telling it to read `AGENTS.md`. Markdown files at the top level and `reference/`
   are not config: editing them never reloads it, and `--reset config` keeps them.
 - **The agent guide fences off private data.** It tells agents to work only with the config files and not
-  to read history, usage, the coding agent bridge's folder, or backups. That is guidance an agent can
+  to read history, usage, the agent bridge's folder, or backups. That is guidance an agent can
   ignore, not access control.
 - **Check the folder from a terminal** with `<app>/Contents/MacOS/KeyScribe --check-config` (honors
   `--config-dir`). It loads every file the way the app does and prints each file it cannot read, each key
@@ -132,7 +132,7 @@
   without interpreting them. `summary` is the strongest outcome in words, shown in place of the outcome label
   (and searched); `facts` are ordered `{label, value}` pairs of context fixed when the entry was written; and
   `steps` are ordered `{at, text}` transitions added when a later result arrives, never removing an earlier one.
-  A **Coding agent** take fills them: `summary` says what happened (`Sent to backend`, `Queued for backend`,
+  An **Agent** take fills them: `summary` says what happened (`Sent to backend`, `Queued for backend`,
   `Opened backend`, or why nothing was sent), and `facts` record the command (Open, choosing a recipient, or a
   message), the spoken address, the conversation chosen with its session id, how it was chosen, the default
   recipient frozen at the start of the take, and for a message that was handed off, `Delivery`: when it was
@@ -141,14 +141,14 @@
   did not match, a turn followed for its reply, when the receipt arrived, and reconnects while waiting. It
   holds times and fixed wording only and is rewritten as later reports arrive. `result` is the text actually sent,
   empty for an Open. A queued or uncertain message's entry is updated in place, by `id`, when its receipt
-  arrives while the app is still running; a receipt after a restart, or after Coding agents is turned off,
+  arrives while the app is still running; a receipt after a restart, or after Agents is turned off,
   leaves the entry as it was. The update re-reads the entry, so a rewrite that fell back or was skipped
   keeps `outcome = "local_fallback"` with its `fallback_reason` or `rewrite_skipped_ms`, and
   `fallback_reason` is kept even when delivery failed. `outcome` stays
   the coarse `inserted` or `failed` that the rest of History keys on; read `summary` for what reached the
   agent. These fields hold fixed local wording and names, never an agent's reply, a credential, or an
   environment value, and they follow the same History setting and per-mode exclusion as everything else.
-  The optional `spoken_reply` is what a Coding agent reply update gave, written once it became audible, or, with the
+  The optional `spoken_reply` is what an agent reply update gave, written once it became audible, or, with the
   voice set to Off — text only, once it was shown: `{at, conversation, text, connection, voice, reason, shown}`, where
   `shown` is `true` only for an update shown without speech (absent otherwise, and then `voice` is absent too), where `text` is the line exactly as heard (a reply, a summary, or how
   a turn ended; a notice is never written), `connection` names the service that wrote the
@@ -158,8 +158,8 @@
   `reason`, present only with `"macos"`, is fixed local wording saying why the natural voice did not read it
   ("the natural voice took too long"); it never holds reply text. A reply to a dictated message is added in place, by `id`, to that
   take's entry, and only when the take was kept. A reply asked for from inside the agent is an entry of its own
-  under the Coding agent mode's name, with `outcome = "command"`, empty `heard` and `result`, and `summary`
-  `Reply from <name>`; it is written only when History is on and the Coding agent mode is not excluded from
+  under the Agent mode's name, with `outcome = "command"`, empty `heard` and `result`, and `summary`
+  `Reply from <name>`; it is written only when History is on and the Agent mode is not excluded from
   History. A notice on its own is not written.
   Optional fields come later, written in place by `id`: `check` (`{heard, error_rate, checker}`), what on-device
   speech recognition heard the last time Check Audio listened to the natural voice's generated audio for that reply,
@@ -249,7 +249,7 @@ never hand-edited, and a write to it does not reload configuration.
   overwritten. Only the most recent unreadable copy is kept; if it cannot be moved, counts are kept in
   memory only until the next launch rather than written over it.
 
-## Coding agent bridge
+## Agent bridge
 
 Every agent connector talks to KeyScribe over HTTP on `agents/bridge.sock`, presenting `agents/token`
 as a bearer token; the Claude Code connector is a plugin, the Pi connector an extension, and both speak the
@@ -489,9 +489,9 @@ a hello on any other protocol is refused with `426` and is never registered or s
 - **The status-line label is cleared by the connector** when KeyScribe stops answering, so a label never
   outlives the app.
 
-## Coding agent names
+## Agent names
 
-`agents/names.json` holds the names chosen with **Rename…** on the Coding agent page, keyed by the
+`agents/names.json` holds the names chosen with **Rename…** on the Agent page, keyed by the
 agent's session id (`{"schema_version": 1, "names": {"<session id>": "backend"}}`), and in `excluded` the
 session ids of conversations you disconnected (`"excluded": ["pi:<session id>"]`). A disconnected conversation
 stays disconnected when it resumes; a new or forked conversation has a new id, so it connects normally. Without an override,
@@ -553,7 +553,7 @@ state, and a write to it does not reload configuration.
   with "tell" reaches a conversation only through a row number, never the current recipient (unaddressed
   takes, including one that starts with a name but no "tell" and one that starts with "ask" and no row number, still go to
   the current recipient), Rename is unavailable, and the
-  Coding agent page says why, with **Try Again**. This differs from `usage/` on purpose — starting fresh
+  Agent page says why, with **Try Again**. This differs from `usage/` on purpose — starting fresh
   there costs counts, while starting fresh here could hand a familiar name to a different conversation.
 - Session ids and names are kept whether or not History is on, until the file is deleted. No message
   text is stored there.
@@ -700,7 +700,7 @@ context = { app = true, preceding_text = false }
 | `trigger_phrases` | string[] | Spoken phrases matched at the transcript end post-STT — case-insensitive, word-boundary-honored, trailing punctuation/space tolerated. Each is a regex, so power users can write one (`(?-i)` opts back into case-sensitivity). Zero or more. |
 | `constraints[]` | table[] | Any of `bundle_id`, `bundle_prefix`, `url_pattern`, `window_title` (ANDed). Empty ⇒ eligible everywhere. |
 | `source` | enum | `dictation` \| `selection`. |
-| `output` | enum | `cursor` \| `replace_selection` \| `speak` \| `voice_command` \| `agent`. `speak` answers the spoken request about the selected text and reads the answer aloud; the selection is not changed. It needs `source = "selection"` (a file that pairs it with `dictation` fails to load), runs only while the `ask_about_selection` experimental flag is on, and ignores the insertion, `trailing`, `submit`, and context settings: only the selection and the spoken request are sent. `voice_command` is the Voice Commands system mode's output: the take is run as a command (`voice_commands.toml`) and nothing is inserted. `agent` is the Coding agent system mode's output: the take goes to a coding agent conversation ("Coding agent bridge" above). Any other mode file that sets either fails to load. |
+| `output` | enum | `cursor` \| `replace_selection` \| `speak` \| `voice_command` \| `agent`. `speak` answers the spoken request about the selected text and reads the answer aloud; the selection is not changed. It needs `source = "selection"` (a file that pairs it with `dictation` fails to load), runs only while the `ask_about_selection` experimental flag is on, and ignores the insertion, `trailing`, `submit`, and context settings: only the selection and the spoken request are sent. `voice_command` is the Voice Commands system mode's output: the take is run as a command (`voice_commands.toml`) and nothing is inserted. `agent` is the Agent system mode's output: the take goes to an agent conversation ("Agent bridge" above). Any other mode file that sets either fails to load. |
 | `[agent]` | table | Read only with `output = "agent"`. `target` picks the conversation a take goes to when it does not start with one's name: `current` (default) is the conversation the front terminal shows when the take starts, if that can be confirmed in the window that had focus, without asking for access, shortly after release at the latest, and otherwise the current recipient; `ask` holds the take until one is named, and any other text is the name of a fixed conversation (the take is held if no live conversation has that name). An older `focused` is read as `current`. |
 | `commands.live_edits` | bool | Opt-in to the spoken-command list (insert new line, insert new paragraph, insert tab character, scratch that, **never mind** / **start over** to discard the whole take, **insert clipboard contents**, **begin/end verbatim**). |
 | `commands.privacy` | bool | Opt-in to best-effort redaction. When true, **context is forced off** — `ai_rewrite.context` is locked to all-false so only the redacted transcript leaves. |
@@ -1034,7 +1034,7 @@ runs, and is reported like any other config file. Replacement use counts are kep
 Read only while the `voice_commands` flag is on. The Voice Commands mode understands
 an app-switching verb followed by a target (`VoiceCommandGrammar.focusVerbs`), `run <action> [words]`, `go back`,
 `repeat that` or `say that again` (`VoiceCommandGrammar.repeatSummary`, which replays the last spoken reply of the
-Coding agent feature), and `cancel` or `never mind` (`VoiceCommandGrammar.cancel`, which runs nothing), matched against
+Agent feature), and `cancel` or `never mind` (`VoiceCommandGrammar.cancel`, which runs nothing), matched against
 the whole utterance (case and punctuation ignored, and a leading or trailing `please` ignored around a recognized
 command, though not before a sound-alike prefix; a leading "the" is dropped from an app-switching target, so
 `switch to the browser` looks for `browser`, but not from a `run` action name). The app-switching prefixes also accept
@@ -1574,7 +1574,7 @@ eviction = "fastest"            # "fastest" | "balanced" | "frugal" (default: fa
 # Governs both STT-model residency AND idle microphone warm-up (the input unit is kept prewarmed for
 # instant starts). Fastest = model loaded + mic held warm (periodic binding refresh); Balanced = both
 # released after eviction_idle_seconds idle; Frugal = mic opened only while dictating, model freed each
-# dictation. The natural voice that reads Coding agent replies follows the same tier: Fastest keeps it
+# dictation. The natural voice that reads Agent replies follows the same tier: Fastest keeps it
 # loaded, Balanced frees it after eviction_idle_seconds without use, Frugal frees it after each reply or preview.
 # eviction_idle_seconds = 1800  # used when eviction = "balanced" (default: 1800 = 30 min)
 # The one dictionary-mechanism control: recognition bias is default-ON for the engines that support it
@@ -1622,14 +1622,14 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 # keep_captures = false                          # debug: retain a copy of each committed capture WAV
 # keep_captures_max_mb = 500                     # soft budget for the archive; oldest pruned first
 
-[coding_agents]                              # Settings ▸ Modes ▸ Coding agent
+[agents]                              # Settings ▸ Modes ▸ Agent
 # hosts = ["bb"]                                 # ids of the agent hosts the user turned on (an AgentKind id
-                                                 #   from CodingAgentIntegrations.hosts); absent = none: a
+                                                 #   from AgentIntegrations.hosts); absent = none: a
                                                  #   host makes no call until its id is here. A host that
                                                  #   brings its own plugin (bb) ignores this list: it is on
                                                  #   while its plugin is connected (connectors.json)
 
-[coding_agents.spoken_result]               # Settings ▸ Modes ▸ Coding agent ▸ Replies
+[agents.spoken_result]               # Settings ▸ Modes ▸ Agent ▸ Replies
 # enabled = true                                 # Reply updates; absent = false
 # connection = "omlx"                            # id of the AI service that summarizes a finished reply
                                                  #   and describes a Pi prompt; absent or "" = None:
@@ -1644,7 +1644,7 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
                                                  #   `voice` is kept
 ```
 
-> **`[coding_agents.spoken_result]`** is read for replies only while the Coding agent feature is on. A reply of at most
+> **`[agents.spoken_result]`** is read for replies only while the Agent feature is on. A reply of at most
 > `SpokenResult.verbatimWordLimit` words (counted on the reply as written, so a reply that is mostly code is
 > summarized rather than read as "code block") is spoken as it is, with markup removed, code blocks named and
 > recognized secrets hidden, without any service call; a reply with nothing left to read, such as one that is
@@ -1662,7 +1662,7 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 > `voice`, and so does `text_only`. `text_only` is an output choice, not a speaker: it changes only how an update or
 > answer is delivered (shown on the panel instead of read aloud, with no voice loaded and no audio lowered), never which
 > updates are given or in what order, and turning it off returns to the saved `voice`. It also applies to Ask modes
-> (`output = "speak"`), which read `voice` and `text_only` from this table even while the Coding agent feature is off.
+> (`output = "speak"`), which read `voice` and `text_only` from this table even while the Agent feature is off.
 > Only turns the user's own dictation started, or that the user asked from inside the agent to hear, are spoken,
 > and a conversation confirmed in front when its turn finishes is skipped without a service call unless the user asked
 > to hear it. With `enabled` on, a dictated turn that starts waiting for
@@ -1743,7 +1743,7 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
   the LLM. Dictation only (not edit-in-place). Empty/absent clipboard leaves the phrase as text.
   "insert clipboard as code" (`ClipboardTokenizer.codePhrases`) inserts the same value inside a Markdown
   fence on lines of its own, with a fence longer than any backtick run in the clipboard.
-  In the Coding agent mode (`AgentClipboard`), copied files are inserted as their paths, and an image
+  In the Agent mode (`AgentClipboard`), copied files are inserted as their paths, and an image
   (saved as PNG) or a PDF is written to a `clipboard-for-agents` folder in the temporary directory, kept
   for a day (pruned at launch, hourly, and on each save), and inserted as its path; neither form is
   fenced. A connector that announces the `images` feature also receives each saved image's path in the

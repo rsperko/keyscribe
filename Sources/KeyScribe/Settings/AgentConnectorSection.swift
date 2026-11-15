@@ -3,18 +3,18 @@ import KeyScribeKit
 import SwiftUI
 
 struct ConnectorSetupsProblemSection: View {
-    @ObservedObject var model: CodingAgentsSettingsModel
+    @ObservedObject var model: AgentsSettingsModel
 
     var body: some View {
         if let problem = model.integrationsProblem {
             Section("Integrations") {
                 VStack(alignment: .leading, spacing: 8) {
-                    IssueText("Two of this build's coding agent integrations conflict, so coding agents are off.")
+                    IssueText("Two of this build's agent integrations conflict, so agents are off.")
                     Text(problem).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                     Text("This is a problem in how \(Branding.appName) was built, not in your settings. Report it to whoever made this build.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.integrationsProblem)
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.integrationsProblem)
             }
         }
         if let problem = model.setupsProblem {
@@ -26,20 +26,20 @@ struct ConnectorSetupsProblemSection: View {
                         .font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Button("Try Again") { Task { await model.retrySetups() } }
-                            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.reloadSetups)
+                            .accessibilityIdentifier(AccessibilityID.Mode.Agents.reloadSetups)
                         Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([model.setups.url]) }
-                            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.showSetupsFile)
+                            .accessibilityIdentifier(AccessibilityID.Mode.Agents.showSetupsFile)
                         Spacer()
                     }
                 }
-                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.setupsProblem)
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.setupsProblem)
             }
         }
     }
 }
 
 struct AgentHostSection: View {
-    @ObservedObject var model: CodingAgentsSettingsModel
+    @ObservedObject var model: AgentsSettingsModel
     let host: AgentKind
     var connector: AgentConnectorModel?
 
@@ -53,7 +53,7 @@ struct AgentHostSection: View {
                     help: "Lists the conversations \(host.displayName) runs and sends what you say to them through \(host.displayName)\u{2019}s own command, into a turn already running the way typing there would. \(Branding.appName) runs nothing of \(host.displayName)\u{2019}s until this is on.")
                 {
                     Toggle("", isOn: Binding(get: { model.isTurnedOn(host) }, set: { model.setTurnedOn(host, $0) })).labelsHidden()
-                        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.host(host.id))
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.host(host.id))
                 }
                 if let problem = model.problem(of: host) {
                     IssueText(problem, severity: .advisory)
@@ -91,16 +91,16 @@ private struct ConnectorSetupBlock: View {
             SettingRow(title: title, result: statusText, help: setup.copy.help, combinesAccessibilityChildren: false, hasError: setup.hasError) {
                 primaryAction
             }
-            .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.connectorStatus)
+            .accessibilityIdentifier(AccessibilityID.Mode.Agents.connectorStatus)
             if let purpose = setup.copy.purpose, !setup.isEnrolled {
                 Text(purpose).font(.caption).foregroundStyle(.secondary)
             }
             CopyableValue(setup.display, value: setup.folder.path, what: "folder", of: "this setup")
                 .font(.caption)
-                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.setupFolder)
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.setupFolder)
             if setup.copy.describesUse {
                 Text(usage).font(.caption).foregroundStyle(.secondary)
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.summary)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.summary)
             }
             issue
             if setup.showsRemovalWarning {
@@ -152,7 +152,7 @@ private struct ConnectorSetupBlock: View {
                 .foregroundStyle(.red)
                 .disabled(setup.operation != nil)
                 .accessibilityLabel("Uninstall \(setupName)")
-                .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.remove)
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.remove)
         }
     }
 
@@ -166,7 +166,7 @@ private struct ConnectorSetupBlock: View {
                     .font(.caption.monospaced())
             }
         }
-        .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.manualUninstall)
+        .accessibilityIdentifier(AccessibilityID.Mode.Agents.manualUninstall)
     }
 
     private var statusText: String {
@@ -193,27 +193,27 @@ private struct ConnectorSetupBlock: View {
             case .status(.notInstalled) where setup.offersReinstall:
                 Button("Reinstall") { Task { await setup.install() } }
                     .accessibilityLabel("Reinstall \(setupName)")
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.install)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.install)
             case .status(.notInstalled):
                 Button("Install\u{2026}", action: onInstall)
                     .accessibilityLabel("Install \(setupName)")
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.install)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.install)
             case .failed:
                 Button("Try Again") { Task { await setup.retry() } }
                     .accessibilityLabel("Try again for \(setupName)")
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.tryAgain)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.tryAgain)
             case .status(.outdated):
                 Button("Update") { Task { await setup.update() } }
                     .accessibilityLabel("Update \(setupName)")
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.update)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.update)
             case .broken:
                 Button("Repair") { Task { await setup.update() } }
                     .accessibilityLabel("Repair \(setupName)")
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.update)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.update)
             case .removalUnfinished:
                 Button("Finish Uninstalling") { Task { await setup.remove() } }
                     .accessibilityLabel("Finish uninstalling \(setupName)")
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.finishUninstalling)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.finishUninstalling)
             default:
                 EmptyView()
             }

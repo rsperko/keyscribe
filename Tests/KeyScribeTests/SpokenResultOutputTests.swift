@@ -1711,7 +1711,7 @@ struct SpokenResultOutputTests {
 @MainActor
 struct SpokenResultSettingsWiringTests {
     @Test func theChosenVoiceShowsTheRecommendedOneAndStoresItAsTheDefault() {
-        let agents = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: FileManager.default.temporaryDirectory, connectors: [])
+        let agents = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: FileManager.default.temporaryDirectory, connectors: [])
         #expect(agents.chosenVoice == SpokenVoices.recommended)
         agents.chosenVoice = "voice.one"
         #expect(agents.spokenResult.voice == "voice.one")
@@ -1721,8 +1721,8 @@ struct SpokenResultSettingsWiringTests {
 
     @Test func aChangeInTheSpokenResultSectionIsSavedAndALoadedValueIsNotSavedBack() {
         var saved: [SpokenResultSettings] = []
-        let model = SettingsModel(settings: .defaults, onChange: { saved.append($0.codingAgents.spokenResult) }, onReload: {}, onResetHUDPosition: {})
-        let agents = CodingAgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: FileManager.default.temporaryDirectory, connectors: [])
+        let model = SettingsModel(settings: .defaults, onChange: { saved.append($0.agents.spokenResult) }, onReload: {}, onResetHUDPosition: {})
+        let agents = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: FileManager.default.temporaryDirectory, connectors: [])
         agents.onSpokenResultChange = { model.setSpokenResult($0) }
         agents.load(spokenResult: SpokenResultSettings(enabled: true, connection: "omlx"))
         #expect(saved.isEmpty)

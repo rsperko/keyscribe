@@ -5,11 +5,11 @@ import KeyScribeKit
 
 @MainActor
 public final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let codingAgents: CodingAgentIntegrations
-    private lazy var surfaces: Result<ResolvedSurfaces, Error> = Result { try codingAgents.resolve() }
+    private let agentIntegrations: AgentIntegrations
+    private lazy var surfaces: Result<ResolvedSurfaces, Error> = Result { try agentIntegrations.resolve() }
 
-    public init(codingAgents: CodingAgentIntegrations = .builtIn) {
-        self.codingAgents = codingAgents
+    public init(agentIntegrations: AgentIntegrations = .builtIn) {
+        self.agentIntegrations = agentIntegrations
         super.init()
     }
 
@@ -202,7 +202,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 Log.config.error("replacement usage file was unreadable; moved to \(aside.lastPathComponent, privacy: .public) and started fresh")
             })
         config.voiceCommandsEnabled = settings.features.isEnabled(.voiceCommands)
-        config.codingAgentsEnabled = settings.features.isEnabled(.codingAgents)
+        config.agentsEnabled = settings.features.isEnabled(.agents)
         config.findsInAppsEnabled = settings.features.isEnabled(.findInApps)
         config.answersEnabled = settings.features.isEnabled(.askAboutSelection)
         configRepository = ConfigRepository(
@@ -274,9 +274,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         hud.onHelpHover = { [weak self] hovering in self?.controller.help.hover(hovering) }
         hud.onOpenSpeechModels = { [weak self] in self?.settingsController.present(.speechModels) }
         hud.onOpenAIService = { [weak self] id in self?.settingsController.presentAIService(id: id) }
-        hud.onOpenCodingAgents = { [weak self] mode, rows in
+        hud.onOpenAgents = { [weak self] mode, rows in
             self?.settingsController.presentMode(id: mode)
-            self?.settingsController.codingAgents.reveal(rows)
+            self?.settingsController.agents.reveal(rows)
         }
         hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
         hud.onKeyTaken = { [weak self] event in self?.controller.noteKeyReceivedByHUD(event) }
@@ -387,11 +387,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             replacedActiveId: launchEngineId == settings.stt.engine ? nil : settings.stt.engine)
 
         if case .failure(let error) = surfaces {
-            Log.agents.error("coding agent integrations conflict, coding agents stay off: \(String(describing: error), privacy: .public)")
+            Log.agents.error("agent integrations conflict, agents stay off: \(String(describing: error), privacy: .public)")
         }
         settingsController = SettingsController(
             settings: settings, speechModels: speechModels, repository: configRepository, surfaces: resolvedSurfaces,
-            agents: codingAgents, historyStore: history,
+            agentIntegrations: agentIntegrations, historyStore: history,
             onChange: { [weak self] updated in self?.applySettings(updated) },
             onReload: { [weak self] in self?.reloadConfig() },
             onResetHUDPosition: { [weak self] in self?.hud.resetAnchor() },
@@ -404,9 +404,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             onEraseAllData: { [weak self] in self?.eraseAllDataAndRelaunch() })
         settingsController.onErrorsChanged = { [weak self] in self?.menu.setErrorBadge($0) }
         if case .failure(let error) = surfaces {
-            settingsController.codingAgents.integrationsProblem = CodingAgentIntegrations.describe(error)
+            settingsController.agents.integrationsProblem = AgentIntegrations.describe(error)
         }
-        settingsController.codingAgents.voice = spokenVoice
+        settingsController.agents.voice = spokenVoice
         controller.spokenAttempts = spokenAttempts
         let history = settingsController.history
         history.spokenAudio = { [spokenAttempts] in spokenAttempts.attempt(forEntry: $0) }
@@ -437,7 +437,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             if let entry = self?.controller.lastSpokenReplyEntry { showEntry(entry) }
         }
         spokenVoice.showEntry = showEntry
-        applyCodingAgents()
+        applyAgents()
         correctionPanel.openSharedVocabulary = { [weak self] id, draft in
             self?.settingsController.presentSharedVocabulary(id: id, draft: draft)
         }
@@ -830,43 +830,43 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             supportDir: KeyScribePaths.supportDir)
     }
 
-    private func applyCodingAgents() {
-        let enabled = settings.features.isEnabled(.codingAgents) && (try? surfaces.get()) != nil
+    private func applyAgents() {
+        let enabled = settings.features.isEnabled(.agents) && (try? surfaces.get()) != nil
         guard enabled != (agentRuntime != nil) else { return }
         if enabled {
             do {
-                let setups = settingsController.codingAgents.setups
+                let setups = settingsController.agents.setups
                 let surfaces = resolvedSurfaces
                 let processes = AgentProcessTable(surfaces: surfaces)
                 let runtime = try AgentRuntime(
-                    supportDir: KeyScribePaths.supportDir, surfaces: surfaces, placeSources: codingAgents.placeSources.map { $0() },
-                    discovery: codingAgents.discoveries(setups: setups, processes: processes), setups: setups,
-                    legacyAgent: AgentKind.claude.id, hosts: codingAgents.hosts,
-                    hostAllowed: { [weak codingAgents = settingsController.codingAgents] in codingAgents?.isTurnedOn(id: $0) ?? false })
+                    supportDir: KeyScribePaths.supportDir, surfaces: surfaces, placeSources: agentIntegrations.placeSources.map { $0() },
+                    discovery: agentIntegrations.discoveries(setups: setups, processes: processes), setups: setups,
+                    legacyAgent: AgentKind.claude.id, hosts: agentIntegrations.hosts,
+                    hostAllowed: { [weak agents = settingsController.agents] in agents?.isTurnedOn(id: $0) ?? false })
                 setups.onChange = { [weak hub = runtime.hub] in Task { @MainActor in await hub?.rescan(wantingHosts: true) } }
                 runtime.hub.onNotice = { [weak self] in self?.controller.showAgentNotice($0, request: $1, conversation: $2) }
                 runtime.hub.onForget = { [weak self] in self?.controller.forgetAgentReceipt(request: $0) }
                 runtime.hub.onDelivery = { [weak self] in self?.controller.recordAgentDelivery($1, request: $0) }
                 runtime.hub.onChange = { [weak self, weak hub = runtime.hub] in
                     guard let hub else { return }
-                    self?.showCodingAgents(hub)
+                    self?.showAgents(hub)
                 }
-                settingsController.codingAgents.onRename = { [weak hub = runtime.hub] in try hub?.rename($0, to: $1) }
-                settingsController.codingAgents.onReloadNames = { [weak hub = runtime.hub] in hub?.reloadNames() }
-                settingsController.codingAgents.renameCheck = { [weak hub = runtime.hub] in hub?.renameProblem($0, to: $1) }
-                settingsController.codingAgents.defaultName = { [weak hub = runtime.hub] in hub?.defaultName(for: $0) }
-                settingsController.codingAgents.onUseDefaultName = { [weak hub = runtime.hub] in try hub?.useDefaultName($0) }
-                settingsController.codingAgents.onRetire = { [weak runtime] in runtime?.retire(installation: $0) }
-                settingsController.codingAgents.onDisconnect = { [weak hub = runtime.hub] in hub?.disconnect($0) }
-                settingsController.codingAgents.onReconnect = { [weak hub = runtime.hub] in hub?.reconnect($0) }
-                settingsController.codingAgents.onRetrySavingExclusions = { [weak hub = runtime.hub] in hub?.retrySavingExclusions() }
-                settingsController.codingAgents.onShow = { [weak hub = runtime.hub] id in Task { _ = await hub?.open(id, makingCurrent: false) } }
-                settingsController.codingAgents.onCancelReadAloud = { [weak hub = runtime.hub] in hub?.cancelReadAloud($0) }
-                settingsController.codingAgents.onCheckAgain = { [weak hub = runtime.hub] in Task { await hub?.rescan(rereadingTitles: true, wantingHosts: true) } }
-                showCodingAgents(runtime.hub)
+                settingsController.agents.onRename = { [weak hub = runtime.hub] in try hub?.rename($0, to: $1) }
+                settingsController.agents.onReloadNames = { [weak hub = runtime.hub] in hub?.reloadNames() }
+                settingsController.agents.renameCheck = { [weak hub = runtime.hub] in hub?.renameProblem($0, to: $1) }
+                settingsController.agents.defaultName = { [weak hub = runtime.hub] in hub?.defaultName(for: $0) }
+                settingsController.agents.onUseDefaultName = { [weak hub = runtime.hub] in try hub?.useDefaultName($0) }
+                settingsController.agents.onRetire = { [weak runtime] in runtime?.retire(installation: $0) }
+                settingsController.agents.onDisconnect = { [weak hub = runtime.hub] in hub?.disconnect($0) }
+                settingsController.agents.onReconnect = { [weak hub = runtime.hub] in hub?.reconnect($0) }
+                settingsController.agents.onRetrySavingExclusions = { [weak hub = runtime.hub] in hub?.retrySavingExclusions() }
+                settingsController.agents.onShow = { [weak hub = runtime.hub] id in Task { _ = await hub?.open(id, makingCurrent: false) } }
+                settingsController.agents.onCancelReadAloud = { [weak hub = runtime.hub] in hub?.cancelReadAloud($0) }
+                settingsController.agents.onCheckAgain = { [weak hub = runtime.hub] in Task { await hub?.rescan(rereadingTitles: true, wantingHosts: true) } }
+                showAgents(runtime.hub)
                 let spoken = SpokenResultOutput(
                     client: llmClient, permits: AIServiceCatalog.permits, speech: spokenVoice.makeSpeech(attempts: spokenAttempts),
-                    settings: { [weak self] in self?.settings.codingAgents.spokenResult ?? SpokenResultSettings() },
+                    settings: { [weak self] in self?.settings.agents.spokenResult ?? SpokenResultSettings() },
                     connection: { [weak self] id in self?.config.connections.connection(id: id) },
                     warm: { [voiceResidency] in voiceResidency.warm() },
                     release: { [voiceResidency] in voiceResidency.release() },
@@ -886,14 +886,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 runtime.hub.onEnded = { [weak spoken] in spoken?.ended(conversation: $0, handle: $1, body: $2, requested: $3, origin: $4) }
                 runtime.hub.onAttention = { [weak spoken] in spoken?.attention(conversation: $0, handle: $1, $2, requested: $3) }
                 runtime.hub.onWithdraw = { [weak spoken] in spoken?.withdraw(conversation: $0) }
-                runtime.hub.speaks = { [weak self] in self?.settings.codingAgents.spokenResult.enabled ?? false }
+                runtime.hub.speaks = { [weak self] in self?.settings.agents.spokenResult.enabled ?? false }
                 runtime.hub.onSilence = { [weak spoken] in spoken?.forget(conversation: $0) }
                 spoken.onSpeaking = { [weak self] name in self?.showSpeaking(name) }
                 spoken.onHeard = { [weak controller = self.controller] in controller?.recordSpokenReply($0) }
                 spoken.onUnread = { [weak controller = self.controller] in controller?.recordUnreadReply($0, origin: $1) }
                 spoken.onPendingChange = { [weak self, weak hub = runtime.hub] in
                     guard let hub else { return }
-                    self?.showCodingAgents(hub)
+                    self?.showAgents(hub)
                 }
                 spokenResult = spoken
                 controller.spokenUpdates = spoken
@@ -901,8 +901,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 runtime.settingsOpen = settingsController.isOpen
                 settingsController.onOpenChange = { [weak runtime] in runtime?.settingsOpen = $0 }
                 controller.agents = runtime.hub
-                Task { [weak self, weak codingAgents = settingsController.codingAgents] in
-                    await codingAgents?.maintain()
+                Task { [weak self, weak agents = settingsController.agents] in
+                    await agents?.maintain()
                     self?.settingsController.refreshProblems()
                 }
             } catch {
@@ -911,43 +911,43 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             agentRuntime?.stop()
             agentRuntime = nil
-            settingsController.codingAgents.setups.onChange = nil
+            settingsController.agents.setups.onChange = nil
             settingsController.onOpenChange = nil
             spokenResult?.stop()
             spokenResult = nil
             voiceResidency.release()
             controller.agents = nil
-            settingsController.codingAgents.onRename = nil
-            settingsController.codingAgents.onReloadNames = nil
-            settingsController.codingAgents.renameCheck = nil
-            settingsController.codingAgents.defaultName = nil
-            settingsController.codingAgents.onUseDefaultName = nil
-            settingsController.codingAgents.onRetire = nil
-            settingsController.codingAgents.onDisconnect = nil
-            settingsController.codingAgents.onReconnect = nil
-            settingsController.codingAgents.onRetrySavingExclusions = nil
-            settingsController.codingAgents.onShow = nil
-            settingsController.codingAgents.onCancelReadAloud = nil
-            settingsController.codingAgents.onCheckAgain = nil
-            settingsController.codingAgents.show([], current: nil)
+            settingsController.agents.onRename = nil
+            settingsController.agents.onReloadNames = nil
+            settingsController.agents.renameCheck = nil
+            settingsController.agents.defaultName = nil
+            settingsController.agents.onUseDefaultName = nil
+            settingsController.agents.onRetire = nil
+            settingsController.agents.onDisconnect = nil
+            settingsController.agents.onReconnect = nil
+            settingsController.agents.onRetrySavingExclusions = nil
+            settingsController.agents.onShow = nil
+            settingsController.agents.onCancelReadAloud = nil
+            settingsController.agents.onCheckAgain = nil
+            settingsController.agents.show([], current: nil)
         }
     }
 
-    private func showCodingAgents(_ hub: AgentHub) {
-        let hadError = settingsController.codingAgents.hasError
-        settingsController.codingAgents.show(
+    private func showAgents(_ hub: AgentHub) {
+        let hadError = settingsController.agents.hasError
+        settingsController.agents.show(
             hub.directory.conversations, current: hub.current, namesProblem: hub.namesProblem, namesNotSaved: hub.namesNotSaved,
             discoveryProblems: hub.discoveryProblems, discoveredSetups: hub.discoveredSetupsByAgent, candidates: hub.candidates,
             disconnected: hub.disconnected, exclusionsNotSaved: hub.exclusionsNotSaved, loadedVersions: hub.loadedVersions,
             lastSeen: hub.lastSeen, readAloud: hub.readAloud.union(spokenResult?.pendingRequested ?? []), readNextAloud: hub.readNextAloud)
-        if hadError != settingsController.codingAgents.hasError { settingsController.refreshProblems() }
+        if hadError != settingsController.agents.hasError { settingsController.refreshProblems() }
     }
 
     private func setUpAnswers() {
         let answers = SpokenAnswerOutput(
             speech: spokenVoice.makeSpeech(reportsOutcome: false, sentenceAtATime: true),
-            voice: { [weak self] in self?.settings.codingAgents.spokenResult.voice },
-            textOnly: { [weak self] in self?.settings.codingAgents.spokenResult.textOnly ?? false },
+            voice: { [weak self] in self?.settings.agents.spokenResult.voice },
+            textOnly: { [weak self] in self?.settings.agents.spokenResult.textOnly ?? false },
             warm: { [weak self] in
                 guard let self, self.spokenVoice.isReady else { return }
                 self.voiceResidency.warm()
@@ -1009,7 +1009,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         SystemConditions.start()
         let diagnostics = spokenDiagnostics
         diagnostics.listen = { [weak self] wav in await self?.controller.listenToSpokenReply(wav: wav) ?? .unavailable }
-        diagnostics.currentVoice = { [weak self] in self?.settingsController.codingAgents.chosenVoice ?? SpokenVoices.recommended }
+        diagnostics.currentVoice = { [weak self] in self?.settingsController.agents.chosenVoice ?? SpokenVoices.recommended }
         diagnostics.onChange = { [weak pane] in pane?.diagnosticsChanged() }
         pane.diagnostics = diagnostics
         diagnostics.voiceReady = { [weak self] in self?.spokenVoice.isReady ?? false }
@@ -1044,14 +1044,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func toggleSpokenUpdates() {
         var updated = settings
-        updated.codingAgents.spokenResult.enabled.toggle()
+        updated.agents.spokenResult.enabled.toggle()
         applySettings(updated)
     }
 
     private func ensureSystemModes() {
         ModeStore.ensureSystemModes(
             in: KeyScribePaths.modesDir, voiceCommands: settings.features.isEnabled(.voiceCommands),
-            codingAgents: settings.features.isEnabled(.codingAgents))
+            agents: settings.features.isEnabled(.agents))
     }
 
     // Apply the runtime consequences of a settings change WITHOUT writing to disk. `applySettings` calls
@@ -1060,9 +1060,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applySettingsEffects(_ updated: Settings) {
         let previousHistory = settings.history
         let voiceCommandsChanged = updated.features.isEnabled(.voiceCommands) != settings.features.isEnabled(.voiceCommands)
-        let codingAgentsChanged = updated.features.isEnabled(.codingAgents) != settings.features.isEnabled(.codingAgents)
+        let agentsChanged = updated.features.isEnabled(.agents) != settings.features.isEnabled(.agents)
         let previousAudio = settings.audio
-        let hostsChanged = updated.codingAgents.hosts != settings.codingAgents.hosts
+        let hostsChanged = updated.agents.hosts != settings.agents.hosts
         // Compared against the provider, not the old setting: launch already activated a replacement for a
         // retired saved id, and persisting it must not evict the engine that preload is warming.
         if updated.stt.engine != provider.active.id {
@@ -1076,7 +1076,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         settings = updated
         spokenResult?.settingsChanged()
         answers?.settingsChanged()
-        if !updated.codingAgents.spokenResult.enabled { agentRuntime?.hub.speechTurnedOff() }
+        if !updated.agents.spokenResult.enabled { agentRuntime?.hub.speechTurnedOff() }
         if hostsChanged, let hub = agentRuntime?.hub { Task { await hub.rescan(wantingHosts: true) } }
         if updated.history != previousHistory {
             history?.applyRetention(retentionDays: updated.history.retentionDays)
@@ -1087,17 +1087,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             CaptureArchive.publish(updated.audio)
             CaptureArchive.applyRetention()
         }
-        if voiceCommandsChanged || codingAgentsChanged {
+        if voiceCommandsChanged || agentsChanged {
             ensureSystemModes()
             selfWriteGate.adopt(ConfigTreeSnapshot.capture(supportDir: KeyScribePaths.supportDir))
             config.voiceCommandsEnabled = updated.features.isEnabled(.voiceCommands)
-            config.codingAgentsEnabled = updated.features.isEnabled(.codingAgents)
+            config.agentsEnabled = updated.features.isEnabled(.agents)
         }
         config.findsInAppsEnabled = updated.features.isEnabled(.findInApps)
         config.answersEnabled = updated.features.isEnabled(.askAboutSelection)
         if !config.answersEnabled { answers?.close() }
         controller.updateSettings(updated)
-        applyCodingAgents()
+        applyAgents()
         hud.appearance = updated.hud.appearance
         rebuildHotkeyMonitor()
         applyLoginItem(updated.loadOnLogin)
@@ -1283,7 +1283,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             modes, automaticName: automatic?.name, overrideName: controller.nextModeOverrideID,
             inertReasons: inertReasons)
         menu.setSpeechModels(speechModels.rows)
-        let spoken = settings.codingAgents.spokenResult
+        let spoken = settings.agents.spokenResult
         menu.setSpokenUpdates(available: agentRuntime != nil, on: spoken.enabled)
     }
 
@@ -1317,7 +1317,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             hotkeyConflict: Self.hotkeyConflictDetected(
                 shadowed: shadowedHotkeyIds(in: config.modes.filter(\.enabled))),
             modeTriggerUnreachable: TriggerKeyConflicts.hasUnreachableTrigger(in: config.modes) || config.voiceCommandsShutOut,
-            codingAgentConnectionFailed: settings.features.isEnabled(.codingAgents) && (settingsController?.codingAgents.hasError ?? false))
+            agentConnectionFailed: settings.features.isEnabled(.agents) && (settingsController?.agents.hasError ?? false))
     }
 
     private func connectionUnavailable(for mode: Mode) -> Bool {

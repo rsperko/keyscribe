@@ -56,8 +56,8 @@ struct DownstreamSeamTests {
         func run(_ argv: [String]) -> (status: Int32, output: String) { outputs[argv].map { (0, $0) } ?? (1, "") }
     }
 
-    static func integrations() -> CodingAgentIntegrations {
-        var integrations = CodingAgentIntegrations.builtIn
+    static func integrations() -> AgentIntegrations {
+        var integrations = AgentIntegrations.builtIn
         integrations.surfaces.terminals.append(term)
         integrations.surfaces.multiplexers.append(Mux())
         integrations.placeSources.append { Places() }
@@ -93,8 +93,8 @@ struct DownstreamSeamTests {
 
     @Test @MainActor func theAppAcceptsTheIntegrationsAndTheDevCLIAcceptsTheSameValue() {
         let integrations = Self.integrations()
-        _ = AppDelegate(codingAgents: integrations)
-        let handle: (CodingAgentIntegrations) -> Void = DevCLI.handleFlags(codingAgents:)
+        _ = AppDelegate(agentIntegrations: integrations)
+        let handle: (AgentIntegrations) -> Void = DevCLI.handleFlags(agentIntegrations:)
         _ = handle
     }
 
@@ -114,7 +114,7 @@ struct DownstreamSeamTests {
         var integrations = Self.integrations()
         integrations.hosts.append(AgentHostIntegration(
             kind: AgentKind(id: "downstream", displayName: "Downstream Host", connectorName: "Downstream plugin"), make: { Host() }))
-        _ = AppDelegate(codingAgents: integrations)
+        _ = AppDelegate(agentIntegrations: integrations)
         #expect(throws: Never.self) { try integrations.resolve() }
         let host = try #require(integrations.hosts.last).make()
         #expect(await host.open(AgentHostLocation(host: "downstream", instance: "/run/d.sock", native: "t1"), stillWanted: { true }) == .unsupported)

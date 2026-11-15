@@ -4,10 +4,10 @@ import Testing
 
 struct AgentModeTests {
     @Test func agentOutputRoundTripsWithItsTable() throws {
-        var mode = Mode(id: "coding-agent", name: "Coding agent")
+        var mode = Mode(id: "agent", name: "Agent")
         mode.output = .agent
         mode.agent = .init(target: .handle("backend"))
-        let decoded = try ModeStore.decode(from: ModeStore.encode(mode), id: Mode.codingAgentId)
+        let decoded = try ModeStore.decode(from: ModeStore.encode(mode), id: Mode.agentModeId)
         #expect(decoded.output == .agent)
         #expect(decoded.agent == .init(target: .handle("backend")))
     }
@@ -15,38 +15,38 @@ struct AgentModeTests {
     @Test func agentTableDefaultsToCurrent() throws {
         let toml = """
         schema_version = \(ModeStore.currentSchemaVersion)
-        name = "Coding agent"
+        name = "Agent"
         output = "agent"
         """
-        let mode = try ModeStore.decode(from: toml, id: Mode.codingAgentId)
+        let mode = try ModeStore.decode(from: toml, id: Mode.agentModeId)
         #expect(mode.agent == .init(target: .current))
     }
 
     @Test func anAgentTableWithoutATargetDefaultsToCurrent() throws {
         let toml = """
         schema_version = \(ModeStore.currentSchemaVersion)
-        name = "Coding agent"
+        name = "Agent"
         output = "agent"
         [agent]
         """
-        #expect(try ModeStore.decode(from: toml, id: Mode.codingAgentId).agent == .init(target: .current))
+        #expect(try ModeStore.decode(from: toml, id: Mode.agentModeId).agent == .init(target: .current))
     }
 
     @Test func anOlderFocusedTargetIsReadAsCurrentAndWrittenAsCurrent() throws {
         let toml = """
         schema_version = \(ModeStore.currentSchemaVersion)
-        name = "Coding agent"
+        name = "Agent"
         output = "agent"
         [agent]
         target = "focused"
         """
-        let mode = try ModeStore.decode(from: toml, id: Mode.codingAgentId).systemNormalized()
+        let mode = try ModeStore.decode(from: toml, id: Mode.agentModeId).systemNormalized()
         #expect(mode.agent.target == .current)
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-agent-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         try ModeStore.write(mode, to: dir)
-        #expect(ModeStore.loadAll(in: dir).first { $0.id == Mode.codingAgentId }?.agent.target == .current)
+        #expect(ModeStore.loadAll(in: dir).first { $0.id == Mode.agentModeId }?.agent.target == .current)
         #expect(!(try ModeStore.encode(mode)).contains("focused"))
     }
 
@@ -59,23 +59,23 @@ struct AgentModeTests {
     func targetSpellings(written: String, expected: Mode.Agent.Target) throws {
         let toml = """
         schema_version = \(ModeStore.currentSchemaVersion)
-        name = "Coding agent"
+        name = "Agent"
         output = "agent"
         [agent]
         target = "\(written)"
         """
-        #expect(try ModeStore.decode(from: toml, id: Mode.codingAgentId).agent.target == expected)
+        #expect(try ModeStore.decode(from: toml, id: Mode.agentModeId).agent.target == expected)
     }
 
     @Test func anEmptyHandleIsRejected() {
         let toml = """
         schema_version = \(ModeStore.currentSchemaVersion)
-        name = "Coding agent"
+        name = "Agent"
         output = "agent"
         [agent]
         target = "  "
         """
-        #expect(throws: ConfigError.self) { try ModeStore.decode(from: toml, id: Mode.codingAgentId) }
+        #expect(throws: ConfigError.self) { try ModeStore.decode(from: toml, id: Mode.agentModeId) }
     }
 
     @Test func nonAgentModesDoNotWriteTheAgentTable() throws {
@@ -84,15 +84,15 @@ struct AgentModeTests {
     }
 
     @Test func theAgentTableIsAKnownKey() throws {
-        var mode = Mode(id: "coding-agent", name: "Coding agent")
+        var mode = Mode(id: "agent", name: "Agent")
         mode.output = .agent
         mode.agent = .init(target: .handle("backend"))
         #expect(ModeStore.unknownKeys(in: try ModeStore.encode(mode)).isEmpty)
     }
 
-    @Test func codingAgentsIsAnOptInFlag() {
-        #expect(Feature.allCases.contains(.codingAgents))
-        #expect(!Settings.defaults.features.isEnabled(.codingAgents))
+    @Test func agentsIsAnOptInFlag() {
+        #expect(Feature.allCases.contains(.agents))
+        #expect(!Settings.defaults.features.isEnabled(.agents))
     }
 
     private func tempModesDir() -> URL {
@@ -101,7 +101,7 @@ struct AgentModeTests {
         return dir
     }
 
-    @Test func onlyTheBuiltInModeSendsToCodingAgents() {
+    @Test func onlyTheBuiltInModeSendsToAgents() {
         let toml = """
         schema_version = \(ModeStore.currentSchemaVersion)
         name = "Talk"
@@ -113,27 +113,27 @@ struct AgentModeTests {
     @Test func theBuiltInModeExistsOnlyWhileTheFeatureIsOn() throws {
         let dir = tempModesDir()
         defer { try? FileManager.default.removeItem(at: dir) }
-        ModeStore.ensureSystemModes(in: dir, codingAgents: false)
-        #expect(!ModeStore.loadAll(in: dir).contains { $0.id == Mode.codingAgentId })
+        ModeStore.ensureSystemModes(in: dir, agents: false)
+        #expect(!ModeStore.loadAll(in: dir).contains { $0.id == Mode.agentModeId })
 
-        ModeStore.ensureSystemModes(in: dir, codingAgents: true)
-        ModeStore.ensureSystemModes(in: dir, codingAgents: true)
+        ModeStore.ensureSystemModes(in: dir, agents: true)
+        ModeStore.ensureSystemModes(in: dir, agents: true)
         let agentModes = ModeStore.loadAll(in: dir).filter { $0.output == .agent }
-        #expect(agentModes.map(\.id) == [Mode.codingAgentId])
+        #expect(agentModes.map(\.id) == [Mode.agentModeId])
         let mode = try #require(agentModes.first)
         #expect(mode.isSystem)
-        #expect(mode.name == "Coding agent")
+        #expect(mode.name == "Agent")
         #expect(mode.triggerKeys.isEmpty)
         #expect(mode.agent == .init(target: .current))
         #expect(mode.commands == .init(liveEdits: true, privacy: false, numbers: true))
 
         let all = ModeStore.loadAll(in: dir)
-        #expect(Mode.visible(all, voiceCommands: false, codingAgents: false).allSatisfy { $0.id != Mode.codingAgentId })
-        #expect(Mode.visible(all, voiceCommands: false, codingAgents: true).contains { $0.id == Mode.codingAgentId })
+        #expect(Mode.visible(all, voiceCommands: false, agents: false).allSatisfy { $0.id != Mode.agentModeId })
+        #expect(Mode.visible(all, voiceCommands: false, agents: true).contains { $0.id == Mode.agentModeId })
     }
 
     @Test func theBuiltInModeKeepsOnlyWhatTheUserMayChange() {
-        var edited = Mode.codingAgent
+        var edited = Mode.agentMode
         edited.name = "Renamed"
         edited.output = .cursor
         edited.source = .selection
@@ -151,7 +151,7 @@ struct AgentModeTests {
         edited.excludeFromHistory = true
 
         let normalized = edited.systemNormalized()
-        #expect(normalized.name == "Coding agent")
+        #expect(normalized.name == "Agent")
         #expect(normalized.output == .agent)
         #expect(normalized.source == .dictation)
         #expect(normalized.trailing == .none)

@@ -40,8 +40,8 @@ final class ConfigCache {
         didSet { if voiceCommandsEnabled != oldValue { invalidate() } }
     }
 
-    var codingAgentsEnabled = false {
-        didSet { if codingAgentsEnabled != oldValue { invalidate() } }
+    var agentsEnabled = false {
+        didSet { if agentsEnabled != oldValue { invalidate() } }
     }
 
     var answersEnabled = false {
@@ -226,7 +226,7 @@ final class ConfigCache {
             if !loadFailures.contains(issue) { loadFailures.append(issue) }
         }
         let unguarded = Mode.visible(
-            result.modes, voiceCommands: voiceCommandsEnabled, codingAgents: codingAgentsEnabled, answers: answersEnabled)
+            result.modes, voiceCommands: voiceCommandsEnabled, agents: agentsEnabled, answers: answersEnabled)
         let visible = VoiceCommandTriggers.guarded(unguarded)
         voiceCommandsShutOutCache = VoiceCommandTriggers.isShutOut(unguarded)
         modesCache = visible

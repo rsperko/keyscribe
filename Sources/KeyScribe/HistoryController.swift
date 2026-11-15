@@ -575,8 +575,8 @@ final class HistoryPaneModel: ObservableObject {
         panel.prompt = "Save Here"
         return panel.runModal() == .OK ? panel.url : nil
     }
-    // Likely mishearings of dictionary words in the selected dictation, for the user to judge. A command or a
-    // Coding agent message is left out: its words were not dictated text.
+    // Likely mishearings of dictionary words in the selected dictation, for the user to judge. A command or an
+    // Agent message is left out: its words were not dictated text.
     func refreshHints() {
         hintsTask?.cancel()
         hints = []
@@ -854,7 +854,7 @@ struct HistoryPaneView: View {
             PaneListSectionHeader("History")
             SettingRow(
                 title: "Keep history on this Mac",
-                help: "Stores transcripts and final text locally so you can search and correct them, and coding agent reply updates as they were given. Recordings of your voice and password-field dictations are never saved. A spoken reply kept for diagnosis keeps the audio the natural voice generated with its entry. For other sensitive work, choose a shorter period or exclude a mode in its Result handling.",
+                help: "Stores transcripts and final text locally so you can search and correct them, and agent reply updates as they were given. Recordings of your voice and password-field dictations are never saved. A spoken reply kept for diagnosis keeps the audio the natural voice generated with its entry. For other sensitive work, choose a shorter period or exclude a mode in its Result handling.",
                 combinesAccessibilityChildren: false)
             {
                 Toggle("Keep history on this Mac", isOn: $settings.historyEnabled).labelsHidden()
@@ -1507,7 +1507,7 @@ private struct HistoryDetailView: View {
             }
             if !entry.isSpokenReplyOnly {
                 Button { model.copyReport() } label: { Label("Copy Report", systemImage: "ladybug") }
-                    .help("Copies this dictation for a bug report: what you said, the inserted text, the app it was for, your microphone's name, any AI request and reply (which can include your dictionary words, selected text, or text from the app), a coding agent's reply update, and details about your setup.")
+                    .help("Copies this dictation for a bug report: what you said, the inserted text, the app it was for, your microphone's name, any AI request and reply (which can include your dictionary words, selected text, or text from the app), an agent's reply update, and details about your setup.")
                     .accessibilityIdentifier(AccessibilityID.History.copyReport)
             }
         } label: {

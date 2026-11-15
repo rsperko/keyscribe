@@ -164,7 +164,7 @@ final class AgentOutput {
         let attention = pendingNotices.filter(Self.needsAttention)
         guard let receipt = attention.first ?? pendingNotices.last else { return }
         pendingNotices = Array(attention.dropFirst())
-        hud.present(Self.receiptState(receipt, mode: "Coding agent", heard: ""))
+        hud.present(Self.receiptState(receipt, mode: "Agent", heard: ""))
         hide(Self.noticeSeconds)
         guard !pendingNotices.isEmpty else { return }
         noticeTask = Task { @MainActor [weak self] in
@@ -298,7 +298,7 @@ final class AgentOutput {
         guard !names.isEmpty else { return "" }
         let one = names.count == 1
         let shown = names.count > unconnectedShown + 1 ? Array(names.prefix(unconnectedShown)) + ["\(names.count - unconnectedShown) more"] : names
-        return "\(either(shown, joining: "and")) \(one ? "is" : "are") running but not connected. Coding agent settings shows how to connect \(one ? "it" : "them")"
+        return "\(either(shown, joining: "and")) \(one ? "is" : "are") running but not connected. Agent settings shows how to connect \(one ? "it" : "them")"
     }
 
     static func example(names: [String: String], current: String?) -> String? {
@@ -392,7 +392,7 @@ final class AgentOutput {
             case .hostTakesNoMessages(let host): "\(name) is in \(host), which doesn\u{2019}t take messages from \(Branding.appName). \(nothingSent)"
             }
             let action: HUDErrorAction? = switch reason {
-            case .connectorNotRunning, .disconnected: settingsMode.map { HUDErrorAction.openCodingAgents($0) }
+            case .connectorNotRunning, .disconnected: settingsMode.map { HUDErrorAction.openAgents($0) }
             default: nil
             }
             return .error(message: message, action: action, heard: HeardExcerpt(heard: heard))

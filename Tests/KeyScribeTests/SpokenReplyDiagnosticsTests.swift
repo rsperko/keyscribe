@@ -31,7 +31,7 @@ struct SpokenReplyDiagnosticsTests {
 
     private func entry(in store: HistoryStore, id: String = "e1", text: String = "Build passed. Ship it.") throws -> HistoryEntry {
         var entry = HistoryEntry(
-            id: id, timestamp: at, modeName: "Coding agent", heard: "", result: "", outcome: .inserted, cloudInvolved: false,
+            id: id, timestamp: at, modeName: "Agent", heard: "", result: "", outcome: .inserted, cloudInvolved: false,
             redaction: false, contextCategories: [])
         entry.spokenReply = .init(at: at, conversation: "docs", text: text, voice: "natural")
         try store.append(entry, today: HistoryStore.todayString(date: at))

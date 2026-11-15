@@ -4,12 +4,12 @@ import Testing
 
 struct MoveToSharedCopyTests {
     @Test func namesTheEntryWhoUsesTheVocabularyAndWhatTheModeNewlyGets() {
-        let plan = SharedVocabularyMove.Plan(users: ["Coding agent", "Markdown"], newlyIncluded: .init(words: 1, rules: 2), conflict: nil)
+        let plan = SharedVocabularyMove.Plan(users: ["Agent", "Markdown"], newlyIncluded: .init(words: 1, rules: 2), conflict: nil)
         #expect(MoveToSharedCopy.lines(
             .rule(.init(heard: "pain", replace: "pane", regex: false)), plan: plan, vocabularyName: "Programming", modeName: "Markdown")
             == [
                 "Move this replacement to Programming?",
-                "Programming is used by Coding agent and Markdown. Future edits will apply to both.",
+                "Programming is used by Agent and Markdown. Future edits will apply to both.",
                 "Markdown will also start using the 1 word and 2 replacements already in Programming.",
             ])
     }

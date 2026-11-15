@@ -97,8 +97,8 @@ export function waitingFor(interaction: any): Waiting {
 
 export function readAloudReply(app: string, answer: ReadAloud): string {
   if (answer === true) return `${app} will report your final reply when this turn ends. Say so in one short sentence and continue.`
-  if (answer === false) return `Reply updates are off in ${app}. Tell the user to turn on Reply updates in ${app}’s Coding agent settings and ask again. Nothing will be reported.`
-  if (answer === "quiet") return `This conversation is disconnected from ${app}. Tell the user to reconnect it in ${app}’s Coding agent settings. Nothing will be reported.`
+  if (answer === false) return `Reply updates are off in ${app}. Tell the user to turn on Reply updates in ${app}’s Agent settings and ask again. Nothing will be reported.`
+  if (answer === "quiet") return `This conversation is disconnected from ${app}. Tell the user to reconnect it in ${app}’s Agent settings. Nothing will be reported.`
   return `${app} didn’t confirm the request, so a spoken reply can’t be promised. Tell the user.`
 }
 

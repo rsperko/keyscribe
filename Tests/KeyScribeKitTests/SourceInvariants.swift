@@ -84,7 +84,7 @@ enum SourceInvariants {
         SourceRule(
             pattern: #"(?i)herdr|tmux|zellij|ghostty|iterm|cmux|warp|wezterm|kitty"#,
             allowed: [
-                "Sources/KeyScribe/CodingAgentIntegrations.swift": 1,
+                "Sources/KeyScribe/AgentIntegrations.swift": 1,
                 "Sources/KeyScribe/DevCLI.swift": 1,
                 "Sources/KeyScribeKit/TerminalRoutes/AgentSurfaces.swift": 2,
             ],
@@ -99,12 +99,12 @@ enum SourceInvariants {
             pattern: #"(?i)claude"#,
             allowed: [
                 "Sources/KeyScribe/AppDelegate.swift": 1,
-                "Sources/KeyScribe/CodingAgentIntegrations.swift": 1,
+                "Sources/KeyScribe/AgentIntegrations.swift": 1,
                 "Sources/KeyScribe/HUD/HUDPreview.swift": 1,
                 "Sources/KeyScribeKit/AIServiceCatalog.swift": 1,
                 "Sources/KeyScribeKit/Features.swift": 1,
             ],
-            reason: "Everything one coding agent needs lives in that agent's own Integrations/<Agent>/ folder; shared "
+            reason: "Everything one agent needs lives in that agent's own Integrations/<Agent>/ folder; shared "
                 + "code speaks AgentKind, AgentSession, AgentDiscovery and AgentConnector, so another agent is another "
                 + "adapter, never a branch (docs/development/areas/voice-commands.md). The composition root lists the "
                 + "agents and names the legacy agent for saved names, and the LLM catalog names a model provider.",
@@ -133,7 +133,7 @@ enum SourceInvariants {
         SourceRule(
             pattern: #"\bBB[A-Z]|"bb"|\bbb\."#,
             allowed: [
-                "Sources/KeyScribe/CodingAgentIntegrations.swift": 1,
+                "Sources/KeyScribe/AgentIntegrations.swift": 1,
             ],
             reason: "Everything an agent host needs lives in its own Integrations/<Host>/ folder; shared code speaks "
                 + "AgentHost and AgentHostLocation, so another host is another adapter, never a branch "

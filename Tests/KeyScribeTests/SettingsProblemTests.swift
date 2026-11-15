@@ -103,11 +103,11 @@ struct SettingsProblemTests {
         #expect(problems.isEmpty)
     }
 
-    @Test func aCodingAgentFailureFlagsModes() {
+    @Test func aAgentFailureFlagsModes() {
         let problems = SettingsProblem.detect(
             hasConfigError: false, microphoneGranted: true, accessibilityGranted: true,
-            codingAgentConnectionFailed: true)
-        #expect(problems == [.codingAgentConnectionFailed])
+            agentConnectionFailed: true)
+        #expect(problems == [.agentConnectionFailed])
         #expect(problems.first?.pane == .modes)
     }
 }
@@ -153,12 +153,12 @@ struct SettingsPaneMarkerTests {
         #expect(model.marker(for: .advanced) == nil)
     }
 
-    @Test func fixingCodingAgentsClearsItsModeMarkerEvenWhenAnotherModeStillHasAnError() {
+    @Test func fixingAgentsClearsItsModeMarkerEvenWhenAnotherModeStillHasAnError() {
         let model = SettingsProblemModel()
-        model.update([.codingAgentConnectionFailed, .modeNeedsAIService])
-        #expect(model.codingAgentHasError)
+        model.update([.agentConnectionFailed, .modeNeedsAIService])
+        #expect(model.agentHasError)
         model.update([.modeNeedsAIService])
-        #expect(!model.codingAgentHasError)
+        #expect(!model.agentHasError)
         #expect(model.marker(for: .modes) == .failure)
     }
 }

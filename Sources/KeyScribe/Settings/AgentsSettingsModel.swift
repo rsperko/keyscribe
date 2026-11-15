@@ -2,7 +2,7 @@ import Foundation
 import KeyScribeKit
 
 @MainActor
-final class CodingAgentsSettingsModel: ObservableObject {
+final class AgentsSettingsModel: ObservableObject {
     struct Row: Identifiable, Equatable {
         let id: String
         let number: Int
@@ -160,7 +160,7 @@ final class CodingAgentsSettingsModel: ObservableObject {
 
     func recipientGuidance(shortcut: String? = nil) -> String {
         guard let example = rows.first(where: \.current) ?? rows.first(where: \.connected) ?? rows.first else {
-            return "Open a conversation in a connected coding agent. It will appear here."
+            return "Open a conversation in a connected agent. It will appear here."
         }
         if namesProblem != nil {
             return "Conversation names are unavailable. Start with \u{201C}session\u{201D} and the number shown while recording, then your instruction."

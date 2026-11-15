@@ -455,20 +455,20 @@ struct TextOnlyResultsTests {
     }
 
     @Test func theVoicePickerOffersTextOnlyFirstAndKeepsTheNamedVoice() {
-        let model = CodingAgentsSettingsModel(
+        let model = AgentsSettingsModel(
             describeTerminal: { _ in nil },
             agentsDir: FileManager.default.temporaryDirectory.appendingPathComponent("text-only-\(UUID().uuidString)"), connectors: [])
         model.load(spokenResult: SpokenResultSettings(enabled: true, voice: "bf_emma"))
         var saved: [SpokenResultSettings] = []
         model.onSpokenResultChange = { saved.append($0) }
         #expect(model.voiceChoice == "bf_emma")
-        model.voiceChoice = CodingAgentsSettingsModel.textOnlyChoice
+        model.voiceChoice = AgentsSettingsModel.textOnlyChoice
         #expect(model.spokenResult.textOnly)
         #expect(model.spokenResult.voice == "bf_emma")
-        #expect(model.voiceChoice == CodingAgentsSettingsModel.textOnlyChoice)
+        #expect(model.voiceChoice == AgentsSettingsModel.textOnlyChoice)
         model.voiceChoice = "bf_emma"
         #expect(!model.spokenResult.textOnly)
         #expect(saved.map(\.textOnly) == [true, false])
-        #expect(SpokenVoices.all.allSatisfy { $0.id != CodingAgentsSettingsModel.textOnlyChoice })
+        #expect(SpokenVoices.all.allSatisfy { $0.id != AgentsSettingsModel.textOnlyChoice })
     }
 }

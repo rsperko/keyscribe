@@ -2,7 +2,7 @@ import KeyScribeKit
 import SwiftUI
 
 struct ConnectorConsentPresenter: View {
-    @ObservedObject var model: CodingAgentsSettingsModel
+    @ObservedObject var model: AgentsSettingsModel
 
     var body: some View {
         Color.clear.sheet(item: $model.consent) { request in
@@ -12,8 +12,8 @@ struct ConnectorConsentPresenter: View {
 }
 
 struct ConnectorConsentSheet: View {
-    @ObservedObject var model: CodingAgentsSettingsModel
-    let request: CodingAgentsSettingsModel.ConsentRequest
+    @ObservedObject var model: AgentsSettingsModel
+    let request: AgentsSettingsModel.ConsentRequest
     @State private var showingAll = false
     @State private var contentHeight: CGFloat = 0
 
@@ -35,10 +35,10 @@ struct ConnectorConsentSheet: View {
                 Spacer()
                 Button("Cancel", role: .cancel) { model.consent = nil }
                     .keyboardShortcut(.cancelAction)
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.consentCancel)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.consentCancel)
                 Button(model.host(of: request.connector).map { "Connect \($0.displayName)" } ?? "Install and Connect") { model.confirm(request) }
                     .keyboardShortcut(.defaultAction)
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.consentInstall)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.consentInstall)
             }
         }
         .padding(24).frame(width: 460)
@@ -74,7 +74,7 @@ struct ConnectorConsentSheet: View {
         return VStack(alignment: .leading, spacing: 14) {
             Text(lead(affected)).fixedSize(horizontal: false, vertical: true)
             if affected.count > Self.shownBeforeDisclosure {
-                DisclosureSection("All \(affected.count) open conversations", isExpanded: $showingAll, headerID: AccessibilityID.Mode.CodingAgents.consentConversations) {
+                DisclosureSection("All \(affected.count) open conversations", isExpanded: $showingAll, headerID: AccessibilityID.Mode.Agents.consentConversations) {
                     ForEach(Array(affected.enumerated()), id: \.offset) { _, name in Text(name).font(.caption) }
                 }
             }
@@ -88,7 +88,7 @@ struct ConnectorConsentSheet: View {
                 Text("Installs in").font(.caption).foregroundStyle(.secondary)
                 CopyableValue(request.setup.display, value: request.setup.folder.path, what: "folder", of: "this setup")
                     .font(.caption)
-                    .accessibilityIdentifier(AccessibilityID.Mode.CodingAgents.consentFolder)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.consentFolder)
             }
             if !affected.isEmpty, let reload = request.connector.kind.reloadCommand {
                 Text("Conversations already open may need \(reload).").font(.caption).foregroundStyle(.secondary)

@@ -162,7 +162,7 @@ struct AgentRecipientTests {
     }
 
     @Test func aHeldOpenIsClassifiedTheSameWhateverConversationsExist() {
-        for names in [["backend": "c"], ["backend": "c", "coding agent build": "d"]] {
+        for names in [["backend": "c"], ["backend": "c", "agent build": "d"]] {
             func resolve(_ text: String) -> AgentRecipient.Resolution {
                 AgentRecipient.resolve(
                     AgentAddress.parse(text, names: Array(names.keys)), frozen: .init(id: "c", source: .current), rows: ["c"], names: names)
@@ -184,9 +184,9 @@ struct AgentRecipientTests {
     }
 
     @Test func aMatchedLongNameAfterAnOpenVerbStillOpens() {
-        let names = ["coding agent build": "d", "backend": "c"]
+        let names = ["agent build": "d", "backend": "c"]
         let resolution = AgentRecipient.resolve(
-            AgentAddress.parse("Go to coding agent build", names: Array(names.keys)), frozen: nil, rows: ["c", "d"], names: names)
+            AgentAddress.parse("Go to agent build", names: Array(names.keys)), frozen: nil, rows: ["c", "d"], names: names)
         #expect(resolution == .open(id: "d"))
     }
 

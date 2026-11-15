@@ -31,12 +31,12 @@ public struct SpokenHelp: Equatable, Sendable {
         rows.sorted { $0.said.localizedStandardCompare($1.said) == .orderedAscending }
     }
 
-    public static func codingAgent(
+    public static func agent(
         title: String, recipient: String?, example: String?, readsReplies: Bool, canRepeat: Bool, stages: [any PipelineStage]
     ) -> SpokenHelp {
         let unnamed = "\u{E000}"
         let name = recipient ?? example
-        let rows = codingAgentPhrases(name: name ?? unnamed, readsReplies: readsReplies)
+        let rows = agentPhrases(name: name ?? unnamed, readsReplies: readsReplies)
             .filter { !$0.said.contains(unnamed) }
             .map { row in
             row.said == VoiceCommandGrammar.repeatSummary[0] && !canRepeat
@@ -47,7 +47,7 @@ public struct SpokenHelp: Equatable, Sendable {
             rows: rows + editRows(stages, forMessage: true) + ruleRows(stages))
     }
 
-    public static func codingAgentPhrases(name: String, readsReplies: Bool) -> [Row] {
+    public static func agentPhrases(name: String, readsReplies: Bool) -> [Row] {
         var rows = [
             Row(said: "tell \(name) run the unit tests", effect: "Sends the instruction to \(name). Later instructions go there too."),
             Row(said: "select \(name)", effect: "Makes \(name) the recipient. Nothing is sent."),

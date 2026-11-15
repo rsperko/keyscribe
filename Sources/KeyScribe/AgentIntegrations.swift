@@ -7,7 +7,7 @@ struct AgentIntegration: Sendable {
     let connector: @MainActor @Sendable (_ agentsDir: URL, _ pluginName: String, ConnectorSurfaces) -> any AgentConnector
 }
 
-public struct CodingAgentIntegrations: Sendable {
+public struct AgentIntegrations: Sendable {
     public typealias PlaceSource = @Sendable () -> any AgentPlaceReading
 
     public var surfaces: AgentSurfaces
@@ -46,13 +46,13 @@ public struct CodingAgentIntegrations: Sendable {
         case .focusDefinition(let id):
             "The focus command “\(id)” is defined more than once, does not start with an absolute program path, or uses a variable its route does not list."
         case .environmentKey(let key): "The environment variable “\(key)” is not a plain variable name."
-        case .kind(let id): "More than one coding agent or agent host uses the id “\(id)”, or the id is empty or contains “:”."
+        case .kind(let id): "More than one agent or agent host uses the id “\(id)”, or the id is empty or contains “:”."
         case nil: String(describing: conflict)
         }
     }
 
-    public static var builtIn: CodingAgentIntegrations {
-        var integrations = CodingAgentIntegrations(surfaces: .builtIn, placeSources: [{ HerdrPlaceReader() }])
+    public static var builtIn: AgentIntegrations {
+        var integrations = AgentIntegrations(surfaces: .builtIn, placeSources: [{ HerdrPlaceReader() }])
         integrations.hosts = [BBHost.integration]
         return integrations
     }

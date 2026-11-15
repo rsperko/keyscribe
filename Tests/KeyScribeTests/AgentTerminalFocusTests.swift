@@ -378,8 +378,8 @@ struct AgentTerminalFocusTests {
     }
 
     @Test(arguments: [
-        (AgentFocusResult.exact, HUDState.commandDone(summary: "Opened backend", detail: "Coding agent")),
-        (.requested("Warp"), .commandDone(summary: "Asked Warp to show backend", detail: "Coding agent")),
+        (AgentFocusResult.exact, HUDState.commandDone(summary: "Opened backend", detail: "Agent")),
+        (.requested("Warp"), .commandDone(summary: "Asked Warp to show backend", detail: "Agent")),
         (.app("Ghostty"), .advisory(message: "Brought Ghostty forward. Couldn\u{2019}t find backend\u{2019}s tab. Your recipient is backend")),
         (.app("WezTerm", noun: "pane"), .advisory(message: "Brought WezTerm forward. Couldn\u{2019}t find backend\u{2019}s pane. Your recipient is backend")),
         (.pane(app: "Ghostty", multiplexer: "Zellij", uncertain: true),
@@ -400,7 +400,7 @@ struct AgentTerminalFocusTests {
         (.none, .advisory(message: "Nothing showing backend could be brought forward. Your recipient is backend")),
     ])
     func eachResultSaysWhatHappened(result: AgentFocusResult, state: HUDState) {
-        #expect(result.hudState(handle: "backend", detail: "Coding agent", agent: .claude) == state)
+        #expect(result.hudState(handle: "backend", detail: "Agent", agent: .claude) == state)
     }
 
     @Test(arguments: [

@@ -156,7 +156,7 @@ struct InjectedIntegrationsTests {
         let setups = ConnectorSetupRegistry(directory: dir)
         let processes = AgentProcessTable(list: { _ in [] })
         let surfaces = ConnectorSurfaces(environmentKeys: [])
-        let builtIn = CodingAgentIntegrations.builtIn
+        let builtIn = AgentIntegrations.builtIn
         #expect(builtIn.discoveries(setups: setups, processes: processes).map(\.kind.id) == ["claude", "pi"])
         #expect(builtIn.connectors(agentsDir: dir, pluginName: "p", surfaces: surfaces).map(\.kind.id) == ["claude", "pi", "bb"])
         let fake = AgentKind(id: "fake", displayName: "Fake", connectorName: "Fake connector")
@@ -169,7 +169,7 @@ struct InjectedIntegrationsTests {
     }
 
     @Test @MainActor func aHostWhoseIdAnotherAgentOrHostUsesIsRejectedBeforeAnythingStarts() throws {
-        var integrations = CodingAgentIntegrations.builtIn
+        var integrations = AgentIntegrations.builtIn
         _ = try integrations.resolve()
         integrations.hosts.append(AgentHostIntegration(kind: AgentHostTests.kind, make: { AgentHostTests.FakeHost() }))
         _ = try integrations.resolve()

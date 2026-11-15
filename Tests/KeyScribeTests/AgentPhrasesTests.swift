@@ -2,13 +2,13 @@
 import Testing
 @testable import KeyScribeApp
 
-struct CodingAgentPhrasesTests {
+struct AgentPhrasesTests {
     private func unquoted(_ phrase: String) -> String {
         String(phrase.dropFirst().dropLast()).trimmingCharacters(in: .punctuationCharacters)
     }
 
     private func phrases(name: String, readsReplies: Bool) -> [String] {
-        CodingAgentPhrasesSection.examples(name: name, readsReplies: readsReplies).map { unquoted($0.phrase) }
+        AgentPhrasesSection.examples(name: name, readsReplies: readsReplies).map { unquoted($0.phrase) }
     }
 
     @Test func tellingANameSendsTheInstructionThere() {
@@ -57,6 +57,6 @@ struct CodingAgentPhrasesTests {
     }
 
     @Test func renamingNamesTheConversationInstructionsGoTo() {
-        #expect(AgentRename.parse(unquoted(CodingAgentPhrasesSection.renameExample)) == .rename("API"))
+        #expect(AgentRename.parse(unquoted(AgentPhrasesSection.renameExample)) == .rename("API"))
     }
 }

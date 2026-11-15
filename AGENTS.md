@@ -20,7 +20,7 @@ before you edit code in its area.
 - **The only outbound network calls that carry content are explicit BYOK LLM calls**, each over a redacted
   payload and each to a connection the user chose for that purpose: a mode's rewrite of the transcript (or of
   the selected text by spoken instruction), a mode's answer to a spoken request about the selected text, and,
-  when the user turns on the Coding agent spoken updates and chooses a service, the summary of an agent's final reply to the user's
+  when the user turns on the Agent mode's spoken updates and chooses a service, the summary of an agent's final reply to the user's
   own dictation, or to a turn the user asked from inside the agent to hear read aloud, and the description of a prompt
   that turn waits on, from the prompt's title, the tool call it seems to
   be about, and the agent's last words (`SpokenResultOutput`). One content-free exception: when the **Phase-A resolved mode is wired to a BYOK
@@ -131,14 +131,14 @@ are the ones that must never break; the guide explains why and what else applies
 - **Config storage and migrations** → `docs/development/areas/config-and-storage.md`.
   - Every config file carries `schema_version`; a migration is an idempotent transform run on every read.
   - Keep `MigrationRunner` and the `migrations:` hook even with no in-tree steps — downstream uses them.
-- **Voice commands and coding agents** → `docs/development/areas/voice-commands.md` (resolution,
-  execution, choices, previews, their settings, and the coding-agent bridge).
+- **Voice commands and agents** → `docs/development/areas/voice-commands.md` (resolution,
+  execution, choices, previews, their settings, and the agent bridge).
   - Check `stillWanted` immediately before every side effect, not once at the start.
   - Missing, unreadable, timed out, and uncertain stay distinct states; none of them means empty or success.
   - An unresolved target or recipient asks; it never falls through to the current or first one. A tie
     takes a predictable order (a recipient tie, the first name alphabetically) and asks only when no such
     order exists or a wrong guess would run the wrong action (different apps, places, or windows, or tabs
-    in different browsers, tied for a switch are offered as a choice). A place label several Coding agent
+    in different browsers, tied for a switch are offered as a choice). A place label several Agent
     conversations share asks rather than taking the first.
   - Previews and uniqueness checks call the same matching function execution uses.
 - **Feature flags** → `docs/development/areas/feature-flags.md`.
@@ -154,7 +154,7 @@ controller owns the state machine, the take's lease, and the diagnostics record;
 - `presenceReading`, `Transcriber`, `EngineKeeper` → speech-to-text engines.
 - `finishInsertion`, `InsertOutput`, `HUDChannel`, `runOnSelection`, `pasteLast` → insertion, pasteboard,
   HUD focus.
-- `VoiceCommandOutput`, `AgentOutput`, `AgentTake` → voice commands and coding agents.
+- `VoiceCommandOutput`, `AgentOutput`, `AgentTake` → voice commands and agents.
 - `probeCandidates`, `PressResolver`, and in `AppDelegate` `rebuildHotkeyMonitor`, `claimableModes`,
   `shadowedHotkeyIds`, `launchAttention` → hotkeys, triggers, permissions.
 - `maybePreconnect`, `produceDictationText`, `TakeText`, `TakeRewrite`, `SelectionText` → the hard
