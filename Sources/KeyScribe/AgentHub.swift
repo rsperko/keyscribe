@@ -150,6 +150,7 @@ final class AgentHub {
     private var labels: [String: String] = [:]
     private var handingOff: [String: String] = [:]
     private var running: [String: Date] = [:]
+    private var turns: [String: String] = [:]
     private var lastUsed: [String: Date] = [:]
     private var shownByHost: [String: String] = [:]
 
@@ -863,6 +864,7 @@ final class AgentHub {
         connectorNames = connectorNames.filter { kept($0.key) }
         connectorNamesAt = connectorNamesAt.filter { kept($0.key) }
         labels = labels.filter { kept($0.key) }
+        turns = turns.filter { kept($0.key) }
     }
 
     var connectorStateSessions: Set<String> {
@@ -959,6 +961,7 @@ final class AgentHub {
         guard !exclusions.excludes(hello.session) else { return }
         if hello.resumesAfterGap { outbox.noteConnectionGap(conversation: hello.session) }
         running[hello.session] = hello.knownIdle ? nil : now()
+        turns[hello.session] = hello.reportsTurn && !hello.knownIdle ? hello.turn.flatMap { $0.isEmpty ? nil : $0 } : nil
     }
 
     func retire(installation: String) {
@@ -1011,6 +1014,7 @@ final class AgentHub {
                 connectorNames[hello.session] = nil
             }
             connectorNamesAt[hello.session] = now()
+            expectListing(hello)
             refresh(nameReportedFor: hello.session)
             readPlaces()
             Task { [weak self] in await self?.rescan(rereadingTitles: true) }
@@ -1095,12 +1099,14 @@ final class AgentHub {
             }
             handingOff[session] = nil
             running[session] = now()
+            turns[session] = turn
         case .turnComplete(let session, let reason, let answer):
             handingOff[session] = nil
             for (id, entry) in requests where entry.message.conversation == session && entry.turnDuringHandOff != nil {
                 requests[id]?.turnDuringHandOff = .ended
             }
             running[session] = nil
+            turns[session] = nil
             if awaitingResult[session] != nil {
                 let wasRequested = requested.contains(session)
                 let origin = awaitedRequests[session]
@@ -1123,6 +1129,10 @@ final class AgentHub {
     var readNextAloud: Set<String> { nextRequested }
 
     func notify(session: String, turn: String, on: Bool) -> Bool {
+        if let holder = heldByItsHost(session) {
+            if on, turns[holder] == nil, running[holder] != nil { return false }
+            return notify(session: holder, turn: turns[holder] ?? "", on: on)
+        }
         guard !stopped, !exclusions.excludes(session) else { return false }
         guard on else {
             cancelReadAloud(session)
@@ -1274,6 +1284,15 @@ final class AgentHub {
         for (session, conversation) in claims { linked[conversation] = session }
     }
 
+    private func expectListing(_ hello: AgentEvent.Hello) {
+        guard AgentSessionID.agent(of: hello.session) == hello.agent,
+              let source = hosts.first(where: { $0.kind.id == hello.agent }), source.isEnabled,
+              !(lastScan[source.kind.id] ?? []).contains(where: { AgentSessionID.make(agent: $0.agent, native: $0.id) == hello.session }),
+              expected.insert(hello.session).inserted
+        else { return }
+        source.expect()
+    }
+
     private func isHostsOwn(_ hello: AgentEvent.Hello) -> Bool {
         guard AgentSessionID.agent(of: hello.session) == hello.agent,
               let source = hosts.first(where: { $0.kind.id == hello.agent }), source.isEnabled
@@ -1309,6 +1328,13 @@ final class AgentHub {
         }
         sendLabels()
         onChange?()
+    }
+
+    private func heldByItsHost(_ session: String) -> String? {
+        guard let conversation = hostedConversation(claimedBy: session), conversation != session,
+              filed[conversation]?.session == conversation, transport.isLive(session: conversation)
+        else { return nil }
+        return conversation
     }
 
     private func hostedConversation(claimedBy session: String, among hosted: Set<String>? = nil) -> String? {

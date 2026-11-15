@@ -72,6 +72,7 @@ struct BBPluginConnectorTests {
         #expect(config["readyPath"] as? String == agents.appendingPathComponent("ready.json").path)
         #expect(config["protocol"] as? Int == AgentBridgeCodec.protocolVersion)
         #expect(config["version"] as? String == plugin.bundledVersion)
+        #expect(config["appName"] as? String == Branding.appName)
         #expect(calls.all.map(\.0) == [[tool, "plugin", "list", "--json"], [tool, "plugin", "install", folder.path, "--yes", "--json"]])
         for (_, environment) in calls.all {
             #expect(environment["BB_TELEMETRY"] == "false")

@@ -594,7 +594,10 @@ Disconnect and current choice you gave it before. When the connector is up to da
 work you ask it to have KeyScribe read aloud.
 
 Installing asks once, then installs a small KeyScribe plugin in bb with bb's own `bb plugin` command, so the
-reply to what you dictate to any bb thread is read aloud, whichever agent the thread runs. KeyScribe keeps the
+reply to what you dictate to any bb thread is read aloud, whichever agent the thread runs, and you hear what a
+thread asks when it stops for your approval or an answer. You can also ask the agent in any bb thread to have
+KeyScribe read its reply aloud, as in a terminal; a thread whose agent was already running when the plugin was
+installed or updated gets that once bb starts its agent again. KeyScribe keeps the
 plugin up to date on its own, and shows whether bb has it running, with a Repair button if bb reports it
 failing. If bb loses the plugin, for example after you remove it in bb, dictation still reaches bb's threads,
 but replies aren't read aloud until you choose Reinstall. Uninstalling it in KeyScribe removes it from bb and
@@ -701,11 +704,11 @@ you dictate, KeyScribe reads short replies and can summarize longer ones. It als
 conversation you spoke to is waiting for your approval or an answer: KeyScribe says its name and "Waiting for
 approval." or "Waiting for an answer."; if its connector goes away before it finishes, you hear
 "Disconnected before it finished." These notices need no AI service, and one that is
-no longer true by the time it would play is dropped. Claude Code reports approvals and questions. Pi reports
-only that a prompt is open, so with an AI service chosen, what is known about it is sent to that service,
+no longer true by the time it would play is dropped. Claude Code reports approvals and questions. Pi and bb report
+that a prompt is open and what kind it is, and with an AI service chosen, what is known about it is sent to that service,
 after best-effort redaction, to say what it asks: the prompt's kind and title, the tool call it seems to be
-about (such as the command to approve, or a question and its options), and the agent's last words before it
-asked. Which tool call a prompt is about is a best guess. Without a service you hear "Waiting for you." For summaries, also choose one of your saved AI services. When a conversation you spoke to finishes, KeyScribe says the conversation's
+about (such as the command to approve, or a question and its options), and for Pi the agent's last words before it
+asked. For Pi, which tool call a prompt is about is a best guess; bb names it exactly. Without a service you hear "Waiting for approval." or "Waiting for an answer." when the prompt's kind says which, and "Waiting for you." otherwise. For summaries, also choose one of your saved AI services. When a conversation you spoke to finishes, KeyScribe says the conversation's
 name and a short summary of the agent's final reply: a longer reply goes to that service, after its
 best-effort redaction, to be summarized; a reply of a few words is read as it is without any service. With
 **AI service** set to **None**, a longer reply is announced as "Replied. Open the conversation for the result." and

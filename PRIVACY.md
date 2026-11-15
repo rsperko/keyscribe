@@ -47,12 +47,13 @@ LLM calls** to a service you configured, and all off unless you turn them on:
   dictation's transcript to the mode's service once more, with no context. It is redacted if the original
   dictation was or the mode is now, so turning redaction off later never sends that dictation unredacted.
 - **Reply updates**, in the experimental Coding agent feature. Notices that a conversation is waiting for you or
-  lost its connector are fixed sentences and send nothing, with one exception: when a Pi conversation you
-  dictated to opens a prompt, or you check on a Pi conversation and its prompt has no short
+  lost its connector are fixed sentences and send nothing, with one exception: when a Pi conversation or a bb thread you
+  dictated to opens a prompt, or you check on one and its prompt has no short
   question to read as it is (whoever started that turn, you typing included), the prompt's kind and title, the tool call it seems to be about (its name and up
-  to a thousand characters of arguments, such as the command it asks you to approve), and the agent's last
+  to a thousand characters of arguments, such as the command it asks you to approve), and for Pi the agent's last
   words before it asked are sent to the service you chose, after best-effort redaction, to say in a sentence
-  what it asks. Which tool call a prompt belongs to is a best guess, so another tool's arguments can be sent. When an agent finishes an instruction you
+  what it asks. For Pi, which tool call a prompt belongs to is a best guess, so another tool's arguments can be
+  sent; for a bb thread it is the request bb itself is waiting on, along with a question's options or a plan's text. When an agent finishes an instruction you
   dictated, or work you asked it to have KeyScribe read aloud, a longer final reply is sent to the service you chose
   under Replies, only to be summarized into a sentence or two to read aloud or show; a short reply is read without it,
   a longer one is only announced when no service is chosen, and nothing is sent for a dictated reply's
@@ -248,6 +249,10 @@ in the same `Application Support` folder:
   and a short fingerprint of the prompt it started with, never the prompt itself. To make that fingerprint it
   reads the thread's queued message or its most recent prompts inside bb, and keeps nothing it read. KeyScribe
   uses a reply only to read aloud the answer to what you dictated, under the same rules as a connector's.
+  When a thread stops for your approval or an answer, the plugin also reports what bb records about that
+  request (described under Reply updates above), and while it is open asks bb every few seconds whether it still
+  is. The plugin also gives the agent in every bb thread a tool for asking KeyScribe to read its reply aloud; the
+  agent calls it only when you ask, and it sends KeyScribe nothing but that request.
   Each bb window also tells the plugin whether it has focus and which thread its page shows (in a split, only
   once the focused pane shows the same thread), and the
   plugin tells KeyScribe which thread the window you used last shows; KeyScribe keeps only that, in memory,

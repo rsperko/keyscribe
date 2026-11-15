@@ -25,7 +25,7 @@ enum BBPluginFiles {
         manifest["name"] = "bb-plugin-\(id)"
         var bb = manifest["bb"] as? [String: Any] ?? [:]
         bb["name"] = Branding.appName
-        bb["description"] = "Lets \(Branding.appName) read aloud the replies to what you dictate to bb threads, and know which thread you are looking at."
+        bb["description"] = "Lets \(Branding.appName) read aloud the replies to what you dictate to bb threads, say what a thread waits on, and know which thread you are looking at."
         manifest["bb"] = bb
         return ConnectorResources.json(manifest)
     }
@@ -38,7 +38,7 @@ enum BBPluginFiles {
         ConnectorResources.json([
             "protocol": AgentBridgeCodec.protocolVersion, "socketPath": agentsDir.appendingPathComponent("bridge.sock").path,
             "tokenPath": agentsDir.appendingPathComponent("token").path, "readyPath": agentsDir.appendingPathComponent("ready.json").path,
-            "installation": installation, "instance": instance, "version": version,
+            "installation": installation, "instance": instance, "version": version, "appName": Branding.appName,
         ])
     }
 
@@ -231,7 +231,7 @@ final class BBPluginConnector: AgentConnector {
     }
 
     let copy = AgentConnectorCopy(
-        help: "With a small plugin installed in bb, \(Branding.appName) lists the threads bb runs, sends what you say to them through bb\u{2019}s own command, queued behind any turn already running, and hears how they answer; each bb window tells the plugin which thread it shows, so dictation goes to the thread you are looking at. Every thread connects on its own unless you disconnect it. \(Branding.appName) runs nothing of bb\u{2019}s until you connect bb. If bb loses the plugin, dictation still reaches its threads by name, but replies are not read aloud and \(Branding.appName) no longer knows which thread is in front until you reinstall it.",
+        help: "With a small plugin installed in bb, \(Branding.appName) lists the threads bb runs, sends what you say to them through bb\u{2019}s own command, queued behind any turn already running, and hears how they answer and what they stop to ask you; each bb window tells the plugin which thread it shows, so dictation goes to the thread you are looking at. Every thread connects on its own unless you disconnect it. \(Branding.appName) runs nothing of bb\u{2019}s until you connect bb. If bb loses the plugin, dictation still reaches its threads by name, but replies are not read aloud and \(Branding.appName) no longer knows which thread is in front until you reinstall it.",
         reloadHint: "",
         uninstallTitle: "Uninstall the plugin from bb?",
         uninstallMessage: "\(Branding.appName) stops listing bb threads and sending to them. Your conversation names, disconnected conversations and other \(Branding.appName) settings are kept.",

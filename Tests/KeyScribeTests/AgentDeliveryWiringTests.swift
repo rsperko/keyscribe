@@ -2723,7 +2723,7 @@ struct AgentDeliveryWiringTests {
         llm.during = { await MainActor.run { hub.handle(.waiting(session: "claude:s1", prompt: AgentPrompt(kind: "confirm", tool: "bash", detail: "rm -rf build"))) } }
         let (output, _) = speaking(rig, llm: llm, connection: Self.service.id)
         await take(rig)
-        #expect(showsAnswer(rig, "Status for keyscribe: a dialog is open. Nothing sent. Say \u{201C}open keyscribe\u{201D} to see it."))
+        #expect(showsAnswer(rig, "Status for keyscribe: waiting for approval. Nothing sent. Say \u{201C}open keyscribe\u{201D} to see it."))
         #expect(!rig.hud.states.contains { $0.primaryText?.contains("pushing") == true })
         withExtendedLifetime(output) {}
     }

@@ -5,12 +5,23 @@ import { readFile } from "node:fs/promises"
 import { request } from "node:http"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { keyscribe, type Exchange, type Response, type WindowReport } from "./keyscribe.ts"
+import { keyscribe, readAloudReply, type Exchange, type Response, type WindowReport } from "./keyscribe.ts"
 
 const pageSize = 200
 const pageLimit = 10
 const historyLimit = "8"
 const responseLimit = 512 * 1024
+
+const readAloudTool = "tell_me_when_done"
+
+export function readAloudToolName(pluginId: string): string {
+  return `${pluginId.replace(/[^A-Za-z0-9]+/g, "_")}_${readAloudTool}`
+}
+
+export async function interactionStatus(sdk: BbPluginApi["sdk"], threadId: string, interactionId: string): Promise<string | null> {
+  const interaction: { status?: unknown } = await sdk.threads.interactions.get({ threadId, interactionId })
+  return typeof interaction?.status === "string" ? interaction.status : null
+}
 
 export function configPaths(moduleURL: string): string[] {
   const here = dirname(fileURLToPath(moduleURL))
@@ -82,6 +93,7 @@ export default async function plugin(bb: BbPluginApi) {
       return found
     },
     history: async (threadId) => (await bb.sdk.threads.promptHistory({ threadId, limit: historyLimit })).map((entry) => said(entry.input)),
+    interaction: (threadId, interactionId) => interactionStatus(bb.sdk, threadId, interactionId),
     on: (event, handler) => bb.events.on(event as any, handler as any),
   }, {
     now: () => Date.now(),
@@ -106,5 +118,17 @@ export default async function plugin(bb: BbPluginApi) {
     },
   }, configPaths(import.meta.url))
   bb.rpc.register(rpcContract as never, { window: (report: WindowReport) => { plugin.window(report); return null } } as never)
+  const app = (await plugin.settings)?.appName?.trim() || "the voice app"
+  const tool = readAloudToolName(bb.pluginId)
+  bb.agents.registerTool({
+    name: tool,
+    description: `The user has ${app}, a voice app on this Mac. Call this only when the user explicitly asks ${app}, or asks to hear it out loud, ` +
+      `to report when the current work is done. Call it once, then keep working. When this turn ends, ${app} reports your final reply. ` +
+      `If the work is already finished, answer instead of calling it. Not for a plain "let me know".`,
+    presentation: { label: { pending: `Asking ${app} to report when done`, completed: `Asked ${app} to report when done` } },
+    parameters: { type: "object", properties: {}, additionalProperties: false },
+    execute: async (_params: unknown, context: { threadId: string }) => readAloudReply(app, await plugin.readAloud(context.threadId)),
+  })
+  bb.agents.configure(() => ({ tools: [tool], skills: [] }))
   bb.onDispose(() => plugin.stop())
 }

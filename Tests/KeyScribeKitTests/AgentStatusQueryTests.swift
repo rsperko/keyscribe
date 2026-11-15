@@ -166,6 +166,16 @@ struct AgentStatusAnswerTests {
             == "Status for architect: Asks whether to allow pushing to main. Nothing sent.")
     }
 
+    @Test func anApprovalsTitleIsReadAsTheQuestionOnlyWhenItAsksOne() {
+        #expect(AgentStatusAnswer.question(in: AgentPrompt(kind: "confirm", title: "Allow pushing to main?")) == "Allow pushing to main?")
+        let reason = AgentPrompt(kind: "confirm", title: "Needs the network", tool: "command", detail: "curl example.com")
+        #expect(AgentStatusAnswer.question(in: reason) == nil)
+        #expect(status(.userDialog, prompt: reason, description: "Asks to run curl.") == "Status for architect: Asks to run curl. Nothing sent.")
+        #expect(status(.userDialog, prompt: reason) == "Status for architect: waiting for approval. Nothing sent.")
+        #expect(status(.userDialog, prompt: AgentPrompt(kind: "input")) == "Status for architect: waiting for an answer. Nothing sent.")
+        #expect(status(.userDialog, prompt: AgentPrompt(kind: "custom")) == "Status for architect: a dialog is open. Nothing sent.")
+    }
+
     @Test func aLongTitleIsNotReadAsTheQuestion() {
         let title = Array(repeating: "word", count: AgentStatusAnswer.questionWordLimit + 1).joined(separator: " ")
         #expect(AgentStatusAnswer.question(in: AgentPrompt(title: title)) == nil)

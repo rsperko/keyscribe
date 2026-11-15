@@ -16,10 +16,13 @@ export type Pane = { threadId: string | null; isFocused: boolean }
 export type Bb = {
   listThreads: () => Promise<Thread[]>
   history: (thread: string) => Promise<string[]>
+  interaction: (thread: string, id: string) => Promise<string | null>
   on: (event: string, handler: (payload: any) => void) => void
 }
+export type Waiting = { kind?: string; title?: string; tool?: string; detail?: string }
+export type ReadAloud = boolean | "quiet" | null
 
-type Config = { protocol: number; socketPath: string; tokenPath: string; readyPath: string; installation: string; instance: string; version?: string }
+type Config = { protocol: number; socketPath: string; tokenPath: string; readyPath: string; installation: string; instance: string; version?: string; appName?: string }
 type Member = {
   status: string
   helloed: boolean
@@ -28,9 +31,12 @@ type Member = {
   turn: string | null
   next: string | null | undefined
   chain: Promise<void>
+  waiting: { id: string; prompt: Waiting; openedAt: number; stop: () => void } | null
+  unsaid: boolean
+  resay: boolean
 }
 
-const features = ["promptDigest", "readiness", "shown"]
+const features = ["promptDigest", "readiness", "shown", "notify"]
 const busy = new Set(["active", "starting", "stopping"])
 const answerLimit = 8192
 const eventDeadline = 2000
@@ -40,6 +46,59 @@ const greetingLimit = 8
 const windowSilence = 15000
 const windowSweep = 5000
 const shownRetry = 5000
+const waitingCheck = 5000
+const waitingCheckLater = 30000
+const waitingCheckSlowsAfter = 60000
+const readAloudDeadline = 4000
+const waitingTitleLimit = 300
+const waitingDetailLimit = 1000
+
+function clean(value: unknown, limit: number): string | undefined {
+  if (typeof value !== "string") return undefined
+  const trimmed = value.trim()
+  return trimmed ? trimmed.slice(0, limit) : undefined
+}
+
+function described(kind: string, title: unknown, tool?: unknown, detail?: unknown): Waiting {
+  const found: Waiting = { kind }
+  const t = clean(title, waitingTitleLimit)
+  if (t) found.title = t
+  const named = clean(tool, waitingTitleLimit)
+  if (named) found.tool = named
+  const d = clean(detail, waitingDetailLimit)
+  if (d) found.detail = d
+  return found
+}
+
+export function waitingFor(interaction: any): Waiting {
+  const payload = interaction?.payload
+  if (!payload || typeof payload !== "object") return {}
+  if (payload.kind === "approval") {
+    const subject = payload.subject ?? {}
+    const reason = payload.reason
+    switch (subject.kind) {
+      case "command": return described("confirm", reason, "command", subject.command)
+      case "file_change": return described("confirm", reason, undefined, subject.writeScope)
+      case "permission_grant": return described("confirm", reason, subject.toolName)
+      case "plan": return described("confirm", reason, undefined, subject.plan)
+      case "tool_use": return described("confirm", reason ?? subject.presentation?.title ?? subject.presentation?.label?.pending, subject.tool, subject.presentation?.detail)
+      default: return described("confirm", reason)
+    }
+  }
+  if (payload.kind === "user_question") {
+    const question = Array.isArray(payload.questions) ? payload.questions[0] : undefined
+    const options = Array.isArray(question?.options) ? question.options.map((option: any) => option?.label).filter((label: unknown) => typeof label === "string") : []
+    return options.length ? described("select", question?.prompt, undefined, options.join(", ")) : described("input", question?.prompt)
+  }
+  return described("custom", payload.title)
+}
+
+export function readAloudReply(app: string, answer: ReadAloud): string {
+  if (answer === true) return `${app} will report your final reply when this turn ends. Say so in one short sentence and continue.`
+  if (answer === false) return `Reply updates are off in ${app}. Tell the user to turn on Reply updates in ${app}’s Coding agent settings and ask again. Nothing will be reported.`
+  if (answer === "quiet") return `This conversation is disconnected from ${app}. Tell the user to reconnect it in ${app}’s Coding agent settings. Nothing will be reported.`
+  return `${app} didn’t confirm the request, so a spoken reply can’t be promised. Tell the user.`
+}
 
 export function shownThread(route: string | null, panes: Pane[] | null): string | null {
   if (!route) return null
@@ -69,7 +128,12 @@ function folder(path: string): string {
   return index > 0 ? path.slice(0, index) : "/"
 }
 
-export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: () => void; window: (report: WindowReport) => void } {
+export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
+  stop: () => void
+  window: (report: WindowReport) => void
+  readAloud: (thread: string) => Promise<ReadAloud>
+  settings: Promise<{ appName?: string; instance?: string } | null>
+} {
   const connection = "bb-" + host.random()
   const members = new Map<string, Member>()
   const queued = new Map<string, { thread: string; text: string }>()
@@ -86,19 +150,26 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
   let polling: { cancel: () => void } | null = null
   const windows = new Map<string, { thread: string | null; focused: boolean; focusedAt: number; seenAt: number }>()
   let focusings = 0
+  let turnCount = 0
   let wanted: string | null = null
   let told: string | null | undefined
   let telling = false
   let retelling: (() => void) | null = null
   let sweeping: (() => void) | null = null
+  let settled: (value: Config | null) => void = () => {}
+  const settings = new Promise<Config | null>((resolve) => { settled = resolve })
 
   const instanceOf = (thread: string) => `${connection}/${thread}`
+  const newTurn = () => "t-" + host.random() + "-" + host.now() + "-" + (++turnCount)
   const sessionOf = (thread: string) => key(thread, config ? config.instance : "")
 
   function member(thread: string, status = "idle"): { member: Member; added: boolean } {
     const found = members.get(thread)
     if (found) return { member: found, added: false }
-    const made: Member = { status, helloed: false, greeting: false, quiet: false, turn: null, next: undefined, chain: Promise.resolve() }
+    const made: Member = {
+      status, helloed: false, greeting: false, quiet: false, turn: busy.has(status) ? newTurn() : null, next: undefined, chain: Promise.resolve(),
+      waiting: null, unsaid: false, resay: false,
+    }
     members.set(thread, made)
     return { member: made, added: true }
   }
@@ -141,6 +212,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
     if (stopped) return
     if (reason) host.log(reason)
     stopped = true
+    settled(config)
     connected = false
     polling?.cancel()
     polling = null
@@ -148,6 +220,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
     retry = null
     unwatch?.()
     unwatch = null
+    for (const m of members.values()) m.waiting?.stop()
     sweeping?.()
     sweeping = null
     retelling?.()
@@ -169,6 +242,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
     try {
       if (!config) {
         config = await readConfig()
+        settled(config)
         if (stopped) return
         if (!config) {
           host.needsConfiguration("Install this plugin again from the app's settings.")
@@ -206,7 +280,10 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
   }
 
   async function greetAll() {
-    const waiting = [...members.keys()].filter((thread) => !members.get(thread)!.helloed && !members.get(thread)!.greeting)
+    const waiting = [...members.keys()].filter((thread) => {
+      const m = members.get(thread)!
+      return (!m.helloed || m.resay) && !m.greeting
+    })
     const results: Array<"ok" | "failed" | "gone" | number> = []
     let next = 0
     const worker = async () => {
@@ -227,21 +304,33 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
     const m = members.get(thread)
     if (!m || !config) return "gone"
     m.greeting = true
+    m.resay = false
+    const announced = m.waiting
     const response = await post("/event", {
       op: "hello", protocol: config.protocol, agent: "bb", agentVersion: "", instance: instanceOf(thread), session: sessionOf(thread),
       pid: 0, features, idle: !busy.has(m.status), gap: true, connection, installation: config.installation, version: config.version,
+      ...(m.waiting ? { waiting: m.waiting.prompt } : {}),
+      ...(m.turn ? { turn: m.turn } : {}),
     }, eventDeadline)
     m.greeting = false
     if (members.get(thread) !== m) return "gone"
-    if (!response || response.status === 0) return "failed"
+    if (!response || response.status === 0) {
+      m.resay = true
+      return "failed"
+    }
     if (response.status === 403 || response.status === 426) return response.status
-    if (!response.ok) return "failed"
+    if (!response.ok) {
+      m.resay = true
+      return "failed"
+    }
     try {
       m.quiet = JSON.parse(response.text)?.quiet === true
     } catch {
       m.quiet = false
     }
     m.helloed = true
+    if (!m.quiet) m.unsaid = false
+    if (m.waiting !== announced) reportWaiting(thread, m)
     return "ok"
   }
 
@@ -278,6 +367,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
       return fail()
     }
     const commands: any[] = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.commands) ? parsed.commands : []
+    const readmitted: string[] = []
     if (commands.some((c) => c && c.op === "retire")) return stop("the app retired this plugin")
     for (const command of commands) {
       const thread = [...members.keys()].find((t) => sessionOf(t) === command?.expectedSession)
@@ -286,29 +376,45 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
       if (command.op === "quiet" || command.op === "admit") {
         m.quiet = command.op === "quiet"
         told = undefined
+        if (command.op === "admit" && m.unsaid) readmitted.push(thread)
       }
       void post("/event", { op: "ack", request: command.id, instance: instanceOf(thread), connection }, eventDeadline)
     }
     const unknown: string[] = Array.isArray(parsed?.unknown) ? parsed.unknown : []
-    for (const [thread, m] of members) if (unknown.includes(instanceOf(thread))) m.helloed = false
-    if (unknown.length) return greetAll()
+    for (const [thread, m] of members) if (unknown.includes(instanceOf(thread)) || readmitted.includes(thread)) m.helloed = false
+    if (unknown.length || readmitted.length) return greetAll()
     tell()
     repoll()
   }
 
-  function report(thread: string, body: () => Promise<object | null>) {
+  function report(thread: string, body: () => Promise<object | null>, state = false) {
     const m = members.get(thread)
     if (!m) return
+    const rehello = () => {
+      if (stopped || members.get(thread) !== m) return
+      m.resay = true
+      m.chain = m.chain.then(() => {
+        if (connected && !stopped && m.resay) void greetAll()
+      })
+    }
     m.chain = m.chain.then(async () => {
-      if (!connected || stopped || !m.helloed || m.quiet) return
+      if (state && m.quiet) m.unsaid = true
+      if (stopped || m.quiet || !m.helloed) return
+      if (!connected) return state ? rehello() : undefined
       const event = await body()
-      if (!event || !connected || stopped || !m.helloed || m.quiet) return
+      if (!event || stopped || !m.helloed || m.quiet) return
+      if (!connected) return state ? rehello() : undefined
       const response = await post("/event", { ...event, instance: instanceOf(thread), connection }, eventDeadline)
       if (response?.status === 409 && members.get(thread) === m) {
         m.helloed = false
-        void greetAll()
-      }
+        if (connected) void greetAll()
+      } else if (state && !response?.ok) rehello()
     })
+  }
+
+  function reportWaiting(thread: string, m: Member) {
+    const prompt = m.waiting?.prompt
+    report(thread, async () => (prompt ? { op: "waiting", session: sessionOf(thread), waiting: prompt } : { op: "waiting", session: sessionOf(thread) }), true)
   }
 
   async function startedPrompt(thread: string, next: string | null | undefined): Promise<string | undefined> {
@@ -405,7 +511,9 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
   bb.on("thread.created", ({ thread }) => arrived(thread))
   bb.on("thread.unarchived", ({ thread }) => arrived(thread))
   const leave = ({ thread }: any) => {
-    if (!thread?.id || !members.delete(thread.id)) return
+    if (!thread?.id) return
+    members.get(thread.id)?.waiting?.stop()
+    if (!members.delete(thread.id)) return
     for (const [id, q] of queued) if (q.thread === thread.id) queued.delete(id)
     changed()
   }
@@ -430,7 +538,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
     m.status = "active"
     const next = m.next
     m.next = undefined
-    const turn = "t-" + host.random() + "-" + host.now()
+    const turn = newTurn()
     m.turn = turn
     if (added) return changed()
     report(thread.id, async () => {
@@ -438,9 +546,74 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
       return prompt === undefined ? { op: "turnStarted", session: sessionOf(thread.id), turn } : { op: "turnStarted", session: sessionOf(thread.id), turn, prompt }
     })
   })
+  function stopWaiting(thread: string, m: Member) {
+    if (!m.waiting) return
+    m.waiting.stop()
+    m.waiting = null
+    reportWaiting(thread, m)
+  }
+
+  function checkWaiting(thread: string, m: Member, entry: NonNullable<Member["waiting"]>) {
+    const delay = host.now() - entry.openedAt < waitingCheckSlowsAfter ? waitingCheck : waitingCheckLater
+    entry.stop = host.after(delay, () => {
+      void (async () => {
+        let status: string | null
+        try {
+          status = await bb.interaction(thread, entry.id)
+        } catch {
+          status = "pending"
+        }
+        if (stopped || m.waiting !== entry || members.get(thread) !== m) return
+        if (status === "pending") checkWaiting(thread, m, entry)
+        else stopWaiting(thread, m)
+      })()
+    })
+  }
+
+  bb.on("interaction.pending", ({ thread, interaction }) => {
+    const id = thread?.id ?? interaction?.threadId
+    const m = typeof id === "string" ? members.get(id) : undefined
+    if (!m || interaction?.status !== "pending" || typeof interaction.id !== "string") return
+    m.waiting?.stop()
+    const entry = { id: interaction.id as string, prompt: waitingFor(interaction), openedAt: host.now(), stop: () => {} }
+    m.waiting = entry
+    reportWaiting(id, m)
+    checkWaiting(id, m, entry)
+  })
+
+  function readAloud(thread: string): Promise<ReadAloud> {
+    const m = members.get(thread)
+    if (!m || (m.turn === null && busy.has(m.status))) return Promise.resolve(null)
+    const turn = m.turn ?? ""
+    return new Promise((answer) => {
+      let done = false
+      const resolve = (value: ReadAloud) => {
+        if (done) return
+        done = true
+        clear()
+        answer(value)
+      }
+      const clear = host.after(readAloudDeadline, () => resolve(null))
+      m.chain = m.chain.then(async () => {
+        if (done) return
+        if (m.helloed && m.quiet) return resolve("quiet")
+        if (!connected || stopped || !m.helloed || members.get(thread) !== m) return resolve(null)
+        const response = await post("/event", { op: "notify", session: sessionOf(thread), turn, on: true, instance: instanceOf(thread), connection }, readAloudDeadline)
+        if (!response?.ok) return resolve(null)
+        try {
+          const answer = JSON.parse(response.text)
+          resolve(answer?.quiet === true ? "quiet" : typeof answer?.spoken === "boolean" ? answer.spoken : null)
+        } catch {
+          resolve(null)
+        }
+      })
+    })
+  }
+
   const ended = (thread: any, reason: string, answer: string) => {
     const m = thread?.id ? members.get(thread.id) : undefined
     if (!m) return
+    stopWaiting(thread.id, m)
     m.status = "idle"
     const turn = m.turn
     m.turn = null
@@ -451,5 +624,5 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): { stop: ()
   bb.on("thread.failed", ({ thread }) => ended(thread, "error", ""))
 
   void connect()
-  return { stop: () => stop(), window }
+  return { stop: () => stop(), window, readAloud, settings }
 }

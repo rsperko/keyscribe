@@ -345,7 +345,9 @@ every rule above applies to it, with these sharpenings:
   Again, turning it on),
   at most once per `HostDiscovery.fallbackInterval`, and otherwise once per `HostDiscovery.idleInterval`; a
   list that could not be read is asked again after the shorter interval. Another agent's hello or title never
-  asks a host: a host's list is a separate program, and asking it on every event costs a run each time. A
+  asks a host: a host's list is a separate program, and asking it on every event costs a run each time. The
+  host's own connector greeting a conversation the host has not listed yet asks it once for that conversation
+  (`AgentHub.expectListing`), so a new thread has its name by the time its first reply is read. A
   host id must not repeat an agent's
   or another host's (`CodingAgentIntegrations.resolve`). Each capability a host's API lacks answers
   unsupported, never a guess.
@@ -421,7 +423,7 @@ every rule above applies to it, with these sharpenings:
   queued, its error envelope as refused in plain words, and anything else as uncertain; bb's error code goes to
   the log as public and its message as private, since a message could echo what was sent. Open only asks:
   bb's answer counts the clients it broadcast to, not a window that showed the thread, so it reads as requested, and bb is brought forward only when some client took it and the open is
-  still wanted. In-front is unsupported: bb reports no focused thread. While bb's app is not running its
+  still wanted. In-front comes from bb's plugin (below), since bb's command reports no focused thread. While bb's app is not running its
   command is not run at all; the command never starts bb's server either (it fails at once, measured with bb
   0.49.0 on 2026-11-14). Its data folder is not watched: bb writes its database every few seconds even while
   idle (measured 2026-11-14), so a watch would run its command constantly. A thread nested under another
@@ -476,12 +478,38 @@ every rule above applies to it, with these sharpenings:
   members the bridge no longer knows, which say hello again on their own). It reports only what it saw: a
   `turnStarted` whose `prompt` is the digest of the queued row bb dispatched, or else of the newest prompt in the
   thread's history that is not still queued, and none for a row bb itself queued; a `turnComplete` only for a turn
-  it saw start. Delivery stays bb's command, so the hub's digest follow matches the dictation exactly as for an
+  it saw start or found running when it loaded. Delivery stays bb's command, so the hub's digest follow matches the dictation exactly as for an
   agent's own connector. While it is live for a thread it holds that thread: an agent's own connector there is sent
-  back and not filed until the plugin stops, so a thread never reports its turns twice; approvals still show,
-  because a hosted conversation's state comes from bb's own list. It lists bb's threads page by page, and a thread
+  back and not filed until the plugin stops, so a thread never reports its turns twice. It lists bb's threads page by page, and a thread
   it had not listed says hello as soon as bb reports it working. Events the app cannot take are dropped, never
   replayed.
+- **bb's plugin reports the prompt a thread waits on, as Pi's connector does.** On bb's `interaction.pending` it
+  sends `waiting` with what bb records for that request (`waitingFor`, bounded like Pi's, with a title only where bb
+  gives one), and repeats it in the thread's hello while it is open. Whether a prompt is open is state, not an
+  event: a `waiting` report that does not land (no connection, a failed post, or a thread disconnected meanwhile
+  and let back in) has that thread say hello again, so the hello carries the current prompt or none, along with
+  the turn running, so the hub keeps a reply it already promised. The hello is said again at the end of the thread's
+  queue of reports, never in place of it, so a reply queued behind the failed report is still sent and is never
+  overtaken by a hello saying the thread is idle. A hello the app does not take for now (no answer, or an error
+  other than a refusal) leaves the thread marked to say hello again once the connection is back. It asks bb
+  whether the request is still pending only while one is open, every few seconds for the first minute and then
+  less often, and a failed read keeps waiting rather than clearing; anything but pending, or the turn ending, sends
+  the clear, before that turn's `turnComplete`. The hosted row reads as a dialog while the prompt is open
+  (`HostDiscovery.observe`), so the hub describes it like Pi's; once cleared it reads as working until bb's list is
+  next read, rather than asking bb's command again for every prompt. A list whose read began after the prompt
+  opened and that shows the thread idle ends the prompt too, since a finished turn waits on nothing; a working
+  thread keeps it, so the row never depends on whether bb's list flags every kind of prompt. Retiring the
+  connector ends it as well.
+- **bb's plugin gives every bb agent the read-aloud tool.** It registers one agent tool, named for its plugin id so
+  each copy of the app has its own, and selects it for every thread; bb adds a plugin tool only when an agent session
+  starts, never to one already running. The tool sends `notify` for the thread's current turn, or its next when
+  idle. A thread already working when the plugin loads gets a turn of its own then, with no prompt (so it never
+  matches a dictation), which its hellos name and whose end it reports, so that turn can still be read aloud. The whole call, queue included, has one deadline, and the agent is told only what
+  the app answered. A Claude Code thread whose connector is installed also sees that connector's own tool. That
+  connector is not filed while the plugin holds the thread, so its conversation is not listed; the hub hands its
+  `notify` to the hosted conversation for the turn the plugin last reported running, in a `turnStarted` or a
+  hello, or its next when none runs (`AgentHub.heldByItsHost`), so either tool follows the same turn and the
+  reply is read once. While the conversation works on a turn the hub cannot name, it promises nothing.
 - **bb's plugin says which thread you are looking at.** Its window half (`app.tsx`, an `experimental_appOverlay`
   mounted once per bb window, which bb builds when it installs or reloads the plugin) reports over bb's plugin
   RPC whether the window has focus and which thread it shows: a thread only on a thread page, and in a split

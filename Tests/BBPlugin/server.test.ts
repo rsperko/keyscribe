@@ -1,6 +1,20 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import plugin, { configPaths, rpcContract } from "../../Sources/KeyScribe/Resources/BBPlugin/server.ts"
+import plugin, { configPaths, interactionStatus, readAloudToolName, rpcContract } from "../../Sources/KeyScribe/Resources/BBPlugin/server.ts"
+
+function fakeBb(overrides: Record<string, unknown> = {}): any {
+  return {
+    pluginId: "keyscribe-dev",
+    sdk: { threads: { list: async () => [], promptHistory: async () => [], interactions: { get: async () => ({ status: "pending" }) } } },
+    events: { on: () => {} },
+    log: { info: () => {} },
+    status: { needsConfiguration: () => {} },
+    onDispose: () => {},
+    rpc: { register: () => {} },
+    agents: { registerTool: () => {}, configure: () => {} },
+    ...overrides,
+  }
+}
 
 test("the settings are looked for beside the entry bb loads, then one folder up", () => {
   assert.deepEqual(configPaths("file:///plugins/ks/server.ts"), ["/plugins/ks/keyscribe.json", "/plugins/keyscribe.json"])
@@ -10,14 +24,10 @@ test("the settings are looked for beside the entry bb loads, then one folder up"
 test("the entry hands bb its cleanup, and without settings asks bb to show it needs setting up", async () => {
   const disposers: Array<() => unknown> = []
   const statuses: string[] = []
-  const bb: any = {
-    sdk: { threads: { list: async () => [], promptHistory: async () => [] } },
-    events: { on: () => {} },
-    log: { info: () => {} },
+  const bb = fakeBb({
     status: { needsConfiguration: (message: string) => statuses.push(message) },
     onDispose: (hook: () => unknown) => disposers.push(hook),
-    rpc: { register: () => {} },
-  }
+  })
   await plugin(bb)
   assert.equal(disposers.length, 1)
   for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r))
@@ -27,14 +37,7 @@ test("the entry hands bb its cleanup, and without settings asks bb to show it ne
 
 test("bb's windows report to the server through one method whose input is checked before it is used", async () => {
   const registered: Array<{ contract: any; handlers: any }> = []
-  const bb: any = {
-    sdk: { threads: { list: async () => [], promptHistory: async () => [] } },
-    events: { on: () => {} },
-    log: { info: () => {} },
-    status: { needsConfiguration: () => {} },
-    onDispose: () => {},
-    rpc: { register: (contract: any, handlers: any) => registered.push({ contract, handlers }) },
-  }
+  const bb = fakeBb({ rpc: { register: (contract: any, handlers: any) => registered.push({ contract, handlers }) } })
   await plugin(bb)
   assert.equal(registered.length, 1)
   assert.deepEqual(Object.keys(registered[0].contract), ["window"])
@@ -46,4 +49,31 @@ test("bb's windows report to the server through one method whose input is checke
     assert.ok("issues" in (check(bad) as object))
   }
   assert.deepEqual(rpcContract.window.output["~standard"].validate(null), { value: null })
+})
+
+test("every bb agent is offered a tool, named for this copy of the plugin, that asks the app to read the turn aloud", async () => {
+  const tools: any[] = []
+  const configured: Array<(context: any) => any> = []
+  const bb = fakeBb({ agents: { registerTool: (tool: any) => tools.push(tool), configure: (provider: any) => configured.push(provider) } })
+  await plugin(bb)
+  assert.equal(readAloudToolName("keyscribe-dev"), "keyscribe_dev_tell_me_when_done")
+  assert.equal(tools.length, 1)
+  assert.equal(tools[0].name, "keyscribe_dev_tell_me_when_done")
+  assert.match(tools[0].description, /Call this only when the user explicitly asks/)
+  assert.deepEqual(tools[0].parameters, { type: "object", properties: {}, additionalProperties: false })
+  assert.equal(configured.length, 1)
+  assert.deepEqual(configured[0]({ thread: { id: "thr_a" } }), { tools: ["keyscribe_dev_tell_me_when_done"], skills: [] })
+  const answer = await tools[0].execute({}, { threadId: "thr_a", projectId: "p", signal: new AbortController().signal })
+  assert.match(answer, /didn’t confirm the request/)
+})
+
+test("whether bb still waits on a prompt is read from bb, and a failed read is left to the caller", async () => {
+  const asked: any[] = []
+  const sdk: any = { threads: { interactions: { get: async (args: any) => { asked.push(args); return { status: "resolved" } } } } }
+  assert.equal(await interactionStatus(sdk, "thr_a", "i1"), "resolved")
+  assert.deepEqual(asked, [{ threadId: "thr_a", interactionId: "i1" }])
+  const failing: any = { threads: { interactions: { get: async () => { throw new Error("busy") } } } }
+  await assert.rejects(interactionStatus(failing, "thr_a", "i1"))
+  const odd: any = { threads: { interactions: { get: async () => ({}) } } }
+  assert.equal(await interactionStatus(odd, "thr_a", "i1"), null)
 })

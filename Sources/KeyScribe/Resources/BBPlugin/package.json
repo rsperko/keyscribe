@@ -8,7 +8,7 @@
   },
   "bb": {
     "name": "KeyScribe",
-    "description": "Reads aloud the replies to what you dictate to bb threads, and knows which thread you are looking at.",
+    "description": "Reads aloud the replies to what you dictate to bb threads, says what a thread waits on, and knows which thread you are looking at.",
     "branding": {
       "icon": "Mic"
     },

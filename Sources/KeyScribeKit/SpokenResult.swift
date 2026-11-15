@@ -107,7 +107,12 @@ public enum SpokenResult {
         case .approval: "Waiting for approval."
         case .question: "Waiting for an answer."
         case .disconnected: "Disconnected before it finished."
-        case .waiting: "Waiting for you."
+        case .waiting(let prompt):
+            switch prompt.kind {
+            case "confirm": "Waiting for approval."
+            case "select", "input", "editor": "Waiting for an answer."
+            default: "Waiting for you."
+            }
         }
     }
 

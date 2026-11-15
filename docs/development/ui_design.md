@@ -618,8 +618,11 @@ this conversation” says “No recipient selected. Nothing sent. Say “check o
 Every answer starts with “Status for docs:” and says “Nothing sent.” after what is reported (the HUD's
 “open” hint follows it), the same words every held take uses. It says only what is reported,
 in this order: the prompt's own question when it is short (“waiting for your answer to “keep the schema or add
-a migration?””), read with the same redaction as a spoken reply, else a description from the chosen summary
-service (the HUD says “Checking docs…” while it waits), else the state (“waiting for approval”). The HUD adds
+a migration?””), read with the same redaction as a spoken reply, and for an approval only when its title asks a
+question (ends in “?”), since bb titles an approval with its reason; else a description from the chosen summary
+service (the HUD says “Checking docs…” while it waits), else the state (“waiting for approval”), which for an
+open prompt follows its kind: a confirm is waiting for approval, a select, input or editor waiting for an answer,
+anything else “a dialog is open”. The HUD adds
 “Say “open docs” to see it”; speech leaves it out. A working conversation is “working. No pending input
 request is reported.” and an idle one “idle. No pending input request is reported.”, never that it needs
 nothing. One that is not connected is “not connected. Its current status is unavailable.” with what it was last
@@ -2104,8 +2107,17 @@ options exist. Attribution is best effort: a dialog opened by a shortcut while a
 running beside another tool, can be reported with the wrong tool, and the instruction tells the model the tool
 call may be unrelated and that the title wins. With a service chosen that context, redacted, becomes one spoken line saying what it asks
 (`SpokenResult.waitingPrompt`), under a budget shorter than a summary's so a slow service does not hold the
-notice; without a service, or when that fails or runs out of time, it is "Waiting for you." The hub forgets a
-prompt's context once its session is no longer live. A Pi prompt shows in the session list as a dialog. Each is spoken once when the state begins; a notice whose state ends (the
+notice; without a service, or when that fails or runs out of time, it follows the prompt's kind: "Waiting for
+approval." for a confirm, "Waiting for an answer." for a select, input or editor, and "Waiting for you." otherwise. The hub forgets a
+prompt's context once its session is no longer live. A bb thread's prompt comes from bb's plugin, which reports
+what bb records for it (`waitingFor`): an approval as a confirm, with its reason or a fixed title and the command,
+tool, plan or folder it asks about; a question as a select naming its options, or an input; anything else as custom
+with its title. bb names the exact request, so no attribution guess is involved, and no last words are sent. The
+plugin asks bb whether the prompt is still open only while it is, every few seconds for the first minute and
+then less often, and clears it when it is answered or the turn ends; until bb's own list is read again, the
+thread then reads as working. A list read after the prompt opened that shows the thread idle ends it too, so a clear
+that was lost never outlives the turn; the plugin also resends a prompt report that did not land. A Pi prompt, and a
+bb thread's, shows in the session list as a dialog. Each is spoken once when the state begins; a notice whose state ends (the
 approval was given, the connector or the conversation came back, the turn finished) before it is audible is withdrawn rather than
 played late, even while the voice is still preparing it, and a finished turn's summary replaces it. A new
 notice supersedes an earlier turn's summary still being made for that conversation. A
@@ -2115,7 +2127,7 @@ even if its state has since ended.
 
 **AI service** picks **None** or one of the saved AI services, used for summaries and for describing a Pi prompt. No
 service is ever chosen for the user. With **None**, a short finished reply is still read as it is, a longer one is
-announced as "Replied. Open the conversation for the result.", and a Pi prompt is "Waiting for you."; the row's caption
+announced as "Replied. Open the conversation for the result.", and a Pi or bb prompt is said by its kind as above; the row's caption
 says so. A chosen service that no longer exists is an `IssueText`, and a longer reply
 is then spoken as unavailable. With no saved services, an advisory saying summaries need one and what plays without it,
 and **Open AI Services**, take its place. While a service is chosen, the row's caption

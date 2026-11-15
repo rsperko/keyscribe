@@ -58,6 +58,8 @@ struct ConnectorConsentSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
             Text("It also installs a small plugin in \(host.displayName) so the reply to what you dictate is read aloud, and so dictation can go to the conversation you are looking at: each \(host.displayName) window tells the plugin which conversation it shows. Every conversation connects on its own, and you can disconnect any of them later.")
                 .fixedSize(horizontal: false, vertical: true)
+            Text("When a conversation stops for your approval or an answer, the plugin reports what it asks, such as the command or plan to approve; with an AI service chosen for reply updates, that goes to the service, after best-effort redaction, to be said in a sentence. The plugin also gives the agent in every conversation a tool for asking \(Branding.appName) to read its reply aloud, which it uses only when you ask.")
+                .fixedSize(horizontal: false, vertical: true)
             Text("\(Branding.appName) runs nothing of \(host.displayName)\u{2019}s until you connect it, and keeps the plugin up to date. Uninstalling the plugin disconnects \(host.displayName).")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }

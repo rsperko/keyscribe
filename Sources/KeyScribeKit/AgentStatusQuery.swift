@@ -43,7 +43,9 @@ public enum AgentStatusAnswer {
     public static let questionWordLimit = 25
 
     public static func question(in prompt: AgentPrompt?) -> String? {
-        guard let title = prompt?.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { return nil }
+        guard let title = prompt?.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty,
+              prompt?.kind != "confirm" || title.hasSuffix("?")
+        else { return nil }
         let spoken = SpokenResult.spoken(summary: RedactionTokenizer.apply(title, into: Tokenizer()))
         let words = spoken.split(whereSeparator: { $0.isWhitespace }).count
         return words > 0 && words <= questionWordLimit ? spoken : nil
@@ -82,9 +84,9 @@ public enum AgentStatusAnswer {
         if let description = description?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty {
             return sentence(description)
         }
-        return switch state {
-        case .waitingApproval: "waiting for approval."
-        case .waitingQuestion: "waiting for an answer."
+        return switch (state, prompt?.kind) {
+        case (.waitingApproval, _), (.userDialog, "confirm"): "waiting for approval."
+        case (.waitingQuestion, _), (.userDialog, "select"), (.userDialog, "input"), (.userDialog, "editor"): "waiting for an answer."
         default: "a dialog is open."
         }
     }

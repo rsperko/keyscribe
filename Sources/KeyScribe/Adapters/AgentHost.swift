@@ -88,6 +88,8 @@ final class HostDiscovery: AgentDiscovery {
     private var last: (at: Date, scan: AgentScan)?
     private var answered = false
     private var wanted = false
+    private var prompting: [String: Date] = [:]
+    private var answeredSinceList: Set<String> = []
 
     init(_ integration: AgentHostIntegration, allowed: @escaping @MainActor () -> Bool, now: @escaping () -> Date = Date.init) {
         kind = integration.kind
@@ -99,6 +101,42 @@ final class HostDiscovery: AgentDiscovery {
     var isEnabled: Bool { allowed() && host.isEnabled }
 
     func want() { wanted = true }
+
+    func observe(_ event: AgentEvent) {
+        switch event {
+        case .hello(let hello): prompt(hello.session, open: hello.waiting != nil)
+        case .waiting(let session, let prompt): self.prompt(session, open: prompt != nil)
+        case .turnComplete(let session, _, _): prompt(session, open: false)
+        default: break
+        }
+    }
+
+    private func prompt(_ session: String, open: Bool) {
+        if open {
+            if prompting[session] == nil { prompting[session] = now() }
+            answeredSinceList.remove(session)
+        } else if prompting.removeValue(forKey: session) != nil {
+            answeredSinceList.insert(session)
+        }
+    }
+
+    func retire(sessions: Set<String>) {
+        prompting = prompting.filter { !sessions.contains($0.key) }
+        answeredSinceList.subtract(sessions)
+    }
+
+    private func withPrompts(_ scan: AgentScan) -> AgentScan {
+        guard case .found(let sessions, let extras) = scan, !prompting.isEmpty || !answeredSinceList.isEmpty else { return scan }
+        return .found(sessions.map { session in
+            var shown = session
+            if prompting[session.id] != nil {
+                shown.state = .userDialog
+            } else if answeredSinceList.contains(session.id), [.waitingApproval, .waitingQuestion, .userDialog].contains(session.state) {
+                shown.state = .working
+            }
+            return shown
+        }, extras)
+    }
 
     func expect() { last = nil }
 
@@ -112,13 +150,19 @@ final class HostDiscovery: AgentDiscovery {
             last = nil
             return .found([], AgentScanExtras(problem: "\(kind.displayName) isn\u{2019}t installed on this Mac. Install it, or turn this off."))
         }
-        if let last, now().timeIntervalSince(last.at) < interval(after: last.scan) { return last.scan }
+        if let last, now().timeIntervalSince(last.at) < interval(after: last.scan) { return withPrompts(last.scan) }
         wanted = false
         let started = now()
         let scan = await fresh()
         last = (started, scan)
-        if case .found = scan, isEnabled { answered = true }
-        return scan
+        if case .found(let sessions, _) = scan {
+            answeredSinceList = []
+            let idle = Set(sessions.filter { $0.state == .idle }.map(\.id))
+            let listed = Set(sessions.map(\.id))
+            prompting = prompting.filter { listed.contains($0.key) && ($0.value > started || !idle.contains($0.key)) }
+            if isEnabled { answered = true }
+        }
+        return withPrompts(scan)
     }
 
     private func interval(after scan: AgentScan) -> TimeInterval {

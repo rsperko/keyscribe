@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { keyscribe, promptDigest, shownThread, type Bb, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
+import { keyscribe, promptDigest, readAloudReply, shownThread, waitingFor, type Bb, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
 
 type Request = { path: string; body: any; auth: string; answer: (status: number, text?: string) => void; settled: boolean; cancelled: boolean }
 
@@ -24,9 +24,17 @@ function harness(options: { threads?: { id: string; status: string }[]; history?
   }
   const threads = options.threads ?? [{ id: "thr_a", status: "idle" }, { id: "thr_b", status: "active" }]
   const history = options.history ?? {}
+  const interactions: Record<string, string | Error> = {}
+  const checked: string[] = []
   const bb: Bb = {
     listThreads: async () => threads,
     history: async (thread) => history[thread] ?? [],
+    interaction: async (thread, id) => {
+      checked.push(`${thread}/${id}`)
+      const status = interactions[id]
+      if (status instanceof Error) throw status
+      return status ?? null
+    },
     on: (event, handler) => { handlers.set(event, handler) },
   }
   const host: Host = {
@@ -98,7 +106,10 @@ function harness(options: { threads?: { id: string; status: string }[]; history?
     for (const w of watchers.filter((w) => !w.stopped)) w.fn()
     await settle()
   }
-  return { bb, host, files, requests, open, sent, emit, settle, advance, answerHellos, answerEvents, timers, logs, configuration, watchers, appStarted }
+  return {
+    bb, host, files, requests, open, sent, emit, settle, advance, answerHellos, answerEvents, timers, logs, configuration, watchers, appStarted,
+    interactions, checked,
+  }
 }
 
 const session = (thread: string) => `${thread}@/Users/me/.bb`
@@ -125,7 +136,7 @@ test("says hello for every thread under its conversation key with what it knows,
   assert.equal(a.installation, "I9")
   assert.equal(a.pid, 0)
   assert.equal(a.idle, true)
-  assert.deepEqual(a.features, ["promptDigest", "readiness", "shown"])
+  assert.deepEqual(a.features, ["promptDigest", "readiness", "shown", "notify"])
   assert.equal(hellos.find((b) => b.session === session("thr_b")).idle, false)
   assert.equal(new Set(hellos.map((b) => b.connection)).size, 1)
   assert.equal(new Set(hellos.map((b) => b.instance)).size, 2)
@@ -196,9 +207,9 @@ test("a turn bb itself started, or one whose prompt cannot be read, names no pro
   assert.equal(h.sent("turnStarted")[1].prompt, undefined)
 })
 
-test("a thread that goes idle without a turn the plugin saw start reports no reply", async () => {
+test("a thread that goes idle with no turn running, as far as the plugin knows, reports no reply", async () => {
   const h = await connected()
-  await h.emit("thread.idle", { thread: { id: "thr_b", status: "idle" }, lastAssistantText: "already running before" })
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "nothing ran" })
   assert.equal(h.sent("turnComplete").length, 0)
 })
 
@@ -541,4 +552,313 @@ test("a window that stops reporting is forgotten, so a reloaded window never sta
   assert.deepEqual(shownEvents(h), [[session("thr_a"), true]])
   await h.advance(10_000)
   assert.deepEqual(shownEvents(h), [[session("thr_a"), true], [session("thr_a"), false]])
+})
+
+const approval = (subject: object, reason: string | null = null) => ({ id: "i1", status: "pending", threadId: "thr_a", payload: { kind: "approval", reason, availableDecisions: ["allow_once", "deny"], subject } })
+
+test("a prompt bb waits on is described the way the app describes any agent's prompt, with a title only where bb gives one", () => {
+  assert.deepEqual(waitingFor(approval({ kind: "command", command: "curl example.com", cwd: "/src", itemId: "x", actions: [], sessionGrant: null }, "Needs the network")),
+    { kind: "confirm", title: "Needs the network", tool: "command", detail: "curl example.com" })
+  assert.deepEqual(waitingFor(approval({ kind: "file_change", itemId: "x", sessionGrant: null, writeScope: "/src/app" })),
+    { kind: "confirm", detail: "/src/app" })
+  assert.deepEqual(waitingFor(approval({ kind: "permission_grant", itemId: "x", toolName: "Bash", permissions: { fileSystem: null, network: null } }, "Run tests")),
+    { kind: "confirm", title: "Run tests", tool: "Bash" })
+  assert.deepEqual(waitingFor(approval({ kind: "plan", itemId: "x", plan: "1. Fix it", planFilePath: null })),
+    { kind: "confirm", detail: "1. Fix it" })
+  assert.deepEqual(waitingFor(approval({ kind: "tool_use", itemId: "x", tool: "deploy", presentation: { icon: { glyph: "x" }, label: { pending: "Deploying", completed: "Deployed" }, detail: "to staging" } })),
+    { kind: "confirm", title: "Deploying", tool: "deploy", detail: "to staging" })
+  const question = (options?: object[]) => ({ id: "i2", status: "pending", threadId: "thr_a", payload: { kind: "user_question", questions: [{ id: "q", prompt: "Which branch?", allowFreeText: false, multiSelect: false, required: true, options }] } })
+  assert.deepEqual(waitingFor(question([{ label: "main", value: "m" }, { label: "dev", value: "d" }])), { kind: "select", title: "Which branch?", detail: "main, dev" })
+  assert.deepEqual(waitingFor(question()), { kind: "input", title: "Which branch?" })
+  assert.deepEqual(waitingFor({ id: "i3", status: "pending", payload: { kind: "acme/login", title: "Sign in to Acme", data: {} } }), { kind: "custom", title: "Sign in to Acme" })
+  assert.deepEqual(waitingFor({ id: "i4", status: "pending", payload: { kind: "plugin", title: "Pick a color", data: {} } }), { kind: "custom", title: "Pick a color" })
+  assert.deepEqual(waitingFor({ id: "i5", status: "pending", payload: null }), {})
+  const long = waitingFor(approval({ kind: "command", command: "x".repeat(5000), cwd: null, itemId: "x", actions: [], sessionGrant: null }, "y".repeat(5000)))
+  assert.equal(long.title?.length, 300)
+  assert.equal(long.detail?.length, 1000)
+})
+
+test("a prompt bb waits on is reported, and cleared once bb no longer waits on it, checking only while it waits", async () => {
+  const h = await connected()
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  h.interactions.i1 = "pending"
+  await h.emit("interaction.pending", { thread: { id: "thr_a" }, interaction: approval({ kind: "command", command: "ls", cwd: null, itemId: "x", actions: [], sessionGrant: null }) })
+  await h.answerEvents()
+  assert.deepEqual(h.sent("waiting").map((b) => [b.session, b.waiting]), [[session("thr_a"), { kind: "confirm", tool: "command", detail: "ls" }]])
+  await h.advance(5000)
+  await h.answerEvents()
+  assert.equal(h.sent("waiting").length, 1)
+  assert.deepEqual(h.checked, ["thr_a/i1"])
+  h.interactions.i1 = "resolved"
+  await h.advance(5000)
+  await h.answerEvents()
+  assert.deepEqual(h.sent("waiting").map((b) => [b.session, b.waiting]), [[session("thr_a"), { kind: "confirm", tool: "command", detail: "ls" }], [session("thr_a"), undefined]])
+  await h.advance(60_000)
+  assert.equal(h.checked.length, 2)
+})
+
+test("a prompt whose check fails is still waited on, and one bb no longer has is cleared", async () => {
+  const h = await connected()
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  h.interactions.i1 = new Error("busy")
+  await h.emit("interaction.pending", { thread: { id: "thr_a" }, interaction: approval({ kind: "plan", itemId: "x", plan: "p", planFilePath: null }) })
+  await h.advance(5000)
+  await h.answerEvents()
+  assert.equal(h.sent("waiting").length, 1)
+  delete h.interactions.i1
+  await h.advance(5000)
+  await h.answerEvents()
+  assert.equal(h.sent("waiting").length, 2)
+  assert.equal(h.sent("waiting")[1].waiting, undefined)
+})
+
+test("a turn that ends stops the wait before its reply, and an answered prompt never resurfaces", async () => {
+  const h = await connected()
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  h.interactions.i1 = "pending"
+  await h.emit("interaction.pending", { thread: { id: "thr_a" }, interaction: approval({ kind: "plan", itemId: "x", plan: "p", planFilePath: null }) })
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "done" })
+  await h.answerEvents()
+  await h.answerEvents()
+  await h.answerEvents()
+  const ops = h.requests.filter((r) => r.path === "/event" && ["waiting", "turnComplete"].includes(r.body.op)).map((r) => [r.body.op, r.body.waiting])
+  assert.deepEqual(ops, [["waiting", { kind: "confirm", detail: "p" }], ["waiting", undefined], ["turnComplete", undefined]])
+  await h.advance(60_000)
+  assert.equal(h.checked.length, 0)
+})
+
+test("a prompt already answered when bb reports it is not reported", async () => {
+  const h = await connected()
+  await h.emit("interaction.pending", { thread: { id: "thr_a" }, interaction: { ...approval({ kind: "plan", itemId: "x", plan: "p", planFilePath: null }), status: "resolved" } })
+  await h.answerEvents()
+  assert.equal(h.sent("waiting").length, 0)
+})
+
+test("a prompt still open when the thread says hello again is in that hello", async () => {
+  const h = await connected()
+  h.interactions.i1 = "pending"
+  await h.emit("interaction.pending", { thread: { id: "thr_a" }, interaction: approval({ kind: "plan", itemId: "x", plan: "p", planFilePath: null }) })
+  await h.answerEvents()
+  h.open("poll")[0].answer(409)
+  await h.settle()
+  const again = h.open("hello").find((r) => r.body.session === session("thr_a"))
+  assert.deepEqual(again?.body.waiting, { kind: "confirm", detail: "p" })
+  assert.equal(h.open("hello").find((r) => r.body.session === session("thr_b"))?.body.waiting, undefined)
+})
+
+test("asked from inside a thread, it asks the app to read that thread's current turn aloud and says what the app answered", async () => {
+  const h = await connected()
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  const turn = h.sent("turnStarted")[0].turn
+  const asked = h.plugin.readAloud("thr_a")
+  await h.settle()
+  const request = h.open("notify")[0]
+  assert.deepEqual([request.body.session, request.body.turn, request.body.on], [session("thr_a"), turn, true])
+  request.answer(200, '{"ok":true,"spoken":true}')
+  assert.equal(await asked, true)
+  for (const [text, expected] of [['{"ok":true,"spoken":false}', false], ['{"ok":true,"quiet":true}', "quiet"], ["nope", null]] as const) {
+    const again = h.plugin.readAloud("thr_a")
+    await h.settle()
+    h.open("notify")[0].answer(200, text)
+    assert.equal(await again, expected)
+  }
+  const failed = h.plugin.readAloud("thr_a")
+  await h.settle()
+  h.open("notify")[0].answer(500)
+  assert.equal(await failed, null)
+})
+
+test("asked from a thread it cannot reach, it promises nothing and sends nothing", async () => {
+  const h = await connected()
+  assert.equal(await h.plugin.readAloud("thr_unknown"), null)
+  const quiet = harness()
+  const plugin = keyscribe(quiet.bb, quiet.host, ["/p/keyscribe.json"])
+  await quiet.settle()
+  for (const r of quiet.open("hello")) r.answer(200, '{"ok":true,"quiet":true}')
+  await quiet.settle()
+  assert.equal(await plugin.readAloud("thr_a"), "quiet")
+  const down = harness({ ready: false })
+  const idle = keyscribe(down.bb, down.host, ["/p/keyscribe.json"])
+  await down.settle()
+  assert.equal(await idle.readAloud("thr_a"), null)
+  assert.equal(h.sent("notify").length + quiet.sent("notify").length + down.sent("notify").length, 0)
+})
+
+test("asked between turns, it asks for the thread's next reply", async () => {
+  const h = await connected()
+  const asked = h.plugin.readAloud("thr_a")
+  await h.settle()
+  assert.equal(h.open("notify")[0].body.turn, "")
+  h.open("notify")[0].answer(200, '{"ok":true,"spoken":true}')
+  assert.equal(await asked, true)
+})
+
+test("the agent is told plainly what the app promised", () => {
+  assert.match(readAloudReply("KeyScribe", true), /KeyScribe will report your final reply/)
+  assert.match(readAloudReply("KeyScribe", false), /Reply updates are off/)
+  assert.match(readAloudReply("KeyScribe", "quiet"), /disconnected/)
+  assert.match(readAloudReply("KeyScribe", null), /didn’t confirm/)
+})
+
+const plan = approval({ kind: "plan", itemId: "x", plan: "p", planFilePath: null })
+
+test("a prompt report the app did not take has the thread say hello again with the prompt, so it is never lost", async () => {
+  const h = await connected()
+  h.interactions.i1 = "pending"
+  await h.emit("interaction.pending", { thread: { id: "thr_a" }, interaction: plan })
+  h.open("waiting")[0].answer(500)
+  await h.settle()
+  const again = h.open("hello").find((r) => r.body.session === session("thr_a"))
+  assert.deepEqual(again?.body.waiting, { kind: "confirm", detail: "p" })
+})
+
+test("a cleared prompt the app did not take has the thread say hello again without it", async () => {
+  const h = await connected()
+  h.interactions.i1 = "pending"
+  await h.emit("interaction.pending", { thread: { id: "thr_a" }, interaction: plan })
+  await h.answerEvents()
+  h.interactions.i1 = "resolved"
+  await h.advance(5000)
+  h.open("waiting")[0].answer(0)
+  await h.settle()
+  const again = h.open("hello").find((r) => r.body.session === session("thr_a"))
+  assert.ok(again)
+  assert.equal(again.body.waiting, undefined)
+})
+
+test("a prompt that opens while the app is unreachable is in the hello once it is back", async () => {
+  const h = await connected()
+  h.open("poll")[0].answer(500)
+  await h.settle()
+  h.interactions.i1 = "pending"
+  await h.emit("interaction.pending", { thread: { id: "thr_a" }, interaction: plan })
+  assert.equal(h.sent("waiting").length, 0)
+  await h.advance(10_000)
+  const again = h.open("hello").find((r) => r.body.session === session("thr_a"))
+  assert.deepEqual(again?.body.waiting, { kind: "confirm", detail: "p" })
+})
+
+test("a thread let back in says hello again, so the app learns the prompt it waits on now", async () => {
+  const h = harness()
+  keyscribe(h.bb, h.host, ["/p/keyscribe.json"])
+  await h.settle()
+  for (const r of h.open("hello")) r.answer(200, r.body.session === session("thr_a") ? '{"ok":true,"quiet":true}' : '{"ok":true}')
+  await h.settle()
+  h.interactions.i1 = "pending"
+  await h.emit("interaction.pending", { thread: { id: "thr_a" }, interaction: plan })
+  assert.equal(h.sent("waiting").length, 0)
+  h.open("poll")[0].answer(200, JSON.stringify({ commands: [{ op: "admit", id: "c1", expectedSession: session("thr_a") }], unknown: [] }))
+  await h.settle()
+  const again = h.open("hello").find((r) => r.body.session === session("thr_a"))
+  assert.deepEqual(again?.body.waiting, { kind: "confirm", detail: "p" })
+})
+
+test("a prompt left open is checked every few seconds at first and then less often", async () => {
+  const h = await connected()
+  h.interactions.i1 = "pending"
+  await h.emit("interaction.pending", { thread: { id: "thr_a" }, interaction: plan })
+  for (let i = 0; i < 12; i++) await h.advance(5000)
+  const early = h.checked.length
+  assert.equal(early, 12)
+  for (let i = 0; i < 60; i++) await h.advance(5000)
+  assert.equal(h.checked.length - early, 10)
+})
+
+test("a turn already running when it starts is taken as the thread's current turn, so it can be read aloud and ends with a reply", async () => {
+  const h = await connected()
+  const hello = h.sent("hello").find((b) => b.session === session("thr_b"))
+  assert.equal(typeof hello.turn, "string")
+  assert.equal(h.sent("hello").find((b) => b.session === session("thr_a")).turn, undefined)
+  const asked = h.plugin.readAloud("thr_b")
+  await h.settle()
+  const request = h.open("notify")[0]
+  assert.equal(request.body.turn, hello.turn)
+  request.answer(200, '{"ok":true,"spoken":true}')
+  assert.equal(await asked, true)
+  await h.emit("thread.idle", { thread: { id: "thr_b", status: "idle" }, lastAssistantText: "finished" })
+  await h.answerEvents()
+  assert.deepEqual(h.sent("turnComplete").map((b) => [b.session, b.answer]), [[session("thr_b"), "finished"]])
+})
+
+test("a hello said again mid-turn names the turn, so a promised reply is not taken back", async () => {
+  const h = await connected()
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  const turn = h.sent("turnStarted")[0].turn
+  h.interactions.i1 = "pending"
+  await h.emit("interaction.pending", { thread: { id: "thr_a" }, interaction: plan })
+  h.open("waiting")[0].answer(0)
+  await h.settle()
+  const again = h.open("hello").find((r) => r.body.session === session("thr_a"))
+  assert.equal(again?.body.turn, turn)
+  assert.deepEqual(again?.body.waiting, { kind: "confirm", detail: "p" })
+})
+
+test("a failed prompt report never drops the reply queued behind it", async () => {
+  const h = await connected()
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  h.interactions.i1 = "pending"
+  await h.emit("interaction.pending", { thread: { id: "thr_a" }, interaction: plan })
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "done" })
+  h.open("waiting")[0].answer(0)
+  await h.settle()
+  for (let i = 0; i < 4; i++) {
+    await h.answerHellos()
+    await h.answerEvents()
+  }
+  assert.deepEqual(h.sent("turnComplete").map((b) => b.answer), ["done"])
+})
+
+test("asked while its earlier reports are stuck, it answers within its own deadline and promises nothing", async () => {
+  const h = await connected()
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  let answer: unknown = "unanswered"
+  void h.plugin.readAloud("thr_a").then((a) => { answer = a })
+  await h.settle()
+  assert.equal(answer, "unanswered")
+  await h.advance(4000)
+  assert.equal(answer, null)
+})
+
+test("its settings are shared with the bb side once read, or none when missing", async () => {
+  const h = harness()
+  const plugin = keyscribe(h.bb, h.host, ["/p/keyscribe.json"])
+  assert.equal((await plugin.settings)?.instance, "/Users/me/.bb")
+  const missing = harness()
+  const none = keyscribe(missing.bb, missing.host, ["/nowhere.json"])
+  assert.equal(await none.settings, null)
+})
+
+test("at the end of a turn, a hello said again after a failed prompt report follows the reply, never overtakes it", async () => {
+  const h = await connected()
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  h.interactions.i1 = "pending"
+  await h.emit("interaction.pending", { thread: { id: "thr_a" }, interaction: plan })
+  await h.answerEvents()
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "done" })
+  h.open("waiting")[0].answer(0)
+  await h.settle()
+  assert.equal(h.open("hello").length, 0)
+  h.open("turnComplete")[0].answer(200, '{"ok":true}')
+  await h.settle()
+  const order = h.requests.filter((r) => r.path === "/event" && (r.body.op === "turnComplete" || (r.body.op === "hello" && r.body.session === session("thr_a"))))
+  assert.deepEqual(order.slice(-2).map((r) => r.body.op), ["turnComplete", "hello"])
+})
+
+test("a hello said again that the app refuses for now is said again once the connection is back", async () => {
+  const h = await connected()
+  h.interactions.i1 = "pending"
+  await h.emit("interaction.pending", { thread: { id: "thr_a" }, interaction: plan })
+  h.open("waiting")[0].answer(500)
+  await h.settle()
+  h.open("hello")[0].answer(500)
+  await h.settle()
+  const before = h.sent("hello").length
+  await h.advance(10_000)
+  const again = h.open("hello").find((r) => r.body.session === session("thr_a"))
+  assert.ok(h.sent("hello").length > before)
+  assert.deepEqual(again?.body.waiting, { kind: "confirm", detail: "p" })
 })

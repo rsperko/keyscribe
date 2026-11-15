@@ -193,6 +193,14 @@ struct SpokenResultEnablementTests {
         #expect(SpokenResult.notice(.waiting(AgentPrompt(title: "Allow?"))) == "Waiting for you.")
     }
 
+    @Test func aPromptOfAKnownKindIsSpokenAsWhatItWaitsFor() {
+        #expect(SpokenResult.notice(.waiting(AgentPrompt(kind: "confirm", detail: "git push"))) == "Waiting for approval.")
+        for kind in ["select", "input", "editor"] {
+            #expect(SpokenResult.notice(.waiting(AgentPrompt(kind: kind, title: "Which branch?"))) == "Waiting for an answer.")
+        }
+        #expect(SpokenResult.notice(.waiting(AgentPrompt(kind: "custom", title: "Sign in"))) == "Waiting for you.")
+    }
+
     @Test func unavailableSummariesWaitingTogetherAreNamedInOneNotice() {
         func notice(_ names: [String]) -> String {
             let merged = SpokenResult.unavailable(names: names)
