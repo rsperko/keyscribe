@@ -43,8 +43,8 @@ struct AgentStatusQueryTests {
         ("check on conversation nine", "conversation nine"),
     ])
     func checkOnSomethingThatIsNoConversationIsStillAStatusCheck(text: String, spoken: String) throws {
-        let query = try #require(query(text))
-        guard case .check(let address?) = query else { Issue.record("\(query)"); return }
+        let parsed = try #require(query(text))
+        guard case .check(let address?) = parsed else { Issue.record("\(parsed)"); return }
         switch address {
         case .unresolved(let heard, ""): #expect(heard == spoken)
         case .row(9, ""): #expect(spoken == "conversation nine")

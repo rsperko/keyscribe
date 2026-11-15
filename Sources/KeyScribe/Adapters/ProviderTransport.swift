@@ -82,7 +82,7 @@ extension URLError: RewriteFailureReporting {
 // session: one session is shared across connections with different base URLs, so a session-wide delegate
 // would have no single origin to pin. Returning nil from the redirect callback declines the redirect and
 // surfaces the 3xx response instead of following it.
-class OriginPinnedRedirects: NSObject, URLSessionTaskDelegate {
+class OriginPinnedRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let pinned: RequestOrigin?
 
     init(_ url: URL?) { pinned = RequestOrigin(url) }
