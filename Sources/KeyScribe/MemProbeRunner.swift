@@ -183,6 +183,7 @@ enum MemProbeRunner {
             .appendingPathComponent("keyscribe-memprobe-\(ProcessInfo.processInfo.processIdentifier).wav")
         let file = try AVAudioFile(forWriting: url, settings: format.settings)
         try file.write(from: buffer)
+        file.close()
         return url
     }
 

@@ -151,6 +151,26 @@ struct CaptureRingLifecycleTests {
         #expect(source == 42)
     }
 
+    @Test func finalizationLeavesTheWAVHoldingEverySampleEvenWhileAnotherReferenceToTheFileLingers() throws {
+        let capture = AudioCapture()
+        let url = tempURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let unit = try capture.armForTesting(url: url, geometry: geometry(slots: 16))
+        let lingering = try #require(capture.armedFileForTesting)
+        for i in 0..<3 {
+            unit.invokeHandlerForTesting(buffer(frames: 500, value: 0.25), hostTime: UInt64(1_000 + i))
+        }
+        capture.finalizeForTesting()
+        let drained = try #require(capture.takeDrainedSamples())
+
+        let wav = try readMonoFloat(url)
+        withExtendedLifetime(lingering) {
+            #expect(drained.count == 1_500)
+            #expect(wav == drained)
+        }
+    }
+
     @Test func eachArmGetsItsOwnRingInstanceEvenWhenTheGeometryIsIdentical() throws {
         let capture = AudioCapture()
         let urlA = tempURL()

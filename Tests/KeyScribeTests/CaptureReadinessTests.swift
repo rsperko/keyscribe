@@ -20,16 +20,6 @@ struct CaptureReadinessTests {
             .appendingPathComponent("keyscribe-readiness-test-\(UUID().uuidString).wav")
     }
 
-    private func readMonoFloat(_ url: URL) throws -> [Float] {
-        let file = try AVAudioFile(forReading: url)
-        let frames = AVAudioFrameCount(file.length)
-        guard frames > 0,
-              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: frames) else { return [] }
-        try file.read(into: buffer)
-        guard let channel = buffer.floatChannelData else { return [] }
-        return Array(UnsafeBufferPointer(start: channel[0], count: Int(buffer.frameLength)))
-    }
-
     private final class ReadySpy: @unchecked Sendable {
         private let lock = NSLock()
         private var _fires = 0
@@ -42,9 +32,8 @@ struct CaptureReadinessTests {
         }
     }
 
-    // Runs one capture and returns only after the writer thread has joined AND the write-file is released, so
-    // the WAV the caller reopens is finalized. The `file` local is confined here (its scope end is the last
-    // release — the writer drops its own reference on thread exit), mirroring CaptureWriterTests.
+    // Runs one capture and returns only after the writer thread has joined and the file is closed, as the
+    // production session does, so the WAV the caller reopens is finalized.
     @discardableResult
     private func runCapture(
         to url: URL,
@@ -66,6 +55,7 @@ struct CaptureReadinessTests {
             }
         }
         writer.finish(flushConverter: true)
+        file.close()
         return writer
     }
 

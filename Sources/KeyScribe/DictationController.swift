@@ -2569,7 +2569,7 @@ final class DictationController {
 
     private func spokenHelp(for mode: Mode?) -> SpokenHelp {
         let stages = plan.postSTTTextStages(for: mode)
-        let title = mode?.name ?? currentModeName ?? "Dictation"
+        let title = mode?.name ?? currentModeName
         if mode?.source == .selection { return .selection(title: title, answers: mode?.answersAloud == true) }
         if mode?.runsVoiceCommands == true {
             let commands = config.voiceCommands

@@ -128,8 +128,11 @@ public enum DevCLI {
                                       shader library terminates the process instead — the build and release gate.
               --capture-probe         Drive the real capture path (record → drain → teardown) and score the
                                       result for dropped/corrupted audio you cannot hear. Feed a pure tone into
-                                      the input (e.g. via a loopback/Aggregate device); reports SINAD, glitches,
-                                      ring-drop and CoreAudio-overload counts. Needs Microphone permission.
+                                      the input (e.g. via a loopback/Aggregate device) for the SINAD and glitch
+                                      scores; any live input still exercises the drop counters and the in-memory
+                                      vs WAV match. Needs Microphone permission. Exits 0 when clean, 1 when it
+                                      measured something suspect (glitches count, and mean nothing without a
+                                      tone), 2 when it could not measure.
               --hud-preview <state>  Render a stable HUD fixture for visual review without starting dictation.
                                       States: ready, recording, loading-model, transcribing, rewriting,
                                       redacted-rewrite, rewriting-with-local-transcript, inserted, copied,
@@ -576,12 +579,13 @@ public enum DevCLI {
                 tone = Double(CommandLine.arguments[t + 1]) ?? tone
             }
             let done = DispatchSemaphore(value: 0)
+            let outcome = Atomic<Int32>(CaptureProbeRunner.Outcome.unmeasured.rawValue)
             Task.detached {
-                await CaptureProbeRunner.run(seconds: seconds, toneHz: tone)
+                outcome.store(await CaptureProbeRunner.run(seconds: seconds, toneHz: tone).rawValue, ordering: .relaxed)
                 done.signal()
             }
             done.wait()
-            exit(0)
+            exit(outcome.load(ordering: .relaxed))
         }
     }
 }

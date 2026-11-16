@@ -40,9 +40,9 @@ echo
 
 step "A2 · P2-1 capture-health canaries"
 echo "  Drives the real capture path over a tone and reports dropped/corrupted audio you can't hear."
-echo "  Watch the teardown line: ringDropped=0 overloads=0 (both MUST be 0). Needs Microphone permission."
+echo "  The four drop/overload counters MUST be 0 and the in-memory samples MUST match the WAV. Needs Microphone permission."
 pause
-"$BIN" --capture-probe --seconds 5 || echo "  (capture-probe returned non-zero — check the SINAD/glitch report)"
+"$BIN" --capture-probe --seconds 5 || echo "  (capture-probe exit $? — 1: measured something suspect, check the report; 2: could not measure)"
 
 step "A3 · P2-3 head-clip exposure table"
 echo "  Trims each command clip by 0/50/100/200 ms and reports command pass-rate per trim. This is the"

@@ -87,13 +87,25 @@ mid-recording restart, which SEEDS the replacement unit's slot with the SAME `se
 slot a started unit can read. The previous capture's writer is JOINED
 (`CaptureWriter.finish`, multi-waiter via a `DispatchGroup`) before the next arm, so
 a cancel's async teardown can never race a still-draining consumer. On
-commit, `finishDraining` awaits the writer join before returning the URL, and the writer drops its `AVAudioFile`
-reference on exit so the session's is the last one — the WAV is finalized/closed before transcription reads it.
+commit, `finishDraining` awaits the writer join and then **closes the `AVAudioFile` explicitly** before returning
+the URL, so the WAV is finalized before transcription reads it. Never rely on releasing the last reference to close
+it. This is a defence, not a fix for an observed holder: no production reference is known to outlive the join,
+but if one did, the WAV would stay open, and an open WAV reads back as **empty** (`length` 0 with every byte on
+disk, measured 2026-11-16: the header is written at close). An engine that reads the WAV, such as the Apple
+engine, would then hear nothing. Only the claimant of a session
+closes it (`CaptureSession.finishAndClose`). Read a WAV back through `AudioDecoder.pcmMono`, never one
+`AVAudioFile.read(into:)` sized to `length`: a single read can return fewer frames than asked, which looks
+exactly like a truncated file. That short read, in the probe's own reader, is what made `--capture-probe`
+report an in-memory/WAV mismatch on a complete file (2026-11-16: on a kept probe capture of 48,469 frames, one
+read returned 48,128 and a looped read all 48,469; the mismatch has not recurred across the runs since the
+reader moved to `AudioDecoder`).
 Teardown ordering is load-bearing: `capturing` → false (RT stops pushing, which SEVERS RT→ring→writer→file),
-`writer.finish` (drains remaining + flushes the resampler tail + joins), release the file (WAV closed —
+`writer.finish` (drains remaining + flushes the resampler tail + joins), close the file (WAV finalized —
 before the unit stop, so a wedged unit stop can't return an open file to transcription), then stop/dispose
 the unit. Because a capture defect here is INAUDIBLE (audio goes straight to STT), validate with
-**`KeyScribe --capture-probe`** (drives the real capture path over a known tone and scores glitches/SINAD),
+**`KeyScribe --capture-probe`** (drives the real capture path and checks the drop counters and that the in-memory
+samples match the WAV on any live input; over a known tone it also scores glitches/SINAD; exits 0 clean, 1
+suspect, 2 could not measure),
 the teardown `Log.audio` line `ringDropped=N overloads=M writerDropped=K oversizeDropped=J` (all must be 0 —
 the writer-keep-up, CoreAudio-RT-deadline, downstream WAV-write/converter, and RT IO-period-growth canaries;
 `writerDropped` counts frames the writer accepted off the ring but failed to persist, e.g. a disk-full or

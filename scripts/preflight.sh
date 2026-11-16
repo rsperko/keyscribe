@@ -39,7 +39,8 @@
 #                            Set to catch a CATASTROPHIC regression (bias wiring broke → WER doubles),
 #                            not to rank engines — Apple Speech ships ~13% (no recognition bias) and must
 #                            not false-fail. Tune to your installed engine set.
-#   KEYSCRIBE_CAPTURE_PROBE=1  run the capture-probe (needs a loopback/Aggregate device feeding a tone)
+#   KEYSCRIBE_CAPTURE_PROBE=1  force the capture-probe even when capture is unchanged since the last release
+#                              (it already runs on the default input by itself whenever capture changed)
 #   KEYSCRIBE_REQUIRE_ALL_ENGINES=1  a shipped-but-not-installed engine is a hard fail, not a skip.
 
 set -uo pipefail
@@ -555,9 +556,10 @@ guard b-vad-gate "$(sig_artifact)" chk_b_vad_gate
 
 chk_b_benchmark() {
   [ -f "$REPO_ROOT/corpus/stt/manifest.json" ] || { result skip "--benchmark: corpus/stt not present"; return; }
+  local RES="$REPO_ROOT/corpus/stt/results.json" WORST STARTED="/tmp/preflight-bench.started"
+  touch "$STARTED"
   if timeout --foreground 2400 "$EXE" --config-dir "$PF_CFG" --benchmark "$REPO_ROOT/corpus/stt" >/tmp/preflight-bench.log 2>&1; then
-    local RES="$REPO_ROOT/corpus/stt/results.json" WORST
-    [ -f "$RES" ] || { result skip "--benchmark ran but wrote no results.json"; return; }
+    [ "$RES" -nt "$STARTED" ] || { result fail "--benchmark ran but wrote no new results.json — the WER ceiling was NOT checked"; return; }
     if ! WORST=$(python3 - "$RES" "$MAX_WER" <<'PY'
 import json, sys
 res = json.load(open(sys.argv[1])); ceil = float(sys.argv[2])
@@ -584,14 +586,60 @@ PY
 }
 guard b-benchmark "$(corpus_sig)" chk_b_benchmark
 
+CAPTURE_PATHS="Sources/KeyScribe/Adapters/AudioCapture.swift Sources/KeyScribe/Adapters/CaptureWriter.swift
+  Sources/KeyScribe/Adapters/CaptureStartRecord.swift Sources/KeyScribe/Adapters/HALInputUnit.swift
+  Sources/KeyScribe/Adapters/AudioInputDevices.swift Sources/KeyScribe/Adapters/CaptureLeftovers.swift
+  Sources/KeyScribe/Adapters/AudioDecoder.swift Sources/KeyScribe/Take/TakeRecorder.swift
+  Sources/KeyScribe/CaptureProbeRunner.swift Sources/KeyScribeKit/AudioSampleRing.swift
+  Sources/KeyScribeKit/TailDrainGate.swift Sources/KeyScribeKit/ChannelSelector.swift
+  Sources/KeyScribeKit/ReadinessBudget.swift"
+
+# Prints why the probe must run and succeeds; fails only when it can tell capture is unchanged. Any doubt
+# (no release tag, a listed file gone) runs the probe rather than skipping it. Diffs against the working
+# tree, so uncommitted capture edits count.
+capture_probe_reason() {
+  local path prev
+  for path in $CAPTURE_PATHS; do
+    [ -f "$REPO_ROOT/$path" ] || { echo "$path is listed in CAPTURE_PATHS but missing (renamed? update the list)"; return 0; }
+  done
+  if [ -n "$(git tag --points-at HEAD --list 'v[0-9]*' 2>/dev/null)" ]; then
+    prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^ 2>/dev/null)"
+  else
+    prev="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null)"
+  fi
+  [ -n "$prev" ] || { echo "no previous v* release tag to compare against"; return 0; }
+  # shellcheck disable=SC2086
+  git diff --quiet "$prev" -- $CAPTURE_PATHS && return 1
+  echo "audio capture changed since $prev"
+}
+
+probe_counter() { sed -nE "s/^ *$1 *: *([0-9]+).*/\1/p" /tmp/preflight-capture.log | head -1; }
+
 chk_b_capture_probe() {
-  [ "${KEYSCRIBE_CAPTURE_PROBE:-0}" = "1" ] || { result skip "--capture-probe: set KEYSCRIBE_CAPTURE_PROBE=1 with a loopback device to run (needed when the audio path changed)"; return; }
-  if timeout --foreground 60 "$EXE" --config-dir "$PF_CFG" --capture-probe --seconds 5 >/tmp/preflight-capture.log 2>&1; then
-    if grep -qE "ringDropped=0.*overloads=0|overloads=0.*ringDropped=0" /tmp/preflight-capture.log; then
-      result pass "--capture-probe: no ring drops, no CoreAudio overloads"
+  if [ "${KEYSCRIBE_CAPTURE_PROBE:-0}" != "1" ]; then
+    local reason
+    if ! reason="$(capture_probe_reason)"; then
+      result skip "--capture-probe: audio capture unchanged since the last release; set KEYSCRIBE_CAPTURE_PROBE=1 to run it anyway"
+      return
+    fi
+    info "$reason — running --capture-probe on the default input (the mic indicator lights for a few seconds; a Bluetooth headset drops to call quality meanwhile)"
+  fi
+  local status=0
+  timeout --foreground 60 "$EXE" --config-dir "$PF_CFG" --capture-probe --seconds 5 >/tmp/preflight-capture.log 2>&1 || status=$?
+  if [ "$status" = 0 ] || [ "$status" = 1 ]; then
+    local ring overloads writer oversize
+    ring="$(probe_counter "ring dropped")"; overloads="$(probe_counter "CoreAudio overloads")"
+    writer="$(probe_counter "writer dropped")"; oversize="$(probe_counter "oversize dropped")"
+    if [ -z "$ring" ] || [ -z "$overloads" ] || [ -z "$writer" ] || [ -z "$oversize" ]; then
+      result fail "--capture-probe printed no drop counters (permission or bring-up?) — see /tmp/preflight-capture.log"
+    elif ! grep -qE "^ *in-memory samples *: *[0-9]+ == WAV" /tmp/preflight-capture.log; then
+      grep -E "in-memory samples" /tmp/preflight-capture.log | sed 's/^/             /'
+      result fail "--capture-probe: the in-memory samples transcription uses do not match the WAV"
+    elif [ "$ring$overloads$writer$oversize" = "0000" ]; then
+      result pass "--capture-probe: in-memory samples match the WAV; no ring, writer, or oversize drops and no CoreAudio overloads"
     else
-      grep -E "ringDropped|overloads|SINAD|glitch" /tmp/preflight-capture.log | sed 's/^/             /'
-      result fail "--capture-probe: ring drops or overloads detected"
+      grep -E "dropped|overloads|SINAD|glitch" /tmp/preflight-capture.log | sed 's/^/             /'
+      result fail "--capture-probe: dropped audio or CoreAudio overloads detected"
     fi
   else
     result fail "--capture-probe errored — see /tmp/preflight-capture.log"

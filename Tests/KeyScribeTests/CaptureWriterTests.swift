@@ -37,10 +37,9 @@ struct CaptureWriterTests {
             .appendingPathComponent("keyscribe-writer-test-\(UUID().uuidString).wav")
     }
 
-    // Runs one write session to `url` and returns only after the writer thread has joined AND the write-file
-    // is released — so the reopened WAV is fully finalized. The `file` local is confined to this function
-    // (its scope end is the last release, mirroring the production session dropping its reference), and the
-    // writer drops its own reference on thread exit. `extraFinishes` re-calls finish() to prove idempotency.
+    // Runs one write session to `url` and returns only after the writer thread has joined AND the file is
+    // closed, as the production session does, so the reopened WAV is finalized. `extraFinishes` re-calls
+    // finish() to prove idempotency.
     private func writeCapture(
         to url: URL, recordRate: Double, pushRate: Double, frames: Int, count: Int,
         seal: @escaping (UInt64?) -> Bool = { _ in false }, flush: Bool = true, extraFinishes: Int = 0
@@ -57,11 +56,11 @@ struct CaptureWriterTests {
         }
         writer.finish(flushConverter: flush)
         for _ in 0..<extraFinishes { writer.finish(flushConverter: flush) }
+        file.close()
     }
 
-    // Runs a full session and returns the writer's in-memory samples (drainedSamples()) AFTER the thread has
-    // joined and the writer dropped its file reference. Does NOT read the WAV — the caller does that after
-    // this returns, when the local `file` releases, so the reopened file is finalized (see writeCapture).
+    // Runs a full session and returns the writer's in-memory samples (drainedSamples()) after the thread has
+    // joined and the file is closed, so a caller that reopens the WAV reads it finalized.
     private func drainedFromCapture(
         to url: URL, recordRate: Double, pushRate: Double, frames: Int, count: Int,
         wantsSamples: Bool = true, flush: Bool = true, seal: @escaping (UInt64?) -> Bool = { _ in false }
@@ -79,11 +78,12 @@ struct CaptureWriterTests {
             }
         }
         writer.finish(flushConverter: flush)
+        file.close()
         return writer.drainedSamples()
     }
 
     // Runs a direct-write (native == record) session where the writer's Nth file write throws, returning the
-    // writer's in-memory samples after the thread joined and the wrapping file references released.
+    // writer's in-memory samples after the thread joined and the file closed.
     private func drainedFromFlakyCapture(to url: URL, frames: Int, count: Int, failWriteIndex: Int) throws -> [Float]? {
         let format = recordFormat(16_000)
         let real = try AVAudioFile(forWriting: url, settings: format.settings)
@@ -97,6 +97,7 @@ struct CaptureWriterTests {
             }
         }
         writer.finish(flushConverter: true)
+        real.close()
         return writer.drainedSamples()
     }
 
@@ -113,17 +114,8 @@ struct CaptureWriterTests {
             }
         }
         writer.finish(flushConverter: true)
+        real.close()
         return writer.writerDroppedFrames()
-    }
-
-    private func readMonoFloat(_ url: URL) throws -> [Float] {
-        let file = try AVAudioFile(forReading: url)
-        let frames = AVAudioFrameCount(file.length)
-        guard frames > 0,
-              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: frames) else { return [] }
-        try file.read(into: buffer)
-        guard let channel = buffer.floatChannelData else { return [] }
-        return Array(UnsafeBufferPointer(start: channel[0], count: Int(buffer.frameLength)))
     }
 
     private typealias Slot = (channels: Int, rate: Double, frames: Int, source: UInt32)
@@ -157,6 +149,7 @@ struct CaptureWriterTests {
             frameStart += slot.frames
         }
         writer.finish(flushConverter: true)
+        file.close()
         return MultichannelCapture(writer: writer, drained: writer.drainedSamples() ?? [])
     }
 

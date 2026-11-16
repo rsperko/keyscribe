@@ -23,7 +23,7 @@ final class CaptureWriter: @unchecked Sendable {
     private static let pollInterval: Double = 0.005
 
     private let ring: AudioSampleRing
-    // Released when the writer thread exits; the session owns final file-close ordering.
+    // Dropped when the writer thread exits to free it early; the session closes the file.
     private var file: (any CaptureFileWriting)?
     private let recordFormat: AVAudioFormat
     // Returns true once the release-covering buffer has reached disk and capture may seal.

@@ -126,9 +126,24 @@ actually catches the list above.
   default 0.20). This is a *catastrophic-regression* backstop (bias wiring broke → WER doubles), not a
   rank check — the default is set so no shipped engine false-fails (the Apple Dictation fallback measured
   12.6% on 2026-09-25, with no recognition bias). The commands-check baseline is the precise gate; this is the cheap safety net.
-- **`--capture-probe`** — opt-in (`KEYSCRIBE_CAPTURE_PROBE=1`, needs a loopback/Aggregate device
-  feeding a steady tone): `ringDropped` and `overloads` must both be 0. Run it whenever the audio
-  path changed.
+- **`--capture-probe`** — runs by itself whenever capture changed (below), or always with
+  `KEYSCRIBE_CAPTURE_PROBE=1`: the ring, writer, and oversize drop
+  counters and CoreAudio overloads must all be 0, and the in-memory samples transcription uses must
+  match the WAV. A loopback/Aggregate device feeding a steady tone is
+  best, since the glitch and SINAD scores mean nothing without one; any live input still exercises the
+  drop and overload canaries. Preflight runs the probe on the default input without being asked
+  whenever it cannot show capture is unchanged: the capture sources (`CAPTURE_PATHS` in
+  `scripts/preflight.sh`, compared in the working tree, so uncommitted edits count) differ from the
+  previous `v*` release tag, no such tag exists, or a listed file is missing. The mic indicator lights
+  briefly, and a Bluetooth headset drops to call quality meanwhile. Otherwise it skips unless
+  `KEYSCRIBE_CAPTURE_PROBE=1`. The probe exits **0** when clean, **1** when it measured something
+  suspect, and **2** when it could not measure (no microphone permission, bring-up failure). Preflight
+  fails on 2 or a timeout; on 0 or 1 it judges the counters and the samples line, never the glitch
+  count, because a glitch-only SUSPECT is room noise on an input with no tone. A machine without a
+  microphone or its permission fails here after a capture change. Add a
+  file to `CAPTURE_PATHS` when it joins the capture path.
+- **`--benchmark`** must write a `corpus/stt/results.json` newer than the run's start, so a run that
+  writes none fails instead of being judged on an earlier run's numbers; the earlier file is kept.
 
 Where a corpus or the hardware is absent, Tier B prints a loud **SKIP** — never a silent pass.
 

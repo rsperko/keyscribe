@@ -96,6 +96,13 @@ private final class CaptureSession: @unchecked Sendable {
         self.writer = writer
         self.ring = ring
     }
+
+    // Only the code that claimed this session calls this. Closing explicitly finalizes the WAV even while
+    // another reference to the file lingers, which releasing the last reference would not.
+    func finishAndClose(flushConverter: Bool) {
+        writer.finish(flushConverter: flushConverter)
+        file.close()
+    }
 }
 
 // One slot per HAL generation keeps late callbacks from writing into a successor's ring. The ring
@@ -453,6 +460,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
 
         // Bail before publishing shared state if a watchdog already superseded this arm.
         guard isGeneration(generation) else {
+            file.close()
             try? FileManager.default.removeItem(at: url)
             throw AudioCaptureError.bringUpTimedOut
         }
@@ -464,6 +472,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             boundDeviceID = try configureCaptureDevice(target: target, record: record, generation: generation)
         } catch {
             record.stage("configure-failed")
+            file.close()
             try? FileManager.default.removeItem(at: url)
             throw error
         }
@@ -500,7 +509,10 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
                 let wasOurs = lock.withLock { () -> Bool in
                     if session === mySession { session = nil; return true } else { return false }
                 }
-                if wasOurs { try? FileManager.default.removeItem(at: url) }
+                if wasOurs {
+                    mySession.finishAndClose(flushConverter: false)
+                    try? FileManager.default.removeItem(at: url)
+                }
             }
             throw error
         }
@@ -569,7 +581,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
             return true
         }
         guard published else {
-            writer.finish(flushConverter: false)
+            mySession.finishAndClose(flushConverter: false)
             try? FileManager.default.removeItem(at: url)
             throw AudioCaptureError.bringUpTimedOut
         }
@@ -802,8 +814,8 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         boundDeviceIsBluetooth == false ? .stop : .dispose
     }
 
-    // Synchronously sever RT → ring → writer → file, join the writer, and release the session's file
-    // reference so transcription never reads an open WAV.
+    // Synchronously sever RT → ring → writer → file, join the writer, and close the file so transcription
+    // never reads an open WAV.
     private func finishWriterAndCloseFile(flushConverter: Bool) {
         let s = lock.withLock { () -> CaptureSession? in let s = session; session = nil; return s }
         producerGeneration.store(-1, ordering: .releasing)
@@ -812,7 +824,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         // Single-flight: stop()'s resumeDrain() can wake a suspended commit drain, racing two calls here. The
         // session is claimed once under the lock above; a second entrant must not touch the strong `ring` var below.
         guard let s else { return }
-        s.writer.finish(flushConverter: flushConverter)
+        s.finishAndClose(flushConverter: flushConverter)
         // The writer thread has joined; its accumulated PCM is now stable. Keep it only on the commit path —
         // cancel/stop/discard pass false and their audio is dropped with the session — and only when the
         // writer actually accumulated (nil when the engine can't consume samples).
@@ -869,7 +881,7 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
         capturing.store(false, ordering: .releasing)
         // Remove listeners a completed-then-superseded arm installed, rather than leak them until the next arm.
         removeActiveDeviceListener()
-        s?.writer.finish(flushConverter: false)
+        s?.finishAndClose(flushConverter: false)
         if let s { try? FileManager.default.removeItem(at: s.url) }
     }
 
@@ -1473,5 +1485,6 @@ final class AudioCapture: AudioCapturing, @unchecked Sendable {
     }
 
     var armedRingForTesting: AudioSampleRing? { lock.withLock { session?.ring } }
+    var armedFileForTesting: AVAudioFile? { lock.withLock { session?.file } }
     #endif
 }

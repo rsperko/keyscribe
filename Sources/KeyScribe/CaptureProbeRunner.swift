@@ -1,4 +1,3 @@
-import AVFoundation
 import Foundation
 import KeyScribeKit
 
@@ -8,10 +7,16 @@ import KeyScribeKit
 // the input (via an Aggregate/loopback device); a non-zero glitch/overload/drop count is ear-free proof
 // the RT path dropped or corrupted audio.
 enum CaptureProbeRunner {
-    static func run(seconds: Double, toneHz: Double) async {
+    enum Outcome: Int32 {
+        case clean = 0
+        case suspect = 1
+        case unmeasured = 2
+    }
+
+    static func run(seconds: Double, toneHz: Double) async -> Outcome {
         guard Permissions.microphoneStatus() == .granted else {
             print("capture-probe: microphone permission is not granted — grant it and retry.")
-            return
+            return .unmeasured
         }
         let rate = 16_000
         let audio = AudioCapture()
@@ -25,14 +30,14 @@ enum CaptureProbeRunner {
             _ = try await audio.start(sampleRate: rate)
         } catch {
             print("capture-probe: bring-up failed: \(error)")
-            return
+            return .unmeasured
         }
         // start() returns at first-buffer readiness and capture keeps everything from that buffer, so the
         // window below is `seconds` of live audio rather than seconds minus bring-up.
         try? await Task.sleep(for: .seconds(seconds))
         guard let finalURL = await audio.finishDraining() else {
             print("capture-probe: capture produced no file.")
-            return
+            return .unmeasured
         }
         // Dictation transcribes the writer's in-memory samples, NOT the WAV — verify the two are identical.
         // Read before the WAV so a divergence surfaces even if the file read fails.
@@ -40,9 +45,9 @@ enum CaptureProbeRunner {
         let diag = audio.captureDiagnostics()
 
         let samples: [Float]
-        do { samples = try readMonoFloat(finalURL) } catch {
+        do { samples = try AudioDecoder.pcmMono(finalURL, sampleRate: rate) } catch {
             print("capture-probe: could not read \(finalURL.path): \(error)")
-            return
+            return .unmeasured
         }
         let samplesMatchWAV = drained == samples
         // The commit path already archived a copy if KEYSCRIBE_KEEP_CAPTURE is set; drop the working file.
@@ -78,17 +83,6 @@ enum CaptureProbeRunner {
         if m.peak < 0.001 {
             print("  note: near-silent capture — no tone was detected on the input; check the loopback routing.")
         }
-    }
-
-    private static func readMonoFloat(_ url: URL) throws -> [Float] {
-        let file = try AVAudioFile(forReading: url)
-        let frames = AVAudioFrameCount(file.length)
-        guard frames > 0,
-              let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: frames) else {
-            return []
-        }
-        try file.read(into: buffer)
-        guard let channel = buffer.floatChannelData else { return [] }
-        return Array(UnsafeBufferPointer(start: channel[0], count: Int(buffer.frameLength)))
+        return clean ? .clean : .suspect
     }
 }

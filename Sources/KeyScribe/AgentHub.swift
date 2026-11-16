@@ -1136,7 +1136,7 @@ final class AgentHub {
             if let prompt { followHosted(turn, of: session, prompt: prompt) }
             let awaitsAbsorbed = prompt == nil && nextTyped[session]?.prompt != nil
             if !awaitsAbsorbed, let pending = nextTyped.removeValue(forKey: session), let typedAt = pending.typedAt,
-               pending.prompt.map { $0 == prompt } ?? (now().timeIntervalSince(typedAt) <= typedTurnWindow) {
+               pending.prompt.map({ $0 == prompt }) ?? (now().timeIntervalSince(typedAt) <= typedTurnWindow) {
                 waitForReply(turn, of: session, requested: false)
                 awaitedRequests[session] = pending.request
                 forgetSteered { $0.request == pending.request }
