@@ -1479,7 +1479,6 @@ private struct VocabularyEditor: View {
     var footer: AnyView? = nil
     var onMoveToShared: ((SharedVocabularyMove.Entry) -> Void)? = nil
     var settling: SharedEditSettling? = nil
-    @State private var recognitionHelpExpanded = false
     @State private var discovery: HistoryReplacementsModel?
     @State private var addedMessage: String?
     @State private var editingRule: ReplacementsSet.Rule?
@@ -1514,12 +1513,10 @@ private struct VocabularyEditor: View {
             Section("Words to Recognize") {
                 Text(wordsDescription)
                     .font(.caption).foregroundStyle(.secondary)
-                DisclosureSection("How recognition works", isExpanded: $recognitionHelpExpanded) {
-                    Text("Recognition support varies by speech model. These terms also guide a rewrite when one runs, including in privacy modes.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.recognitionHelp)
+                Text("Recognition support varies by speech model. These terms also guide a rewrite when one runs, including in privacy modes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.recognitionHelp)
                 DictionaryRows(
                     words: words,
                     removeID: AccessibilityID.Settings.Vocabulary.dictionaryRemove,

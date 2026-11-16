@@ -396,13 +396,7 @@ final class AgentsSettingsModel: ObservableObject {
         return available == 1 ? "1 available" : available == 0 ? "None available" : "\(available) available"
     }
 
-    var routingExample: String? {
-        guard namesProblem == nil else { return nil }
-        let name = rows.first(where: \.connected)?.name ?? "backend"
-        return "\u{201C}tell \(name) run the unit tests\u{201D} sends only that instruction to \(name)."
-    }
-
-    static let routingNote = "Instructions go to the conversation in front of you when you start speaking. Start with a conversation\u{2019}s name or number to send one instruction there instead."
+    static let routingNote = "Instructions go to the conversation focused when you start speaking. Say a conversation\u{2019}s name or number to send that instruction there instead. Without either, nothing is sent."
 
     struct Groups: Equatable {
         var connected: [Row]

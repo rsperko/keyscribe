@@ -854,7 +854,21 @@ struct HistoryPaneView: View {
             PaneListSectionHeader("History")
             SettingRow(
                 title: "Keep history on this Mac",
-                help: "Stores transcripts and final text locally so you can search and correct them, and agent reply updates as they were given. Recordings of your voice and password-field dictations are never saved. A spoken reply kept for diagnosis keeps the audio the natural voice generated with its entry. For other sensitive work, choose a shorter period or exclude a mode in its Result handling.",
+                help: "Transcripts and final text stay on this Mac for search and correction. Recordings of your voice are never saved.",
+                reference: HelpTopic("What History keeps", id: AccessibilityID.History.whatHistoryKeeps, parts: [
+                    .init(heading: "Saved", paragraphs: [
+                        "What you said and the final text, so you can search and correct them.",
+                        "Agent reply updates as they were given.",
+                        "Generated reply audio is saved when you keep a reply for diagnosis.",
+                    ]),
+                    .init(heading: "Never saved", paragraphs: [
+                        "Recordings of your voice from the microphone.",
+                        "Dictations into password fields.",
+                    ]),
+                    .init(heading: "Sensitive work", paragraphs: [
+                        "Choose a shorter period under Keep for, or turn on Do not save this mode in history in a mode\u{2019}s Result handling.",
+                    ]),
+                ]),
                 combinesAccessibilityChildren: false)
             {
                 Toggle("Keep history on this Mac", isOn: $settings.historyEnabled).labelsHidden()

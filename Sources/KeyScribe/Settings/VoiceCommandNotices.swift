@@ -27,8 +27,20 @@ struct VoiceCommandNotices {
         }
     }
 
-    static var actionPermissions: String {
-        "Actions start without an extra confirmation from \(Branding.appName). Some run immediately. Others may wait for a dialog:\n\n• macOS may ask for permission the first time an action controls another app or accesses protected data. The dialog may name \(Branding.appName), even when a script caused it. Permission given through Terminal may not apply here. A script may also use permission you already gave \(Branding.appName), without asking again.\n\n• Shortcuts may offer Allow Once or Always Allow. Allow Once can ask again next time; Always Allow remembers that permission.\n\n• A script or shortcut may include its own confirmation on every run.\n\nIf an action seems to be waiting, check for an approval dialog."
+    static var actionPermissionsHelp: HelpTopic {
+        let app = Branding.appName
+        return HelpTopic("Permissions and confirmations", id: AccessibilityID.Mode.VoiceCommands.actionPermissions, parts: [
+            .init(paragraphs: ["Actions start without an extra confirmation from \(app). Some run immediately. Others may wait for a dialog."]),
+            .init(heading: "macOS permission", paragraphs: [
+                "macOS may ask for permission the first time an action controls another app or accesses protected data. The dialog may name \(app), even when a script caused it.",
+                "Permission given through Terminal may not apply here. A script may also use permission you already gave \(app), without asking again.",
+            ]),
+            .init(heading: "Shortcuts", paragraphs: [
+                "Shortcuts may offer Allow Once or Always Allow. Allow Once can ask again next time; Always Allow remembers that permission.",
+            ]),
+            .init(heading: "Confirmations of their own", paragraphs: ["A script or shortcut may include its own confirmation on every run."]),
+            .init(heading: "If an action seems stuck", paragraphs: ["Check for an approval dialog."]),
+        ])
     }
 
     private let defaults: UserDefaults
@@ -57,17 +69,21 @@ struct VoiceCommandNotices {
 struct VoiceCommandNoticeRow: View {
     let kind: VoiceCommandNotices.Kind
     let needsAcknowledgment: Bool
+    let id: String
     @State private var expanded = false
 
     var body: some View {
-        DisclosureSection(isExpanded: $expanded, hasWarning: needsAcknowledgment) {
-            Text(kind.title)
-        } content: {
-            if needsAcknowledgment {
+        if needsAcknowledgment {
+            DisclosureSection(isExpanded: $expanded, hasWarning: true) {
+                Text(kind.title)
+            } content: {
                 IssueText(kind.message, severity: .advisory, font: .callout)
-            } else {
-                Text(kind.message).font(.caption).foregroundStyle(.secondary)
             }
+            .accessibilityIdentifier(id)
+        } else {
+            HelpLink(HelpTopic(kind.title, id: id, parts: [
+                .init(paragraphs: kind.message.components(separatedBy: "\n\n")),
+            ]))
         }
     }
 }

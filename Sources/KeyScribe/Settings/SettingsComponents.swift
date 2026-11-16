@@ -149,26 +149,31 @@ struct DisclosureSummaryLabel: View {
     }
 }
 
-// No hover-only tooltips for anything affecting data, privacy, or output (ui_design.md §3) — the "Learn
-// more" disclosure and persistent dependency reason exist so that information is always reachable.
+// No hover-only tooltips for anything affecting data, privacy, or output (ui_design.md §3): the brief
+// explanation stays visible, and reference opens in a named help dialog, never behind a generic toggle.
 struct SettingRow<Control: View>: View {
     let title: String
     var result: String? = nil
-    let help: String
+    var help: String? = nil
+    var reference: HelpTopic? = nil
     var dependencyReason: String? = nil
     var combinesAccessibilityChildren = true
     var controlBelowLabel = false
     var hasError = false
     @ViewBuilder var control: () -> Control
-    @State private var expanded = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        if combinesAccessibilityChildren {
-            content.accessibilityElement(children: .combine)
-                .accessibilityLabel([title, result].compactMap { $0 }.joined(separator: ", "))
-        } else {
-            content.accessibilityElement(children: .contain)
+        VStack(alignment: .leading, spacing: 4) {
+            if combinesAccessibilityChildren {
+                content.accessibilityElement(children: .combine)
+                    .accessibilityLabel([title, result].compactMap { $0 }.joined(separator: ", "))
+                    .accessibilityHint(help ?? "")
+            } else {
+                content.accessibilityElement(children: .contain)
+            }
+            if let reference {
+                HelpLink(reference)
+            }
         }
     }
 
@@ -184,22 +189,9 @@ struct SettingRow<Control: View>: View {
                     control()
                 }
             }
-            Button {
-                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.15)) { expanded.toggle() }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(expanded ? "Hide details" : "Learn more")
-                    Image(systemName: "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .rotationEffect(.degrees(expanded ? 90 : 0))
-                }
-                .font(.caption)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
-            .accessibilityLabel("\(expanded ? "Hide details" : "Learn more") about \(title)")
-            if expanded {
+            if let help {
                 Text(help).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             if let dependencyReason {
                 Label(dependencyReason, systemImage: "info.circle")
@@ -709,6 +701,142 @@ struct PaneNoticeRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct HelpDialog<Content: View>: View {
+    let title: String
+    var height: CGFloat = 460
+    let onDone: () -> Void
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title).font(.title2.bold())
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 12)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) { content() }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(24)
+                    .textSelection(.enabled)
+            }
+            Divider()
+            HStack {
+                Spacer()
+                Button("Done", action: onDone)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier(AccessibilityID.Settings.helpDone)
+            }
+            .padding(16)
+        }
+        .frame(width: 500, height: height)
+        .onExitCommand(perform: onDone)
+    }
+}
+
+struct HelpSection<Content: View>: View {
+    let heading: String?
+    @ViewBuilder var content: () -> Content
+
+    init(_ heading: String? = nil, @ViewBuilder content: @escaping () -> Content) {
+        self.heading = heading
+        self.content = content
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let heading {
+                Text(heading).font(.headline).accessibilityAddTraits(.isHeader)
+            }
+            content()
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+struct HelpPhrase: Hashable {
+    let said: String
+    let meaning: String
+    var note: String? = nil
+}
+
+struct HelpPhraseRow: View {
+    let phrase: HelpPhrase
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\u{201C}\(phrase.said)\u{201D}")
+            Text([phrase.meaning, phrase.note].compactMap { $0 }.joined(separator: ". "))
+                .font(.callout).foregroundStyle(.secondary)
+        }
+    }
+}
+
+struct HelpTopic {
+    struct Part: Identifiable {
+        var heading: String? = nil
+        var paragraphs: [String] = []
+        var phrases: [HelpPhrase] = []
+        var id: String { heading ?? paragraphs.first ?? phrases.first?.said ?? "" }
+    }
+
+    let link: String
+    let title: String
+    let id: String
+    let parts: [Part]
+
+    init(_ link: String, title: String? = nil, id: String, parts: [Part]) {
+        self.link = link
+        self.title = title ?? link
+        self.id = id
+        self.parts = parts
+    }
+}
+
+struct HelpTopicContent: View {
+    let topic: HelpTopic
+
+    var body: some View {
+        ForEach(topic.parts) { part in
+            HelpSection(part.heading) {
+                ForEach(part.paragraphs, id: \.self) { Text($0) }
+                ForEach(part.phrases, id: \.self) { HelpPhraseRow(phrase: $0) }
+            }
+        }
+    }
+}
+
+extension HelpLink where Content == HelpTopicContent {
+    init(_ topic: HelpTopic) {
+        self.init(topic.link, title: topic.title, id: topic.id) { HelpTopicContent(topic: topic) }
+    }
+}
+
+struct HelpLink<Content: View>: View {
+    let label: String
+    let title: String
+    let id: String
+    @ViewBuilder var content: () -> Content
+    @State private var showing = false
+
+    init(_ label: String, title: String? = nil, id: String, @ViewBuilder content: @escaping () -> Content) {
+        self.label = label
+        self.title = title ?? label
+        self.id = id
+        self.content = content
+    }
+
+    var body: some View {
+        Button(label) { showing = true }
+            .buttonStyle(.link)
+            .font(.callout)
+            .fixedSize()
+            .accessibilityIdentifier(id)
+            .sheet(isPresented: $showing) {
+                HelpDialog(title: title, onDone: { showing = false }, content: content)
+            }
     }
 }
 

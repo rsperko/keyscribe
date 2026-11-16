@@ -77,7 +77,8 @@ struct ModeEditorView: View {
             Section("What it does") {
                 SettingRow(
                     title: "Turn spoken editing phrases into edits",
-                    help: "Turns phrases you say into edits: \u{201C}insert new line\u{201D}, \u{201C}insert new paragraph\u{201D}, \u{201C}insert tab character\u{201D}, \u{201C}insert clipboard contents\u{201D} (or \u{201C}insert clipboard as code\u{201D} for a code block), \u{201C}scratch that\u{201D}, \u{201C}never mind\u{201D} at the end to throw the dictation away, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
+                    help: Self.editingPhrasesNote,
+                    reference: Self.editingPhrasesHelp)
                 {
                     Toggle("", isOn: bind.commandsBinding(\.liveEdits)).labelsHidden()
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.liveEdits)
@@ -85,7 +86,7 @@ struct ModeEditorView: View {
                 SettingRow(
                     title: "Recognition and replacements",
                     result: "Uses your global vocabulary",
-                    help: "Plain Dictation always uses the words and replacements in Global vocabulary. To give dictation its own words, add a mode.",
+                    help: "To give dictation its own words, add a mode.",
                     combinesAccessibilityChildren: false)
                 {
                     Button("Edit Vocabulary…", action: onEditVocabulary)
@@ -96,7 +97,7 @@ struct ModeEditorView: View {
                 nonPasteInsertionNotice
                 SettingRow(
                     title: "Do not save this mode in history",
-                    help: "When on, Plain Dictation's dictations are never written to local history. Other modes still record per your History setting.")
+                    help: "When on, Plain Dictation\u{2019}s dictations are never written to History. Other modes follow your History setting.")
                 {
                     Toggle("", isOn: bind.binding(\.excludeFromHistory)).labelsHidden()
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.excludeFromHistory)
@@ -125,7 +126,8 @@ struct ModeEditorView: View {
             Section("What it does") {
                 SettingRow(
                     title: "Turn spoken editing phrases into edits",
-                    help: "Turns phrases you say into edits: \u{201C}insert new line\u{201D}, \u{201C}insert new paragraph\u{201D}, \u{201C}insert tab character\u{201D}, \u{201C}insert clipboard contents\u{201D} (or \u{201C}insert clipboard as code\u{201D} for a code block), \u{201C}scratch that\u{201D}, \u{201C}never mind\u{201D} at the end to throw the dictation away, and \u{201C}begin verbatim\u{201D}/\u{201C}end verbatim\u{201D}.")
+                    help: Self.editingPhrasesNote,
+                    reference: Self.editingPhrasesHelp)
                 {
                     Toggle("", isOn: bind.commandsBinding(\.liveEdits)).labelsHidden()
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.liveEdits)
@@ -165,7 +167,7 @@ struct ModeEditorView: View {
                 if !mode.answersAloud { nonPasteInsertionNotice }
                 SettingRow(
                     title: "Do not save this mode in history",
-                    help: "When on, this mode's dictations are never written to local history — useful for sensitive work. Other modes still record per your History setting.")
+                    help: "When on, this mode\u{2019}s dictations are never written to History. Other modes follow your History setting.")
                 {
                     Toggle("", isOn: bind.binding(\.excludeFromHistory)).labelsHidden()
                         .accessibilityIdentifier(AccessibilityID.Mode.Editor.excludeFromHistory)
@@ -246,6 +248,18 @@ struct ModeEditorView: View {
         ModeVocabularyRow(mode: mode, shared: sharedVocabularyNames, onEdit: onEditVocabulary)
     }
 
+    static let editingPhrasesNote = "Phrases like \u{201C}insert new line\u{201D} and \u{201C}scratch that\u{201D} become edits instead of words."
+
+    static var editingPhrasesHelp: HelpTopic {
+        let stages = TakeStages.text(liveEdits: true, rules: [], numbers: false, dictionary: [])
+        let rows = SpokenHelp.dictation(title: "", stages: stages).rows
+        return HelpTopic("What can I say?", title: "Editing phrases", id: AccessibilityID.Mode.Editor.editingPhrases, parts: [
+            .init(paragraphs: ["With this on, these phrases become edits instead of words in what you dictate."]),
+            .init(heading: "Phrases", phrases: rows.map { HelpPhrase(said: $0.said, meaning: $0.effect, note: $0.note) }),
+            .init(heading: "While recording", paragraphs: ["Say \u{201C}what can I say\u{201D} to see the phrases this mode uses, with your own vocabulary."]),
+        ])
+    }
+
     static func vocabularyHelp(for mode: Mode, shared: [String] = []) -> String {
         let base = mode.dictionary.includeGlobal || mode.replacements.includeGlobal
             ? "Mode-only words and replacements apply only here. Global vocabulary is also included where this mode allows it."
@@ -258,14 +272,14 @@ struct ModeEditorView: View {
     @ViewBuilder private var finishingControls: some View {
         SettingRow(
             title: "Trim trailing punctuation",
-            help: "Removes a final . ! or ? (and any trailing spaces) from the result before it is inserted. Useful for command, identifier, or subject-line modes that should not end in sentence punctuation. Runs before \u{201C}End with\u{201D} adds its space or line break.")
+            help: "Removes a final . ! or ? before inserting, for commands, identifiers, or subject lines.")
         {
             Toggle("", isOn: bind.binding(\.trimTrailingPunctuation)).labelsHidden()
                 .accessibilityIdentifier(AccessibilityID.Mode.Editor.trimTrailingPunctuation)
         }
         SettingRow(
             title: "End with",
-            help: "Appends a space or line break to the end of every dictation. It is part of the inserted text, so one ⌘Z still undoes the whole thing.")
+            help: "Added to every dictation as part of the inserted text, so one ⌘Z still undoes it all.")
         {
             Picker("", selection: bind.binding(\.trailing)) {
                 Text("Nothing").tag(Mode.Trailing.none)
@@ -314,7 +328,7 @@ struct ModeEditorView: View {
                 if !mode.answersAloud { contextRows }
                 SettingRow(
                     title: "Hide recognizable sensitive text",
-                    help: "Best-effort redaction replaces recognizable sensitive spans with tokens before the request, then restores them on this Mac. It is pattern matching: it can miss content, it turns all context off, and it does not make cloud use appropriate for every secret.",
+                    help: "Replaces recognizable sensitive text with tokens before the request and restores it on this Mac. Pattern matching can miss content, so it doesn\u{2019}t make every secret safe to send. It turns all context off.",
                     dependencyReason: mode.commands.privacy ? "All context is off while this is on." : nil)
                 {
                     Toggle("", isOn: privacyMode).labelsHidden()
@@ -327,7 +341,7 @@ struct ModeEditorView: View {
     @ViewBuilder private var contextRows: some View {
         SettingRow(
             title: "Send app details",
-            help: "Shares the frontmost app's name as untrusted reference, never as commands. The browser URL is never sent — it is only a local routing key.",
+            help: "Sends the front app\u{2019}s name as reference, never as commands. A browser\u{2019}s URL is never sent.",
             dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)
         {
             Toggle("", isOn: bind.contextBinding(\.app)).labelsHidden().disabled(mode.commands.privacy)
@@ -335,7 +349,7 @@ struct ModeEditorView: View {
         }
         SettingRow(
             title: "Send text before the cursor",
-            help: "Shares a short, bounded excerpt of the text just before the insertion point as untrusted reference, so a rewrite can match the surrounding voice and tense. Native text fields only — best-effort (browsers expose nothing).",
+            help: "Sends a short excerpt of the text before the cursor so the rewrite matches its voice. Native text fields only; browsers expose nothing.",
             dependencyReason: mode.commands.privacy ? "Off while best-effort redaction sends only the redacted dictation." : nil)
         {
             Toggle("", isOn: bind.contextBinding(\.precedingText)).labelsHidden().disabled(mode.commands.privacy)

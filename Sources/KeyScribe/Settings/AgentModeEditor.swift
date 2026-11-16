@@ -55,7 +55,7 @@ struct AgentModeEditor: View {
                     Section("Data sent with AI") {
                         SettingRow(
                             title: "Hide recognizable sensitive text",
-                            help: "Best-effort redaction replaces recognizable sensitive spans with tokens before the AI rewrite, then restores them on this Mac. It protects only the rewrite request: the agent still receives your words in full.")
+                            help: "Replaces recognizable sensitive text with tokens in the rewrite request and restores it on this Mac. Pattern matching can miss content. The agent still receives your words in full.")
                         {
                             Toggle("", isOn: hidesSensitiveText).labelsHidden()
                                 .accessibilityIdentifier(AccessibilityID.Mode.Editor.privacy)
@@ -65,7 +65,7 @@ struct AgentModeEditor: View {
                 Section("History") {
                     SettingRow(
                         title: "Do not save this mode in history",
-                        help: "When on, what you send to agents is never written to local history. Other modes still record per your History setting.")
+                        help: "When on, what you send to agents is never written to History. Other modes follow your History setting.")
                     {
                         Toggle("", isOn: leavesOutOfHistory).labelsHidden()
                             .accessibilityIdentifier(AccessibilityID.Mode.Editor.excludeFromHistory)
@@ -89,23 +89,26 @@ struct AgentModeEditor: View {
         Section("Where instructions go") {
             VStack(alignment: .leading, spacing: 4) {
                 Text(AgentsSettingsModel.routingNote)
-                if let example = agents.routingExample {
-                    Text(example).font(.caption).foregroundStyle(.secondary)
-                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.example)
-                }
-                HStack {
-                    Button("What can I say?") { showingPhrases = true }
-                        .buttonStyle(.link)
-                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.whatCanISay)
-                    Spacer()
+                Button("What can I say?") { showingPhrases = true }
+                    .buttonStyle(.link)
+                    .font(.callout)
+                    .fixedSize()
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.whatCanISay)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                Label(Self.dataNotice, systemImage: "arrow.up.forward.app")
+                    .font(.caption).foregroundStyle(.secondary)
+                HelpLink("What the agent receives", id: AccessibilityID.Mode.Agents.whatAgentsReceive) {
+                    AgentDataHelp()
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
-            Label(
-                "The agent receives what you say and sends it to its own AI provider under its own settings. Best-effort redaction does not apply to it.",
-                systemImage: "arrow.up.forward.app")
-                .font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    static var dataNotice: String {
+        "Instructions go to the agent and its AI provider without \(Branding.appName)\u{2019}s best-effort redaction."
     }
 
     private var connectionsSection: some View {

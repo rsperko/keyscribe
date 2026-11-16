@@ -37,9 +37,7 @@ struct ModeAISection: View {
                 SettingRow(
                     title: serviceTitle,
                     result: aiServiceLabel,
-                    help: mode.answersAloud
-                        ? "The selected text and your spoken request are sent to this AI service to be answered. If it fails, nothing is read aloud and the selected text is not changed."
-                        : "When set, the transcript is sent to this AI service to be rewritten before it is inserted. Only an explicit AI service can run a rewrite; if it fails, the transcript is inserted without rewriting — your words are never lost.")
+                    help: serviceHelp)
                 {
                     Picker("", selection: rewriteSelection) {
                         Text(mode.answersAloud ? "None" : "No cloud rewrite").tag("")
@@ -68,12 +66,38 @@ struct ModeAISection: View {
         }
     }
 
+    private var serviceHelp: String {
+        switch ((mode.aiRewrite?.connection ?? "").isEmpty, mode.answersAloud) {
+        case (true, true): "Nothing is sent. Choose a service for this mode to answer."
+        case (true, false): "No text is sent for rewriting."
+        case (false, true): "The selected text and your request go to this service. If it fails, nothing is read aloud and the selection is unchanged."
+        case (false, false): "Your transcript goes to this service to be rewritten. If it fails, the transcript is inserted unchanged."
+        }
+    }
+
+    static let reusableInstructionsHelp = HelpTopic(
+        "About reusable instructions", title: "Reusable writing instructions",
+        id: AccessibilityID.Mode.Editor.aboutReusableInstructions,
+        parts: [
+            .init(paragraphs: ["Shared style rules you can attach to any mode."]),
+            .init(heading: "Examples", paragraphs: [
+                "A \u{201C}my voice\u{201D} style guide.",
+                "A standard sign-off.",
+                "A glossary of names to spell right.",
+                "Tone rules like \u{201C}keep it terse.\u{201D}",
+            ]),
+            .init(heading: "How they apply", paragraphs: [
+                "They apply in the order listed, even when your dictation already reads cleanly.",
+                "When one conflicts with the mode\u{2019}s writing instruction, the reusable instruction wins, so a tweak you always want is more reliable here than in the mode\u{2019}s own instruction.",
+            ]),
+            .init(heading: "Sharing", paragraphs: ["Editing an instruction changes it for every mode that uses it."]),
+        ])
+
     @ViewBuilder private var reusableInstructions: some View {
         let attached = mode.aiRewrite?.fragments ?? []
         if attached.isEmpty {
             addInstructionMenu
-            Text("Reusable writing instructions are shared style rules you can attach to any mode \u{2014} a \u{201C}my voice\u{201D} style guide, a standard sign-off, a glossary of names to spell right, or tone rules like \u{201C}keep it terse.\u{201D} They are applied even when your dictation already reads cleanly, and they take precedence over the writing instruction above when the two conflict \u{2014} so a tweak you always want applied is more reliable here than in the mode's own prompt.")
-                .font(.caption).foregroundStyle(.secondary)
+            reusableInstructionsNote
         } else {
             Text("Reusable writing instructions")
                 .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -97,8 +121,15 @@ struct ModeAISection: View {
             }
             .onMove(perform: moveFragment)
             addInstructionMenu
-            Text("Applied in order, even when your dictation already reads cleanly, and they take precedence over the writing instruction above when they conflict. Instructions are shared, so editing one changes it for every mode that uses it.")
+            reusableInstructionsNote
+        }
+    }
+
+    private var reusableInstructionsNote: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Reuse writing instructions across modes.")
                 .font(.caption).foregroundStyle(.secondary)
+            HelpLink(Self.reusableInstructionsHelp)
         }
     }
 

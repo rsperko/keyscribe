@@ -4,6 +4,7 @@ enum AccessibilityID {
     enum Settings {
         static let paneNotice = "settings.paneNotice"
         static let paneNoticeReveal = "settings.paneNotice.reveal"
+        static let helpDone = "settings.help.done"
         enum Sidebar {
             static let general = "settings.sidebar.general"
             static let speechModels = "settings.sidebar.speechModels"
@@ -263,6 +264,7 @@ enum AccessibilityID {
             static let previewDetails = "mode.voiceCommands.previewDetails"
             static let previewResultDetails = "mode.voiceCommands.previewResultDetails"
             static let excludeFromHistory = "mode.voiceCommands.excludeFromHistory"
+            static let whatCanISay = "mode.voiceCommands.whatCanISay"
             static let editVocabulary = "mode.voiceCommands.editVocabulary"
             static let placeName = "mode.voiceCommands.place.name"
             static let placeSay = "mode.voiceCommands.place.say"
@@ -390,7 +392,8 @@ enum AccessibilityID {
             static let replyOptions = "mode.agents.replyOptions"
             static let advanced = "mode.agents.advanced"
             static let whatCanISay = "mode.agents.whatCanISay"
-            static let phrasesDone = "mode.agents.phrasesDone"
+            static let whatAgentsReceive = "mode.agents.whatAgentsReceive"
+            static let aboutReplyUpdates = "mode.agents.aboutReplyUpdates"
             static let search = "mode.agents.search"
             static let conversationDetail = "mode.agents.conversationDetail"
             static let example = "mode.agents.example"
@@ -411,6 +414,8 @@ enum AccessibilityID {
             static let usePressStyleDefault = "mode.editor.usePressStyleDefault"
             static let extraTriggersNote = "mode.editor.extraTriggersNote"
             static let liveEdits = "mode.editor.liveEdits"
+            static let editingPhrases = "mode.editor.editingPhrases"
+            static let aboutReusableInstructions = "mode.editor.aboutReusableInstructions"
             static let aiService = "mode.editor.aiService"
             static let instruction = "mode.editor.instruction"
             static let instructionExpand = "mode.editor.instructionExpand"
@@ -539,6 +544,7 @@ enum AccessibilityID {
         static let list = "history.list"
         static func row(_ id: String) -> String { "history.list.row.\(id)" }
         static let search = "history.search"
+        static let whatHistoryKeeps = "history.whatHistoryKeeps"
         static let clearSearch = "history.action.clearSearch"
         static let export = "history.action.export"
         static let rewriteAgain = "history.action.rewriteAgain"
@@ -704,14 +710,16 @@ enum AccessibilityID {
         Mode.Agents.renameCancel,
         Mode.Agents.manageConversations, Mode.Agents.conversationList, Mode.Agents.conversationsDone,
         Mode.Agents.unavailableGroup, Mode.Agents.detailsDone,
-        Mode.Agents.replyOptions, Mode.Agents.advanced, Mode.Agents.whatCanISay, Mode.Agents.phrasesDone, Mode.Agents.search,
+        Settings.helpDone,
+        Mode.Agents.replyOptions, Mode.Agents.advanced, Mode.Agents.whatCanISay, Mode.Agents.whatAgentsReceive,
+        Mode.Agents.aboutReplyUpdates, Mode.Agents.search,
         Mode.Agents.conversationDetail, Mode.Agents.example, Mode.Agents.conversationDetails,
         Mode.List.list, Mode.List.add, Mode.List.addBlank, Mode.List.chooserCancel,
         Mode.List.deleteConfirmConfirm, Mode.List.deleteConfirmCancel,
         Mode.List.moveShortcutConfirm, Mode.List.moveShortcutCancel, Mode.List.moveShortcutUndo,
         Mode.Editor.name, Mode.Editor.enabled, Mode.Editor.shortcutWell, Mode.Editor.pressStyle, Mode.Editor.usePressStyleDefault,
         Mode.Editor.extraTriggersNote,
-        Mode.Editor.liveEdits, Mode.Editor.aiService, Mode.Editor.instruction,
+        Mode.Editor.liveEdits, Mode.Editor.editingPhrases, Mode.Editor.aboutReusableInstructions, Mode.VoiceCommands.whatCanISay, Mode.Editor.aiService, Mode.Editor.instruction,
         Mode.Editor.instructionExpand, Mode.Editor.instructionExpandDone,
         Mode.Editor.addInstruction, Mode.Editor.newInstruction, Mode.Editor.newInstructionName,
         Mode.Editor.newInstructionCreate, Mode.Editor.newInstructionCancel,
@@ -746,7 +754,7 @@ enum AccessibilityID {
         History.readWithMacOSVoice, History.playSpokenAudio, History.saveSpokenAudio,
         History.soundedWrong, History.showKeptReply, History.renderAgain, History.checkAudio, History.replyCheck,
         History.manageVocabulary, History.createReplacement, History.addToDictionary,
-        History.retentionConfirm, History.retentionCancel,
+        History.retentionConfirm, History.retentionCancel, History.whatHistoryKeeps,
         History.ReplacementSheet.source, History.ReplacementSheet.replace, History.ReplacementSheet.save,
         History.DictionarySheet.term, History.DictionarySheet.status, History.DictionarySheet.save,
         History.DictionarySheet.correct,

@@ -535,51 +535,51 @@ struct AgentPhrasesReference: View {
     @ObservedObject var model: AgentsSettingsModel
     let onDone: () -> Void
 
-    static let renameExample = "\u{201C}rename this conversation to API\u{201D}"
+    static let exampleName = "Backend"
+    static let renameExample = "\u{201C}rename this conversation to \(exampleName)\u{201D}"
+    static let routingExample = "\u{201C}tell \(exampleName) run the unit tests\u{201D} sends only that instruction to \(exampleName)."
 
-    nonisolated static func examples(name: String, readsReplies: Bool) -> [(phrase: String, meaning: String)] {
-        SpokenHelp.agentPhrases(name: name, readsReplies: readsReplies).map { ("\u{201C}\($0.said)\u{201D}", $0.effect) }
-    }
-
-    private var exampleName: String {
-        guard model.namesProblem == nil else { return "conversation two" }
-        return (model.rows.first(where: \.connected) ?? model.rows.first)?.name ?? "backend"
+    nonisolated static func phrases(readsReplies: Bool) -> [HelpPhrase] {
+        SpokenHelp.agentPhrases(name: exampleName, readsReplies: readsReplies).map { HelpPhrase(said: $0.said, meaning: $0.effect, note: $0.note) }
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("What can I say?").font(.title2.bold())
-            Text("Start with \u{201C}tell\u{201D} and a conversation\u{2019}s name to send it an instruction.")
-                .foregroundStyle(.secondary)
-            Form {
-                Section {
-                    ForEach(Self.examples(name: exampleName, readsReplies: model.spokenResult.enabled), id: \.phrase) { example in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(example.phrase)
-                            Text(example.meaning).font(.caption).foregroundStyle(.secondary)
-                        }
-                        .accessibilityElement(children: .combine)
-                    }
-                }
-                Section {
-                    Text("Without a name, an instruction goes to the conversation in front of you when you start speaking. With no conversation in front, nothing is sent.")
-                    Text("While recording, conversations are numbered. Say \u{201C}conversation\u{201D} and the number to use one without its name.")
-                    Text("Say \(Self.renameExample) to give the conversation you\u{2019}re talking to a name of your own.")
-                    Text("While recording, say \u{201C}what can I say\u{201D} to see this list with your own vocabulary.")
-                }
-                .font(.callout).foregroundStyle(.secondary)
+        HelpDialog(title: "What can I say?", height: 560, onDone: onDone) {
+            HelpSection {
+                Text("Start with \u{201C}tell\u{201D} and a conversation\u{2019}s name to send it an instruction. These examples use a conversation named \u{201C}\(Self.exampleName).\u{201D}")
             }
-            .formStyle(.grouped)
-            .accessibilityIdentifier(AccessibilityID.Mode.Agents.phrases)
-            HStack {
-                Spacer()
-                Button("Done", action: onDone)
-                    .keyboardShortcut(.defaultAction)
-                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.phrasesDone)
+            HelpSection("Phrases") {
+                ForEach(Self.phrases(readsReplies: model.spokenResult.enabled), id: \.self) { HelpPhraseRow(phrase: $0) }
+            }
+            HelpSection("Where instructions go") {
+                Text("Without a name, an instruction goes to the conversation focused when you start speaking. With none focused, nothing is sent.")
+                Text(Self.routingExample)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.example)
+                Text("While recording, conversations are numbered. Say \u{201C}conversation\u{201D} and the number to use one without its name.")
+            }
+            HelpSection("Names") {
+                Text("Say \(Self.renameExample) to give the conversation you\u{2019}re talking to a name of your own.")
+            }
+            HelpSection("While recording") {
+                Text("Say \u{201C}what can I say\u{201D} to see this list with your own conversations\u{2019} names and vocabulary.")
             }
         }
-        .padding(24)
-        .frame(width: 480, height: 560)
+        .accessibilityIdentifier(AccessibilityID.Mode.Agents.phrases)
+    }
+}
+
+struct AgentDataHelp: View {
+    var body: some View {
+        HelpSection {
+            Text("The agent receives each instruction in full, as text, and sends it to its own AI provider under its own settings. \(Branding.appName) doesn\u{2019}t control where the agent sends it.")
+        }
+        HelpSection("Redaction") {
+            Text("Best-effort redaction doesn\u{2019}t apply to what the agent receives.")
+            Text("With Rewrite instructions before sending on, your words first go to the rewrite service you chose, after best-effort redaction when Hide recognizable sensitive text is on. The agent then receives the rewritten text in full.")
+        }
+        HelpSection("Replies") {
+            Text("Reply updates send nothing unless you choose a summary service. With one, longer replies and the prompts an agent waits on go to that service after best-effort redaction.")
+        }
     }
 }
 

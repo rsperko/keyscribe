@@ -287,10 +287,11 @@ struct VoiceCommandsSettingsModelTests {
     }
 
     @Test func theFirstExamplesNeedNothingSaved() {
-        #expect(VoiceCommandsEditorView.examples(findsInApps: true).map(\.phrase)
-                == ["\u{201C}open Mail\u{201D}", "\u{201C}open Slack general\u{201D}", "\u{201C}go back\u{201D}"])
-        #expect(VoiceCommandsEditorView.examples(findsInApps: false).map(\.phrase)
-                == ["\u{201C}open Mail\u{201D}", "\u{201C}go back\u{201D}"])
+        func said(_ findsInApps: Bool) -> [String] {
+            VoiceCommandsEditorView.phrasesHelp(findsInApps: findsInApps).parts.flatMap(\.phrases).map(\.said)
+        }
+        #expect(said(true) == ["open Mail", "open Slack general", "go back"])
+        #expect(said(false) == ["open Mail", "go back"])
     }
 
     @Test func anOldSidebarCommandEditsAsAPlainAppCommand() {

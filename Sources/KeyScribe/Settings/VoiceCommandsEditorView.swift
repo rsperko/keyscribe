@@ -15,7 +15,6 @@ struct VoiceCommandsEditorView: View {
     @State private var editingShortcut: ShortcutDraft?
     @State private var tryText = ""
     @State private var pendingShortcut: Mode?
-    @State private var actionPermissionsExpanded = false
     @State private var previewDetailsExpanded = false
     @State private var previewResultExpanded = false
     @State private var capturingTab: Task<Void, Never>?
@@ -53,15 +52,11 @@ struct VoiceCommandsEditorView: View {
             }
 
             Section("What you can say") {
-                Text("Open apps by name. Nothing to configure.")
-                    .font(.callout).foregroundStyle(.secondary)
-                ForEach(Self.examples(findsInApps: model.findsInApps), id: \.phrase) { example in
-                    phraseRow(example.phrase, example.meaning)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Open apps by name, with nothing to configure. Commands you save below add places, scripts, and shortcuts.")
+                    HelpLink(Self.phrasesHelp(findsInApps: model.findsInApps))
                 }
-                Text(Self.switchingNote)
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("For a command you save below, say \u{201C}open\u{201D} and its name for a place, or \u{201C}run\u{201D} and its name for a script or shortcut.")
-                    .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             trySection
@@ -72,7 +67,7 @@ struct VoiceCommandsEditorView: View {
                 SettingRow(
                     title: "Vocabulary",
                     result: VocabularyScopePicker.summary(for: mode),
-                    help: ModeEditorView.vocabularyHelp(for: mode, shared: sharedVocabularyNames) + " Replacements apply before a command is read. Use them to correct a name or phrase that is often misheard.",
+                    help: ModeEditorView.vocabularyHelp(for: mode, shared: sharedVocabularyNames) + " Replacements apply before a command is read.",
                     combinesAccessibilityChildren: false)
                 {
                     Button("Edit Vocabulary…", action: onEditVocabulary)
@@ -83,7 +78,7 @@ struct VoiceCommandsEditorView: View {
             Section("Result handling") {
                 SettingRow(
                     title: "Do not save this mode in history",
-                    help: "Keeps voice commands out of History. Otherwise, when History is on, it saves what you said, what ran (including any input), and any error message. Errors may include text from the script or shortcut.")
+                    help: "When off, History saves what you said, what ran with its input, and any error, which may include text from a script or shortcut.")
                 {
                     Toggle("", isOn: Binding(
                         get: { mode.excludeFromHistory },
@@ -139,15 +134,18 @@ struct VoiceCommandsEditorView: View {
 
     static let switchingNote = "\u{201C}Open\u{201D} can start an app. Use \u{201C}switch to\u{201D} to stay with what\u{2019}s already running."
 
-    nonisolated static func examples(findsInApps: Bool) -> [(phrase: String, meaning: String)] {
-        SpokenHelp.voiceCommandPhrases(findsInApps: findsInApps).map { ("\u{201C}\($0.said)\u{201D}", $0.effect) }
-    }
-
-    private func phraseRow(_ phrase: String, _ meaning: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(phrase)
-            Text(meaning).font(.caption).foregroundStyle(.secondary)
-        }
+    static func phrasesHelp(findsInApps: Bool) -> HelpTopic {
+        HelpTopic("What can I say?", id: AccessibilityID.Mode.VoiceCommands.whatCanISay, parts: [
+            .init(paragraphs: ["Open apps by name. Nothing to configure."]),
+            .init(heading: "Phrases", phrases: SpokenHelp.voiceCommandPhrases(findsInApps: findsInApps).map {
+                HelpPhrase(said: $0.said, meaning: $0.effect, note: $0.note)
+            }),
+            .init(heading: "Opening and switching", paragraphs: [switchingNote]),
+            .init(heading: "Saved commands", paragraphs: [
+                "For a command you save, say \u{201C}open\u{201D} and its name for a place, or \u{201C}run\u{201D} and its name for a script or shortcut.",
+            ]),
+            .init(heading: "While recording", paragraphs: ["Say \u{201C}what can I say\u{201D} to see this list with your own commands."]),
+        ])
     }
 
     private var commandsSection: some View {
@@ -165,17 +163,13 @@ struct VoiceCommandsEditorView: View {
                 case .script(let script): actionRow(script)
                 }
             }
-            VoiceCommandNoticeRow(kind: .apps, needsAcknowledgment: false)
-                .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.appNotice)
-            DisclosureSection(isExpanded: $actionPermissionsExpanded) {
-                DisclosureSummaryLabel(
-                    title: "Permissions and confirmations",
-                    summary: "Some prompts appear on the first run; others can appear every time.")
-            } content: {
-                Text(VoiceCommandNotices.actionPermissions)
-                    .font(.callout).foregroundStyle(.secondary)
+            VoiceCommandNoticeRow(kind: .apps, needsAcknowledgment: false, id: AccessibilityID.Mode.VoiceCommands.appNotice)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Actions start without an extra confirmation. macOS or the action itself may still ask for permission.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HelpLink(VoiceCommandNotices.actionPermissionsHelp)
             }
-            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.actionPermissions)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .task(id: model.scripts.contains(where: \.isShortcut)) {
             if model.scripts.contains(where: \.isShortcut) { await model.loadShortcutChoices() }
@@ -618,8 +612,7 @@ private struct PlaceEditorSheet: View {
     }
 
     private var notice: some View {
-        VoiceCommandNoticeRow(kind: .places, needsAcknowledgment: false)
-            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.placeNotice)
+        VoiceCommandNoticeRow(kind: .places, needsAcknowledgment: false, id: AccessibilityID.Mode.VoiceCommands.placeNotice)
     }
 
     private var appRow: some View {
@@ -868,8 +861,7 @@ private struct ScriptEditorSheet: View {
     }
 
     private var notice: some View {
-        VoiceCommandNoticeRow(kind: .scripts, needsAcknowledgment: draft.originalName == nil)
-            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.scriptNotice)
+        VoiceCommandNoticeRow(kind: .scripts, needsAcknowledgment: draft.originalName == nil, id: AccessibilityID.Mode.VoiceCommands.scriptNotice)
     }
 
     private func chooseProgram() {
@@ -1082,8 +1074,7 @@ private struct ShortcutEditorSheet: View {
     }
 
     private var notice: some View {
-        VoiceCommandNoticeRow(kind: .shortcuts, needsAcknowledgment: draft.originalName == nil)
-            .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.shortcutNotice)
+        VoiceCommandNoticeRow(kind: .shortcuts, needsAcknowledgment: draft.originalName == nil, id: AccessibilityID.Mode.VoiceCommands.shortcutNotice)
     }
 
     private var shortcutRow: some View {

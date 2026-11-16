@@ -6,14 +6,13 @@ struct SpokenResultSection: View {
     let connections: [Connection]
     @State private var optionsExpanded = false
 
-    private static let help = "For messages you dictate, and for work you type when you ask the agent to have \(Branding.appName) tell you when it\u{2019}s done (or run /\(KeyScribePaths.variant.connectorSlug) in the conversation). Each update is shown, and read aloud unless Voice is \(SpokenVoiceRows.textOnlyLabel). Replies to dictation are skipped while you\u{2019}re viewing the conversation. A short reply is given as it is; a longer one is summarized by the AI service you choose, or announced without one. You also get an update when the agent needs approval or disconnects before finishing. When \(Branding.appName) can\u{2019}t confirm the conversation is in front, it gives the update."
 
     var body: some View {
         Section("Replies") {
             SettingRow(
                 title: "Reply updates",
                 result: model.spokenResult.enabled ? currentSummary : "Get replies to messages you dictate or ask the agent to report, and know when it needs you.",
-                help: Self.help)
+                reference: aboutReplyUpdates)
             {
                 Toggle("", isOn: enabled)
                     .labelsHidden().toggleStyle(.switch)
@@ -75,7 +74,7 @@ struct SpokenResultSection: View {
                 Spacer()
             }
         } else {
-            SettingRow(title: "Summary service", result: boundary, help: serviceHelp) {
+            SettingRow(title: "Summary service", result: boundary) {
                 Picker("", selection: service) {
                     Text("None").tag("")
                     if missing {
@@ -99,9 +98,28 @@ struct SpokenResultSection: View {
         return "Long replies and waiting prompts go to \(chosen.name) after best-effort redaction."
     }
 
-    private var serviceHelp: String {
-        let name = chosen?.name ?? "the chosen service"
-        return "A longer reply is sent to \(name) to be summarized. When a conversation waits on a prompt its connector describes, the prompt\u{2019}s title, the tool call it seems to be about (such as a command to approve) and the agent\u{2019}s last words are sent to say what it asks. Both go after best-effort redaction, which can miss things in code and command output. A short reply is read as it is, without any service; with None, a longer reply is announced without a summary. With History on, \(Branding.appName) saves what was read aloud in History."
+    private var aboutReplyUpdates: HelpTopic {
+        let service = chosen?.name ?? "the summary service you choose"
+        let app = Branding.appName
+        return HelpTopic("About reply updates", title: "Reply updates", id: AccessibilityID.Mode.Agents.aboutReplyUpdates, parts: [
+            .init(heading: "When updates appear", paragraphs: [
+                "When a conversation finishes a message you dictated.",
+                "When you ask the agent to have \(app) tell you it\u{2019}s done with work you typed, or run /\(KeyScribePaths.variant.connectorSlug) in the conversation.",
+                "When the agent needs your approval, or disconnects before finishing.",
+                "A reply to dictation is skipped while you\u{2019}re viewing that conversation. When \(app) can\u{2019}t confirm the conversation is in front, it gives the update.",
+            ]),
+            .init(heading: "Speech and display", paragraphs: [
+                "Each update is shown, and read aloud unless Voice is \(SpokenVoiceRows.textOnlyLabel).",
+                "Speech is made on this Mac. What it reads is never sent anywhere for speaking.",
+            ]),
+            .init(heading: "Summaries and data sharing", paragraphs: [
+                "A short reply is given as it is, without any service.",
+                "A longer reply is sent to \(service) to be summarized. With None, nothing is sent and a longer reply is announced without a summary.",
+                "When a conversation waits on a prompt its connector describes, such as an approval, the prompt\u{2019}s title, the tool call it seems to be about (such as a command to approve) and the agent\u{2019}s last words are sent to \(service) to say what it asks.",
+                "Both go after best-effort redaction, which can miss things in code and command output.",
+                "With History on, \(app) saves what was read aloud in History.",
+            ]),
+        ])
     }
 
     private var chosen: Connection? { connections.first { $0.id == model.spokenResult.connection } }
@@ -124,7 +142,7 @@ struct SpokenVoiceRows: View {
     let sharedNote: String
     @State private var preview: NaturalSpeech?
 
-    private static let help = "Speech is made on this Mac; what it reads is never sent anywhere. With Off \u{2014} text only, results are shown without being read aloud."
+    private static let help = "Speech is made on this Mac; what it reads is never sent anywhere."
     static let textOnlyLabel = "Off \u{2014} text only"
     private var size: String { ByteCountFormatter.fileStyle.string(fromByteCount: SpokenVoiceModel.approxDownloadBytes) }
     private var textOnly: Bool { selection.wrappedValue == AgentsSettingsModel.textOnlyChoice }

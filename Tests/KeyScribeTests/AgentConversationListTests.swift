@@ -94,15 +94,6 @@ struct AgentConversationListTests {
         #expect(model.listFilter == nil)
     }
 
-    @Test func theRoutingExampleUsesAConversationThatCanReceiveAndSaysItIsForOneInstruction() {
-        let model = model()
-        #expect(model.routingExample == "\u{201C}tell backend run the unit tests\u{201D} sends only that instruction to backend.")
-        crowded(model)
-        #expect(model.routingExample?.contains("\u{201C}tell zeta run the unit tests\u{201D} sends only that instruction to zeta") == true)
-        model.show([], namesProblem: "unreadable")
-        #expect(model.routingExample == nil)
-    }
-
     @Test func aHealthyIntegrationSaysOnlyWhatIsAvailableAndAnyOtherLeadsWithItsSetup() {
         #expect(ConnectionSummary.line(setup: nil, available: 10) == "10 conversations available")
         #expect(ConnectionSummary.line(setup: nil, available: 1) == "1 conversation available")

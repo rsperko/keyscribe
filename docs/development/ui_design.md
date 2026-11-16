@@ -109,24 +109,31 @@ one optional taste of rewrite modes) is otherwise impossible to demonstrate.
 
 ## 3. Progressive discovery and contextual help
 
-Every unfamiliar, advanced, privacy-relevant, or irreversible control uses the same three
-levels of explanation:
+Configure inline, explain briefly, open reference on demand. Each kind of content has exactly one
+presentation, so every interaction has a predictable purpose:
 
-1. **Label and one-line result.** A setting row answers “what will change?” without opening
-   anything.
-2. **Inline help.** The help affordance expands in place. It explains what KeyScribe does, what
-   it does not guarantee, prerequisites, and a short example if the concept is abstract.
-3. **Details.** Only when useful, this expands to technical behavior, file/config references,
-   or exact data flow. Details are local to the control; there is no dependency on a separate
-   searchable help site.
+| Content | Presentation |
+|---|---|
+| Essential controls, current status, required actions | Always visible |
+| Brief explanation: what a control does, its limit, a data-sharing notice | Always visible, one or two short sentences beside the control (a `SettingRow`'s caption) |
+| Instructions, examples, command lists, troubleshooting, detailed data flow | Help dialog, opened from a link that names it |
+| Additional controls for an optional feature | Inline disclosure (`DisclosureSection`) |
+| Diagnostic details and example results | Inline disclosure |
+| Actionable warning or error | Inline beside the affected control (`IssueText`) |
 
-The default affordance is the `Setting row with help` component from `ui_components.md`.
-Do not use unnamed info icons or tooltip-only explanations for information that affects data,
-privacy, or output.
+A help dialog's link names what it opens (**What can I say?**, **How Claude Code connects**, **About reply
+updates**, **What History keeps**), never a generic “Learn more”. A dialog holds no settings, so nothing is
+configured in two places, and a disclosure never holds only explanation. When a brief explanation and a
+dialog cover the same control, the brief one says what a person must know to decide, and the dialog answers
+the rest without sending the reader to another dialog. Audit each explanation by its purpose rather than
+converting one presentation into another wholesale.
+
+The shared components are `Setting row with help` and `Help dialog` from `ui_components.md`. Do not use
+unnamed info icons or tooltip-only explanations for information that affects data, privacy, or output.
 
 ### Required help locations
 
-| Concept | Level-1 wording | Must explain in inline help |
+| Concept | Level-1 wording | Must explain beside the control or in its help dialog |
 |---|---|---|
 | Mode | “How KeyScribe handles this dictation” | How automatic selection, one-shot overrides, app rules, and spoken routing interact. |
 | Cloud rewrite | “Improve text with a language model” | The provider/model, that only an explicit BYOK connection can run it, and the fallback result. |
@@ -142,7 +149,7 @@ privacy, or output.
 ### Help writing rules
 
 - Lead with the user-visible effect, not the internal mechanism.
-- State limits in the same expansion as the benefit.
+- State limits beside the benefit, in the same caption or the same dialog section.
 - Use a concrete example for fragments, trigger phrases, regex, and redaction.
 - Do not bury required permissions in an error after the user configured a feature. Explain
   them beside the setting and request them only when needed.
@@ -1513,8 +1520,8 @@ vocabularies the mode uses.
     as local processing with today's settings, because an AI rewrite can still change the result. With
     History off it says there is nothing to check against.
 - Dictionary: edit/remove saved words, import/export later only if needed. The first scan says only
-  that terms use the intended spelling; model-specific recognition behavior and rewrite sharing live
-  behind **How recognition works** inline help. Dictionary and replacement rows use the shared red
+  that terms use the intended spelling; a visible caption under **Words to Recognize** says recognition
+  support varies by speech model and that the terms also guide a rewrite. Dictionary and replacement rows use the shared red
   trash action; deleting either opens an item-specific confirmation that distinguishes global entries
   from mode-only entries.
 - **Find replacements in History.** Each Words to Recognize row lists the spellings the word already
@@ -1794,7 +1801,8 @@ sections:
    **Add app or website…** precedes saved places and offers running apps (with their icons), Choose from Applications…,
    Enter Bundle ID…, and **Website…**. Window-title regexes and raw URL patterns live under
    **More precise matching**. Availability is separate from the ways a user starts or selects a mode.
-4. **What it does** — live edits, spoken symbols, numbers (inverse text normalization), and an
+4. **What it does** — live edits (a caption naming two of the phrases, with **What can I say?** opening the
+   full list from `SpokenHelp.dictation`), spoken symbols, numbers (inverse text normalization), and an
    always-visible **Recognition and replacements** summary. Whether the mode dictates, replaces the
    selected text, or answers about it is fixed by its template and shown read-only on the summary's
    **Does** line, never as a control here. Its
@@ -1804,7 +1812,12 @@ sections:
    mode's **reusable writing instructions** (fragments): listed by name directly under the
    instruction they extend, reorderable (they append in order), edited in place in a popover, and
    added from a single menu of existing instructions or a new one. They appear only once an AI
-   service is selected, since a fragment is appended to the rewrite instruction.
+   service is selected, since a fragment is appended to the rewrite instruction. Under them, one caption
+   (“Reuse writing instructions across modes.”) and **About reusable instructions**, a help dialog with
+   examples, the order they apply in, that they win over the mode's own instruction when the two conflict,
+   and that editing one changes it for every mode that uses it. The service row's caption follows the
+   choice: with no service it says no text is sent for rewriting (or, for an answer mode, that nothing is
+   sent and a service is needed to answer).
 6. **Data sent with AI** — visible only after AI rewrite is enabled. Privacy and context are
    mutually exclusive by design; the UI makes the tradeoff explicit before allowing either.
 7. **Result handling** — history exclusion, trim trailing punctuation, ending spacing, and read-only
@@ -1812,8 +1825,8 @@ sections:
 
 Plain Dictation stays deliberately small: the same header card as other modes (name, **Built in**, its
 shortcut), then **How to start Plain Dictation**, **What it does**, and **Result handling**.
-Its spoken-editing control explicitly names phrases such as “insert new line”, “scratch that”, and
-“never mind”; it
+Its spoken-editing control's caption names phrases such as “insert new line” and “scratch that”, and
+**What can I say?** lists the rest; it
 does not imply an AI rewrite or a separate expert mode. What it does also carries the vocabulary row,
 which says Plain Dictation uses Global vocabulary and whose **Edit Vocabulary…** opens Global.
 
@@ -1857,7 +1870,7 @@ is remembered for this configuration across launches; resetting onboarding or co
 
 Each command sheet carries guidance written for what that kind of entry can do (`VoiceCommandNotices.Kind`),
 weighted by what it risks. An app, link, or tab search opens apps and links or switches windows and tabs, so its sheet ends
-with a brief, neutral, collapsed **If a name is misheard** note (the wrong app, link, tab, channel, or mailbox
+with a brief, neutral **If a name is misheard** help link (the wrong app, link, tab, channel, or mailbox
 can open, which can bring the wrong content into view while sharing the screen) and never opens with a warning. A script runs
 with your account's permissions and can change or delete files; a shortcut can send messages, change or
 delete files, or send its input to online services, depending on its steps. A new script or shortcut sheet
@@ -1879,13 +1892,14 @@ Its sections are, in order:
    Voice Commands paragraph above), and a shared shortcut written by hand shows a red caption here (“…
    also uses this shortcut, so it does not start Voice Commands”) with **Move Shortcut to Voice
    Commands…**, and marks the list row and the menu-bar badge as never firing.
-2. **What you can say** — a brief introduction (“Open apps by name. Nothing to configure.”), then short,
-   concrete examples (`VoiceCommandsEditorView.examples`): “open Mail” opens Mail or brings it forward,
-   “open Slack general” opens general in Slack (shown only while **Find items in apps by voice** is on),
-   and “go back” returns to where you were. A caption then draws the one distinction a user must know
-   (“Open” can start an app. Use “switch to” to stay with what’s already running.), and a final caption
-   says a command saved below is reached with “open” and its name for a place, or “run” and its name for a
-   script or shortcut. There is no expanded phrase guide here. Spoken input is explained beside the script and
+2. **What you can say** — one line (“Open apps by name, with nothing to configure. Commands you save below
+   add places, scripts, and shortcuts.”) and **What can I say?**, a help dialog with short, concrete examples
+   (`VoiceCommandsEditorView.phrasesHelp`, from `SpokenHelp.voiceCommandPhrases`): “open Mail” opens Mail or
+   brings it forward, “open Slack general” opens general in Slack (shown only while **Find items in apps by
+   voice** is on), and “go back” returns to where you were; then the one distinction a user must know (“Open”
+   can start an app. Use “switch to” to stay with what’s already running.), how a saved command is reached
+   (“open” and its name for a place, or “run” and its name for a script or shortcut), and that “what can I
+   say” while recording shows the list with the user's own commands. There is no expanded phrase guide here. Spoken input is explained beside the script and
    shortcut input controls; choosing a match is explained in the choice panel when it appears. The FAQ
    carries the fuller phrase reference, including “switch to …” and “run …”. Alternative verbs
    and their common mishearings (`VoiceCommandGrammar.focusVerbs`) still work in live commands and Preview
@@ -1966,8 +1980,9 @@ Its sections are, in order:
    shows its command line and an orange advisory when the program is missing or not executable; a shortcut
    row shows the shortcut's name and input, and an orange advisory when that shortcut is no longer in
    Shortcuts. Any row also shows an orange advisory when your replacements send one of its names to
-   something else, so a rule that takes a name away is visible without opening the command. Under the list sit the **Using Voice Commands** notice and a collapsed **Permissions and confirmations**
-   disclosure explaining that macOS may request access when an action first controls another app or
+   something else, so a rule that takes a name away is visible without opening the command. Under the list sit the **Using Voice Commands** help link, then one caption (“Actions start without an
+   extra confirmation. macOS or the action itself may still ask for permission.”) and a **Permissions and
+   confirmations** help dialog explaining that macOS may request access when an action first controls another app or
    accesses protected data; Shortcuts can offer **Allow Once** or **Always Allow**, and actions can include
    confirmations on every run. A macOS dialog may name the app even when a script triggered it, and a
    permission granted through Terminal may not apply to a run here. The copy distinguishes those prompts
@@ -2055,24 +2070,25 @@ Its sections are, in order:
    refuse it, because a command is edited by its stable id, never its name. A program that is not installed yet remains an advisory. An existing script's sheet holds the
    red **Delete Command** action at its trailing edge, with a confirmation.
 5. **Recognition and replacements** — the same vocabulary summary and help as other modes, with
-   **Edit Vocabulary…** opening Vocabulary on Voice Commands. Help explains that replacements apply
-   before a command is read and can correct frequently misheard names or phrases.
+   **Edit Vocabulary…** opening Vocabulary on Voice Commands. Its caption says replacements apply
+   before a command is read.
 6. **Result handling** — the same **Do not save this mode in history** toggle as other modes, off by
-   default. Its help says saved commands include what was said, what ran (including input), and any
-   error message, which may include text from a script or shortcut.
+   default. Its caption says History otherwise saves what was said, what ran with its input, and any error,
+   which may include text from a script or shortcut.
 
 **Agent** (experimental) has one home: the Agent mode in Modes, built like every other mode editor (grouped
 form, the same header, sections and shared components). There is no separate Agent pane, no tabs, and no
 master/detail conversation list. Its everyday view is, in order:
 
 1. **How to start Agent** — the shortcut and press style, as in other modes.
-2. **Where instructions go** — guidance only, with no destination control: one line saying instructions go to
-   the conversation in front when the user starts speaking and that starting with a conversation's name or
-   number sends one instruction there instead (`AgentsSettingsModel.routingNote`), a real addressing example
-   using a conversation that can receive (“tell {name} run the unit tests” sends only that instruction to
-   {name}, `AgentsSettingsModel.routingExample`, hidden while names can't be loaded), **What can I say?**, and
-   the data boundary in one line: the agent receives what the user says and sends it to its own AI provider
-   under its own settings, and best-effort redaction does not apply. It never says “On this Mac”.
+2. **Where instructions go** — guidance only, with no destination control: one line (“Instructions go to the
+   conversation focused when you start speaking. Say a conversation’s name or number to send that instruction
+   there instead. Without either, nothing is sent.”, `AgentsSettingsModel.routingNote`) with **What can I
+   say?** under it, then the data boundary in one line (“Instructions go to the agent and its AI provider
+   without {appName}’s best-effort redaction.”) with **What the agent receives** under it. That dialog says the
+   agent sends each instruction to its own AI provider under its own settings, that a rewrite before sending
+   goes to the chosen rewrite service (redacted when that is on) while the agent still receives the rewritten
+   text in full, and what reply updates send to a summary service. It never says “On this Mac”.
 3. **Connections** — one grouped section with one compact `DisclosureSection` per supported integration, drawn from
    the build's integration inventory (`AgentsSettingsModel.integrationIDs`), separated by the form's native
    separators; no card or section per integration. Each row has the integration's name and, under it, a
@@ -2089,7 +2105,7 @@ master/detail conversation list. Its everyday view is, in order:
    opening the consent sheet (below). Expanding a row changes no connection and sends nothing. A real
    failure auto-expands the row to its setup's `IssueText`; manually collapsing it leaves the header's red
    dot and the failure's `IssueText` visible under the row. A problem finding its conversations stays visible as an advisory `IssueText`. Updates,
-   reload advice, folders, repair, inline help and uninstall live in the expanded content, so optional
+   reload advice, folders, repair, uninstall and a **How {agent} connects** help link live in the expanded content, so optional
    maintenance never reads as a failure. The expanded content is the agent's configuration folder list (below). The section ends with a **Conversations** row: how many can receive
    (`AgentsSettingsModel.conversationsSummary`; conversations that can't are explained by the agents'
    warnings and the list itself, not counted here) and **Manage…**, the one permanent entry to the
@@ -2141,13 +2157,15 @@ as a `CopyableValue`, where it runs, its title, other names it answers to, start
 identical rows, where its name comes from, and a note when it runs the previous connector), and **Disconnect**
 or **Reconnect** alone at the trailing edge, with **Done**.
 
-**What can I say?** opens a sheet built from the same `SpokenHelp.agentPhrases` the recording HUD uses: one
-introduction (“Start with “tell” and a conversation’s name to send it an instruction.”), the phrases with what
-each does, using the name of a connected conversation, else a placeholder, and “conversation two” while names
-are unavailable, then captions saying that an instruction without a name goes to the conversation in front
-when the user starts speaking and that nothing is sent with none in front, that the numbers shown while recording can be said as “conversation” and the number,
-how to rename a conversation by voice, and that “what can I say” while recording shows the list with the
-user's own vocabulary. Every example is one the take's own parsers read as described, checked by test.
+**What can I say?** opens a help dialog built from the same `SpokenHelp.agentPhrases` the recording HUD uses,
+with one fixed example name, “Backend” (`AgentPhrasesReference.exampleName`), introduced once (“These examples
+use a conversation named “Backend.””), never a real conversation's name: the recording HUD is where real names
+help. Then **Phrases**, each with what it does; **Where instructions go**: an instruction without a name goes
+to the conversation focused when the user starts speaking and nothing is sent with none focused, the fixed
+example (“tell Backend run the unit tests” sends only that instruction to Backend), and that the numbers shown
+while recording can be said as “conversation” and the number; **Names**: “rename this conversation to
+Backend”; and **While recording**: “what can I say” shows the list with the user's own conversations and
+vocabulary. Every example is one the take's own parsers read as described, checked by test.
 Conversation titles remain available to the recording HUD: the title is the one the user gave the
 conversation, reported by the connector, else the title Claude Code generated, read best effort from the end
 of the session's own transcript (only the title is kept, and it is never logged); a brand-new conversation has
@@ -2160,10 +2178,13 @@ Longer replies are summarized by {service}." or "Shown as text, not read aloud. 
 a collapsed `DisclosureSection` shown while the switch is on, holds **Summary service** and **Voice**, then,
 under a divider, the **Summary instruction** and the voice's files, and opens by itself when the service is missing or the voice needs attention. The summary
 service is separate from the Agent mode's rewrite service, with a different name, so the service that
-rewrites what the user says is never mistaken for the one that summarizes replies. Its help explains
-that each update is shown and read aloud unless the voice is **Off — text only**, that replies are skipped while
-the conversation is in front, how short replies and longer summaries differ,
-and that it also announces approval requests and disconnections. Whether an update is spoken or only shown is the
+rewrites what the user says is never mistaken for the one that summarizes replies; its row's caption is the data
+boundary in one line. **About reply updates**, under the switch, opens a help dialog in three parts: **When
+updates appear** (a dictated message finishing, work the user asked to hear about, an approval request or a
+disconnection, and that a reply is skipped while its conversation is in front), **Speech and display** (each
+update is shown and read aloud unless the voice is **Off — text only**; speech is made on this Mac), and
+**Summaries and data sharing**, one short paragraph each for short replies, longer replies, waiting prompts,
+redaction, and History. Whether an update is spoken or only shown is the
 shared voice choice below; the rules in this section apply the same way to both, and "read" here means given as
 an update either way. It reads a reply or summary when a turn
 the user's dictation started finishes, or a turn the user asked from inside the agent to hear, and a notice when it
@@ -2231,7 +2252,7 @@ says so. A chosen service that no longer exists is an `IssueText`, and a longer 
 is then spoken as unavailable. With no saved services, an advisory saying summaries need one and what plays without it,
 and **Open AI Services**, take its place. While a service is chosen, the row's caption
 states the data boundary in one line, naming the service ("Long replies and waiting prompts go to {name}
-after best-effort redaction."); its help adds that short replies are read without any service and that the app, named with
+after best-effort redaction."); **About reply updates** adds that short replies are read without any service and that the app, named with
 `Branding.appName`, saves what was read aloud in History only while History is on, with no claim about what the provider keeps.
 
 **Voice** is one row, with **Preview Voice** beside its control, wrapping below it only when the pane is too
@@ -2319,9 +2340,8 @@ leaves the host on and reads **Not installed** with **Reinstall**, which install
 Uninstall stays offered for any enrolled setup. A plugin the host reports as
 installed but failing reads **Not working**, with the host's reason as an `IssueText` and a **Repair** action that
 installs the current files again; Uninstall stays offered. A host without its own connector has one `SettingRow`
-switch inside its expanded row instead, **Reach conversations in {host}**, off by default. Its help says the host's conversations are
-listed and sent to through the host's own command, into a turn already running the way typing there would, and that {appName} runs
-nothing of the host's until the switch is on. Turning it off removes the host's conversations from the list on
+switch inside its expanded row instead, **Reach conversations in {host}**, off by default. Its caption says what the user says is sent to the host's conversations
+through the host's own command, and that {appName} runs nothing of the host's until the switch is on. Turning it off removes the host's conversations from the list on
 the next scan. While the host is on, a reason the host's list is missing (the tool isn't installed or isn't
 open, or its list couldn't be read) stays visible below its header as an advisory `IssueText` that says what to do next,
 whether or not other conversations are listed.
@@ -2568,7 +2588,8 @@ on the History pane) and the sidebar. It uses the same list/detail pane layout a
 left column with one compact History section for enablement and retention (moved out of General), a search field,
 the day-grouped list, and the storage-truth statement pinned at the bottom; the right column is
 the entry detail. The section uses the shared uppercase **History** header, followed by **Keep history
-on this Mac** and the subordinate **Keep for** menu. These controls live only here — General has no
+on this Mac** (its caption: transcripts and final text stay on this Mac, recordings of the user's voice are never
+saved; **What History keeps** opens the rest) and the subordinate **Keep for** menu. These controls live only here — General has no
 History section. **"Navigated away" equals "closed"**: leaving the pane (or closing Settings)
 releases all parsed transcripts and the search cache, and re-entering reloads (signature-gated,
 so it is free when nothing changed). History offers copying for reuse; it does not paste into other apps.

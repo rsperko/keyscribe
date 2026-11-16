@@ -60,7 +60,7 @@ struct AgentIntegrationRow: View {
                 } content: {
                     SettingRow(
                         title: "Reach conversations in \(host.displayName)",
-                        help: "Lists the conversations \(host.displayName) runs and sends what you say to them through \(host.displayName)\u{2019}s own command, into a turn already running the way typing there would. \(Branding.appName) runs nothing of \(host.displayName)\u{2019}s until this is on.")
+                        help: "Sends what you say to \(host.displayName)\u{2019}s conversations through its own command. \(Branding.appName) runs nothing of \(host.displayName)\u{2019}s until this is on.")
                     {
                         Toggle("", isOn: Binding(get: { agents.isTurnedOn(host) }, set: { agents.setTurnedOn(host, $0) })).labelsHidden()
                             .accessibilityIdentifier(AccessibilityID.Mode.Agents.host(host.id))
@@ -84,7 +84,6 @@ private struct ConnectorRow: View {
     let onAddFolder: () -> String?
     let onShow: ([String]) -> Void
     @State private var expanded = false
-    @State private var showingHelp = false
     @State private var folderProblem: String?
 
     var body: some View {
@@ -146,21 +145,17 @@ private struct ConnectorRow: View {
                         .accessibilityIdentifier(AccessibilityID.Mode.Agents.viewAwaitingReload)
                 }
             }
-            DisclosureSection(
-                "How \(connector.kind.displayName) connects", isExpanded: $showingHelp,
-                headerID: AccessibilityID.Mode.Agents.howItConnects(connector.kind.id)
+            HelpLink(
+                "How \(connector.kind.displayName) connects",
+                id: AccessibilityID.Mode.Agents.howItConnects(connector.kind.id)
             ) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(connector.copy.help)
-                    if !connector.copy.reloadHint.isEmpty {
-                        Text(connector.copy.reloadHint)
-                    }
-                    if connector.connector.allowsOtherFolders {
-                        Text(Self.foldersHelp(connector.kind.displayName))
-                    }
+                HelpSection { Text(connector.copy.help) }
+                if !connector.copy.reloadHint.isEmpty {
+                    HelpSection("Conversations already open") { Text(connector.copy.reloadHint) }
                 }
-                .font(.caption).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+                if connector.connector.allowsOtherFolders {
+                    HelpSection("Configuration folders") { Text(Self.foldersHelp(connector.kind.displayName)) }
+                }
             }
         }
         .onChange(of: connector.setups.count) { _, _ in folderProblem = nil }
