@@ -612,6 +612,16 @@ struct AgentsSettingsModelTests {
         AgentConversation(id: id, agent: "claude", pid: pid, cwd: "/src/\(id)", handle: id, state: .idle, connectorLive: true, title: title, setup: setup)
     }
 
+    @Test func anOpenDialogsRowIsLabelledByItsPromptsKind() {
+        let (model, _, _) = makeModel()
+        var dialog = conversation("backend", pid: 1)
+        dialog.state = .userDialog
+        model.show([dialog], prompts: ["backend": AgentPrompt(kind: "confirm")])
+        #expect(model.rows.first?.state == "Waiting for approval")
+        model.show([dialog])
+        #expect(model.rows.first?.state == "Dialog open")
+    }
+
     @Test func renameContextKeepsTheTitleWithItsConversationAsItChanges() {
         let (model, _, _) = makeModel()
         model.show([conversation("backend", pid: 1, title: "Fix the cache")])

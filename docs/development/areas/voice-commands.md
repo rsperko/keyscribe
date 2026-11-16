@@ -471,7 +471,9 @@ every rule above applies to it, with these sharpenings:
   a thread stopped on a command approval). The approval stayed open, the message sat in bb's queue as
   `waitingOn: interaction`, and once the approval was denied bb delivered it into the same turn. If a later bb
   steers into an open approval instead, the hub must hold the take as it does for a terminal agent. A queued
-  answer's receipt names what the thread waits on, from the thread's state in bb's list. bb's `sent` reads as sent, and a
+  answer's receipt names what the thread waits on, from the thread's state in bb's list or, once the plugin has
+  reported the prompt, from that prompt's kind (`AgentLiveState.named(by:)`, as for any dialog: a confirm is an
+  approval, a select, input or editor a question, anything else a dialog). bb's `sent` reads as sent, and a
   dictation it steers into a running turn follows that turn's reply, `queued` as
   queued, its error envelope as refused in plain words, and anything else as uncertain; bb's error code goes to
   the log as public and its message as private, since a message could echo what was sent. Open only asks:

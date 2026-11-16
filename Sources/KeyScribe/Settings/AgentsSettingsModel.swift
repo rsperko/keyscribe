@@ -205,7 +205,7 @@ final class AgentsSettingsModel: ObservableObject {
         _ conversations: [AgentConversation], namesProblem: String? = nil, namesNotSaved: String? = nil,
         discoveryProblems: [String: String]? = nil, discoveredSetups: [String: [String]] = [:], candidates: [AgentCandidate] = [],
         disconnected: [AgentConversation] = [], exclusionsNotSaved: String? = nil, loadedVersions: [String: String] = [:],
-        lastSeen: Set<String> = [], readAloud: Set<String> = [], readNextAloud: Set<String> = []
+        lastSeen: Set<String> = [], readAloud: Set<String> = [], readNextAloud: Set<String> = [], prompts: [String: AgentPrompt] = [:]
     ) {
         if exclusionsNotSaved != self.exclusionsNotSaved { self.exclusionsNotSaved = exclusionsNotSaved }
         shownExtras = Extras(
@@ -224,7 +224,7 @@ final class AgentsSettingsModel: ObservableObject {
             let lastSeen = !conversation.reachable && lastSeen.contains(conversation.id)
             return Row(
                 id: conversation.id, name: conversation.handle, folder: conversation.cwd,
-                state: lastSeen ? "Last seen" : AgentRoster.stateLabel(conversation),
+                state: lastSeen ? "Last seen" : AgentRoster.stateLabel(conversation, prompt: prompts[conversation.id]),
                 connected: conversation.reachable,
                 agent: conversation.runningAgent, terminal: conversation.pid.flatMap { terminals[$0] ?? nil },
                 title: conversation.title, setup: conversation.setup,

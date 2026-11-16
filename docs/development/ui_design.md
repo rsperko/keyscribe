@@ -783,7 +783,10 @@ running, the take goes into that turn when the agent takes messages during a tur
 finishes”), unless that conversation is the one in front and its connector can enter it for the user, below.
 When the conversation is waiting on the user instead (an approval, a question, or a dialog), the take still
 waits for the turn, and the receipt says what it waits on, how to respond, and what happens to the message
-(“Waiting for approval. Say “open docs” to respond; this message stays queued”).
+(“Waiting for approval. Say “open docs” to respond; this message stays queued”). An open dialog whose prompt
+reports its kind is named by it: a confirm reads as an approval, a select, input or editor as a question, and
+anything else as a dialog. One rule (`AgentLiveState.named(by:)`) names it the same way in the receipt, the
+spoken notice, the conversation list and a status check, its "last seen" included.
 “May not have reached docs: check its terminal” appears only after the app has asked the connector where the
 message is and still cannot tell; when the answer is that it reached the conversation, the receipt is
 “Sent to docs”. A take left uncertain still has its turn's reply spoken when nothing says that turn belongs to another
@@ -826,7 +829,8 @@ goes in stays in the box with it, and Return is never pressed (“Not sent to do
 prompt box after text already there. Review it there and press Return to send it”). A take for a conversation that
 is not in front, that waits on the user, that has an earlier message still on its way or waiting, or that carries
 an attached image waits for the turn as above, and so does one the box will not take; one turned away because an
-approval just opened waits on it (“Dialog open…”). An approval or question the agent decides on in the moment
+approval just opened waits on it, named by the prompt's kind when the connector reported it (“Waiting for
+approval…”) and otherwise “Dialog open…”. An approval or question the agent decides on in the moment
 before Return lands is held back until it has, so Return never answers it. The take's spoken reply is the reply of
 the turn that read the message: the running turn when it took it in, unless an earlier take already claimed that
 reply, or the turn the message starts when the running one ended first; it is heard once.

@@ -27,7 +27,7 @@ public struct AgentRoster: Equatable, Sendable {
 
     public init(
         frozen: [AgentConversation], live: [AgentConversation], focused: String?, namesAvailable: Bool = true,
-        disconnected: [AgentConversation] = []
+        disconnected: [AgentConversation] = [], prompts: [String: AgentPrompt] = [:]
     ) {
         self.namesAvailable = namesAvailable
         disconnectedTarget = disconnected.first { $0.id == focused }?.handle
@@ -38,7 +38,7 @@ public struct AgentRoster: Equatable, Sendable {
             return Row(
                 id: conversation.id, number: index + 1, name: conversation.handle,
                 detail: Self.detail(conversation, namingAgent: mixed),
-                state: now.map(Self.stateLabel) ?? "Ended",
+                state: now.map { Self.stateLabel($0, prompt: prompts[$0.id]) } ?? "Ended",
                 available: now.map(Self.isAvailable) ?? false,
                 target: conversation.id == focused)
         }
@@ -75,9 +75,9 @@ public struct AgentRoster: Equatable, Sendable {
         conversation.reachable && conversation.state != .disconnected
     }
 
-    public static func stateLabel(_ conversation: AgentConversation) -> String {
+    public static func stateLabel(_ conversation: AgentConversation, prompt: AgentPrompt? = nil) -> String {
         guard conversation.reachable else { return "Not connected" }
-        switch conversation.state {
+        switch conversation.state.named(by: prompt) {
         case .idle: return "Ready"
         case .working: return "Working"
         case .waitingApproval: return "Waiting for approval"

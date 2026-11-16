@@ -176,6 +176,21 @@ struct AgentStatusAnswerTests {
         #expect(status(.userDialog, prompt: AgentPrompt(kind: "custom")) == "Status for architect: a dialog is open. Nothing sent.")
     }
 
+    @Test func anOpenDialogLastSeenIsNamedByItsPromptsKind() {
+        #expect(status(.userDialog, connected: false, prompt: AgentPrompt(kind: "confirm"))
+            == "Status for architect: not connected. Its current status is unavailable. Last seen waiting for approval. Nothing sent.")
+        #expect(status(.userDialog, current: false, prompt: AgentPrompt(kind: "input"))
+            == "Status for architect: last seen waiting for an answer. Its current status is unavailable. Nothing sent.")
+    }
+
+    @Test func eachPromptKindNamesTheStateItWaitsIn() {
+        #expect(AgentLiveState.userDialog.named(by: AgentPrompt(kind: "confirm")) == .waitingApproval)
+        for kind in ["select", "input", "editor"] { #expect(AgentLiveState.userDialog.named(by: AgentPrompt(kind: kind)) == .waitingQuestion) }
+        #expect(AgentLiveState.userDialog.named(by: AgentPrompt(kind: "custom")) == .userDialog)
+        #expect(AgentLiveState.userDialog.named(by: nil) == .userDialog)
+        #expect(AgentLiveState.working.named(by: AgentPrompt(kind: "confirm")) == .working)
+    }
+
     @Test func aLongTitleIsNotReadAsTheQuestion() {
         let title = Array(repeating: "word", count: AgentStatusAnswer.questionWordLimit + 1).joined(separator: " ")
         #expect(AgentStatusAnswer.question(in: AgentPrompt(title: title)) == nil)

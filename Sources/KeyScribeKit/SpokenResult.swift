@@ -108,9 +108,9 @@ public enum SpokenResult {
         case .question: "Waiting for an answer."
         case .disconnected: "Disconnected before it finished."
         case .waiting(let prompt):
-            switch prompt.kind {
-            case "confirm": "Waiting for approval."
-            case "select", "input", "editor": "Waiting for an answer."
+            switch AgentLiveState.userDialog.named(by: prompt) {
+            case .waitingApproval: notice(.approval)
+            case .waitingQuestion: notice(.question)
             default: "Waiting for you."
             }
         }

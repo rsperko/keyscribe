@@ -102,6 +102,16 @@ struct AgentRosterTests {
         #expect(roster.rows.allSatisfy { !$0.target })
     }
 
+    @Test func anOpenDialogIsLabelledByThePromptsKindWhenItIsKnown() {
+        let dialog = conversation("a", "k", state: .userDialog)
+        #expect(AgentRoster.stateLabel(dialog, prompt: AgentPrompt(kind: "confirm")) == "Waiting for approval")
+        #expect(AgentRoster.stateLabel(dialog, prompt: AgentPrompt(kind: "select")) == "Waiting for an answer")
+        #expect(AgentRoster.stateLabel(dialog, prompt: AgentPrompt(kind: "custom")) == "Dialog open")
+        #expect(AgentRoster.stateLabel(conversation("a", "k", state: .waitingQuestion), prompt: AgentPrompt(kind: "confirm")) == "Waiting for an answer")
+        let roster = AgentRoster(frozen: [dialog], live: [dialog], focused: nil, prompts: ["a": AgentPrompt(kind: "confirm")])
+        #expect(roster.rows.first?.state == "Waiting for approval")
+    }
+
     @Test func stateLabelsSayWhetherItCanReceiveBeforeWhatItIsDoing() {
         #expect(AgentRoster.stateLabel(conversation("a", "k", state: .working, live: false)) == "Not connected")
         #expect(AgentRoster.stateLabel(conversation("a", "k", state: .idle)) == "Ready")

@@ -165,7 +165,8 @@ final class AgentTake {
         guard let host, host.takeMode?.output == .agent, let agents = host.agents, let snapshot = host.agentSnapshot else { return nil }
         return AgentRoster(
             frozen: snapshot.conversations, live: agents.directory.conversations, focused: host.agentFocus?.id,
-            namesAvailable: snapshot.namesAvailable, disconnected: snapshot.namesAvailable ? agents.disconnected : [])
+            namesAvailable: snapshot.namesAvailable, disconnected: snapshot.namesAvailable ? agents.disconnected : [],
+            prompts: agents.openPrompts)
     }
 
     func finish(routed: PhaseBResult, heard: String, mode: Mode) async {
@@ -484,7 +485,7 @@ final class AgentTake {
         }
         func observed() -> (conversation: AgentConversation, prompt: AgentPrompt?)? {
             guard let conversation = agents.directory.conversations.first(where: { $0.id == id }) else { return nil }
-            return (conversation, AgentRoster.isWaitingForInput(conversation) ? agents.waitingPrompt(of: id) : nil)
+            return (conversation, AgentRoster.isWaitingForInput(conversation) ? agents.openPrompts[id] : nil)
         }
         guard let before = observed() else { return fail("That conversation has ended. \(AgentOutput.nothingSent)") }
         var description: String?

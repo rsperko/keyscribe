@@ -2,6 +2,15 @@ import Foundation
 
 public enum AgentLiveState: Equatable, Sendable {
     case idle, working, waitingApproval, waitingQuestion, userDialog, disconnected
+
+    public func named(by prompt: AgentPrompt?) -> AgentLiveState {
+        guard self == .userDialog else { return self }
+        switch prompt?.kind {
+        case "confirm": return .waitingApproval
+        case "select", "input", "editor": return .waitingQuestion
+        default: return .userDialog
+        }
+    }
 }
 
 public struct AgentDeliveryContext: Equatable, Sendable {

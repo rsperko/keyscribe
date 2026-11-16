@@ -287,6 +287,50 @@ struct AgentHubTests {
         #expect(await receipt == .kept("keyscribe", reason: .inPromptBox(.besideText)))
     }
 
+    @Test(arguments: [
+        (String?("confirm"), AgentDeliveryDecision.QueueReason.approval), ("select", .question), ("input", .question), ("editor", .question),
+        ("custom", .userDialog), (nil, .userDialog),
+    ])
+    func aDictationHeldByAnOpenPromptSaysWhatKindOfPromptItWaitsOn(kind: String?, reason: AgentDeliveryDecision.QueueReason) async {
+        let (hub, transport, registry, _) = makeHub()
+        registry.set("s1", status: "waiting", waitingFor: "custom")
+        transport.live.insert("claude:s1")
+        await hub.rescan()
+        greet(hub, working())
+        hub.handle(.waiting(session: "claude:s1", prompt: AgentPrompt(kind: kind, title: "Pick one")))
+        await hub.rescan()
+        #expect(await hub.deliver("use the other file", to: "claude:s1") == .queued("keyscribe", waitingOn: reason))
+    }
+
+    @Test func aPromptReportedForAConversationAlreadyInADialogRefreshesItsLabelOnlyWhenThePromptChanges() async {
+        let (hub, transport, registry, _) = makeHub()
+        registry.set("s1", status: "waiting", waitingFor: "custom")
+        transport.live.insert("claude:s1")
+        await hub.rescan()
+        greet(hub, working())
+        await hub.rescan()
+        var changes = 0
+        hub.onChange = { changes += 1 }
+        hub.handle(.waiting(session: "claude:s1", prompt: AgentPrompt(kind: "confirm")))
+        #expect(changes == 1)
+        hub.handle(.waiting(session: "claude:s1", prompt: AgentPrompt(kind: "confirm")))
+        #expect(changes == 1)
+        hub.handle(.waiting(session: "claude:s1", prompt: AgentPrompt(kind: "select")))
+        #expect(changes == 2)
+    }
+
+    @Test func aPromptBoxHeldByAReportedApprovalQueuesTheDictationAsWaitingForApproval() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working())
+        hub.handle(.waiting(session: "claude:s1", prompt: AgentPrompt(kind: "confirm", tool: "bash", detail: "rm -rf build")))
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("use the other file", to: "claude:s1", inFront: true)
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.refused(request: "r1", reason: "dialog"))
+        #expect(await receipt == .queued("keyscribe", waitingOn: .approval))
+    }
+
     @Test func aPromptBoxHeldByADialogQueuesTheDictationAsWaitingOnIt() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry, status: "busy")

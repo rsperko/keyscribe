@@ -602,6 +602,27 @@ struct AgentHostTests {
         #expect(await hub.deliver("use the other file", to: Self.id("t1")) == .queued(handle, waitingOn: reason))
     }
 
+    @Test(arguments: [
+        (String?("confirm"), AgentDeliveryDecision.QueueReason.approval), ("select", .question), ("input", .question), ("editor", .question),
+        ("custom", .userDialog), (nil, .userDialog),
+    ])
+    func aMessageTheHostQueuedBehindAReportedPromptSaysWhatKindOfPromptItWaitsOn(kind: String?, reason: AgentDeliveryDecision.QueueReason) async {
+        let host = FakeHost()
+        var thread = Self.thread("t1")
+        thread.state = .waitingQuestion
+        host.conversations = [thread]
+        host.delivery = .queued
+        let transport = FakeTransport()
+        let hub = makeHub(host, transport: transport)
+        await hub.rescan()
+        transport.live.insert(Self.id("t1"))
+        hub.handle(.hello(Self.hostHello("t1")))
+        hub.handle(.waiting(session: Self.id("t1"), prompt: AgentPrompt(kind: kind, title: "Pick one")))
+        await hub.rescan()
+        let handle = hub.directory.conversations.first { $0.id == Self.id("t1") }?.handle ?? ""
+        #expect(await hub.deliver("use the other file", to: Self.id("t1")) == .queued(handle, waitingOn: reason))
+    }
+
     @Test func aHostedConversationWhosePluginShowsNamesIsToldItsName() async {
         let transport = FakeTransport()
         let host = FakeHost()

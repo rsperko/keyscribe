@@ -447,7 +447,7 @@ final class AgentHub {
 
     func isExcluded(_ id: String) -> Bool { exclusions.excludes(id) }
 
-    func waitingPrompt(of id: String) -> AgentPrompt? { waitingPrompts[id] }
+    var openPrompts: [String: AgentPrompt] { waitingPrompts }
 
     var disconnectedNames: [String: String] {
         guard namesProblem == nil else { return [:] }
@@ -937,7 +937,7 @@ final class AgentHub {
                 return .sent(handle)
             case .queued:
                 settleHostDelivery(request, in: id, expires: nil)
-                let waiting = directory.conversations.first { $0.id == id }?.state ?? .working
+                let waiting = (directory.conversations.first { $0.id == id }?.state ?? .working).named(by: waitingPrompts[id])
                 if case .queue(let reason) = AgentDeliveryPolicy.decide(AgentDeliveryContext(state: waiting)) { return .queued(handle, waitingOn: reason) }
                 return .queued(handle)
             case .uncertain where arrived:
@@ -1046,7 +1046,9 @@ final class AgentHub {
             refresh(nameReportedFor: session)
             Task { [weak self] in await self?.rescan(rereadingTitles: true) }
         case .waiting(let session, let prompt):
+            let changed = waitingPrompts[session] != prompt
             waitingPrompts[session] = prompt
+            if changed { onChange?() }
             Task { [weak self] in await self?.rescan(rereadingTitles: false) }
         case .notify(let session, let turn, let on):
             _ = notify(session: session, turn: turn, on: on)
@@ -1456,7 +1458,7 @@ final class AgentHub {
         guard let conversation = directory.conversations.first(where: { $0.id == id }), conversation.connectorLive else { return nil }
         if handingOff[id] != nil { return .working }
         if running[id] != nil, conversation.state == .idle { return .working }
-        return conversation.state
+        return conversation.state.named(by: waitingPrompts[id])
     }
 
     func delivery(of request: String) -> AgentDelivery? { traced[request]?.delivery }
@@ -1558,8 +1560,8 @@ final class AgentHub {
         case "dialog" where entry.box && !entry.timedOut:
             requests[request] = nil
             retries[request] = entry.retry + 1
-            _ = outbox.send(entry.message, state: .userDialog)
-            report(.queued(handle, waitingOn: .userDialog), for: request, in: entry.message.conversation)
+            let held = outbox.send(entry.message, state: AgentLiveState.userDialog.named(by: waitingPrompts[entry.message.conversation]))
+            report(.queued(handle, waitingOn: { if case .queue(let reason) = held { reason } else { .userDialog } }()), for: request, in: entry.message.conversation)
             return
         case "filled" where entry.box:
             filledWires[request] = entry.wire

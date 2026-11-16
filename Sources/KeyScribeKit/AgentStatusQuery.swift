@@ -52,8 +52,9 @@ public enum AgentStatusAnswer {
     }
 
     public static func status(
-        handle: String, state: AgentLiveState, connected: Bool, current: Bool, prompt: AgentPrompt?, description: String?
+        handle: String, state reportedState: AgentLiveState, connected: Bool, current: Bool, prompt: AgentPrompt?, description: String?
     ) -> String {
+        let state = reportedState.named(by: prompt)
         let reported: String? = switch state {
         case .disconnected: nil
         case .idle: "idle"
@@ -84,9 +85,9 @@ public enum AgentStatusAnswer {
         if let description = description?.trimmingCharacters(in: .whitespacesAndNewlines), !description.isEmpty {
             return sentence(description)
         }
-        return switch (state, prompt?.kind) {
-        case (.waitingApproval, _), (.userDialog, "confirm"): "waiting for approval."
-        case (.waitingQuestion, _), (.userDialog, "select"), (.userDialog, "input"), (.userDialog, "editor"): "waiting for an answer."
+        return switch state {
+        case .waitingApproval: "waiting for approval."
+        case .waitingQuestion: "waiting for an answer."
         default: "a dialog is open."
         }
     }
