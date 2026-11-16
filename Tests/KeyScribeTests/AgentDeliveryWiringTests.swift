@@ -184,6 +184,7 @@ struct AgentDeliveryWiringTests {
         var firstWaitingFor: String?
         var unreadable = false
         var firstPid = 10
+        var firstGone = false
     }
 
     @MainActor private final class Unconnected: AgentDiscovery {
@@ -251,7 +252,7 @@ struct AgentDeliveryWiringTests {
             registry.unreadable ? nil : [
                 ClaudeRegistryEntry(pid: registry.firstPid, sessionId: "s1", cwd: "/src/keyscribe", name: nil, status: registry.firstStatus, waitingFor: registry.firstWaitingFor),
                 ClaudeRegistryEntry(pid: 11, sessionId: "s2", cwd: "/src/keyscribe", name: nil, status: "idle", waitingFor: nil),
-            ]
+            ].filter { !registry.firstGone || $0.sessionId != "s1" }
         }
         let agentsDir = supportDir.appendingPathComponent("agents", isDirectory: true)
         if let namesFile {
@@ -1200,23 +1201,72 @@ struct AgentDeliveryWiringTests {
     }
 
     private func inFront(
-        _ transcript: String = "Run the tests.", modes: [Mode]? = nil, press: TargetSnapshot = terminal,
+        _ transcript: String = "Run the tests.", modes: [Mode]? = nil, current: String? = nil, press: TargetSnapshot = terminal,
         glance: any AgentFronting = Front("claude:s2"), engine: (any SpeechEngine)? = nil, frontGrace: Duration = .seconds(1)
     ) async -> Rig {
-        await rig(transcript, modes: modes, current: "claude:s1", front: FrontWindow(press), glance: glance, engine: engine, frontGrace: frontGrace)
+        await rig(transcript, modes: modes, current: current, front: FrontWindow(press), glance: glance, engine: engine, frontGrace: frontGrace)
     }
 
-    @Test func anUnaddressedTakeGoesToTheConversationInFrontAndMakesItCurrent() async {
+    private func saidNoConversationInFront(_ rig: Rig) -> Bool {
+        rig.hud.states.contains { if case .error(let shown, _, _) = $0 { shown.hasPrefix(AgentTake.noneInFrontLine) } else { false } }
+    }
+
+    @Test func anUnaddressedTakeGoesToTheConversationInFrontAndKeepsFollowingTheFront() async {
         let rig = await inFront()
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig, readingTheFront: true)
         #expect(rig.sent.map(\.1) == ["claude:s2"])
-        #expect(rig.hub.current == "claude:s2")
+        #expect(rig.hub.current == nil)
         let roster = try? #require(rosters(rig).last ?? nil)
         #expect(roster?.rows.map(\.name) == ["keyscribe", "keyscribe blue"])
         #expect(roster?.recipientName == "keyscribe blue")
         #expect(roster?.source == .front)
         #expect(fact(await lastHistoryEntry(rig), "Chosen by") == "The conversation in front")
+    }
+
+    @Test func aChosenConversationIsNotReplacedByTheConversationInFront() async {
+        let rig = await inFront(current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig, readingTheFront: true)
+        #expect(rig.sent.map(\.1) == ["claude:s1"])
+        #expect(rig.hub.current == "claude:s1")
+        #expect(fact(await lastHistoryEntry(rig), "Chosen by") == "The chosen conversation")
+    }
+
+    @Test func aChosenConversationThatEndedSendsNothingAndKeepsItsPlace() async {
+        let rig = await rig("Run the tests.", current: "claude:s1", glance: Front("claude:s2"))
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.registry.firstGone = true
+        await rig.hub.rescan()
+        #expect(rig.hub.handle(of: "claude:s1") == nil)
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.current == "claude:s1")
+        #expect(rig.hud.states.contains { if case .error(let shown, _, _) = $0 { shown.hasPrefix(AgentTake.endedLine("keyscribe")) } else { false } })
+        #expect(offeredTheChooser(rig))
+    }
+
+    private func offeredTheChooser(_ rig: Rig) -> Bool {
+        rig.hud.states.contains { if case .error(_, .chooseAgentRecipient(_)?, _) = $0 { true } else { false } }
+    }
+
+    @Test func sayingToFollowTheFrontReleasesTheChosenConversationAndSendsNothing() async {
+        let rig = await rig("Follow the front.", current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.current == nil)
+        #expect(fact(await lastHistoryEntry(rig), "Command") == "Follow the conversation in front")
+    }
+
+    @Test func aChosenConversationThatWasDisconnectedSendsNothingAndKeepsItsPlace() async {
+        let rig = await inFront(current: "claude:s1")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.hub.disconnect("claude:s1")
+        await take(rig, readingTheFront: true)
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.current == "claude:s1")
+        #expect(rig.hud.states.contains { if case .error(let shown, _, _) = $0 { shown.hasPrefix("keyscribe is disconnected.") } else { false } })
     }
 
     @Test func aSpokenNameWinsOverTheConversationInFront() async {
@@ -1244,39 +1294,44 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test func thePressNeverReadsTheFrontThroughTheReaderThatMayAskForAccess() async {
-        let rig = await rig("Run the tests.", current: "claude:s1", front: FrontWindow(Self.terminal), sessionInFront: Front("claude:s2"))
+        let rig = await rig("Run the tests.", front: FrontWindow(Self.terminal), sessionInFront: Front("claude:s2"))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig, readingTheFront: true)
-        #expect(rig.sent.map(\.1) == ["claude:s1"])
+        #expect(rig.sent.isEmpty)
+        #expect(saidNoConversationInFront(rig))
+        #expect(offeredTheChooser(rig))
     }
 
     @Test(arguments: [
         TargetSnapshot(bundleId: "com.apple.Safari", pid: 4, focusedWindowId: "cg:3"),
         TargetSnapshot(bundleId: "com.mitchellh.ghostty", pid: 9, focusedWindowId: "cg:5"),
     ])
-    func aFrontReadingFromAnotherAppOrWindowThanThePressLeavesTheCurrentRecipient(press: TargetSnapshot) async {
+    func aFrontReadingFromAnotherAppOrWindowThanThePressSendsNothing(press: TargetSnapshot) async {
         let rig = await inFront(press: press)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig, readingTheFront: true)
-        #expect(rig.sent.map(\.1) == ["claude:s1"])
-        #expect(rig.hub.current == "claude:s1")
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.current == nil)
+        #expect(saidNoConversationInFront(rig))
     }
 
-    @Test func aConversationInFrontThatIsNotInTheListLeavesTheCurrentRecipient() async {
+    @Test func aConversationInFrontThatIsNotInTheListSendsNothing() async {
         let rig = await inFront(glance: Front("claude:s9"))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig, readingTheFront: true)
-        #expect(rig.sent.map(\.1) == ["claude:s1"])
+        #expect(rig.sent.isEmpty)
+        #expect(saidNoConversationInFront(rig))
     }
 
-    @Test func aFrontReadingThatDoesNotSettleInTimeLeavesTheCurrentRecipient() async {
+    @Test func aFrontReadingThatDoesNotSettleInTimeSendsNothing() async {
         let slow = SlowFront()
         let rig = await inFront(glance: slow, frontGrace: .milliseconds(50))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         slow.release.fire()
-        #expect(rig.sent.map(\.1) == ["claude:s1"])
-        #expect(rig.hub.current == "claude:s1")
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.current == nil)
+        #expect(saidNoConversationInFront(rig))
     }
 
     @Test func aFrontReadingThatLandsAfterReleaseAndGraceWhileTranscribingIsIgnored() async {
@@ -1293,8 +1348,8 @@ struct AgentDeliveryWiringTests {
         await rig.controller.agentFrontTask?.value
         engine.release.fire()
         await rig.controller.dictationTask?.value
-        #expect(rig.sent.map(\.1) == ["claude:s1"])
-        #expect(rig.hub.current == "claude:s1")
+        #expect(rig.sent.isEmpty)
+        #expect(rig.hub.current == nil)
     }
 
     @Test func aFrontReadingThatLandsAfterItsTakeWasCancelledNeverReachesTheNextTake() async {
@@ -1314,7 +1369,7 @@ struct AgentDeliveryWiringTests {
         await first?.value
         rig.controller.handleCommit()
         await rig.controller.dictationTask?.value
-        #expect(rig.sent.map(\.1) == ["claude:s1"])
+        #expect(rig.sent.isEmpty)
     }
 
     @Test func anUnknownNameSendsNothingAndInsertsNothing() async {
@@ -1854,17 +1909,17 @@ struct AgentDeliveryWiringTests {
         #expect(entry?.outcome == .inserted)
         #expect(fact(entry, "Command") == "Rename")
         #expect(fact(entry, "New name") == "auth refactor two")
-        #expect(fact(entry, "Chosen by") == "The current conversation")
+        #expect(fact(entry, "Chosen by") == "The chosen conversation")
     }
 
-    @Test func renamingThisSessionRenamesTheConversationInFrontAndMakesItCurrent() async {
+    @Test func renamingThisSessionRenamesTheConversationInFrontAndLeavesWhereInstructionsGo() async {
         let rig = await inFront("Rename this session to docs")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig, readingTheFront: true)
         #expect(rig.sent.isEmpty)
         #expect(rig.hub.handle(of: "claude:s2") == "docs")
         #expect(rig.hub.handle(of: "claude:s1") == "keyscribe")
-        #expect(rig.hub.current == "claude:s2")
+        #expect(rig.hub.current == nil)
         #expect(fact(await lastHistoryEntry(rig), "Chosen by") == "The conversation in front")
     }
 
@@ -2308,7 +2363,7 @@ struct AgentDeliveryWiringTests {
         #expect(entry?.result == "Run the tests.")
         #expect(fact(entry, "Command") == "Send message")
         #expect(fact(entry, "Conversation") == "keyscribe \u{00B7} claude \u{00B7} s1")
-        #expect(fact(entry, "Chosen by") == "The current conversation")
+        #expect(fact(entry, "Chosen by") == "The chosen conversation")
         #expect(fact(entry, "Delivery")?.hasPrefix("Handed off at ") == true)
         #expect(fact(entry, "Delivery")?.contains("; confirmed +") == true)
         #expect(entry?.steps == nil)
@@ -2888,16 +2943,16 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(showsAnswer(rig, "Status for keyscribe: working. No pending input request is reported. Nothing sent."))
-        #expect(fact(await lastHistoryEntry(rig), "Chosen by") == "The current conversation")
+        #expect(fact(await lastHistoryEntry(rig), "Chosen by") == "The chosen conversation")
     }
 
-    @Test func checkingOnThisConversationWithNoRecipientAsksForAName() async {
+    @Test func checkingOnThisConversationWithNoConversationInFrontAsksForAName() async {
         let rig = await rig("Check on this conversation.")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.hud.states.contains {
-            if case .error("No recipient selected. Nothing sent. Say \u{201C}check on\u{201D} and a conversation\u{2019}s name.", _, _) = $0 { true } else { false }
+            if case .error("No conversation is in front of you. Nothing sent. Say \u{201C}check on\u{201D} and a conversation\u{2019}s name.", _, _) = $0 { true } else { false }
         })
     }
 

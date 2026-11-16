@@ -99,9 +99,10 @@ the agent in Settings > Modes > Agent). [Name] is a conversation name shown ther
 
 | Say | Works in | What happens |
 | --- | --- | --- |
-| `tell [name] [instruction]`<br>Example: `tell backend run the tests` | Connected conversation | Sends it there and makes it the recipient. A conversation in front of you can still take over; the recording panel shows where a take goes. |
+| `tell [name] [instruction]`<br>Example: `tell backend run the tests` | Connected conversation | Sends it there and makes it the recipient, so later instructions go there too, whatever is in front. The recording panel shows where a take goes. |
 | `ask [name] [question]` | Connected conversation | Sends the question to the agent. |
-| `select [name]`<br>Also: `choose [name]` | Known conversation | Makes it the recipient. Sends nothing; windows stay put. |
+| `select [name]`<br>Also: `choose [name]` | Known conversation | Makes it the recipient, as choosing it under Send to does. Sends nothing; windows stay put. |
+| `follow the front`<br>Also: `follow the conversation in front` | Agent mode | Instructions without a name go to the conversation in front again, as choosing **Conversation in front** under Send to does. Sends nothing. |
 | `open [name]` | Known conversation | Brings its terminal forward and makes it the recipient. Sends nothing. |
 | `tell conversation two [instruction]` | While recording | Uses number 2 from the list on screen. Saying "session two" works too. |
 | `check on [name]` | Known conversation | Reports its status. Sends nothing; the recipient stays the same. |

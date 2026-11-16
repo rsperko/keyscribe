@@ -51,6 +51,10 @@ public enum AgentHistoryFacts {
         [fact(command: "That sounded wrong")] + defaultRecipient(frozen, in: conversations)
     }
 
+    public static func followFront(frozen: AgentRecipient.Frozen?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
+        [fact(command: "Follow the conversation in front")] + defaultRecipient(frozen, in: conversations)
+    }
+
     public static func rename(frozen: AgentRecipient.Frozen?, to name: String?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
         var facts = [fact(command: "Rename")]
         facts.append(.init(label: "Conversation", value: frozen.map { described($0.id, in: conversations) } ?? "None resolved"))
@@ -117,7 +121,7 @@ public enum AgentHistoryFacts {
             return switch source {
             case .fixed: "The mode\u{2019}s fixed conversation"
             case .front: "The conversation in front"
-            case .current, .spoken: "The current conversation"
+            case .current, .spoken: "The chosen conversation"
             }
         }
         return spoken ?? "Its name"

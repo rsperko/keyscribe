@@ -9,6 +9,16 @@ struct AgentRecipientTests {
         AgentRecipient.initial(target: target, current: current, names: names)
     }
 
+    @Test(arguments: ["Follow the front.", "please follow the conversation in front", "Select the conversation in front", "Follow front please"])
+    func sayingToFollowTheFrontIsRecognized(_ said: String) {
+        #expect(AgentRecipient.followsFront(said))
+    }
+
+    @Test(arguments: ["Follow the front door example", "Select backend", "Tell front to follow the front", "Run the unit tests"])
+    func otherWordsAboutTheFrontAreNotTheCommand(_ said: String) {
+        #expect(!AgentRecipient.followsFront(said))
+    }
+
     @Test func aCurrentTargetUsesTheCurrentRecipient() {
         #expect(initial(.current, current: "c") == .init(id: "c", source: .current))
     }
@@ -23,10 +33,10 @@ struct AgentRecipientTests {
         #expect(!AgentRecipient.usesDefault(AgentAddress.parse(text, names: Array(names.keys))))
     }
 
-    @Test func aMessageToTheConversationInFrontMakesItCurrent() {
+    @Test func aMessageToTheConversationInFrontLeavesTheDestinationFollowingTheFront() {
         let resolution = resolve("Run the unit tests.", frozen: .init(id: "b", source: .front))
         #expect(resolution == .deliver(id: "b", body: "Run the unit tests.", source: .front))
-        #expect(resolution.makesCurrent == "b")
+        #expect(resolution.makesCurrent == nil)
     }
 
     @Test func aMessageToTheCurrentOrFixedConversationLeavesCurrentAlone() {

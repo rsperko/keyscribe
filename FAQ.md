@@ -506,17 +506,28 @@ agent replies.
 ### Can I get answers and agent updates without hearing them?
 
 Yes. Set **Voice** to **Off — text only**, either in an Ask mode's **Answer** section or under **Settings ▸ Modes ▸
-Agent ▸ Replies**. It is one shared choice, so it applies to both. Answers and agent updates then appear on
+Agent ▸ Replies ▸ More reply options**. It is one shared choice, so it applies to both. Answers and agent updates then appear on
 screen with their text, a copy button and a close button, and close themselves after time to read them; hovering
 keeps one open, and Escape closes it. Nothing is spoken and other audio is left alone. Agent updates still arrive
 one at a time, in order: the next appears when the current one closes, and they wait while you dictate.
 Choosing Off — text only while something is being read stops the voice and leaves the text on screen. Choose a voice again to hear them; your
 earlier voice is remembered.
 
+### Which conversation does my instruction go to?
+
+An instruction that starts with a conversation's name goes there. Otherwise it goes where **Send to** points, in
+**Settings ▸ Modes ▸ Agent**. **Conversation in front** sends it to the conversation you are looking at when you
+start speaking. A named conversation keeps receiving until you choose another, even when a different one is in
+front. Choosing one in Settings, or saying “select” or “open” and its name, sends nothing. Starting an
+instruction with a conversation's name also makes it the one Send to points at. If the conversation in front
+can't be identified, or the chosen one has ended or is disconnected, nothing is sent and the panel says why,
+with **Choose Conversation…** to pick another; KeyScribe never picks another conversation instead. Say “follow
+the front” to go back to **Conversation in front**. Your choice is kept when KeyScribe restarts or updates.
+
 ### How do I connect an agent conversation?
 
-In **Settings ▸ Modes ▸ Agent**, find the conversation in **Conversations** and choose **Connect…**,
-or choose **Install…** in the agent's section. KeyScribe finds the folder that conversation's agent loads its
+In **Settings ▸ Modes ▸ Agent**, choose **Change…** beside **Send to**, find the conversation under **Not available**, and
+choose **Connect…**, or choose **Connect…** beside that agent under **Connections**. KeyScribe finds the folder that conversation's agent loads its
 configuration from (for Pi usually `~/.pi/agent`, for Claude Code `~/.claude`, or whatever folder that
 agent was started with), and asks before installing there. Connecting a folder connects the conversations
 open in it now and future ones that use it; other folders are left alone. No flag, wrapper, or edit to your
@@ -584,7 +595,7 @@ Claude Code or `/reload` in Pi, or restart it.
 
 ### Can I talk to agents running in bb?
 
-Yes. Install the plugin under **bb** in **Settings ▸ Modes ▸ Agent**. KeyScribe then lists bb's
+Yes. In **Settings ▸ Modes ▸ Agent**, choose **Connect…** beside **bb** under **Connections** to install the plugin. KeyScribe then lists bb's
 threads and sends what you say to them through bb's own `bb` command, whichever agent the thread runs, with
 any image you pasted attached. It runs nothing of bb's until you connect bb this way, and nothing while bb isn't
 open. Your words reach a turn that is already running the way typing in bb would; bb keeps them in its own queue while
@@ -621,7 +632,8 @@ failing. If bb loses the plugin, for example after you remove it in bb, dictatio
 but replies aren't read aloud until you choose Reinstall. Uninstalling it in KeyScribe removes it from bb and
 disconnects bb: KeyScribe no longer lists bb's threads or sends to them. While KeyScribe isn't running the plugin waits quietly and picks up
 as soon as KeyScribe starts. Where a thread's agent has its own connector too, the plugin speaks for that
-thread. While bb is the app in front, dictation without a name goes to the thread its window shows, the
+thread. While Send to is **Conversation in front** and bb is the app in front, dictation without a name goes to
+the thread its window shows, the
 focused pane of a split included, as it does for the terminal tab in front.
 
 KeyScribe turns off bb's usage reporting for the commands it runs.
@@ -633,8 +645,9 @@ name, such as “rename this conversation to auth refactor”, as the whole dict
 “conversation”, and “rename conversation to auth refactor” works too). Only the conversation you are
 talking to is renamed; the panel shows the new name, and you say that name from then on. The name can be up
 to four words, and it can't be one another conversation already has. Say the name on its own: if anything
-follows it, nothing is renamed or sent, and the panel says why. You can also choose **Rename…** beside a conversation
-in **Settings ▸ Modes ▸ Agent ▸ Conversations**. Renaming only changes the name you say to KeyScribe;
+follows it, nothing is renamed or sent, and the panel says why. You can also choose **Send to** in
+**Settings ▸ Modes ▸ Agent**, then **Rename…** from a conversation's **⋯** menu; that renames it without
+changing where instructions go. Renaming only changes the name you say to KeyScribe;
 the agent's own title for the conversation stays as it was. **Use Default Name** in the same sheet goes back
 to the name KeyScribe would choose on its own.
 

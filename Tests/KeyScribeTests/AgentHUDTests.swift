@@ -20,7 +20,7 @@ struct AgentHUDTests {
         let state = recording(.init(id: "b", source: .current))
         #expect(state.primaryText == "To chatplay")
         #expect(state.secondaryText == "Listening")
-        #expect(state.agentRosterHint == "The last conversation you used. To talk to another, say \u{201C}tell keyscribe \u{2026}\u{201D} or \u{201C}tell conversation 1 \u{2026}\u{201D}.")
+        #expect(state.agentRosterHint == "The conversation you chose. To talk to another, say \u{201C}tell keyscribe \u{2026}\u{201D} or \u{201C}tell conversation 1 \u{2026}\u{201D}.")
         #expect(state.panelWidth == HUDState.recording(mode: "Polish", level: 0, latchedTrigger: nil).panelWidth)
         #expect(state.panelWidth == HUDState.transcribing(mode: "Agent").panelWidth)
     }
@@ -35,13 +35,13 @@ struct AgentHUDTests {
     @Test func whileNamesAreUnavailableTheHintOffersOnlyRowNumbers() {
         let state = HUDState.recording(mode: "Agent", level: 0.3, latchedTrigger: nil,
             agents: AgentRoster(frozen: conversations, live: conversations, recipient: .init(id: "b", source: .current), namesAvailable: false))
-        #expect(state.agentRosterHint == "The last conversation you used. Names are off until they can be loaded; to talk to another, say \u{201C}tell conversation 1 \u{2026}\u{201D}.")
+        #expect(state.agentRosterHint == "The conversation you chose. Names are off until they can be loaded; to talk to another, say \u{201C}tell conversation 1 \u{2026}\u{201D}.")
         let none = HUDState.recording(mode: "Agent", level: 0.3, latchedTrigger: nil,
             agents: AgentRoster(frozen: conversations, live: conversations, recipient: nil, namesAvailable: false))
         #expect(none.agentRosterHint == "Names are off until they can be loaded. Start with \u{201C}tell conversation 1 \u{2026}\u{201D}, then your message.")
         let only = HUDState.recording(mode: "Agent", level: 0.3, latchedTrigger: nil,
             agents: AgentRoster(frozen: [conversations[0]], live: [conversations[0]], recipient: .init(id: "a", source: .current), namesAvailable: false))
-        #expect(only.agentRosterHint == "The last conversation you used. Names are off until they can be loaded.")
+        #expect(only.agentRosterHint == "The conversation you chose. Names are off until they can be loaded.")
     }
 
     @Test func voiceOverHearsTheRecipientAndHowManySessionsOnce() {

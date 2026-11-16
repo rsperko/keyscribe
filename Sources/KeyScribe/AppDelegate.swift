@@ -278,6 +278,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.settingsController.presentMode(id: mode)
             self?.settingsController.agents.reveal(rows)
         }
+        hud.onChooseAgentRecipient = { [weak self] mode in
+            self?.settingsController.presentMode(id: mode)
+            self?.settingsController.agents.showingChooser = true
+        }
         hud.canCancel = { [weak self] in self?.controller.isCancellable ?? false }
         hud.onKeyTaken = { [weak self] event in self?.controller.noteKeyReceivedByHUD(event) }
         hud.onVisibilityChange = { [weak self] visible in
@@ -861,6 +865,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 settingsController.agents.onReconnect = { [weak hub = runtime.hub] in hub?.reconnect($0) }
                 settingsController.agents.onRetrySavingExclusions = { [weak hub = runtime.hub] in hub?.retrySavingExclusions() }
                 settingsController.agents.onShow = { [weak hub = runtime.hub] id in Task { _ = await hub?.open(id, makingCurrent: false) } }
+                settingsController.agents.onChoose = { [weak hub = runtime.hub] id in
+                    if let id { hub?.makeCurrent(id) } else { hub?.followFront() }
+                }
                 settingsController.agents.onCancelReadAloud = { [weak hub = runtime.hub] in hub?.cancelReadAloud($0) }
                 settingsController.agents.onCheckAgain = { [weak hub = runtime.hub] in Task { await hub?.rescan(rereadingTitles: true, wantingHosts: true) } }
                 showAgents(runtime.hub)
@@ -927,6 +934,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsController.agents.onReconnect = nil
             settingsController.agents.onRetrySavingExclusions = nil
             settingsController.agents.onShow = nil
+            settingsController.agents.onChoose = nil
             settingsController.agents.onCancelReadAloud = nil
             settingsController.agents.onCheckAgain = nil
             settingsController.agents.show([], current: nil)
@@ -936,7 +944,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showAgents(_ hub: AgentHub) {
         let hadError = settingsController.agents.hasError
         settingsController.agents.show(
-            hub.directory.conversations, current: hub.current, namesProblem: hub.namesProblem, namesNotSaved: hub.namesNotSaved,
+            hub.directory.conversations, current: hub.current, currentName: hub.currentName, namesProblem: hub.namesProblem, namesNotSaved: hub.namesNotSaved,
             discoveryProblems: hub.discoveryProblems, discoveredSetups: hub.discoveredSetupsByAgent, candidates: hub.candidates,
             disconnected: hub.disconnected, exclusionsNotSaved: hub.exclusionsNotSaved, loadedVersions: hub.loadedVersions,
             lastSeen: hub.lastSeen, readAloud: hub.readAloud.union(spokenResult?.pendingRequested ?? []), readNextAloud: hub.readNextAloud)

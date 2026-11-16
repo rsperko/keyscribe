@@ -3,70 +3,98 @@ import KeyScribeKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct AgentRecipientSection: View {
+struct AgentDestinationChooser: View {
     @ObservedObject var model: AgentsSettingsModel
-    let shortcut: String?
-    var scroll: ScrollViewProxy?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var highlighted: Set<String> = []
-    @State private var renaming: AgentsSettingsModel.Row?
-    @State private var showingNameDetails = false
-    @State private var showingDisconnected = false
+    let onOpenConnections: () -> Void
+    let onDone: () -> Void
+    @State private var query = ""
+    @State private var showingUnavailable = false
     @State private var showingMissing = false
+    @State private var showingNameDetails = false
+    @State private var renaming: AgentsSettingsModel.Row?
+    @State private var inspecting: AgentsSettingsModel.Row?
     @State private var choosingFolder: AgentConnectorModel?
     @State private var folderProblem: String?
-    @AccessibilityFocusState private var focusedReconnect: String?
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
-        Section("Conversations") {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(model.currentName.map { "Current recipient: \($0)" } ?? "No current recipient")
-                Text(model.recipientGuidance(shortcut: shortcut))
-                    .font(.caption).foregroundStyle(.secondary)
+        let groups = model.conversationGroups(matching: query)
+        let unavailable = groups.notConnected + groups.disconnected
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Send instructions to").font(.title2.bold())
+                Text("Choosing a conversation sends nothing. Instructions without a name go there until you choose again.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                problems
+                TextField("Search conversations", text: $query, prompt: Text("Search conversations"))
+                    .textFieldStyle(.roundedBorder)
+                    .labelsHidden()
+                    .multilineTextAlignment(.leading)
+                    .focused($searchFocused)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.search)
             }
-            .accessibilityIdentifier(AccessibilityID.Mode.Agents.currentRecipient)
-            if let problem = model.namesProblem {
-                namesUnavailable(problem)
-            } else if let reason = model.namesNotSaved {
-                VStack(alignment: .leading, spacing: 2) {
-                    IssueText("Names given to these conversations could not be saved, so they may change when \(Branding.appName) restarts. \(Branding.appName) keeps trying.", severity: .advisory)
-                    Text(reason).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityIdentifier(AccessibilityID.Mode.Agents.namesNotSaved)
-            }
-            if let reason = model.exclusionsNotSaved {
-                VStack(alignment: .leading, spacing: 6) {
-                    IssueText("Disconnected for now. Couldn\u{2019}t save this choice for the next launch.")
-                    Text(reason).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-                    Button("Try Again") { model.onRetrySavingExclusions?() }
-                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.tryAgain)
-                }
-                .accessibilityIdentifier(AccessibilityID.Mode.Agents.exclusionsProblem)
-            }
-            if model.rows.isEmpty {
-                Text(model.emptyState).font(.caption).foregroundStyle(.secondary)
-            }
-            ForEach(model.rows, id: \.key) { row in
-                conversationRow(row)
-            }
-            if !model.disconnectedRows.isEmpty {
-                DisclosureSection("Disconnected conversations", isExpanded: $showingDisconnected, headerID: AccessibilityID.Mode.Agents.disconnected) {
-                    Text("These conversations stay disconnected when reopened. New conversations connect normally.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    ForEach(model.disconnectedRows, id: \.key) { row in
-                        disconnectedRow(row)
+            .padding([.horizontal, .top], 20).padding(.bottom, 10)
+            ScrollViewReader { scroll in
+                List {
+                    if query.isEmpty { frontRow }
+                    Section {
+                        ForEach(groups.connected, id: \.key) { row in availableRow(row) }
+                        if groups.connected.isEmpty {
+                            Text(query.isEmpty ? model.emptyState : "No conversations match \u{201C}\(query)\u{201D}.")
+                                .foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        PaneListSectionHeader("Conversations")
+                    }
+                    if !unavailable.isEmpty {
+                        let open = showingUnavailable || !query.isEmpty
+                        Section {
+                            if open { ForEach(unavailable, id: \.key) { row in unavailableRow(row) } }
+                        } header: {
+                            DisclosureSection(
+                                headerOnly: Binding(get: { open }, set: { showingUnavailable = $0 }),
+                                hasWarning: unavailable.contains(where: \.current),
+                                headerID: AccessibilityID.Mode.Agents.unavailableGroup
+                            ) {
+                                PaneListSectionHeader("Not available (\(unavailable.count))")
+                            }
+                        }
                     }
                 }
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.chooser)
+                .onChange(of: model.revealedKey, initial: true) { _, key in
+                    guard let key else { return }
+                    model.reveal([])
+                    query = ""
+                    showingUnavailable = true
+                    DispatchQueue.main.async { scroll.scrollTo(key, anchor: .center) }
+                }
             }
-            DisclosureSection("Conversation missing?", isExpanded: $showingMissing, hasError: folderProblem != nil, headerID: AccessibilityID.Mode.Agents.missing) {
-                missingHelp
+            Divider()
+            HStack(spacing: 12) {
+                Button("Check Again", systemImage: "arrow.clockwise") { model.onCheckAgain?() }
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.checkAgain)
+                Button("Missing one?") { showingMissing = true }
+                    .buttonStyle(.link)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.missing)
+                    .popover(isPresented: $showingMissing, arrowEdge: .top) { missingHelp.padding(16).frame(width: 340) }
+                Spacer()
+                Button("Connections\u{2026}", action: onOpenConnections)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.openConnections)
+                Button("Cancel", role: .cancel, action: onDone)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.chooserCancel)
             }
+            .padding(.horizontal, 20).padding(.vertical, 12)
         }
-        .onChange(of: model.revealed, initial: true) { revealRows() }
-        .onChange(of: model.rows) { revealRows() }
+        .frame(width: 520, height: 560)
+        .onAppear { showingUnavailable = showingUnavailable || model.conversationGroups(matching: "").notConnected.contains(where: \.current) }
         .sheet(item: $renaming, onDismiss: { model.clearRenameProblem() }) { row in
             ConversationNameEditor(row: row, model: model) { renaming = nil }
+        }
+        .sheet(item: $inspecting) { row in
+            AgentConversationDetail(model: model, rowKey: row.key, fallback: row) { inspecting = nil }
         }
         .fileImporter(
             isPresented: Binding(get: { choosingFolder != nil }, set: { if !$0 { choosingFolder = nil } }),
@@ -76,228 +104,395 @@ struct AgentRecipientSection: View {
             choosingFolder = nil
             folderProblem = model.choose(folder: url, for: connector)
         }
+        .background { ConnectorConsentPresenter(model: model) }
     }
 
-    private func revealRows() {
-        let wanted = model.pendingReveal
-        let rows = model.rows.filter { wanted.contains($0.id) }
-        guard let scroll, let first = rows.first else { return }
-        model.reveal([])
-        withAnimation(reduceMotion ? nil : .default) { scroll.scrollTo(first.key, anchor: .center) }
-        let keys = Set(rows.map(\.key))
-        highlighted = keys
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(2))
-            if highlighted == keys { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.4)) { highlighted = [] } }
-        }
+    private func choose(_ id: String?) {
+        model.choose(id)
+        onDone()
     }
 
-    private func conversationRow(_ row: AgentsSettingsModel.Row) -> some View {
-        let action = model.action(for: row)
-        return VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .top, spacing: 12) {
-                conversationHeading(row)
-                HStack(spacing: 8) { rowButtons(row, action: action) }
-                    .fixedSize()
-            }
+    private var frontRow: some View {
+        Button { choose(nil) } label: {
             HStack(spacing: 8) {
-                if model.showsAgentType {
-                    Text(model.agentName(row)).fixedSize()
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(AgentsSettingsModel.frontTitle)
+                    Text("Follows the conversation you\u{2019}re looking at when you start speaking.")
+                        .font(.callout).foregroundStyle(.secondary)
                 }
-                directory(row)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let location = row.location {
-                    Text(location).lineLimit(1).truncationMode(.middle).help(location)
-                        .layoutPriority(1)
-                }
+                Spacer(minLength: 8)
+                chosenMark(model.chosenID == nil)
             }
-            .font(.caption).foregroundStyle(.secondary)
-            if let others = model.alsoAnswers(row) {
-                Text(others).font(.caption).foregroundStyle(.secondary)
-            }
-            if let trouble = AgentsSettingsModel.placeTrouble(row) {
-                Text(trouble).font(.caption).foregroundStyle(.secondary)
-            }
-            if let context = model.recognitionContext(for: row) {
-                Text(context).font(.caption).foregroundStyle(.secondary)
-            }
-            if case .recover(let reload) = action {
-                recovery(row, reload: reload)
-            }
-            if row.olderConnector {
-                Text(olderConnectorNote(row)).font(.caption).foregroundStyle(.secondary)
-            }
-            if let readAloud = row.readAloud {
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.vertical, 3)
+        .accessibilityLabel("\(AgentsSettingsModel.frontTitle), follows the conversation you\u{2019}re looking at\(model.chosenID == nil ? ", chosen" : "")")
+        .accessibilityAddTraits(model.chosenID == nil ? .isSelected : [])
+        .accessibilityIdentifier(AccessibilityID.Mode.Agents.chooseFront)
+    }
+
+    private func availableRow(_ row: AgentsSettingsModel.Row) -> some View {
+        HStack(spacing: 8) {
+            Button { choose(row.id) } label: {
                 HStack(spacing: 8) {
-                    Text(readAloud.note).font(.caption).foregroundStyle(.secondary)
-                    Button("Cancel") { model.cancelReadAloud(row) }
-                        .buttonStyle(.link).controlSize(.small).font(.caption)
-                        .accessibilityLabel("Don\u{2019}t report \(row.name)\u{2019}s reply")
-                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.cancelReadAloud)
+                    rowLabel(row)
+                    Spacer(minLength: 8)
+                    chosenMark(row.current)
                 }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(spoken(row))
+            .accessibilityAddTraits(row.current ? .isSelected : [])
+            .accessibilityIdentifier(AccessibilityID.Mode.Agents.row(row.id))
+            actions(row)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(
-            [
-                row.name, row.state, row.folder, row.location, model.alsoAnswers(row), AgentsSettingsModel.placeTrouble(row),
-                model.recognitionContext(for: row), row.readAloud?.note,
-            ]
-                .compactMap { $0 }.joined(separator: ", "))
-        .accessibilityIdentifier(AccessibilityID.Mode.Agents.conversation)
-        .listRowBackground(highlighted.contains(row.key) ? Color.accentColor.opacity(0.15) : nil)
+        .padding(.vertical, 3)
+        .help(row.name)
+        .id(row.key)
     }
 
-    private func conversationHeading(_ row: AgentsSettingsModel.Row) -> some View {
-        let title = PaneListRow(title: row.name, badges: {
-            if row.current { PaneBadge("Current", kind: .prominent).fixedSize() }
-        })
-        let state = Text(row.state).font(.caption)
-            .foregroundStyle(row.connected ? Color.secondary : Color.orange).fixedSize()
-        return ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 8) {
-                title
-                state.padding(.vertical, 2)
+    private func unavailableRow(_ row: AgentsSettingsModel.Row) -> some View {
+        let action = model.action(for: row)
+        let disconnected = model.disconnectedRows.contains { $0.key == row.key }
+        return HStack(spacing: 8) {
+            rowLabel(row)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(spoken(row))
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.row(row.id))
+            Spacer(minLength: 8)
+            chosenMark(row.current)
+            if disconnected {
+                Button("Reconnect") { model.reconnect(row) }
+                    .disabled(model.namesProblem != nil)
+                    .accessibilityLabel("Reconnect \(row.name)")
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.reconnect)
+            } else if action == .connect {
+                Button("Connect\u{2026}") { model.connect(row) }
+                    .accessibilityLabel("Connect \(row.name)")
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.connect)
+            } else if case .recover = action {
+                Button("How to Connect\u{2026}") { inspecting = row }
+                    .accessibilityLabel("How to connect \(row.name)")
             }
-            .fixedSize(horizontal: true, vertical: false)
-            VStack(alignment: .leading, spacing: 2) {
-                title
-                state
-            }
+            actions(row)
         }
-        .lineLimit(2).truncationMode(.middle).help(row.name)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 3)
+        .help(row.name)
+        .id(row.key)
     }
 
-    @ViewBuilder private func rowButtons(_ row: AgentsSettingsModel.Row, action: AgentsSettingsModel.RowAction) -> some View {
-        if action == .connect {
-            Button("Connect\u{2026}") { model.connect(row) }
-                .buttonStyle(.bordered).controlSize(.small).fixedSize()
-                .accessibilityLabel("Connect \(row.name)")
-                .accessibilityIdentifier(AccessibilityID.Mode.Agents.connect)
-        }
-        if row.identified {
-            Button("Rename\u{2026}") {
-                model.clearRenameProblem()
-                renaming = row
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .fixedSize()
-            .disabled(model.namesProblem != nil)
-            .accessibilityLabel("Rename \(row.name)")
-            .accessibilityIdentifier(AccessibilityID.Mode.Agents.rename)
-        }
-        if action == .connected {
-            Button("Disconnect") {
-                focusedReconnect = row.id
-                showingDisconnected = true
-                model.disconnect(row)
-            }
-            .buttonStyle(.bordered).controlSize(.small).fixedSize()
-            .disabled(model.namesProblem != nil)
-            .accessibilityLabel("Disconnect \(row.name)")
-            .accessibilityIdentifier(AccessibilityID.Mode.Agents.disconnect)
-        }
-    }
-
-    private func recovery(_ row: AgentsSettingsModel.Row, reload: String?) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let reload {
-                Text("Connector installed. Run \(reload) in this conversation.").font(.caption)
-                CopyableValue(reload, value: reload, what: "command", of: row.name)
-                    .font(.caption.monospaced())
-                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.reloadCommand)
-            } else {
-                Text("Connector installed, but this conversation hasn\u{2019}t connected yet.").font(.caption)
-            }
-            HStack {
-                if row.identified {
-                    Button("Show Conversation") { model.onShow?(row.id) }
-                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.showConversation)
-                }
-                Button("Try Again") { model.onCheckAgain?() }
-                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.checkAgain)
-            }
-            .controlSize(.small)
-        }
-        .padding(.top, 2)
-        .accessibilityIdentifier(AccessibilityID.Mode.Agents.recovery)
-    }
-
-    private func olderConnectorNote(_ row: AgentsSettingsModel.Row) -> String {
-        let reload = model.connector(for: row)?.kind.reloadCommand.map { "Run \($0) in it when convenient." } ?? "Restart it when convenient."
-        return "Still using the previous connector, which keeps working. \(reload)"
-    }
-
-    private func disconnectedRow(_ row: AgentsSettingsModel.Row) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(row.name).lineLimit(1)
-                Text((row.folder as NSString).abbreviatingWithTildeInPath).font(.caption).foregroundStyle(.secondary)
+    private func rowLabel(_ row: AgentsSettingsModel.Row) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(row.name)
+                .fontWeight(row.current ? .semibold : .regular)
+                .lineLimit(1).truncationMode(.middle)
+            HStack(spacing: 0) {
+                Text(context(row)).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
+                Text(" \u{00B7} ").foregroundStyle(.secondary)
+                Text(row.state)
+                    .fontWeight(row.needsYou ? .semibold : .regular)
+                    .foregroundStyle(row.needsYou ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    .lineLimit(1)
+                    .layoutPriority(1)
             }
-            Spacer()
-            Button("Reconnect") { model.reconnect(row) }
-                .buttonStyle(.bordered).controlSize(.small)
-                .disabled(model.namesProblem != nil)
-                .accessibilityLabel("Reconnect \(row.name)")
-                .accessibilityIdentifier(AccessibilityID.Mode.Agents.reconnect)
-                .accessibilityFocused($focusedReconnect, equals: row.id)
+            .font(.callout)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(row.name), disconnected, \(row.folder)")
+    }
+
+    private func chosenMark(_ chosen: Bool) -> some View {
+        Image(systemName: "checkmark")
+            .font(.body.weight(.semibold))
+            .foregroundStyle(Color.accentColor)
+            .opacity(chosen ? 1 : 0)
+            .accessibilityHidden(true)
+    }
+
+    private func actions(_ row: AgentsSettingsModel.Row) -> some View {
+        Menu {
+            if row.identified {
+                Button("Rename\u{2026}") {
+                    model.clearRenameProblem()
+                    renaming = row
+                }
+                .disabled(model.namesProblem != nil)
+            }
+            if row.identified, row.connected {
+                Button("Show Conversation") { model.onShow?(row.id) }
+            }
+            Button("Details\u{2026}") { inspecting = row }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("More for \(row.name)")
+        .accessibilityLabel("More for \(row.name)")
+        .accessibilityIdentifier(AccessibilityID.Mode.Agents.rowActions(row.id))
+    }
+
+    private func spoken(_ row: AgentsSettingsModel.Row) -> String {
+        [row.name, context(row), row.state, row.current ? "chosen" : nil].compactMap { $0 }.joined(separator: ", ")
+    }
+
+    private func context(_ row: AgentsSettingsModel.Row) -> String {
+        let project = (row.folder as NSString).lastPathComponent
+        return [model.agentName(row), project.isEmpty ? nil : project].compactMap { $0 }.joined(separator: " \u{00B7} ")
+    }
+
+    @ViewBuilder private var problems: some View {
+        if let problem = model.namesProblem {
+            VStack(alignment: .leading, spacing: 8) {
+                IssueText("Saved conversation names could not be loaded.")
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.namesProblem)
+                HStack {
+                    Button("Try Again") { model.reloadNames() }
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.reloadNames)
+                    Spacer()
+                }
+                DisclosureSection("Details", isExpanded: $showingNameDetails) {
+                    Text(problem).font(.caption).textSelection(.enabled)
+                    Text("Until it can be read, conversations stay disconnected. Restore the names file, then try again. If you remove it, your chosen names and the conversations you disconnected will be forgotten.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([model.namesFile]) }
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.showNamesFile)
+                }
+            }
+        }
     }
 
     private var missingHelp: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("\(Branding.appName) finds conversations from the agents running on this Mac and the folders their connectors are installed in. It can miss agents started through unusual wrappers or hosted inside other programs.")
                 .font(.caption).foregroundStyle(.secondary)
-            ViewThatFits(in: .horizontal) {
-                HStack { missingActions }.fixedSize()
-                VStack(alignment: .leading, spacing: 8) { missingActions }
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(model.connectors) { connector in
+                    Button("Choose \(connector.kind.displayName) Setup Folder\u{2026}") {
+                        showingMissing = false
+                        choosingFolder = connector
+                    }
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.chooseSetupFolder)
+                }
             }
             .controlSize(.small)
             Text("Choosing a folder tells \(Branding.appName) where to install. It does not show which conversations use that folder.")
                 .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             if let folderProblem {
                 IssueText(folderProblem)
             }
         }
     }
+}
 
-    private var missingActions: some View {
-        Group {
-            Button("Try Again") { model.onCheckAgain?() }
-                .accessibilityIdentifier(AccessibilityID.Mode.Agents.checkAgain)
-            ForEach(model.connectors) { connector in
-                Button("Choose \(connector.kind.displayName) Setup Folder\u{2026}") { choosingFolder = connector }
-                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.chooseSetupFolder)
+struct AgentSavedChoicesProblems: View {
+    @ObservedObject var model: AgentsSettingsModel
+
+    var body: some View {
+        if model.namesProblem != nil {
+            IssueText("Saved conversation names could not be loaded. Open Send to for details.")
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.namesProblem)
+        } else if let reason = model.namesNotSaved {
+            VStack(alignment: .leading, spacing: 2) {
+                IssueText("Names given to these conversations could not be saved, so they may change when \(Branding.appName) restarts. \(Branding.appName) keeps trying.", severity: .advisory)
+                Text(reason).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier(AccessibilityID.Mode.Agents.namesNotSaved)
+        }
+        if let reason = model.exclusionsNotSaved {
+            VStack(alignment: .leading, spacing: 6) {
+                IssueText("Disconnected for now. Couldn\u{2019}t save this choice for the next launch.")
+                Text(reason).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                Button("Try Again") { model.onRetrySavingExclusions?() }
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.tryAgain)
+            }
+            .accessibilityIdentifier(AccessibilityID.Mode.Agents.exclusionsProblem)
+        }
+    }
+}
+
+private struct AgentConversationDetail: View {
+    @ObservedObject var model: AgentsSettingsModel
+    let rowKey: String
+    let fallback: AgentsSettingsModel.Row
+    let onDone: () -> Void
+    @State private var showingDetails = true
+
+    private var row: AgentsSettingsModel.Row {
+        (model.rows + model.disconnectedRows).first { $0.key == rowKey } ?? fallback
+    }
+
+    private var disconnected: Bool { model.disconnectedRows.contains { $0.key == row.key } }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            form
+            Divider()
+            HStack {
+                Spacer()
+                Button("Done", action: onDone)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.detailsDone)
+            }
+            .padding(.horizontal, 20).padding(.vertical, 12)
+        }
+        .frame(width: 480, height: 520)
+        .accessibilityIdentifier(AccessibilityID.Mode.Agents.conversationDetail)
+    }
+
+    private var form: some View {
+        let action = model.action(for: row)
+        return Form {
+            Section {
+                PaneDetailHeader(
+                    systemImage: "terminal", title: row.name,
+                    subtitle: [model.agentName(row), row.state].joined(separator: " \u{00B7} "),
+                    badges: { EmptyView() })
+                showButton(action)
+                if let readAloud = row.readAloud {
+                    HStack(spacing: 8) {
+                        Text(readAloud.note).font(.callout)
+                        Button("Cancel") { model.cancelReadAloud(row) }
+                            .buttonStyle(.link)
+                            .accessibilityLabel("Don\u{2019}t report \(row.name)\u{2019}s reply")
+                            .accessibilityIdentifier(AccessibilityID.Mode.Agents.cancelReadAloud)
+                    }
+                }
+                if let trouble = AgentsSettingsModel.placeTrouble(row) {
+                    IssueText(trouble, severity: .advisory)
+                }
+            }
+            primary(action)
+            Section {
+                DisclosureSection(
+                    "Location and details", isExpanded: $showingDetails,
+                    headerID: AccessibilityID.Mode.Agents.conversationDetails
+                ) {
+                    details
+                }
+            }
+            footer(action)
+        }
+        .formStyle(.grouped)
+    }
+
+    @ViewBuilder private func primary(_ action: AgentsSettingsModel.RowAction) -> some View {
+        if disconnected {
+            Section {
+                Text("Disconnected. It stays disconnected when reopened; new conversations connect normally.")
+                    .foregroundStyle(.secondary)
+            }
+        } else if let example = model.example(for: row) {
+            Section("Say") {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\u{201C}\(example.said)\u{201D}")
+                    Text(example.effect).font(.caption).foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.example)
+            }
+        } else {
+            switch action {
+            case .connect:
+                Section {
+                    HStack {
+                        Text("Not connected. Connect it to send it instructions.").foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Connect\u{2026}") { model.connect(row) }
+                            .accessibilityLabel("Connect \(row.name)")
+                            .accessibilityIdentifier(AccessibilityID.Mode.Agents.connect)
+                    }
+                }
+            case .recover(let reload):
+                Section { recovery(reload: reload) }
+            case .connected, .unknown:
+                if !row.connected {
+                    Section {
+                        Text("Not connected. Instructions can\u{2019}t reach it right now.").foregroundStyle(.secondary)
+                    }
+                }
             }
         }
     }
 
-    private func directory(_ row: AgentsSettingsModel.Row) -> some View {
-        CopyableValue((row.folder as NSString).abbreviatingWithTildeInPath, value: row.folder, what: "directory", of: row.name)
-            .accessibilityIdentifier(AccessibilityID.Mode.Agents.copyDirectory)
+    private func recovery(reload: String?) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let reload {
+                Text("Connector installed. Run \(reload) in this conversation.")
+                CopyableValue(reload, value: reload, what: "command", of: row.name)
+                    .font(.callout.monospaced())
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.reloadCommand)
+            } else {
+                Text("Connector installed, but this conversation hasn\u{2019}t connected yet.")
+            }
+            Button("Try Again") { model.onCheckAgain?() }
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.checkAgain)
+        }
+        .accessibilityIdentifier(AccessibilityID.Mode.Agents.recovery)
     }
 
-    private func namesUnavailable(_ problem: String) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            IssueText("Saved conversation names could not be loaded.")
-                .accessibilityIdentifier(AccessibilityID.Mode.Agents.namesProblem)
-            HStack {
-                Button("Try Again") { model.reloadNames() }
-                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.reloadNames)
-                Spacer()
+    @ViewBuilder private func showButton(_ action: AgentsSettingsModel.RowAction) -> some View {
+        if row.identified, row.connected || action != .connect {
+            Button("Show Conversation") { model.onShow?(row.id) }
+                .buttonStyle(.borderedProminent)
+                .accessibilityLabel("Show \(row.name)")
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.showConversation)
+        }
+    }
+
+    @ViewBuilder private func footer(_ action: AgentsSettingsModel.RowAction) -> some View {
+        if disconnected || action == .connected {
+            Section {
+                HStack(spacing: 8) {
+                    Spacer()
+                    connectionAction(action)
+                }
             }
-            DisclosureSection("Details", isExpanded: $showingNameDetails) {
-                Text(problem).font(.caption).textSelection(.enabled)
-                Text("Until it can be read, conversations stay disconnected. Restore the names file, then try again. If you remove it, your chosen names and the conversations you disconnected will be forgotten.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([model.namesFile]) }
-                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.showNamesFile)
-            }
+        }
+    }
+
+    @ViewBuilder private func connectionAction(_ action: AgentsSettingsModel.RowAction) -> some View {
+        if disconnected {
+            Button("Reconnect") { model.reconnect(row) }
+                .disabled(model.namesProblem != nil)
+                .accessibilityLabel("Reconnect \(row.name)")
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.reconnect)
+        } else if action == .connected {
+            Button("Disconnect") { model.disconnect(row) }
+            .disabled(model.namesProblem != nil)
+            .accessibilityLabel("Disconnect \(row.name)")
+            .accessibilityIdentifier(AccessibilityID.Mode.Agents.disconnect)
+        }
+    }
+
+    @ViewBuilder private var details: some View {
+        LabeledContent("Folder") {
+            CopyableValue((row.folder as NSString).abbreviatingWithTildeInPath, value: row.folder, what: "directory", of: row.name)
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.copyDirectory)
+        }
+        if let location = row.location {
+            LabeledContent("Runs in", value: location)
+        }
+        if let title = row.title, !title.isEmpty, title != row.name {
+            LabeledContent("Title", value: title)
+        }
+        if let context = model.recognitionContext(for: row) {
+            Text(context).font(.caption).foregroundStyle(.secondary)
+        }
+        if let others = model.alsoAnswers(row) {
+            Text(others).font(.caption).foregroundStyle(.secondary)
+        }
+        if let note = AgentsSettingsModel.placeNote(row) {
+            Text(note).font(.caption).foregroundStyle(.secondary)
+        }
+        if row.olderConnector {
+            Text("Uses the previous connector, which keeps working. Connections lists how to update it.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }
@@ -393,8 +588,9 @@ private struct ConversationNameEditor: View {
     }
 }
 
-struct AgentPhrasesSection: View {
+struct AgentPhrasesReference: View {
     @ObservedObject var model: AgentsSettingsModel
+    let onDone: () -> Void
 
     static let renameExample = "\u{201C}rename this conversation to API\u{201D}"
 
@@ -408,23 +604,39 @@ struct AgentPhrasesSection: View {
     }
 
     var body: some View {
-        Section("What you can say") {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("What can I say?").font(.title2.bold())
             Text("Start with \u{201C}tell\u{201D} and a conversation\u{2019}s name to send it an instruction.")
-                .font(.callout).foregroundStyle(.secondary)
-            ForEach(Self.examples(name: exampleName, readsReplies: model.spokenResult.enabled), id: \.phrase) { example in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(example.phrase)
-                    Text(example.meaning).font(.caption).foregroundStyle(.secondary)
+                .foregroundStyle(.secondary)
+            Form {
+                Section {
+                    ForEach(Self.examples(name: exampleName, readsReplies: model.spokenResult.enabled), id: \.phrase) { example in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(example.phrase)
+                            Text(example.meaning).font(.caption).foregroundStyle(.secondary)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
                 }
-                .accessibilityElement(children: .combine)
+                Section {
+                    Text("Without a name, an instruction goes where Send to points: the conversation in front of you, or the one you chose.")
+                    Text("While recording, conversations are numbered. Say \u{201C}conversation\u{201D} and the number to use one without its name.")
+                    Text("Say \(Self.renameExample) to give the conversation you\u{2019}re talking to a name of your own.")
+                    Text("While recording, say \u{201C}what can I say\u{201D} to see this list with your own vocabulary.")
+                }
+                .font(.callout).foregroundStyle(.secondary)
             }
-            Text("Without a name, an instruction goes to the current recipient, or to the conversation in front of you.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text("While recording, conversations are numbered. Say \u{201C}conversation\u{201D} and the number to use one without its name.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text("Say \(Self.renameExample) to give the conversation an instruction would go to a name of your own.")
-                .font(.caption).foregroundStyle(.secondary)
+            .formStyle(.grouped)
+            .accessibilityIdentifier(AccessibilityID.Mode.Agents.phrases)
+            HStack {
+                Spacer()
+                Button("Done", action: onDone)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.phrasesDone)
+            }
         }
-        .accessibilityIdentifier(AccessibilityID.Mode.Agents.phrases)
+        .padding(24)
+        .frame(width: 480, height: 560)
     }
 }
+

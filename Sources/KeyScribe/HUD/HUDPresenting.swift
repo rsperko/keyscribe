@@ -11,6 +11,7 @@ enum HUDErrorAction: Equatable {
     case openSpeechModels
     case openAIService(String)
     case openAgents(String, reveal: [String] = [])
+    case chooseAgentRecipient(String)
 
     var buttonTitle: String {
         switch self {
@@ -20,6 +21,7 @@ enum HUDErrorAction: Equatable {
         case .openSpeechModels: "Open Speech Models"
         case .openAIService: "AI Service Settings…"
         case .openAgents: "Open Agent Settings"
+        case .chooseAgentRecipient: "Choose Conversation\u{2026}"
         }
     }
 }
@@ -412,7 +414,7 @@ extension HUDState {
         case nil: return "\(namesOff). Start with \(example(first)), then your message."
         case .fixed: source = "Set by this mode."
         case .front: source = "The conversation in front of you."
-        case .current, .spoken: source = "The last conversation you used."
+        case .current, .spoken: source = "The conversation you chose."
         }
         guard let other = agents.rows.first(where: { !$0.current }) else {
             return agents.namesAvailable ? source : "\(source) \(namesOff)."

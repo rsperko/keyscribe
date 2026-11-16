@@ -5,8 +5,13 @@ struct AgentNameStore {
     static let fileName = "names.json"
     static let schemaVersion = 1
 
+    struct Chosen: Codable, Equatable {
+        var id: String
+        var name: String?
+    }
+
     enum Loaded: Equatable {
-        case names([String: String], remembered: [String: RememberedName] = [:], excluded: Set<String> = [])
+        case names([String: String], remembered: [String: RememberedName] = [:], excluded: Set<String> = [], chosen: Chosen? = nil)
         case unavailable(String)
     }
 
@@ -15,10 +20,11 @@ struct AgentNameStore {
         var names: [String: String]
         var remembered: [String: RememberedName]?
         var excluded: [String]?
+        var chosen: Chosen?
 
         enum CodingKeys: String, CodingKey {
             case schemaVersion = "schema_version"
-            case names, remembered, excluded
+            case names, remembered, excluded, chosen
         }
     }
 
@@ -45,16 +51,17 @@ struct AgentNameStore {
             if named.agent.isEmpty { named.agent = AgentSessionID.agent(of: key) ?? legacyAgent }
             return (migrated(key), named)
         }, uniquingKeysWith: { first, _ in first })
-        return .names(names, remembered: remembered, excluded: Set((file.excluded ?? []).map(migrated)))
+        let chosen = file.chosen.map { Chosen(id: migrated($0.id), name: $0.name) }
+        return .names(names, remembered: remembered, excluded: Set((file.excluded ?? []).map(migrated)), chosen: chosen)
     }
 
-    func save(_ names: [String: String], remembered: [String: RememberedName], excluded: Set<String> = []) throws {
+    func save(_ names: [String: String], remembered: [String: RememberedName], excluded: Set<String> = [], chosen: Chosen?) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let file = File(
             schemaVersion: Self.schemaVersion, names: names, remembered: remembered.isEmpty ? nil : remembered,
-            excluded: excluded.isEmpty ? nil : excluded.sorted())
+            excluded: excluded.isEmpty ? nil : excluded.sorted(), chosen: chosen)
         try encoder.encode(file).write(to: url, options: .atomic)
     }
 }

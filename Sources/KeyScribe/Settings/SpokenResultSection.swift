@@ -4,28 +4,35 @@ import SwiftUI
 struct SpokenResultSection: View {
     @ObservedObject var model: AgentsSettingsModel
     let connections: [Connection]
-    @State private var advancedExpanded = false
+    @State private var optionsExpanded = false
+
+    private static let help = "For messages you dictate, and for work you type when you ask the agent to have \(Branding.appName) tell you when it\u{2019}s done (or run /\(KeyScribePaths.variant.connectorSlug) in the conversation). Each update is shown, and read aloud unless Voice is \(SpokenVoiceRows.textOnlyLabel). Replies to dictation are skipped while you\u{2019}re viewing the conversation. A short reply is given as it is; a longer one is summarized by the AI service you choose, or announced without one. You also get an update when the agent needs approval or disconnects before finishing. When \(Branding.appName) can\u{2019}t confirm the conversation is in front, it gives the update."
 
     var body: some View {
         Section("Replies") {
             SettingRow(
-                title: "Reply updates", result: "Get replies to messages you dictate or ask the agent to report, and know when it needs you.",
-                help: "For messages you dictate, and for work you type when you ask the agent to have \(Branding.appName) tell you when it\u{2019}s done (or run /\(KeyScribePaths.variant.connectorSlug) in the conversation). Each update is shown, and read aloud unless Voice is \(SpokenVoiceRows.textOnlyLabel). Replies to dictation are skipped while you\u{2019}re viewing the conversation. A short reply is given as it is; a longer one is summarized by the AI service you choose, or announced without one. You also get an update when the agent needs approval or disconnects before finishing. When \(Branding.appName) can\u{2019}t confirm the conversation is in front, it gives the update.")
+                title: "Reply updates",
+                result: model.spokenResult.enabled ? currentSummary : "Get replies to messages you dictate or ask the agent to report, and know when it needs you.",
+                help: Self.help)
             {
                 Toggle("", isOn: enabled)
                     .labelsHidden().toggleStyle(.switch)
                     .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenResultEnabled)
             }
             if model.spokenResult.enabled {
-                serviceRows
-                if let voice = model.voice {
-                    SpokenVoiceRows(
-                        voice: voice, selection: $model.voiceChoice, spokenVoice: model.chosenVoice,
-                        sharedNote: "This choice also applies to Ask modes\u{2019} answers.")
-                }
-                DisclosureSection(isExpanded: $advancedExpanded, headerID: AccessibilityID.Mode.Agents.spokenResultAdvanced) {
-                    DisclosureSummaryLabel(title: "Advanced", summary: "Summary instruction and voice files")
+                DisclosureSection(
+                    isExpanded: $optionsExpanded, hasError: missing || model.voice?.status == .needsAttention,
+                    headerID: AccessibilityID.Mode.Agents.replyOptions
+                ) {
+                    DisclosureSummaryLabel(title: "More reply options", summary: "Summary service, voice, summary instruction, and voice files")
                 } content: {
+                    serviceRows
+                    if let voice = model.voice {
+                        SpokenVoiceRows(
+                            voice: voice, selection: $model.voiceChoice, spokenVoice: model.chosenVoice,
+                            sharedNote: "This choice also applies to Ask modes\u{2019} answers.")
+                    }
+                    Divider()
                     PromptEditor(
                         title: "Summary instruction",
                         placeholder: "How the AI should sum up a reply\u{2026}",
@@ -51,6 +58,14 @@ struct SpokenResultSection: View {
         }
     }
 
+    private var currentSummary: String {
+        let voice = model.spokenResult.textOnly
+            ? "Shown as text, not read aloud."
+            : "Read aloud with the \(SpokenVoices.all.first { $0.id == model.chosenVoice }?.name ?? "chosen") voice."
+        let summary = chosen.map { "Longer replies are summarized by \($0.name)." } ?? "Longer replies are announced without a summary."
+        return "\(voice) \(summary)"
+    }
+
     @ViewBuilder private var serviceRows: some View {
         if connections.isEmpty {
             IssueText("Add an AI service to hear summaries of longer replies and what a waiting prompt asks. Without one, a longer reply is announced without a summary.", severity: .advisory)
@@ -60,7 +75,7 @@ struct SpokenResultSection: View {
                 Spacer()
             }
         } else {
-            SettingRow(title: "AI service", result: boundary, help: serviceHelp) {
+            SettingRow(title: "Summary service", result: boundary, help: serviceHelp) {
                 Picker("", selection: service) {
                     Text("None").tag("")
                     if missing {

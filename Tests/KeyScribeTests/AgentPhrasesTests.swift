@@ -8,7 +8,7 @@ struct AgentPhrasesTests {
     }
 
     private func phrases(name: String, readsReplies: Bool) -> [String] {
-        AgentPhrasesSection.examples(name: name, readsReplies: readsReplies).map { unquoted($0.phrase) }
+        AgentPhrasesReference.examples(name: name, readsReplies: readsReplies).map { unquoted($0.phrase) }
     }
 
     @Test func tellingANameSendsTheInstructionThere() {
@@ -41,9 +41,10 @@ struct AgentPhrasesTests {
         let said = phrases(name: "backend", readsReplies: false)
         #expect(VoiceCommandGrammar.parse(said[5]) == .goBack)
         #expect(VoiceCommandGrammar.parse(said[6]) == .cancel)
-        #expect(said.count == 7)
+        #expect(AgentRecipient.followsFront(said[7]))
+        #expect(said.count == 8)
         let reading = phrases(name: "backend", readsReplies: true)
-        #expect(reading.count == 9)
+        #expect(reading.count == 10)
         #expect(VoiceCommandGrammar.parse(reading[5]) == .repeatSummary)
         #expect(VoiceCommandGrammar.parse(reading[6]) == .keepReply)
     }
@@ -57,6 +58,6 @@ struct AgentPhrasesTests {
     }
 
     @Test func renamingNamesTheConversationInstructionsGoTo() {
-        #expect(AgentRename.parse(unquoted(AgentPhrasesSection.renameExample)) == .rename("API"))
+        #expect(AgentRename.parse(unquoted(AgentPhrasesReference.renameExample)) == .rename("API"))
     }
 }

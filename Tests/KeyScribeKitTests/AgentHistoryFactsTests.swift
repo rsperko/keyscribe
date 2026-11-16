@@ -50,7 +50,7 @@ struct AgentHistoryFactsTests {
         let unnamed = AgentHistoryFacts.status(
             address: nil, resolution: .deliver(id: "s-docs", body: "", source: .current), frozen: current, conversations: roster)
         #expect(unnamed.first?.value == "Check status")
-        #expect(unnamed.first { $0.label == "Chosen by" }?.value == "The current conversation")
+        #expect(unnamed.first { $0.label == "Chosen by" }?.value == "The chosen conversation")
         #expect(AgentHistoryFacts.allConversations().map(\.value) == ["Check status", "All conversations"])
     }
 
@@ -67,7 +67,7 @@ struct AgentHistoryFactsTests {
         #expect(recorded["Command"] == "Send message")
         #expect(recorded["Spoken address"] == nil)
         #expect(recorded["Conversation"] == "docs \u{00B7} claude \u{00B7} s-docs")
-        #expect(recorded["Chosen by"] == "The current conversation")
+        #expect(recorded["Chosen by"] == "The chosen conversation")
         #expect(recorded["Default recipient"] == "docs")
     }
 

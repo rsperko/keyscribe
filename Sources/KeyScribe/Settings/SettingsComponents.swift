@@ -56,6 +56,20 @@ struct DisclosureSection<Label: View, Content: View>: View {
     }
 }
 
+extension DisclosureSection where Content == EmptyView {
+    init(
+        headerOnly isExpanded: Binding<Bool>, hasError: Bool = false, hasWarning: Bool = false, headerID: String? = nil,
+        @ViewBuilder label: @escaping () -> Label
+    ) {
+        self._isExpanded = isExpanded
+        self.hasError = hasError
+        self.hasWarning = hasWarning
+        self.headerID = headerID
+        self.label = label
+        self.content = { EmptyView() }
+    }
+}
+
 extension DisclosureSection where Label == Text {
     init(
         _ title: String, isExpanded: Binding<Bool>, hasError: Bool = false, hasWarning: Bool = false, headerID: String? = nil,

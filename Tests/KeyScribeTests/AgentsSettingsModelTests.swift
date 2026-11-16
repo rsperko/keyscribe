@@ -546,7 +546,7 @@ struct AgentsSettingsModelTests {
             .init(id: "b", number: 2, name: "chatplay", folder: "/src/chatplay", state: "Not connected", connected: false, current: false, agent: "claude", key: "2:0"),
             .init(id: "c", number: 3, name: "home", folder: "/src/home", state: "Ready", connected: true, current: false, agent: "claude", key: "3:0"),
         ])
-        #expect(model.currentName == "keyscribe")
+        #expect(model.destination == .conversation("keyscribe"))
         #expect(model.connectedCount == 2)
     }
 
@@ -585,21 +585,6 @@ struct AgentsSettingsModelTests {
         #expect(model.rows.first?.title == "Verify the cache")
         model.show([conversation("backend", pid: 1)], current: nil)
         #expect(model.rows.first?.title == nil)
-    }
-
-    @Test func firstInstructionGuidanceUsesTheConfiguredShortcutWithoutInventingOne() {
-        let (model, _, _) = makeModel()
-        model.show([conversation("backend", pid: 1)], current: nil)
-        #expect(model.recipientGuidance(shortcut: "Fn (Globe)").hasPrefix("Use Fn (Globe) and say \u{201C}backend, run the unit tests.\u{201D}"))
-        #expect(model.recipientGuidance(shortcut: nil).hasPrefix("Start recording and say \u{201C}backend, run the unit tests.\u{201D}"))
-    }
-
-    @Test func guidanceShowsHowToCheckOnAConversationWithoutSendingAnything() {
-        let (model, _, _) = makeModel()
-        model.show([conversation("backend", pid: 1)], current: nil)
-        #expect(model.recipientGuidance().hasSuffix(" Say \u{201C}check on backend\u{201D} to see its status without sending anything."))
-        model.show([conversation("backend", pid: 1)], current: "backend")
-        #expect(model.recipientGuidance().hasSuffix(" Say \u{201C}check on backend\u{201D} to see its status without sending anything."))
     }
 
     @Test func agentTypesAreShownOnlyWhenTheConversationListIsMixed() {
@@ -665,41 +650,17 @@ struct AgentsSettingsModelTests {
         #expect(model.rows.map(\.folder) == ["/src/rsperko/keyscribe", "/src/other/keyscribe", "/src/chatplay", home])
     }
 
-    @Test func aCurrentRecipientThatIsGoneIsNotShown() {
+    @Test func aChosenConversationThatIsGoneKeepsItsNameAndSaysItEnded() {
         let (model, _, _) = makeModel()
-        model.show([AgentConversation(id: "b", agent: "claude", pid: 2, cwd: "/src/chatplay", handle: "chatplay", state: .idle, connectorLive: true)], current: "a")
-        #expect(model.currentName == nil)
-    }
-
-    @Test func guidanceOnlyOffersWhatCanBeSaid() {
-        let (model, _, _) = makeModel()
-        let backend = AgentConversation(id: "a", agent: "claude", pid: 1, cwd: "/src/api", handle: "backend", state: .idle, connectorLive: true)
-        let offline = AgentConversation(id: "a", agent: "claude", pid: 1, cwd: "/src/api", handle: "backend", state: .idle, connectorLive: false)
-        for (conversations, current, problem) in [
-            ([backend], nil, nil), ([backend], "a", nil), ([offline], "a", nil), ([backend], nil, "unreadable"),
-        ] as [([AgentConversation], String?, String?)] {
-            model.show(conversations, current: current, namesProblem: problem)
-            #expect(!model.recipientGuidance().contains("below"))
-            #expect(!model.recipientGuidance().lowercased().contains("choose"))
+        model.show(
+            [AgentConversation(id: "b", agent: "claude", pid: 2, cwd: "/src/chatplay", handle: "chatplay", state: .idle, connectorLive: true)],
+            current: "a", currentName: "backend")
+        #expect(model.destination.title == "backend")
+        guard case .unavailable(_, let problem) = model.destination else {
+            Issue.record("expected an unavailable destination")
+            return
         }
-        model.show([backend], current: "a")
-        #expect(model.recipientGuidance().contains("Instructions go here unless another conversation is in front of you"))
-    }
-
-    @Test func guidanceUsesRealConversationsAndExplainsAnEmptyList() {
-        let (model, _, _) = makeModel()
-        #expect(model.recipientGuidance().contains("Open a conversation"))
-        #expect(!model.recipientGuidance().contains("keyscribe"))
-        model.show([
-            .init(id: "a", agent: "claude", pid: 1, cwd: "/src/api", handle: "backend", state: .idle, connectorLive: true),
-        ], current: nil)
-        #expect(model.recipientGuidance().contains("backend, run the unit tests"))
-        model.show([
-            .init(id: "a", agent: "claude", pid: 1, cwd: "/src/api", handle: "backend", state: .idle, connectorLive: true),
-        ], current: "a", namesProblem: "unavailable")
-        #expect(model.recipientGuidance().contains("number shown while recording"))
-        #expect(!model.recipientGuidance().contains("session 1"))
-        #expect(!model.recipientGuidance().contains("backend"))
+        #expect(problem.hasPrefix("backend has ended."))
     }
 
     @Test func theRenamePreviewAsksTheSameCheckTheRenameUses() {

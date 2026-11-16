@@ -13,13 +13,15 @@ struct ModeAISection: View {
     let onSaveFragmentBody: (String, String) -> Void
     let onCloseFragment: (String, String) -> Void
     let onRevealFragment: (String) -> Void
+    var title: String?
+    var serviceTitle = "AI service"
     @State private var newFragmentName = ""
     @State private var editingFragment: String?
     @State private var creatingFragment = false
     @State private var fragmentFlush = PromptEditorFlush()
 
     var body: some View {
-        Section(mode.answersAloud ? "Answer with AI" : "Improve with AI") {
+        Section(title ?? (mode.answersAloud ? "Answer with AI" : "Improve with AI")) {
             if connections.isEmpty {
                 if let aiServiceIssueText {
                     IssueText(aiServiceIssueText)
@@ -33,7 +35,7 @@ struct ModeAISection: View {
                     IssueText(aiServiceIssueText)
                 }
                 SettingRow(
-                    title: "AI service",
+                    title: serviceTitle,
                     result: aiServiceLabel,
                     help: mode.answersAloud
                         ? "The selected text and your spoken request are sent to this AI service to be answered. If it fails, nothing is read aloud and the selected text is not changed."

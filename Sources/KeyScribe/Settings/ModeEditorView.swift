@@ -31,79 +31,25 @@ struct ModeEditorView: View {
         if mode.id == Mode.agentModeId { agentBody } else if mode.isSystem { systemBody } else { normalBody }
     }
 
-    private var agentBody: some View {
-        ScrollViewReader { scroll in agentForm(scroll) }
-    }
-
-    private func agentForm(_ scroll: ScrollViewProxy) -> some View {
-        Form {
-            Section {
-                PaneDetailHeader(
-                    systemImage: "terminal",
-                    title: mode.name,
-                    subtitle: ModeSummary.whenRuns(mode),
-                    badges: { PaneBadge("Built in") })
-            }
-
-            Section("How to start \(mode.name)") {
-                ModeTriggerRow(mode: mode, onUpdate: onUpdate, label: "Shortcut")
-                PressStyleRow(trigger: trigger)
-                TriggerConflictLabel(conflict: trigger.conflict, mode: mode)
-                ExtraTriggersNote(mode: mode)
-            }
-            if let agents {
-                AgentPhrasesSection(model: agents)
-                AgentRecipientSection(
-                    model: agents, shortcut: ModeSummary.triggerDescriptors(mode).first?.displayString, scroll: scroll)
-                SpokenResultSection(model: agents, connections: connections)
-                ConnectorSetupsProblemSection(model: agents)
-                ForEach(agents.connectors.filter { connector in !agents.hosts.contains { $0.id == connector.kind.id } }) { connector in
-                    AgentConnectorSection(model: connector, onInstall: { agents.requestInstall($0, of: connector) })
-                }
-                ForEach(agents.hosts, id: \.id) { host in
-                    AgentHostSection(model: agents, host: host, connector: agents.connectors.first { $0.kind.id == host.id })
-                }
-            }
-            Section("Words") {
-                modeVocabularyRow
-            }
-            ModeAISection(
-                mode: mode, connections: connections,
-                fragmentIds: fragmentIds, fragmentNames: fragmentNames,
-                onUpdate: onUpdate,
-                onAddFragmentFile: onAddFragmentFile,
-                onLoadFragmentBody: onLoadFragmentBody,
-                onSaveFragmentBody: onSaveFragmentBody,
-                onCloseFragment: onCloseFragment,
-                onRevealFragment: onRevealFragment)
-            if mode.aiRewrite != nil {
-                Section("Data sent with AI") {
-                    SettingRow(
-                        title: "Hide recognizable sensitive text",
-                        help: "Best-effort redaction replaces recognizable sensitive spans with tokens before the AI rewrite, then restores them on this Mac. It protects only the rewrite request: the agent still receives your words in full.")
-                    {
-                        Toggle("", isOn: privacyMode).labelsHidden()
-                            .accessibilityIdentifier(AccessibilityID.Mode.Editor.privacy)
-                    }
-                }
-            }
-            Section("Where it goes") {
-                Label(
-                    "The agent receives what you say and sends it to its own AI provider under its own settings. Best-effort redaction does not apply to it.",
-                    systemImage: "arrow.up.forward.app")
-                    .font(.caption).foregroundStyle(.secondary)
-                SettingRow(
-                    title: "Do not save this mode in history",
-                    help: "When on, what you send to agents is never written to local history. Other modes still record per your History setting.")
-                {
-                    Toggle("", isOn: bind.binding(\.excludeFromHistory)).labelsHidden()
-                        .accessibilityIdentifier(AccessibilityID.Mode.Editor.excludeFromHistory)
-                }
-            }
+    @ViewBuilder private var agentBody: some View {
+        if let agents {
+            AgentModeEditor(
+                mode: mode, agents: agents, connections: connections, trigger: trigger, onUpdate: onUpdate,
+                vocabulary: modeVocabularyRow,
+                rewrite: ModeAISection(
+                    mode: mode, connections: connections,
+                    fragmentIds: fragmentIds, fragmentNames: fragmentNames,
+                    onUpdate: onUpdate,
+                    onAddFragmentFile: onAddFragmentFile,
+                    onLoadFragmentBody: onLoadFragmentBody,
+                    onSaveFragmentBody: onSaveFragmentBody,
+                    onCloseFragment: onCloseFragment,
+                    onRevealFragment: onRevealFragment,
+                    title: "Rewrite instructions before sending",
+                    serviceTitle: "Rewrite service"),
+                hidesSensitiveText: privacyMode,
+                leavesOutOfHistory: bind.binding(\.excludeFromHistory))
         }
-        .formStyle(.grouped)
-        .padding(16)
-        .background { if let agents { ConnectorConsentPresenter(model: agents) } }
     }
 
     private var systemBody: some View {
@@ -296,16 +242,8 @@ struct ModeEditorView: View {
         return "\(mode.answersAloud ? "Cloud answer" : "Cloud rewrite") via \(name)\(redaction)"
     }
 
-    private var modeVocabularyRow: some View {
-        SettingRow(
-            title: "Recognition and replacements",
-            result: VocabularyScopePicker.summary(for: mode),
-            help: Self.vocabularyHelp(for: mode, shared: sharedVocabularyNames),
-            combinesAccessibilityChildren: false)
-        {
-            Button("Edit Vocabulary…", action: onEditVocabulary)
-                .accessibilityIdentifier(AccessibilityID.Mode.Editor.Recognition.editVocabulary)
-        }
+    private var modeVocabularyRow: ModeVocabularyRow {
+        ModeVocabularyRow(mode: mode, shared: sharedVocabularyNames, onEdit: onEditVocabulary)
     }
 
     static func vocabularyHelp(for mode: Mode, shared: [String] = []) -> String {
@@ -411,5 +349,23 @@ struct ModeEditorView: View {
             updated.commands.privacy = value
             onUpdate(updated)
         })
+    }
+}
+
+struct ModeVocabularyRow: View {
+    let mode: Mode
+    let shared: [String]
+    let onEdit: () -> Void
+
+    var body: some View {
+        SettingRow(
+            title: "Recognition and replacements",
+            result: VocabularyScopePicker.summary(for: mode),
+            help: ModeEditorView.vocabularyHelp(for: mode, shared: shared),
+            combinesAccessibilityChildren: false)
+        {
+            Button("Edit Vocabulary…", action: onEdit)
+                .accessibilityIdentifier(AccessibilityID.Mode.Editor.Recognition.editVocabulary)
+        }
     }
 }

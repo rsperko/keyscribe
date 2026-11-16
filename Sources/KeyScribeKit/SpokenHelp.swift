@@ -61,6 +61,7 @@ public struct SpokenHelp: Equatable, Sendable {
         }
         rows.append(Row(said: VoiceCommandGrammar.goBack, effect: "Returns to where you were."))
         rows.append(Row(said: VoiceCommandGrammar.cancel[0], effect: "Stops this recording. Nothing is sent."))
+        rows.append(Row(said: AgentRecipient.followFront[0], effect: "Instructions without a name go to the conversation in front again. Nothing is sent."))
         return rows
     }
 

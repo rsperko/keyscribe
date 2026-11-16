@@ -26,6 +26,7 @@ final class AgentsSettingsModel: ObservableObject {
         var surface: String?
         var otherNames: [String] = []
         var unreadSince: Date?
+        var needsYou = false
 
         var location: String? {
             guard let place else { return terminal }
@@ -142,7 +143,9 @@ final class AgentsSettingsModel: ObservableObject {
         didSet { for connector in connectors { connector.onRetire = onRetire } }
     }
 
-    var currentName: String? { rows.first(where: \.current)?.name }
+    @Published private(set) var chosenID: String?
+    @Published private var currentName: String?
+    var onChoose: ((String?) -> Void)?
     var connectedCount: Int { rows.filter(\.connected).count }
     var showsAgentType: Bool { Set(rows.map(\.agent)).count > 1 }
 
@@ -158,31 +161,10 @@ final class AgentsSettingsModel: ObservableObject {
         return "Started \(startedAt.formatted(date: .abbreviated, time: .standard))"
     }
 
-    func recipientGuidance(shortcut: String? = nil) -> String {
-        guard let example = rows.first(where: \.current) ?? rows.first(where: \.connected) ?? rows.first else {
-            return "Open a conversation in a connected agent. It will appear here."
-        }
-        if namesProblem != nil {
-            return "Conversation names are unavailable. Start with \u{201C}session\u{201D} and the number shown while recording, then your instruction."
-        }
-        if example.current {
-            guard example.connected else { return "\(example.name) is current but not connected. Connect it before speaking, or start with another conversation\u{2019}s name." }
-            return "Instructions go here unless another conversation is in front of you. Start with another conversation\u{2019}s name to switch."
-                + Self.checking(example.name)
-        }
-        guard example.connected else { return "Choose Connect\u{2026} on a conversation to send it instructions." }
-        let start = shortcut.map { "Use \($0)" } ?? "Start recording"
-        return "\(start) and say \u{201C}\(example.name), run the unit tests.\u{201D}" + Self.checking(example.name)
-    }
-
-    private static func checking(_ name: String) -> String {
-        " Say \u{201C}check on \(name)\u{201D} to see its status without sending anything."
-    }
-
     private let describeTerminal: @Sendable (Int) -> String?
     private var terminals: [Int: String?] = [:]
     @Published private var discoveryProblems: [String: String] = [:]
-    private var shown: (conversations: [AgentConversation], current: String?)?
+    private var shown: (conversations: [AgentConversation], current: String?, currentName: String?)?
     private struct Extras {
         var setups: [String: [String]]
         var candidates: [AgentCandidate]
@@ -226,7 +208,7 @@ final class AgentsSettingsModel: ObservableObject {
     }
 
     func show(
-        _ conversations: [AgentConversation], current: String?, namesProblem: String? = nil, namesNotSaved: String? = nil,
+        _ conversations: [AgentConversation], current: String?, currentName: String? = nil, namesProblem: String? = nil, namesNotSaved: String? = nil,
         discoveryProblems: [String: String]? = nil, discoveredSetups: [String: [String]] = [:], candidates: [AgentCandidate] = [],
         disconnected: [AgentConversation] = [], exclusionsNotSaved: String? = nil, loadedVersions: [String: String] = [:],
         lastSeen: Set<String> = [], readAloud: Set<String> = [], readNextAloud: Set<String> = []
@@ -242,7 +224,9 @@ final class AgentsSettingsModel: ObservableObject {
             connector.discoveryProblem = self.discoveryProblems[connector.kind.id]
         }
         if namesNotSaved != self.namesNotSaved { self.namesNotSaved = namesNotSaved }
-        shown = (conversations, current)
+        shown = (conversations, current, currentName)
+        if chosenID != current { chosenID = current }
+        if self.currentName != currentName { self.currentName = currentName }
         describeNewTerminals(conversations.compactMap(\.pid) + candidates.map(\.pid) + disconnected.compactMap(\.pid))
         var next = conversations.enumerated().map { index, conversation in
             let lastSeen = !conversation.reachable && lastSeen.contains(conversation.id)
@@ -256,7 +240,8 @@ final class AgentsSettingsModel: ObservableObject {
                 lastSeen: lastSeen, olderConnector: runsOlderConnector(conversation, loadedVersions: loadedVersions), startedAt: conversation.startedAt,
                 readAloud: readAloud.contains(conversation.id) ? .thisReply : readNextAloud.contains(conversation.id) ? .nextReply : nil,
                 place: conversation.placeName, renamed: conversation.nameSource == .chosen,
-                surface: conversation.placeSurface, otherNames: conversation.otherNames, unreadSince: conversation.placeUnreadSince)
+                surface: conversation.placeSurface, otherNames: conversation.otherNames, unreadSince: conversation.placeUnreadSince,
+                needsYou: conversation.reachable && Self.waitsOnUser.contains(conversation.state))
         }
         next += candidates.map { candidate in
             Row(
@@ -302,13 +287,15 @@ final class AgentsSettingsModel: ObservableObject {
             for (pid, terminal) in found { self.terminals[pid] = .some(terminal) }
             if let shown = self.shown, let extras = self.shownExtras {
                 self.show(
-                    shown.conversations, current: shown.current, namesProblem: self.namesProblem, namesNotSaved: self.namesNotSaved,
+                    shown.conversations, current: shown.current, currentName: shown.currentName, namesProblem: self.namesProblem, namesNotSaved: self.namesNotSaved,
                     discoveredSetups: extras.setups, candidates: extras.candidates, disconnected: extras.disconnected,
                     exclusionsNotSaved: self.exclusionsNotSaved, loadedVersions: extras.loadedVersions, lastSeen: extras.lastSeen,
                     readAloud: extras.readAloud, readNextAloud: extras.readNextAloud)
             }
         }
     }
+
+    private static let waitsOnUser: [AgentLiveState] = [.waitingApproval, .waitingQuestion, .userDialog]
 
     static func older(_ loaded: String?, than bundled: String?) -> Bool {
         guard let loaded, let bundled else { return false }
@@ -363,9 +350,106 @@ final class AgentsSettingsModel: ObservableObject {
 
     var pendingReveal: [String] { now().timeIntervalSince(revealedAt) < Self.revealLasts ? revealed : [] }
 
+    var revealedKey: String? {
+        pendingReveal.lazy.compactMap { id in (self.rows + self.disconnectedRows).first { $0.id == id }?.key }.first
+    }
+
     func reveal(_ rows: [String]) {
         revealed = rows
         revealedAt = now()
+        if !rows.isEmpty { showingChooser = true }
+    }
+
+    var hasAnyConnection: Bool {
+        connectors.contains { $0.setups.contains(where: \.isEnrolled) } || hosts.contains { connector(of: $0) == nil && isTurnedOn($0) }
+    }
+
+    var integrationIDs: [String] {
+        connectors.filter { host(of: $0) == nil }.map(\.kind.id) + hosts.map(\.id)
+    }
+
+    @Published var showingChooser = false
+
+    enum Destination: Equatable {
+        case front
+        case conversation(String)
+        case unavailable(String, problem: String)
+
+        var title: String {
+            switch self {
+            case .front: AgentsSettingsModel.frontTitle
+            case .conversation(let name), .unavailable(let name, _): name
+            }
+        }
+    }
+
+    nonisolated static let frontTitle = "Conversation in front"
+
+    var destination: Destination {
+        guard let chosenID else { return .front }
+        if let row = rows.first(where: { $0.id == chosenID }) {
+            guard row.connected else {
+                return .unavailable(row.name, problem: "\(row.name) isn\u{2019}t connected, so nothing can be sent to it. Instructions without a name are held, not sent elsewhere.")
+            }
+            return .conversation(row.name)
+        }
+        if let row = disconnectedRows.first(where: { $0.id == chosenID }) {
+            return .unavailable(row.name, problem: "\(row.name) is disconnected. Instructions without a name are held, not sent elsewhere.")
+        }
+        let name = currentName ?? "The conversation you chose"
+        return .unavailable(name, problem: "\(name) has ended. Instructions without a name are held, not sent elsewhere.")
+    }
+
+    func choose(_ id: String?) {
+        guard id != chosenID else { return }
+        onChoose?(id)
+    }
+
+    var sendToExample: String? {
+        if namesProblem != nil { return nil }
+        switch destination {
+        case .front: return "\u{201C}Run the unit tests\u{201D} goes to the conversation in front of you."
+        case .conversation(let name): return "\u{201C}Run the unit tests\u{201D} goes to \(name), even when another conversation is in front."
+        case .unavailable: return nil
+        }
+    }
+
+    static let addressedNote = "Start with another conversation\u{2019}s name to send there instead. That conversation then becomes where instructions go."
+
+    struct Groups: Equatable {
+        var connected: [Row]
+        var notConnected: [Row]
+        var disconnected: [Row]
+    }
+
+    func conversationGroups(matching query: String) -> Groups {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let shown = { (rows: [Row]) in
+            rows.filter { query.isEmpty || self.matches($0, query) }.sorted(by: Self.listOrder)
+        }
+        return Groups(
+            connected: shown(rows.filter(\.connected)),
+            notConnected: shown(rows.filter { !$0.connected }),
+            disconnected: shown(disconnectedRows))
+    }
+
+    private static func listOrder(_ a: Row, _ b: Row) -> Bool {
+        switch a.name.localizedStandardCompare(b.name) {
+        case .orderedAscending: true
+        case .orderedDescending: false
+        case .orderedSame: a.key < b.key
+        }
+    }
+
+    private func matches(_ row: Row, _ query: String) -> Bool {
+        ([row.name, agentName(row), row.folder, row.location, row.title] + row.otherNames.map(Optional.some))
+            .compactMap { $0 }
+            .contains { $0.localizedCaseInsensitiveContains(query) }
+    }
+
+    func example(for row: Row) -> SpokenHelp.Row? {
+        guard row.connected, namesProblem == nil else { return nil }
+        return SpokenHelp.agentPhrases(name: row.name, readsReplies: false).first
     }
 
     func reconnect(_ row: Row) {

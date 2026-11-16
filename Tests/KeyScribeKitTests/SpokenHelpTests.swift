@@ -12,7 +12,7 @@ struct SpokenHelpTests {
         let help = SpokenHelp.agent(title: "Agent", recipient: "backend", example: "api", readsReplies: true, canRepeat: true, stages: [])
         #expect(help.status == "Recipient: backend")
         #expect(help.rows.map(\.said) == [
-            "cancel", "check on all conversations", "check on backend", "go back", "open backend", "repeat that", "select backend",
+            "cancel", "check on all conversations", "check on backend", "follow the front", "go back", "open backend", "repeat that", "select backend",
             "tell backend run the unit tests", "that sounded wrong",
         ])
         for row in help.rows { #expect(!row.effect.isEmpty) }
@@ -27,7 +27,7 @@ struct SpokenHelpTests {
 
     @Test func agentHelpWithNoConversationInventsNoName() {
         let help = SpokenHelp.agent(title: "Agent", recipient: nil, example: nil, readsReplies: false, canRepeat: false, stages: [])
-        #expect(help.rows.map(\.said) == ["cancel", "check on all conversations", "go back"])
+        #expect(help.rows.map(\.said) == ["cancel", "check on all conversations", "follow the front", "go back"])
     }
 
     @Test func agentHelpListsSpokenEditsWordedForAMessageOnlyWhenTheyAreOn() {

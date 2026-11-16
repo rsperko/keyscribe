@@ -115,7 +115,7 @@ final class AgentTake {
     }
 
     private func followAgentInFront(target: Mode.Agent.Target, snapshot: AgentSnapshot, through agents: AgentHub) {
-        guard target == .current, let host, let identity = host.takeIdentity else { return }
+        guard target == .current, snapshot.current == nil, let host, let identity = host.takeIdentity else { return }
         host.agentFrontTask?.cancel()
         host.agentFrontTask = Task { @MainActor [weak host, weak agents] in
             guard let shown = await agents?.sessionInFrontWithoutAsking(), let host, !Task.isCancelled,
@@ -138,9 +138,13 @@ final class AgentTake {
 
     var roster: AgentRoster? {
         guard let host, host.takeMode?.output == .agent, let agents = host.agents, let snapshot = host.agentSnapshot else { return nil }
+        let recipient = host.agentRecipient
+        let ended = recipient.flatMap { pinned in
+            pinned.source == .current && Self.hasEnded(pinned.id, in: snapshot, agents: agents) ? agents.currentName : nil
+        }
         return AgentRoster(
-            frozen: snapshot.conversations, live: agents.directory.conversations, recipient: host.agentRecipient,
-            namesAvailable: snapshot.namesAvailable, disconnected: snapshot.namesAvailable ? agents.disconnected : [])
+            frozen: snapshot.conversations, live: agents.directory.conversations, recipient: recipient,
+            namesAvailable: snapshot.namesAvailable, disconnected: snapshot.namesAvailable ? agents.disconnected : [], ended: ended)
     }
 
     func finish(routed: PhaseBResult, heard: String, mode: Mode) async {
@@ -184,6 +188,14 @@ final class AgentTake {
         default:
             break
         }
+        if AgentRecipient.followsFront(routed.transcript) {
+            host.agentFrontTask?.cancel()
+            agents.followFront()
+            finishAgent(state: .commandDone(summary: "Recipient: the conversation in front", detail: mode.name),
+                        outcome: .inserted, heard: heard, body: "", transformed: nil, rewrite: nil,
+                        facts: AgentHistoryFacts.followFront(frozen: recipient(in: pressed), conversations: pressed.conversations))
+            return
+        }
         let namesSettled = await settlePlaceNames(agents)
         if Task.isCancelled { return }
         let snapshot = {
@@ -226,6 +238,18 @@ final class AgentTake {
         if !namesSettled, AgentRecipient.usesDefault(address), case .deliver(_, let body, _) = resolution {
             let line = "Couldn\u{2019}t check conversation names yet. Nothing sent. Say it again, or start with \u{201C}tell\u{201D} and a name or conversation number."
             finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: nil, heard: HeardExcerpt(heard: body)),
+                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
+            return
+        }
+        if case .deliver(let id, let body, .current) = resolution, Self.hasEnded(id, in: snapshot, agents: agents) {
+            let line = Self.endedLine(agents.currentName)
+            finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: .chooseAgentRecipient(mode.id), heard: HeardExcerpt(heard: body)),
+                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
+            return
+        }
+        if case .ask(let body, .noRecipient) = resolution, mode.agent.target == .current {
+            let line = Self.noneInFrontLine
+            finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: .chooseAgentRecipient(mode.id), heard: HeardExcerpt(heard: body)),
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
             return
         }
@@ -292,6 +316,16 @@ final class AgentTake {
             await host.rewriteAndDeliver(
                 PhaseBResult(routedModeId: routed.routedModeId, transcript: body), mode: mode, to: id, facts: facts, heard: heard)
         }
+    }
+
+    static let noneInFrontLine = "No conversation is in front of you. Nothing sent. Bring one forward, start with a conversation\u{2019}s name, or choose a conversation."
+
+    static func endedLine(_ name: String?) -> String {
+        "\(name ?? "The conversation you chose") has ended. Nothing sent. Choose another conversation, say \u{201C}follow the front\u{201D}, or start with a conversation\u{2019}s name."
+    }
+
+    private static func hasEnded(_ id: String, in snapshot: AgentSnapshot, agents: AgentHub) -> Bool {
+        !snapshot.rows.contains(id) && !snapshot.disconnected.values.contains(id) && !agents.isExcluded(id)
     }
 
     private static func target(of resolution: AgentRecipient.Resolution) -> (id: String, front: Bool, body: String)? {
@@ -368,7 +402,7 @@ final class AgentTake {
         } catch {
             return fail("Couldn\u{2019}t save the new name. \(old) is unchanged", action: .openAgents(mode.id))
         }
-        agents.makeCurrent(id)
+        agents.noteUsed(id)
         finishAgent(state: .commandDone(summary: "Renamed \(old) to \(name)", detail: mode.name), outcome: .inserted, heard: heard,
                     body: "", transformed: nil, rewrite: nil, transitioned: true, hideAfter: 4, facts: facts)
     }
@@ -436,7 +470,8 @@ final class AgentTake {
                 }
                 return fail(AgentOutput.askLine(reason), action: .openAgents(mode.id), keepingWords: true)
             }
-            return fail("No recipient selected. \(AgentOutput.nothingSent) Say \u{201C}check on\u{201D} and a conversation\u{2019}s name.",
+            let missing = mode.agent.target == .current ? "No conversation is in front of you." : "No recipient selected."
+            return fail("\(missing) \(AgentOutput.nothingSent) Say \u{201C}check on\u{201D} and a conversation\u{2019}s name.",
                         action: .openAgents(mode.id))
         }
         let name = agents.handle(of: id) ?? snapshot.disconnected.first { $0.value == id }?.key ?? "That conversation"

@@ -118,6 +118,7 @@ final class AgentHub {
     private var stopped = false
     private var savedRemembered: [String: RememberedName] = [:]
     private(set) var current: String?
+    private(set) var currentName: String?
     let exclusions: AgentExclusions
     private(set) var exclusionsNotSaved: String?
     var disconnected: [AgentConversation] { directory.disconnected }
@@ -269,7 +270,7 @@ final class AgentHub {
         guard directory.chosenNames[id] != nil else { return }
         var restored = directory
         restored.useDefaultName(id)
-        try nameStore?.save(restored.chosenNames, remembered: restored.remembered, excluded: exclusions.excluded)
+        try nameStore?.save(restored.chosenNames, remembered: restored.remembered, excluded: exclusions.excluded, chosen: chosen)
         savedRemembered = restored.remembered
         namesNotSaved = nil
         directory = restored
@@ -340,10 +341,41 @@ final class AgentHub {
     }
 
     func makeCurrent(_ id: String) {
-        lastUsed[id] = now()
+        noteUsed(id)
+        currentName = handle(of: id) ?? disconnectedName(of: id) ?? (current == id ? currentName : nil)
         guard current != id else { return }
         current = id
+        saveChosen()
         onChange?()
+    }
+
+    func followFront() {
+        guard current != nil else { return }
+        current = nil
+        currentName = nil
+        saveChosen()
+        onChange?()
+    }
+
+    private var chosen: AgentNameStore.Chosen? { current.map { AgentNameStore.Chosen(id: $0, name: currentName) } }
+
+    private func saveChosen() {
+        guard let nameStore, namesProblem == nil else { return }
+        do {
+            try nameStore.save(directory.chosenNames, remembered: directory.remembered, excluded: exclusions.excluded, chosen: chosen)
+            namesNotSaved = nil
+        } catch {
+            namesNotSaved = error.localizedDescription
+            Log.agents.error("conversation choice not saved: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    func noteUsed(_ id: String) {
+        lastUsed[id] = now()
+    }
+
+    private func disconnectedName(of id: String) -> String? {
+        directory.disconnected.first { $0.id == id }?.handle
     }
 
     func open(
@@ -434,10 +466,14 @@ final class AgentHub {
         guard handle(of: id) != nil else { return }
         var renamed = directory
         try renamed.rename(id, to: name)
-        try nameStore?.save(renamed.chosenNames, remembered: renamed.remembered, excluded: exclusions.excluded)
+        try nameStore?.save(renamed.chosenNames, remembered: renamed.remembered, excluded: exclusions.excluded, chosen: chosen)
         savedRemembered = renamed.remembered
         namesNotSaved = nil
         directory = renamed
+        if current == id {
+            currentName = handle(of: id)
+            saveChosen()
+        }
         sendLabels()
         onChange?()
         if let conversation = directory.conversations.first(where: { $0.id == id }), let (source, location) = host(of: conversation) {
@@ -467,7 +503,6 @@ final class AgentHub {
         hostFollows[id] = nil
         shownByHost = shownByHost.filter { $0.value != id && $0.value != counterpart(of: id) }
         saveExclusions()
-        if current == id { current = nil }
         for message in outbox.withdraw(conversation: id) {
             retries[message.id] = nil
             report(.notSent(handle(of: id), reason: .disconnected), for: message.id, in: id)
@@ -506,7 +541,7 @@ final class AgentHub {
     private func saveExclusions() {
         guard let nameStore else { return }
         do {
-            try nameStore.save(directory.chosenNames, remembered: directory.remembered, excluded: exclusions.excluded)
+            try nameStore.save(directory.chosenNames, remembered: directory.remembered, excluded: exclusions.excluded, chosen: chosen)
             savedRemembered = directory.remembered
             exclusionsNotSaved = nil
         } catch {
@@ -534,7 +569,7 @@ final class AgentHub {
             return
         }
         do {
-            try nameStore.save(directory.chosenNames, remembered: remembered, excluded: exclusions.excluded)
+            try nameStore.save(directory.chosenNames, remembered: remembered, excluded: exclusions.excluded, chosen: chosen)
             savedRemembered = remembered
             namesNotSaved = nil
         } catch {
@@ -545,11 +580,15 @@ final class AgentHub {
 
     private func adopt(_ loaded: AgentNameStore.Loaded) {
         switch loaded {
-        case .names(let chosen, let remembered, let excluded):
-            directory = AgentDirectory(chosen: chosen, remembered: remembered)
+        case .names(let names, let remembered, let excluded, let chosen):
+            directory = AgentDirectory(chosen: names, remembered: remembered)
             savedRemembered = remembered
             namesProblem = nil
             exclusions.adopt(excluded)
+            if let chosen, current == nil {
+                current = chosen.id
+                currentName = chosen.name
+            }
         case .unavailable(let reason):
             namesProblem = reason
             Log.agents.error("conversation names unavailable: \(reason, privacy: .public)")
@@ -740,7 +779,7 @@ final class AgentHub {
             } ?? [], unreadSince: placeTracker?.failingSince ?? [:])
         let reported = namesNotSaved
         rememberNames()
-        if let current, handle(of: current) == nil { self.current = nil }
+        if let current, let name = handle(of: current) ?? disconnectedName(of: current) { currentName = name }
         lastUsed = lastUsed.filter { handle(of: $0.key) != nil }
         let listed = Set((directory.conversations + directory.disconnected).map(\.id))
         pruneHostFollows(listed: listed)
@@ -1122,7 +1161,7 @@ final class AgentHub {
                 requests[id]?.typedSince = true
             }
             outbox.noteTyped(conversation: session)
-            if handle(of: session) != nil { makeCurrent(session) }
+            if handle(of: session) != nil { noteUsed(session) }
         case .turnStarted(let session, let turn, let prompt):
             if let awaited = awaitingResult[session], awaited != turn { stopAwaiting(session) }
             if nextRequested.remove(session) != nil { waitForReply(turn, of: session, requested: true) }
@@ -1348,7 +1387,10 @@ final class AgentHub {
 
     private func carry(from old: String, to new: String) {
         if exclusions.isKnown, exclusions.excludes(old), exclusions.insert(new) { saveExclusions() }
-        if current == old { current = new }
+        if current == old {
+            current = new
+            saveChosen()
+        }
         if let used = lastUsed[old], used > lastUsed[new] ?? .distantPast { lastUsed[new] = used }
         if directory.chosenNames[old] != nil { carriedNames[new] = old }
     }
@@ -1362,7 +1404,7 @@ final class AgentHub {
         guard !moved.isEmpty else { return }
         directory = next
         do {
-            try nameStore?.save(directory.chosenNames, remembered: directory.remembered, excluded: exclusions.excluded)
+            try nameStore?.save(directory.chosenNames, remembered: directory.remembered, excluded: exclusions.excluded, chosen: chosen)
             savedRemembered = directory.remembered
         } catch {
             namesNotSaved = error.localizedDescription

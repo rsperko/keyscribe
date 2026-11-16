@@ -51,6 +51,7 @@ final class HUDController: HUDPresenting {
     var onOpenSpeechModels: (() -> Void)?
     var onOpenAIService: ((String) -> Void)?
     var onOpenAgents: ((String, [String]) -> Void)?
+    var onChooseAgentRecipient: ((String) -> Void)?
     var onEscapeCancel: (() -> Void)?
     var onChooseVoiceCommand: ((Int, String) -> Void)?
     var onCancelVoiceCommandChoice: ((Int) -> Void)?
@@ -192,6 +193,7 @@ final class HUDController: HUDPresenting {
                 case .openSpeechModels: self?.onOpenSpeechModels?()
                 case .openAIService(let id): self?.onOpenAIService?(id)
                 case .openAgents(let mode, let rows): self?.onOpenAgents?(mode, rows)
+                case .chooseAgentRecipient(let mode): self?.onChooseAgentRecipient?(mode)
                 }
             },
             onChoose: { [weak self] id, identity in self?.onChooseVoiceCommand?(id, identity) },

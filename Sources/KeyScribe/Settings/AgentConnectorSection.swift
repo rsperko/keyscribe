@@ -38,45 +38,122 @@ struct ConnectorSetupsProblemSection: View {
     }
 }
 
-struct AgentHostSection: View {
-    @ObservedObject var model: AgentsSettingsModel
-    let host: AgentKind
-    var connector: AgentConnectorModel?
+struct AgentIntegrationRow: View {
+    @ObservedObject var agents: AgentsSettingsModel
+    let id: String
+    @State private var expanded = false
 
     var body: some View {
-        if let connector {
-            AgentConnectorSection(model: connector, onInstall: { model.requestInstall($0, of: connector) })
-        } else {
-            Section(host.displayName) {
-                SettingRow(
-                    title: "Reach conversations in \(host.displayName)",
-                    help: "Lists the conversations \(host.displayName) runs and sends what you say to them through \(host.displayName)\u{2019}s own command, into a turn already running the way typing there would. \(Branding.appName) runs nothing of \(host.displayName)\u{2019}s until this is on.")
-                {
-                    Toggle("", isOn: Binding(get: { model.isTurnedOn(host) }, set: { model.setTurnedOn(host, $0) })).labelsHidden()
-                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.host(host.id))
+        if let connector = agents.connectors.first(where: { $0.kind.id == id }) {
+            ConnectorRow(connector: connector, available: available, notConnected: notConnected, onConnect: {
+                agents.requestInstall($0, of: connector)
+            })
+        } else if let host = agents.hosts.first(where: { $0.id == id }) {
+            let on = agents.isTurnedOn(host)
+            VStack(alignment: .leading, spacing: 6) {
+                DisclosureSection(isExpanded: $expanded, headerID: AccessibilityID.Mode.Agents.integration(id)) {
+                    DisclosureSummaryLabel(
+                        title: host.displayName,
+                        summary: ConnectionSummary.line(setup: on ? "Turned on" : "Not set up", isSetUp: on, available: available, notConnected: notConnected))
+                } content: {
+                    SettingRow(
+                        title: "Reach conversations in \(host.displayName)",
+                        help: "Lists the conversations \(host.displayName) runs and sends what you say to them through \(host.displayName)\u{2019}s own command, into a turn already running the way typing there would. \(Branding.appName) runs nothing of \(host.displayName)\u{2019}s until this is on.")
+                    {
+                        Toggle("", isOn: Binding(get: { agents.isTurnedOn(host) }, set: { agents.setTurnedOn(host, $0) })).labelsHidden()
+                            .accessibilityIdentifier(AccessibilityID.Mode.Agents.host(host.id))
+                    }
                 }
-                if let problem = model.problem(of: host) {
+                if let problem = agents.problem(of: host) {
                     IssueText(problem, severity: .advisory)
                 }
             }
         }
     }
+
+    private var available: Int { agents.rows.filter { $0.agent == id && $0.connected }.count }
+    private var notConnected: Int { agents.rows.filter { $0.agent == id && !$0.connected }.count }
 }
 
-struct AgentConnectorSection: View {
-    @ObservedObject var model: AgentConnectorModel
-    let onInstall: (ConnectorSetupModel) -> Void
+private struct ConnectorRow: View {
+    @ObservedObject var connector: AgentConnectorModel
+    let available: Int
+    let notConnected: Int
+    let onConnect: (ConnectorSetupModel) -> Void
+    @State private var expanded = false
 
     var body: some View {
-        Section(model.kind.displayName) {
-            if let problem = model.discoveryProblem {
+        let setup = connector.setupStatus
+        let failing = connector.setups.first(where: \.hasError)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                DisclosureSection(
+                    headerOnly: $expanded, hasError: failing != nil,
+                    headerID: AccessibilityID.Mode.Agents.integration(connector.kind.id)
+                ) {
+                    DisclosureSummaryLabel(
+                        title: connector.kind.displayName,
+                        summary: ConnectionSummary.line(setup: setup.text, isSetUp: setup.isSetUp, available: available, notConnected: notConnected))
+                }
+                if let connectable = connector.connectableSetup {
+                    Button("Connect\u{2026}") { onConnect(connectable) }
+                        .fixedSize()
+                        .accessibilityLabel("Connect \(connector.kind.displayName)")
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.integrationConnect(connector.kind.id))
+                }
+            }
+            if expanded {
+                ForEach(connector.setups) { setup in
+                    ConnectorSetupBlock(setup: setup, showsFolderInTitle: connector.setups.count > 1, onInstall: { onConnect(setup) })
+                }
+            } else if let message = failing?.failureMessage {
+                IssueText(message)
+            }
+            if let problem = connector.discoveryProblem {
                 IssueText(problem, severity: .advisory)
             }
-            ForEach(model.setups) { setup in
-                ConnectorSetupBlock(setup: setup, showsFolderInTitle: model.setups.count > 1, onInstall: { onInstall(setup) })
-            }
         }
-        .task { await model.refresh() }
+    }
+}
+
+enum ConnectionSummary {
+    static func line(setup: String, isSetUp: Bool, available: Int, notConnected: Int) -> String {
+        var parts = [setup]
+        if available > 0 {
+            parts.append(available == 1 ? "1 conversation available" : "\(available) conversations available")
+        } else if isSetUp, notConnected == 0 {
+            parts.append("No conversations open")
+        }
+        if notConnected > 0 { parts.append("\(notConnected) not connected") }
+        return parts.joined(separator: " \u{00B7} ")
+    }
+}
+
+extension AgentConnectorModel {
+    var setupStatus: (text: String, isSetUp: Bool) {
+        if let failing = setups.first(where: \.hasError) {
+            return (setups.count > 1 ? "\(failing.statusText) in \(failing.display)" : failing.statusText, true)
+        }
+        if let operation = setups.lazy.compactMap(\.operation).first { return (operation, true) }
+        let installed = setups.filter(\.isInstalled)
+        if !installed.isEmpty {
+            let disabled = installed.allSatisfy { $0.state == .status(.disabled) }
+            return (disabled ? copy.disabledLabel : "\(copy.setupTitle) installed", true)
+        }
+        if let enrolled = setups.first(where: \.isEnrolled) { return (enrolled.statusText, true) }
+        if setups.contains(where: { $0.state == .checking }) { return ("Checking\u{2026}", false) }
+        if let missing = setups.first(where: { $0.state == .toolNotFound || $0.state == .unavailable }) {
+            return (missing.statusText, false)
+        }
+        if let old = setups.first(where: { if case .toolTooOld = $0.state { true } else { false } }) { return (old.statusText, false) }
+        return ("Not set up", false)
+    }
+
+    var connectableSetup: ConnectorSetupModel? {
+        guard !setups.contains(where: { $0.isEnrolled || $0.isInstalled || $0.operation != nil }),
+              let setup = setups.first(where: \.isDefault), setup.state == .status(.notInstalled)
+        else { return nil }
+        return setup
     }
 }
 
@@ -85,10 +162,11 @@ private struct ConnectorSetupBlock: View {
     let showsFolderInTitle: Bool
     let onInstall: () -> Void
     @State private var confirmingRemove = false
+    @State private var showingUsers = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SettingRow(title: title, result: statusText, help: setup.copy.help, combinesAccessibilityChildren: false, hasError: setup.hasError) {
+            SettingRow(title: title, result: setup.statusText, help: setup.copy.help, combinesAccessibilityChildren: false, hasError: setup.hasError) {
                 primaryAction
             }
             .accessibilityIdentifier(AccessibilityID.Mode.Agents.connectorStatus)
@@ -99,8 +177,7 @@ private struct ConnectorSetupBlock: View {
                 .font(.caption)
                 .accessibilityIdentifier(AccessibilityID.Mode.Agents.setupFolder)
             if setup.copy.describesUse {
-                Text(usage).font(.caption).foregroundStyle(.secondary)
-                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.summary)
+                usage
             }
             issue
             if setup.showsRemovalWarning {
@@ -135,11 +212,25 @@ private struct ConnectorSetupBlock: View {
         showsFolderInTitle ? "\(setup.copy.setupTitle) in \(setup.display)" : setup.copy.setupTitle
     }
 
-    private var usage: String {
-        switch setup.usedBy.count {
-        case 0: "No open conversations use this folder."
-        case 1: "Used by \(setup.usedBy[0])."
-        default: "Used by \(ListFormatter.localizedString(byJoining: setup.usedBy))."
+    @ViewBuilder private var usage: some View {
+        let count = setup.usedBy.count
+        HStack(spacing: 6) {
+            Text(count == 0 ? "No open conversations use this folder." : count == 1 ? "Used by 1 conversation." : "Used by \(count) conversations.")
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.summary)
+            if count > 0 {
+                Button(showingUsers ? "Hide" : "Show") { showingUsers.toggle() }
+                    .buttonStyle(.link)
+                    .accessibilityLabel(showingUsers ? "Hide the conversations using this folder" : "Show the conversations using this folder")
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.usedBy)
+            }
+        }
+        .font(.caption).foregroundStyle(.secondary)
+        if showingUsers, count > 0 {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(Array(setup.usedBy.enumerated()), id: \.offset) { _, name in Text(name) }
+            }
+            .font(.caption).foregroundStyle(.secondary)
+            .padding(.leading, 12)
         }
     }
 
@@ -167,24 +258,6 @@ private struct ConnectorSetupBlock: View {
             }
         }
         .accessibilityIdentifier(AccessibilityID.Mode.Agents.manualUninstall)
-    }
-
-    private var statusText: String {
-        if let operation = setup.operation { return operation }
-        return switch setup.state {
-        case .checking: "Checking\u{2026}"
-        case .toolNotFound: setup.copy.toolNotFoundLabel
-        case .toolTooOld: setup.copy.toolTooOldLabel
-        case .unavailable: "Unavailable"
-        case .failed: "Something went wrong"
-        case .removalUnfinished: "Uninstall not finished"
-        case .broken: "Not working"
-        case .status(.ready): "Installed"
-        case .status(.notInstalled): "Not installed"
-        case .status(.outdated): "Update available"
-        case .status(.disabled): setup.copy.disabledLabel
-        case .status(.unknown): "Unknown"
-        }
     }
 
     @ViewBuilder private var primaryAction: some View {
@@ -226,14 +299,10 @@ private struct ConnectorSetupBlock: View {
             IssueText(setup.copy.toolNotFoundAdvice, severity: .advisory)
         case .toolTooOld(let found):
             IssueText(setup.copy.toolTooOldAdvice(found), severity: .advisory)
-        case .unavailable:
-            IssueText(setup.copy.unavailable)
-        case .failed(let message):
-            IssueText(message.isEmpty ? setup.copy.noReason : message)
+        case .unavailable, .failed, .broken:
+            if let message = setup.failureMessage { IssueText(message) }
         case .status(.disabled):
             IssueText(setup.copy.disabledAdvice, severity: .advisory)
-        case .broken(let message):
-            IssueText(message.isEmpty ? setup.copy.noReason : message)
         case .removalUnfinished(let message):
             IssueText(setup.copy.removalUnfinishedAdvice, severity: .advisory)
             if let message { IssueText(message.isEmpty ? setup.copy.noReason : message) }
@@ -241,6 +310,35 @@ private struct ConnectorSetupBlock: View {
             IssueText(setup.copy.listUnreadable, severity: .advisory)
         default:
             EmptyView()
+        }
+    }
+}
+
+extension ConnectorSetupModel {
+    var statusText: String {
+        if let operation = operation { return operation }
+        return switch state {
+        case .checking: "Checking\u{2026}"
+        case .toolNotFound: copy.toolNotFoundLabel
+        case .toolTooOld: copy.toolTooOldLabel
+        case .unavailable: "Unavailable"
+        case .failed: "Something went wrong"
+        case .removalUnfinished: "Uninstall not finished"
+        case .broken: "Not working"
+        case .status(.ready): "Installed"
+        case .status(.notInstalled): "Not installed"
+        case .status(.outdated): "Update available"
+        case .status(.disabled): copy.disabledLabel
+        case .status(.unknown): "Unknown"
+        }
+    }
+
+    var failureMessage: String? {
+        switch state {
+        case .unavailable: copy.unavailable
+        case .failed(let message), .broken(let message): message.isEmpty ? copy.noReason : message
+        case .removalUnfinished(let message): message.flatMap { $0.isEmpty ? nil : $0 } ?? copy.removalUnfinishedAdvice
+        default: nil
         }
     }
 }

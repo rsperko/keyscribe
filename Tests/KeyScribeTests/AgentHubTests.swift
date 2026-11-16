@@ -1480,13 +1480,55 @@ struct AgentHubTests {
         #expect(results.isEmpty)
     }
 
-    @Test func typingIntoAConversationMakesItTheCurrentRecipient() async {
+    @Test func typingIntoAConversationLeavesWhereInstructionsGo() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry, "s1")
         await connected(hub, transport, registry, "s2")
         hub.makeCurrent("claude:s1")
         hub.handle(.typed(session: "claude:s2"))
-        #expect(hub.current == "claude:s2")
+        #expect(hub.current == "claude:s1")
+        hub.followFront()
+        hub.handle(.typed(session: "claude:s2"))
+        #expect(hub.current == nil)
+    }
+
+    @Test func aChosenConversationThatEndsStaysChosenUnderItsLastName() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, "s1")
+        await connected(hub, transport, registry, "s2")
+        hub.makeCurrent("claude:s1")
+        let name = hub.handle(of: "claude:s1")
+        registry.entries.removeAll { $0.sessionId == "s1" }
+        transport.live.remove("claude:s1")
+        await hub.rescan()
+        #expect(hub.handle(of: "claude:s1") == nil)
+        #expect(hub.current == "claude:s1")
+        #expect(hub.currentName == name)
+    }
+
+    @Test func choosingANewConversationNeverBorrowsThePreviousName() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, "s1")
+        hub.makeCurrent("claude:s1")
+        hub.makeCurrent("claude:unlisted")
+        #expect(hub.current == "claude:unlisted")
+        #expect(hub.currentName == nil)
+    }
+
+    @Test func whereInstructionsGoIsKeptAcrossARelaunch() async throws {
+        let dir = try nameDir(nil)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let registry = Registry()
+        registry.set("a", cwd: "/src/api")
+        let hub = AgentHub(transport: FakeTransport(), scan: { registry.entries }, names: AgentNameStore(directory: dir), scanDeadline: .seconds(30))
+        await hub.rescan()
+        hub.makeCurrent("claude:a")
+        let relaunched = AgentHub(transport: FakeTransport(), scan: { [] }, names: AgentNameStore(directory: dir), scanDeadline: .seconds(30))
+        #expect(relaunched.current == "claude:a")
+        #expect(relaunched.currentName == "api")
+        relaunched.followFront()
+        let again = AgentHub(transport: FakeTransport(), scan: { [] }, names: AgentNameStore(directory: dir), scanDeadline: .seconds(30))
+        #expect(again.current == nil)
     }
 
     @Test func theRecordingListFollowsTheLastConversationsUsed() async {
@@ -1629,7 +1671,7 @@ struct AgentHubTests {
                               stillRunning: { $0.pid == 10 })
         await second.rescan()
         #expect(second.names == ["keyscribe blue": "claude:b", "keyscribe green": "claude:c"])
-        guard case .names(_, let remembered, _) = AgentNameStore(directory: dir).load() else { Issue.record("names not loaded"); return }
+        guard case .names(_, let remembered, _, _) = AgentNameStore(directory: dir).load() else { Issue.record("names not loaded"); return }
         #expect(remembered["claude:a"]?.name == "keyscribe")
         registry.entries.append(missing)
         await second.rescan()
@@ -1655,7 +1697,7 @@ struct AgentHubTests {
         await hub.rescan()
         #expect(hub.namesNotSaved == nil)
         #expect(changes == reported + 1)
-        guard case .names(_, let remembered, _) = AgentNameStore(directory: dir).load() else { Issue.record("names not saved"); return }
+        guard case .names(_, let remembered, _, _) = AgentNameStore(directory: dir).load() else { Issue.record("names not saved"); return }
         #expect(remembered["claude:a"] == RememberedName(name: "keyscribe", pid: 10, startedAt: 100, native: nil, agent: "claude"))
     }
 
@@ -2000,13 +2042,14 @@ struct AgentHubTests {
         hub.disconnect("fake:f1")
         #expect(hub.directory.conversations.isEmpty)
         #expect(hub.disconnected.map(\.id) == ["fake:f1"])
-        #expect(hub.current == nil)
+        #expect(hub.current == "fake:f1")
+        #expect(hub.currentName == "api")
         #expect(hub.names.isEmpty)
         #expect(hub.disconnectedNames == ["api": "fake:f1"])
         #expect(forgotten == ["fake:f1"])
         #expect(transport.sent.contains { if case .quiet(_, "fake:f1") = $0.0 { true } else { false } })
         #expect(await hub.deliver("run the tests", to: "fake:f1") == .notSent("api", reason: .disconnected))
-        guard case .names(_, _, let excluded) = AgentNameStore(directory: dir).load() else { Issue.record("not saved"); return }
+        guard case .names(_, _, let excluded, _) = AgentNameStore(directory: dir).load() else { Issue.record("not saved"); return }
         #expect(excluded == ["fake:f1"])
 
         let reopened = AgentHub(transport: FakeTransport(), discovery: [fake], names: AgentNameStore(directory: dir))
@@ -2017,7 +2060,7 @@ struct AgentHubTests {
         hub.reconnect("fake:f1")
         #expect(transport.sent.contains { if case .admit(_, "fake:f1") = $0.0 { true } else { false } })
         #expect(hub.directory.conversations.map(\.id) == ["fake:f1"])
-        guard case .names(_, _, let after) = AgentNameStore(directory: dir).load() else { Issue.record("not saved"); return }
+        guard case .names(_, _, let after, _) = AgentNameStore(directory: dir).load() else { Issue.record("not saved"); return }
         #expect(after.isEmpty)
     }
 
@@ -2062,7 +2105,7 @@ struct AgentHubTests {
         await hub.rescan()
         #expect(hub.isExcluded("fake:f1"))
         #expect(hub.directory.conversations.isEmpty)
-        try AgentNameStore(directory: dir).save([:], remembered: [:])
+        try AgentNameStore(directory: dir).save([:], remembered: [:], chosen: nil)
         hub.reloadNames()
         #expect(!hub.isExcluded("fake:f1"))
     }

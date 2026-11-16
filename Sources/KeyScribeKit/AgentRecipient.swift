@@ -87,10 +87,23 @@ public enum AgentRecipient {
 
         public var makesCurrent: String? {
             switch self {
-            case .deliver(let id, _, .spoken), .deliver(let id, _, .front), .select(let id), .open(let id): return id
+            case .deliver(let id, _, .spoken), .select(let id), .open(let id): return id
             case .deliver, .ask: return nil
             }
         }
+    }
+
+    public static let followFront = [
+        "follow the front", "follow front", "follow the conversation in front",
+        "select the conversation in front", "choose the conversation in front",
+    ]
+
+    public static func followsFront(_ text: String) -> Bool {
+        var said = VoiceCommandText.key(text).split(separator: " ").map(String.init)
+        said.removeFirst(said.prefix { $0 == "please" }.count)
+        if said.count > 1, said.last == "please" { said.removeLast() }
+        let words = said.joined(separator: " ")
+        return followFront.contains(words)
     }
 
     public static func initial(target: Mode.Agent.Target, current: String?, names: [String: String]) -> Frozen? {

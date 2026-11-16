@@ -375,8 +375,13 @@ private struct ModeSummaryRow: View {
 
     private var summary: String {
         guard mode.enabled else { return "Disabled" }
-        return [ModeSummary.whenRuns(mode), issue?.summary ?? (mode.aiRewrite == nil ? "On this Mac" : mode.answersAloud ? "Cloud answer" : "Cloud rewrite")]
+        return [ModeSummary.whenRuns(mode), issue?.summary ?? destination]
             .joined(separator: " · ")
+    }
+
+    private var destination: String {
+        if mode.output == .agent { return mode.aiRewrite == nil ? "Sends to agent" : "Cloud rewrite, sends to agent" }
+        return mode.aiRewrite == nil ? "On this Mac" : mode.answersAloud ? "Cloud answer" : "Cloud rewrite"
     }
 }
 
@@ -405,7 +410,7 @@ private enum ModeSummaryIssue {
         case .failedService: "This mode's AI service failed its last connection test."
         case .triggerUnreachable: "Another mode claims the same press, written a different way, so no shortcut on this mode fires."
         case .voiceCommandsShutOut: "Another mode uses this shortcut, and it keeps it, so Voice Commands never starts. Select Voice Commands and choose Move Shortcut to take it, or record a different shortcut."
-        case .agentFailed: "A connector or saved conversation choice needs attention. Select Agent to fix it."
+        case .agentFailed: "A connection or saved conversation choice needs attention. Select Agent, then Connections, to fix it."
         }
     }
 }

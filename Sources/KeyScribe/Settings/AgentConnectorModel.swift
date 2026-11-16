@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import KeyScribeKit
 
@@ -299,7 +300,13 @@ final class AgentConnectorModel: ObservableObject, Identifiable {
     let connector: any AgentConnector
     let registry: ConnectorSetupRegistry
     nonisolated let id: String
-    @Published private(set) var setups: [ConnectorSetupModel] = []
+    @Published private(set) var setups: [ConnectorSetupModel] = [] {
+        didSet {
+            setupChanges = Publishers.MergeMany(setups.map(\.objectWillChange))
+                .sink { [weak self] _ in self?.objectWillChange.send() }
+        }
+    }
+    private var setupChanges: AnyCancellable?
     @Published var discoveryProblem: String?
     var onRetire: ((String) -> Void)?
     private var discovered: [String] = []

@@ -366,7 +366,6 @@ enum AccessibilityID {
             static let spokenResultEnabled = "mode.agents.spokenResultEnabled"
             static let spokenResultService = "mode.agents.spokenResultService"
             static let spokenResultOpenAIServices = "mode.agents.spokenResultOpenAIServices"
-            static let spokenResultAdvanced = "mode.agents.spokenResultAdvanced"
             static let spokenResultPrompt = "mode.agents.spokenResultPrompt"
             static let spokenResultPromptExpand = "mode.agents.spokenResultPromptExpand"
             static let spokenResultPromptExpandDone = "mode.agents.spokenResultPromptExpandDone"
@@ -380,6 +379,28 @@ enum AccessibilityID {
             static let spokenVoiceDelete = "mode.agents.spokenVoiceDelete"
             static let spokenVoiceDeleteConfirm = "mode.agents.spokenVoiceDeleteConfirm"
             static let spokenVoiceDeleteCancel = "mode.agents.spokenVoiceDeleteCancel"
+            static let sendTo = "mode.agents.sendTo"
+            static let destination = "mode.agents.destination"
+            static let sendToProblem = "mode.agents.sendToProblem"
+            static let chooser = "mode.agents.chooser"
+            static let chooseFront = "mode.agents.chooseFront"
+            static let chooserCancel = "mode.agents.chooserCancel"
+            static let unavailableGroup = "mode.agents.unavailableGroup"
+            static let openConnections = "mode.agents.openConnections"
+            static let detailsDone = "mode.agents.detailsDone"
+            static let replyOptions = "mode.agents.replyOptions"
+            static let advanced = "mode.agents.advanced"
+            static let whatCanISay = "mode.agents.whatCanISay"
+            static let phrasesDone = "mode.agents.phrasesDone"
+            static let search = "mode.agents.search"
+            static let conversationDetail = "mode.agents.conversationDetail"
+            static let example = "mode.agents.example"
+            static let conversationDetails = "mode.agents.conversationDetails"
+            static let usedBy = "mode.agents.usedBy"
+            static func row(_ id: String) -> String { "mode.agents.row.\(id)" }
+            static func rowActions(_ id: String) -> String { "mode.agents.rowActions.\(id)" }
+            static func integration(_ id: String) -> String { "mode.agents.integration.\(id)" }
+            static func integrationConnect(_ id: String) -> String { "mode.agents.integration.\(id).connect" }
         }
 
         enum Editor {
@@ -683,6 +704,10 @@ enum AccessibilityID {
         Mode.Agents.showNamesFile, Mode.Agents.setupsProblem, Mode.Agents.reloadSetups, Mode.Agents.showSetupsFile,
         Mode.Agents.renameName, Mode.Agents.renameSave,
         Mode.Agents.renameCancel,
+        Mode.Agents.sendTo, Mode.Agents.destination, Mode.Agents.sendToProblem, Mode.Agents.chooser, Mode.Agents.chooseFront, Mode.Agents.chooserCancel,
+        Mode.Agents.unavailableGroup, Mode.Agents.openConnections, Mode.Agents.detailsDone,
+        Mode.Agents.replyOptions, Mode.Agents.advanced, Mode.Agents.whatCanISay, Mode.Agents.phrasesDone, Mode.Agents.search,
+        Mode.Agents.conversationDetail, Mode.Agents.example, Mode.Agents.conversationDetails, Mode.Agents.usedBy,
         Mode.List.list, Mode.List.add, Mode.List.addBlank, Mode.List.chooserCancel,
         Mode.List.deleteConfirmConfirm, Mode.List.deleteConfirmCancel,
         Mode.List.moveShortcutConfirm, Mode.List.moveShortcutCancel, Mode.List.moveShortcutUndo,
