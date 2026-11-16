@@ -232,10 +232,10 @@ final class ClaudeConnector: AgentConnector {
     }
 
     let copy = AgentConnectorCopy(
-        help: "\(Branding.appName) reaches Claude Code through a small plugin installed in the folder Claude Code loads its configuration from. Installed means the plugin is in place; each conversation using this folder then connects on its own, unless you disconnect it.",
-        reloadHint: "Already running Claude Code here? Run /reload-plugins once in each open conversation. New conversations connect on their own once you trust their folder.",
+        help: "\(Branding.appName) reaches Claude Code through a small plugin installed in the folder Claude Code loads its configuration from. Installed means the plugin is in place; each conversation using this folder then connects on its own once you trust its project folder, unless you disconnect it.",
+        reloadHint: "Already running Claude Code here? Run /reload-plugins in each open conversation.",
         uninstallTitle: "Uninstall the Claude Code connector from this folder?",
-        uninstallMessage: "Claude Code conversations using this folder disconnect now, and new ones will not connect. Work you already sent may still finish. Each open conversation unloads the connector when you run /reload-plugins in it or restart it. Other folders stay connected, and your conversation names, disconnected conversations and other \(Branding.appName) settings are kept.",
+        uninstallMessage: "Claude Code conversations using this folder disconnect now, and new ones will not connect. Work you already sent may still finish. Each open conversation unloads the connector when you run /reload-plugins in it or restart it. Other folders stay connected. The folder, its conversations, your conversation names and disconnections, and other \(Branding.appName) settings are kept.",
         toolNotFoundLabel: "Claude Code not found",
         toolNotFoundAdvice: "Install Claude Code, then come back here. \(Branding.appName) looks for the claude command on your PATH and in the usual install folders.",
         unavailable: "This copy of \(Branding.appName) is missing its Claude Code connector. Reinstall \(Branding.appName) to connect Claude Code.",

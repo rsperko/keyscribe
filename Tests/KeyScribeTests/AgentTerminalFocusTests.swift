@@ -380,24 +380,24 @@ struct AgentTerminalFocusTests {
     @Test(arguments: [
         (AgentFocusResult.exact, HUDState.commandDone(summary: "Opened backend", detail: "Agent")),
         (.requested("Warp"), .commandDone(summary: "Asked Warp to show backend", detail: "Agent")),
-        (.app("Ghostty"), .advisory(message: "Brought Ghostty forward. Couldn\u{2019}t find backend\u{2019}s tab. Your recipient is backend")),
-        (.app("WezTerm", noun: "pane"), .advisory(message: "Brought WezTerm forward. Couldn\u{2019}t find backend\u{2019}s pane. Your recipient is backend")),
+        (.app("Ghostty"), .advisory(message: "Brought Ghostty forward. Couldn\u{2019}t find backend\u{2019}s tab.")),
+        (.app("WezTerm", noun: "pane"), .advisory(message: "Brought WezTerm forward. Couldn\u{2019}t find backend\u{2019}s pane.")),
         (.pane(app: "Ghostty", multiplexer: "Zellij", uncertain: true),
-         .advisory(message: "Brought Ghostty forward. Couldn\u{2019}t confirm backend\u{2019}s Zellij pane. Your recipient is backend")),
+         .advisory(message: "Brought Ghostty forward. Couldn\u{2019}t confirm backend\u{2019}s Zellij pane.")),
         (.pane(app: "Ghostty", multiplexer: "herdr", uncertain: false),
-         .advisory(message: "Brought Ghostty forward. Couldn\u{2019}t select backend\u{2019}s herdr pane. Your recipient is backend")),
-        (.unsupported("kitty"), .advisory(message: "Brought kitty forward. Select backend\u{2019}s terminal yourself. Your recipient is backend")),
+         .advisory(message: "Brought Ghostty forward. Couldn\u{2019}t select backend\u{2019}s herdr pane.")),
+        (.unsupported("kitty"), .advisory(message: "Brought kitty forward. Select backend\u{2019}s terminal yourself.")),
         (.notAllowed("Ghostty"), .error(
-            message: "Brought Ghostty forward. Couldn\u{2019}t select backend\u{2019}s tab without access to Ghostty. Your recipient is backend",
+            message: "Brought Ghostty forward. Couldn\u{2019}t select backend\u{2019}s tab without access to Ghostty.",
             action: .openAutomationSettings)),
         (.notAllowed("Example", noun: "pane"), .error(
-            message: "Brought Example forward. Couldn\u{2019}t select backend\u{2019}s pane without access to Example. Your recipient is backend",
+            message: "Brought Example forward. Couldn\u{2019}t select backend\u{2019}s pane without access to Example.",
             action: .openAutomationSettings)),
         (.connectorOutdated("cmux"), .advisory(
-            message: "Brought cmux forward. Update the Claude Code connector in Settings, then run /reload-plugins in backend to open its tab. Your recipient is backend")),
+            message: "Brought cmux forward. Update the Claude Code connector in Settings, then run /reload-plugins in backend to open its tab.")),
         (.connectorOutdated("Example", noun: "pane"), .advisory(
-            message: "Brought Example forward. Update the Claude Code connector in Settings, then run /reload-plugins in backend to open its pane. Your recipient is backend")),
-        (.none, .advisory(message: "Nothing showing backend could be brought forward. Your recipient is backend")),
+            message: "Brought Example forward. Update the Claude Code connector in Settings, then run /reload-plugins in backend to open its pane.")),
+        (.none, .advisory(message: "Nothing showing backend could be brought forward.")),
     ])
     func eachResultSaysWhatHappened(result: AgentFocusResult, state: HUDState) {
         #expect(result.hudState(handle: "backend", detail: "Agent", agent: .claude) == state)

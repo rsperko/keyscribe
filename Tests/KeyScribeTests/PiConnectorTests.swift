@@ -364,7 +364,7 @@ struct PiConnectorStatusTests {
         let (connector, _, agents, folder) = make()
         let other = agents.deletingLastPathComponent().appendingPathComponent("pi-work")
         let model = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
-        model.show([], current: nil, discoveredSetups: ["pi": [ConnectorFolders.canonical(other).path]])
+        model.show([], discoveredSetups: ["pi": [ConnectorFolders.canonical(other).path]])
         let work = try #require(model.connectors[0].setup(for: ConnectorFolders.canonical(other).path))
         await work.install()
         #expect(connector.hasFiles(in: target(other)))

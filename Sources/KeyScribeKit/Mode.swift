@@ -28,7 +28,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
     public var pasteSettleMs: Int
     public var trimTrailingPunctuation: Bool
     public var excludeFromHistory: Bool
-    public var agent: Agent
 
     public enum Source: String, Codable, Sendable { case dictation, selection }
     public enum Output: String, Codable, Sendable {
@@ -237,47 +236,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         }
     }
 
-    public struct Agent: Codable, Equatable, Sendable {
-        public enum Target: Equatable, Sendable, Codable {
-            case current
-            case ask
-            case handle(String)
-
-            public init(from decoder: Decoder) throws {
-                let raw = try decoder.singleValueContainer().decode(String.self)
-                switch raw {
-                case "current", "focused": self = .current
-                case "ask": self = .ask
-                default:
-                    let handle = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !handle.isEmpty else { throw ConfigError.invalid("agent.target is empty") }
-                    self = .handle(handle)
-                }
-            }
-
-            public func encode(to encoder: Encoder) throws {
-                var c = encoder.singleValueContainer()
-                switch self {
-                case .current: try c.encode("current")
-                case .ask: try c.encode("ask")
-                case .handle(let handle): try c.encode(handle)
-                }
-            }
-        }
-
-        public var target: Target
-        enum CodingKeys: String, CodingKey { case target }
-
-        public init(target: Target = .current) {
-            self.target = target
-        }
-
-        public init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            target = try c.decodeIfPresent(Target.self, forKey: .target) ?? .current
-        }
-    }
-
     public struct AIRewrite: Codable, Equatable, Sendable {
         public var connection: String
         public var prompt: String
@@ -319,7 +277,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         case pasteSettleMs = "paste_settle_ms"
         case trimTrailingPunctuation = "trim_trailing_punctuation"
         case excludeFromHistory = "exclude_from_history"
-        case agent
     }
 
     public init(id: String, name: String, schemaVersion: Int = ModeStore.currentSchemaVersion) {
@@ -348,7 +305,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         pasteSettleMs = 0
         trimTrailingPunctuation = false
         excludeFromHistory = false
-        agent = .init()
     }
 
     public init(from decoder: Decoder) throws {
@@ -378,7 +334,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         pasteSettleMs = try c.decodeIfPresent(Int.self, forKey: .pasteSettleMs) ?? 0
         trimTrailingPunctuation = try c.decodeIfPresent(Bool.self, forKey: .trimTrailingPunctuation) ?? false
         excludeFromHistory = try c.decodeIfPresent(Bool.self, forKey: .excludeFromHistory) ?? false
-        agent = try c.decodeIfPresent(Agent.self, forKey: .agent) ?? .init()
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -407,7 +362,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
         if pasteSettleMs != 0 { try c.encode(pasteSettleMs, forKey: .pasteSettleMs) }
         if trimTrailingPunctuation { try c.encode(trimTrailingPunctuation, forKey: .trimTrailingPunctuation) }
         try c.encode(excludeFromHistory, forKey: .excludeFromHistory)
-        if output == .agent { try c.encode(agent, forKey: .agent) }
     }
 
     public static let directId = "_direct"
@@ -468,7 +422,6 @@ public struct Mode: Codable, Equatable, Sendable, Identifiable {
             var mode = Mode.agentMode
             mode.triggerKeys = triggerKeys
             mode.enabled = enabled
-            mode.agent = agent
             mode.commands.privacy = commands.privacy
             mode.dictionary = dictionary
             mode.replacements = replacements
@@ -584,10 +537,16 @@ public enum ModeStore {
         return mode
     }
 
+    static func retiredKeys(in toml: String) -> Set<String> {
+        let target = (try? TOMLTable(string: toml))?["agent"]?.table?["target"]?.string
+        guard target == nil || target == "current" || target == "focused" else { return [] }
+        return ["agent", "agent.target"]
+    }
+
     public static func unknownKeys(in toml: String) -> [UnknownConfigKey] {
         ConfigKeyCheck.unknownKeys(
             Mode.self, in: toml, supportedVersion: currentSchemaVersion, migrations: migrations,
-            examples: [everyKeyExample])
+            retired: retiredKeys(in: toml), examples: [everyKeyExample])
     }
 
     static var everyKeyExample: Mode {
@@ -609,7 +568,6 @@ public enum ModeStore {
         mode.trimTrailingPunctuation = true
         mode.excludeFromHistory = true
         mode.output = .agent
-        mode.agent = .init(target: .handle("a"))
         return mode
     }
 

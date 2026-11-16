@@ -101,7 +101,7 @@ struct AgentDirectoryPlaceTests {
         let shared = directory.sharedPlaceNames
         let address = AgentAddress.parse(
             text, names: AgentRecipient.spokenNames(names, shared: shared), afterVerb: AgentRecipient.afterVerbNames(shared))
-        #expect(AgentRecipient.resolve(address, frozen: .init(id: "pi:b", source: .current), rows: ["pi:a", "pi:b", "claude:c"], names: names, shared: shared)
+        #expect(AgentRecipient.resolve(address, focused: "pi:b", rows: ["pi:a", "pi:b", "claude:c"], names: names, shared: shared)
             == .deliver(id: "pi:a", body: body, source: .spoken))
     }
 
@@ -154,8 +154,8 @@ struct AgentDirectoryPlaceTests {
         let shared = directory.sharedPlaceNames
         let address = AgentAddress.parse(
             text, names: AgentRecipient.spokenNames(names, shared: shared), afterVerb: AgentRecipient.afterVerbNames(shared))
-        let resolved = AgentRecipient.resolve(address, frozen: .init(id: "pi:b", source: .current), rows: ["bb:t1", "pi:b"], names: names, shared: shared)
-        #expect(resolved == .deliver(id: id, body: body, source: id == "pi:b" ? .current : .spoken))
+        let resolved = AgentRecipient.resolve(address, focused: "pi:b", rows: ["bb:t1", "pi:b"], names: names, shared: shared)
+        #expect(resolved == .deliver(id: id, body: body, source: id == "pi:b" ? .front : .spoken))
     }
 
     @Test func twoPanesShowingTheSameTitleAreQualifiedAndTheBareTitleAsks() {

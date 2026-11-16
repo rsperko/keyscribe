@@ -155,12 +155,10 @@ struct AgentPlaceTrackerTests {
         let (hub, registry) = makeHub(reader)
         await hub.rescan()
         await settle(hub)
-        hub.makeCurrent("claude:a")
         registry.entries = [ClaudeRegistryEntry(pid: 20, sessionId: "b", cwd: "/src/home", name: nil, status: "idle", waitingFor: nil, startedAt: 200)]
         await hub.rescan()
         await settle(hub)
         #expect(hub.names == ["architect": "claude:b"])
-        #expect(hub.current == nil)
     }
 
     @Test func useDefaultNameDropsTheOverrideSavesItAndKeepsTheNameWhenSavingFails() async throws {

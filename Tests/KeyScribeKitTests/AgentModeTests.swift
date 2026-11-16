@@ -3,60 +3,17 @@ import Testing
 @testable import KeyScribeKit
 
 struct AgentModeTests {
-    @Test func agentOutputRoundTripsWithItsTable() throws {
+    @Test func agentOutputRoundTripsWithoutAnAgentTable() throws {
         var mode = Mode(id: "agent", name: "Agent")
         mode.output = .agent
-        mode.agent = .init(target: .handle("backend"))
-        let decoded = try ModeStore.decode(from: ModeStore.encode(mode), id: Mode.agentModeId)
-        #expect(decoded.output == .agent)
-        #expect(decoded.agent == .init(target: .handle("backend")))
+        let toml = try ModeStore.encode(mode)
+        #expect(try ModeStore.decode(from: toml, id: Mode.agentModeId).output == .agent)
+        #expect(!toml.contains("[agent]"))
+        #expect(ModeStore.unknownKeys(in: toml).isEmpty)
     }
 
-    @Test func agentTableDefaultsToCurrent() throws {
-        let toml = """
-        schema_version = \(ModeStore.currentSchemaVersion)
-        name = "Agent"
-        output = "agent"
-        """
-        let mode = try ModeStore.decode(from: toml, id: Mode.agentModeId)
-        #expect(mode.agent == .init(target: .current))
-    }
-
-    @Test func anAgentTableWithoutATargetDefaultsToCurrent() throws {
-        let toml = """
-        schema_version = \(ModeStore.currentSchemaVersion)
-        name = "Agent"
-        output = "agent"
-        [agent]
-        """
-        #expect(try ModeStore.decode(from: toml, id: Mode.agentModeId).agent == .init(target: .current))
-    }
-
-    @Test func anOlderFocusedTargetIsReadAsCurrentAndWrittenAsCurrent() throws {
-        let toml = """
-        schema_version = \(ModeStore.currentSchemaVersion)
-        name = "Agent"
-        output = "agent"
-        [agent]
-        target = "focused"
-        """
-        let mode = try ModeStore.decode(from: toml, id: Mode.agentModeId).systemNormalized()
-        #expect(mode.agent.target == .current)
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-agent-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        try ModeStore.write(mode, to: dir)
-        #expect(ModeStore.loadAll(in: dir).first { $0.id == Mode.agentModeId }?.agent.target == .current)
-        #expect(!(try ModeStore.encode(mode)).contains("focused"))
-    }
-
-    @Test(arguments: [
-        ("focused", Mode.Agent.Target.current),
-        ("current", .current),
-        ("ask", .ask),
-        ("keyscribe blue", .handle("keyscribe blue")),
-    ])
-    func targetSpellings(written: String, expected: Mode.Agent.Target) throws {
+    @Test(arguments: ["focused", "current"])
+    func aRetiredAgentTargetStillLoadsWarnsNothingAndIsDroppedOnSave(written: String) throws {
         let toml = """
         schema_version = \(ModeStore.currentSchemaVersion)
         name = "Agent"
@@ -64,30 +21,42 @@ struct AgentModeTests {
         [agent]
         target = "\(written)"
         """
-        #expect(try ModeStore.decode(from: toml, id: Mode.agentModeId).agent.target == expected)
+        let mode = try ModeStore.decode(from: toml, id: Mode.agentModeId).systemNormalized()
+        #expect(ModeStore.unknownKeys(in: toml).isEmpty)
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-agent-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try ModeStore.write(mode, to: dir)
+        let file = try #require(try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil).first)
+        let saved = try String(contentsOf: file, encoding: .utf8)
+        #expect(!saved.contains("[agent]"))
+        #expect(!saved.contains("target"))
+        #expect(ModeStore.loadAll(in: dir).contains { $0.id == Mode.agentModeId })
     }
 
-    @Test func anEmptyHandleIsRejected() {
+    @Test(arguments: ["ask", "keyscribe blue", "  "])
+    func aFixedOrAskTargetStillLoadsButIsReportedAsHavingNoEffect(written: String) throws {
         let toml = """
         schema_version = \(ModeStore.currentSchemaVersion)
         name = "Agent"
         output = "agent"
         [agent]
-        target = "  "
+        target = "\(written)"
         """
-        #expect(throws: ConfigError.self) { try ModeStore.decode(from: toml, id: Mode.agentModeId) }
+        #expect(try ModeStore.decode(from: toml, id: Mode.agentModeId).output == .agent)
+        let unread = ModeStore.unknownKeys(in: toml).map(\.path)
+        #expect(unread.contains { $0.hasPrefix("agent") })
     }
 
-    @Test func nonAgentModesDoNotWriteTheAgentTable() throws {
-        let toml = try ModeStore.encode(Mode(id: "plain", name: "Plain"))
-        #expect(!toml.contains("[agent]"))
-    }
-
-    @Test func theAgentTableIsAKnownKey() throws {
-        var mode = Mode(id: "agent", name: "Agent")
-        mode.output = .agent
-        mode.agent = .init(target: .handle("backend"))
-        #expect(ModeStore.unknownKeys(in: try ModeStore.encode(mode)).isEmpty)
+    @Test func anEmptyRetiredAgentTableStillLoads() throws {
+        let toml = """
+        schema_version = \(ModeStore.currentSchemaVersion)
+        name = "Agent"
+        output = "agent"
+        [agent]
+        """
+        #expect(try ModeStore.decode(from: toml, id: Mode.agentModeId).output == .agent)
+        #expect(ModeStore.unknownKeys(in: toml).isEmpty)
     }
 
     @Test func agentsIsAnOptInFlag() {
@@ -124,7 +93,6 @@ struct AgentModeTests {
         #expect(mode.isSystem)
         #expect(mode.name == "Agent")
         #expect(mode.triggerKeys.isEmpty)
-        #expect(mode.agent == .init(target: .current))
         #expect(mode.commands == .init(liveEdits: true, privacy: false, numbers: true))
 
         let all = ModeStore.loadAll(in: dir)
@@ -142,7 +110,6 @@ struct AgentModeTests {
         edited.constraints = [.init(bundleId: "com.example")]
         edited.triggerKeys = [.init(key: "control+/")]
         edited.enabled = false
-        edited.agent = .init(target: .handle("backend"))
         edited.dictionary = .init(includeGlobal: false, words: ["herdr"])
         edited.replacements = .init(includeGlobal: false, rules: [.init(heard: "a", replace: "b", regex: false)])
         edited.aiRewrite = .init(
@@ -159,7 +126,6 @@ struct AgentModeTests {
         #expect(normalized.constraints.isEmpty)
         #expect(normalized.triggerKeys == edited.triggerKeys)
         #expect(normalized.enabled == false)
-        #expect(normalized.agent == edited.agent)
         #expect(normalized.dictionary == edited.dictionary)
         #expect(normalized.replacements == edited.replacements)
         #expect(normalized.aiRewrite == .init(connection: "c", prompt: "Tidy it.", fragments: ["style"]))

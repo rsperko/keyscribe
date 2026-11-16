@@ -1,16 +1,11 @@
 import Foundation
 
 public enum AgentRecipient {
-    public enum Source: Equatable, Sendable { case fixed, current, front, spoken }
+    public enum Source: Equatable, Sendable { case front, spoken }
 
-    public struct Frozen: Equatable, Sendable {
-        public var id: String
-        public var source: Source
-        public init(id: String, source: Source) {
-            self.id = id
-            self.source = source
-        }
-    }
+    public static let nothingFocused = "No conversation focused"
+    public static let nothingFocusedAdvice = "Open one, or name a conversation in your instruction."
+    public static let nothingFocusedLine = "\(nothingFocused). \(nothingFocusedAdvice)"
 
     public struct SharedName: Equatable, Sendable {
         public enum Kind: Equatable, Sendable {
@@ -68,7 +63,7 @@ public enum AgentRecipient {
     }
 
     public enum AskReason: Equatable, Sendable {
-        case noRecipient
+        case nothingFocused
         case noSuchRow(Int)
         case unknownName(String)
         case ambiguousName(String, matches: [String])
@@ -76,77 +71,43 @@ public enum AgentRecipient {
         case soundsLike(String, name: String)
         case noBreak(String)
         case shownOn(String, name: String, as: String)
-        case sayToSelect(String)
+        case nameOnly(String)
     }
 
     public enum Resolution: Equatable, Sendable {
         case deliver(id: String, body: String, source: Source)
-        case select(id: String)
         case open(id: String)
         case ask(body: String, reason: AskReason)
-
-        public var makesCurrent: String? {
-            switch self {
-            case .deliver(let id, _, .spoken), .select(let id), .open(let id): return id
-            case .deliver, .ask: return nil
-            }
-        }
     }
 
-    public static let followFront = [
-        "follow the front", "follow front", "follow the conversation in front",
-        "select the conversation in front", "choose the conversation in front",
-    ]
-
-    public static func followsFront(_ text: String) -> Bool {
-        var said = VoiceCommandText.key(text).split(separator: " ").map(String.init)
-        said.removeFirst(said.prefix { $0 == "please" }.count)
-        if said.count > 1, said.last == "please" { said.removeLast() }
-        let words = said.joined(separator: " ")
-        return followFront.contains(words)
-    }
-
-    public static func initial(target: Mode.Agent.Target, current: String?, names: [String: String]) -> Frozen? {
-        switch target {
-        case .handle(let name):
-            return id(named: name, in: names).map { Frozen(id: $0, source: .fixed) }
-        case .current:
-            return current.map { Frozen(id: $0, source: .current) }
-        case .ask:
-            return nil
-        }
-    }
-
-    public static func usesDefault(_ address: AgentAddress) -> Bool {
+    public static func usesFocus(_ address: AgentAddress) -> Bool {
         switch address {
         case .none, .nearMiss: true
-        case .open(let target), .select(let target): usesDefault(target)
+        case .open(let target): usesFocus(target)
         case .unbroken: true
         case .name, .row, .unresolved, .ambiguous: false
         }
     }
 
     public static func resolve(
-        _ address: AgentAddress, frozen: Frozen?, rows: [String], names: [String: String], shared: [String: SharedName] = [:]
+        _ address: AgentAddress, focused: String?, rows: [String], names: [String: String], shared: [String: SharedName] = [:]
     ) -> Resolution {
-        let resolution = resolveAddressed(address, frozen: frozen, rows: rows, names: names, shared: shared)
-        switch (address, resolution) {
-        case (.open, _), (.select, _): return resolution
-        case (_, .select): return .ask(body: "", reason: .sayToSelect(said(address)))
-        case (_, .deliver(_, let body, .spoken)) where AgentHandles.normalize(body) == "please":
-            return .ask(body: "", reason: .sayToSelect(said(address)))
-        default: return resolution
+        let resolution = resolveAddressed(address, focused: focused, rows: rows, names: names, shared: shared)
+        if case .open = address { return resolution }
+        if case .deliver(_, let body, .spoken) = resolution, ["", "please"].contains(AgentHandles.normalize(body)) {
+            return .ask(body: "", reason: .nameOnly(said(address)))
         }
+        return resolution
     }
 
     public static func conversation(
-        _ address: AgentAddress, frozen: Frozen?, rows: [String], names: [String: String], shared: [String: SharedName] = [:]
+        _ address: AgentAddress, focused: String?, rows: [String], names: [String: String], shared: [String: SharedName] = [:]
     ) -> Resolution {
-        resolveAddressed(address, frozen: frozen, rows: rows, names: names, shared: shared)
+        resolveAddressed(address, focused: focused, rows: rows, names: names, shared: shared)
     }
 
     private static func resolveAddressed(
-        _ address: AgentAddress, frozen: Frozen?, rows: [String], names: [String: String], shared: [String: SharedName]
+        _ address: AgentAddress, focused: String?, rows: [String], names: [String: String], shared: [String: SharedName]
     ) -> Resolution {
         func sharedAsk(_ spoken: String, body: String) -> Resolution? {
             guard id(named: spoken, in: names) == nil,
@@ -159,29 +120,24 @@ public enum AgentRecipient {
             return .ask(body: body, reason: .sharedName(place.key, matches: place.value.names, tellApartIn: place.value.tellApartIn))
         }
         switch address {
-        case .open(.unresolved(let spoken, _)), .select(.unresolved(let spoken, _)):
+        case .open(.unresolved(let spoken, _)):
             return .ask(body: "", reason: suggestion(for: spoken, among: Array(names.keys)))
         case .open(let target):
-            switch resolveAddressed(target, frozen: frozen, rows: rows, names: names, shared: shared) {
-            case .select(let id), .open(let id), .deliver(let id, _, _): return .open(id: id)
-            case .ask(_, let reason): return .ask(body: "", reason: reason)
-            }
-        case .select(let target):
-            switch resolveAddressed(target, frozen: frozen, rows: rows, names: names, shared: shared) {
-            case .select(let id), .open(let id), .deliver(let id, _, _): return .select(id: id)
+            switch resolveAddressed(target, focused: focused, rows: rows, names: names, shared: shared) {
+            case .open(let id), .deliver(let id, _, _): return .open(id: id)
             case .ask(_, let reason): return .ask(body: "", reason: reason)
             }
         case .unbroken(let target, let unaddressed):
-            switch resolveAddressed(target, frozen: frozen, rows: rows, names: names, shared: shared) {
-            case .deliver(let id, _, _), .select(let id), .open(let id):
-                if let frozen, frozen.id == id { return .deliver(id: id, body: unaddressed, source: frozen.source) }
+            switch resolveAddressed(target, focused: focused, rows: rows, names: names, shared: shared) {
+            case .deliver(let id, _, _), .open(let id):
+                if focused == id { return .deliver(id: id, body: unaddressed, source: .front) }
                 return .ask(body: unaddressed, reason: .noBreak(said(target)))
             case .ask(_, let reason):
                 return .ask(body: unaddressed, reason: reason)
             }
         case .none(let body):
-            guard let frozen else { return .ask(body: body, reason: .noRecipient) }
-            return .deliver(id: frozen.id, body: body, source: frozen.source)
+            guard let focused else { return .ask(body: body, reason: .nothingFocused) }
+            return .deliver(id: focused, body: body, source: .front)
         case .unresolved(let spoken, let body):
             return .ask(body: body, reason: .unknownName(spoken))
         case .ambiguous(let spoken, let matches, let body):
@@ -191,9 +147,9 @@ public enum AgentRecipient {
             }
             return addressed(id, body: body)
         case .nearMiss(let spoken, let name, let body, let unaddressed):
-            if let frozen, id(named: name, in: names) == frozen.id {
-                guard let unaddressed else { return addressed(frozen.id, body: body) }
-                return .deliver(id: frozen.id, body: unaddressed, source: frozen.source)
+            if let focused, id(named: name, in: names) == focused {
+                guard let unaddressed else { return addressed(focused, body: body) }
+                return .deliver(id: focused, body: unaddressed, source: .front)
             }
             return .ask(body: body, reason: .soundsLike(spoken, name: name))
         case .row(let row, let body):
@@ -212,7 +168,7 @@ public enum AgentRecipient {
         case .row(let row, _): "conversation \(row)"
         case .ambiguous(_, let matches, _): matches.sorted().first ?? ""
         case .unresolved(let spoken, _): spoken
-        case .open(let inner), .select(let inner), .unbroken(let inner, _): said(inner)
+        case .open(let inner), .unbroken(let inner, _): said(inner)
         case .none: ""
         }
     }
@@ -227,7 +183,7 @@ public enum AgentRecipient {
     }
 
     private static func addressed(_ id: String, body: String) -> Resolution {
-        body.isEmpty ? .select(id: id) : .deliver(id: id, body: body, source: .spoken)
+        .deliver(id: id, body: body, source: .spoken)
     }
 
     private static func id(named name: String, in names: [String: String]) -> String? {

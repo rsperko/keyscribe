@@ -94,12 +94,12 @@ struct AgentsSettingsModelTests {
 
     @Test func aConversationStillConnectedToASetupThatIsNotInstalledIsWarnedAbout() async {
         let (model, _, dir) = makeModel()
-        model.show([conversation("backend", pid: 1, setup: defaultFolder(dir))], current: nil)
+        model.show([conversation("backend", pid: 1, setup: defaultFolder(dir))])
         #expect(setup(model).showsRemovalWarning)
-        model.show([], current: nil)
+        model.show([])
         #expect(!setup(model).showsRemovalWarning)
         await setup(model).install()
-        model.show([conversation("backend", pid: 1, setup: defaultFolder(dir))], current: nil)
+        model.show([conversation("backend", pid: 1, setup: defaultFolder(dir))])
         #expect(!setup(model).showsRemovalWarning)
         #expect(setup(model).usedBy == ["backend"])
     }
@@ -132,12 +132,12 @@ struct AgentsSettingsModelTests {
         #expect(!setup(model).needsReload)
         var row = conversation("backend", pid: 1, setup: defaultFolder(dir))
         row.connectorLive = false
-        model.show([row], current: nil)
+        model.show([row])
         #expect(setup(model).needsReload)
         row.connectorLive = true
-        model.show([row], current: nil, loadedVersions: ["backend": "0.1.0-old"])
+        model.show([row], loadedVersions: ["backend": "0.1.0-old"])
         #expect(setup(model).needsReload)
-        model.show([row], current: nil, loadedVersions: ["backend": ClaudeConnectorFiles.version(for: ClaudeConnectorFiles.registerJS ?? "", surfaces: .builtIn)])
+        model.show([row], loadedVersions: ["backend": ClaudeConnectorFiles.version(for: ClaudeConnectorFiles.registerJS ?? "", surfaces: .builtIn)])
         #expect(!setup(model).needsReload)
     }
 
@@ -166,11 +166,11 @@ struct AgentsSettingsModelTests {
 
     @Test func unreadableNamesAndUnsavedDisconnectionsNeedAttentionUntilRecovered() {
         let (model, _, _) = makeModel()
-        model.show([], current: nil, namesProblem: "unreadable")
+        model.show([], namesProblem: "unreadable")
         #expect(model.hasError)
-        model.show([], current: nil, exclusionsNotSaved: "read only")
+        model.show([], exclusionsNotSaved: "read only")
         #expect(model.hasError)
-        model.show([], current: nil)
+        model.show([])
         #expect(!model.hasError)
     }
 
@@ -178,7 +178,7 @@ struct AgentsSettingsModelTests {
         let (model, _, _) = makeModel()
         let first = AgentCandidate(agent: "claude", pid: 7, startedAt: 5_000, cwd: "/src/atlas", setup: "/x/.claude")
         let second = AgentCandidate(agent: "claude", pid: 8, startedAt: 65_000, cwd: "/src/atlas", setup: "/x/.claude")
-        model.show([], current: nil, discoveredSetups: ["claude": ["/x/.claude"]], candidates: [first, second])
+        model.show([], discoveredSetups: ["claude": ["/x/.claude"]], candidates: [first, second])
         #expect(model.rows.map(\.name) == ["Claude Code in atlas", "Claude Code in atlas"])
         let contexts = try model.rows.map { try #require(model.recognitionContext(for: $0)) }
         #expect(Set(contexts).count == 2)
@@ -186,14 +186,14 @@ struct AgentsSettingsModelTests {
         model.connect(model.rows[0])
         let request = try #require(model.consent)
         #expect(Set(model.affected(by: request)).count == 2)
-        model.show([], current: nil, candidates: [first])
+        model.show([], candidates: [first])
         #expect(model.recognitionContext(for: model.rows[0]) == nil)
     }
 
     @Test func aRevealedProcessRowIsTheOneTheHUDNamed() {
         let (model, _, _) = makeModel()
         let candidate = AgentCandidate(agent: "claude", pid: 7, startedAt: 5_000, cwd: "/src/atlas", setup: "/x/.claude")
-        model.show([], current: nil, candidates: [candidate])
+        model.show([], candidates: [candidate])
         #expect(model.rows.map(\.id) == [candidate.rowId])
         model.reveal([candidate.rowId])
         #expect(model.pendingReveal == [candidate.rowId])
@@ -346,7 +346,7 @@ struct AgentsSettingsModelTests {
 
     @Test func eachSetupAConversationUsesIsListedWithoutBeingEnrolled() {
         let (model, _, dir) = makeModel()
-        model.show([conversation("backend", pid: 1, setup: "/work/.claude")], current: nil, discoveredSetups: ["claude": ["/work/.claude"]])
+        model.show([conversation("backend", pid: 1, setup: "/work/.claude")], discoveredSetups: ["claude": ["/work/.claude"]])
         #expect(model.connectors[0].setups.map(\.folder.path) == [defaultFolder(dir), "/work/.claude"])
         #expect(model.connectors[0].setups[1].usedBy == ["backend"])
         #expect(model.setups.setups?.setups.isEmpty == true)
@@ -356,8 +356,9 @@ struct AgentsSettingsModelTests {
         let (model, _, dir) = makeModel()
         var row = conversation("backend", pid: 1, setup: defaultFolder(dir))
         row.connectorLive = false
-        model.show([row], current: nil)
+        model.show([row])
         #expect(model.action(for: model.rows[0]) == .connect)
+        #expect(model.awaitingReload(of: model.connectors[0]).isEmpty)
         model.connect(model.rows[0])
         let request = try? #require(model.consent)
         #expect(request?.setup === setup(model))
@@ -366,14 +367,16 @@ struct AgentsSettingsModelTests {
         #expect(model.consent == nil)
         await until { setup(model).state == .status(.ready) }
         #expect(model.action(for: model.rows[0]) == .recover(reload: "/reload-plugins"))
+        #expect(model.awaitingReload(of: model.connectors[0]).map(\.name) == ["backend"])
         row.connectorLive = true
-        model.show([row], current: nil)
+        model.show([row])
         #expect(model.action(for: model.rows[0]) == .connected)
+        #expect(model.awaitingReload(of: model.connectors[0]).isEmpty)
     }
 
     @Test func aProcessFoundBeforeItsConnectorSaysHelloIsListedButCannotBeRenamedOrAddressed() {
         let (model, _, _) = makeModel()
-        model.show([], current: nil, candidates: [
+        model.show([], candidates: [
             AgentCandidate(agent: "claude", pid: 7, startedAt: 5_000, cwd: "/src/atlas", setup: "/x/.claude"),
         ])
         #expect(model.rows.count == 1)
@@ -383,7 +386,7 @@ struct AgentsSettingsModelTests {
         #expect(model.rows[0].key == "7:5000")
         model.show([AgentConversation(
             id: "claude:abc", agent: "claude", pid: 7, cwd: "/src/atlas", handle: "atlas", state: .idle, connectorLive: true,
-            startedAt: Date(timeIntervalSince1970: 5), setup: "/x/.claude")], current: nil)
+            startedAt: Date(timeIntervalSince1970: 5), setup: "/x/.claude")])
         #expect(model.rows.map(\.key) == ["7:5000"])
         #expect(model.rows[0].identified)
     }
@@ -393,11 +396,11 @@ struct AgentsSettingsModelTests {
         var asked: [String] = []
         model.onDisconnect = { asked.append("disconnect \($0)") }
         model.onReconnect = { asked.append("reconnect \($0)") }
-        model.show([conversation("backend", pid: 1, setup: defaultFolder(dir))], current: nil)
+        model.show([conversation("backend", pid: 1, setup: defaultFolder(dir))])
         model.disconnect(model.rows[0])
         var away = conversation("backend", pid: 1, setup: defaultFolder(dir))
         away.connectorLive = false
-        model.show([], current: nil, disconnected: [away])
+        model.show([], disconnected: [away])
         #expect(model.disconnectedRows.map(\.name) == ["backend"])
         model.reconnect(model.disconnectedRows[0])
         #expect(asked == ["disconnect backend"])
@@ -410,7 +413,7 @@ struct AgentsSettingsModelTests {
         model.onCancelReadAloud = { cancelled.append($0) }
         model.show(
             [conversation("backend", pid: 1, setup: defaultFolder(dir)), conversation("docs", pid: 2, setup: defaultFolder(dir)),
-             conversation("web", pid: 3, setup: defaultFolder(dir))], current: nil,
+             conversation("web", pid: 3, setup: defaultFolder(dir))],
             readAloud: ["backend"], readNextAloud: ["web"])
         #expect(model.rows.map(\.readAloud?.note) == ["Reply will be reported.", nil, "Next reply will be reported."])
         model.cancelReadAloud(model.rows[0])
@@ -425,7 +428,7 @@ struct AgentsSettingsModelTests {
         away.connectorLive = false
         var other = conversation("api", pid: 2, setup: defaultFolder(dir))
         other.connectorLive = false
-        model.show([], current: nil, disconnected: [away, other])
+        model.show([], disconnected: [away, other])
         model.reconnect(model.disconnectedRows[0])
         let request = try #require(model.consent)
         #expect(model.affected(by: request) == ["backend"])
@@ -441,7 +444,7 @@ struct AgentsSettingsModelTests {
         let (model, _, dir) = makeModel(cli: cli)
         var row = conversation("backend", pid: 1, setup: defaultFolder(dir))
         row.connectorLive = false
-        model.show([row], current: nil)
+        model.show([row])
         await setup(model).install()
         guard case .failed = setup(model).state else { Issue.record("not failed: \(setup(model).state)"); return }
         #expect(setup(model).isEnrolled)
@@ -472,7 +475,7 @@ struct AgentsSettingsModelTests {
         let (model, _, _) = makeModel()
         var away = conversation("backend", pid: 1)
         away.connectorLive = false
-        model.show([], current: nil, namesProblem: "unreadable", disconnected: [away])
+        model.show([], namesProblem: "unreadable", disconnected: [away])
         #expect(model.disconnectedRows.isEmpty)
         #expect(model.emptyState == "Conversations stay disconnected until \(AgentNameStore.fileName) can be read.")
     }
@@ -483,7 +486,7 @@ struct AgentsSettingsModelTests {
         fresh.connectorLive = false
         var carried = conversation("api", pid: 2)
         carried.connectorLive = false
-        model.show([fresh, carried], current: nil, discoveryProblems: ["claude": "partial"], lastSeen: ["api"])
+        model.show([fresh, carried], discoveryProblems: ["claude": "partial"], lastSeen: ["api"])
         #expect(model.rows.first { $0.name == "api" }?.state == "Last seen")
         #expect(model.rows.first { $0.name == "backend" }?.lastSeen == false)
     }
@@ -491,7 +494,7 @@ struct AgentsSettingsModelTests {
     @Test func aSetupFoundAfterThePaneOpenedIsCheckedWithoutReopeningIt() async {
         let (model, _, _) = makeModel()
         await model.refresh()
-        model.show([], current: nil, discoveredSetups: ["claude": ["/work/.claude"]])
+        model.show([], discoveredSetups: ["claude": ["/work/.claude"]])
         let late = model.connectors[0].setups.first { $0.folder.path == "/work/.claude" }
         await until { late?.state != .checking }
         #expect(late?.state == .status(.notInstalled))
@@ -501,7 +504,7 @@ struct AgentsSettingsModelTests {
         let terminals = Terminals()
         terminals.byPid[1] = "Ghostty"
         let (model, _, _) = makeModel(terminals: terminals)
-        model.show([conversation("backend", pid: 1)], current: nil, loadedVersions: ["backend": "0.1.0-old"])
+        model.show([conversation("backend", pid: 1)], loadedVersions: ["backend": "0.1.0-old"])
         await until { model.rows.first?.terminal == "Ghostty" }
         #expect(model.rows.first?.olderConnector == true)
     }
@@ -509,7 +512,7 @@ struct AgentsSettingsModelTests {
     @Test func aConversationStillRunningThePreviousConnectorIsNotedAndOneOnTheCurrentIsNot() {
         let (model, _, _) = makeModel()
         let bundled = ClaudeConnectorFiles.version(for: ClaudeConnectorFiles.registerJS ?? "", surfaces: .builtIn)
-        model.show([conversation("backend", pid: 1), conversation("api", pid: 2)], current: nil,
+        model.show([conversation("backend", pid: 1), conversation("api", pid: 2)],
                    loadedVersions: ["backend": "0.1.0-old", "api": bundled])
         #expect(model.rows.first { $0.name == "backend" }?.olderConnector == true)
         #expect(model.rows.first { $0.name == "api" }?.olderConnector == false)
@@ -517,7 +520,7 @@ struct AgentsSettingsModelTests {
 
     @Test func aDisconnectThatCouldNotBeSavedIsShown() {
         let (model, _, _) = makeModel()
-        model.show([], current: nil, exclusionsNotSaved: "disk full")
+        model.show([], exclusionsNotSaved: "disk full")
         #expect(model.exclusionsNotSaved == "disk full")
     }
 
@@ -534,19 +537,51 @@ struct AgentsSettingsModelTests {
         #expect(model.setups.setups?.setups.isEmpty == true)
     }
 
+    @Test func addingAFolderAlreadyListedUnderAnotherPathSaysSoAndAddsNothing() throws {
+        let (model, _, dir) = makeModel()
+        let connector = model.connectors[0]
+        let real = dir.appendingPathComponent("work")
+        try FileManager.default.createDirectory(at: real.appendingPathComponent("projects"), withIntermediateDirectories: true)
+        let link = dir.appendingPathComponent("work-link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        #expect(model.choose(folder: real, for: connector) == nil)
+        model.consent = nil
+        let before = connector.setups.map(\.folder.path)
+        #expect(model.choose(folder: link, for: connector)?.hasSuffix("is already listed.") == true)
+        #expect(model.choose(folder: URL(fileURLWithPath: real.path + "/"), for: connector)?.hasSuffix("is already listed.") == true)
+        #expect(model.choose(folder: connector.connector.defaultFolder, for: connector)?.hasSuffix("is already listed.") == true)
+        #expect(connector.setups.map(\.folder.path) == before)
+        #expect(model.consent == nil)
+    }
+
+    @Test func aFolderAddedButNeverInstalledCanBeRemovedFromTheListAndTheDefaultCannot() throws {
+        let (model, _, dir) = makeModel()
+        let connector = model.connectors[0]
+        let real = dir.appendingPathComponent("work")
+        try FileManager.default.createDirectory(at: real.appendingPathComponent("projects"), withIntermediateDirectories: true)
+        _ = model.choose(folder: real, for: connector)
+        let added = try #require(connector.setup(for: ConnectorFolders.canonical(real).path))
+        let defaults = connector.setups.filter { $0.isDefault }
+        let fallback = try #require(defaults.first)
+        #expect(connector.canForget(added))
+        #expect(!connector.canForget(fallback))
+        connector.forget(added)
+        #expect(connector.setup(for: ConnectorFolders.canonical(real).path) == nil)
+        #expect(FileManager.default.fileExists(atPath: real.path))
+    }
+
     @Test func conversationsSayWhetherTheyCanReceiveBeforeWhatTheyAreDoing() {
         let (model, _, _) = makeModel()
         model.show([
             AgentConversation(id: "a", agent: "claude", pid: 1, cwd: "/src/keyscribe", handle: "keyscribe", state: .working, connectorLive: true),
             AgentConversation(id: "b", agent: "claude", pid: 2, cwd: "/src/chatplay", handle: "chatplay", state: .idle, connectorLive: false),
             AgentConversation(id: "c", agent: "claude", pid: 3, cwd: "/src/home", handle: "home", state: .idle, connectorLive: true),
-        ], current: "a")
-        #expect(model.rows == [
-            .init(id: "a", number: 1, name: "keyscribe", folder: "/src/keyscribe", state: "Working", connected: true, current: true, agent: "claude", key: "1:0"),
-            .init(id: "b", number: 2, name: "chatplay", folder: "/src/chatplay", state: "Not connected", connected: false, current: false, agent: "claude", key: "2:0"),
-            .init(id: "c", number: 3, name: "home", folder: "/src/home", state: "Ready", connected: true, current: false, agent: "claude", key: "3:0"),
         ])
-        #expect(model.destination == .conversation("keyscribe"))
+        #expect(model.rows == [
+            .init(id: "a", name: "keyscribe", folder: "/src/keyscribe", state: "Working", connected: true, agent: "claude", key: "1:0"),
+            .init(id: "b", name: "chatplay", folder: "/src/chatplay", state: "Not connected", connected: false, agent: "claude", key: "2:0"),
+            .init(id: "c", name: "home", folder: "/src/home", state: "Ready", connected: true, agent: "claude", key: "3:0"),
+        ])
         #expect(model.connectedCount == 2)
     }
 
@@ -564,12 +599,12 @@ struct AgentsSettingsModelTests {
         let terminals = Terminals()
         terminals.byPid = [1: "Ghostty"]
         let (model, _, _) = makeModel(terminals: terminals)
-        model.show([conversation("backend", pid: 1)], current: nil, discoveryProblems: ["claude": "unreadable"])
+        model.show([conversation("backend", pid: 1)], discoveryProblems: ["claude": "unreadable"])
         #expect(model.connectors[0].discoveryProblem == "unreadable")
         await until { model.rows.first?.terminal == "Ghostty" }
         #expect(model.rows.first?.terminal == "Ghostty")
         #expect(model.connectors[0].discoveryProblem == "unreadable")
-        model.show([conversation("backend", pid: 1)], current: nil, discoveryProblems: [:])
+        model.show([conversation("backend", pid: 1)], discoveryProblems: [:])
         #expect(model.connectors[0].discoveryProblem == nil)
     }
 
@@ -579,38 +614,24 @@ struct AgentsSettingsModelTests {
 
     @Test func renameContextKeepsTheTitleWithItsConversationAsItChanges() {
         let (model, _, _) = makeModel()
-        model.show([conversation("backend", pid: 1, title: "Fix the cache")], current: nil)
+        model.show([conversation("backend", pid: 1, title: "Fix the cache")])
         #expect(model.rows.first?.title == "Fix the cache")
-        model.show([conversation("backend", pid: 1, title: "Verify the cache")], current: nil)
+        model.show([conversation("backend", pid: 1, title: "Verify the cache")])
         #expect(model.rows.first?.title == "Verify the cache")
-        model.show([conversation("backend", pid: 1)], current: nil)
+        model.show([conversation("backend", pid: 1)])
         #expect(model.rows.first?.title == nil)
-    }
-
-    @Test func agentTypesAreShownOnlyWhenTheConversationListIsMixed() {
-        let (model, _, _) = makeModel()
-        let claude = conversation("backend", pid: 1)
-        var codex = conversation("frontend", pid: 2)
-        codex.agent = "codex"
-        model.show([claude], current: nil)
-        #expect(!model.showsAgentType)
-        model.show([claude, codex], current: nil)
-        #expect(model.showsAgentType)
-        #expect(model.rows.map(\.agent) == ["claude", "codex"])
-        model.show([codex], current: nil)
-        #expect(!model.showsAgentType)
     }
 
     @Test func everyRowNamesItsTerminalIncludingSessionsThatShareOne() async {
         let terminals = Terminals()
         terminals.byPid = [1: "Ghostty \u{00B7} herdr", 2: "Ghostty \u{00B7} herdr"]
         let (model, _, _) = makeModel(terminals: terminals)
-        model.show([conversation("a", pid: 1), conversation("b", pid: 2)], current: nil)
+        model.show([conversation("a", pid: 1), conversation("b", pid: 2)])
         await until { model.rows.allSatisfy { $0.terminal != nil } }
         #expect(model.rows.map(\.terminal) == ["Ghostty \u{00B7} herdr", "Ghostty \u{00B7} herdr"])
 
         terminals.byPid[3] = "cmux"
-        model.show([conversation("a", pid: 1), conversation("b", pid: 2), conversation("c", pid: 3)], current: nil)
+        model.show([conversation("a", pid: 1), conversation("b", pid: 2), conversation("c", pid: 3)])
         await until { model.rows.last?.terminal != nil }
         #expect(model.rows.map(\.terminal) == ["Ghostty \u{00B7} herdr", "Ghostty \u{00B7} herdr", "cmux"])
         #expect(terminals.asked.sorted() == [1, 2, 3])
@@ -620,7 +641,7 @@ struct AgentsSettingsModelTests {
         let terminals = Terminals()
         terminals.byPid = [1: "Ghostty", 2: "Terminal"]
         let (model, _, _) = makeModel(terminals: terminals)
-        model.show([conversation("a", pid: 1), conversation("b", pid: 2)], current: nil)
+        model.show([conversation("a", pid: 1), conversation("b", pid: 2)])
         await until { model.rows.allSatisfy { $0.terminal != nil } }
         #expect(model.rows.map(\.terminal) == ["Ghostty", "Terminal"])
     }
@@ -629,11 +650,11 @@ struct AgentsSettingsModelTests {
         let terminals = Terminals()
         terminals.byPid = [1: "Ghostty"]
         let (model, _, _) = makeModel(terminals: terminals)
-        model.show([conversation("a", pid: 1)], current: nil)
+        model.show([conversation("a", pid: 1)])
         await until { model.rows.first?.terminal != nil }
-        model.show([], current: nil)
+        model.show([])
         terminals.byPid[1] = "Terminal"
-        model.show([conversation("b", pid: 1)], current: nil)
+        model.show([conversation("b", pid: 1)])
         await until { model.rows.first?.terminal == "Terminal" }
         #expect(model.rows.map(\.terminal) == ["Terminal"])
     }
@@ -646,28 +667,15 @@ struct AgentsSettingsModelTests {
             AgentConversation(id: "b", agent: "claude", pid: 2, cwd: "/src/other/keyscribe", handle: "b", state: .idle, connectorLive: true),
             AgentConversation(id: "c", agent: "claude", pid: 3, cwd: "/src/chatplay", handle: "c", state: .idle, connectorLive: true),
             AgentConversation(id: "d", agent: "claude", pid: 4, cwd: home, handle: "d", state: .idle, connectorLive: true),
-        ], current: nil)
+        ])
         #expect(model.rows.map(\.folder) == ["/src/rsperko/keyscribe", "/src/other/keyscribe", "/src/chatplay", home])
-    }
-
-    @Test func aChosenConversationThatIsGoneKeepsItsNameAndSaysItEnded() {
-        let (model, _, _) = makeModel()
-        model.show(
-            [AgentConversation(id: "b", agent: "claude", pid: 2, cwd: "/src/chatplay", handle: "chatplay", state: .idle, connectorLive: true)],
-            current: "a", currentName: "backend")
-        #expect(model.destination.title == "backend")
-        guard case .unavailable(_, let problem) = model.destination else {
-            Issue.record("expected an unavailable destination")
-            return
-        }
-        #expect(problem.hasPrefix("backend has ended."))
     }
 
     @Test func theRenamePreviewAsksTheSameCheckTheRenameUses() {
         let (model, _, _) = makeModel()
         model.show([
             .init(id: "a", agent: "claude", pid: 1, cwd: "/src/api", handle: "backend", state: .idle, connectorLive: true),
-        ], current: "a")
+        ])
         var asked: [String] = []
         model.renameCheck = { id, name in
             asked.append("\(id) \(name)")
@@ -694,7 +702,7 @@ struct AgentsSettingsModelTests {
         model.show([
             .init(id: "a", agent: "claude", pid: 1, cwd: "/src/api", handle: "backend", state: .idle, connectorLive: true),
             .init(id: "b", agent: "claude", pid: 2, cwd: "/src/web", handle: "frontend", state: .idle, connectorLive: true),
-        ], current: nil)
+        ])
         #expect(model.renameIssue("a", name: "Back End") == nil)
         #expect(model.renameIssue("b", name: "Back End") != nil)
         #expect(model.renameIssue("a", name: "session two") != nil)
@@ -706,7 +714,7 @@ struct AgentsSettingsModelTests {
         model.show([
             .init(id: "a", agent: "claude", pid: 1, cwd: "/src/api", handle: "backend", state: .idle, connectorLive: true),
             .init(id: "b", agent: "claude", pid: 2, cwd: "/src/web", handle: "fix authentication tests", state: .idle, connectorLive: true),
-        ], current: nil)
+        ])
         #expect(model.renameExample("a", name: "Back End") == "Say \u{201C}back end, run the unit tests.\u{201D}")
         #expect(model.renameExample("a", name: "fix authentication retries")
             == "Say \u{201C}fix authentication retries, run the unit tests.\u{201D}")
@@ -743,16 +751,16 @@ struct AgentsSettingsModelTests {
         let (model, _, _) = makeModel()
         var reloads = 0
         model.onReloadNames = { reloads += 1 }
-        model.show([], current: nil, namesProblem: "names.json could not be read.")
+        model.show([], namesProblem: "names.json could not be read.")
         #expect(model.namesProblem == "names.json could not be read.")
         model.reloadNames()
         #expect(reloads == 1)
-        model.show([], current: nil)
+        model.show([])
         #expect(model.namesProblem == nil)
-        model.show([], current: nil, namesNotSaved: "names.json could not be written.")
+        model.show([], namesNotSaved: "names.json could not be written.")
         #expect(model.namesNotSaved == "names.json could not be written.")
         #expect(model.namesProblem == nil)
-        model.show([], current: nil)
+        model.show([])
         #expect(model.namesNotSaved == nil)
     }
 
@@ -778,7 +786,7 @@ struct AgentsSettingsModelTests {
             .init(id: "b", agent: "claude", pid: 2, cwd: "/src/home", handle: "cos pi", state: .idle, connectorLive: true,
                   nameSource: .place, placeName: cos, placeSurface: "herdr"),
             .init(id: "c", agent: "claude", pid: 3, cwd: "/src/api", handle: "api", state: .idle, connectorLive: true, placeSurface: "herdr"),
-        ], current: nil)
+        ])
         await until { model.rows.filter { $0.id != "c" }.allSatisfy { $0.terminal != nil } }
         let rows = Dictionary(uniqueKeysWithValues: model.rows.map { ($0.id, $0) })
         #expect(rows["a"]?.location == "Ghostty \u{00B7} herdr workspace Cos")
@@ -790,7 +798,7 @@ struct AgentsSettingsModelTests {
     @Test func theRenameSheetExplainsWhereTheNameComesFromAndTheDefaultBehindAnOverride() {
         let (model, _, _) = makeModel()
         let row = AgentsSettingsModel.Row(
-            id: "a", number: 1, name: "cos claude", folder: "/src/home", state: "Ready", connected: true, current: false, agent: "claude")
+            id: "a", name: "cos claude", folder: "/src/home", state: "Ready", connected: true, agent: "claude")
         var renamed = row
         renamed.renamed = true
         model.defaultName = { _ in
@@ -806,7 +814,7 @@ struct AgentsSettingsModelTests {
     @Test func theRenameSheetListsTheOtherNamesThatReachTheConversation() {
         let (model, _, _) = makeModel()
         var row = AgentsSettingsModel.Row(
-            id: "a", number: 1, name: "marvin", folder: "/src/home", state: "Ready", connected: true, current: false, agent: "pi")
+            id: "a", name: "marvin", folder: "/src/home", state: "Ready", connected: true, agent: "pi")
         row.otherNames = ["cos", "refactor auth"]
         model.defaultName = { _ in
             AgentDirectory.DefaultName(
@@ -827,7 +835,7 @@ struct AgentsSettingsModelTests {
     ])
     func theRenameSheetSaysWhatSetsTheNameItCameFrom(level: AgentPlace.Level, term: String?, surface: String, note: String) {
         var row = AgentsSettingsModel.Row(
-            id: "a", number: 1, name: "marvin", folder: "/src/home", state: "Ready", connected: true, current: false, agent: "pi")
+            id: "a", name: "marvin", folder: "/src/home", state: "Ready", connected: true, agent: "pi")
         row.surface = surface
         row.place = AgentPlaceName(surface: surface, level: level, label: "marvin", term: term)
         #expect(AgentsSettingsModel.placeNote(row) == note)
@@ -842,7 +850,7 @@ struct AgentsSettingsModelTests {
 
     @Test func aConversationWhosePlaceStoppedReadingSaysSoAndKeepsItsNames() {
         var row = AgentsSettingsModel.Row(
-            id: "a", number: 1, name: "marvin", folder: "/src/home", state: "Ready", connected: true, current: false, agent: "pi")
+            id: "a", name: "marvin", folder: "/src/home", state: "Ready", connected: true, agent: "pi")
         #expect(AgentsSettingsModel.placeTrouble(row) == nil)
         row.surface = "herdr"
         let since = Date(timeIntervalSince1970: 1_800_000_000)

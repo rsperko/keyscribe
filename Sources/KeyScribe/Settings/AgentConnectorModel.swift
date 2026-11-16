@@ -21,7 +21,6 @@ struct AgentConnectorCopy {
     var toolTooOldLabel = ""
     var toolTooOldAdvice: (String) -> String = { _ in "" }
     var setupTitle = "Connector"
-    var describesUse = true
     var purpose: String?
     var installNote: String?
     var undoOnUninstallLabel = ""
@@ -49,6 +48,7 @@ protocol AgentConnector: AnyObject {
     func hasFiles(in target: ConnectorTarget) -> Bool
     func manualUninstall(for target: ConnectorTarget) -> [String]
     func recognizes(folder: URL) -> Bool
+    var allowsOtherFolders: Bool { get }
     func locateTool() -> String?
     func check(tool: String, target: ConnectorTarget) async -> AgentConnectorModel.State
     func install(tool: String, target: ConnectorTarget) async throws
@@ -59,6 +59,7 @@ protocol AgentConnector: AnyObject {
 }
 
 extension AgentConnector {
+    var allowsOtherFolders: Bool { true }
     func undoesOnUninstall(in target: ConnectorTarget) -> Bool { false }
     func uninstall(tool: String, target: ConnectorTarget, undoing: Bool) async throws { try await uninstall(tool: tool, target: target) }
 }
@@ -339,6 +340,17 @@ final class AgentConnectorModel: ObservableObject, Identifiable {
         if !chosen.contains(path) { chosen.append(path) }
         rebuild()
         return setup(for: path)
+    }
+
+    func canForget(_ setup: ConnectorSetupModel) -> Bool {
+        chosen.contains(setup.folder.path) && !discovered.contains(setup.folder.path) && !setup.isDefault
+            && registry.setups?.setup(agent: kind.id, folder: setup.folder.path) == nil && setup.operation == nil
+    }
+
+    func forget(_ setup: ConnectorSetupModel) {
+        guard canForget(setup) else { return }
+        chosen.removeAll { $0 == setup.folder.path }
+        rebuild()
     }
 
     func maintain() async {

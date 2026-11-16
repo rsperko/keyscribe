@@ -1,4 +1,5 @@
 import Carbon.HIToolbox
+import CoreGraphics
 import Foundation
 import KeyScribeKit
 import os
@@ -28,6 +29,21 @@ final class CarbonHotKeys: ChordRegistering {
     private var handler: EventHandlerRef?
     private var refs: [EventHotKeyRef?] = []
     private var byId: [UInt32: Registration] = [:]
+    private static var registered: [ObjectIdentifier: [(keyCode: Int, modifiers: ModifierSet)]] = [:]
+
+    static func consumes(keyCode: Int, flags: CGEventFlags) -> Bool {
+        let held = modifiers(of: flags)
+        return registered.values.contains { $0.contains { $0.keyCode == keyCode && $0.modifiers == held } }
+    }
+
+    nonisolated static func modifiers(of flags: CGEventFlags) -> ModifierSet {
+        var held: ModifierSet = []
+        if flags.contains(.maskCommand) { held.insert(.command) }
+        if flags.contains(.maskAlternate) { held.insert(.option) }
+        if flags.contains(.maskControl) { held.insert(.control) }
+        if flags.contains(.maskShift) { held.insert(.shift) }
+        return held
+    }
     private let signature: OSType = 0x4B59_5343  // 'KYSC'
 
     @discardableResult
@@ -50,6 +66,7 @@ final class CarbonHotKeys: ChordRegistering {
             if status == noErr, ref != nil {
                 refs.append(ref)
                 byId[numericId] = reg
+                Self.registered[ObjectIdentifier(self), default: []].append((reg.keyCode, reg.modifiers))
             } else {
                 allRegistered = false
                 // Only an exclusive-lock collision returns an error here; a system-reserved combo
@@ -77,6 +94,7 @@ final class CarbonHotKeys: ChordRegistering {
         for ref in refs where ref != nil { UnregisterEventHotKey(ref) }
         refs.removeAll()
         byId.removeAll()
+        Self.registered[ObjectIdentifier(self)] = nil
     }
 
     private func installHandlerIfNeeded() {

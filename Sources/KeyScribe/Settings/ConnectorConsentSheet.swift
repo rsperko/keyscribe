@@ -23,7 +23,7 @@ struct ConnectorConsentSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(model.host(of: request.connector).map { "Connect \($0.displayName)?" } ?? "Connect conversations using this \(agent) setup?").font(.title2.bold())
+            Text(model.host(of: request.connector).map { "Connect \($0.displayName)?" } ?? "Connect \(agent) conversations using this folder?").font(.title2.bold())
             ScrollView {
                 details
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -82,11 +82,11 @@ struct ConnectorConsentSheet: View {
                 Text("\(ListFormatter.localizedString(byJoining: excluded)) \(excluded.count == 1 ? "stays" : "stay") disconnected.")
                     .font(.callout).foregroundStyle(.secondary)
             }
-            Text("Other setups are unaffected. \(Branding.appName) keeps this connector up to date when it updates; open conversations keep the version they loaded until you reload them.")
+            Text("Other configuration folders are unaffected. \(Branding.appName) keeps this connector up to date when it updates; open conversations keep the version they loaded until you reload them.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Installs in").font(.caption).foregroundStyle(.secondary)
-                CopyableValue(request.setup.display, value: request.setup.folder.path, what: "folder", of: "this setup")
+                CopyableValue(request.setup.display, value: request.setup.folder.path, what: "configuration folder", of: "this connection")
                     .font(.caption)
                     .accessibilityIdentifier(AccessibilityID.Mode.Agents.consentFolder)
             }
@@ -101,6 +101,6 @@ struct ConnectorConsentSheet: View {
         let rest = affected.count - shown.count
         let names = shown + (rest > 0 ? ["\(rest) more"] : [])
         let current = names.isEmpty ? "Future conversations" : "\(ListFormatter.localizedString(byJoining: names + ["future conversations"]))"
-        return "\(current) using this setup will connect to \(Branding.appName). You can disconnect individual conversations later."
+        return "\(current) using this folder will connect to \(Branding.appName). You can disconnect individual conversations later."
     }
 }

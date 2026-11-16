@@ -10,47 +10,48 @@ private let roster = [conversation("s-backend", "backend"), conversation("s-docs
 
 private func facts(
     _ address: AgentAddress, _ resolution: AgentRecipient.Resolution,
-    frozen: AgentRecipient.Frozen? = AgentRecipient.Frozen(id: "s-docs", source: .current)
+    focused: String? = "s-docs"
 ) -> [String: String] {
-    let list = AgentHistoryFacts.facts(address: address, resolution: resolution, frozen: frozen, conversations: roster)
+    let list = AgentHistoryFacts.facts(address: address, resolution: resolution, focused: focused, conversations: roster)
     return Dictionary(list.map { ($0.label, $0.value) }, uniquingKeysWith: { first, _ in first })
 }
 
 struct AgentHistoryFactsTests {
-    @Test func goingBackRecordsTheCommandAndTheRecipientItLeavesInPlace() {
-        let list = AgentHistoryFacts.goBack(frozen: AgentRecipient.Frozen(id: "s-docs", source: .current), conversations: roster)
-        #expect(list.map(\.label) == ["Command", "Default recipient"])
+    @Test func goingBackRecordsTheCommandAndTheConversationInFront() {
+        let list = AgentHistoryFacts.goBack(focused: "s-docs", conversations: roster)
+        #expect(list.map(\.label) == ["Command", "Conversation in front"])
         #expect(list.map(\.value) == ["Go back", "docs"])
-        #expect(AgentHistoryFacts.goBack(frozen: nil, conversations: roster).map(\.label) == ["Command"])
+        #expect(AgentHistoryFacts.goBack(focused: nil, conversations: roster).map(\.label) == ["Command"])
     }
 
-    @Test func repeatingASummaryRecordsTheCommandAndTheRecipientItLeavesInPlace() {
-        let list = AgentHistoryFacts.repeatSummary(frozen: AgentRecipient.Frozen(id: "s-docs", source: .current), conversations: roster)
+    @Test func repeatingASummaryRecordsTheCommandAndTheConversationInFront() {
+        let list = AgentHistoryFacts.repeatSummary(focused: "s-docs", conversations: roster)
         #expect(list.map(\.value) == ["Repeat that", "docs"])
     }
 
     @Test func aRenameRecordsTheConversationItsNewNameAndHowItWasChosen() {
         let list = AgentHistoryFacts.rename(
-            frozen: AgentRecipient.Frozen(id: "s-docs", source: .front), to: "auth refactor", conversations: roster)
+            focused: "s-docs", to: "auth refactor", conversations: roster)
         #expect(list.map(\.label) == ["Command", "Conversation", "New name", "Chosen by"])
         #expect(list.map(\.value) == [
             "Rename", "docs \u{00B7} claude \u{00B7} s-docs", "auth refactor", "The conversation in front",
         ])
-        #expect(AgentHistoryFacts.rename(frozen: nil, to: "x", conversations: roster).map(\.value)
+        #expect(AgentHistoryFacts.rename(focused: nil, to: "x", conversations: roster).map(\.value)
             == ["Rename", "None resolved", "x"])
-        #expect(AgentHistoryFacts.rename(frozen: nil, to: nil, conversations: roster).map(\.label) == ["Command", "Conversation"])
+        #expect(AgentHistoryFacts.rename(focused: nil, to: nil, conversations: roster).map(\.label) == ["Command", "Conversation"])
     }
 
     @Test func aStatusCheckRecordsTheConversationAndHowItWasChosenButNoAnswer() {
         let named = AgentHistoryFacts.status(
-            address: .name("backend", body: ""), resolution: .select(id: "s-backend"), frozen: nil, conversations: roster)
+            address: .name("backend", body: ""), resolution: .deliver(id: "s-backend", body: "", source: .spoken), focused: nil,
+            conversations: roster)
         #expect(named.map(\.label) == ["Command", "Spoken address", "Conversation", "Chosen by"])
         #expect(named.map(\.value) == ["Check status", "backend", "backend \u{00B7} claude \u{00B7} s-backend", "Its name"])
-        let current = AgentRecipient.Frozen(id: "s-docs", source: .current)
         let unnamed = AgentHistoryFacts.status(
-            address: nil, resolution: .deliver(id: "s-docs", body: "", source: .current), frozen: current, conversations: roster)
+            address: nil, resolution: .deliver(id: "s-docs", body: "", source: .front), focused: "s-docs", conversations: roster)
         #expect(unnamed.first?.value == "Check status")
-        #expect(unnamed.first { $0.label == "Chosen by" }?.value == "The chosen conversation")
+        #expect(unnamed.first { $0.label == "Chosen by" }?.value == "The conversation in front")
+        #expect(!unnamed.contains { $0.label == "Conversation in front" })
         #expect(AgentHistoryFacts.allConversations().map(\.value) == ["Check status", "All conversations"])
     }
 
@@ -62,30 +63,20 @@ struct AgentHistoryFactsTests {
         #expect(recorded["Chosen by"] == "Its name")
     }
 
-    @Test func aMessageToTheCurrentConversationNamesTheDefaultAndHowItWasChosen() {
-        let recorded = facts(.none(body: "run the tests"), .deliver(id: "s-docs", body: "run the tests", source: .current))
+    @Test func aMessageToTheConversationInFrontNamesItAndHowItWasChosen() {
+        let recorded = facts(.none(body: "run the tests"), .deliver(id: "s-docs", body: "run the tests", source: .front))
         #expect(recorded["Command"] == "Send message")
         #expect(recorded["Spoken address"] == nil)
         #expect(recorded["Conversation"] == "docs \u{00B7} claude \u{00B7} s-docs")
-        #expect(recorded["Chosen by"] == "The chosen conversation")
-        #expect(recorded["Default recipient"] == "docs")
-    }
-
-    @Test func aFixedConversationRecordsThatTheModeChoseIt() {
-        let recorded = facts(.none(body: "x"), .deliver(id: "s-docs", body: "x", source: .fixed))
-        #expect(recorded["Chosen by"] == "The mode\u{2019}s fixed conversation")
-    }
-
-    @Test func aMessageToTheConversationInFrontRecordsThatItWasInFront() {
-        let recorded = facts(.none(body: "x"), .deliver(id: "s-docs", body: "x", source: .front))
         #expect(recorded["Chosen by"] == "The conversation in front")
+        #expect(recorded["Conversation in front"] == "docs")
     }
 
-    @Test func choosingARecipientBySessionNumberIsNotAMessage() {
-        let recorded = facts(.row(2, body: ""), .select(id: "s-docs"))
-        #expect(recorded["Command"] == "Choose recipient")
+    @Test func aNumberAloneIsHeldAndRecordedAsAMessageThatResolvedNothing() {
+        let recorded = facts(.row(2, body: ""), .ask(body: "", reason: .nameOnly("conversation 2")))
+        #expect(recorded["Command"] == "Send message")
         #expect(recorded["Spoken address"] == "Conversation 2")
-        #expect(recorded["Chosen by"] == "Its conversation number")
+        #expect(recorded["Conversation"] == "None resolved")
     }
 
     @Test func anUnresolvedAddressKeepsWhatWasSaidAndSaysNoConversationWasResolved() {
@@ -94,7 +85,7 @@ struct AgentHistoryFactsTests {
         #expect(recorded["Spoken address"] == "frontend")
         #expect(recorded["Conversation"] == "None resolved")
         #expect(recorded["Chosen by"] == nil)
-        #expect(recorded["Default recipient"] == "docs")
+        #expect(recorded["Conversation in front"] == "docs")
     }
 
     @Test func aMisheardOpenStaysAnOpen() {
@@ -111,12 +102,12 @@ struct AgentHistoryFactsTests {
         #expect(recorded["Candidates"] == "backend, docs")
     }
 
-    @Test func noDefaultRecipientIsRecordedWhenNoneWasFrozen() {
+    @Test func noConversationInFrontIsRecordedWhenNoneWasFocused() {
         let list = AgentHistoryFacts.facts(
             address: .name("backend", body: "x"), resolution: .deliver(id: "s-backend", body: "x", source: .spoken),
-            frozen: nil, conversations: roster)
+            focused: nil, conversations: roster)
         #expect(list.contains(.init(label: "Conversation", value: "backend \u{00B7} claude \u{00B7} s-backend")))
-        #expect(!list.contains { $0.label == "Default recipient" })
+        #expect(!list.contains { $0.label == "Conversation in front" })
     }
 }
 

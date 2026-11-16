@@ -99,15 +99,14 @@ the agent in Settings > Modes > Agent). [Name] is a conversation name shown ther
 
 | Say | Works in | What happens |
 | --- | --- | --- |
-| `tell [name] [instruction]`<br>Example: `tell backend run the tests` | Connected conversation | Sends it there and makes it the recipient, so later instructions go there too, whatever is in front. The recording panel shows where a take goes. |
+| `[instruction]`<br>Example: `run the tests` | Conversation in front | Sends it to the conversation in front of you when you started speaking. With none in front, nothing is sent. The recording panel shows where a take goes. |
+| `tell [name] [instruction]`<br>Example: `tell backend run the tests` | Connected conversation | Sends only this instruction there, whatever is in front. The next one without a name goes to the conversation in front again. |
 | `ask [name] [question]` | Connected conversation | Sends the question to the agent. |
-| `select [name]`<br>Also: `choose [name]` | Known conversation | Makes it the recipient, as choosing it under Send to does. Sends nothing; windows stay put. |
-| `follow the front`<br>Also: `follow the conversation in front` | Agent mode | Instructions without a name go to the conversation in front again, as choosing **Conversation in front** under Send to does. Sends nothing. |
-| `open [name]` | Known conversation | Brings its terminal forward and makes it the recipient. Sends nothing. |
+| `open [name]` | Known conversation | Brings its terminal forward. Sends nothing. While it stays in front, instructions without a name go there. |
 | `tell conversation two [instruction]` | While recording | Uses number 2 from the list on screen. Saying "session two" works too. |
-| `check on [name]` | Known conversation | Reports its status. Sends nothing; the recipient stays the same. |
+| `check on [name]` | Known conversation | Reports its status. Sends nothing. |
 | `check on all conversations` | Agent mode | Names the conversations waiting for you. Sends nothing. |
-| `rename this conversation to [name]` | The current conversation | Renames it. Say only the rename. |
+| `rename this conversation to [name]` | Conversation in front | Renames it. Say only the rename. |
 | `repeat that` | Reply updates on | Replays the last spoken reply and names its conversation. |
 | `that sounded wrong` | Reply updates on | Keeps the reply you just heard, with its audio and a report, alongside its History entry. |
 | `cancel`<br>Also: `never mind` | Said alone | Sends nothing. To send the word, say `tell [name] cancel`. |
@@ -115,9 +114,8 @@ the agent in Settings > Modes > Agent). [Name] is a conversation name shown ther
 
 ### Practice without sending anything
 
-These send nothing: “select backend” shows **Recipient: backend**; “open backend” also brings its terminal
-forward; “check on backend” answers locally; “backend” alone tells you to say “select backend”;
-“cancel” shows **Cancelled. Nothing sent.** Any question you ask, such as “what are you waiting for?”, is a
+These send nothing: “open backend” brings its terminal forward; “check on backend” answers locally;
+“backend” alone asks for the instruction to go with it; “cancel” shows **Cancelled. Nothing sent.** Any question you ask, such as “what are you waiting for?”, is a
 message. “Tell” and “ask” always send, so check the **To …** line on
 the recording panel before you stop recording.
 
@@ -154,8 +152,8 @@ These work too. The phrases on the earlier pages are the ones worth remembering.
 | Say | Works in | What happens |
 | --- | --- | --- |
 | `[name], [instruction]` | Connected conversation | Same as `tell [name] [instruction]`. |
-| `select conversation two`<br>Also: `open session two`, `check on conversation two` | While recording | Picks, opens, or checks by number. |
-| `check on this conversation` | The current conversation | Checks the recipient. |
+| `open conversation two`<br>Also: `open session two`, `check on conversation two` | While recording | Opens or checks by number. |
+| `check on this conversation` | Conversation in front | Checks the conversation in front. |
 | `who needs me?` | Agent mode | Same as `check on all conversations`. |
-| `rename this session to [name]`<br>Also: `rename conversation to [name]`, `name this conversation [name]`, `call this conversation [name]` | The current conversation | Same as `rename this conversation to`. |
+| `rename this session to [name]`<br>Also: `rename conversation to [name]`, `name this conversation [name]`, `call this conversation [name]` | Conversation in front | Same as `rename this conversation to`. |
 | `switch to [name]`<br>Also: `go to [name]` | Known conversation | Same as `open [name]`. |

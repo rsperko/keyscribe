@@ -502,7 +502,7 @@ struct HUDStateTests {
         let conversations = (1...20).map {
             AgentConversation(id: "c\($0)", agent: "claude", pid: $0, cwd: "/src/p\($0)", handle: "p\($0)", state: .idle, connectorLive: true)
         }
-        let roster = AgentRoster(frozen: conversations, live: conversations, recipient: nil)
+        let roster = AgentRoster(frozen: conversations, live: conversations, focused: nil)
         let screens = FakeDisplays([1: CGRect(x: 0, y: 0, width: 800, height: 400), 2: CGRect(x: 900, y: 0, width: 800, height: 1400)])
         let hud = HUDController(
             defaults: UserDefaults(suiteName: "hud-\(UUID().uuidString)")!, escape: FakeChordRegistrar(), displays: screens.displays)

@@ -43,12 +43,19 @@ review keeps finding the same few of them.
   shortcut follows `run` (`VoiceCommandResolver.route`). A saved name said alone acts on nothing and answers
   with the phrase to say, which is what keeps a saved name from ever taking over a built-in command or
   ordinary speech, so never reintroduce a bare-name match.
-- **An agent recipient changes only on an explicit verb.** `select`/`choose` with an address selects
-  (`AgentAddress.select`), `open` brings forward, and `tell`/`ask` or a name with a message sends; an address
-  alone, or followed only by `please`, holds with the select hint and leaves the recipient as it was. `ask`
-  always sends, so a question put to the agent never becomes a local status answer; an unknown name after
-  `ask` followed by a question holds rather than falling to the current recipient, except after `the`, where
-  a word that names no conversation is message text by design.
+- **Nothing a take says outlives the take.** A name or number sends that one take there; without one, the take goes
+  to the conversation captured in front at its press (`AgentTake.captureFocus`), and with none it is held with
+  `AgentRecipient.nothingFocusedLine`. The front read lands after the press, so it counts only when no key press or
+  click happened between the press and the read (`UserInput`, by each event's own time; an event that
+  arrives late clears it through `AgentTake.noteUserInput` when its time falls in that window, and input after the
+  read never does). Unobservable input confirms nothing, and every path that needs the front (delivery, `check on`, rename) says
+  so with the Accessibility action (`AgentTake.unconfirmed`). The HUD, help and delivery
+  read the same captured value. A keyDown a Carbon hot key consumes (`CarbonHotKeys.consumes`) never reaches the
+  app, so it is not input. There is no remembered recipient: `open`, `check on`, and rename change
+  nothing about later takes, and `select`/`choose` are ordinary message words. An address alone, or followed only
+  by `please`, holds (`AskReason.nameOnly`). `ask` always sends, so a question put to the agent never becomes a
+  local status answer; an unknown name after `ask` followed by a question holds rather than falling to the
+  conversation in front, except after `the`, where a word that names no conversation is message text by design.
 - **A status check is an explicit command, never a question.** Only a whole take starting with `check on`
   (or exactly `who needs me`) checks status (`AgentStatusQuery.parse`); every question is a message, because
   questions are what people say to agents. Focus never decides whether a take is a check or a message. An
@@ -195,15 +202,15 @@ every rule above applies to it, with these sharpenings:
 - **A disconnected conversation keeps its name.** The directory names connected and disconnected
   conversations together (`AgentDirectory.update(excluded:)`), so disconnecting never renames a
   conversation and no other conversation takes its name.
-- **A spoken recipient never falls through to the current recipient.** An unknown one holds and asks,
+- **A spoken recipient never falls through to the conversation in front.** An unknown one holds and asks,
   like any unresolved target; one that fits several names goes to the first of them alphabetically
   (`AgentRecipient.resolve`), except a place label several conversations share
   (`AgentDirectory.sharedPlaceNames`), which asks. The shared labels are frozen with the take's names and
   passed to both the parse (`AgentRecipient.spokenNames`) and the resolve, for messages, open, and
   questions alike, so a bare label said without “tell” asks too instead of becoming a message. Names a
   place read produced during the recording are added for the same frozen conversations only
-  (`AgentRecipient.addingLate`): they never replace a frozen name, add a conversation, or change the frozen
-  recipient and rows. Whether a place label is qualified is decided per spoken label, across every place
+  (`AgentRecipient.addingLate`): they never replace a frozen name, add a conversation, or change the
+  conversation captured in front and the rows. Whether a place label is qualified is decided per spoken label, across every place
   that has it, not per container. A qualified place name stays once given (`cos claude` keeps its
   qualifier after its sibling closes, and across an app restart through its remembered name), because the
   user may have learned it and the words after a name are the message.
@@ -241,7 +248,7 @@ every rule above applies to it, with these sharpenings:
   waits for a read already running only when it is resolved, up to `AgentTake.placeNamesGrace`,
   and never for Go back or Repeat that, which name no conversation;
   if a read is still running then, or any listed conversation has no completed read yet (`placesUnread`), a
-  take that would go to the default recipient is held, because its leading words may be a name a first read
+  take that would go to the conversation in front is held, because its leading words may be a name a first read
   did not deliver (a new conversation whose pane already has a label). A read that completes, even unknown,
   never holds: a pane renamed during an outage and then addressed bare is the one case left, and the receipt names
   where the take went. Holding instead would block the main path for the whole outage, and some outages are
@@ -418,8 +425,8 @@ every rule above applies to it, with these sharpenings:
   (`AgentTransport.rehello`) so it says hello again and is filed afresh; a process placed in a conversation
   its host does not list yet has that host asked again at once, once per conversation. A second connector
   claiming a conversation another live connector instance holds is not filed. When an agent moves into its
-  host's conversation, and back out when the host stops listing it, its Disconnect, chosen name, current
-  choice and last use move with it (`AgentDirectory.carryChosenName`). The two ids stay linked for the rest
+  host's conversation, and back out when the host stops listing it, its Disconnect, chosen name and last use move with
+  it (`AgentDirectory.carryChosenName`). The two ids stay linked for the rest
   of the run, so Disconnect and reconnect on either one apply to both, in either direction. An agent's process environment, and its parent's, are
   read only for the host's keys, once per process, and only while a host that names keys is turned on.
 - **A reply is followed only into the turn that carries the dictated text.** A dictation delivered through a

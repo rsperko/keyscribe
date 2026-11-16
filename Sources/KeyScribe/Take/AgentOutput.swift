@@ -229,11 +229,10 @@ final class AgentOutput {
     }
 
     enum Retry {
-        case tell, ask, open, select
+        case tell, ask, open
 
         func phrase(_ name: String) -> String {
             switch self {
-            case .select: "select \(name)"
             case .tell: "tell \(name), \u{2026}"
             case .ask: "ask \(name), \u{2026}"
             case .open: "open \(name)"
@@ -242,14 +241,12 @@ final class AgentOutput {
 
         static func matching(_ text: String, _ address: AgentAddress) -> Retry {
             if case .open = address { return .open }
-            if case .select = address { return .select }
             return AgentAddress.asks(text) ? .ask : .tell
         }
     }
 
-    static func openAskLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:], current: String? = nil) -> String {
-        if case .sayToSelect(let name) = reason { return selectHint(name) }
-        let advice = [askAdvice(reason), retryHint(reason, retry: retry, names: names, current: current)].compactMap { $0 }
+    static func openAskLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:], focused: String? = nil) -> String {
+        let advice = [askAdvice(reason), retryHint(reason, retry: retry, names: names, focused: focused)].compactMap { $0 }
         guard !advice.isEmpty else {
             let problem = askProblem(reason)
             return problem.prefix(1).uppercased() + problem.dropFirst()
@@ -257,9 +254,8 @@ final class AgentOutput {
         return ([sentence(askProblem(reason))] + advice).joined(separator: " ")
     }
 
-    static func askLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:], current: String? = nil) -> String {
-        if case .sayToSelect(let name) = reason { return selectHint(name) }
-        let advice = [askAdvice(reason), retryHint(reason, retry: retry, names: names, current: current)].compactMap { $0 }
+    static func askLine(_ reason: AgentRecipient.AskReason, retry: Retry? = nil, names: [String: String] = [:], focused: String? = nil) -> String {
+        let advice = [askAdvice(reason), retryHint(reason, retry: retry, names: names, focused: focused)].compactMap { $0 }
         return ([sentence(askProblem(reason)), nothingSent] + advice).joined(separator: " ")
     }
 
@@ -271,13 +267,11 @@ final class AgentOutput {
     private static func askAdvice(_ reason: AgentRecipient.AskReason) -> String? {
         switch reason {
         case .noBreak(let name): "Say \u{201C}tell \(name),\u{201D} with a pause, or \u{201C}tell \(name) to \u{2026}\u{201D}."
+        case .nothingFocused: AgentRecipient.nothingFocusedAdvice
+        case .nameOnly(let name): "Say your instruction after \u{201C}\(name)\u{201D}, or \u{201C}open \(name)\u{201D} to bring it forward."
         case .sharedName(_, _, let surface?): "Name the panes in \(surface) to tell them apart."
         default: nil
         }
-    }
-
-    private static func selectHint(_ name: String) -> String {
-        "Say \u{201C}select \(name)\u{201D} to choose it. Nothing sent."
     }
 
     static let nothingSent = "Nothing sent."
@@ -301,15 +295,15 @@ final class AgentOutput {
         return "\(either(shown, joining: "and")) \(one ? "is" : "are") running but not connected. Agent settings shows how to connect \(one ? "it" : "them")"
     }
 
-    static func example(names: [String: String], current: String?) -> String? {
+    static func example(names: [String: String], focused: String?) -> String? {
         let ordered = names.keys.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
-        return ordered.first { names[$0] == current } ?? ordered.first
+        return ordered.first { names[$0] == focused } ?? ordered.first
     }
 
-    private static func retryHint(_ reason: AgentRecipient.AskReason, retry: Retry?, names: [String: String], current: String?) -> String? {
+    private static func retryHint(_ reason: AgentRecipient.AskReason, retry: Retry?, names: [String: String], focused: String?) -> String? {
         guard let retry else { return nil }
         let name: String? = switch reason {
-        case .unknownName: example(names: names, current: current)
+        case .unknownName: example(names: names, focused: focused)
         case .shownOn(_, let name, _): names[name] == nil ? nil : name
         default: nil
         }
@@ -318,9 +312,9 @@ final class AgentOutput {
 
     private static func askProblem(_ reason: AgentRecipient.AskReason) -> String {
         switch reason {
-        case .noRecipient: "start with a conversation\u{2019}s name"
+        case .nothingFocused: AgentRecipient.nothingFocused
         case .noSuchRow(let row): "there is no conversation \(row)"
-        case .sayToSelect(let name): "say \u{201C}select \(name)\u{201D} to choose it"
+        case .nameOnly(let name): "only a name was heard: \u{201C}\(name)\u{201D}"
         case .unknownName(let name): "no conversation named \u{201C}\(name)\u{201D}"
         case .shownOn(let word, let name, let seenAs): "\u{201C}\(word)\u{201D} is the \(seenAs) of \u{201C}\(name)\u{201D}"
         case .soundsLike(let spoken, let name): "\u{201C}\(spoken)\u{201D} sounded like \u{201C}\(name)\u{201D}"

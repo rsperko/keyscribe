@@ -95,7 +95,6 @@ public enum AgentAddress: Equatable, Sendable {
     case nearMiss(spoken: String, name: String, body: String, unaddressed: String?)
     case none(body: String)
     indirect case open(AgentAddress)
-    indirect case select(AgentAddress)
     indirect case unbroken(AgentAddress, unaddressed: String)
 
     private static let notAnAddress: Set<String> = [
@@ -113,7 +112,6 @@ public enum AgentAddress: Equatable, Sendable {
     ]
     private static let soundsLikeARow: Set<String> = ["to", "too", "for"]
     static let rowNouns: Set<String> = ["session", "conversation"]
-    static let selectVerbs = ["select", "choose"]
     private static let minimumUntoldNearMiss = 6
 
     static func isRowWord(_ word: String) -> Bool {
@@ -137,7 +135,7 @@ public enum AgentAddress: Equatable, Sendable {
             if said.count > 1, said.last == "please" { said.removeLast() }
             if let verb = addressVerb(said) {
                 said.removeFirst(verb.count)
-            } else if let verb = (VoiceCommandGrammar.focusVerbs + selectVerbs).map({ $0.split(separator: " ").map(String.init) })
+            } else if let verb = VoiceCommandGrammar.focusVerbs.map({ $0.split(separator: " ").map(String.init) })
                 .first(where: { said.starts(with: $0) }) {
                 said.removeFirst(verb.count)
             } else {
@@ -149,8 +147,6 @@ public enum AgentAddress: Equatable, Sendable {
         switch parse(text, names: names + afterVerb, namesKnown: namesKnown, read: nil, explicit: false, assumeTold: false) {
         case .open(.name(let name, "")) where addressed(name, before: ""):
             return .open(.name(name, body: ""))
-        case .select(.name(let name, "")) where addressed(name, before: ""):
-            return .select(.name(name, body: ""))
         case .name(let name, let body) where told && addressed(name, before: body):
             return .name(name, body: body)
         default:
@@ -179,10 +175,6 @@ public enum AgentAddress: Equatable, Sendable {
         if !assumeTold, let opened = opening(
             tokens, bare: bare, in: text, names: names, namesKnown: namesKnown, read: read, verbs: VoiceCommandGrammar.focusVerbs) {
             return .open(opened)
-        }
-        if !assumeTold, let selected = opening(
-            tokens, bare: bare, in: text, names: names, namesKnown: namesKnown, read: read, verbs: selectVerbs) {
-            return .select(selected)
         }
 
         if !assumeTold, let verb = addressVerb(bare) {

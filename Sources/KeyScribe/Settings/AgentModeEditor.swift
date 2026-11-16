@@ -13,7 +13,6 @@ struct AgentModeEditor: View {
     let leavesOutOfHistory: Binding<Bool>
     @State private var advancedExpanded = false
     @State private var showingPhrases = false
-    @State private var revealingConnections = false
 
     private var rewriteNeedsService: Bool {
         guard let rewrite = mode.aiRewrite else { return false }
@@ -21,12 +20,6 @@ struct AgentModeEditor: View {
     }
 
     var body: some View {
-        ScrollViewReader { scroll in
-            editor(scroll)
-        }
-    }
-
-    private func editor(_ scroll: ScrollViewProxy) -> some View {
         Form {
             Section {
                 PaneDetailHeader(
@@ -43,11 +36,11 @@ struct AgentModeEditor: View {
             }
             ConnectorSetupsProblemSection(model: agents)
             if agents.hasAnyConnection {
-                destinationSection
+                routingSection
                 connectionsSection
             } else {
                 connectionsSection
-                destinationSection
+                routingSection
             }
             SpokenResultSection(model: agents, connections: connections)
             Section {
@@ -83,49 +76,23 @@ struct AgentModeEditor: View {
         .formStyle(.grouped)
         .padding(16)
         .task { await agents.refresh() }
-        .sheet(isPresented: $agents.showingChooser, onDismiss: {
-            if revealingConnections {
-                revealingConnections = false
-                scroll.scrollTo(AccessibilityID.Mode.Agents.openConnections, anchor: .top)
-            }
-        }) {
-            AgentDestinationChooser(model: agents, onOpenConnections: {
-                revealingConnections = true
-                agents.showingChooser = false
-            }) { agents.showingChooser = false }
+        .sheet(isPresented: $agents.showingConversations) {
+            AgentConversationList(model: agents) { agents.showingConversations = false }
         }
         .sheet(isPresented: $showingPhrases) {
             AgentPhrasesReference(model: agents) { showingPhrases = false }
         }
-        .background { if !agents.showingChooser { ConnectorConsentPresenter(model: agents) } }
+        .background { if !agents.showingConversations { ConnectorConsentPresenter(model: agents) } }
     }
 
-    private var destinationSection: some View {
+    private var routingSection: some View {
         Section("Where instructions go") {
-            LabeledContent("Send to") {
-                HStack(spacing: 8) {
-                    if case .unavailable = agents.destination {
-                        Circle().fill(.red).frame(width: 7, height: 7).accessibilityHidden(true)
-                    }
-                    Text(agents.destination.title).lineLimit(1).truncationMode(.middle)
-                        .help(agents.destination.title)
-                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.destination)
-                    Button("Change\u{2026}") { agents.showingChooser = true }
-                        .fixedSize()
-                        .accessibilityLabel("Change where instructions go")
-                        .accessibilityHint("Nothing is sent.")
-                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.sendTo)
-                }
-            }
-            if case .unavailable(_, let problem) = agents.destination {
-                IssueText(problem).accessibilityIdentifier(AccessibilityID.Mode.Agents.sendToProblem)
-            }
-            AgentSavedChoicesProblems(model: agents)
             VStack(alignment: .leading, spacing: 4) {
-                if let example = agents.sendToExample {
-                    Text(example).accessibilityIdentifier(AccessibilityID.Mode.Agents.example)
+                Text(AgentsSettingsModel.routingNote)
+                if let example = agents.routingExample {
+                    Text(example).font(.caption).foregroundStyle(.secondary)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.example)
                 }
-                Text(AgentsSettingsModel.addressedNote).font(.caption).foregroundStyle(.secondary)
                 HStack {
                     Button("What can I say?") { showingPhrases = true }
                         .buttonStyle(.link)
@@ -146,8 +113,17 @@ struct AgentModeEditor: View {
             ForEach(agents.integrationIDs, id: \.self) { id in
                 AgentIntegrationRow(agents: agents, id: id)
             }
+            LabeledContent("Conversations") {
+                HStack(spacing: 8) {
+                    Text(agents.conversationsSummary).foregroundStyle(.secondary)
+                    Button("Manage\u{2026}") { agents.showingConversations = true }
+                        .fixedSize()
+                        .accessibilityLabel("Manage conversations")
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.manageConversations)
+                }
+            }
+            AgentSavedChoicesProblems(model: agents)
         }
-        .id(AccessibilityID.Mode.Agents.openConnections)
     }
 }
 

@@ -515,18 +515,17 @@ earlier voice is remembered.
 
 ### Which conversation does my instruction go to?
 
-An instruction that starts with a conversation's name goes there. Otherwise it goes where **Send to** points, in
-**Settings ▸ Modes ▸ Agent**. **Conversation in front** sends it to the conversation you are looking at when you
-start speaking. A named conversation keeps receiving until you choose another, even when a different one is in
-front. Choosing one in Settings, or saying “select” or “open” and its name, sends nothing. Starting an
-instruction with a conversation's name also makes it the one Send to points at. If the conversation in front
-can't be identified, or the chosen one has ended or is disconnected, nothing is sent and the panel says why,
-with **Choose Conversation…** to pick another; KeyScribe never picks another conversation instead. Say “follow
-the front” to go back to **Conversation in front**. Your choice is kept when KeyScribe restarts or updates.
+An instruction that starts with a conversation's name or number goes there, and only that instruction does.
+Otherwise it goes to the conversation you were looking at when you started speaking; switching to another one
+while you speak doesn't move it. If you switch before KeyScribe has confirmed which conversation was in front,
+nothing is sent, so a switch can never redirect it. If no conversation can be identified in front, nothing is sent and the panel
+says “No conversation focused. Open one, or name a conversation in your instruction.” KeyScribe never picks
+another conversation instead, and never remembers one for later. Saying “open” and a conversation's name brings
+it forward and sends nothing; while it stays in front, instructions without a name go there.
 
 ### How do I connect an agent conversation?
 
-In **Settings ▸ Modes ▸ Agent**, choose **Change…** beside **Send to**, find the conversation under **Not available**, and
+In **Settings ▸ Modes ▸ Agent**, choose **Manage…** beside **Conversations**, find the conversation under **Not available**, and
 choose **Connect…**, or choose **Connect…** beside that agent under **Connections**. KeyScribe finds the folder that conversation's agent loads its
 configuration from (for Pi usually `~/.pi/agent`, for Claude Code `~/.claude`, or whatever folder that
 agent was started with), and asks before installing there. Connecting a folder connects the conversations
@@ -535,18 +534,25 @@ own configuration is needed. A conversation that is already open picks the conne
 `/reload` in Pi or `/reload-plugins` in Claude Code, or restart it; its row says so until it connects. The
 Pi connector needs Pi 1.4.0 or later.
 
-If a conversation is not listed, open **Conversation missing?** below the list: **Try Again** looks again,
-and **Choose Setup Folder…** lets you pick the agent's folder yourself. KeyScribe can miss an agent started
+If a conversation is not listed, choose **Check Again** below that list. KeyScribe can miss an agent started
 through an unusual wrapper or hosted inside another program.
+
+### I run Claude Code or Pi with more than one configuration folder. How do I connect them all?
+
+Expand that agent under **Connections**. Its **Configuration folders** list shows the default folder, every
+folder its connector is installed in, and every folder an open conversation uses. If one is missing, choose
+**Add Folder…** and pick it; KeyScribe asks before installing there. Each folder is connected and removed on its
+own, and in **Manage…** each conversation shows which folder it uses. bb has one data folder, so it has no Add
+Folder.
 
 ### How do I choose which conversation hears me?
 
-In the Agent mode, say **“tell”** and the conversation's name with your instruction, such as “tell
-docs run the tests”; later dictation without a name goes there too. To choose a conversation without sending
-anything, say **“select docs”** (or “choose docs”); **“open docs”** also brings its terminal forward. While
-recording, conversations are numbered, so “tell conversation two …” and “select conversation two” work too,
-and “session” means the same as “conversation”. A name said on its own sends nothing and the panel tells you
-to say “select” first. If a message can't be delivered (an unknown or ambiguous name, a conversation that
+In the Agent mode, bring the conversation forward and speak, or say **“tell”** and the conversation's name
+with your instruction, such as “tell docs run the tests”. A name sends only that instruction there; the next
+one without a name goes to whichever conversation is in front then. **“Open docs”** brings its terminal
+forward and sends nothing. While recording, conversations are numbered, so “tell conversation two …” and
+“open conversation two” work too, and “session” means the same as “conversation”. A name said on its own sends
+nothing and the panel asks for the instruction to go with it. If a message can't be delivered (an unknown or ambiguous name, a conversation that
 isn't connected), nothing is sent and your words are kept: **Paste Last Dictation** pastes them.
 **“Cancel”** or **“never mind”** on its own sends nothing; to send that word to an
 agent, for example to answer its prompt, say “tell docs cancel”.
@@ -619,7 +625,7 @@ them off, KeyScribe leaves them off. When you uninstall the plugin, KeyScribe of
 but only if it was the one that turned them on.
 
 A Claude Code thread in bb whose connector is installed is listed once, as the bb thread, keeping the name,
-Disconnect and current choice you gave it before. When the connector is up to date, the reply to what you dictate there is read aloud as it is for a terminal, and so is
+and Disconnect you gave it before. When the connector is up to date, the reply to what you dictate there is read aloud as it is for a terminal, and so is
 work you ask it to have KeyScribe read aloud.
 
 Installing asks once, then installs a small KeyScribe plugin in bb with bb's own `bb plugin` command, so the
@@ -632,7 +638,7 @@ failing. If bb loses the plugin, for example after you remove it in bb, dictatio
 but replies aren't read aloud until you choose Reinstall. Uninstalling it in KeyScribe removes it from bb and
 disconnects bb: KeyScribe no longer lists bb's threads or sends to them. While KeyScribe isn't running the plugin waits quietly and picks up
 as soon as KeyScribe starts. Where a thread's agent has its own connector too, the plugin speaks for that
-thread. While Send to is **Conversation in front** and bb is the app in front, dictation without a name goes to
+thread. While bb is the app in front, dictation without a name goes to
 the thread its window shows, the
 focused pane of a split included, as it does for the terminal tab in front.
 
@@ -645,9 +651,8 @@ name, such as “rename this conversation to auth refactor”, as the whole dict
 “conversation”, and “rename conversation to auth refactor” works too). Only the conversation you are
 talking to is renamed; the panel shows the new name, and you say that name from then on. The name can be up
 to four words, and it can't be one another conversation already has. Say the name on its own: if anything
-follows it, nothing is renamed or sent, and the panel says why. You can also choose **Send to** in
-**Settings ▸ Modes ▸ Agent**, then **Rename…** from a conversation's **⋯** menu; that renames it without
-changing where instructions go. Renaming only changes the name you say to KeyScribe;
+follows it, nothing is renamed or sent, and the panel says why. You can also choose **Manage…** beside
+**Conversations** in **Settings ▸ Modes ▸ Agent**, then **Rename…** from a conversation's **⋯** menu. Renaming only changes the name you say to KeyScribe;
 the agent's own title for the conversation stays as it was. **Use Default Name** in the same sheet goes back
 to the name KeyScribe would choose on its own.
 
@@ -701,11 +706,11 @@ conversation connects until it can, and Settings says so.
 
 ### How do I remove a connector?
 
-Choose **Uninstall Connector…** in the block for that folder. Conversations using it disconnect at once, and
+Expand the agent under **Connections**, open the **⋯** menu beside that folder, and choose **Uninstall Connector…**. Conversations using it disconnect at once, and
 new ones do not connect; an instruction a conversation already received may still finish. Each open
 conversation unloads the connector the next time you run `/reload` (Pi) or `/reload-plugins` (Claude Code)
 in it, or restart it. Other folders stay connected, and your settings, history, conversation names and
-disconnections are kept. If the uninstall cannot finish, the block says what went wrong and offers **Finish
+disconnections are kept. The folder itself and its conversations are never deleted. If the uninstall cannot finish, the folder's row says what went wrong and offers **Finish
 Uninstalling**.
 
 If KeyScribe cannot find the agent's command, or you already deleted KeyScribe, Settings shows the exact

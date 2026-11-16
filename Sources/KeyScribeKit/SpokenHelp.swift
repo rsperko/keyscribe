@@ -32,10 +32,10 @@ public struct SpokenHelp: Equatable, Sendable {
     }
 
     public static func agent(
-        title: String, recipient: String?, example: String?, readsReplies: Bool, canRepeat: Bool, stages: [any PipelineStage]
+        title: String, focused: String?, example: String?, readsReplies: Bool, canRepeat: Bool, stages: [any PipelineStage]
     ) -> SpokenHelp {
         let unnamed = "\u{E000}"
-        let name = recipient ?? example
+        let name = focused ?? example
         let rows = agentPhrases(name: name ?? unnamed, readsReplies: readsReplies)
             .filter { !$0.said.contains(unnamed) }
             .map { row in
@@ -43,15 +43,14 @@ public struct SpokenHelp: Equatable, Sendable {
                 ? Row(said: row.said, effect: row.effect, note: "There\u{2019}s nothing to repeat yet") : row
         }
         return SpokenHelp(
-            title: title, status: recipient.map { "Recipient: \($0)" } ?? "No recipient selected",
+            title: title, status: focused.map { "Unnamed instructions go to \($0)" } ?? AgentRecipient.nothingFocusedLine,
             rows: rows + editRows(stages, forMessage: true) + ruleRows(stages))
     }
 
     public static func agentPhrases(name: String, readsReplies: Bool) -> [Row] {
         var rows = [
-            Row(said: "tell \(name) run the unit tests", effect: "Sends the instruction to \(name). Later instructions go there too."),
-            Row(said: "select \(name)", effect: "Makes \(name) the recipient. Nothing is sent."),
-            Row(said: "open \(name)", effect: "Brings \(name) to the front and makes it the recipient. Nothing is sent."),
+            Row(said: "tell \(name) run the unit tests", effect: "Sends this instruction to \(name)."),
+            Row(said: "open \(name)", effect: "Brings \(name) to the front. Nothing is sent."),
             Row(said: "check on \(name)", effect: "Reports \(name)\u{2019}s status. Nothing is sent."),
             Row(said: "check on all conversations", effect: "Names the conversations waiting for you. Nothing is sent."),
         ]
@@ -61,7 +60,6 @@ public struct SpokenHelp: Equatable, Sendable {
         }
         rows.append(Row(said: VoiceCommandGrammar.goBack, effect: "Returns to where you were."))
         rows.append(Row(said: VoiceCommandGrammar.cancel[0], effect: "Stops this recording. Nothing is sent."))
-        rows.append(Row(said: AgentRecipient.followFront[0], effect: "Instructions without a name go to the conversation in front again. Nothing is sent."))
         return rows
     }
 

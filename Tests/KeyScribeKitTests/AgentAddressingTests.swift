@@ -2,50 +2,40 @@ import Foundation
 import Testing
 @testable import KeyScribeKit
 
-struct AgentSelectTests {
+struct AgentAddressingTests {
     let names = ["keyscribe": "a", "keyscribe blue": "b", "backend": "c"]
 
     private func resolve(
-        _ text: String, frozen: AgentRecipient.Frozen? = .init(id: "a", source: .current), rows: [String] = ["a", "b", "c"]
+        _ text: String, focused: String? = "a", rows: [String] = ["a", "b", "c"]
     ) -> AgentRecipient.Resolution {
-        AgentRecipient.resolve(AgentAddress.parse(text, names: Array(names.keys)), frozen: frozen, rows: rows, names: names)
+        AgentRecipient.resolve(AgentAddress.parse(text, names: Array(names.keys)), focused: focused, rows: rows, names: names)
     }
 
     @Test(arguments: [
         "select backend", "Select backend.", "choose backend", "Choose the backend", "please select backend",
         "select backend please", "Select conversation three", "choose session 3", "Select conversation 3.",
     ])
-    func selectingARecipientSelectsItAndSendsNothing(text: String) {
-        let resolution = resolve(text)
-        #expect(resolution == .select(id: "c"))
-        #expect(resolution.makesCurrent == "c")
+    func selectOrChooseIsTextForTheConversationInFrontAndNeverPicksTheNamedOne(text: String) {
+        #expect(resolve(text) == .deliver(id: "a", body: text, source: .front))
     }
 
-    @Test func selectingAnUnknownRecipientHoldsAndSendsNothing() {
-        #expect(resolve("select frontend") == .ask(body: "", reason: .unknownName("frontend")))
-    }
-
-    @Test(arguments: ["select backend rows where active is true", "choose backend over frontend for this"])
-    func selectFollowedByMoreWordsIsAMessage(text: String) {
-        #expect(resolve(text) == .deliver(id: "a", body: text, source: .current))
+    @Test(arguments: ["select frontend", "select backend rows where active is true", "choose backend over frontend for this"])
+    func selectFollowedByAnythingIsAMessage(text: String) {
+        #expect(resolve(text) == .deliver(id: "a", body: text, source: .front))
     }
 
     @Test(arguments: [
         ("backend", "backend"), ("Backend.", "backend"), ("please backend", "backend"), ("tell backend", "backend"),
         ("session two", "conversation 2"), ("Conversation 2", "conversation 2"),
     ])
-    func aRecipientAloneHoldsWithASelectHint(text: String, said: String) {
-        let resolution = resolve(text)
-        #expect(resolution == .ask(body: "", reason: .sayToSelect(said)))
-        #expect(resolution.makesCurrent == nil)
+    func aConversationAloneHoldsAndSendsNothing(text: String, said: String) {
+        #expect(resolve(text) == .ask(body: "", reason: .nameOnly(said)))
     }
 
     @Test(arguments: [("backend please", "backend"), ("Backend, please.", "backend"), ("tell backend please", "backend"),
                       ("conversation two please", "conversation 2")])
-    func aRecipientWithOnlyPleaseHoldsWithASelectHint(text: String, said: String) {
-        let resolution = resolve(text)
-        #expect(resolution == .ask(body: "", reason: .sayToSelect(said)))
-        #expect(resolution.makesCurrent == nil)
+    func aConversationWithOnlyPleaseHoldsAndSendsNothing(text: String, said: String) {
+        #expect(resolve(text) == .ask(body: "", reason: .nameOnly(said)))
     }
 
     @Test(arguments: [
@@ -67,17 +57,17 @@ struct AgentSelectTests {
         "ask the frontend what it needs from me", "Ask yourself whether the cache is needed.",
     ])
     func askingWithoutAConversationIsStillAMessage(text: String) {
-        #expect(resolve(text) == .deliver(id: "a", body: text, source: .current))
+        #expect(resolve(text) == .deliver(id: "a", body: text, source: .front))
     }
 
-    @Test(arguments: ["open first", "select first", "switch to later", "choose again"])
+    @Test(arguments: ["open first", "switch to later"])
     func navigatingToAnAdverbThatNamesNothingHolds(text: String) {
         guard case .ask(_, .unknownName) = resolve(text) else {
             Issue.record("expected a hold for an unknown name, got \(resolve(text))"); return
         }
     }
 
-    @Test func aRecipientFollowedByAMessageStillSends() {
+    @Test func aConversationFollowedByAMessageStillSends() {
         #expect(resolve("backend, run the tests") == .deliver(id: "c", body: "run the tests", source: .spoken))
     }
 

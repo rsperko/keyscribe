@@ -11,7 +11,6 @@ enum HUDErrorAction: Equatable {
     case openSpeechModels
     case openAIService(String)
     case openAgents(String, reveal: [String] = [])
-    case chooseAgentRecipient(String)
 
     var buttonTitle: String {
         switch self {
@@ -21,7 +20,6 @@ enum HUDErrorAction: Equatable {
         case .openSpeechModels: "Open Speech Models"
         case .openAIService: "AI Service Settings…"
         case .openAgents: "Open Agent Settings"
-        case .chooseAgentRecipient: "Choose Conversation\u{2026}"
         }
     }
 }
@@ -149,7 +147,7 @@ extension HUDState {
         case .ready(let mode):
             return mode
         case .recording(_, _, _, _, let agents?):
-            return agents.recipientName.map { "To \($0)" } ?? "No recipient yet"
+            return agents.targetName.map { "To \($0)" } ?? AgentRecipient.nothingFocused
         case .recording(let mode, _, _, _, nil):
             return mode
         case .loadingModel(let mode):
@@ -350,7 +348,7 @@ extension HUDState {
             return "Recording stops in \(countdown.secondsLeft) seconds"
         case .recording(_, _, _, nil, let agents?):
             let sessions = agents.rows.count == 1 ? "1 session" : "\(agents.rows.count) sessions"
-            let to = agents.recipientName.map { "Recording to \($0)" } ?? "Recording. No recipient yet"
+            let to = agents.targetName.map { "Recording to \($0)" } ?? "Recording. \(AgentRecipient.nothingFocused)"
             return "\(to). \(sessions)"
         case .recording:
             return "Recording"
@@ -373,7 +371,7 @@ extension HUDState {
     func voiceOverAnnouncement(after previous: HUDState) -> String? {
         if case .recording(_, _, _, let countdown, let agents) = self, case .recording(_, _, _, let shown, let before) = previous {
             if shown == nil && countdown != nil { return voiceOverAnnouncement }
-            guard let name = agents?.recipientName, name != before?.recipientName else { return nil }
+            guard let name = agents?.targetName, name != before?.targetName else { return nil }
             return "Recording to \(name)"
         }
         guard case .choice(let prompt, let status, _) = self,
@@ -408,15 +406,11 @@ extension HUDState {
         guard let first = agents.rows.first else { return "No agent sessions are running." }
         let namesOff = "Names are off until they can be loaded"
         let example = agents.namesAvailable ? Self.addressExample : Self.rowExample
-        let source: String
-        switch agents.source {
-        case nil where agents.namesAvailable: return "Start with \(example(first)), then your message."
-        case nil: return "\(namesOff). Start with \(example(first)), then your message."
-        case .fixed: source = "Set by this mode."
-        case .front: source = "The conversation in front of you."
-        case .current, .spoken: source = "The conversation you chose."
+        guard agents.rows.contains(where: \.target) else {
+            return agents.namesAvailable ? "Start with \(example(first)), then your message." : "\(namesOff). Start with \(example(first)), then your message."
         }
-        guard let other = agents.rows.first(where: { !$0.current }) else {
+        let source = "The conversation in front of you."
+        guard let other = agents.rows.first(where: { !$0.target }) else {
             return agents.namesAvailable ? source : "\(source) \(namesOff)."
         }
         guard agents.namesAvailable else { return "\(source) \(namesOff); to talk to another, say \(example(other))." }
@@ -478,7 +472,7 @@ extension HUDState {
     }
 
     static func spoken(_ row: AgentRoster.Row) -> String {
-        [String(row.number), row.name, row.detail, row.state, row.current ? "current recipient" : nil]
+        [String(row.number), row.name, row.detail, row.state, row.target ? "in front" : nil]
             .compactMap { $0 }.joined(separator: ", ")
     }
 

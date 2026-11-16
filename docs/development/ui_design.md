@@ -279,7 +279,7 @@ left behind. It is disabled while a dictation is arming, recording, transcribing
 while a voice-command question is waiting, and while a reply is being read aloud. The picker never delays
 work: pressing a dictation trigger, or anything else that shows the HUD or the spoken-reply panel, closes
 it without saving first. Opening it records nothing, plays no cue, and changes neither the frontmost app
-nor the next dictation's mode or recipient. **Reset HUD Position** (Settings ▸ Maintenance) returns the
+nor the next dictation's mode or conversation. **Reset HUD Position** (Settings ▸ Maintenance) returns the
 anchor to `HUDAnchor.default`.
 
 **Timing contract: the HUD never appears until speech spoken immediately after its appearance will
@@ -303,7 +303,7 @@ because opening its mic switches it to call mode.
 |---|---|---|---|
 | Ready (one-shot mode picked from the menu) | Mode name | “Next dictation” | None; replaced when recording starts |
 | Recording | Mode name + a red level circle (halo + dot; Reduce Motion: intensity-only dot) | “Listening”, or “Listening — tap [trigger] again to stop” for a latched tap-to-toggle recording | Stop if tap-to-toggle |
-| Recording (Agent mode, experimental) | “To [name]” for the frozen recipient (“To [name], disconnected” when it is a disconnected conversation in front), or “No recipient yet”, + the level circle | “Listening” as above, then the open sessions as numbered rows (name over agent and project, live state at the trailing edge, the recipient highlighted and marked Current), then one line saying where the recipient came from and how to name another | As Recording; rows are not clickable while recording |
+| Recording (Agent mode, experimental) | “To [name]” for the conversation in front captured at the press (“To [name], disconnected” when it is a disconnected conversation in front), or “No conversation focused”, + the level circle; a name said in the take is reflected only in the result, once resolved | “Listening” as above, then the open sessions as numbered rows (name over agent and project, live state at the trailing edge, the conversation in front highlighted and marked In front), then one line saying it is the conversation in front and how to name another | As Recording; rows are not clickable while recording |
 | Recording, near the limit | Same, plus an orange ring around the level circle that drains to empty | “Stops in 0:SS”, counting down | As Recording |
 | Transcribing | “Transcribing” | Mode name | Cancel when safe |
 | Waiting for Check Audio (a dictation committed while a check the user started in History holds the speech model) | Mode name | “Waiting for Check Audio to finish… Esc discards this dictation.” After 10 seconds (`DictationController.checkStallSeconds`) it turns to the error triangle and says Check Audio is taking longer than expected, the recording is held until the check ends, and quitting the app discards it (quitting cancels the take) | **Discard Dictation**; Escape does the same from any app (claimed without taking key focus, so typing elsewhere is not swallowed). Transcription resumes on its own when the check ends |
@@ -316,7 +316,7 @@ because opening its mic switches it to call mode.
 | Rewrite fallback | “Inserted without rewriting” — or “Copied without rewriting” if the target also changed | A short cause, such as “The model reached its output limit while reasoning.”, or “Rewrite could not be completed” when none was recorded. History keeps the full reason and advice. When copied, the focus-change or Accessibility explanation comes first. Stays five seconds when it carries a reason | AI Service Settings… opens the affected service when the failure names one. Paste last dictation also remains available when copied and Accessibility permits it |
 | Rewrite skipped | “Inserted without rewriting” — or “Copied without rewriting”; “Dictation failed” when the local text then could not be inserted | “You skipped the rewrite after 17.5 seconds.”, timed from when the rewrite started. The user chose this, so a delivered skip has its own neutral indicator, never success or failure styling; a failed delivery shows the failure styling first and keeps this line as context. When copied, the focus-change or Accessibility explanation comes first. Stays five seconds | No AI Service Settings… action. Paste last dictation remains available when copied and Accessibility permits it |
 | Reasoning setting not applied | The completed state’s own title (“Inserted”, or “Copied instead of inserted”) | “Reasoning setting not applied.” followed by a plain explanation naming the service and model — e.g. “[service] didn't accept a reasoning setting for [model], so the model uses its own. Rewrites may be slower.” Stays five seconds | None. Carried by the completion itself — never a second, delayed HUD that a following dictation could cancel unseen — once per connection and model each time the app runs. Shown when a requested reasoning setting had to be dropped and the service did not confirm the model used no reasoning, when no lower level was accepted, or when the model reasoned with reasoning off. Also shown when an OpenRouter route could only be found without guaranteeing the setting. Never after a fallback, whose reason already says what happened. On a copied completion it follows the explanation of where the text went, which is read first |
-| What you can say (any mode) | The mode's name with a neutral `info.circle` in the recording icon's place (no green, no pulse), and “What you can say” beneath it; an agent mode adds “Recipient: name” or “No recipient selected” | The phrases for that mode (`SpokenHelp`), each with what it does, in one list sorted alphabetically by the phrase as shown, with other modes’ spoken suffixes in a final group headed “End your dictation with” (sorted the same way, each shown as “… ” and the configured phrase exactly as written, one per mode, and only a phrase that routes there from this mode; a pattern phrase is left out): in Voice Commands “open” and “switch to” with apps that are running and the first saved place and action with their verbs; the Agent phrases with the recipient's name, or another conversation's when none is selected, and without the name-led phrases when there is no conversation; spoken edits, “insert clipboard contents”, “insert clipboard as code” and “begin verbatim … end verbatim” when spoken edits are on, in an agent mode too, worded for the message being sent; never an invented app or conversation name. A mode with no phrase and no suffix to show says so (“No spoken commands in this mode. Turn on spoken edits in its settings to add some.”) instead of an empty list. Also and the mode's replacement rules as verified examples (`RuleExample`: a pattern rule shows the phrases its own pattern matches completely, an open-ended capture as “…”; a pattern outside the supported forms is left out), each kept only when running it through the mode's own text stages, up to and including its rules, gives that output, so a rule a spoken edit or help itself would beat is not shown, while later polishing (numbers, the dictionary) never hides a rule that works. An edit-selection mode shows no rows, only how to give an instruction (“Select text first, then say how to change it …”), since its words are an instruction, not text the stages change. The list keeps the HUD's usual width, and the header with the close button never scrolls. A list that fits is as tall as its rows; a longer one scrolls from the first view at the shared list cap (`HUDAnchor.listCap`, about half the screen's height within fixed bounds), with the scroll bar at the panel's trailing edge. There is no “Show more”. Invisible output reads “New line”, “New paragraph”, “Tab”, “then presses Return”; a whole-take rule notes “Say alone”, and “repeat that” notes “There’s nothing to repeat yet” when there is nothing to repeat. The rows grow toward the screen's middle, above the header when the HUD sits at the bottom | Close button; closes after about 15 seconds, held while the pointer is over it and not timed at all while VoiceOver runs; Escape closes it from any app while it shows (the Escape claim is released when it closes); the next recording replaces it. Never takes key focus, never read aloud, nothing sent, run, inserted or recorded in History. Shown for a whole take of “what can I say” or “show commands” (optional “please”, `VoiceCommandGrammar.help`), checked before any rule runs; a longer take is ordinary text. While a voice command choice waits, the request is that choice's answer: the choice stays and its note says how to answer |
+| What you can say (any mode) | The mode's name with a neutral `info.circle` in the recording icon's place (no green, no pulse), and “What you can say” beneath it; an agent mode adds “Unnamed instructions go to name” or “No conversation focused. Open one, or name a conversation in your instruction.” | The phrases for that mode (`SpokenHelp`), each with what it does, in one list sorted alphabetically by the phrase as shown, with other modes’ spoken suffixes in a final group headed “End your dictation with” (sorted the same way, each shown as “… ” and the configured phrase exactly as written, one per mode, and only a phrase that routes there from this mode; a pattern phrase is left out): in Voice Commands “open” and “switch to” with apps that are running and the first saved place and action with their verbs; the Agent phrases with the name of the conversation in front, or another conversation's when none is, and without the name-led phrases when there is no conversation; spoken edits, “insert clipboard contents”, “insert clipboard as code” and “begin verbatim … end verbatim” when spoken edits are on, in an agent mode too, worded for the message being sent; never an invented app or conversation name. A mode with no phrase and no suffix to show says so (“No spoken commands in this mode. Turn on spoken edits in its settings to add some.”) instead of an empty list. Also and the mode's replacement rules as verified examples (`RuleExample`: a pattern rule shows the phrases its own pattern matches completely, an open-ended capture as “…”; a pattern outside the supported forms is left out), each kept only when running it through the mode's own text stages, up to and including its rules, gives that output, so a rule a spoken edit or help itself would beat is not shown, while later polishing (numbers, the dictionary) never hides a rule that works. An edit-selection mode shows no rows, only how to give an instruction (“Select text first, then say how to change it …”), since its words are an instruction, not text the stages change. The list keeps the HUD's usual width, and the header with the close button never scrolls. A list that fits is as tall as its rows; a longer one scrolls from the first view at the shared list cap (`HUDAnchor.listCap`, about half the screen's height within fixed bounds), with the scroll bar at the panel's trailing edge. There is no “Show more”. Invisible output reads “New line”, “New paragraph”, “Tab”, “then presses Return”; a whole-take rule notes “Say alone”, and “repeat that” notes “There’s nothing to repeat yet” when there is nothing to repeat. The rows grow toward the screen's middle, above the header when the HUD sits at the bottom | Close button; closes after about 15 seconds, held while the pointer is over it and not timed at all while VoiceOver runs; Escape closes it from any app while it shows (the Escape claim is released when it closes); the next recording replaces it. Never takes key focus, never read aloud, nothing sent, run, inserted or recorded in History. Shown for a whole take of “what can I say” or “show commands” (optional “please”, `VoiceCommandGrammar.help`), checked before any rule runs; a longer take is ordinary text. While a voice command choice waits, the request is that choice's answer: the choice stays and its note says how to answer |
 | Voice command ran (Voice Commands mode, experimental) | Where it went — the app, the place and its browser (“Gmail · Google Chrome”), or the window and its app (“Budget — Numbers · Numbers”) — or the script or shortcut it ran (“Deploy”); a script that reported a result shows that message instead (“Switched to Inbox”) | “Voice command”, or “Started, still running” when the action has not finished; under a reported result, the script's name. A script's informational result (“Nothing waiting”) shows as an Advisory instead, with no failure styling. A window that closed, moved to another desktop, or could not be confirmed in front, and a search where some app did not list its windows, show an Error saying so (Accessibility off adds **Open Accessibility Settings**). A browser that refused control, and a script whose error output carries the Apple Events not-permitted code (`-1743`) on an error line, show an Error with **Open Automation Settings** (“Manager couldn’t control another app. Check Automation access for KeyScribe.”, followed by the script's denial line, which names the app that refused, even when later error lines follow); the button only opens that pane, never retries or asks again; if an action later fails, an Error naming the failure follows unless a dictation is in progress or a voice command choice is on screen, in which case History alone records it | None; dismiss automatically |
 | Voice command needs a choice (Voice Commands mode) | “Which one?” for apps, places, and a script's own options, “Which action?” for `run` | Numbered rows, each a name over a detail that tells it apart (app, browser and host, app identity where names repeat, a window's app plus its document or site when two titles are the same, Script/Shortcut, or the name of the script that offered the option), then how to answer with the actual Voice Commands shortcut, led by one line when window rows still read the same (“Same name; the lower number is further forward.” within one app instance, else “Same name; these windows can’t be told apart.”) | Click a row; Cancel. Stays until answered, dismissed, or idle for the timeout |
 | Voice command not recognized (Voice Commands mode) | “Command not recognized” | What the speech model heard, before any replacement: “Heard “stitch to Mail”” — omitted when the target was a password field or could not be confirmed | None; dismiss automatically |
@@ -424,9 +424,9 @@ change, and when a recording that could go to an agent starts; while Settings is
 read every few seconds while a conversation runs in a named place and less often otherwise. A tab renamed
 since the last read takes its new name at the next recording, which reads the labels again. A take resolves
 against the names frozen when its recording started, plus any new name a read during the recording gave
-one of those same conversations: the recipient chosen at the start and the row numbers never change, and
+one of those same conversations: the conversation in front at the start and the row numbers never change, and
 a new name never takes a frozen one or adds a conversation. When the take is resolved while a read is
-still running, it waits for that read up to a second. A take that would go to the current conversation
+still running, it waits for that read up to a second. A take that would go to the conversation in front
 is held, “Couldn’t check conversation names yet. Nothing sent. Say it again, or start with “tell” and a name or
 conversation number.”, if the read still has not finished or the first read of one of the listed conversations has not
 finished, because its first words may be a name that read did not deliver; a take that named a known
@@ -437,8 +437,8 @@ shown, and so does a read that cannot tell which pane holds the conversation, fo
 only a read that shows the label gone, or herdr reporting the pane closed, changes the name. After a
 restart, a conversation keeps its remembered name until its place has been checked. A new conversation in the same pane gets
 the pane's name once the old one has closed, and nothing else of the old conversation: its held messages,
-spoken replies, disconnection and current-recipient status stay with the old one.
-Automatically generated titles never rename the destination. For Claude Code, custom names are kept
+spoken replies and disconnection stay with the old one.
+Automatically generated titles never rename a conversation. For Claude Code, custom names are kept
 separate from generated titles, and a fresh registry rename can supersede the last connector report. For
 Pi, the name is the session name its user set (`/name`), as the connector reports it.
 Each row's second line is the agent's title for the conversation, when it differs from the
@@ -460,7 +460,7 @@ always needs “conversation” or “session”, and “conversation two” is 
 even beside a conversation named two. A name made only of number words — the words a row number accepts,
 including “to”, “too” and “for” — is reached only with “tell” or “open”, because a take that starts with a
 number is ordinary prose: “One more thing: …”, “For the record, …” and “Two tests failed” go whole to the
-highlighted recipient. A number never falls back to a row: “tell two …” or “open two” with no conversation
+conversation in front. A number never falls back to a row: “tell two …” or “open two” with no conversation
 named two is held with “No conversation named “two””. A name with other words is matched without “tell”,
 longest first, so with conversations named two and two bugs, “two bugs, run tests” addresses two bugs. That
 has a deliberate cost: “Two bugs are left in the parser” is also an address to two bugs, with “are left in
@@ -473,25 +473,25 @@ project”. After “tell” or “ask”, a word said in the singular or the pl
 (`AgentHandles.singular`), so “ask review manager …” reaches `reviews_manager_queue`; two names that differ
 only that way count as the same name. Without “tell”, part of a name needs at least two of its words, and
 words must match as written, because a single word at the start of a sentence is usually just prose. A take that starts with what sounds like an address
-but does not match is held rather than sent to the highlighted recipient: “session to …” (a misheard
+but does not match is held rather than sent to the conversation in front: “session to …” (a misheard
 row) and a long word one sound away from a name (“keyscrib …”). One exception keeps the take: when that
-misheard word sounds like the highlighted recipient itself, it is sent there, since both readings agree.
+misheard word sounds like the conversation in front itself, it is sent there, since both readings agree.
 Without “tell” the whole take is sent, misheard word included; after “tell” the misheard address is removed
 like any other. Otherwise the HUD says which name it sounded like.
 
 When the name matches no conversation at all (“No conversation named “architect””), the HUD adds one retry
 it would accept: “Try “tell keyscribe, …”” for a message, “Try “open keyscribe”” after a bring-forward word.
-It names the highlighted conversation when that one qualifies, otherwise the first that does alphabetically. A
+It names the conversation in front when that one qualifies, otherwise the first that does alphabetically. A
 message retry offers only a conversation that can take a message now (its connector is live); an open retry
 offers any conversation still running, since bringing a terminal forward needs no connector. Disconnected
 conversations are never offered, and when none qualifies the line ends at the problem. A conversation is
 offered under its current name, so a pane renamed during the take is offered by its new label, never the one
 it left. Its Open Agent
 Settings button shows every name and renames a conversation; the spoken rename is not offered here, because
-a mode with a fixed recipient renames that recipient, not the conversation in front. History records only
+it renames the conversation in front, not the one the user meant. History records only
 “No conversation named “architect”. Nothing sent.”, since the names offered change as conversations come and go. A status
 question about an unknown name never reaches this line: it is a message (see below). Whenever a message is held
-with words in it (an unknown, ambiguous, unconnected, or disconnected recipient, or names not read yet), the HUD
+with words in it (an unknown, ambiguous, unconnected, or disconnected conversation, nothing focused, or names not read yet), the HUD
 line ends “Your words are kept for Paste last dictation.”, because the held text is the last dictation (History
 on or off), so the user can paste it into the agent or dictate the address again without repeating the
 message; History keeps the line without that sentence.
@@ -502,49 +502,47 @@ by a question (“ask frontend what changed”, “ask frontend why it is stuck�
 not followed by “to”, or “if”, “when” or “where” followed by “it”, “they”, “he” or “she”) is held with
 “No conversation named “frontend””, since it was plainly meant as an address. With “the” before the word the
 take stays a message, as for any “the” that names no conversation (below), so “ask the team whether it is
-done” reaches the recipient. A common adverb or a reflexive after “ask” is never taken for an unknown name, so
-“ask again if it fails” and “ask yourself whether …” stay messages; after a bring-forward word or
-“select” it still holds (“open first” with no conversation named first). Anything else after “ask” is an
-instruction for the highlighted recipient, so “ask clarifying questions first” and “ask me before you push”
+done” reaches the conversation in front. A common adverb or a reflexive after “ask” is never taken for an unknown name, so
+“ask again if it fails” and “ask yourself whether …” stay messages; after a bring-forward word it still
+holds (“open first” with no conversation named first). Anything else after “ask” is an
+instruction for the conversation in front, so “ask clarifying questions first” and “ask me before you push”
 are messages, not addresses. After “tell” or “ask”, one “the” may come before the name (“ask the docs what
 changed”) when the name is followed by a break: the end of the take, a comma or colon, or a word that starts
 what is said to it (`AgentAddress` lists them, such as “to”, “that”, “whether” and “what”). Without a break
 (“tell the docs run the tests”, “tell the session two run the tests”, “tell the backend team the API
 changed”) it is unclear whether the name was meant, so the take is held and never sent to another
 conversation: “Did you mean “docs”? Nothing sent. Say “tell docs,” with a pause, or “tell docs to …”.”. When that
-conversation is already the recipient, the whole take is sent to it as said. Words after “the” that name no
-conversation (“tell the users that the API changed”) are the message for the highlighted recipient. A
+conversation is the one in front, the whole take is sent to it as said. Words after “the” that name no
+conversation (“tell the users that the API changed”) are the message for the conversation in front. A
 conversation whose own name starts with “the”, or with an opening word such as “so” or “okay”
 (“so long”), matches whole first.
 
 An address that matched is always removed from the message, and a name that was said whole is never traded
 for a longer one it sounds like: “tell keyscribe glue the adapters together” sends “glue the adapters
-together” to keyscribe even when keyscribe blue is current. Short words are left alone without
+together” to keyscribe even when keyscribe blue is in front. Short words are left alone without
 “tell”, so “build the project” beside a conversation named `builds` is still a message. Words that fit several conversations at the winning address length and match tier go to the
 first conversation alphabetically by its displayed name, whatever order the session list shows, except a
 place label shared by several conversations, which asks (above). The
-current recipient does not override that order. A whole-name match wins over a looser match at the same
-address length. The receipt names the selected conversation, which becomes current; no choice is required
-for an accepted tie. A first match that is no longer available is held, never replaced by the next one. The list is not a question: a take that does not start with a name or
-number from the list sends to the highlighted recipient.
+conversation in front does not override that order. A whole-name match wins over a looser match at the same
+address length. The receipt names the conversation that received it; no choice is required for an accepted
+tie, and the next take is routed afresh. A first match that is no longer available is held, never replaced by the next one. The list is not a question: a take that does not start with a name or
+number from the list sends to the conversation in front, and with nothing in front it is held: “No
+conversation focused. Open one, or name a conversation in your instruction.”
 A take that is only an address, with nothing to send (“docs”, “tell docs”, “conversation two”), is held: it sends
-nothing, leaves the recipient as it was, and the HUD says “Say “select docs” to choose it. Nothing sent.” A take
-that is only “select” or “choose”, an optional “the”, and an address (“select docs”, “choose conversation two”,
-`AgentAddress.selectVerbs`) makes that conversation the recipient, sends nothing, leaves every window as it
-is, and the HUD shows “Recipient: docs”. It follows the bring-forward rules below for an address that names
-nothing (held, never sent) and for more words after the verb (a message, so “select docs rows where active is
-true” goes to the recipient as text). An unknown name after “select” offers “Try “select keyscribe””.
+nothing and the HUD says “Only a name was heard: “docs”. Nothing sent. Say your instruction after “docs”, or
+“open docs” to bring it forward.” Nothing a take says is remembered for later takes: “select” and “choose” are
+ordinary words, so “select docs” is a message for the conversation in front.
 A take that is only “cancel” or “never mind” (`VoiceCommandGrammar.cancel`) cancels it locally and the HUD
 says “Cancelled. Nothing sent.”; inside a longer take (“tell docs cancel”, “tell docs cancel the deployment”) it
 is message text, which is how to send the word to an agent that asked for it.
-An optional “please” before or after a recognized command (“please select docs”, “repeat that, please”,
+An optional “please” before or after a recognized command (“please open docs”, “repeat that, please”,
 “please rename this conversation to docs”) changes nothing, and an address followed only by “please”
-(“docs, please”) is held with the select hint like an address alone.
+(“docs, please”) is held like an address alone.
 A take that is only a bring-forward word and an address opens that conversation: the words Voice Commands
 uses to bring something forward (`VoiceCommandGrammar.focusVerbs`, such as “open”, “switch to”, “go to”), an
 optional “the”, then a name or number that meets the same evidence as an address without “tell” (“open
-docs”, “switch to conversation two”). It makes the conversation current, sends nothing, and brings its terminal
-forward. A bring-forward word followed by a few words (at most `AgentAddress.navigationWords`) is navigation
+docs”, “switch to conversation two”). It sends nothing, brings its terminal forward, and remembers nothing:
+a later take without a name goes to it only while it is the conversation in front when that take starts. A bring-forward word followed by a few words (at most `AgentAddress.navigationWords`) is navigation
 even when those words name nothing: the take is held with the reason and never sent, so a misheard name
 cannot become a message. The held line names the closest conversation when one sounds like what was heard,
 or the equally close ones, without opening any (`AgentAddress.closest`; the narrow sound-alike that
@@ -566,14 +564,13 @@ front of that conversation, or was cancelled or superseded before it could tell,
 in place. Every switch that moves focus remembers the conversation it left the same way, whichever trigger
 moved it, and a script run by voice reads nothing. Going back to a conversation opens it the
 way Open does, through the same routes, under the take's own stop check (a stop also closes a terminal script
-already queued or running, before its next Apple event), without making it the current
-recipient, and the destination becomes the conversation the user just left, so two conversations in one window
+already queued or running, before its next Apple event), and the destination becomes the conversation the user just left, so two conversations in one window
 toggle. A return the user stopped, or that the feature or a system sleep stopped, ends like a stopped voice
 command and leaves the destination for another try. A conversation that has ended
 or that nothing could show returns to its app and window instead; a terminal that came forward without
 selecting the conversation reports that and keeps the destination for another try. A take that is only “go
-back” in the Agent mode is that return, never a message: it moves focus and nothing else, keeps the
-current recipient, sends no pending dictation, and reports what Voice Commands would (“Nothing to go back
+back” in the Agent mode is that return, never a message: it moves focus and nothing else, sends no pending
+dictation, and reports what Voice Commands would (“Nothing to go back
 to.” when there is no destination). “Go back” inside a longer take, or after “tell” and a name, is ordinary
 message text. A take that is only “repeat that” or “say that again” (`VoiceCommandGrammar.repeatSummary`) is
 the same kind of local command on either trigger: it replays the last spoken reply that started playing,
@@ -583,10 +580,10 @@ notice is never merged again with notices still waiting. It does not repeat the 
 The HUD names the conversation (“docs”), or says “There’s nothing to repeat yet.” or “Reply updates are off.”;
 History records the command and adds no second copy of the line. Inside a longer take or after “tell” and a name it is
 message text. A take that is only “rename this conversation to” or “rename this session to” a new name (“name this
-conversation …” and “call this session …” work too) renames the take's recipient, with the same check
-Settings' Rename uses (`AgentRename.parse`, then `AgentHub.rename`), and sends nothing. The recipient is
-the one an unaddressed take would go to: the conversation in front when it is confirmed, otherwise the
-current one; renaming makes it current. The feature is rechecked right before the name is saved. Only the current conversation can be renamed by voice, because
+conversation …” and “call this session …” work too) renames the conversation in front when the take started,
+with the same check Settings' Rename uses (`AgentRename.parse`, then `AgentHub.rename`), and sends nothing; it
+changes nothing about where later takes go. The feature is rechecked right before the name is saved. Only the
+conversation in front can be renamed by voice, because
 long, changing generated names are hard to say right for one in the background: switch to it first. The
 name may run to `AgentRename.nameWords` words and is stored as it will be said (“auth 2” becomes “auth
 two”). Once a take starts with “rename this conversation” (or session), it is never sent: no name, a longer one, or more words
@@ -601,27 +598,27 @@ run on the words after it before the name is read (`AgentRename.request`, then `
 mind” at the end discards the take (nothing in History), and “rename this conversation to docs, scratch that,
 notes” names it notes. The HUD shows “Renamed keyscribe to auth refactor” long enough to read, so a misheard name is caught
 and fixed by saying it again. A name another conversation holds, or a row name such as “conversation three” or “session three”,
-is refused with the reason and nothing changes; with no recipient it says “Switch to a conversation, then
-say the rename command again” with **Open Agent Settings**. History records Rename, the conversation, the new name and how it was chosen. After “tell” and a
+is refused with the reason and nothing changes; with no conversation in front it says “Switch to a
+conversation, then say the rename command again” with **Open Agent Settings**. History records Rename, the conversation, the new name and how it was chosen. After “tell” and a
 name it is message text.
 
 A status check is an explicit command, never a question: questions are what people say to agents, so a
 question such as “what are you waiting for?”, “do you need anything from me?” or “what does docs need from
-me?” is a message to the recipient like any other dictation. Only a whole take that starts with “check on”
+me?” is a message to the conversation in front like any other dictation. Only a whole take that starts with “check on”
 is answered by KeyScribe, and it sends nothing (`AgentStatusQuery`): “check on docs” (a conversation's name,
 including a name reached only after a verb), “check on conversation two” or “session two”, “check on this
-conversation” for the take's recipient, and “check on all conversations” (or “sessions”). “Who needs me?” is
+conversation” for the conversation in front when the take started, and “check on all conversations” (or “sessions”). “Who needs me?” is
 the one other phrase, the same as checking on all conversations. Capitals, closing punctuation, an opening “please”, “hey”,
 “so” or “okay”, and a closing “please” are fine; nothing else is added. Which window is in front never decides whether a take is a
-check or a message; it only feeds the recipient “this conversation” means. “Check on” inside a longer take
+check or a message; it only decides which conversation “this conversation” means. “Check on” inside a longer take
 (“before you change anything, check on docs”) and after “tell” or “ask” and a name (“tell docs check on
 the build”) is message text. After “check on”, words that name no conversation are held like any unknown
 name when they are no longer than a conversation name can be, with the reason and the words kept for Paste last dictation
-(“No conversation named “frontend”. Nothing sent.”), and never checked on the recipient instead; longer words
+(“No conversation named “frontend”. Nothing sent.”), and never checked on the conversation in front instead; longer words
 (“check on the deploy before we merge today”) are a message. A conversation named with an everyday word makes
-“check on” that word a status check, so “tell” is how to say it to the agent. With no recipient, “check on
-this conversation” says “No recipient selected. Nothing sent. Say “check on” and a conversation’s name.” with
-**Open Agent Settings**.
+“check on” that word a status check, so “tell” is how to say it to the agent. With no conversation in front,
+“check on this conversation” says “No conversation focused. Nothing sent. Say “check on” and a conversation’s
+name.”
 
 Every answer starts with “Status for docs:” and says “Nothing sent.” after what is reported (the HUD's
 “open” hint follows it), the same words every held take uses. It says only what is reported,
@@ -650,7 +647,7 @@ check is not counted. When some agents could not be checked, a state is carried 
 without a connector could be waiting without reporting it, the answer adds “Some conversations couldn’t be
 checked.”, and with none to name it says “no pending input requests are reported, but some conversations
 couldn’t be checked” instead of an all-clear. Spoken, it is dropped if the names or that completeness
-changed while it waited. Checking never changes the recipient or the window in front. History records Check
+changed while it waited. Checking never changes where a later take goes or the window in front. History records Check
 status and the conversation (or all conversations), never the answer.
 
 An opening “please”, “hey”, “so” or “okay” is skipped before “tell”, “ask” or a conversation's name, so “hey
@@ -694,8 +691,8 @@ permission for that terminal, so a user who never says Open never sees the promp
 says what the access is for (“Allow access to Ghostty to open the tab for docs”).
 The receipt stays short when it worked: “Opened docs” only when every layer confirmed its selection, and
 “Asked Warp to show docs” when the terminal accepted a session link but cannot report which tab it chose.
-Anything less says what came forward, what is still missing, and who the recipient now is — “Brought
-Ghostty forward. Couldn’t find docs’s tab. Your recipient is docs”. The missing part names the layer that
+Anything less says what came forward and what is still missing — “Brought Ghostty forward. Couldn’t find
+docs’s tab.” The missing part names the layer that
 fell short: the terminal’s tab (its pane, in a terminal whose route calls its places panes), a multiplexer’s pane (“Couldn’t select docs’s herdr pane”, or “Couldn’t
 confirm docs’s Zellij pane” when a session open in several windows cannot say which one moved), or a
 terminal with no tab route, where the next step is the user’s (“Select docs’s terminal yourself”). These
@@ -709,67 +706,66 @@ Anything after a matched address makes the take a message, so “open keyscribe 
 as said, and so is a longer instruction after the verb (“open the readme and fix the typo”). A short one is
 navigation: “open the readme” alone is held with “No conversation named “readme””, and “tell keyscribe open
 the readme” sends it. A misheard name with nothing after it follows the address rule: held, unless it
-sounds closely like the highlighted recipient, which is then opened. Words that fit several conversations
+sounds closely like the conversation in front, which is then opened. Words that fit several conversations
 choose one as an address does.
-Settings has no Open or Talk to button: Settings configures the integration, and choosing or opening a
-conversation belongs where the user is already working.
+Settings has no Talk to button: Settings configures the integration, and addressing a conversation belongs
+where the user is already working.
 
-**Send to** is the one routing intent, shared by Settings, spoken commands, the recording HUD and delivery
-(`AgentHub.current`; nil means *Conversation in front*). A chosen conversation is pinned: it keeps
-receiving whatever is in front until the user deliberately changes the destination — in the Send to chooser,
-with `select`/`choose` or `open` and its name, or by starting a take with another conversation's name or
-number. Nothing else moves it: typing in a conversation, a take sent to the conversation in front, a rename,
-or a conversation ending or being disconnected. A chosen conversation that ended or is disconnected keeps its
-name on Send to and in the HUD (“{name}, ended”, “{name}, disconnected”); a take without a name is then held
-with that reason, never sent to the front or another conversation. Saying “follow the front” (or “follow the
-conversation in front”, “select the conversation in front”, `AgentRecipient.followFront`) returns Send to to
-*Conversation in front* and sends nothing. The destination is saved with the conversation names
-(`agents/names.json`), so a chosen conversation stays chosen across a relaunch or update; if it ended
-meanwhile, it shows as ended under its saved name.
+**Routing.** Each take is routed on its own and nothing is remembered for the next one. A take that starts
+with a conversation's name or number goes there, and only that take does. Otherwise it goes to the
+conversation in front when its recording started, and with none it is held: “No conversation focused. Open
+one, or name a conversation in your instruction.” An unknown or unavailable name never falls back to the
+conversation in front. Naming, opening, checking or renaming a conversation never sets where a later take
+goes.
 
-A take that starts with an agent mode whose target is `current`, with nothing chosen, follows
-the conversation in front: when recording starts, KeyScribe reads which conversation the front terminal shows, through the
+When recording starts, KeyScribe reads which conversation the front terminal shows, through the
 same terminal and multiplexer routes that “open” and “go back” use, reading twice and checking that the app
 stayed in front. Exactly one listed conversation must be confirmed there, in the app and window that had
-focus at the press, for it to be this take's recipient. The read never asks for Automation access, so a
+focus at the press, for it to be this take's conversation in front. The read never asks for Automation access, so a
 terminal not yet allowed reads as unknown. A bb thread is in front when bb is the app in front with the
 same window focused as at the press, and bb's plugin last said the window you used most recently shows that
 thread on its page (in a split, once the focused pane agrees with the page); a bb page that shows no thread, such as its
 settings, has no conversation in front. Being in front also means its reply is not read aloud while you look
 at it, as for a terminal. Unknown, no terminal in front, a different app or window, or a
-front view that could belong to another session leaves the take without a recipient: it is held, with
-“No conversation is in front of you. Nothing sent.” and the way forward. The read runs beside the
+front view that could belong to another session leaves the take with nothing focused. Recording still
+starts, since the take may name a conversation or be a command that needs none. The read runs beside the
 recording, and a reading that lands more than a moment after release is ignored, however long transcription
-takes. A spoken name or conversation number still wins and never waits for the read; a mode with a fixed
-conversation or set to ask never follows the front, and neither does a take that reaches an agent mode only
-through a spoken phrase after the press. A take sent to the conversation in front leaves Send to following
-the front. When the read lands, only the highlight and the recipient line change: the list keeps its order
-and numbers, a list that scrolls brings the new recipient into view, and VoiceOver hears the new recipient
-once.
+takes; focus that moves during the recording never redirects it. The read only sees the pane in front when
+it lands, so it is trusted only when no key press or click happened between the press and the moment the read
+finished (`UserInput`, timed by each event's own time, not when it arrived). A press or click that arrives
+later but happened in that window drops it at once, from the headline and highlight as well as delivery, which
+all read the same captured conversation; input after the read never does, however long the take. A key
+KeyScribe itself takes as a shortcut, such as the stop press of a chord, never reaches the app and is not
+counted. With nothing focused, an unnamed take is held: “No conversation focused. Nothing sent. Open one, or
+name a conversation in your instruction.” When input cannot be observed at all (no Accessibility), the hold,
+and “check on this conversation” or a rename of it, say so instead and offer **Open Accessibility Settings**. A spoken name or conversation number still
+wins and never waits for the read, and neither does a take that reaches an agent mode only through a spoken
+phrase after the press. When the read lands, only the highlight and the headline change: the list keeps its
+order and numbers, a list that scrolls brings the conversation into view, and VoiceOver hears its name once.
 
-The list opens with the current recipient first, then the sessions waiting for input (approval, an answer,
+The list opens with the sessions waiting for input (approval, an answer,
 or an open dialog), then the other sessions; within each group the most recent comes first, where a
 session's recency is the later of its last use and its start, so a session just started leads until
 another is used after it; sessions with neither follow alphabetically (`AgentRoster.recordingOrder`). A session is used
-when a take is sent to it, when it is chosen or opened by voice, or when the user submits a prompt in it
-(which does not change Send to); a prompt sent from another device through Claude Code's Remote
+when a take is sent to it, when it is opened by voice, or when the user submits a prompt in it;
+a prompt sent from another device through Claude Code's Remote
 Control counts the same way. Slash commands and `!` shell commands never reach the connector, so they are not
-use: they neither move the recipient nor reorder the list, and they do not hold a queued take for review. Settings keeps its list alphabetical: it is an inventory, not
-an addressing surface. The recipient row is highlighted across the whole row with a subtle accent background and a semibold name. A separate
-**Current** label stays visible even when the conversation title truncates; Ready, Working and other
+use: they do not reorder the list, and they do not hold a queued take for review. Settings keeps its list alphabetical: it is an inventory, not
+an addressing surface. The conversation in front is highlighted across the whole row with a subtle accent background and a semibold name. A separate
+**In front** label stays visible even when the conversation title truncates; Ready, Working and other
 live states remain at the trailing edge. The list is frozen when recording starts — numbers,
 order, and names never change for that take, new sessions do not join it, and a session that ended keeps
 its row marked Ended rather than handing its number to a neighbour. Live states update in place. A state
 that means the session cannot receive (Not connected, Disconnected, Ended) is orange, and the
-word itself says so, so colour is never the only signal. The recipient line says where it came from and never claims the screen identified a
-conversation it did not: “The conversation in front of you”, “The conversation you chose”, or “Set by
-this mode” — followed by a real example of both address forms taken from the list (“docs …” or
-“session 4 …”; a bare “four” starts the message, and “tell four” reaches only a conversation named four). With no recipient, nothing is highlighted. A list
-taller than the screen allows scrolls to the recipient each time recording starts, and keeps its numbers.
+word itself says so, so colour is never the only signal. The line under the list says “The conversation in
+front of you” only when one was confirmed — followed by a real example of both address forms taken from the
+list (“docs …” or “session 4 …”; a bare “four” starts the message, and “tell four” reaches only a conversation
+named four). With nothing in front, nothing is highlighted and the line says how to start with a name. A list
+taller than the screen allows scrolls to the conversation in front each time recording starts, and keeps its numbers.
 Live status changes do not scroll the list again. A session changing state
 during the take is not announced again to VoiceOver. In the usual layout the level circle and title stay where
 every other recording shows them: the panel keeps its usual width, and when the HUD sits at the bottom of the
-screen the list opens above the header instead of below it. A recipient name long enough to wrap still grows
+screen the list opens above the header instead of below it. A conversation name long enough to wrap still grows
 the header. At the middle of a screen edge the header stays at the anchor and the list opens below it unless
 only above fits, the same rule as the spoken-reply panel and “What you can say”. Wherever the list
 sits, VoiceOver reaches the header first. Ordinary dictation never shows the list.
@@ -830,11 +826,11 @@ reply, or the turn the message starts when the running one ended first; it is he
 
 A take addressed to a conversation that is not connected, or that the user disconnected, says so by name
 (“docs isn’t connected to {app}. Nothing sent.”, “docs is disconnected. Nothing sent.”, or “The conversation in front is
-disconnected”) with **Open Agent Settings**, and never falls through to another recipient. A
+disconnected”) with **Open Agent Settings**, and never falls through to another conversation. A
 disconnected conversation's name is still recognized for this, but it never appears in the numbered list.
 "The conversation in front is disconnected" needs the conversation's terminal facts, which only a connected
 conversation sends; one disconnected since before the app last started, in a multiplexer pane, may not be
-recognized as the one in front, and the take then asks for a name.
+recognized as the one in front, and the take then says no conversation is focused.
 A running agent whose connector has not connected has no name the app could match, so a spoken name meant for
 it asks like any unknown name. While such a process is listed in Settings, a spoken name that matches no
 conversation, or only sounds like one, says so with **Open Agent Settings**, where the process's row says
@@ -2070,19 +2066,23 @@ form, the same header, sections and shared components). There is no separate Age
 master/detail conversation list. Its everyday view is, in order:
 
 1. **How to start Agent** — the shortcut and press style, as in other modes.
-2. **Where instructions go** — the **Send to** row, then what it means: one accurate spoken example
-   (“Run the unit tests” goes to the conversation in front of you. / … goes to {name}, even when another
-   conversation is in front.), a caption that starting with another conversation's name sends there and makes
-   it the destination, **What can I say?**, problems with saved conversation choices, and the data boundary in
-   one line: the agent receives what the user says and sends it to its own AI provider under its own
-   settings, and best-effort redaction does not apply. It never says “On this Mac”.
+2. **Where instructions go** — guidance only, with no destination control: one line saying instructions go to
+   the conversation in front when the user starts speaking and that starting with a conversation's name or
+   number sends one instruction there instead (`AgentsSettingsModel.routingNote`), a real addressing example
+   using a conversation that can receive (“tell {name} run the unit tests” sends only that instruction to
+   {name}, `AgentsSettingsModel.routingExample`, hidden while names can't be loaded), **What can I say?**, and
+   the data boundary in one line: the agent receives what the user says and sends it to its own AI provider
+   under its own settings, and best-effort redaction does not apply. It never says “On this Mac”.
 3. **Connections** — one grouped section with one compact `DisclosureSection` per supported integration, drawn from
    the build's integration inventory (`AgentsSettingsModel.integrationIDs`), separated by the form's native
    separators; no card or section per integration. Each row has the integration's name and, under it, a
-   status line that keeps setup apart from conversation availability (`ConnectionSummary`): setup first
-   (Not set up, {Connector or Plugin} installed, the agent's own turned-off wording, a lifecycle step in
-   progress, or the failing status), then availability (N conversations available, or No conversations
-   open once set up), then how many of its conversations are not connected. The status wraps rather than
+   short status line (`ConnectionSummary`): what is available (N conversations available, or No
+   conversations open), led by the setup only when it needs reading (Not set up, the agent's own turned-off
+   wording, a lifecycle step in progress, or the failing status; a healthy installed connector or a host
+   that is on says nothing about setup, since its folders already show it), then, only when more than one
+   configuration folder is listed, how many (“2 configuration folders”). Conversations that are not
+   available are not counted here: ones that need a step are handled inside the expanded row (below), and
+   the rest (last seen, disconnected) are counted under **Manage…**. The status wraps rather than
    truncating the name or squeezing the action. The whole header expands management inline, with a trailing
    chevron; there is no Manage dialog or separate Learn more action on the collapsed row. **Connect…** stays
    directly available beside the header while nothing is set up and the default setup can be installed,
@@ -2090,7 +2090,10 @@ master/detail conversation list. Its everyday view is, in order:
    failure auto-expands the row to its setup's `IssueText`; manually collapsing it leaves the header's red
    dot and the failure's `IssueText` visible under the row. A problem finding its conversations stays visible as an advisory `IssueText`. Updates,
    reload advice, folders, repair, inline help and uninstall live in the expanded content, so optional
-   maintenance never reads as a failure.
+   maintenance never reads as a failure. The expanded content is the agent's configuration folder list (below). The section ends with a **Conversations** row: how many can receive
+   (`AgentsSettingsModel.conversationsSummary`; conversations that can't are explained by the agents'
+   warnings and the list itself, not counted here) and **Manage…**, the one permanent entry to the
+   conversation list (below), then any problem with saved conversation names or disconnections.
 4. **Replies** — **Reply updates** and a disclosure for the rest (below).
 5. **Advanced** — one collapsed `DisclosureSection` (“Vocabulary, rewriting before sending, and history”)
    that, when open, shows **Words**, **Rewrite instructions before sending** (an optional AI rewrite with its
@@ -2104,37 +2107,33 @@ one up is the first step; after that the daily control leads. The order follows 
 saved choices rather than a live check, so it does not move while Settings is open. When `connectors.json`
 cannot be read or the build's integrations conflict, those problem sections (below) appear just above both.
 
-**Send to** is the authoritative destination (`AgentsSettingsModel.destination`, backed by
-`AgentHub.current`): **Conversation in front** or one named conversation. The row shows the destination's name
-as text (truncated in the middle, full name on hover) and a **Change…** button that opens the chooser sheet; it
-is not drawn as a pop-up menu, because it opens a sheet. A chosen conversation
-that has ended, is disconnected, or isn't connected keeps its name on the row with a red dot and an
-`IssueText` saying so and that instructions without a name are held, not sent elsewhere; it is never
-replaced by the front or another conversation (§5 states the routing). The **HUD**'s **Open Agent Settings**
-opens this editor, and opens the chooser when the notice names conversations, with the **Not available**
-group open and the first of them scrolled into view. When the fix is choosing — the chosen conversation has
-ended, or nothing is in front to follow — the HUD offers **Choose Conversation…**, which opens this editor
-with the chooser already open.
+Nothing in Settings chooses where instructions go: each recording goes to the conversation it names, else
+the conversation in front when it started (§5 states the routing). The **HUD**'s **Open Agent Settings** opens
+this editor, and opens the conversation list when the notice names conversations, with the **Not available**
+group open and the first of them scrolled into view.
 
-The **chooser** is a sheet: title “Send instructions to”, one line saying that choosing sends nothing and that
-instructions without a name go there until the user chooses again, any saved-names problem with **Try
-Again** and **Details**, and a search field over a list. The list starts with **Conversation in front**
-(“Follows the conversation you’re looking at when you start speaking.”, hidden while searching), then
-**Conversations** that can receive, then a collapsed **Not available (N)** group (`DisclosureSection` header,
-open while searching, and open by itself when the chosen conversation is in it) holding conversations found
-without a working connector and the ones the user disconnected. Rows are ordered by name, so a status change
-never moves a row; they are keyed by process and start time, so a found conversation that later identifies
-itself keeps its row, and live updates never move focus, the search, the open group, or the scroll position.
-Each row is two lines: the name (semibold when chosen, truncated in the middle, never crowded by status), then
-agent · project · live state (orange semibold only when it waits on the user). A checkmark marks the
-destination. Clicking an available row, or Conversation in front, chooses it and closes the sheet; it never
-sends anything or opens anything. Each row has a **⋯** menu with **Rename…**, **Show Conversation** (connected
-rows; brings it forward without changing the destination), and **Details…**; a Not available row also shows
-its one step: **Connect…**, **How to Connect…** (its details, with the reload step), or **Reconnect**. The
-sheet's footer has **Check Again** and **Missing one?** leading, and **Connections…** and **Cancel** trailing.
-Rename, Details, and connection consent open over the chooser, so closing them returns to it exactly as it
-was. Rows carry no numbers: row numbers appear only on the recording HUD, where they are said. An empty list
-explains how to open a conversation instead of inventing a name.
+The **conversation list** is a sheet for managing conversations, never for routing: title “Conversations”,
+one line saying it manages conversation names and connections and sends no instructions; when opened from a
+warning's link, a line naming the filter (“Showing Claude Code conversations that need the connector loaded.”)
+with a **Show All** link, the **Not available** group open, and only those conversations listed, a filter
+that ends when the sheet closes; any saved-names problem
+with **Try Again** and **Details**, and a search field over a list. The list has **Conversations** that can
+receive, then a collapsed **Not available (N)** group (`DisclosureSection` header, open while searching)
+holding conversations found without a working connector and the ones the user disconnected. Rows are ordered
+by name, so a status change never moves a row; they are keyed by process and start time, so a found
+conversation that later identifies itself keeps its row, and live updates never move focus, the search, the
+open group, or the scroll position. Each row is two lines: the name (truncated in the middle, never crowded
+by status), then agent · project · live state (orange semibold only when it waits on the user); when the
+agent has more than one configuration folder listed, the row's folder joins that line before the state, and
+its details always name it, so otherwise identical conversations can be told apart. Search also matches the
+folder. Rows carry no
+checkmark and clicking one does nothing. Each row has a **⋯** menu with **Rename…**, **Show Conversation**
+(connected rows; brings it forward), and **Details…**; a Not available row also shows its one step:
+**Connect…**, **How to Connect…** (its details, with the reload step), or **Reconnect**. The sheet's footer
+has **Check Again** and **Missing one?** leading, and **Done** trailing. Rename, Details, and connection
+consent open over the list, so closing them returns to it exactly as it was. Rows carry no numbers: row
+numbers appear only on the recording HUD, where they are said. An empty list explains how to open a
+conversation instead of inventing a name.
 
 **Details…** is a sheet with the conversation's name, agent and state, **Show Conversation**, the one thing it
 needs or an example under **Say** taken from `SpokenHelp.agentPhrases`, **Location and details** (the folder
@@ -2144,9 +2143,9 @@ or **Reconnect** alone at the trailing edge, with **Done**.
 
 **What can I say?** opens a sheet built from the same `SpokenHelp.agentPhrases` the recording HUD uses: one
 introduction (“Start with “tell” and a conversation’s name to send it an instruction.”), the phrases with what
-each does, using the name of the chosen conversation, else a connected conversation, else a placeholder, and
-“conversation two” while names are unavailable, then captions saying that an instruction without a name goes
-where Send to points, that the numbers shown while recording can be said as “conversation” and the number,
+each does, using the name of a connected conversation, else a placeholder, and “conversation two” while names
+are unavailable, then captions saying that an instruction without a name goes to the conversation in front
+when the user starts speaking and that nothing is sent with none in front, that the numbers shown while recording can be said as “conversation” and the number,
 how to rename a conversation by voice, and that “what can I say” while recording shows the list with the
 user's own vocabulary. Every example is one the take's own parsers read as described, checked by test.
 Conversation titles remain available to the recording HUD: the title is the one the user gave the
@@ -2309,8 +2308,8 @@ redaction hid from the service is spoken as "a hidden value", never read aloud.
 
 Each agent host (`AgentIntegrations.hosts`) has a row in Connections, named by the host. A host
 whose integration brings its own connector (`AgentHostIntegration.connector`, bb's plugin) has no switch: its
-expanded content is that connector's setup block, titled **Plugin** and without
-the line naming the conversations that use the folder, and the host is on exactly while its default setup is
+expanded content is that connector's configuration folder list with its one folder (bb's data folder) and no
+**Add Folder…**, since the host reaches only that one, and the host is on exactly while its default setup is
 enrolled; its id in `agents.hosts` is ignored. **Install…** shows the connector consent sheet in its host form (**Connect {host}?**, what the host
 integration does, that it installs the plugin and keeps it up to date, and that uninstalling stops all of it);
 **Connect {host}** turns the host on and installs, and Cancel leaves it off. While the host is off, a caption under
@@ -2328,17 +2327,32 @@ open, or its list couldn't be read) stays visible below its header as an advisor
 whether or not other conversations are listed.
 
 An integration's expanded row holds its setup and repair in place; ordinary management opens no sheet.
-The chooser's **Connections…** closes the chooser and scrolls to the editor's Connections section without
-changing the destination. Each integration is drawn from that agent's own adapter, holding
-one block per setup: the folder an agent loads its configuration from (Pi's agent folder, Claude Code's config
-folder). The setups shown are the default one, the ones a connector is installed in, and the ones open
-conversations were found using, read from each conversation's own process, so a Finder launch and a terminal
-launch show the same setups; finding a setup never installs into it. Each setup looks like a single connector: a `SettingRow` with the status and one primary action, the folder as
-a `CopyableValue`, a count of the conversations that use it ("Used by 3 conversations." or "No open
-conversations use this folder.") with **Show** to list them, its issues, reload advice while a conversation using it is not connected or still runs the previous
-connector, and **Uninstall Connector…** alone at the trailing edge. More setups
-repeat the same block, each titled with its folder; there is no chooser or extra disclosure around them.
-Installing, updating or uninstalling one setup's connector never disconnects another setup's or another
+Each integration is drawn from that agent's own adapter. Its expanded content is a **Configuration folders**
+list (singular when there is one): the folders the agent loads its configuration from (Pi's agent folder,
+Claude Code's config folder). The folders shown are the default one, as an ordinary row, the ones a connector
+is installed in, the ones open conversations were found using, read from each conversation's own process, so
+a Finder launch and a terminal launch show the same folders, and any the user added this session; finding a
+folder never installs into it. Each folder is one compact row: the shortened path (full path on hover), its
+status word, at most one lifecycle action, and a **⋯** menu with **Show in Finder**, **Copy Path**,
+**Uninstall {Connector or Plugin}…** (red) while there is something to uninstall, and **Remove from List** for a
+folder the user added that was never installed. A folder's problems, its manual uninstall commands and a
+removed-outside-the-app warning sit directly under its row, so a failure is beside the folder it concerns.
+The list is labelled **Configuration folders** however many it holds. One **Add Folder…** follows the list for agents that can use more than one folder: it opens the native folder
+picker, starting beside the default folder with hidden folders shown. A folder already listed, by any
+equivalent path (symlink, trailing slash, the default), is refused with an advisory naming it; a folder that
+does not look like that agent's configuration folder is explained the same way; any other opens the consent
+sheet, and cancelling leaves it listed as Not installed with **Install…**. An open conversation in a folder
+that has no connector is covered by that folder's **Install…**. Open conversations in a folder whose connector
+is installed but that have not connected (just after an install, or after the connector was updated or
+reinstalled) get one advisory with their count and the step (“8 conversations need the connector loaded. Run
+/reload-plugins in each, or restart them.”) and, under it, a small **View affected conversations…** text
+link that opens the conversation list filtered to exactly those conversations; the advisory goes away as
+each one connects. No second button leads to the unfiltered list, which stays **Manage…**'s. A conversation still
+running the previous connector keeps working and is noted only in its details. Last, a **How {agent}
+connects** `DisclosureSection`, collapsed, holds the agent's help, the general reload advice and how
+configuration folders are found. Which conversations use a folder is not
+counted here; the conversation list names each conversation's folder whenever the agent has more than one.
+Installing, updating or uninstalling one folder's connector never disconnects another folder's or another
 agent's conversations. When an agent's conversations cannot all be checked, its section says so as an
 advisory and the conversations last seen stay listed rather than vanishing; only those are marked Last
 seen. When `connectors.json` cannot be read, a **Connectors** section above the agents says no connector
@@ -2350,9 +2364,9 @@ conflict, and says the fix belongs to whoever made the build; nothing in Setting
 no action.
 
 **Install…** on a setup and **Connect…** on a conversation open the same consent sheet, presented like the
-Rename sheet: the title "Connect conversations using this {agent} setup?", then the open conversations it
+Rename sheet: the title "Connect {agent} conversations using this folder?", then the open conversations it
 affects by name and that future conversations using the setup connect too ("Atlas, Build API, and future
-conversations using this setup will connect to {app}. You can disconnect individual conversations later."),
+conversations using this folder will connect to {app}. You can disconnect individual conversations later."),
 a `DisclosureSection` for a longer list, the conversations that stay disconnected (one being reconnected is
 listed with those that connect), that other setups are
 unaffected, that the app keeps this connector up to date and open conversations keep the version they loaded
@@ -2360,7 +2374,7 @@ until they reload, the folder it installs in as a `CopyableValue`, and the reloa
 are already open. The details grow only to a bounded height and then scroll, while the title and
 **Cancel** and **Install and Connect** remain visible. The buttons carry the standard cancel and default shortcuts.
 Opening the sheet changes nothing, and Install and Connect is the consent: there is no second confirmation
-and no result sheet. Progress and the outcome appear in the setup's block and the conversation rows.
+and no result sheet. Progress and the outcome appear in the folder's row and the conversation rows.
 
 A setup's status says what its files show: **Installed**, **Update available**, **Not installed**, the
 agent's own turned-off wording when the agent's configuration turns the connector off, **Uninstall not
@@ -2376,14 +2390,15 @@ connector keeps working until the conversation reloads.
 
 Failed connector operations and unreadable or unsaved conversation choices use the same error-marker
 chain as other Settings failures: the connector label where applicable, the dot on the affected
-integration's row under Connections (or the saved-choices problem under Send to), “Needs attention” on the Agent mode's row in the
+integration's row under Connections (or the saved-choices problem under its Conversations row), “Needs attention” on the Agent mode's row in the
 Modes list, Modes in the sidebar, and Settings in the menu. Not installed, Not connected and deliberate disconnections
 do not create errors. Lifecycle and help buttons retain their own action names in accessibility.
 
 **Uninstall Connector…** asks for confirmation first, which says that conversations using this setup
 disconnect at once, new ones will not connect, work already sent may still finish, each open conversation
 unloads the connector with its agent's reload command (`/reload-plugins` in Claude Code, `/reload` in Pi) or
-a restart, and the app's names and disconnected conversations are kept. The setup stops admitting its
+a restart, and that the folder itself, its conversations, and the app's names and disconnected conversations are
+kept; nothing is deleted but the connector. The setup stops admitting its
 connectors before anything is removed. For Claude Code, the uninstall is done only once Claude Code no longer
 lists the plugin or its marketplace in that setup; a step that reports something already gone is not a
 failure. A setup that is not installed but still has a connected conversation warns that the conversation
@@ -2391,7 +2406,7 @@ keeps receiving instructions until it reloads, which happens when the connector 
 An uninstall that did not finish shows **Uninstall not finished** as soon as it fails, with what the agent
 said, explains that its conversations no longer connect, and offers **Finish Uninstalling**; finishing never
 lets them connect again. When the agent's command cannot be found but the connector's files are still in
-place, the block keeps **Uninstall Connector…** and lists the terminal commands that finish the job, each
+place, the folder's row keeps **Uninstall Connector…** and lists the terminal commands that finish the job, each
 copyable, named for this copy of the app and its setup. A copy of the app that is missing its connector shows
 the connector as Unavailable, with guidance to reinstall the app; nothing else in the app is affected.
 
@@ -2413,13 +2428,13 @@ name. A row whose setup has no connector offers
 it forward and never types) when it can be located, and **Try Again**; the app never infers a reload is needed
 from process age or a missing hello. A conversation's details name the place it runs in
 when it has a label ("Ghostty · herdr workspace cos", naming the multiplexer once), so a name that came from the place matches
-it, and a name that won over the place still shows where it runs. A connected conversation offers **Rename…** in its chooser menu and **Disconnect** in its details.
+it, and a name that won over the place still shows where it runs. A connected conversation offers **Rename…** in its conversation list menu and **Disconnect** in its details.
 Connecting never changes where instructions go or sends anything.
 
-**Disconnect** takes effect at once without confirmation: the conversation leaves the recipients and the
+**Disconnect** takes effect at once without confirmation: the conversation can no longer receive, leaves the
 recording HUD's numbered list, and its held hand-offs and waiting spoken replies are dropped; work the agent
-already accepted may finish. If it was the chosen destination it stays chosen, shown as disconnected, so
-nothing goes elsewhere until the user chooses again. It then appears in the chooser's **Not available** group, and its details say
+already accepted may finish. A recording made while it is in front, or that names it, sends nothing and says it
+is disconnected. It then appears in the conversation list's **Not available** group, and its details say
 "Disconnected. It stays disconnected when reopened; new conversations connect normally." with
 **Reconnect**, which takes effect at once without a reload, or opens the consent sheet when the setup was
 uninstalled and reconnects the conversation once the install succeeds. A disconnected conversation keeps
@@ -2428,11 +2443,10 @@ now. Couldn't save this choice for the next launch." and **Try Again**. While th
 read, no conversation connects, the names problem says so, the list says "Conversations stay disconnected
 until names.json can be read.", and nothing is offered for Reconnect.
 
-**Missing one?** in the chooser's footer opens a popover with a plain account of what discovery can miss
-(agents started through unusual wrappers or hosted inside other programs) and a **Choose {agent} Setup
-Folder…** button per agent; **Check Again** beside it looks again. A chosen folder that does not look like that
-agent's setup is explained in the popover; one that does opens the consent sheet. Choosing a folder says where to
-install, not which conversations use it. With nothing found the list says "No open conversations found.", and
+**Missing one?** in the conversation list's footer opens a popover with a plain account of what discovery can miss
+(agents started through unusual wrappers or hosted inside other programs) and says that an agent using another
+configuration folder is added with **Add Folder…** in that agent's row under Connections; the list has no folder
+chooser of its own. **Check Again** beside it looks again. With nothing found the list says "No open conversations found.", and
 when some conversations could not be checked it says so instead; neither claims no agent is running.
 
 **Rename…** opens a compact sheet, focused on the existing name, with a live spoken example. When fewer of
@@ -2458,20 +2472,20 @@ a name of your own.”). Renaming changes the
 name used in KeyScribe and leaves Claude Code's own title alone. A chosen name stays with its session
 across restarts of either app and is held for it while it is closed. A name KeyScribe gave a session
 stays with it across KeyScribe restarts while that session keeps running, and is free once it closes. If those names
-cannot be saved, Where instructions go shows an orange advisory that they may change when the app restarts, with
+cannot be saved, the Conversations row shows an orange advisory that they may change when the app restarts, with
 the reason beneath it; saving is retried and the advisory clears once it succeeds. The name is saved before it takes
 effect. It overrides subsequent native renames; without a KeyScribe override the native conversation
 name is used automatically.
 
-If saved names cannot be loaded, Where instructions go says so, and the chooser explains what still works and
-offers **Try Again**.
+If saved names cannot be loaded, the Conversations row says so, and the conversation list explains what still
+works and offers **Try Again**.
 The diagnostic reason and **Show in Finder** live under **Details**; removing the file is explicitly
 described as forgetting the chosen names. Rename is unavailable, and a take starting with “tell” that
 is not a row number (“tell session 2 …”) is held instead of sent, including prose such as “tell me …”.
-A take starting with a name but no “tell” cannot be recognized and goes where Send to points.
-The HUD offers row numbers while names are unavailable, and the Settings example points to the number
-shown while recording without naming one, since the chooser and the recording list are ordered differently. Choosing or renaming a
-conversation never retargets a take already recording: its list and recipient stay frozen.
+A take starting with a name but no “tell” cannot be recognized and goes to the conversation in front.
+The HUD offers row numbers while names are unavailable, and the Settings example is hidden then, since the
+conversation list and the recording list are ordered differently. Renaming or opening a conversation never
+retargets a take already recording: its list and the conversation captured at its press stay frozen.
 
 When privacy is enabled, context controls remain visible but disabled with the exact reason:
 `Privacy mode sends only the redacted dictation. Context is off.` The user should not have to
@@ -2643,14 +2657,13 @@ Voice Commands vocabulary, not the global one, since that is what reads commands
 are turned off, a command entry shows no corrections, since that vocabulary cannot be seen or edited. The Voice Commands
 editor carries its own **Do not save this mode in history** toggle.
 
-An **Agent** entry is an attempted action, not a text transformation, so every one of them (Open,
-choosing a recipient, a sent, queued, kept or refused message) uses one presentation instead of the
+An **Agent** entry is an attempted action, not a text transformation, so every one of them (Open, a sent, queued, kept or refused message) uses one presentation instead of the
 comparison. Its Result view leads with the outcome in large type, red when it failed (*Sent to backend*,
-*Opened backend*, *Start with a conversation’s name. Nothing sent.*). The header carries no outcome badge or
+*Opened backend*, *No conversation focused. Open one, or name a conversation in your instruction.*). The header carries no outcome badge or
 second copy of it. Below it come what was heard, on its own and selectable for corrections, then the
 **Message** that was sent or kept when it differs from what was heard. **What happened** follows:
 labelled lines recorded when the take happened (the command, the spoken address, the conversation, or
-*None resolved*, and how it was chosen, and the default recipient), then, once a queued
+*None resolved*, how it was chosen, and the conversation in front at the press), then, once a queued
 or uncertain message settles, a timed line for each result in order. Those lines are as they were at the
 time, so a later rename or reorder does not change them. When an AI rewrite ran, **Compare with the AI
 rewrite** offers the usual comparison, collapsed, with the final text called **Result**. A message whose
@@ -2733,7 +2746,7 @@ on, unless the entry was deleted meanwhile, and the new audio plays. The status 
 Again does not check the new audio; its Check does. Playback details also holds **Show in Finder** for a kept reply
 and a list of the renders, each with its own Play and Check.
 
-A dictation in which live edits ran, including an agent message (beside its recipient lines), adds a
+A dictation in which live edits ran, including an agent message (beside its conversation lines), adds a
 **What happened** row, **Spoken edits**, with the same words as the completion HUD (“new line ×2, scratch that”), so the user can tell afterwards whether a spoken edit fired.
 
 Under the comparison of a dictation (not a command or an agent message), a line names each likely

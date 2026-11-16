@@ -164,13 +164,13 @@ enum HUDPreview {
             .choice(choicePrompt, status: .waiting(note: nil, heard: HeardExcerpt(heard: longHeard)))
         case "recording-agents":
             .recording(mode: "Agent", level: 0.7, latchedTrigger: nil, agents: AgentRoster(
-                frozen: agentConversations, live: agentConversations, recipient: .init(id: "b", source: .current)))
+                frozen: agentConversations, live: agentConversations, focused: "b"))
         case "recording-agents-long":
             .recording(mode: "Agent", level: 0.7, latchedTrigger: nil, agents: AgentRoster(
-                frozen: longAgentConversations, live: longAgentConversations, recipient: .init(id: "web", source: .current)))
+                frozen: longAgentConversations, live: longAgentConversations, focused: "web"))
         case "help-agent":
             .help(SpokenHelp.agent(
-                title: "Agent", recipient: "backend", example: nil, readsReplies: true, canRepeat: false,
+                title: "Agent", focused: "backend", example: nil, readsReplies: true, canRepeat: false,
                 stages: TakeStages.text(liveEdits: true, rules: [
                     ReplacementRule(heard: "slash resume", replace: "/resume", isRegex: false, wholeDictation: true),
                 ], numbers: false, dictionary: [])))

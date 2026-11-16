@@ -158,6 +158,8 @@ final class BBPluginConnector: AgentConnector {
 
     func recognizes(folder: URL) -> Bool { ConnectorFolders.contains(any: ["bin/bb", "thread-storage"], in: folder) }
 
+    var allowsOtherFolders: Bool { false }
+
     func locateTool() -> String? {
         let tool = defaultFolder.appendingPathComponent("bin/bb").path
         return isExecutable(tool) ? tool : nil
@@ -301,7 +303,7 @@ final class BBPluginConnector: AgentConnector {
         help: "With a small plugin installed in bb, \(Branding.appName) lists the threads bb runs, sends what you say to them through bb\u{2019}s own command, into a turn already running the way typing in bb would, and hears how they answer and what they stop to ask you; each bb window tells the plugin which thread it shows, so dictation goes to the thread you are looking at. Every thread connects on its own unless you disconnect it. \(Branding.appName) runs nothing of bb\u{2019}s until you connect bb. If bb loses the plugin, dictation still reaches its threads by name, but replies are not read aloud and \(Branding.appName) no longer knows which thread is in front until you reinstall it.",
         reloadHint: "",
         uninstallTitle: "Uninstall the plugin from bb?",
-        uninstallMessage: "\(Branding.appName) stops listing bb threads and sending to them. Your conversation names, disconnected conversations and other \(Branding.appName) settings are kept.",
+        uninstallMessage: "\(Branding.appName) stops listing bb threads and sending to them. bb, its threads, your conversation names and disconnections, and other \(Branding.appName) settings are kept.",
         toolNotFoundLabel: "bb not found",
         toolNotFoundAdvice: "Install bb, then come back here. \(Branding.appName) looks for bb in its usual folder.",
         unavailable: "This copy of \(Branding.appName) is missing its bb plugin. Reinstall \(Branding.appName) to add it.",
@@ -317,7 +319,7 @@ final class BBPluginConnector: AgentConnector {
                 ? "The plugin was removed outside \(Branding.appName), so 1 bb thread is still connected until bb restarts the plugin."
                 : "The plugin was removed outside \(Branding.appName), so \(count) bb threads are still connected until bb restarts the plugin."
         },
-        setupTitle: "Plugin", describesUse: false,
+        setupTitle: "Plugin",
         purpose: "Dictate to the bb thread you are looking at and hear its replies read aloud.",
         installNote: "To show the name to say for each thread, it turns on bb\u{2019}s thread row details (Organize \u{25B8} Rows \u{25B8} Metadata, which bb still calls experimental); a thread whose bb title already says its name shows nothing extra.",
         undoOnUninstallLabel: "Uninstall and Turn Off Row Details",

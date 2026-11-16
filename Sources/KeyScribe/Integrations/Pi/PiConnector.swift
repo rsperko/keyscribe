@@ -264,9 +264,9 @@ final class PiConnector: AgentConnector {
 
     let copy = AgentConnectorCopy(
         help: "\(Branding.appName) reaches Pi through a small extension installed in the folder Pi loads its configuration from. Installed means the extension is in place; each conversation using this folder then connects on its own, unless you disconnect it.",
-        reloadHint: "Already running Pi here? Run /reload once in each open conversation. New conversations connect on their own.",
+        reloadHint: "Already running Pi here? Run /reload in each open conversation.",
         uninstallTitle: "Uninstall the Pi connector from this folder?",
-        uninstallMessage: "Pi conversations using this folder disconnect now, and new ones will not connect. Work you already sent may still finish. Each open conversation unloads the connector when you run /reload in it or restart it. Other folders stay connected, and your conversation names, disconnected conversations and other \(Branding.appName) settings are kept.",
+        uninstallMessage: "Pi conversations using this folder disconnect now, and new ones will not connect. Work you already sent may still finish. Each open conversation unloads the connector when you run /reload in it or restart it. Other folders stay connected. The folder, its conversations, your conversation names and disconnections, and other \(Branding.appName) settings are kept.",
         toolNotFoundLabel: "Pi not found",
         toolNotFoundAdvice: "Install Pi, then come back here. \(Branding.appName) looks for the pi command on your PATH, in the usual install folders, and under Node version managers.",
         unavailable: "This copy of \(Branding.appName) is missing its Pi connector. Reinstall \(Branding.appName) to connect Pi.",

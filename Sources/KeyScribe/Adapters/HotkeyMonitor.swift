@@ -621,6 +621,27 @@ extension KeyDescriptor {
 
 nonisolated(unsafe) private weak var activeHotkeyMonitor: HotkeyMonitor?
 
+@MainActor
+enum UserInput {
+    private(set) static var latest: UInt64 = 0
+    static var onInput: (@MainActor (UInt64) -> Void)?
+
+    static var isObserved: Bool { activeHotkeyMonitor?.isTapActive == true }
+
+    static func any(after time: UInt64) -> Bool? {
+        isObserved ? latest > time : nil
+    }
+
+    static func note(at time: UInt64) {
+        latest = max(latest, time)
+        onInput?(time)
+    }
+
+    nonisolated static func canMoveFocus(_ type: CGEventType) -> Bool {
+        type == .keyDown || type == .leftMouseDown || type == .rightMouseDown
+    }
+}
+
 private func hotkeyTapCallback(
     proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, userInfo: UnsafeMutableRawPointer?
 ) -> Unmanaged<CGEvent>? {
@@ -629,6 +650,14 @@ private func hotkeyTapCallback(
         return Unmanaged.passUnretained(event)
     }
     if KeyReplay.isReplayed(event) { return Unmanaged.passUnretained(event) }
+    if UserInput.canMoveFocus(type), event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
+        let at = event.timestamp
+        let consumed = type == .keyDown ? (keyCode: Int(event.getIntegerValueField(.keyboardEventKeycode)), flags: event.flags) : nil
+        MainActor.assumeIsolated {
+            guard consumed.map({ CarbonHotKeys.consumes(keyCode: $0.keyCode, flags: $0.flags) }) != true else { return }
+            UserInput.note(at: at)
+        }
+    }
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
     let rawFlags = event.flags.rawValue
     let scrollIsUserDriven = type != .scrollWheel || HotkeyMonitor.scrollIsUserDriven(

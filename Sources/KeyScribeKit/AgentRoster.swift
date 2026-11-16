@@ -8,34 +8,30 @@ public struct AgentRoster: Equatable, Sendable {
         public let detail: String
         public let state: String
         public let available: Bool
-        public let current: Bool
+        public let target: Bool
 
-        public init(id: String, number: Int, name: String, detail: String, state: String, available: Bool, current: Bool) {
+        public init(id: String, number: Int, name: String, detail: String, state: String, available: Bool, target: Bool) {
             self.id = id
             self.number = number
             self.name = name
             self.detail = detail
             self.state = state
             self.available = available
-            self.current = current
+            self.target = target
         }
     }
 
     public let rows: [Row]
-    public let source: AgentRecipient.Source?
     public let namesAvailable: Bool
-    public let disconnectedRecipient: String?
-    public let endedRecipient: String?
+    public let disconnectedTarget: String?
 
     public init(
-        frozen: [AgentConversation], live: [AgentConversation], recipient: AgentRecipient.Frozen?, namesAvailable: Bool = true,
-        disconnected: [AgentConversation] = [], ended: String? = nil
+        frozen: [AgentConversation], live: [AgentConversation], focused: String?, namesAvailable: Bool = true,
+        disconnected: [AgentConversation] = []
     ) {
         self.namesAvailable = namesAvailable
-        disconnectedRecipient = disconnected.first { $0.id == recipient?.id }?.handle
-        endedRecipient = ended
+        disconnectedTarget = disconnected.first { $0.id == focused }?.handle
         let byId = Dictionary(live.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        let listed = recipient.map { wanted in frozen.contains { $0.id == wanted.id } } ?? false
         let mixed = Set(frozen.map(\.agent)).count > 1
         rows = frozen.enumerated().map { index, conversation in
             let now = byId[conversation.id]
@@ -44,13 +40,12 @@ public struct AgentRoster: Equatable, Sendable {
                 detail: Self.detail(conversation, namingAgent: mixed),
                 state: now.map(Self.stateLabel) ?? "Ended",
                 available: now.map(Self.isAvailable) ?? false,
-                current: listed && conversation.id == recipient?.id)
+                target: conversation.id == focused)
         }
-        source = listed ? recipient?.source : nil
     }
 
-    public var recipientName: String? {
-        rows.first(where: \.current)?.name ?? disconnectedRecipient.map { "\($0), disconnected" } ?? endedRecipient.map { "\($0), ended" }
+    public var targetName: String? {
+        rows.first(where: \.target)?.name ?? disconnectedTarget.map { "\($0), disconnected" }
     }
 
     public static func isWaitingForInput(_ conversation: AgentConversation) -> Bool {
@@ -61,7 +56,7 @@ public struct AgentRoster: Equatable, Sendable {
     }
 
     public static func recordingOrder(
-        _ conversations: [AgentConversation], current: String?, lastUsed: [String: Date]
+        _ conversations: [AgentConversation], lastUsed: [String: Date]
     ) -> [AgentConversation] {
         let alphabetical = conversations.sorted { $0.handle < $1.handle }
         let recency = { (conversation: AgentConversation) in
@@ -73,10 +68,7 @@ public struct AgentRoster: Equatable, Sendable {
                 return first != second ? first > second : $0.handle < $1.handle
             }
         }
-        let others = alphabetical.filter { $0.id != current }
-        let waiting = recent(others.filter(isWaitingForInput))
-        let rest = others.filter { !isWaitingForInput($0) }
-        return alphabetical.filter { $0.id == current } + waiting + recent(rest)
+        return recent(alphabetical.filter(isWaitingForInput)) + recent(alphabetical.filter { !isWaitingForInput($0) })
     }
 
     public static func isAvailable(_ conversation: AgentConversation) -> Bool {

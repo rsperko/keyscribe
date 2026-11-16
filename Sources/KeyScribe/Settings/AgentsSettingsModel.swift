@@ -5,12 +5,10 @@ import KeyScribeKit
 final class AgentsSettingsModel: ObservableObject {
     struct Row: Identifiable, Equatable {
         let id: String
-        let number: Int
         let name: String
         let folder: String
         let state: String
         let connected: Bool
-        let current: Bool
         let agent: String
         var terminal: String?
         var title: String?
@@ -143,11 +141,7 @@ final class AgentsSettingsModel: ObservableObject {
         didSet { for connector in connectors { connector.onRetire = onRetire } }
     }
 
-    @Published private(set) var chosenID: String?
-    @Published private var currentName: String?
-    var onChoose: ((String?) -> Void)?
     var connectedCount: Int { rows.filter(\.connected).count }
-    var showsAgentType: Bool { Set(rows.map(\.agent)).count > 1 }
 
     var hasError: Bool {
         namesProblem != nil || exclusionsNotSaved != nil || setupsProblem != nil || integrationsProblem != nil
@@ -164,7 +158,7 @@ final class AgentsSettingsModel: ObservableObject {
     private let describeTerminal: @Sendable (Int) -> String?
     private var terminals: [Int: String?] = [:]
     @Published private var discoveryProblems: [String: String] = [:]
-    private var shown: (conversations: [AgentConversation], current: String?, currentName: String?)?
+    private var shown: [AgentConversation]?
     private struct Extras {
         var setups: [String: [String]]
         var candidates: [AgentCandidate]
@@ -208,7 +202,7 @@ final class AgentsSettingsModel: ObservableObject {
     }
 
     func show(
-        _ conversations: [AgentConversation], current: String?, currentName: String? = nil, namesProblem: String? = nil, namesNotSaved: String? = nil,
+        _ conversations: [AgentConversation], namesProblem: String? = nil, namesNotSaved: String? = nil,
         discoveryProblems: [String: String]? = nil, discoveredSetups: [String: [String]] = [:], candidates: [AgentCandidate] = [],
         disconnected: [AgentConversation] = [], exclusionsNotSaved: String? = nil, loadedVersions: [String: String] = [:],
         lastSeen: Set<String> = [], readAloud: Set<String> = [], readNextAloud: Set<String> = []
@@ -224,17 +218,15 @@ final class AgentsSettingsModel: ObservableObject {
             connector.discoveryProblem = self.discoveryProblems[connector.kind.id]
         }
         if namesNotSaved != self.namesNotSaved { self.namesNotSaved = namesNotSaved }
-        shown = (conversations, current, currentName)
-        if chosenID != current { chosenID = current }
-        if self.currentName != currentName { self.currentName = currentName }
+        shown = conversations
         describeNewTerminals(conversations.compactMap(\.pid) + candidates.map(\.pid) + disconnected.compactMap(\.pid))
-        var next = conversations.enumerated().map { index, conversation in
+        var next = conversations.map { conversation in
             let lastSeen = !conversation.reachable && lastSeen.contains(conversation.id)
             return Row(
-                id: conversation.id, number: index + 1, name: conversation.handle, folder: conversation.cwd,
+                id: conversation.id, name: conversation.handle, folder: conversation.cwd,
                 state: lastSeen ? "Last seen" : AgentRoster.stateLabel(conversation),
                 connected: conversation.reachable,
-                current: conversation.id == current, agent: conversation.runningAgent, terminal: conversation.pid.flatMap { terminals[$0] ?? nil },
+                agent: conversation.runningAgent, terminal: conversation.pid.flatMap { terminals[$0] ?? nil },
                 title: conversation.title, setup: conversation.setup,
                 key: conversation.pid.map { Self.key(pid: $0, milliseconds: conversation.startedAt.map { Int(($0.timeIntervalSince1970 * 1000).rounded()) }) } ?? conversation.id,
                 lastSeen: lastSeen, olderConnector: runsOlderConnector(conversation, loadedVersions: loadedVersions), startedAt: conversation.startedAt,
@@ -245,16 +237,16 @@ final class AgentsSettingsModel: ObservableObject {
         }
         next += candidates.map { candidate in
             Row(
-                id: candidate.rowId, number: 0, name: name(of: candidate), folder: candidate.cwd,
-                state: "Not connected", connected: false, current: false, agent: candidate.agent, terminal: terminals[candidate.pid] ?? nil,
+                id: candidate.rowId, name: name(of: candidate), folder: candidate.cwd,
+                state: "Not connected", connected: false, agent: candidate.agent, terminal: terminals[candidate.pid] ?? nil,
                 setup: candidate.setup, key: Self.key(pid: candidate.pid, milliseconds: candidate.startedAt), identified: false,
                 startedAt: candidate.startedAt.map { Date(timeIntervalSince1970: Double($0) / 1000) })
         }
         if next != rows { rows = next }
         let away = namesProblem != nil ? [] : disconnected.map { conversation in
             Row(
-                id: conversation.id, number: 0, name: conversation.handle, folder: conversation.cwd, state: "Disconnected", connected: false,
-                current: false, agent: conversation.runningAgent, terminal: conversation.pid.flatMap { terminals[$0] ?? nil }, title: conversation.title,
+                id: conversation.id, name: conversation.handle, folder: conversation.cwd, state: "Disconnected", connected: false,
+                agent: conversation.runningAgent, terminal: conversation.pid.flatMap { terminals[$0] ?? nil }, title: conversation.title,
                 setup: conversation.setup, key: conversation.id, place: conversation.placeName,
                 renamed: conversation.nameSource == .chosen, surface: conversation.placeSurface, otherNames: conversation.otherNames,
                 unreadSince: conversation.placeUnreadSince)
@@ -287,7 +279,7 @@ final class AgentsSettingsModel: ObservableObject {
             for (pid, terminal) in found { self.terminals[pid] = .some(terminal) }
             if let shown = self.shown, let extras = self.shownExtras {
                 self.show(
-                    shown.conversations, current: shown.current, currentName: shown.currentName, namesProblem: self.namesProblem, namesNotSaved: self.namesNotSaved,
+                    shown, namesProblem: self.namesProblem, namesNotSaved: self.namesNotSaved,
                     discoveredSetups: extras.setups, candidates: extras.candidates, disconnected: extras.disconnected,
                     exclusionsNotSaved: self.exclusionsNotSaved, loadedVersions: extras.loadedVersions, lastSeen: extras.lastSeen,
                     readAloud: extras.readAloud, readNextAloud: extras.readNextAloud)
@@ -319,6 +311,18 @@ final class AgentsSettingsModel: ObservableObject {
 
     func agentName(_ row: Row) -> String {
         connector(for: row)?.kind.displayName ?? hosts.first { $0.id == row.agent }?.displayName ?? row.agent
+    }
+
+    func awaitingReload(of connector: AgentConnectorModel) -> [Row] {
+        rows.filter { row in
+            guard row.agent == connector.kind.id, !row.connected, !row.lastSeen, case .recover = action(for: row) else { return false }
+            return true
+        }
+    }
+
+    func configurationFolder(of row: Row) -> String? {
+        guard let setup = row.setup, (connector(for: row)?.setups.count ?? 0) > 1 else { return nil }
+        return (setup as NSString).abbreviatingWithTildeInPath
     }
 
     func setup(for row: Row) -> ConnectorSetupModel? {
@@ -357,7 +361,7 @@ final class AgentsSettingsModel: ObservableObject {
     func reveal(_ rows: [String]) {
         revealed = rows
         revealedAt = now()
-        if !rows.isEmpty { showingChooser = true }
+        if !rows.isEmpty { showingConversations = true }
     }
 
     var hasAnyConnection: Bool {
@@ -368,53 +372,37 @@ final class AgentsSettingsModel: ObservableObject {
         connectors.filter { host(of: $0) == nil }.map(\.kind.id) + hosts.map(\.id)
     }
 
-    @Published var showingChooser = false
-
-    enum Destination: Equatable {
-        case front
-        case conversation(String)
-        case unavailable(String, problem: String)
-
-        var title: String {
-            switch self {
-            case .front: AgentsSettingsModel.frontTitle
-            case .conversation(let name), .unavailable(let name, _): name
-            }
-        }
+    @Published var showingConversations = false {
+        didSet { if !showingConversations { listFilter = nil } }
     }
 
-    nonisolated static let frontTitle = "Conversation in front"
-
-    var destination: Destination {
-        guard let chosenID else { return .front }
-        if let row = rows.first(where: { $0.id == chosenID }) {
-            guard row.connected else {
-                return .unavailable(row.name, problem: "\(row.name) isn\u{2019}t connected, so nothing can be sent to it. Instructions without a name are held, not sent elsewhere.")
-            }
-            return .conversation(row.name)
-        }
-        if let row = disconnectedRows.first(where: { $0.id == chosenID }) {
-            return .unavailable(row.name, problem: "\(row.name) is disconnected. Instructions without a name are held, not sent elsewhere.")
-        }
-        let name = currentName ?? "The conversation you chose"
-        return .unavailable(name, problem: "\(name) has ended. Instructions without a name are held, not sent elsewhere.")
+    struct ListFilter: Equatable {
+        var ids: Set<String>
+        var title: String
     }
 
-    func choose(_ id: String?) {
-        guard id != chosenID else { return }
-        onChoose?(id)
+    @Published private(set) var listFilter: ListFilter?
+
+    func showOnly(_ ids: [String], title: String) {
+        guard !ids.isEmpty else { return }
+        listFilter = ListFilter(ids: Set(ids), title: title)
+        showingConversations = true
     }
 
-    var sendToExample: String? {
-        if namesProblem != nil { return nil }
-        switch destination {
-        case .front: return "\u{201C}Run the unit tests\u{201D} goes to the conversation in front of you."
-        case .conversation(let name): return "\u{201C}Run the unit tests\u{201D} goes to \(name), even when another conversation is in front."
-        case .unavailable: return nil
-        }
+    func showAllConversations() { listFilter = nil }
+
+    var conversationsSummary: String {
+        let available = rows.filter(\.connected).count
+        return available == 1 ? "1 available" : available == 0 ? "None available" : "\(available) available"
     }
 
-    static let addressedNote = "Start with another conversation\u{2019}s name to send there instead. That conversation then becomes where instructions go."
+    var routingExample: String? {
+        guard namesProblem == nil else { return nil }
+        let name = rows.first(where: \.connected)?.name ?? "backend"
+        return "\u{201C}tell \(name) run the unit tests\u{201D} sends only that instruction to \(name)."
+    }
+
+    static let routingNote = "Instructions go to the conversation in front of you when you start speaking. Start with a conversation\u{2019}s name or number to send one instruction there instead."
 
     struct Groups: Equatable {
         var connected: [Row]
@@ -424,8 +412,9 @@ final class AgentsSettingsModel: ObservableObject {
 
     func conversationGroups(matching query: String) -> Groups {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let filter = listFilter?.ids
         let shown = { (rows: [Row]) in
-            rows.filter { query.isEmpty || self.matches($0, query) }.sorted(by: Self.listOrder)
+            rows.filter { (filter?.contains($0.id) ?? true) && (query.isEmpty || self.matches($0, query)) }.sorted(by: Self.listOrder)
         }
         return Groups(
             connected: shown(rows.filter(\.connected)),
@@ -442,7 +431,7 @@ final class AgentsSettingsModel: ObservableObject {
     }
 
     private func matches(_ row: Row, _ query: String) -> Bool {
-        ([row.name, agentName(row), row.folder, row.location, row.title] + row.otherNames.map(Optional.some))
+        ([row.name, agentName(row), row.folder, row.location, row.title, row.setup.map { ($0 as NSString).abbreviatingWithTildeInPath }] + row.otherNames.map(Optional.some))
             .compactMap { $0 }
             .contains { $0.localizedCaseInsensitiveContains(query) }
     }
@@ -470,8 +459,11 @@ final class AgentsSettingsModel: ObservableObject {
     }
 
     func choose(folder: URL, for connector: AgentConnectorModel) -> String? {
+        if let listed = connector.setup(for: ConnectorFolders.canonical(folder).path) {
+            return "\(listed.display) is already listed."
+        }
         guard connector.connector.recognizes(folder: folder) else {
-            return "\(ConnectorFolders.display(folder)) doesn\u{2019}t look like a \(connector.kind.displayName) setup folder."
+            return "\(ConnectorFolders.display(folder)) doesn\u{2019}t look like a \(connector.kind.displayName) configuration folder."
         }
         guard let setup = connector.choose(folder: folder) else { return nil }
         Task { await setup.refresh() }

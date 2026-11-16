@@ -8,31 +8,32 @@ struct SpokenHelpTests {
         ReplacementRule(heard: #"(?<=x)y"#, replace: "z", isRegex: true),
     ])
 
-    @Test func agentHelpNamesTheRecipientAndUsesItsName() {
-        let help = SpokenHelp.agent(title: "Agent", recipient: "backend", example: "api", readsReplies: true, canRepeat: true, stages: [])
-        #expect(help.status == "Recipient: backend")
+    @Test func agentHelpNamesTheFocusedConversationAndUsesItsName() {
+        let help = SpokenHelp.agent(title: "Agent", focused: "backend", example: "api", readsReplies: true, canRepeat: true, stages: [])
+        #expect(help.status == "Unnamed instructions go to backend")
         #expect(help.rows.map(\.said) == [
-            "cancel", "check on all conversations", "check on backend", "follow the front", "go back", "open backend", "repeat that", "select backend",
+            "cancel", "check on all conversations", "check on backend", "go back", "open backend", "repeat that",
             "tell backend run the unit tests", "that sounded wrong",
         ])
+        #expect(!help.rows.contains { $0.effect.localizedCaseInsensitiveContains("recipient") || $0.effect.contains("Later instructions") })
         for row in help.rows { #expect(!row.effect.isEmpty) }
     }
 
-    @Test func agentHelpWithoutARecipientUsesAConversationThatExists() {
-        let help = SpokenHelp.agent(title: "Agent", recipient: nil, example: "api", readsReplies: false, canRepeat: false, stages: [])
-        #expect(help.status == "No recipient selected")
+    @Test func agentHelpWithNothingFocusedSaysSoAndUsesAConversationThatExists() {
+        let help = SpokenHelp.agent(title: "Agent", focused: nil, example: "api", readsReplies: false, canRepeat: false, stages: [])
+        #expect(help.status == AgentRecipient.nothingFocusedLine)
         #expect(help.rows.contains { $0.said == "tell api run the unit tests" })
         #expect(!help.rows.contains { $0.said == "repeat that" })
     }
 
     @Test func agentHelpWithNoConversationInventsNoName() {
-        let help = SpokenHelp.agent(title: "Agent", recipient: nil, example: nil, readsReplies: false, canRepeat: false, stages: [])
-        #expect(help.rows.map(\.said) == ["cancel", "check on all conversations", "follow the front", "go back"])
+        let help = SpokenHelp.agent(title: "Agent", focused: nil, example: nil, readsReplies: false, canRepeat: false, stages: [])
+        #expect(help.rows.map(\.said) == ["cancel", "check on all conversations", "go back"])
     }
 
     @Test func agentHelpListsSpokenEditsWordedForAMessageOnlyWhenTheyAreOn() {
         let on = SpokenHelp.agent(
-            title: "Agent", recipient: "backend", example: nil, readsReplies: false, canRepeat: false,
+            title: "Agent", focused: "backend", example: nil, readsReplies: false, canRepeat: false,
             stages: TakeStages.text(liveEdits: true, rules: [], numbers: false, dictionary: []))
         let effects = Dictionary(on.rows.map { ($0.said, $0.effect) }, uniquingKeysWith: { first, _ in first })
         #expect(effects["insert tab character"] == "Tab in the message")
@@ -44,14 +45,14 @@ struct SpokenHelpTests {
         #expect(on.rows.first { $0.said == "never mind" }?.note == "Say it last")
         #expect(on.rows.map(\.said) == on.rows.map(\.said).sorted { $0.localizedStandardCompare($1) == .orderedAscending })
         let off = SpokenHelp.agent(
-            title: "Agent", recipient: "backend", example: nil, readsReplies: false, canRepeat: false,
+            title: "Agent", focused: "backend", example: nil, readsReplies: false, canRepeat: false,
             stages: TakeStages.text(liveEdits: false, rules: [], numbers: false, dictionary: []))
         #expect(!off.rows.contains { $0.said.hasPrefix("insert") || $0.said.contains("verbatim") || $0.said == "never mind" })
         #expect(off.rows.contains { $0.said == "tell backend run the unit tests" })
     }
 
     @Test func repeatSaysWhenThereIsNothingToRepeat() {
-        let help = SpokenHelp.agent(title: "Agent", recipient: "backend", example: nil, readsReplies: true, canRepeat: false, stages: [])
+        let help = SpokenHelp.agent(title: "Agent", focused: "backend", example: nil, readsReplies: true, canRepeat: false, stages: [])
         #expect(help.rows.first { $0.said == "repeat that" }?.note == "There\u{2019}s nothing to repeat yet")
     }
 
@@ -243,13 +244,13 @@ struct SpokenHelpTests {
     }
 
     @Test func everyBuiltInPhraseIsRecognizedAsWhatItSays() {
-        let agent = SpokenHelp.agent(title: "", recipient: "backend", example: nil, readsReplies: true, canRepeat: true, stages: []).rows.map(\.said)
+        let agent = SpokenHelp.agent(title: "", focused: "backend", example: nil, readsReplies: true, canRepeat: true, stages: []).rows.map(\.said)
         #expect(AgentAddress.parse("tell backend run the unit tests", names: ["backend"]) == .name("backend", body: "run the unit tests"))
-        #expect(AgentAddress.parse("select backend", names: ["backend"]) == .select(.name("backend", body: "")))
         #expect(AgentAddress.parse("open backend", names: ["backend"]) == .open(.name("backend", body: "")))
         #expect(AgentStatusQuery.parse("check on backend", names: ["backend"]) == .check(.name("backend", body: "")))
         #expect(AgentStatusQuery.parse("check on all conversations", names: ["backend"]) == .all)
-        for phrase in ["tell backend run the unit tests", "select backend", "open backend", "check on backend", "check on all conversations"] {
+        #expect(!agent.contains("select backend"))
+        for phrase in ["tell backend run the unit tests", "open backend", "check on backend", "check on all conversations"] {
             #expect(agent.contains(phrase))
         }
         for (phrase, intent) in [("repeat that", VoiceCommandIntent.repeatSummary), ("go back", .goBack), ("cancel", .cancel)] {

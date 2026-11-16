@@ -45,16 +45,18 @@ struct AgentIntegrationRow: View {
 
     var body: some View {
         if let connector = agents.connectors.first(where: { $0.kind.id == id }) {
-            ConnectorRow(connector: connector, available: available, notConnected: notConnected, onConnect: {
-                agents.requestInstall($0, of: connector)
-            })
+            ConnectorRow(
+                connector: connector, available: available, awaitingReload: agents.awaitingReload(of: connector).map(\.id),
+                onConnect: { agents.requestInstall($0, of: connector) },
+                onAddFolder: { ConnectorFolderPicker.choose(for: connector).flatMap { agents.choose(folder: $0, for: connector) } },
+                onShow: { agents.showOnly($0, title: ConnectionSummary.awaitingReloadTitle(connector.kind.displayName)) })
         } else if let host = agents.hosts.first(where: { $0.id == id }) {
             let on = agents.isTurnedOn(host)
             VStack(alignment: .leading, spacing: 6) {
                 DisclosureSection(isExpanded: $expanded, headerID: AccessibilityID.Mode.Agents.integration(id)) {
                     DisclosureSummaryLabel(
                         title: host.displayName,
-                        summary: ConnectionSummary.line(setup: on ? "Turned on" : "Not set up", isSetUp: on, available: available, notConnected: notConnected))
+                        summary: ConnectionSummary.line(setup: on ? nil : "Not set up", available: available))
                 } content: {
                     SettingRow(
                         title: "Reach conversations in \(host.displayName)",
@@ -72,18 +74,20 @@ struct AgentIntegrationRow: View {
     }
 
     private var available: Int { agents.rows.filter { $0.agent == id && $0.connected }.count }
-    private var notConnected: Int { agents.rows.filter { $0.agent == id && !$0.connected }.count }
 }
 
 private struct ConnectorRow: View {
     @ObservedObject var connector: AgentConnectorModel
     let available: Int
-    let notConnected: Int
+    let awaitingReload: [String]
     let onConnect: (ConnectorSetupModel) -> Void
+    let onAddFolder: () -> String?
+    let onShow: ([String]) -> Void
     @State private var expanded = false
+    @State private var showingHelp = false
+    @State private var folderProblem: String?
 
     var body: some View {
-        let setup = connector.setupStatus
         let failing = connector.setups.first(where: \.hasError)
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
@@ -93,7 +97,7 @@ private struct ConnectorRow: View {
                 ) {
                     DisclosureSummaryLabel(
                         title: connector.kind.displayName,
-                        summary: ConnectionSummary.line(setup: setup.text, isSetUp: setup.isSetUp, available: available, notConnected: notConnected))
+                        summary: ConnectionSummary.line(setup: connector.setupStatus, available: available, folders: connector.setups.count))
                 }
                 if let connectable = connector.connectableSetup {
                     Button("Connect\u{2026}") { onConnect(connectable) }
@@ -103,9 +107,7 @@ private struct ConnectorRow: View {
                 }
             }
             if expanded {
-                ForEach(connector.setups) { setup in
-                    ConnectorSetupBlock(setup: setup, showsFolderInTitle: connector.setups.count > 1, onInstall: { onConnect(setup) })
-                }
+                folders
             } else if let message = failing?.failureMessage {
                 IssueText(message)
             }
@@ -114,39 +116,121 @@ private struct ConnectorRow: View {
             }
         }
     }
+
+    private var folders: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Configuration folders")
+                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            ForEach(connector.setups) { setup in
+                ConnectorFolderRow(
+                    setup: setup, canForget: connector.canForget(setup), onInstall: { onConnect(setup) },
+                    onForget: { connector.forget(setup) })
+            }
+            if connector.connector.allowsOtherFolders {
+                Button("Add Folder\u{2026}") { folderProblem = onAddFolder() }
+                    .accessibilityLabel("Add a \(connector.kind.displayName) configuration folder")
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.addFolder)
+                if let folderProblem {
+                    IssueText(folderProblem, severity: .advisory)
+                }
+            }
+            if let purpose = connector.copy.purpose, !connector.setups.contains(where: \.isEnrolled) {
+                Text(purpose).font(.caption).foregroundStyle(.secondary)
+            }
+            if !awaitingReload.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    IssueText(ConnectionSummary.awaitingReload(awaitingReload.count, reload: connector.kind.reloadCommand), severity: .advisory)
+                    Button("View affected conversations\u{2026}") { onShow(awaitingReload) }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.viewAwaitingReload)
+                }
+            }
+            DisclosureSection(
+                "How \(connector.kind.displayName) connects", isExpanded: $showingHelp,
+                headerID: AccessibilityID.Mode.Agents.howItConnects(connector.kind.id)
+            ) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(connector.copy.help)
+                    if !connector.copy.reloadHint.isEmpty {
+                        Text(connector.copy.reloadHint)
+                    }
+                    if connector.connector.allowsOtherFolders {
+                        Text(Self.foldersHelp(connector.kind.displayName))
+                    }
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .onChange(of: connector.setups.count) { _, _ in folderProblem = nil }
+    }
+
+    static func foldersHelp(_ agent: String) -> String {
+        "A configuration folder is where \(agent) loads its settings from. \(Branding.appName) lists the default folder, the folders its connector is installed in, and the folders open conversations use. If you run \(agent) with another folder, choose Add Folder\u{2026} to install the connector there; each folder is connected and removed on its own."
+    }
+}
+
+@MainActor
+enum ConnectorFolderPicker {
+    static func choose(for connector: AgentConnectorModel) -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.canCreateDirectories = false
+        panel.directoryURL = connector.connector.defaultFolder.deletingLastPathComponent()
+        panel.message = "Choose the folder \(connector.kind.displayName) loads its configuration from."
+        panel.prompt = "Add Folder"
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
+    }
 }
 
 enum ConnectionSummary {
-    static func line(setup: String, isSetUp: Bool, available: Int, notConnected: Int) -> String {
-        var parts = [setup]
+    static func line(setup: String?, available: Int, folders: Int = 1) -> String {
+        var parts = setup.map { [$0] } ?? []
         if available > 0 {
             parts.append(available == 1 ? "1 conversation available" : "\(available) conversations available")
-        } else if isSetUp, notConnected == 0 {
+        } else if setup == nil {
             parts.append("No conversations open")
         }
-        if notConnected > 0 { parts.append("\(notConnected) not connected") }
+        if folders > 1 { parts.append("\(folders) configuration folders") }
         return parts.joined(separator: " \u{00B7} ")
+    }
+
+    static func awaitingReload(_ count: Int, reload: String?) -> String {
+        guard let reload else {
+            return count == 1 ? "1 conversation hasn\u{2019}t connected yet." : "\(count) conversations haven\u{2019}t connected yet."
+        }
+        return count == 1
+            ? "1 conversation needs the connector loaded. Run \(reload) in it, or restart it."
+            : "\(count) conversations need the connector loaded. Run \(reload) in each, or restart them."
+    }
+
+    static func awaitingReloadTitle(_ agent: String) -> String {
+        "\(agent) conversations that need the connector loaded"
     }
 }
 
 extension AgentConnectorModel {
-    var setupStatus: (text: String, isSetUp: Bool) {
+    var setupStatus: String? {
         if let failing = setups.first(where: \.hasError) {
-            return (setups.count > 1 ? "\(failing.statusText) in \(failing.display)" : failing.statusText, true)
+            return setups.count > 1 ? "\(failing.statusText) in \(failing.display)" : failing.statusText
         }
-        if let operation = setups.lazy.compactMap(\.operation).first { return (operation, true) }
+        if let operation = setups.lazy.compactMap(\.operation).first { return operation }
         let installed = setups.filter(\.isInstalled)
         if !installed.isEmpty {
-            let disabled = installed.allSatisfy { $0.state == .status(.disabled) }
-            return (disabled ? copy.disabledLabel : "\(copy.setupTitle) installed", true)
+            return installed.allSatisfy { $0.state == .status(.disabled) } ? copy.disabledLabel : nil
         }
-        if let enrolled = setups.first(where: \.isEnrolled) { return (enrolled.statusText, true) }
-        if setups.contains(where: { $0.state == .checking }) { return ("Checking\u{2026}", false) }
+        if let enrolled = setups.first(where: \.isEnrolled) { return enrolled.statusText }
+        if setups.contains(where: { $0.state == .checking }) { return "Checking\u{2026}" }
         if let missing = setups.first(where: { $0.state == .toolNotFound || $0.state == .unavailable }) {
-            return (missing.statusText, false)
+            return missing.statusText
         }
-        if let old = setups.first(where: { if case .toolTooOld = $0.state { true } else { false } }) { return (old.statusText, false) }
-        return ("Not set up", false)
+        if let old = setups.first(where: { if case .toolTooOld = $0.state { true } else { false } }) { return old.statusText }
+        return "Not set up"
     }
 
     var connectableSetup: ConnectorSetupModel? {
@@ -157,27 +241,30 @@ extension AgentConnectorModel {
     }
 }
 
-private struct ConnectorSetupBlock: View {
+private struct ConnectorFolderRow: View {
     @ObservedObject var setup: ConnectorSetupModel
-    let showsFolderInTitle: Bool
+    let canForget: Bool
     let onInstall: () -> Void
+    let onForget: () -> Void
     @State private var confirmingRemove = false
-    @State private var showingUsers = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SettingRow(title: title, result: setup.statusText, help: setup.copy.help, combinesAccessibilityChildren: false, hasError: setup.hasError) {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                HStack(spacing: 6) {
+                    Text(setup.display).lineLimit(1).truncationMode(.middle).help(setup.folder.path)
+                    if setup.hasError {
+                        Circle().fill(.red).frame(width: 7, height: 7).accessibilityHidden(true)
+                    }
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(([setup.display, setup.statusText] + (setup.hasError ? ["Needs attention"] : [])).joined(separator: ", "))
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.folderRow)
+                Spacer(minLength: 8)
+                Text(setup.statusText).font(.callout).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                    .accessibilityHidden(true)
                 primaryAction
-            }
-            .accessibilityIdentifier(AccessibilityID.Mode.Agents.connectorStatus)
-            if let purpose = setup.copy.purpose, !setup.isEnrolled {
-                Text(purpose).font(.caption).foregroundStyle(.secondary)
-            }
-            CopyableValue(setup.display, value: setup.folder.path, what: "folder", of: "this setup")
-                .font(.caption)
-                .accessibilityIdentifier(AccessibilityID.Mode.Agents.setupFolder)
-            if setup.copy.describesUse {
-                usage
+                actions
             }
             issue
             if setup.showsRemovalWarning {
@@ -185,12 +272,6 @@ private struct ConnectorSetupBlock: View {
             }
             if !setup.manualUninstall.isEmpty {
                 manualUninstall
-            }
-            if setup.needsReload, !setup.copy.reloadHint.isEmpty {
-                Text(setup.copy.reloadHint).font(.caption).foregroundStyle(.secondary)
-            }
-            if setup.offersUninstall {
-                uninstallButton
             }
         }
         .confirmationDialog(setup.copy.uninstallTitle, isPresented: $confirmingRemove, titleVisibility: .visible) {
@@ -208,43 +289,31 @@ private struct ConnectorSetupBlock: View {
         "\(setup.connector.kind.displayName) \(setup.copy.setupTitle.lowercased()) in \(setup.display)"
     }
 
-    private var title: String {
-        showsFolderInTitle ? "\(setup.copy.setupTitle) in \(setup.display)" : setup.copy.setupTitle
-    }
-
-    @ViewBuilder private var usage: some View {
-        let count = setup.usedBy.count
-        HStack(spacing: 6) {
-            Text(count == 0 ? "No open conversations use this folder." : count == 1 ? "Used by 1 conversation." : "Used by \(count) conversations.")
-                .accessibilityIdentifier(AccessibilityID.Mode.Agents.summary)
-            if count > 0 {
-                Button(showingUsers ? "Hide" : "Show") { showingUsers.toggle() }
-                    .buttonStyle(.link)
-                    .accessibilityLabel(showingUsers ? "Hide the conversations using this folder" : "Show the conversations using this folder")
-                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.usedBy)
+    private var actions: some View {
+        Menu {
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([setup.folder]) }
+            Button("Copy Path") { _ = TextInserter.copyToClipboard(setup.folder.path) }
+            if setup.offersUninstall || canForget {
+                Divider()
             }
-        }
-        .font(.caption).foregroundStyle(.secondary)
-        if showingUsers, count > 0 {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(setup.usedBy.enumerated()), id: \.offset) { _, name in Text(name) }
+            if setup.offersUninstall {
+                Button("Uninstall \(setup.copy.setupTitle)\u{2026}", role: .destructive) { confirmingRemove = true }
+                    .disabled(setup.operation != nil)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.remove)
             }
-            .font(.caption).foregroundStyle(.secondary)
-            .padding(.leading, 12)
+            if canForget {
+                Button("Remove from List", action: onForget)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.forgetFolder)
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
         }
-    }
-
-    private var uninstallButton: some View {
-        HStack {
-            Spacer()
-            Button("Uninstall \(setup.copy.setupTitle)\u{2026}", role: .destructive) { confirmingRemove = true }
-                .buttonStyle(.borderless)
-                .font(.caption)
-                .foregroundStyle(.red)
-                .disabled(setup.operation != nil)
-                .accessibilityLabel("Uninstall \(setupName)")
-                .accessibilityIdentifier(AccessibilityID.Mode.Agents.remove)
-        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("More for \(setup.display)")
+        .accessibilityLabel("More for \(setupName)")
+        .accessibilityIdentifier(AccessibilityID.Mode.Agents.folderActions)
     }
 
     private var manualUninstall: some View {

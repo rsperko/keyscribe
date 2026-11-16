@@ -230,7 +230,9 @@ in the same `Application Support` folder:
   connector notes the time of the last key pressed in that session, never which key. When you start an
   Agent dictation, KeyScribe asks the terminal in front which tab or pane is selected and reads the same
   process details, so what you say goes to the conversation you are looking at; it never asks for permission to
-  do so, and the answer stays on your Mac and is not stored. To bring a
+  do so, and the answer stays on your Mac and is not stored. To tell whether you moved to another
+  conversation before that answer arrived, KeyScribe notes the time of your latest key press or click in any
+  app, never which key or where; it keeps only that one time, in memory, and never stores or logs it. To bring a
   conversation's terminal forward, KeyScribe reads a few terminal and multiplexer variables (such as a
   pane id) from the environment of the processes that hold it; the rest of their environment is ignored.
   If you install KeyScribe's plugin in bb, KeyScribe runs bb's own `bb` command on your Mac to list bb's

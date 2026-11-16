@@ -6,9 +6,9 @@ struct AgentRecipientSharedNameTests {
     let names = ["cos claude": "a", "cos pi": "b", "backend": "c"]
     let shared = ["cos": AgentRecipient.SharedName(names: ["cos claude", "cos pi"])]
 
-    private func resolve(_ text: String, frozen: AgentRecipient.Frozen? = .init(id: "c", source: .current)) -> AgentRecipient.Resolution {
+    private func resolve(_ text: String, focused: String? = "c") -> AgentRecipient.Resolution {
         let address = AgentAddress.parse(text, names: AgentRecipient.spokenNames(names, shared: shared))
-        return AgentRecipient.resolve(address, frozen: frozen, rows: ["a", "b", "c"], names: names, shared: shared)
+        return AgentRecipient.resolve(address, focused: focused, rows: ["a", "b", "c"], names: names, shared: shared)
     }
 
     private var asked: AgentRecipient.AskReason { .sharedName("cos", matches: ["cos claude", "cos pi"], tellApartIn: nil) }
@@ -32,21 +32,21 @@ struct AgentRecipientSharedNameTests {
     }
 
     @Test func aMessageWithoutAnAddressStillGoesToTheRecipient() {
-        #expect(resolve("Run the unit tests.") == .deliver(id: "c", body: "Run the unit tests.", source: .current))
+        #expect(resolve("Run the unit tests.") == .deliver(id: "c", body: "Run the unit tests.", source: .front))
     }
 
     @Test func aSharedNameThatTheQualifierCouldNotSeparateSaysHowToTellThemApart() {
         let shared = ["cos": AgentRecipient.SharedName(names: ["cos claude", "cos claude blue"], tellApartIn: "herdr")]
         let names = ["cos claude": "a", "cos claude blue": "b"]
         let address = AgentAddress.parse("Tell cos to run the tests", names: AgentRecipient.spokenNames(names, shared: shared))
-        #expect(AgentRecipient.resolve(address, frozen: nil, rows: ["a", "b"], names: names, shared: shared)
+        #expect(AgentRecipient.resolve(address, focused: nil, rows: ["a", "b"], names: names, shared: shared)
             == .ask(body: "to run the tests", reason: .sharedName("cos", matches: ["cos claude", "cos claude blue"], tellApartIn: "herdr")))
     }
 
     @Test func anOrdinaryTieBetweenNamesStillTakesTheFirstAlphabetically() {
         let names = ["web blue": "a", "api blue": "b"]
         let address = AgentAddress.parse("Tell blue, fix it", names: AgentRecipient.spokenNames(names, shared: shared))
-        #expect(AgentRecipient.resolve(address, frozen: nil, rows: ["a", "b"], names: names, shared: shared)
+        #expect(AgentRecipient.resolve(address, focused: nil, rows: ["a", "b"], names: names, shared: shared)
             == .deliver(id: "b", body: "fix it", source: .spoken))
     }
 }
@@ -78,7 +78,7 @@ struct AgentRecipientLateNameTests {
         let names = ["cos claude": "a"]
         let shared = ["cos": AgentRecipient.SharedName(names: ["cos claude"])]
         let address = AgentAddress.parse("cos, run the tests", names: AgentRecipient.spokenNames(names, shared: shared))
-        #expect(AgentRecipient.resolve(address, frozen: nil, rows: ["a"], names: names, shared: shared)
+        #expect(AgentRecipient.resolve(address, focused: nil, rows: ["a"], names: names, shared: shared)
             == .deliver(id: "a", body: "run the tests", source: .spoken))
     }
 
@@ -90,7 +90,7 @@ struct AgentRecipientLateNameTests {
             Issue.record("expected a status check, got \(query)")
             return
         }
-        #expect(AgentRecipient.resolve(address, frozen: nil, rows: ["a", "b"], names: names, shared: shared)
+        #expect(AgentRecipient.resolve(address, focused: nil, rows: ["a", "b"], names: names, shared: shared)
             == .ask(body: "", reason: .sharedName("cos", matches: ["cos claude", "cos pi"], tellApartIn: nil)))
     }
 }
@@ -108,7 +108,7 @@ struct AgentRecipientOtherNameTests {
     private func resolve(_ text: String) -> AgentRecipient.Resolution {
         let address = AgentAddress.parse(
             text, names: AgentRecipient.spokenNames(names, shared: shared), afterVerb: AgentRecipient.afterVerbNames(shared))
-        return AgentRecipient.resolve(address, frozen: .init(id: "c", source: .current), rows: ["a", "b", "c"], names: names, shared: shared)
+        return AgentRecipient.resolve(address, focused: "c", rows: ["a", "b", "c"], names: names, shared: shared)
     }
 
     @Test(arguments: [
@@ -128,7 +128,7 @@ struct AgentRecipientOtherNameTests {
 
     @Test(arguments: ["Refactor auth, then run the tests", "ask questions if anything is unclear", "ask again if it fails"])
     func aTitleSaidWithoutTellAskOrOpenIsJustTheMessage(text: String) {
-        #expect(resolve(text) == .deliver(id: "c", body: text, source: .current))
+        #expect(resolve(text) == .deliver(id: "c", body: text, source: .front))
     }
 
     @Test(arguments: [("tell chief, run the tests", "run the tests"), ("Ask chief what we should do next", "what we should do next")])
@@ -167,12 +167,12 @@ struct AgentRecipientUncertainNameTests {
     private func resolve(_ text: String) -> AgentRecipient.Resolution {
         let address = AgentAddress.parse(
             text, names: AgentRecipient.spokenNames(names, shared: shared), afterVerb: AgentRecipient.afterVerbNames(shared))
-        return AgentRecipient.resolve(address, frozen: .init(id: "b", source: .current), rows: ["a", "b"], names: names, shared: shared)
+        return AgentRecipient.resolve(address, focused: "b", rows: ["a", "b"], names: names, shared: shared)
     }
 
     @Test func anOrdinaryInstructionThatStartsLikeAnUncertainNameIsTheMessage() {
         let text = "Clean up panes in this repository"
-        #expect(resolve(text) == .deliver(id: "b", body: text, source: .current))
+        #expect(resolve(text) == .deliver(id: "b", body: text, source: .front))
     }
 
     @Test func anUncertainNameSaidInFullAfterAVerbReachesItsConversation() {
@@ -192,8 +192,8 @@ struct AgentRecipientUncertainNameTests {
         shared["user onboarding flow"] = .init(names: ["marvin"], kind: .afterVerb("herdr pane title"))
         let address = AgentAddress.parse(
             text, names: AgentRecipient.spokenNames(names, shared: shared), afterVerb: AgentRecipient.afterVerbNames(shared))
-        #expect(AgentRecipient.resolve(address, frozen: .init(id: "b", source: .current), rows: ["a", "b"], names: names, shared: shared)
-            == .deliver(id: "b", body: text, source: .current))
+        #expect(AgentRecipient.resolve(address, focused: "b", rows: ["a", "b"], names: names, shared: shared)
+            == .deliver(id: "b", body: text, source: .front))
     }
 
     @Test func aStatusCheckReachesAConversationByAnAfterVerbName() throws {
@@ -204,16 +204,17 @@ struct AgentRecipientUncertainNameTests {
             Issue.record("expected a status check, got \(query)")
             return
         }
-        #expect(AgentRecipient.conversation(address, frozen: nil, rows: ["a", "b"], names: names, shared: shared) == .select(id: "b"))
+        #expect(AgentRecipient.conversation(address, focused: nil, rows: ["a", "b"], names: names, shared: shared)
+            == .deliver(id: "b", body: "", source: .spoken))
     }
 }
 
 struct AgentRecipientAfterVerbSpanTests {
     @Test(arguments: [
-        "select refactor auth", "please select refactor auth", "select refactor auth please",
-        "select refactor auth flow handling please", "Please choose refactor auth flow handling.",
+        "open refactor auth", "please open refactor auth", "open refactor auth please",
+        "open refactor auth flow handling please", "Please open refactor auth flow handling.",
     ])
-    func pleaseAroundSelectingByAPaneTitleStillSelects(text: String) {
+    func pleaseAroundOpeningByAPaneTitleStillOpens(text: String) {
         let names = ["api": "a", "builder": "b", "reviewer": "c"]
         let shared: [String: AgentRecipient.SharedName] = [
             "refactor auth": .init(names: ["builder"], kind: .afterVerb("herdr pane title")),
@@ -221,8 +222,8 @@ struct AgentRecipientAfterVerbSpanTests {
         ]
         let address = AgentAddress.parse(
             text, names: AgentRecipient.spokenNames(names, shared: shared), afterVerb: AgentRecipient.afterVerbNames(shared))
-        let resolution = AgentRecipient.resolve(address, frozen: .init(id: "a", source: .current), rows: ["a", "b", "c"], names: names, shared: shared)
-        #expect(resolution == .select(id: text.lowercased().contains("handling") ? "c" : "b"))
+        let resolution = AgentRecipient.resolve(address, focused: "a", rows: ["a", "b", "c"], names: names, shared: shared)
+        #expect(resolution == .open(id: text.lowercased().contains("handling") ? "c" : "b"))
     }
 
     @Test func anAfterVerbNameCountsOnlyWhereTheAddressIsNotLaterInTheMessage() {
@@ -231,7 +232,7 @@ struct AgentRecipientAfterVerbSpanTests {
         let address = AgentAddress.parse(
             "Tell refactor to explain refactor auth", names: AgentRecipient.spokenNames(names, shared: shared),
             afterVerb: AgentRecipient.afterVerbNames(shared))
-        let resolution = AgentRecipient.resolve(address, frozen: .init(id: "a", source: .current), rows: ["a", "b"], names: names, shared: shared)
+        let resolution = AgentRecipient.resolve(address, focused: "a", rows: ["a", "b"], names: names, shared: shared)
         #expect(resolution != .deliver(id: "b", body: "to explain refactor auth", source: .spoken))
         guard case .ask = resolution else {
             Issue.record("expected a hold, got \(resolution)")
@@ -244,13 +245,14 @@ struct AgentRecipientAfterVerbSpanTests {
         let shared: [String: AgentRecipient.SharedName] = ["reviewer": .init(names: ["builder"], kind: .afterVerb("herdr pane title"))]
         let spoken = AgentRecipient.spokenNames(names, shared: shared), afterVerb = AgentRecipient.afterVerbNames(shared)
         let message = AgentAddress.parse("Ask reviewer to check it", names: spoken, afterVerb: afterVerb)
-        #expect(AgentRecipient.resolve(message, frozen: nil, rows: ["a", "b"], names: names, shared: shared)
+        #expect(AgentRecipient.resolve(message, focused: nil, rows: ["a", "b"], names: names, shared: shared)
             == .deliver(id: "b", body: "to check it", source: .spoken))
         let query = try #require(AgentStatusQuery.parse("Check on reviewer", names: spoken, afterVerb: afterVerb))
         guard case .check(let address?) = query else {
             Issue.record("expected a status check, got \(query)")
             return
         }
-        #expect(AgentRecipient.conversation(address, frozen: nil, rows: ["a", "b"], names: names, shared: shared) == .select(id: "b"))
+        #expect(AgentRecipient.conversation(address, focused: nil, rows: ["a", "b"], names: names, shared: shared)
+            == .deliver(id: "b", body: "", source: .spoken))
     }
 }

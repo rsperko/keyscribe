@@ -1,11 +1,9 @@
 import AppKit
 import KeyScribeKit
 import SwiftUI
-import UniformTypeIdentifiers
 
-struct AgentDestinationChooser: View {
+struct AgentConversationList: View {
     @ObservedObject var model: AgentsSettingsModel
-    let onOpenConnections: () -> Void
     let onDone: () -> Void
     @State private var query = ""
     @State private var showingUnavailable = false
@@ -13,8 +11,6 @@ struct AgentDestinationChooser: View {
     @State private var showingNameDetails = false
     @State private var renaming: AgentsSettingsModel.Row?
     @State private var inspecting: AgentsSettingsModel.Row?
-    @State private var choosingFolder: AgentConnectorModel?
-    @State private var folderProblem: String?
     @FocusState private var searchFocused: Bool
 
     var body: some View {
@@ -22,11 +18,21 @@ struct AgentDestinationChooser: View {
         let unavailable = groups.notConnected + groups.disconnected
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Send instructions to").font(.title2.bold())
-                Text("Choosing a conversation sends nothing. Instructions without a name go there until you choose again.")
+                Text("Conversations").font(.title2.bold())
+                Text("Manage conversation names and connections. No instructions are sent.")
                     .font(.callout).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 problems
+                if let filter = model.listFilter {
+                    HStack(spacing: 8) {
+                        Text("Showing \(filter.title).").font(.callout)
+                            .accessibilityIdentifier(AccessibilityID.Mode.Agents.listFilter)
+                        Spacer(minLength: 8)
+                        Button("Show All") { model.showAllConversations() }
+                            .buttonStyle(.link)
+                            .accessibilityIdentifier(AccessibilityID.Mode.Agents.showAllConversations)
+                    }
+                }
                 TextField("Search conversations", text: $query, prompt: Text("Search conversations"))
                     .textFieldStyle(.roundedBorder)
                     .labelsHidden()
@@ -37,7 +43,6 @@ struct AgentDestinationChooser: View {
             .padding([.horizontal, .top], 20).padding(.bottom, 10)
             ScrollViewReader { scroll in
                 List {
-                    if query.isEmpty { frontRow }
                     Section {
                         ForEach(groups.connected, id: \.key) { row in availableRow(row) }
                         if groups.connected.isEmpty {
@@ -48,13 +53,12 @@ struct AgentDestinationChooser: View {
                         PaneListSectionHeader("Conversations")
                     }
                     if !unavailable.isEmpty {
-                        let open = showingUnavailable || !query.isEmpty
+                        let open = showingUnavailable || !query.isEmpty || model.listFilter != nil
                         Section {
                             if open { ForEach(unavailable, id: \.key) { row in unavailableRow(row) } }
                         } header: {
                             DisclosureSection(
                                 headerOnly: Binding(get: { open }, set: { showingUnavailable = $0 }),
-                                hasWarning: unavailable.contains(where: \.current),
                                 headerID: AccessibilityID.Mode.Agents.unavailableGroup
                             ) {
                                 PaneListSectionHeader("Not available (\(unavailable.count))")
@@ -62,7 +66,7 @@ struct AgentDestinationChooser: View {
                         }
                     }
                 }
-                .accessibilityIdentifier(AccessibilityID.Mode.Agents.chooser)
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.conversationList)
                 .onChange(of: model.revealedKey, initial: true) { _, key in
                     guard let key else { return }
                     model.reveal([])
@@ -80,72 +84,29 @@ struct AgentDestinationChooser: View {
                     .accessibilityIdentifier(AccessibilityID.Mode.Agents.missing)
                     .popover(isPresented: $showingMissing, arrowEdge: .top) { missingHelp.padding(16).frame(width: 340) }
                 Spacer()
-                Button("Connections\u{2026}", action: onOpenConnections)
-                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.openConnections)
-                Button("Cancel", role: .cancel, action: onDone)
-                    .keyboardShortcut(.cancelAction)
-                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.chooserCancel)
+                Button("Done", action: onDone)
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.conversationsDone)
             }
             .padding(.horizontal, 20).padding(.vertical, 12)
         }
         .frame(width: 520, height: 560)
-        .onAppear { showingUnavailable = showingUnavailable || model.conversationGroups(matching: "").notConnected.contains(where: \.current) }
         .sheet(item: $renaming, onDismiss: { model.clearRenameProblem() }) { row in
             ConversationNameEditor(row: row, model: model) { renaming = nil }
         }
         .sheet(item: $inspecting) { row in
             AgentConversationDetail(model: model, rowKey: row.key, fallback: row) { inspecting = nil }
         }
-        .fileImporter(
-            isPresented: Binding(get: { choosingFolder != nil }, set: { if !$0 { choosingFolder = nil } }),
-            allowedContentTypes: [.folder]
-        ) { result in
-            guard let connector = choosingFolder, case .success(let url) = result else { return }
-            choosingFolder = nil
-            folderProblem = model.choose(folder: url, for: connector)
-        }
         .background { ConnectorConsentPresenter(model: model) }
-    }
-
-    private func choose(_ id: String?) {
-        model.choose(id)
-        onDone()
-    }
-
-    private var frontRow: some View {
-        Button { choose(nil) } label: {
-            HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(AgentsSettingsModel.frontTitle)
-                    Text("Follows the conversation you\u{2019}re looking at when you start speaking.")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 8)
-                chosenMark(model.chosenID == nil)
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .padding(.vertical, 3)
-        .accessibilityLabel("\(AgentsSettingsModel.frontTitle), follows the conversation you\u{2019}re looking at\(model.chosenID == nil ? ", chosen" : "")")
-        .accessibilityAddTraits(model.chosenID == nil ? .isSelected : [])
-        .accessibilityIdentifier(AccessibilityID.Mode.Agents.chooseFront)
     }
 
     private func availableRow(_ row: AgentsSettingsModel.Row) -> some View {
         HStack(spacing: 8) {
-            Button { choose(row.id) } label: {
-                HStack(spacing: 8) {
-                    rowLabel(row)
-                    Spacer(minLength: 8)
-                    chosenMark(row.current)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(spoken(row))
-            .accessibilityAddTraits(row.current ? .isSelected : [])
-            .accessibilityIdentifier(AccessibilityID.Mode.Agents.row(row.id))
+            rowLabel(row)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(spoken(row))
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.row(row.id))
+            Spacer(minLength: 8)
             actions(row)
         }
         .padding(.vertical, 3)
@@ -162,7 +123,6 @@ struct AgentDestinationChooser: View {
                 .accessibilityLabel(spoken(row))
                 .accessibilityIdentifier(AccessibilityID.Mode.Agents.row(row.id))
             Spacer(minLength: 8)
-            chosenMark(row.current)
             if disconnected {
                 Button("Reconnect") { model.reconnect(row) }
                     .disabled(model.namesProblem != nil)
@@ -186,7 +146,6 @@ struct AgentDestinationChooser: View {
     private func rowLabel(_ row: AgentsSettingsModel.Row) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(row.name)
-                .fontWeight(row.current ? .semibold : .regular)
                 .lineLimit(1).truncationMode(.middle)
             HStack(spacing: 0) {
                 Text(context(row)).foregroundStyle(.secondary)
@@ -200,14 +159,6 @@ struct AgentDestinationChooser: View {
             }
             .font(.callout)
         }
-    }
-
-    private func chosenMark(_ chosen: Bool) -> some View {
-        Image(systemName: "checkmark")
-            .font(.body.weight(.semibold))
-            .foregroundStyle(Color.accentColor)
-            .opacity(chosen ? 1 : 0)
-            .accessibilityHidden(true)
     }
 
     private func actions(_ row: AgentsSettingsModel.Row) -> some View {
@@ -235,12 +186,12 @@ struct AgentDestinationChooser: View {
     }
 
     private func spoken(_ row: AgentsSettingsModel.Row) -> String {
-        [row.name, context(row), row.state, row.current ? "chosen" : nil].compactMap { $0 }.joined(separator: ", ")
+        [row.name, context(row), row.state].joined(separator: ", ")
     }
 
     private func context(_ row: AgentsSettingsModel.Row) -> String {
         let project = (row.folder as NSString).lastPathComponent
-        return [model.agentName(row), project.isEmpty ? nil : project].compactMap { $0 }.joined(separator: " \u{00B7} ")
+        return [model.agentName(row), project.isEmpty ? nil : project, model.configurationFolder(of: row)].compactMap { $0 }.joined(separator: " \u{00B7} ")
     }
 
     @ViewBuilder private var problems: some View {
@@ -266,25 +217,12 @@ struct AgentDestinationChooser: View {
 
     private var missingHelp: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("\(Branding.appName) finds conversations from the agents running on this Mac and the folders their connectors are installed in. It can miss agents started through unusual wrappers or hosted inside other programs.")
+            Text("\(Branding.appName) finds conversations from the agents running on this Mac and the configuration folders their connectors are installed in. It can miss agents started through unusual wrappers or hosted inside other programs.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(model.connectors) { connector in
-                    Button("Choose \(connector.kind.displayName) Setup Folder\u{2026}") {
-                        showingMissing = false
-                        choosingFolder = connector
-                    }
-                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.chooseSetupFolder)
-                }
-            }
-            .controlSize(.small)
-            Text("Choosing a folder tells \(Branding.appName) where to install. It does not show which conversations use that folder.")
+            Text("If an agent loads its configuration from another folder, add that folder under Connections, in that agent\u{2019}s row.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            if let folderProblem {
-                IssueText(folderProblem)
-            }
         }
     }
 }
@@ -294,7 +232,7 @@ struct AgentSavedChoicesProblems: View {
 
     var body: some View {
         if model.namesProblem != nil {
-            IssueText("Saved conversation names could not be loaded. Open Send to for details.")
+            IssueText("Saved conversation names could not be loaded. Manage conversations for details.")
                 .accessibilityIdentifier(AccessibilityID.Mode.Agents.namesProblem)
         } else if let reason = model.namesNotSaved {
             VStack(alignment: .leading, spacing: 2) {
@@ -471,12 +409,17 @@ private struct AgentConversationDetail: View {
     }
 
     @ViewBuilder private var details: some View {
-        LabeledContent("Folder") {
+        LabeledContent("Project folder") {
             CopyableValue((row.folder as NSString).abbreviatingWithTildeInPath, value: row.folder, what: "directory", of: row.name)
                 .accessibilityIdentifier(AccessibilityID.Mode.Agents.copyDirectory)
         }
         if let location = row.location {
             LabeledContent("Runs in", value: location)
+        }
+        if let setup = row.setup {
+            LabeledContent("Configuration folder") {
+                CopyableValue((setup as NSString).abbreviatingWithTildeInPath, value: setup, what: "configuration folder", of: row.name)
+            }
         }
         if let title = row.title, !title.isEmpty, title != row.name {
             LabeledContent("Title", value: title)
@@ -600,7 +543,7 @@ struct AgentPhrasesReference: View {
 
     private var exampleName: String {
         guard model.namesProblem == nil else { return "conversation two" }
-        return (model.rows.first(where: \.current) ?? model.rows.first(where: \.connected) ?? model.rows.first)?.name ?? "backend"
+        return (model.rows.first(where: \.connected) ?? model.rows.first)?.name ?? "backend"
     }
 
     var body: some View {
@@ -619,7 +562,7 @@ struct AgentPhrasesReference: View {
                     }
                 }
                 Section {
-                    Text("Without a name, an instruction goes where Send to points: the conversation in front of you, or the one you chose.")
+                    Text("Without a name, an instruction goes to the conversation in front of you when you start speaking. With no conversation in front, nothing is sent.")
                     Text("While recording, conversations are numbered. Say \u{201C}conversation\u{201D} and the number to use one without its name.")
                     Text("Say \(Self.renameExample) to give the conversation you\u{2019}re talking to a name of your own.")
                     Text("While recording, say \u{201C}what can I say\u{201D} to see this list with your own vocabulary.")

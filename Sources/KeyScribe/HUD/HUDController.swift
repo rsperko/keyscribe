@@ -51,7 +51,6 @@ final class HUDController: HUDPresenting {
     var onOpenSpeechModels: (() -> Void)?
     var onOpenAIService: ((String) -> Void)?
     var onOpenAgents: ((String, [String]) -> Void)?
-    var onChooseAgentRecipient: ((String) -> Void)?
     var onEscapeCancel: (() -> Void)?
     var onChooseVoiceCommand: ((Int, String) -> Void)?
     var onCancelVoiceCommandChoice: ((Int) -> Void)?
@@ -193,7 +192,6 @@ final class HUDController: HUDPresenting {
                 case .openSpeechModels: self?.onOpenSpeechModels?()
                 case .openAIService(let id): self?.onOpenAIService?(id)
                 case .openAgents(let mode, let rows): self?.onOpenAgents?(mode, rows)
-                case .chooseAgentRecipient(let mode): self?.onChooseAgentRecipient?(mode)
                 }
             },
             onChoose: { [weak self] id, identity in self?.onChooseVoiceCommand?(id, identity) },
@@ -596,8 +594,8 @@ private struct HUDView: View {
         }
     }
 
-    private func scrollToRecipient(_ agents: AgentRoster, _ proxy: ScrollViewProxy) {
-        if let current = agents.rows.first(where: \.current) { proxy.scrollTo(current.id, anchor: .center) }
+    private func scrollToTarget(_ agents: AgentRoster, _ proxy: ScrollViewProxy) {
+        if let target = agents.rows.first(where: \.target) { proxy.scrollTo(target.id, anchor: .center) }
     }
 
     private func agentList(_ agents: AgentRoster) -> some View {
@@ -606,8 +604,8 @@ private struct HUDView: View {
                 ScrollViewReader { proxy in
                     ScrollView(.vertical) { agentRows(agents) }
                         .frame(height: height)
-                        .onChange(of: model.recordingAdmission, initial: true) { _, _ in scrollToRecipient(agents, proxy) }
-                        .onChange(of: agents.rows.first(where: \.current)?.id) { _, _ in scrollToRecipient(agents, proxy) }
+                        .onChange(of: model.recordingAdmission, initial: true) { _, _ in scrollToTarget(agents, proxy) }
+                        .onChange(of: agents.rows.first(where: \.target)?.id) { _, _ in scrollToTarget(agents, proxy) }
                 }
             } else if !agents.rows.isEmpty {
                 agentRows(agents)
@@ -632,14 +630,14 @@ private struct HUDView: View {
                 .font(.system(size: 13, weight: .semibold).monospacedDigit())
                 .frame(minWidth: 14, alignment: .trailing)
             VStack(alignment: .leading, spacing: 1) {
-                Text(row.name).font(.system(size: 13, weight: row.current ? .semibold : .regular))
+                Text(row.name).font(.system(size: 13, weight: row.target ? .semibold : .regular))
                     .lineLimit(1).truncationMode(.middle)
                 HStack(spacing: 6) {
                     Text(row.detail)
                         .foregroundStyle(.secondary)
                         .lineLimit(1).truncationMode(.middle)
-                    if row.current {
-                        Text("Current").fontWeight(.medium).fixedSize()
+                    if row.target {
+                        Text("In front").fontWeight(.medium).fixedSize()
                     }
                 }
                 .font(.system(size: 11))
@@ -651,7 +649,7 @@ private struct HUDView: View {
         }
         .padding(.horizontal, 6)
         .frame(maxWidth: .infinity, minHeight: HUDState.agentRowHeight, maxHeight: HUDState.agentRowHeight, alignment: .leading)
-        .background(row.current ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 6))
+        .background(row.target ? Color.accentColor.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: 6))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(HUDState.spoken(row))
         .accessibilityIdentifier(AccessibilityID.HUD.agentRow)

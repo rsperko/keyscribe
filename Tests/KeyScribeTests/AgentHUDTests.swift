@@ -10,50 +10,49 @@ struct AgentHUDTests {
         AgentConversation(id: "b", agent: "claude", pid: 2, cwd: "/src/chatplay", handle: "chatplay", state: .idle, connectorLive: true),
     ]
 
-    private func recording(_ recipient: AgentRecipient.Frozen?, conversations: [AgentConversation]? = nil) -> HUDState {
+    private func recording(_ focused: String?, conversations: [AgentConversation]? = nil) -> HUDState {
         let list = conversations ?? self.conversations
         return .recording(mode: "Agent", level: 0.3, latchedTrigger: nil,
-                          agents: AgentRoster(frozen: list, live: list, recipient: recipient))
+                          agents: AgentRoster(frozen: list, live: list, focused: focused))
     }
 
-    @Test func theRecipientIsTheHeadlineAndTheListSaysWhereItCameFrom() {
-        let state = recording(.init(id: "b", source: .current))
+    @Test func theConversationInFrontIsTheHeadlineAndTheListSaysWhereItCameFrom() {
+        let state = recording("b")
         #expect(state.primaryText == "To chatplay")
         #expect(state.secondaryText == "Listening")
-        #expect(state.agentRosterHint == "The conversation you chose. To talk to another, say \u{201C}tell keyscribe \u{2026}\u{201D} or \u{201C}tell conversation 1 \u{2026}\u{201D}.")
+        #expect(state.agentRosterHint == "The conversation in front of you. To talk to another, say \u{201C}tell keyscribe \u{2026}\u{201D} or \u{201C}tell conversation 1 \u{2026}\u{201D}.")
         #expect(state.panelWidth == HUDState.recording(mode: "Polish", level: 0, latchedTrigger: nil).panelWidth)
         #expect(state.panelWidth == HUDState.transcribing(mode: "Agent").panelWidth)
     }
 
-    @Test func eachSourceIsDescribedWithoutClaimingTheScreenIdentifiedIt() {
-        #expect(recording(.init(id: "a", source: .fixed)).agentRosterHint?.hasPrefix("Set by this mode.") == true)
-        #expect(recording(nil).primaryText == "No recipient yet")
+    @Test func withNothingFocusedTheHeadlineSaysSoAndTheHintTeachesAddressing() {
+        #expect(recording(nil).primaryText == "No conversation focused")
         #expect(recording(nil).agentRosterHint == "Start with \u{201C}tell keyscribe \u{2026}\u{201D} or \u{201C}tell conversation 1 \u{2026}\u{201D}, then your message.")
         #expect(recording(nil, conversations: []).agentRosterHint == "No agent sessions are running.")
     }
 
     @Test func whileNamesAreUnavailableTheHintOffersOnlyRowNumbers() {
         let state = HUDState.recording(mode: "Agent", level: 0.3, latchedTrigger: nil,
-            agents: AgentRoster(frozen: conversations, live: conversations, recipient: .init(id: "b", source: .current), namesAvailable: false))
-        #expect(state.agentRosterHint == "The conversation you chose. Names are off until they can be loaded; to talk to another, say \u{201C}tell conversation 1 \u{2026}\u{201D}.")
+            agents: AgentRoster(frozen: conversations, live: conversations, focused: "b", namesAvailable: false))
+        #expect(state.agentRosterHint == "The conversation in front of you. Names are off until they can be loaded; to talk to another, say \u{201C}tell conversation 1 \u{2026}\u{201D}.")
         let none = HUDState.recording(mode: "Agent", level: 0.3, latchedTrigger: nil,
-            agents: AgentRoster(frozen: conversations, live: conversations, recipient: nil, namesAvailable: false))
+            agents: AgentRoster(frozen: conversations, live: conversations, focused: nil, namesAvailable: false))
         #expect(none.agentRosterHint == "Names are off until they can be loaded. Start with \u{201C}tell conversation 1 \u{2026}\u{201D}, then your message.")
         let only = HUDState.recording(mode: "Agent", level: 0.3, latchedTrigger: nil,
-            agents: AgentRoster(frozen: [conversations[0]], live: [conversations[0]], recipient: .init(id: "a", source: .current), namesAvailable: false))
-        #expect(only.agentRosterHint == "The conversation you chose. Names are off until they can be loaded.")
+            agents: AgentRoster(frozen: [conversations[0]], live: [conversations[0]], focused: "a", namesAvailable: false))
+        #expect(only.agentRosterHint == "The conversation in front of you. Names are off until they can be loaded.")
     }
 
-    @Test func voiceOverHearsTheRecipientAndHowManySessionsOnce() {
-        #expect(recording(.init(id: "b", source: .current)).voiceOverAnnouncement == "Recording to chatplay. 2 sessions")
-        #expect(recording(nil, conversations: [conversations[0]]).voiceOverAnnouncement == "Recording. No recipient yet. 1 session")
+    @Test func voiceOverHearsTheConversationInFrontAndHowManySessionsOnce() {
+        #expect(recording("b").voiceOverAnnouncement == "Recording to chatplay. 2 sessions")
+        #expect(recording(nil, conversations: [conversations[0]]).voiceOverAnnouncement == "Recording. No conversation focused. 1 session")
     }
 
     @Test func aSessionChangingStateWhileRecordingIsNotAnnouncedAgain() {
-        let entry = recording(.init(id: "b", source: .current))
+        let entry = recording("b")
         var changed = conversations
         changed[1].state = .working
-        let updated = recording(.init(id: "b", source: .current), conversations: changed)
+        let updated = recording("b", conversations: changed)
         #expect(entry.voiceOverAnnouncement(after: .hidden) == "Recording to chatplay. 2 sessions")
         #expect(updated.voiceOverAnnouncement(after: entry) == nil)
 
@@ -64,16 +63,16 @@ struct AgentHUDTests {
         #expect(countingChanged.voiceOverAnnouncement(after: counting) == nil)
     }
 
-    @Test func aRecipientThatChangesWhileRecordingIsAnnouncedOnce() {
-        let entry = recording(.init(id: "a", source: .current))
-        let moved = recording(.init(id: "b", source: .front))
+    @Test func theConversationInFrontArrivingWhileRecordingIsAnnouncedOnce() {
+        let entry = recording(nil)
+        let moved = recording("b")
         #expect(moved.voiceOverAnnouncement(after: entry) == "Recording to chatplay")
         let level = HUDState.recording(mode: "Agent", level: 0.9, latchedTrigger: nil, agents: moved.agentRoster)
         #expect(level.voiceOverAnnouncement(after: moved) == nil)
     }
 
     @Test func theConversationInFrontSaysSoInTheHint() {
-        #expect(recording(.init(id: "b", source: .front)).agentRosterHint?.hasPrefix("The conversation in front of you.") == true)
+        #expect(recording("b").agentRosterHint?.hasPrefix("The conversation in front of you.") == true)
     }
 
     @Test func aLongListScrollsInsideTheSpaceTheScreenLeaves() {
@@ -87,8 +86,8 @@ struct AgentHUDTests {
     }
 
     @Test func aRowReadsAsOneSentence() {
-        let row = AgentRoster.Row(id: "a", number: 2, name: "keyscribe", detail: "Claude \u{00B7} keyscribe", state: "Working", available: true, current: true)
-        #expect(HUDState.spoken(row) == "2, keyscribe, Claude \u{00B7} keyscribe, Working, current recipient")
+        let row = AgentRoster.Row(id: "a", number: 2, name: "keyscribe", detail: "Claude \u{00B7} keyscribe", state: "Working", available: true, target: true)
+        #expect(HUDState.spoken(row) == "2, keyscribe, Claude \u{00B7} keyscribe, Working, in front")
     }
 
     @Test func ordinaryRecordingIsUnchanged() {
@@ -106,10 +105,10 @@ struct AgentHUDTests {
         #expect(agents.rows.count > 1)
     }
 
-    @Test func theLongListPreviewPutsTheRecipientBelowTheInitialViewport() throws {
+    @Test func theLongListPreviewPutsTheConversationInFrontBelowTheInitialViewport() throws {
         let agents = try #require(HUDPreview.state(named: "recording-agents-long")?.agentRoster)
-        let recipient = try #require(agents.rows.first(where: { $0.current }))
-        #expect(recipient.number > HUDState.agentRowsShown(screenHeight: 2000))
+        let target = try #require(agents.rows.first(where: { $0.target }))
+        #expect(target.number > HUDState.agentRowsShown(screenHeight: 2000))
         #expect(agents.rows.map(\.number) == Array(1...agents.rows.count))
     }
 }

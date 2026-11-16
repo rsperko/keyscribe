@@ -115,7 +115,8 @@ final class DictationController {
         // An unconfirmed target is treated as secure: no cloud rewrite, context, or history.
         var targetUnconfirmed = false
         var precedingTextTask: Task<String?, Never>?
-        var agentRecipient: AgentRecipient.Frozen?
+        var agentFocus: CapturedFocus?
+        var agentFocusUnconfirmed = false
         var agentFrontTask: Task<Void, Never>?
         var agentFrontCutoff: ContinuousClock.Instant?
         var agentSnapshot: AgentSnapshot?
@@ -150,7 +151,7 @@ final class DictationController {
             },
             open: { [weak self, weak hub] id, stillWanted in
                 guard let self, self.settings.features.isEnabled(.agents), let hub else { return .none }
-                return await hub.open(id, makingCurrent: false, stillWanted: stillWanted)
+                return await hub.open(id, stillWanted: stillWanted)
             },
             handle: { [weak self, weak hub] id in
                 guard let self, self.settings.features.isEnabled(.agents) else { return nil }
@@ -1347,7 +1348,7 @@ final class DictationController {
         session?.shortcutCandidates = choice.shortcutCandidates
         session?.triggerDisplay = choice.triggerDisplay
         activeMode = securePolicyApplied(chosen)
-        agentTake.freezeRecipient()
+        agentTake.freezeConversations()
         session?.modeReady = true
         claimOrDismissVoiceCommandChoice()
         onModeAndSnapshotReady()
@@ -1713,6 +1714,9 @@ final class DictationController {
     }
     var promptBoxConfirmation: Duration {
         get { agentTake.promptBoxConfirmation } set { agentTake.promptBoxConfirmation = newValue }
+    }
+    var inputAfter: @MainActor (UInt64) -> Bool? {
+        get { agentTake.inputAfter } set { agentTake.inputAfter = newValue }
     }
     var frontApp: @MainActor () -> FrontApp? {
         get { agentTake.frontApp } set { agentTake.frontApp = newValue }
@@ -2372,7 +2376,7 @@ final class DictationController {
         if case .abort(let message, let action) = final { return finishError(message, action: action) }
         let destination: Destination
         if activeMode?.output == .agent {
-            guard let id = session?.agentDestination else { return finishError("The recipient was lost. Nothing sent.") }
+            guard let id = session?.agentDestination else { return finishError("The conversation was lost. Nothing sent.") }
             destination = .agent(id: id, facts: session?.agentFacts ?? [])
         } else {
             destination = .cursor
@@ -2569,9 +2573,8 @@ final class DictationController {
                 title: title, apps: runningAppNames(), places: commands.places, scripts: commands.scripts, stages: stages)
         }
         if mode?.output == .agent {
-            let id = session?.agentRecipient?.id ?? agents?.current
             return SpokenHelp.agent(
-                title: title, recipient: id.flatMap { agents?.handle(of: $0) }, example: agents?.recordingOrder.first?.handle,
+                title: title, focused: session?.agentFocus.flatMap { agents?.handle(of: $0.id) }, example: agents?.recordingOrder.first?.handle,
                 readsReplies: spokenUpdates?.readsReplies == true, canRepeat: spokenUpdates?.hasReplyToRepeat == true,
                 stages: stages)
         }
@@ -2644,14 +2647,19 @@ extension DictationController: AgentTakeHost {
     var agentSnapshot: AgentSnapshot? {
         get { session?.agentSnapshot } set { session?.agentSnapshot = newValue }
     }
-    var agentRecipient: AgentRecipient.Frozen? {
-        get { session?.agentRecipient } set { session?.agentRecipient = newValue }
+    var agentFocus: CapturedFocus? {
+        get { session?.agentFocus } set { session?.agentFocus = newValue }
     }
+    var agentFocusUnconfirmed: Bool {
+        get { session?.agentFocusUnconfirmed ?? false } set { session?.agentFocusUnconfirmed = newValue }
+    }
+    var takePressedAt: DispatchTime? { session?.pressedAt }
     var agentFrontCutoff: ContinuousClock.Instant? { session?.agentFrontCutoff }
     func noteAgentDestination(_ id: String, facts: [HistoryEntry.Fact]) {
         session?.agentDestination = id
         session?.agentFacts = facts
     }
+    func noteUserInput(at time: UInt64) { agentTake.noteUserInput(at: time) }
     func redrawRecordingHUD() {
         if case .recording = machine.state {
             hud.present(recordingHUD(level: max(0, lastRenderedLevel)))

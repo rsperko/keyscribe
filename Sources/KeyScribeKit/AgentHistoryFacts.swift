@@ -11,11 +11,11 @@ public enum AgentHistoryFacts {
     }
 
     public static func facts(
-        address: AgentAddress, resolution: AgentRecipient.Resolution, frozen: AgentRecipient.Frozen?,
+        address: AgentAddress, resolution: AgentRecipient.Resolution, focused: String?,
         conversations: [AgentConversation]
     ) -> [HistoryEntry.Fact] {
         let spoken = spokenAddress(address)
-        var facts = [fact(command: command(address, resolution))]
+        var facts = [fact(command: command(address))]
         if let said = spoken.said { facts.append(.init(label: "Spoken address", value: said)) }
         if let closest = spoken.closest { facts.append(.init(label: "Closest name", value: closest)) }
         if let candidates = spoken.candidates { facts.append(.init(label: "Candidates", value: candidates.sorted().joined(separator: ", "))) }
@@ -25,7 +25,7 @@ public enum AgentHistoryFacts {
         } else {
             facts.append(.init(label: "Conversation", value: "None resolved"))
         }
-        facts += defaultRecipient(frozen, in: conversations)
+        facts += inFront(focused, in: conversations)
         return facts
     }
 
@@ -39,37 +39,31 @@ public enum AgentHistoryFacts {
         return next
     }
 
-    public static func goBack(frozen: AgentRecipient.Frozen?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
-        [fact(command: "Go back")] + defaultRecipient(frozen, in: conversations)
+    public static func goBack(focused: String?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
+        [fact(command: "Go back")] + inFront(focused, in: conversations)
     }
 
-    public static func repeatSummary(frozen: AgentRecipient.Frozen?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
-        [fact(command: "Repeat that")] + defaultRecipient(frozen, in: conversations)
+    public static func repeatSummary(focused: String?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
+        [fact(command: "Repeat that")] + inFront(focused, in: conversations)
     }
 
-    public static func keepReply(frozen: AgentRecipient.Frozen?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
-        [fact(command: "That sounded wrong")] + defaultRecipient(frozen, in: conversations)
+    public static func keepReply(focused: String?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
+        [fact(command: "That sounded wrong")] + inFront(focused, in: conversations)
     }
 
-    public static func followFront(frozen: AgentRecipient.Frozen?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
-        [fact(command: "Follow the conversation in front")] + defaultRecipient(frozen, in: conversations)
-    }
-
-    public static func rename(frozen: AgentRecipient.Frozen?, to name: String?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
+    public static func rename(focused: String?, to name: String?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
         var facts = [fact(command: "Rename")]
-        facts.append(.init(label: "Conversation", value: frozen.map { described($0.id, in: conversations) } ?? "None resolved"))
+        facts.append(.init(label: "Conversation", value: focused.map { described($0, in: conversations) } ?? "None resolved"))
         if let name { facts.append(.init(label: "New name", value: name)) }
-        if let frozen {
-            facts.append(.init(label: "Chosen by", value: chosenBy(.deliver(id: frozen.id, body: "", source: frozen.source), spoken: nil)))
-        }
+        if focused != nil { facts.append(.init(label: "Chosen by", value: byFront)) }
         return facts
     }
 
     public static func status(
-        address: AgentAddress?, resolution: AgentRecipient.Resolution, frozen: AgentRecipient.Frozen?, conversations: [AgentConversation]
+        address: AgentAddress?, resolution: AgentRecipient.Resolution, focused: String?, conversations: [AgentConversation]
     ) -> [HistoryEntry.Fact] {
-        let recorded = facts(address: address ?? .none(body: ""), resolution: resolution, frozen: frozen, conversations: conversations)
-        return [fact(command: "Check status")] + recorded.dropFirst().filter { $0.label != "Default recipient" }
+        let recorded = facts(address: address ?? .none(body: ""), resolution: resolution, focused: focused, conversations: conversations)
+        return [fact(command: "Check status")] + recorded.dropFirst().filter { $0.label != inFrontLabel }
     }
 
     public static func allConversations() -> [HistoryEntry.Fact] {
@@ -85,15 +79,16 @@ public enum AgentHistoryFacts {
         HistoryEntry.Fact(label: "Command", value: command)
     }
 
-    private static func defaultRecipient(_ frozen: AgentRecipient.Frozen?, in conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
-        guard let frozen else { return [] }
-        let handle = conversations.first { $0.id == frozen.id }?.handle ?? frozen.id
-        return [.init(label: "Default recipient", value: handle)]
+    private static let inFrontLabel = "Conversation in front"
+
+    private static func inFront(_ focused: String?, in conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
+        guard let focused else { return [] }
+        let handle = conversations.first { $0.id == focused }?.handle ?? focused
+        return [.init(label: inFrontLabel, value: handle)]
     }
 
-    private static func command(_ address: AgentAddress, _ resolution: AgentRecipient.Resolution) -> String {
+    private static func command(_ address: AgentAddress) -> String {
         if case .open = address { return "Open" }
-        if case .select = resolution { return "Choose recipient" }
         return "Send message"
     }
 
@@ -106,7 +101,7 @@ public enum AgentHistoryFacts {
 
     private static func spokenAddress(_ address: AgentAddress) -> Spoken {
         switch address {
-        case .open(let inner), .select(let inner), .unbroken(let inner, _): spokenAddress(inner)
+        case .open(let inner), .unbroken(let inner, _): spokenAddress(inner)
         case .name(let name, _): Spoken(said: name, how: "Its name")
         case .row(let row, _): Spoken(said: "Conversation \(row)", how: "Its conversation number")
         case .unresolved(let spoken, _): Spoken(said: spoken)
@@ -117,21 +112,17 @@ public enum AgentHistoryFacts {
     }
 
     private static func chosenBy(_ resolution: AgentRecipient.Resolution, spoken: String?) -> String {
-        if case .deliver(_, _, let source) = resolution, source != .spoken {
-            return switch source {
-            case .fixed: "The mode\u{2019}s fixed conversation"
-            case .front: "The conversation in front"
-            case .current, .spoken: "The chosen conversation"
-            }
-        }
+        if case .deliver(_, _, .front) = resolution { return byFront }
         return spoken ?? "Its name"
     }
+
+    private static let byFront = "The conversation in front"
 }
 
 extension AgentRecipient.Resolution {
     public var recipient: String? {
         switch self {
-        case .deliver(let id, _, _), .select(let id), .open(let id): id
+        case .deliver(let id, _, _), .open(let id): id
         case .ask: nil
         }
     }

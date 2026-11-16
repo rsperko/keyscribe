@@ -319,17 +319,21 @@ enum AccessibilityID {
 
         enum Agents {
             static func host(_ id: String) -> String { "mode.agents.host.\(id)" }
-            static let connectorStatus = "mode.agents.connectorStatus"
-            static let currentRecipient = "mode.agents.currentRecipient"
+            static let folderRow = "mode.agents.folderRow"
+            static let folderActions = "mode.agents.folderActions"
+            static let addFolder = "mode.agents.addFolder"
+            static let forgetFolder = "mode.agents.forgetFolder"
+            static let viewAwaitingReload = "mode.agents.viewAwaitingReload"
+            static let listFilter = "mode.agents.listFilter"
+            static let showAllConversations = "mode.agents.showAllConversations"
+            static func howItConnects(_ id: String) -> String { "mode.agents.howItConnects.\(id)" }
             static let phrases = "mode.agents.phrases"
             static let cancelReadAloud = "mode.agents.cancelReadAloud"
-            static let summary = "mode.agents.summary"
             static let install = "mode.agents.install"
             static let update = "mode.agents.update"
             static let remove = "mode.agents.remove"
             static let finishUninstalling = "mode.agents.finishUninstalling"
             static let manualUninstall = "mode.agents.manualUninstall"
-            static let setupFolder = "mode.agents.setupFolder"
             static let tryAgain = "mode.agents.tryAgain"
             static let connect = "mode.agents.connect"
             static let disconnect = "mode.agents.disconnect"
@@ -342,7 +346,6 @@ enum AccessibilityID {
             static let showConversation = "mode.agents.showConversation"
             static let checkAgain = "mode.agents.checkAgain"
             static let missing = "mode.agents.missing"
-            static let chooseSetupFolder = "mode.agents.chooseSetupFolder"
             static let consentInstall = "mode.agents.consentInstall"
             static let consentCancel = "mode.agents.consentCancel"
             static let consentFolder = "mode.agents.consentFolder"
@@ -379,14 +382,10 @@ enum AccessibilityID {
             static let spokenVoiceDelete = "mode.agents.spokenVoiceDelete"
             static let spokenVoiceDeleteConfirm = "mode.agents.spokenVoiceDeleteConfirm"
             static let spokenVoiceDeleteCancel = "mode.agents.spokenVoiceDeleteCancel"
-            static let sendTo = "mode.agents.sendTo"
-            static let destination = "mode.agents.destination"
-            static let sendToProblem = "mode.agents.sendToProblem"
-            static let chooser = "mode.agents.chooser"
-            static let chooseFront = "mode.agents.chooseFront"
-            static let chooserCancel = "mode.agents.chooserCancel"
+            static let manageConversations = "mode.agents.manageConversations"
+            static let conversationList = "mode.agents.conversationList"
+            static let conversationsDone = "mode.agents.conversationsDone"
             static let unavailableGroup = "mode.agents.unavailableGroup"
-            static let openConnections = "mode.agents.openConnections"
             static let detailsDone = "mode.agents.detailsDone"
             static let replyOptions = "mode.agents.replyOptions"
             static let advanced = "mode.agents.advanced"
@@ -396,7 +395,6 @@ enum AccessibilityID {
             static let conversationDetail = "mode.agents.conversationDetail"
             static let example = "mode.agents.example"
             static let conversationDetails = "mode.agents.conversationDetails"
-            static let usedBy = "mode.agents.usedBy"
             static func row(_ id: String) -> String { "mode.agents.row.\(id)" }
             static func rowActions(_ id: String) -> String { "mode.agents.rowActions.\(id)" }
             static func integration(_ id: String) -> String { "mode.agents.integration.\(id)" }
@@ -693,21 +691,21 @@ enum AccessibilityID {
         Settings.AI.Editor.delete,
         Settings.Advanced.revealConfig, Settings.Advanced.reloadConfig, Settings.Advanced.resetHUDPosition,
         Settings.Advanced.eraseAllData, Settings.Advanced.eraseConfirmConfirm, Settings.Advanced.eraseConfirmCancel,
-        Mode.Agents.connectorStatus, Mode.Agents.currentRecipient, Mode.Agents.summary,
+        Mode.Agents.folderRow, Mode.Agents.folderActions, Mode.Agents.addFolder, Mode.Agents.forgetFolder, Mode.Agents.viewAwaitingReload, Mode.Agents.listFilter, Mode.Agents.showAllConversations,
         Mode.Agents.install, Mode.Agents.update, Mode.Agents.remove, Mode.Agents.finishUninstalling, Mode.Agents.manualUninstall,
-        Mode.Agents.setupFolder, Mode.Agents.tryAgain, Mode.Agents.connect, Mode.Agents.disconnect,
+        Mode.Agents.tryAgain, Mode.Agents.connect, Mode.Agents.disconnect,
         Mode.Agents.reconnect, Mode.Agents.disconnected, Mode.Agents.exclusionsProblem, Mode.Agents.recovery,
         Mode.Agents.reloadCommand, Mode.Agents.showConversation, Mode.Agents.checkAgain, Mode.Agents.missing,
-        Mode.Agents.chooseSetupFolder, Mode.Agents.consentInstall, Mode.Agents.consentCancel, Mode.Agents.consentFolder, Mode.Agents.consentConversations,
+        Mode.Agents.consentInstall, Mode.Agents.consentCancel, Mode.Agents.consentFolder, Mode.Agents.consentConversations,
         Mode.Agents.conversation, Mode.Agents.rename, Mode.Agents.copyDirectory,
         Mode.Agents.renameProblem, Mode.Agents.namesProblem, Mode.Agents.namesNotSaved, Mode.Agents.reloadNames,
         Mode.Agents.showNamesFile, Mode.Agents.setupsProblem, Mode.Agents.reloadSetups, Mode.Agents.showSetupsFile,
         Mode.Agents.renameName, Mode.Agents.renameSave,
         Mode.Agents.renameCancel,
-        Mode.Agents.sendTo, Mode.Agents.destination, Mode.Agents.sendToProblem, Mode.Agents.chooser, Mode.Agents.chooseFront, Mode.Agents.chooserCancel,
-        Mode.Agents.unavailableGroup, Mode.Agents.openConnections, Mode.Agents.detailsDone,
+        Mode.Agents.manageConversations, Mode.Agents.conversationList, Mode.Agents.conversationsDone,
+        Mode.Agents.unavailableGroup, Mode.Agents.detailsDone,
         Mode.Agents.replyOptions, Mode.Agents.advanced, Mode.Agents.whatCanISay, Mode.Agents.phrasesDone, Mode.Agents.search,
-        Mode.Agents.conversationDetail, Mode.Agents.example, Mode.Agents.conversationDetails, Mode.Agents.usedBy,
+        Mode.Agents.conversationDetail, Mode.Agents.example, Mode.Agents.conversationDetails,
         Mode.List.list, Mode.List.add, Mode.List.addBlank, Mode.List.chooserCancel,
         Mode.List.deleteConfirmConfirm, Mode.List.deleteConfirmCancel,
         Mode.List.moveShortcutConfirm, Mode.List.moveShortcutCancel, Mode.List.moveShortcutUndo,

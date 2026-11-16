@@ -13,22 +13,21 @@ enum AgentFocusResult: Equatable, Sendable {
     case none
 
     func hudState(handle: String, detail: String, agent: AgentKind? = nil) -> HUDState {
-        let recipient = "Your recipient is \(handle)"
-        return switch self {
+        switch self {
         case .exact: .commandDone(summary: "Opened \(handle)", detail: detail)
         case .requested(let app): .commandDone(summary: "Asked \(app) to show \(handle)", detail: detail)
-        case .app(let app, let noun): .advisory(message: "Brought \(app) forward. Couldn\u{2019}t find \(handle)\u{2019}s \(noun). \(recipient)")
+        case .app(let app, let noun): .advisory(message: "Brought \(app) forward. Couldn\u{2019}t find \(handle)\u{2019}s \(noun).")
         case .pane(let app, let multiplexer, let uncertain):
-            .advisory(message: "Brought \(app) forward. Couldn\u{2019}t \(uncertain ? "confirm" : "select") \(handle)\u{2019}s \(multiplexer) pane. \(recipient)")
+            .advisory(message: "Brought \(app) forward. Couldn\u{2019}t \(uncertain ? "confirm" : "select") \(handle)\u{2019}s \(multiplexer) pane.")
         case .unsupported(let app):
-            .advisory(message: "Brought \(app) forward. Select \(handle)\u{2019}s terminal yourself. \(recipient)")
+            .advisory(message: "Brought \(app) forward. Select \(handle)\u{2019}s terminal yourself.")
         case .notAllowed(let app, let noun):
             .error(
-                message: "Brought \(app) forward. Couldn\u{2019}t select \(handle)\u{2019}s \(noun) without access to \(app). \(recipient)",
+                message: "Brought \(app) forward. Couldn\u{2019}t select \(handle)\u{2019}s \(noun) without access to \(app).",
                 action: .openAutomationSettings)
         case .connectorOutdated(let app, let noun):
-            .advisory(message: "Brought \(app) forward. Update the \(agent?.connectorName ?? "connector") in Settings, then \(Self.reload(agent, in: handle)) to open its \(noun). \(recipient)")
-        case .none: .advisory(message: "Nothing showing \(handle) could be brought forward. \(recipient)")
+            .advisory(message: "Brought \(app) forward. Update the \(agent?.connectorName ?? "connector") in Settings, then \(Self.reload(agent, in: handle)) to open its \(noun).")
+        case .none: .advisory(message: "Nothing showing \(handle) could be brought forward.")
         }
     }
 

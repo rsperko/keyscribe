@@ -133,9 +133,9 @@
   (and searched); `facts` are ordered `{label, value}` pairs of context fixed when the entry was written; and
   `steps` are ordered `{at, text}` transitions added when a later result arrives, never removing an earlier one.
   An **Agent** take fills them: `summary` says what happened (`Sent to backend`, `Queued for backend`,
-  `Opened backend`, or why nothing was sent), and `facts` record the command (Open, choosing a recipient, or a
-  message), the spoken address, the conversation chosen with its session id, how it was chosen, the default
-  recipient frozen at the start of the take, and for a message that was handed off, `Delivery`: when it was
+  `Opened backend`, or why nothing was sent), and `facts` record the command (Open or a message), the spoken
+  address, the conversation chosen with its session id, how it was chosen, the conversation in front captured
+  at the start of the take, and for a message that was handed off, `Delivery`: when it was
   handed off and, relative to that, when the agent had it, when it entered the conversation (and whether it
   changed on its way in), whether a receipt was missing and what the check found, why a message that entered
   did not match, a turn followed for its reply, when the receipt arrived, and reconnects while waiting. It
@@ -473,7 +473,7 @@ a hello on any other protocol is refused with `426` and is never registered or s
   and any prompt Claude Code cannot attribute to a program; the Pi connector counts prompts typed in Pi's own
   editor. Prompts from plugins (the connector's own
   submissions included), background tasks, and scheduled triggers are not counted.
-  One holds a queued take for review and makes that conversation the current recipient. Hello and each typed event
+  One holds a queued take for review. Hello and each typed event
   carry the count of prompts the user has submitted in that session; each submit carries the count
   KeyScribe last heard, and the connector refuses it as `typedSince` when the count has moved since, so a
   prompt the user typed is never overtaken by dictation decided before KeyScribe heard about it. That
@@ -493,10 +493,9 @@ a hello on any other protocol is refused with `426` and is never registered or s
 
 `agents/names.json` holds the names chosen with **Rename…** on the Agent page, keyed by the
 agent's session id (`{"schema_version": 1, "names": {"<session id>": "backend"}}`), and in `excluded` the
-session ids of conversations you disconnected (`"excluded": ["pi:<session id>"]`), and in `chosen` where
-instructions without a name go when it is not the conversation in front: the session id and the name it had
-when last seen (`"chosen": {"id": "claude:<session id>", "name": "backend"}`; absent means the conversation in
-front). A disconnected conversation
+session ids of conversations you disconnected (`"excluded": ["pi:<session id>"]`). A `chosen` key written by
+an earlier version is ignored and dropped on the next save; where instructions go is never saved. A
+disconnected conversation
 stays disconnected when it resumes; a new or forked conversation has a new id, so it connects normally. Without an override,
 the conversation uses its explicit native name, normalized like a name chosen in KeyScribe. Only an
 unnamed conversation gets a name generated from its folder. Like `usage/`, it is app-written
@@ -553,9 +552,9 @@ state, and a write to it does not reload configuration.
   every name stays as it was.
 - An absent file means no chosen names. A file that cannot be read, is malformed, or was written by a
   newer version is **left as it is**, never moved aside or overwritten: until it loads, a take starting
-  with "tell" reaches a conversation only through a row number, never the current recipient (unaddressed
+  with "tell" reaches a conversation only through a row number, never the conversation in front (unaddressed
   takes, including one that starts with a name but no "tell" and one that starts with "ask" and no row number, still go to
-  the current recipient), Rename is unavailable, and the
+  the conversation in front), Rename is unavailable, and the
   Agent page says why, with **Try Again**. This differs from `usage/` on purpose — starting fresh
   there costs counts, while starting fresh here could hand a familiar name to a different conversation.
 - Session ids and names are kept whether or not History is on, until the file is deleted. No message
@@ -704,7 +703,7 @@ context = { app = true, preceding_text = false }
 | `constraints[]` | table[] | Any of `bundle_id`, `bundle_prefix`, `url_pattern`, `window_title` (ANDed). Empty ⇒ eligible everywhere. |
 | `source` | enum | `dictation` \| `selection`. |
 | `output` | enum | `cursor` \| `replace_selection` \| `speak` \| `voice_command` \| `agent`. `speak` answers the spoken request about the selected text and reads the answer aloud; the selection is not changed. It needs `source = "selection"` (a file that pairs it with `dictation` fails to load), runs only while the `ask_about_selection` experimental flag is on, and ignores the insertion, `trailing`, `submit`, and context settings: only the selection and the spoken request are sent. `voice_command` is the Voice Commands system mode's output: the take is run as a command (`voice_commands.toml`) and nothing is inserted. `agent` is the Agent system mode's output: the take goes to an agent conversation ("Agent bridge" above). Any other mode file that sets either fails to load. |
-| `[agent]` | table | Read only with `output = "agent"`. `target` picks the conversation a take goes to when it does not start with one's name: `current` (default) is where **Send to** points: a conversation the user chose (in Settings, with `select` or `open`, or by starting a take with its name) keeps receiving whatever is in front, and with none chosen it is the conversation the front terminal shows when the take starts, if that can be confirmed in the window that had focus, without asking for access, shortly after release at the latest. The choice is not saved in config and does not outlive the app. When the front cannot be confirmed, or the chosen conversation has ended or is disconnected, the take is held and nothing is sent, never to another conversation; `ask` holds the take until one is named, and any other text is the name of a fixed conversation (the take is held if no live conversation has that name). An older `focused` is read as `current`. |
+| `[agent]` | table | Retired. An earlier version used `target` to fix where a take without a name goes. `current` and `focused` (the old default) are ignored silently and dropped the next time the mode is saved (`ModeStore.retiredKeys(in:)`); a fixed conversation name or `ask` is ignored too but reported as a key with no effect, so the Agent mode says unnamed takes no longer go there and asks for the line to be removed. A take without a name always goes to the conversation the front terminal shows when the take starts, if that can be confirmed in the window that had focus, without asking for access, shortly after release at the latest; with none, it is held and nothing is sent. |
 | `commands.live_edits` | bool | Opt-in to the spoken-command list (insert new line, insert new paragraph, insert tab character, scratch that, **never mind** / **start over** to discard the whole take, **insert clipboard contents**, **begin/end verbatim**). |
 | `commands.privacy` | bool | Opt-in to best-effort redaction. When true, **context is forced off** — `ai_rewrite.context` is locked to all-false so only the redacted transcript leaves. |
 | `commands.numbers` | bool | Opt-in to inverse text normalization ("twenty five" → "25"); bails on ambiguous/year-like runs. |

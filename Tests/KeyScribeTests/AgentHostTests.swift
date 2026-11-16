@@ -931,17 +931,14 @@ struct AgentHostTests {
         hub.exclusions.adopt([])
         await hub.rescan()
         try hub.rename("claude:s1", to: "billing")
-        hub.makeCurrent("claude:s1")
         hub.disconnect("claude:s2")
         turnedOn = true
         await hub.rescan(wantingHosts: true)
         #expect(hub.directory.conversations.first { $0.id == Self.id("t1") }?.handle == "billing")
-        #expect(hub.current == Self.id("t1"))
         #expect(hub.isExcluded(Self.id("t2")))
         #expect(!hub.directory.conversations.contains { $0.id == Self.id("t2") })
         turnedOn = false
         await hub.rescan()
-        #expect(hub.current == "claude:s1")
         #expect(hub.isExcluded("claude:s2"))
         #expect(hub.directory.conversations.first { $0.id == "claude:s1" }?.handle == "billing")
     }

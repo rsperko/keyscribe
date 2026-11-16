@@ -4,7 +4,6 @@ import KeyScribeKit
 struct AgentSnapshot {
     let names: [String: String]
     let conversations: [AgentConversation]
-    let current: String?
     var namesAvailable = true
     var disconnected: [String: String] = [:]
     var shared: [String: AgentRecipient.SharedName] = [:]
@@ -18,6 +17,11 @@ struct AgentSnapshot {
     var sharedNames: [String: AgentRecipient.SharedName] { merged.shared }
     var spokenNames: [String] { AgentRecipient.spokenNames(addressable, shared: sharedNames) }
     var afterVerbNames: [String] { AgentRecipient.afterVerbNames(sharedNames) }
+}
+
+struct CapturedFocus: Equatable {
+    let id: String
+    let readAt: UInt64
 }
 
 @MainActor
@@ -38,7 +42,9 @@ protocol AgentTakeHost: AnyObject {
     var voiceCommandStopsAtPress: Int? { get }
     var spokenEdits: String? { get set }
     var agentSnapshot: AgentSnapshot? { get set }
-    var agentRecipient: AgentRecipient.Frozen? { get set }
+    var agentFocus: CapturedFocus? { get set }
+    var agentFocusUnconfirmed: Bool { get set }
+    var takePressedAt: DispatchTime? { get }
     var agentFrontTask: Task<Void, Never>? { get set }
     var agentFrontCutoff: ContinuousClock.Instant? { get }
     func noteAgentDestination(_ id: String, facts: [HistoryEntry.Fact])
@@ -75,6 +81,7 @@ final class AgentTake {
     var placeNamesGrace: Duration = .seconds(1)
     var promptBoxConfirmation: Duration = .seconds(2)
     var frontApp: @MainActor () -> FrontApp? = { AgentFront.frontmost() }
+    var inputAfter: @MainActor (UInt64) -> Bool? = { UserInput.any(after: $0) }
 
     init(
         hud: HUDChannel, output: AgentOutput, voiceCommands: VoiceCommandRunning,
@@ -89,21 +96,23 @@ final class AgentTake {
         self.agentClipboard = agentClipboard
     }
 
-    func freezeRecipient() {
+    func freezeConversations() {
         guard let host, let agents = host.agents, host.agentsEnabled,
               host.eligibleModes?.contains(where: { $0.output == .agent }) == true
         else { return }
         agents.refresh()
         agents.readPlaces()
         Task { await agents.refreshHostsForPress() }
-        let snapshot = AgentSnapshot(
-            names: agents.names, conversations: agents.recordingOrder, current: agents.current,
-            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames, shared: agents.sharedNames)
+        let snapshot = Self.snapshot(of: agents)
         host.agentSnapshot = snapshot
-        guard let mode = host.takeMode, mode.output == .agent else { return }
-        host.agentRecipient = AgentRecipient.initial(
-            target: mode.agent.target, current: snapshot.current, names: snapshot.names)
-        followAgentInFront(target: mode.agent.target, snapshot: snapshot, through: agents)
+        guard host.takeMode?.output == .agent else { return }
+        captureFocus(snapshot: snapshot, through: agents)
+    }
+
+    private static func snapshot(of agents: AgentHub) -> AgentSnapshot {
+        AgentSnapshot(
+            names: agents.names, conversations: agents.recordingOrder,
+            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames, shared: agents.sharedNames)
     }
 
     private func settlePlaceNames(_ agents: AgentHub) async -> Bool {
@@ -114,19 +123,35 @@ final class AgentTake {
         return agents.placeTracker?.reading == nil && !agents.placesUnread(ids)
     }
 
-    private func followAgentInFront(target: Mode.Agent.Target, snapshot: AgentSnapshot, through agents: AgentHub) {
-        guard target == .current, snapshot.current == nil, let host, let identity = host.takeIdentity else { return }
+    private func captureFocus(snapshot: AgentSnapshot, through agents: AgentHub) {
+        guard let host, let identity = host.takeIdentity else { return }
         host.agentFrontTask?.cancel()
-        host.agentFrontTask = Task { @MainActor [weak host, weak agents] in
-            guard let shown = await agents?.sessionInFrontWithoutAsking(), let host, !Task.isCancelled,
+        host.agentFrontTask = Task { @MainActor [weak self, weak host, weak agents] in
+            guard let shown = await agents?.sessionInFrontWithoutAsking(), let self, let host, !Task.isCancelled,
                   host.takeIdentity === identity,
                   host.agentFrontCutoff.map({ ContinuousClock.now <= $0 }) ?? true,
                   snapshot.rows.contains(shown.id) || snapshot.disconnected.values.contains(shown.id),
-                  host.captureOrigin?.leaving(shown).session == shown.id
+                  host.captureOrigin?.leaving(shown).session == shown.id,
+                  let pressed = host.takePressedAt?.uptimeNanoseconds
             else { return }
-            host.agentRecipient = AgentRecipient.Frozen(id: shown.id, source: .front)
-            host.redrawRecordingHUD()
+            switch inputAfter(pressed) {
+            case false?:
+                host.agentFocus = CapturedFocus(id: shown.id, readAt: DispatchTime.now().uptimeNanoseconds)
+                host.redrawRecordingHUD()
+            case nil:
+                host.agentFocusUnconfirmed = true
+            case true?:
+                break
+            }
         }
+    }
+
+    func noteUserInput(at time: UInt64) {
+        guard let host, let focus = host.agentFocus, let pressed = host.takePressedAt?.uptimeNanoseconds,
+              time > pressed, time <= focus.readAt
+        else { return }
+        host.agentFocus = nil
+        host.redrawRecordingHUD()
     }
 
     private func settleAgentInFront() async {
@@ -138,13 +163,9 @@ final class AgentTake {
 
     var roster: AgentRoster? {
         guard let host, host.takeMode?.output == .agent, let agents = host.agents, let snapshot = host.agentSnapshot else { return nil }
-        let recipient = host.agentRecipient
-        let ended = recipient.flatMap { pinned in
-            pinned.source == .current && Self.hasEnded(pinned.id, in: snapshot, agents: agents) ? agents.currentName : nil
-        }
         return AgentRoster(
-            frozen: snapshot.conversations, live: agents.directory.conversations, recipient: recipient,
-            namesAvailable: snapshot.namesAvailable, disconnected: snapshot.namesAvailable ? agents.disconnected : [], ended: ended)
+            frozen: snapshot.conversations, live: agents.directory.conversations, focused: host.agentFocus?.id,
+            namesAvailable: snapshot.namesAvailable, disconnected: snapshot.namesAvailable ? agents.disconnected : [])
     }
 
     func finish(routed: PhaseBResult, heard: String, mode: Mode) async {
@@ -157,17 +178,13 @@ final class AgentTake {
             host.finishNoSpeech()
             return
         }
-        let pressed = host.agentSnapshot ?? AgentSnapshot(
-            names: agents.names, conversations: agents.recordingOrder, current: agents.current,
-            namesAvailable: agents.namesProblem == nil, disconnected: agents.disconnectedNames, shared: agents.sharedNames)
-        func recipient(in snapshot: AgentSnapshot) -> AgentRecipient.Frozen? {
-            host.agentRecipient ?? AgentRecipient.initial(target: mode.agent.target, current: snapshot.current, names: snapshot.names)
-        }
+        let pressed = host.agentSnapshot ?? Self.snapshot(of: agents)
+        let focused = { host.agentFocus?.id }
         switch VoiceCommandGrammar.parse(routed.transcript) {
         case .goBack:
             host.agentFrontTask?.cancel()
             await builtInFromAgent(
-                VoiceCommandGrammar.goBack, heard: heard, facts: AgentHistoryFacts.goBack(frozen: recipient(in: pressed), conversations: pressed.conversations))
+                VoiceCommandGrammar.goBack, heard: heard, facts: AgentHistoryFacts.goBack(focused: focused(), conversations: pressed.conversations))
             return
         case .cancel:
             host.agentFrontTask?.cancel()
@@ -177,24 +194,16 @@ final class AgentTake {
             host.agentFrontTask?.cancel()
             await builtInFromAgent(
                 VoiceCommandGrammar.repeatSummary[0], heard: heard,
-                facts: AgentHistoryFacts.repeatSummary(frozen: recipient(in: pressed), conversations: pressed.conversations))
+                facts: AgentHistoryFacts.repeatSummary(focused: focused(), conversations: pressed.conversations))
             return
         case .keepReply where host.spokenUpdates?.readsReplies == true && host.lastHeardReply != nil:
             host.agentFrontTask?.cancel()
             await builtInFromAgent(
                 VoiceCommandGrammar.keepReply[0], heard: heard,
-                facts: AgentHistoryFacts.keepReply(frozen: recipient(in: pressed), conversations: pressed.conversations))
+                facts: AgentHistoryFacts.keepReply(focused: focused(), conversations: pressed.conversations))
             return
         default:
             break
-        }
-        if AgentRecipient.followsFront(routed.transcript) {
-            host.agentFrontTask?.cancel()
-            agents.followFront()
-            finishAgent(state: .commandDone(summary: "Recipient: the conversation in front", detail: mode.name),
-                        outcome: .inserted, heard: heard, body: "", transformed: nil, rewrite: nil,
-                        facts: AgentHistoryFacts.followFront(frozen: recipient(in: pressed), conversations: pressed.conversations))
-            return
         }
         let namesSettled = await settlePlaceNames(agents)
         if Task.isCancelled { return }
@@ -206,50 +215,43 @@ final class AgentTake {
             }
             return frozen
         }()
-        func frozenRecipient() -> AgentRecipient.Frozen? { recipient(in: snapshot) }
         if let request = AgentRename.request(in: routed.transcript) {
-            await renameFromAgent(request, in: routed.transcript, recipient: frozenRecipient, through: agents, heard: heard, mode: mode, snapshot: snapshot)
+            await renameFromAgent(request, in: routed.transcript, focused: focused, through: agents, heard: heard, mode: mode, snapshot: snapshot)
             return
         }
         let read = host.takePlan.agentAddressReader(for: routed.transcript, mode: mode)
         if let query = AgentStatusQuery.parse(
             routed.transcript, names: snapshot.spokenNames, namesKnown: snapshot.namesAvailable,
             read: read, afterVerb: snapshot.afterVerbNames) {
-            await answerStatus(query, recipient: frozenRecipient, through: agents, heard: heard, mode: mode, snapshot: snapshot)
+            await answerStatus(query, focused: focused, through: agents, heard: heard, mode: mode, snapshot: snapshot)
             return
         }
         let address = AgentAddress.parse(
             routed.transcript, names: snapshot.spokenNames, namesKnown: snapshot.namesAvailable,
             read: read, afterVerb: snapshot.afterVerbNames)
-        if AgentRecipient.usesDefault(address) {
+        if AgentRecipient.usesFocus(address) {
             await settleAgentInFront()
             if Task.isCancelled { return }
         } else {
             host.agentFrontTask?.cancel()
         }
-        let frozen = frozenRecipient()
-        let resolution = AgentRecipient.resolve(address, frozen: frozen, rows: snapshot.rows, names: snapshot.addressable, shared: snapshot.sharedNames)
+        let inFront = focused()
+        let resolution = AgentRecipient.resolve(address, focused: inFront, rows: snapshot.rows, names: snapshot.addressable, shared: snapshot.sharedNames)
         let facts = AgentHistoryFacts.facts(
-            address: address, resolution: resolution, frozen: frozen, conversations: snapshot.conversations)
+            address: address, resolution: resolution, focused: inFront, conversations: snapshot.conversations)
         if host.captureWasLost {
             if case .deliver(_, let body, _) = resolution { host.finishTruncatedCapture(transcript: body) } else { host.finishCommandCaptureLost() }
             return
         }
-        if !namesSettled, AgentRecipient.usesDefault(address), case .deliver(_, let body, _) = resolution {
+        if !namesSettled, AgentRecipient.usesFocus(address), case .deliver(_, let body, _) = resolution {
             let line = "Couldn\u{2019}t check conversation names yet. Nothing sent. Say it again, or start with \u{201C}tell\u{201D} and a name or conversation number."
             finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: nil, heard: HeardExcerpt(heard: body)),
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
             return
         }
-        if case .deliver(let id, let body, .current) = resolution, Self.hasEnded(id, in: snapshot, agents: agents) {
-            let line = Self.endedLine(agents.currentName)
-            finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: .chooseAgentRecipient(mode.id), heard: HeardExcerpt(heard: body)),
-                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
-            return
-        }
-        if case .ask(let body, .noRecipient) = resolution, mode.agent.target == .current {
-            let line = Self.noneInFrontLine
-            finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: .chooseAgentRecipient(mode.id), heard: HeardExcerpt(heard: body)),
+        if case .ask(let body, .nothingFocused) = resolution, host.agentFocusUnconfirmed {
+            let line = Self.unconfirmedLine
+            finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: .openAccessibilitySettings, heard: HeardExcerpt(heard: body)),
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
             return
         }
@@ -260,13 +262,9 @@ final class AgentTake {
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
             return
         }
-        if let id = resolution.makesCurrent { agents.makeCurrent(id) }
-
         switch resolution {
-        case .select(let id):
-            finishAgent(state: .commandDone(summary: "Recipient: \(agents.handle(of: id) ?? "it")", detail: mode.name),
-                        outcome: .inserted, heard: heard, body: "", transformed: nil, rewrite: nil, facts: facts)
         case .open(let id):
+            agents.noteUsed(id)
             let handle = agents.handle(of: id) ?? "it"
             hud.present(.transcribing(mode: mode.name, status: "Opening \(handle)\u{2026}"))
             let lease = host.lease(for: .agents, stopsAtPress: nil)
@@ -306,7 +304,7 @@ final class AgentTake {
             }
             let hint = AgentOutput.unconnectedHint(unconnected.map(\.name))
             let shown = hint.isEmpty
-                ? line(reason, retry, reachable(snapshot, agents, for: retry), frozen?.id) : AgentOutput.withHint(line(reason, nil, [:], nil), hint)
+                ? line(reason, retry, reachable(snapshot, agents, for: retry), inFront) : AgentOutput.withHint(line(reason, nil, [:], nil), hint)
             let action = hint.isEmpty ? Self.askAction(reason, mode: mode) : .openAgents(mode.id)
             finishAgent(state: .error(message: AgentOutput.kept(shown, body: body), action: action, heard: HeardExcerpt(heard: body)),
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil,
@@ -318,26 +316,32 @@ final class AgentTake {
         }
     }
 
-    static let noneInFrontLine = "No conversation is in front of you. Nothing sent. Bring one forward, start with a conversation\u{2019}s name, or choose a conversation."
-
-    static func endedLine(_ name: String?) -> String {
-        "\(name ?? "The conversation you chose") has ended. Nothing sent. Choose another conversation, say \u{201C}follow the front\u{201D}, or start with a conversation\u{2019}s name."
+    static var unconfirmed: String {
+        "Couldn\u{2019}t confirm the conversation in front, because \(Branding.appName) can\u{2019}t see key presses and clicks."
     }
 
-    private static func hasEnded(_ id: String, in snapshot: AgentSnapshot, agents: AgentHub) -> Bool {
-        !snapshot.rows.contains(id) && !snapshot.disconnected.values.contains(id) && !agents.isExcluded(id)
+    static var unconfirmedLine: String {
+        "\(unconfirmed) \(AgentOutput.nothingSent) Name a conversation in your instruction, or check that Accessibility is on for \(Branding.appName)."
+    }
+
+    static var unconfirmedCheckLine: String {
+        "\(unconfirmed) \(AgentOutput.nothingSent) Say \u{201C}check on\u{201D} and a conversation\u{2019}s name, or check that Accessibility is on for \(Branding.appName)."
+    }
+
+    static var unconfirmedRenameLine: String {
+        "\(unconfirmed) Check that Accessibility is on for \(Branding.appName), then say the rename command again."
     }
 
     private static func target(of resolution: AgentRecipient.Resolution) -> (id: String, front: Bool, body: String)? {
         switch resolution {
         case .deliver(let id, let body, let source): (id, source == .front, body)
-        case .select(let id), .open(let id): (id, false, "")
+        case .open(let id): (id, false, "")
         case .ask: nil
         }
     }
 
     private func renameFromAgent(
-        _ request: Result<Substring, AgentRename.Problem>, in transcript: String, recipient: @escaping () -> AgentRecipient.Frozen?, through agents: AgentHub, heard: String,
+        _ request: Result<Substring, AgentRename.Problem>, in transcript: String, focused: @escaping () -> String?, through agents: AgentHub, heard: String,
         mode: Mode, snapshot: AgentSnapshot
     ) async {
         guard let host else { return }
@@ -373,15 +377,15 @@ final class AgentTake {
             if case .invalid(let problem) = rename {
                 finishAgent(state: .error(message: Self.renameProblem(problem), action: nil, heard: HeardExcerpt(heard: heard)),
                             outcome: .failed, heard: heard, body: "", transformed: nil, rewrite: nil,
-                            facts: AgentHistoryFacts.rename(frozen: nil, to: nil, conversations: snapshot.conversations))
+                            facts: AgentHistoryFacts.rename(focused: nil, to: nil, conversations: snapshot.conversations))
             }
             return
         }
         await settleAgentInFront()
         if Task.isCancelled { return }
         let name = AgentHandles.normalize(spoken)
-        let frozen = recipient()
-        let facts = AgentHistoryFacts.rename(frozen: frozen, to: name, conversations: snapshot.conversations)
+        let target = focused()
+        let facts = AgentHistoryFacts.rename(focused: target, to: name, conversations: snapshot.conversations)
         func fail(_ message: String, action: HUDErrorAction? = nil) {
             finishAgent(state: .error(message: message, action: action, heard: HeardExcerpt(heard: heard)),
                         outcome: .failed, heard: heard, body: "", transformed: nil, rewrite: nil, transitioned: true, facts: facts)
@@ -391,7 +395,8 @@ final class AgentTake {
             host.cancelQuietly()
             return
         }
-        guard let id = frozen?.id else {
+        guard let id = target else {
+            if host.agentFocusUnconfirmed { return fail(Self.unconfirmedRenameLine, action: .openAccessibilitySettings) }
             return fail("Switch to a conversation, then say the rename command again", action: .openAgents(mode.id))
         }
         guard let old = agents.handle(of: id) else { return fail("That conversation has ended") }
@@ -408,7 +413,7 @@ final class AgentTake {
     }
 
     private func answerStatus(
-        _ query: AgentStatusQuery, recipient: () -> AgentRecipient.Frozen?, through agents: AgentHub, heard: String, mode: Mode,
+        _ query: AgentStatusQuery, focused: () -> String?, through agents: AgentHub, heard: String, mode: Mode,
         snapshot: AgentSnapshot
     ) async {
         guard let host else { return }
@@ -440,20 +445,20 @@ final class AgentTake {
         case .check(let named):
             address = named
         }
-        let frozen: AgentRecipient.Frozen?
+        let inFront: String?
         let resolution: AgentRecipient.Resolution
         if let address {
             host.agentFrontTask?.cancel()
-            frozen = recipient()
+            inFront = focused()
             resolution = AgentRecipient.conversation(
-                address, frozen: frozen, rows: snapshot.rows, names: snapshot.addressable, shared: snapshot.sharedNames)
+                address, focused: inFront, rows: snapshot.rows, names: snapshot.addressable, shared: snapshot.sharedNames)
         } else {
             await settleAgentInFront()
             if Task.isCancelled { return }
-            frozen = recipient()
-            resolution = frozen.map { .deliver(id: $0.id, body: "", source: $0.source) } ?? .ask(body: "", reason: .noRecipient)
+            inFront = focused()
+            resolution = inFront.map { .deliver(id: $0, body: "", source: .front) } ?? .ask(body: "", reason: .nothingFocused)
         }
-        let facts = AgentHistoryFacts.status(address: address, resolution: resolution, frozen: frozen, conversations: snapshot.conversations)
+        let facts = AgentHistoryFacts.status(address: address, resolution: resolution, focused: inFront, conversations: snapshot.conversations)
         func fail(_ message: String, action: HUDErrorAction? = nil, keepingWords: Bool = false) {
             let body = keepingWords ? heard : ""
             if keepingWords { host.rememberResult(heard) }
@@ -463,16 +468,15 @@ final class AgentTake {
         let lease = host.lease(for: .agents, stopsAtPress: nil)
         guard lease.keepActing() else { return stopQuietly() }
         guard let id = resolution.recipient else {
-            if case .ask(_, let reason) = resolution, reason != .noRecipient {
+            if case .ask(_, let reason) = resolution, reason != .nothingFocused {
                 if !snapshot.namesAvailable, case .unresolved? = address {
                     return fail("Couldn\u{2019}t check conversation names yet. \(AgentOutput.nothingSent) Say it again, or say \u{201C}check on conversation\u{201D} and its number.",
                                 keepingWords: true)
                 }
                 return fail(AgentOutput.askLine(reason), action: .openAgents(mode.id), keepingWords: true)
             }
-            let missing = mode.agent.target == .current ? "No conversation is in front of you." : "No recipient selected."
-            return fail("\(missing) \(AgentOutput.nothingSent) Say \u{201C}check on\u{201D} and a conversation\u{2019}s name.",
-                        action: .openAgents(mode.id))
+            if host.agentFocusUnconfirmed { return fail(Self.unconfirmedCheckLine, action: .openAccessibilitySettings) }
+            return fail("\(AgentRecipient.nothingFocused). \(AgentOutput.nothingSent) Say \u{201C}check on\u{201D} and a conversation\u{2019}s name.")
         }
         let name = agents.handle(of: id) ?? snapshot.disconnected.first { $0.value == id }?.key ?? "That conversation"
         if snapshot.disconnected.values.contains(id) || agents.isExcluded(id) {

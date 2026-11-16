@@ -409,11 +409,11 @@ struct AgentHostConsentModelTests {
     @Test func aHostsListingProblemIsShownBesideItsSwitchOnlyWhileItIsOn() {
         let model = AgentsSettingsModel(
             describeTerminal: { _ in nil }, agentsDir: FileManager.default.temporaryDirectory, connectors: [], hosts: [BBHost.kind])
-        model.show([], current: nil, discoveryProblems: ["bb": "bb isn\u{2019}t open. Open bb to reach its threads."])
+        model.show([], discoveryProblems: ["bb": "bb isn\u{2019}t open. Open bb to reach its threads."])
         #expect(model.problem(of: BBHost.kind) == nil)
         model.load(hosts: ["bb"])
         #expect(model.problem(of: BBHost.kind) == "bb isn\u{2019}t open. Open bb to reach its threads.")
-        model.show([], current: nil, discoveryProblems: [:])
+        model.show([], discoveryProblems: [:])
         #expect(model.problem(of: BBHost.kind) == nil)
     }
 }

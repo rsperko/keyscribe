@@ -1480,55 +1480,20 @@ struct AgentHubTests {
         #expect(results.isEmpty)
     }
 
-    @Test func typingIntoAConversationLeavesWhereInstructionsGo() async {
-        let (hub, transport, registry, _) = makeHub()
-        await connected(hub, transport, registry, "s1")
-        await connected(hub, transport, registry, "s2")
-        hub.makeCurrent("claude:s1")
-        hub.handle(.typed(session: "claude:s2"))
-        #expect(hub.current == "claude:s1")
-        hub.followFront()
-        hub.handle(.typed(session: "claude:s2"))
-        #expect(hub.current == nil)
-    }
-
-    @Test func aChosenConversationThatEndsStaysChosenUnderItsLastName() async {
-        let (hub, transport, registry, _) = makeHub()
-        await connected(hub, transport, registry, "s1")
-        await connected(hub, transport, registry, "s2")
-        hub.makeCurrent("claude:s1")
-        let name = hub.handle(of: "claude:s1")
-        registry.entries.removeAll { $0.sessionId == "s1" }
-        transport.live.remove("claude:s1")
-        await hub.rescan()
-        #expect(hub.handle(of: "claude:s1") == nil)
-        #expect(hub.current == "claude:s1")
-        #expect(hub.currentName == name)
-    }
-
-    @Test func choosingANewConversationNeverBorrowsThePreviousName() async {
-        let (hub, transport, registry, _) = makeHub()
-        await connected(hub, transport, registry, "s1")
-        hub.makeCurrent("claude:s1")
-        hub.makeCurrent("claude:unlisted")
-        #expect(hub.current == "claude:unlisted")
-        #expect(hub.currentName == nil)
-    }
-
-    @Test func whereInstructionsGoIsKeptAcrossARelaunch() async throws {
-        let dir = try nameDir(nil)
+    @Test func aRecipientSavedByAnEarlierVersionIsIgnoredAndDroppedOnTheNextSave() async throws {
+        let dir = try nameDir(#"{"schema_version": 1, "names": {"claude:a": "backend"}, "chosen": {"id": "claude:a", "name": "backend"}}"#)
         defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent(AgentNameStore.fileName)
         let registry = Registry()
         registry.set("a", cwd: "/src/api")
         let hub = AgentHub(transport: FakeTransport(), scan: { registry.entries }, names: AgentNameStore(directory: dir), scanDeadline: .seconds(30))
         await hub.rescan()
-        hub.makeCurrent("claude:a")
-        let relaunched = AgentHub(transport: FakeTransport(), scan: { [] }, names: AgentNameStore(directory: dir), scanDeadline: .seconds(30))
-        #expect(relaunched.current == "claude:a")
-        #expect(relaunched.currentName == "api")
-        relaunched.followFront()
-        let again = AgentHub(transport: FakeTransport(), scan: { [] }, names: AgentNameStore(directory: dir), scanDeadline: .seconds(30))
-        #expect(again.current == nil)
+        #expect(hub.namesProblem == nil)
+        #expect(hub.names == ["backend": "claude:a"])
+        try hub.rename("claude:a", to: "api server")
+        let saved = try String(contentsOf: file, encoding: .utf8)
+        #expect(!saved.contains("chosen"))
+        #expect(saved.contains("api server"))
     }
 
     @Test func theRecordingListFollowsTheLastConversationsUsed() async {
@@ -1542,11 +1507,11 @@ struct AgentHubTests {
         #expect(hub.recordingOrder.map(\.id) == ["claude:s1", "claude:s2", "claude:s3"])
         hub.handle(.typed(session: "claude:s3"))
         clock.now += 1
-        hub.makeCurrent("claude:s2")
+        hub.noteUsed("claude:s2")
         #expect(hub.recordingOrder.map(\.id) == ["claude:s2", "claude:s3", "claude:s1"])
         clock.now += 1
         _ = await hub.deliver("run the tests", to: "claude:s1")
-        #expect(hub.recordingOrder.map(\.id) == ["claude:s2", "claude:s1", "claude:s3"])
+        #expect(hub.recordingOrder.map(\.id) == ["claude:s1", "claude:s2", "claude:s3"])
     }
 
     @Test func aConversationStartedAfterTheLastUseLeadsTheRecordingList() async {
@@ -1557,7 +1522,6 @@ struct AgentHubTests {
         transport.live.formUnion(["claude:s1", "claude:s2"])
         await hub.rescan()
         _ = await hub.deliver("run the tests", to: "claude:s1")
-        #expect(hub.current == nil)
         #expect(hub.recordingOrder.map(\.id) == ["claude:s1", "claude:s2"])
         registry.set("s3", cwd: "/src/charlie", pid: 30, startedAt: Int(clock.now.timeIntervalSince1970 * 1000) + 500)
         transport.live.insert("claude:s3")
@@ -1671,7 +1635,7 @@ struct AgentHubTests {
                               stillRunning: { $0.pid == 10 })
         await second.rescan()
         #expect(second.names == ["keyscribe blue": "claude:b", "keyscribe green": "claude:c"])
-        guard case .names(_, let remembered, _, _) = AgentNameStore(directory: dir).load() else { Issue.record("names not loaded"); return }
+        guard case .names(_, let remembered, _) = AgentNameStore(directory: dir).load() else { Issue.record("names not loaded"); return }
         #expect(remembered["claude:a"]?.name == "keyscribe")
         registry.entries.append(missing)
         await second.rescan()
@@ -1697,7 +1661,7 @@ struct AgentHubTests {
         await hub.rescan()
         #expect(hub.namesNotSaved == nil)
         #expect(changes == reported + 1)
-        guard case .names(_, let remembered, _, _) = AgentNameStore(directory: dir).load() else { Issue.record("names not saved"); return }
+        guard case .names(_, let remembered, _) = AgentNameStore(directory: dir).load() else { Issue.record("names not saved"); return }
         #expect(remembered["claude:a"] == RememberedName(name: "keyscribe", pid: 10, startedAt: 100, native: nil, agent: "claude"))
     }
 
@@ -2028,7 +1992,7 @@ struct AgentHubTests {
         #expect(hub.names == before.filter { $0.value != id })
     }
 
-    @Test func aDisconnectedConversationLeavesTheRecipientsAndItsHeldMessagesAreNotSent() async throws {
+    @Test func aDisconnectedConversationKeepsItsNameAndItsHeldMessagesAreNotSent() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-hub-ex-\(UUID().uuidString)")
         let fake = FakeDiscovery()
         fake.result = .found([Self.fakeSession("f1")])
@@ -2036,20 +2000,17 @@ struct AgentHubTests {
         transport.live = ["fake:f1"]
         let hub = AgentHub(transport: transport, discovery: [fake], names: AgentNameStore(directory: dir))
         await hub.rescan()
-        hub.makeCurrent("fake:f1")
         var forgotten: [String] = []
         hub.onSilence = { forgotten.append($0) }
         hub.disconnect("fake:f1")
         #expect(hub.directory.conversations.isEmpty)
         #expect(hub.disconnected.map(\.id) == ["fake:f1"])
-        #expect(hub.current == "fake:f1")
-        #expect(hub.currentName == "api")
         #expect(hub.names.isEmpty)
         #expect(hub.disconnectedNames == ["api": "fake:f1"])
         #expect(forgotten == ["fake:f1"])
         #expect(transport.sent.contains { if case .quiet(_, "fake:f1") = $0.0 { true } else { false } })
         #expect(await hub.deliver("run the tests", to: "fake:f1") == .notSent("api", reason: .disconnected))
-        guard case .names(_, _, let excluded, _) = AgentNameStore(directory: dir).load() else { Issue.record("not saved"); return }
+        guard case .names(_, _, let excluded) = AgentNameStore(directory: dir).load() else { Issue.record("not saved"); return }
         #expect(excluded == ["fake:f1"])
 
         let reopened = AgentHub(transport: FakeTransport(), discovery: [fake], names: AgentNameStore(directory: dir))
@@ -2060,7 +2021,7 @@ struct AgentHubTests {
         hub.reconnect("fake:f1")
         #expect(transport.sent.contains { if case .admit(_, "fake:f1") = $0.0 { true } else { false } })
         #expect(hub.directory.conversations.map(\.id) == ["fake:f1"])
-        guard case .names(_, _, let after, _) = AgentNameStore(directory: dir).load() else { Issue.record("not saved"); return }
+        guard case .names(_, _, let after) = AgentNameStore(directory: dir).load() else { Issue.record("not saved"); return }
         #expect(after.isEmpty)
     }
 
@@ -2105,7 +2066,7 @@ struct AgentHubTests {
         await hub.rescan()
         #expect(hub.isExcluded("fake:f1"))
         #expect(hub.directory.conversations.isEmpty)
-        try AgentNameStore(directory: dir).save([:], remembered: [:], chosen: nil)
+        try AgentNameStore(directory: dir).save([:], remembered: [:])
         hub.reloadNames()
         #expect(!hub.isExcluded("fake:f1"))
     }
@@ -2350,19 +2311,6 @@ struct AgentHubTests {
         #expect(await blind.sessionInFront() == nil)
     }
 
-    @Test func openingWithoutMakingCurrentLeavesTheRecipientAlone() async {
-        let focus = FakeFocus()
-        let registry = Registry()
-        registry.set("s1")
-        registry.set("s2", pid: 11)
-        let hub = AgentHub(transport: FakeTransport(), scan: { registry.entries }, focus: focus, scanDeadline: .seconds(30))
-        await hub.rescan()
-        hub.makeCurrent("claude:s1")
-        #expect(await hub.open("claude:s2", makingCurrent: false) == .exact)
-        #expect(hub.current == "claude:s1")
-        #expect(focus.focused.map(\.0) == ["claude:s2"])
-    }
-
     @Test func openingHandsTheStopCheckToTheTerminalFocus() async {
         let focus = FakeFocus()
         let registry = Registry()
@@ -2373,14 +2321,13 @@ struct AgentHubTests {
         #expect(focus.wanted == [false])
     }
 
-    @Test func openingMakesTheConversationCurrentAndBringsItsTerminalForward() async {
+    @Test func openingBringsTheConversationsTerminalForward() async {
         let focus = FakeFocus()
         let registry = Registry()
         registry.set("s1")
         let hub = AgentHub(transport: FakeTransport(), scan: { registry.entries }, focus: focus, scanDeadline: .seconds(30))
         await hub.rescan()
         #expect(await hub.open("claude:s1") == .exact)
-        #expect(hub.current == "claude:s1")
         #expect(focus.focused.map(\.0) == ["claude:s1"])
         #expect(focus.focused.map(\.1) == [10])
     }
@@ -2507,7 +2454,7 @@ struct AgentHubTests {
         hub.handle(.title(session: "claude:s1", text: "Cache invalidation"))
         #expect(hub.names == ["cache invalidation": "claude:s1"])
         #expect(AgentAddress.parse("fix authentication retries, run the tests", names: Array(frozenNames.keys)) == .name("fix authentication retries", body: "run the tests"))
-        let roster = AgentRoster(frozen: frozenConversations, live: hub.directory.conversations, recipient: .init(id: "claude:s1", source: .current))
+        let roster = AgentRoster(frozen: frozenConversations, live: hub.directory.conversations, focused: "claude:s1")
         #expect(roster.rows.first?.name == "fix authentication retries")
         try hub.rename("claude:s1", to: "backend")
         hub.handle(.title(session: "claude:s1", text: "Another native name"))
@@ -2555,20 +2502,6 @@ struct AgentHubTests {
         #expect(labels(transport) == ["\u{201C}keyscribe\u{201D}", "\u{201C}backend\u{201D}"])
         hub.handle(labelHello())
         #expect(labels(transport).count == 3)
-    }
-
-    @Test func choosingTheCurrentRecipientLeavesEveryLabelAsItWas() async {
-        let (hub, transport, registry, _) = makeHub()
-        registry.set("s1")
-        registry.set("s2", cwd: "/src/backend")
-        transport.live.formUnion(["claude:s1", "claude:s2"])
-        await hub.rescan()
-        hub.handle(labelHello("claude:s1"))
-        hub.handle(labelHello("claude:s2"))
-        #expect(Set(labels(transport)) == ["\u{201C}keyscribe\u{201D}", "\u{201C}backend\u{201D}"])
-        hub.makeCurrent("claude:s1")
-        hub.makeCurrent("claude:s2")
-        #expect(labels(transport).count == 2)
     }
 
     @Test func aConnectorThatCannotShowLabelsIsNeverSentOne() async {
@@ -2664,19 +2597,7 @@ struct AgentHubTests {
         let focus = FakeFocus()
         let hub = AgentHub(transport: FakeTransport(), scan: { [] }, focus: focus, scanDeadline: .seconds(30))
         #expect(await hub.open("claude:s1") == .none)
-        #expect(hub.current == nil)
         #expect(focus.focused.isEmpty)
-    }
-
-    @Test func aTerminalThatCannotComeForwardStillLeavesTheConversationCurrent() async {
-        let focus = FakeFocus()
-        focus.result = .none
-        let registry = Registry()
-        registry.set("s1")
-        let hub = AgentHub(transport: FakeTransport(), scan: { registry.entries }, focus: focus, scanDeadline: .seconds(30))
-        await hub.rescan()
-        #expect(await hub.open("claude:s1") == .none)
-        #expect(hub.current == "claude:s1")
     }
 
     final class Spoken {
