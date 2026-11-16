@@ -576,6 +576,14 @@ every rule above applies to it, with these sharpenings:
   `notify` to the hosted conversation for the turn the plugin last reported running, in a `turnStarted` or a
   hello, or its next when none runs (`AgentHub.heldByItsHost`), so either tool follows the same turn and the
   reply is read once. While the conversation works on a turn the hub cannot name, it promises nothing.
+- **bb's plugin stands in for `/keyscribe` in a bb thread.** bb lets a plugin add no `/` command of its own (those
+  come from skills and the agent's own commands, and both send the agent a message), so the window half registers two
+  message-box commands, in the `+` menu and bb's command palette: read this thread's reply aloud, and don't. Each asks
+  the server half over bb's plugin RPC (`readAloud`), which sends `notify` on or off for the composer's own thread
+  exactly as the tool does, and shows the terminal command's answer (`commandAnswer`) in a popup in that message box,
+  since a plugin's command can show nothing else. Only the latest request in a message box shows its answer
+  (`ComposerAnswers`), so a slow answer to an earlier choice never replaces a newer one, and answers are kept for a
+  bounded number of message boxes.
 - **bb's plugin says which thread you are looking at.** Its window half (`app.tsx`, an `experimental_appOverlay`
   mounted once per bb window, which bb builds when it installs or reloads the plugin) reports over bb's plugin
   RPC whether the window has focus and which thread it shows: a thread only on a thread page, and in a split

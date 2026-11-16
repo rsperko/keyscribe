@@ -40,7 +40,7 @@ test("bb's windows report to the server through one method whose input is checke
   const bb = fakeBb({ rpc: { register: (contract: any, handlers: any) => registered.push({ contract, handlers }) } })
   await plugin(bb)
   assert.equal(registered.length, 1)
-  assert.deepEqual(Object.keys(registered[0].contract), ["window", "labels"])
+  assert.deepEqual(Object.keys(registered[0].contract), ["window", "labels", "readAloud"])
   assert.equal(registered[0].handlers.window({ window: "w1", focused: true, thread: "thr_a" }), null)
   const check = (value: unknown) => rpcContract.window.input["~standard"].validate(value)
   assert.deepEqual(check({ window: "w1", focused: true, thread: null }), { value: { window: "w1", focused: true, thread: null } })
@@ -100,4 +100,20 @@ test("whether bb still waits on a prompt is read from bb, and a failed read is l
   await assert.rejects(interactionStatus(failing, "thr_a", "i1"))
   const odd: any = { threads: { interactions: { get: async () => ({}) } } }
   assert.equal(await interactionStatus(odd, "thr_a", "i1"), null)
+})
+
+test("a command in bb's message box asks for its thread's reply through one method whose input is checked, and hears back what to show", async () => {
+  const registered: Array<{ handlers: any }> = []
+  const bb = fakeBb({ rpc: { register: (_contract: any, handlers: any) => registered.push({ handlers }) } })
+  await plugin(bb)
+  assert.deepEqual(await registered[0].handlers.readAloud({ thread: "thr_unknown", on: true }),
+    { message: "the voice app didn’t confirm the request, so a reply update isn’t certain." })
+  const check = (value: unknown) => rpcContract.readAloud.input["~standard"].validate(value)
+  assert.deepEqual(check({ thread: "thr_a", on: false }), { value: { thread: "thr_a", on: false } })
+  for (const bad of [null, {}, { thread: 1, on: true }, { thread: "thr_a" }, { thread: "x".repeat(129), on: true }]) {
+    assert.ok("issues" in (check(bad) as object))
+  }
+  const output = (value: unknown) => rpcContract.readAloud.output["~standard"].validate(value)
+  assert.deepEqual(output({ message: "ok" }), { value: { message: "ok" } })
+  assert.ok("issues" in (output({ message: null }) as object))
 })

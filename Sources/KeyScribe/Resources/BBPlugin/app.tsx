@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react"
 import {
-  definePluginApp, experimental_Icon as Icon, experimental_useRpcKeyedQuery, useBbContext, useRpc, useSidebarSplitLayout,
-  type ExperimentalThreadRowMetadataDataInput, type ExperimentalThreadRowMetadataProps,
+  definePluginApp, experimental_Icon as Icon, experimental_useRpcKeyedQuery, useBbContext, useComposer, useRpc, useSidebarSplitLayout,
+  type ExperimentalThreadRowMetadataDataInput, type ExperimentalThreadRowMetadataProps, type PluginComposerApi,
 } from "@get-bb/plugin-sdk/app"
-import { rowLabel, rpcContract, shownThread } from "./keyscribe.ts"
+import { ComposerAnswers, rowLabel, rpcContract, shownThread } from "./keyscribe.ts"
 
 type Labels = Record<string, string | null> | undefined
 
@@ -32,6 +32,46 @@ const chip = {
 
 const heartbeat = 5000
 const windowId = Math.random().toString(36).slice(2, 12)
+const unreachable = "This window can\u2019t reach the voice app\u2019s plugin yet. Try again in a moment."
+const answerPopup = "read-aloud-answer"
+const answers = new ComposerAnswers()
+
+let askReadAloud: ((thread: string, on: boolean) => Promise<{ message: string }>) | null = null
+
+async function readAloud(composer: PluginComposerApi, on: boolean) {
+  if (composer.scope.kind !== "thread") return
+  const request = answers.begin(composer.key)
+  const ask = askReadAloud
+  let message = unreachable
+  if (ask) {
+    try {
+      message = (await ask(composer.scope.threadId, on)).message
+    } catch {}
+  }
+  if (answers.settle(composer.key, request, message)) composer.experimental_openPopup(answerPopup)
+}
+
+function ReadAloudBridge() {
+  const rpc = useRpc<typeof rpcContract>()
+  useEffect(() => {
+    const ask = (thread: string, on: boolean) => rpc.call("readAloud", { thread, on })
+    askReadAloud = ask
+    return () => {
+      if (askReadAloud === ask) askReadAloud = null
+    }
+  }, [rpc])
+  return null
+}
+
+function ReadAloudAnswer() {
+  const composer = useComposer()
+  return <div role="status" style={{ padding: "0.6em 0.8em", maxWidth: "28em" }}>{answers.answer(composer.key) ?? ""}</div>
+}
+
+const readAloudCommands = [
+  { id: "read-reply-aloud", label: "Read this thread\u2019s reply aloud", on: true },
+  { id: "stop-reading-reply-aloud", label: "Don\u2019t read this thread\u2019s reply aloud", on: false },
+]
 
 function FocusReporter() {
   const rpc = useRpc<typeof rpcContract>()
@@ -78,5 +118,15 @@ function FocusReporter() {
 
 export default definePluginApp((app) => {
   app.slots.experimental_appOverlay({ id: "focus-reporter", component: FocusReporter })
+  app.slots.experimental_appOverlay({ id: "read-aloud-bridge", component: ReadAloudBridge })
   app.slots.experimental_threadRowMetadata<Labels>({ id: "spoken-name", useData: useLabels, component: SpokenName })
+  app.composer.customize({
+    id: "read-aloud",
+    scopes: ["thread"],
+    plusMenu: readAloudCommands.map(({ id, label, on }) => ({ id, label, icon: "Mic", run: ({ composer }) => readAloud(composer, on) })),
+    experimental_popups: [{ id: answerPopup, label: "Reply read aloud", component: ReadAloudAnswer }],
+  })
+  for (const { id, label, on } of readAloudCommands) {
+    app.composer.experimental_registerCommand({ id, title: label, run: ({ composer }) => readAloud(composer, on) })
+  }
 })

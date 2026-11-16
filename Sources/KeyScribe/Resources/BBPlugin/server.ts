@@ -5,7 +5,7 @@ import { readFile } from "node:fs/promises"
 import { request } from "node:http"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { keyscribe, readAloudReply, rpcContract, type Exchange, type Response, type WindowReport } from "./keyscribe.ts"
+import { appNameOf, keyscribe, readAloudReply, rpcContract, type Exchange, type Response, type WindowReport } from "./keyscribe.ts"
 
 const pageSize = 200
 const pageLimit = 10
@@ -103,11 +103,12 @@ export default async function plugin(bb: BbPluginApi) {
     },
     labelled: () => labelsChanged(bb),
   }, configPaths(import.meta.url))
-  bb.rpc.register(rpcContract as never, {
+  bb.rpc.register(rpcContract, {
     window: (report: WindowReport) => { plugin.window(report); return null },
     labels: ({ keys }: { keys: string[] }) => plugin.labels(keys),
-  } as never)
-  const app = (await plugin.settings)?.appName?.trim() || "the voice app"
+    readAloud: async ({ thread, on }: { thread: string; on: boolean }) => ({ message: await plugin.command(thread, on) }),
+  })
+  const app = appNameOf(await plugin.settings)
   const tool = readAloudToolName(bb.pluginId)
   bb.agents.registerTool({
     name: tool,

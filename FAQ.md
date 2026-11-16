@@ -808,7 +808,10 @@ start, or while it works, run **/keyscribe** in the conversation: it covers the 
 reply when the agent is idle. **/keyscribe cancel** takes it back, including a reply to a message you dictated and
 one still being summarized or waiting to play; a reply you can already hear stops with Esc. Until you hear it, Settings
 shows "Reply will be reported." (or "Next reply will be reported.") on that conversation's row, with **Cancel**.
-In Claude Code the command runs while the agent works, and what it says is shown to you, not to the agent. A reply
+In Claude Code the command runs while the agent works, and what it says is shown to you, not to the agent. In a bb
+thread, choose **Read this thread’s reply aloud** (or **Don’t read this thread’s reply aloud**) from the **+** menu
+beside the message box or from bb's command palette, where you can also give it a shortcut; it works the same way and
+shows its answer above the message box. A reply
 you asked for is never dropped in favor of a later reply from the same conversation.
 
 A request is kept in memory only: quitting KeyScribe, turning **Reply updates** off or disconnecting the

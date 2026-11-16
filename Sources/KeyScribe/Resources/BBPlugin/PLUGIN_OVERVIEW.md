@@ -12,6 +12,7 @@ running it waits and sends nothing.
 - The reply to what you dictate to a bb thread, read aloud by the app.
 - Dictation that goes to the bb thread in front, the focused pane of a split included.
 - A spoken line saying what a thread waits on when it stops for your approval or an answer.
+- Read this thread's reply aloud, or don't, from the message box's + menu or the command palette.
 - A tool every thread's agent can call when you ask it to have the app read its reply aloud. bb adds it when it
   next starts a thread's agent.
 - The name to say for a thread, under its title in the sidebar, when its title says something else. The app turns

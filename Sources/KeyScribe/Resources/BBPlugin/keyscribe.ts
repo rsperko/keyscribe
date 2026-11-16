@@ -95,6 +95,51 @@ export function waitingFor(interaction: any): Waiting {
   return described("custom", payload.title)
 }
 
+export class ComposerAnswers {
+  private readonly latest = new Map<string, number>()
+  private readonly answers = new Map<string, string>()
+  private requests = 0
+  private readonly limit: number
+
+  constructor(limit = 32) {
+    this.limit = limit
+  }
+
+  begin(composer: string): number {
+    const request = ++this.requests
+    this.latest.delete(composer)
+    this.latest.set(composer, request)
+    for (const oldest of this.latest.keys()) {
+      if (this.latest.size <= this.limit) break
+      this.latest.delete(oldest)
+      this.answers.delete(oldest)
+    }
+    return request
+  }
+
+  settle(composer: string, request: number, answer: string): boolean {
+    if (this.latest.get(composer) !== request) return false
+    this.answers.set(composer, answer)
+    return true
+  }
+
+  answer(composer: string): string | undefined {
+    return this.answers.get(composer)
+  }
+}
+
+export function appNameOf(settings: { appName?: string } | null | undefined): string {
+  return settings?.appName?.trim() || "the voice app"
+}
+
+export function commandAnswer(app: string, cancelling: boolean, answer: ReadAloud, running: boolean): string {
+  if (answer === "quiet") return `This conversation is disconnected from ${app}. Reconnect it in ${app}\u2019s Agent settings.`
+  if (answer === null) return cancelling ? `${app} didn\u2019t confirm the cancel.` : `${app} didn\u2019t confirm the request, so a reply update isn\u2019t certain.`
+  if (cancelling) return `${app} won\u2019t report this reply.`
+  if (answer === false) return `Reply updates are off. Turn on Reply updates in ${app}\u2019s Agent settings.`
+  return running ? `${app} will report the result of this work.` : `${app} will report your next reply.`
+}
+
 export function readAloudReply(app: string, answer: ReadAloud): string {
   if (answer === true) return `${app} will report your final reply when this turn ends. Say so in one short sentence and continue.`
   if (answer === false) return `Reply updates are off in ${app}. Tell the user to turn on Reply updates in ${app}’s Agent settings and ask again. Nothing will be reported.`
@@ -102,14 +147,18 @@ export function readAloudReply(app: string, answer: ReadAloud): string {
   return `${app} didn’t confirm the request, so a spoken reply can’t be promised. Tell the user.`
 }
 
-export function shownThread(route: string | null, panes: Pane[] | null): string | null {
+export function shownThread(route: string | null, panes: readonly Pane[] | null): string | null {
   if (!route) return null
   const focused = panes?.find((pane) => pane.isFocused)
   return !focused || focused.threadId === route ? route : null
 }
 
 type Checked<T> = { value: T } | { issues: { message: string }[] }
-type Schema<T> = { readonly "~standard": { readonly version: 1; readonly vendor: string; readonly validate: (value: unknown) => Checked<T> } }
+type Schema<T> = {
+  readonly "~standard": {
+    readonly version: 1; readonly vendor: string; readonly validate: (value: unknown) => Checked<T>; readonly types?: { readonly input: T; readonly output: T }
+  }
+}
 
 function schema<T>(accepts: (value: unknown) => value is T, message: string): Schema<T> {
   return { "~standard": { version: 1, vendor: "keyscribe", validate: (value) => accepts(value) ? { value } : { issues: [{ message }] } } }
@@ -128,6 +177,16 @@ function isThreadKeys(value: unknown): value is { keys: string[] } {
   return Array.isArray(keys) && keys.length <= 1000 && keys.every((key) => typeof key === "string" && key.length <= 128)
 }
 
+function isReadAloudAsk(value: unknown): value is { thread: string; on: boolean } {
+  if (!value || typeof value !== "object") return false
+  const ask = value as Record<string, unknown>
+  return typeof ask.thread === "string" && ask.thread.length > 0 && ask.thread.length <= 128 && typeof ask.on === "boolean"
+}
+
+function isMessage(value: unknown): value is { message: string } {
+  return !!value && typeof value === "object" && typeof (value as Record<string, unknown>).message === "string"
+}
+
 function isLabels(value: unknown): value is Record<string, string | null> {
   return !!value && typeof value === "object" && Object.values(value).every((label) => label === null || typeof label === "string")
 }
@@ -140,6 +199,10 @@ export const rpcContract = {
   labels: {
     input: schema(isThreadKeys, "expected { keys }"),
     output: schema(isLabels, "expected a name or null for each key"),
+  },
+  readAloud: {
+    input: schema(isReadAloudAsk, "expected { thread, on }"),
+    output: schema(isMessage, "expected { message }"),
   },
 }
 
@@ -175,7 +238,8 @@ function folder(path: string): string {
 export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
   stop: () => void
   window: (report: WindowReport) => void
-  readAloud: (thread: string) => Promise<ReadAloud>
+  readAloud: (thread: string, on?: boolean) => Promise<ReadAloud>
+  command: (thread: string, on: boolean) => Promise<string>
   labels: (threads: string[]) => Record<string, string | null>
   settings: Promise<{ appName?: string; instance?: string } | null>
 } {
@@ -632,9 +696,9 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     checkWaiting(id, m, entry)
   })
 
-  function readAloud(thread: string): Promise<ReadAloud> {
+  function readAloud(thread: string, on = true): Promise<ReadAloud> {
     const m = members.get(thread)
-    if (!m || (m.turn === null && busy.has(m.status))) return Promise.resolve(null)
+    if (!m) return Promise.resolve(null)
     const turn = m.turn ?? ""
     return new Promise((answer) => {
       let done = false
@@ -649,7 +713,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
         if (done) return
         if (m.helloed && m.quiet) return resolve("quiet")
         if (!connected || stopped || !m.helloed || members.get(thread) !== m) return resolve(null)
-        const response = await post("/event", { op: "notify", session: sessionOf(thread), turn, on: true, instance: instanceOf(thread), connection }, readAloudDeadline)
+        const response = await post("/event", { op: "notify", session: sessionOf(thread), turn, on, instance: instanceOf(thread), connection }, readAloudDeadline)
         if (!response?.ok) return resolve(null)
         try {
           const answer = JSON.parse(response.text)
@@ -676,5 +740,10 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
 
   void connect()
   const labels = (threads: string[]) => Object.fromEntries(threads.map((thread) => [thread, names.get(thread) ?? null]))
-  return { stop: () => stop(), window, readAloud, labels, settings }
+  async function command(thread: string, on: boolean): Promise<string> {
+    const running = (members.get(thread)?.turn ?? null) !== null
+    return commandAnswer(appNameOf(config), !on, await readAloud(thread, on), running)
+  }
+
+  return { stop: () => stop(), window, readAloud, command, labels, settings }
 }

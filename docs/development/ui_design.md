@@ -2198,7 +2198,10 @@ as "Couldn’t complete the request.", and one that ends without a reply, or end
 "Replied. Open the conversation for the result." (`SpokenResult.ending`); a turn the user interrupts is not announced.
 
 A request to read a reply aloud comes from the agent's connector: a tool the model calls when the user explicitly asks
-for it, or the connector's own command (`/keyscribe`, `/keyscribe cancel`, named for the connector). It covers the turn
+for it, or the connector's own command (`/keyscribe`, `/keyscribe cancel`, named for the connector). bb gives a plugin no
+command of its own in the message box, so in a bb thread the same two requests are "Read this thread’s reply aloud" and
+"Don’t read this thread’s reply aloud", in the message box's `+` menu and bb's command palette, where they can be given a
+shortcut; the answer the terminal command shows appears in a small popup above the message box. It covers the turn
 running, or the next one when the agent is idle, and only that turn. A requested turn that finishes with no text to
 read is announced as "Finished without a written reply. Open the conversation for the result." Asking to hear a turn
 whose wait was skipped because the conversation was in front announces that wait then; one already queued or heard

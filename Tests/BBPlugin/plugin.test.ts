@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { keyscribe, promptDigest, readAloudReply, rowLabel, shownThread, waitingFor, type Bb, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
+import { ComposerAnswers, commandAnswer, keyscribe, promptDigest, readAloudReply, rowLabel, shownThread, waitingFor, type Bb, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
 
 type Request = { path: string; body: any; auth: string; answer: (status: number, text?: string) => void; settled: boolean; cancelled: boolean }
 
@@ -15,7 +15,7 @@ function harness(options: { threads?: { id: string; status: string }[]; history?
   let now = 1_000_000
   const config = {
     protocol: 3, socketPath: "/s/bridge.sock", tokenPath: "/s/token", readyPath: "/s/ready.json", installation: "I9",
-    instance: "/Users/me/.bb", version: "1",
+    instance: "/Users/me/.bb", version: "1", appName: "KeyScribe",
   }
   const files: Record<string, string | undefined> = {
     "/p/keyscribe.json": JSON.stringify(config),
@@ -894,4 +894,71 @@ test("a hello said again that the app refuses for now is said again once the con
   const again = h.open("hello").find((r) => r.body.session === session("thr_a"))
   assert.ok(h.sent("hello").length > before)
   assert.deepEqual(again?.body.waiting, { kind: "confirm", detail: "p" })
+})
+
+test("asked from bb's message box to stop, it tells the app not to read the thread's reply", async () => {
+  const h = await connected()
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  const asked = h.plugin.readAloud("thr_a", false)
+  await h.settle()
+  const request = h.open("notify")[0]
+  assert.deepEqual([request.body.session, request.body.on], [session("thr_a"), false])
+  request.answer(200, '{"ok":true,"spoken":true}')
+  assert.equal(await asked, true)
+})
+
+test("a command in bb's message box answers in the same words as the terminal command", () => {
+  assert.equal(commandAnswer("KeyScribe", false, true, true), "KeyScribe will report the result of this work.")
+  assert.equal(commandAnswer("KeyScribe", false, true, false), "KeyScribe will report your next reply.")
+  assert.equal(commandAnswer("KeyScribe", true, true, true), "KeyScribe won’t report this reply.")
+  assert.equal(commandAnswer("KeyScribe", true, false, false), "KeyScribe won’t report this reply.")
+  assert.equal(commandAnswer("KeyScribe", false, false, true), "Reply updates are off. Turn on Reply updates in KeyScribe’s Agent settings.")
+  assert.equal(commandAnswer("KeyScribe", false, "quiet", true), "This conversation is disconnected from KeyScribe. Reconnect it in KeyScribe’s Agent settings.")
+  assert.equal(commandAnswer("KeyScribe", false, null, true), "KeyScribe didn’t confirm the request, so a reply update isn’t certain.")
+  assert.equal(commandAnswer("KeyScribe", true, null, true), "KeyScribe didn’t confirm the cancel.")
+})
+
+test("the command's answer names the app and says whether a turn was running when it was asked", async () => {
+  const h = await connected()
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  const asked = h.plugin.command("thr_a", true)
+  await h.settle()
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "done" })
+  h.open("notify")[0].answer(200, '{"ok":true,"spoken":true}')
+  assert.equal(await asked, "KeyScribe will report the result of this work.")
+  await h.settle()
+  await h.answerEvents()
+  assert.equal(h.sent("turnComplete").length, 1)
+  const next = h.plugin.command("thr_a", true)
+  await h.settle()
+  h.open("notify")[0].answer(200, '{"ok":true,"spoken":true}')
+  assert.equal(await next, "KeyScribe will report your next reply.")
+  assert.equal(await h.plugin.command("thr_c", true), "KeyScribe didn’t confirm the request, so a reply update isn’t certain.")
+})
+
+test("a message box shows only the answer to its latest request, whatever order the answers arrive in", () => {
+  const answers = new ComposerAnswers()
+  const read = answers.begin("c1")
+  const cancel = answers.begin("c1")
+  assert.equal(answers.settle("c1", cancel, "won’t report"), true)
+  assert.equal(answers.settle("c1", read, "will report"), false)
+  assert.equal(answers.answer("c1"), "won’t report")
+  const other = answers.begin("c2")
+  assert.equal(answers.settle("c2", other, "next reply"), true)
+  assert.equal(answers.answer("c1"), "won’t report")
+  assert.equal(answers.answer("c2"), "next reply")
+})
+
+test("a message box remembers answers for only a few message boxes", () => {
+  const answers = new ComposerAnswers(2)
+  for (const key of ["c1", "c2", "c3"]) answers.settle(key, answers.begin(key), key)
+  assert.equal(answers.answer("c1"), undefined)
+  assert.equal(answers.answer("c2"), "c2")
+  assert.equal(answers.answer("c3"), "c3")
+  const late = answers.begin("c2")
+  answers.settle("c4", answers.begin("c4"), "c4")
+  assert.equal(answers.answer("c3"), undefined)
+  assert.equal(answers.settle("c2", late, "again"), true)
 })
