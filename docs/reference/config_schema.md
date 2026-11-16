@@ -405,15 +405,22 @@ a hello on any other protocol is refused with `426` and is never registered or s
   had already collected stays uncertain.
 - **A submit is refused as `working`** when a turn is already running in that session; KeyScribe holds
   the take and sends it when the turn finishes. A connector whose hello lists `steer` takes it during the turn
-  instead, the way typing there would (Pi's sends it with `deliverAs: "steer"`, confirms it when Pi accepts it,
-  and reports the turn with `absorbed`), and refuses as `working` only while an earlier dictation still awaits its receipt.
+  instead, the way typing there would, and reports the turn with `absorbed`: Pi's sends it with `deliverAs: "steer"`
+  and confirms it when Pi accepts it, refusing as `working` only while an earlier dictation still awaits its
+  receipt; Claude Code's confirms it at once, adds it to the turn after the next tool call, reports `absorbed`
+  when the model's next step starts, and submits it as the next prompt if the turn ends first. A take it
+  confirmed but could not deliver after all gets a late `refused` for the same request (`draft`, `filled` when
+  left in the prompt box after the user's Esc, `added` when left there after text the user typed meanwhile,
+  `stopped`, or the agent's own reason), which KeyScribe reports as a late outcome of that take. A lost
+  connection does not cancel a confirmed take.
 - **A submit with `box: true` goes in the prompt box while a turn runs.** KeyScribe sets it only for the
   conversation in front, while its agent is working, and only for a connector whose hello lists `box`. The
   connector applies every other check, then adds the text to the empty prompt box and refuses the submit as
   `filled`, so the agent takes it as the user's own typed prompt once KeyScribe presses Return. It refuses as
-  `dialog` when the agent's dialog holds the keys, and as `working` when the box will not take the text or the
-  text starts with `/` or `!` (in the box, Return would run them as a command or in the shell; the box also drops
-  the invisible character that keeps a submitted slash from running). Text the user typed as it went in refuses
+  `dialog` when the agent's dialog holds the keys. When the box will not take the text, or the text starts with
+  `/` or `!` (in the box, Return would run them as a command or in the shell; the box also drops the invisible
+  character that keeps a submitted slash from running), a connector that lists `steer` takes it as a steer
+  instead, and any other refuses as `working`. Text the user typed as it went in refuses
   it as `added`, with both left in the box. A fill that fails sends no answer, on purpose: the connector cannot
   tell whether the text reached the box, and a refusal would let KeyScribe send it again and enter it twice, so
   the take stays handed and reads as uncertain once its receipt wait ends. With no turn running, it is an

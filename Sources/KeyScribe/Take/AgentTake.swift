@@ -598,7 +598,8 @@ final class AgentTake {
         var (request, receipt) = await output.deliver(text, to: id, via: agents, images: images, inFront: inFront)
         if case .kept(let handle, .inPromptBox(let cause)) = receipt, cause != .besideText,
            let sent = await sendFromPromptBox(
-               id, handle: handle, steering: cause == .awaitingReturn ? text : nil, through: agents, lease: lease, request: request) {
+               id, handle: handle, steering: cause == .awaitingReturn ? text : nil, through: agents, keepActing: { lease.keepActing() },
+               request: request) {
             receipt = sent
         }
         finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id, clipboard: clipboard),
@@ -612,13 +613,13 @@ final class AgentTake {
     // the message in the empty box. Return goes only to that conversation, only when it is the one in front, and,
     // where the connector can say, only while the box holds just the message and no approval is open.
     private func sendFromPromptBox(
-        _ id: String, handle: String, steering: String?, through agents: AgentHub, lease: TakeLease, request: String
+        _ id: String, handle: String, steering: String?, through agents: AgentHub, keepActing: () -> Bool, request: String
     ) async -> AgentReceipt? {
-        guard lease.keepActing(), let shown = await agents.sessionInFrontWithoutAsking(), shown.id == id, lease.keepActing()
+        guard keepActing(), let shown = await agents.sessionInFrontWithoutAsking(), shown.id == id, keepActing()
         else { return nil }
         if agents.checksPromptBox(id) {
-            guard await agents.promptBoxReady(request, in: id), lease.keepActing(),
-                  let still = await agents.sessionInFrontWithoutAsking(), still.id == id, still.app == shown.app, lease.keepActing(),
+            guard await agents.promptBoxReady(request, in: id), keepActing(),
+                  let still = await agents.sessionInFrontWithoutAsking(), still.id == id, still.app == shown.app, keepActing(),
                   let focused = frontApp(), focused.pid == shown.app.pid, shown.app.window == nil || focused.window == shown.app.window
             else { return nil }
         }
@@ -635,6 +636,13 @@ final class AgentTake {
         }
         if let steering { agents.followSteer(of: id, for: request, text: steering) }
         return .sent(handle)
+    }
+
+    func sendLeftInPromptBox(_ request: String, in id: String, handle: String) async {
+        guard let host, let agents = host.agents else { return }
+        let idle = { [weak host] in host?.isBusy == false }
+        let sent = idle() ? await sendFromPromptBox(id, handle: handle, steering: nil, through: agents, keepActing: idle, request: request) : nil
+        agents.settleLeftInPromptBox(request, in: id, as: sent == .sent(handle) ? nil : sent ?? .kept(handle, reason: .inPromptBox(.afterStop)))
     }
 
     private func reachable(_ snapshot: AgentSnapshot, _ agents: AgentHub, for retry: AgentOutput.Retry) -> [String: String] {
@@ -683,7 +691,11 @@ final class AgentTake {
                 output?.noteRecorded(entry, request: awaited.request)
             } })
         else { return }
-        if let awaited { output.replayEarlyReceipts(request: awaited.request, receipt: awaited.receipt) }
+        if let awaited {
+            output.replayEarlyReceipts(
+                request: awaited.request, receipt: awaited.receipt,
+                mayStillChange: host.agents?.awaitsLateOutcome(awaited.request) == true)
+        }
     }
 
     func speakRefusal(_ receipt: AgentReceipt, conversation: String) {

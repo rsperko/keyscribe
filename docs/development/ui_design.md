@@ -827,8 +827,20 @@ checks that the same window still has focus; only then is Return pressed, and th
 message is in its prompt box. Review it there and press Return to send it”). Text the user types while the message
 goes in stays in the box with it, and Return is never pressed (“Not sent to docs: the message was added to its
 prompt box after text already there. Review it there and press Return to send it”). A take for a conversation that
-is not in front, that waits on the user, that has an earlier message still on its way or waiting, or that carries
-an attached image waits for the turn as above, and so does one the box will not take; one turned away because an
+is not in front, one that carries an attached image, and one the box will not take go to the agent as a steer when
+its connector steers: the receipt is “Sent to docs”, the message shows above the agent's prompt as typed queued
+messages do until the agent takes it in, and then as the user's prompt in the conversation. If the conversation
+cannot take it after all, the take gets a late outcome, shown, recorded and spoken like any refusal that comes
+after the user has moved on: the user started typing there (“Not sent to docs: its prompt box already has text.
+Send or clear that text there, then say this again”), pressed Esc before it went in and the conversation is not
+the one in front, or a check before Return failed (“Not sent to docs: its last turn was interrupted, so the
+message is waiting in its prompt box. Press Return there to send it”; when it is in front, the app presses
+Return for the user as for any message left in the prompt box, and the take stays “Sent”), or, after
+text the user typed meanwhile, the message added after it), or the agent turned it away (“Not sent to docs”, with
+the reason). A lost connection to the agent does not take back a message it already took. A message that went
+in but was not read before the turn ended stays in the conversation for the next turn and has no spoken reply of
+its own. A take that waits on the user, that has an earlier message still on its way or waiting, or whose
+connector does not steer waits for the turn as above; one turned away because an
 approval just opened waits on it, named by the prompt's kind when the connector reported it (“Waiting for
 approval…”) and otherwise “Dialog open…”. An approval or question the agent decides on in the moment
 before Return lands is held back until it has, so Return never answers it. The take's spoken reply is the reply of

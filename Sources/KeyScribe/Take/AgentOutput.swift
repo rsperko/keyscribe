@@ -94,13 +94,13 @@ final class AgentOutput {
         reporter.update(id: entry.id, near: entry.at, { AgentHistoryFacts.replacing(fact, in: $0) }, then: { _ in })
     }
 
-    func replayEarlyReceipts(request: String, receipt: AgentReceipt) {
+    func replayEarlyReceipts(request: String, receipt: AgentReceipt, mayStillChange: Bool = false) {
         if let fact = awaited[request]?.delivery, awaited[request]?.entry != nil {
             awaited[request]?.delivery = nil
             recordDelivery(fact, request: request)
         }
         guard let tracked = awaited[request], tracked.entry != nil,
-              !tracked.early.isEmpty || Self.mayStillSettle(receipt) else { return stopAwaiting(request) }
+              !tracked.early.isEmpty || mayStillChange || Self.mayStillSettle(receipt) else { return stopAwaiting(request) }
         awaited[request]?.early = []
         for receipt in tracked.early { recordLateReceipt(receipt, request: request) }
     }

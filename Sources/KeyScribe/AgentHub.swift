@@ -61,6 +61,7 @@ final class AgentHub {
 
     var onNotice: ((AgentReceipt, _ request: String, _ conversation: String) -> Void)?
     var onForget: ((_ request: String) -> Void)?
+    var onLeftInPromptBox: ((_ request: String, _ conversation: String, _ handle: String) -> Void)?
     var onChange: (() -> Void)?
     var onFirstConnection: (() -> Void)?
     var onResult: ((_ conversation: String, _ handle: String, _ answer: String, _ requested: Bool, _ origin: String?) -> Void)?
@@ -148,6 +149,15 @@ final class AgentHub {
     private var prompts: [String: Int] = [:]
     private var typedCounts: [String: Int] = [:]
     private var absorbed: [String: (turn: String, prompt: String)] = [:]
+    private struct Steered {
+        let wire: String
+        let request: String
+        let handle: String
+        let conversation: String
+    }
+
+    private var steered: [Steered] = []
+    private var leftInBox: [String: [Steered]] = [:]
     private var filledWires: [String: String] = [:] {
         didSet { if filledWires.count > Self.keptDeliveries { filledWires.remove(at: filledWires.startIndex) } }
     }
@@ -876,6 +886,8 @@ final class AgentHub {
         connectorNamesAt = connectorNamesAt.filter { kept($0.key) }
         labels = labels.filter { kept($0.key) }
         turns = turns.filter { kept($0.key) }
+        forgetSteered { !kept($0.conversation) }
+        leftInBox = leftInBox.filter { kept($0.key) }
     }
 
     var connectorStateSessions: Set<String> {
@@ -1127,6 +1139,7 @@ final class AgentHub {
                pending.prompt.map { $0 == prompt } ?? (now().timeIntervalSince(typedAt) <= typedTurnWindow) {
                 waitForReply(turn, of: session, requested: false)
                 awaitedRequests[session] = pending.request
+                forgetSteered { $0.request == pending.request }
             }
             if let pending = handingOff[session], requests[pending] != nil { requests[pending]?.turnDuringHandOff = .started(turn) }
             if let (request, _) = requests.first(where: { $0.value.message.conversation == session && $0.value.followsNextTurn }) {
@@ -1207,6 +1220,7 @@ final class AgentHub {
     }
 
     static let hostFollowLimit = 16
+    static let steeredLimit = 64
     static let hostTurnWait: TimeInterval = 300
 
     private struct HostFollow {
@@ -1499,8 +1513,10 @@ final class AgentHub {
             Log.agents.notice("delivery confirmed late: \(fact.value, privacy: .public)")
         }
         let conversation = requests[request]?.message.conversation
-        if let conversation, turn.isEmpty, features[conversation]?.contains("steer") == true, let text = requests[request]?.message.text {
-            followSteer(of: conversation, for: request, text: text)
+        if let conversation, turn.isEmpty, features[conversation]?.contains("steer") == true, let entry = requests[request] {
+            steered.append(Steered(wire: entry.wire, request: request, handle: entry.handle, conversation: conversation))
+            if steered.count > Self.steeredLimit, let oldest = steered.first { forgetSteered { $0.wire == oldest.wire } }
+            followSteer(of: conversation, for: request, text: entry.message.text)
         }
         if let conversation, !turn.isEmpty, awaitingResult[conversation] != turn {
             stopAwaiting(conversation)
@@ -1515,6 +1531,7 @@ final class AgentHub {
     }
 
     private func follow(_ turn: String, of conversation: String, for request: String) {
+        defer { forgetSteered { $0.request == request } }
         guard awaitingResult[conversation] == nil else { return }
         waitForReply(turn, of: conversation, requested: false)
         awaitedRequests[conversation] = request
@@ -1543,6 +1560,9 @@ final class AgentHub {
     }
 
     private func refuse(_ request: String, reason: String) {
+        if requests[request] == nil, let index = steered.firstIndex(where: { $0.wire == request }) {
+            return refuseSteered(steered.remove(at: index), reason: reason)
+        }
         clearHandOff(request)
         guard let entry = requests[request] else { return releaseHeld() }
         stopFollowing(request)
@@ -1574,6 +1594,44 @@ final class AgentHub {
         default: settle(request, .notSent(handle, reason: Self.notSent(reason)))
         }
         releaseHeld()
+    }
+
+    func settleLeftInPromptBox(_ request: String, in conversation: String, as receipt: AgentReceipt?) {
+        let left = leftInBox.removeValue(forKey: conversation)?.map(\.request) ?? [request]
+        for one in left {
+            filledWires[one] = nil
+            if let receipt { report(receipt, for: one, in: conversation) } else { onForget?(one) }
+        }
+    }
+
+    func awaitsLateOutcome(_ request: String) -> Bool {
+        steered.contains { $0.request == request }
+    }
+
+    private func forgetSteered(_ matches: (Steered) -> Bool) {
+        let forgotten = steered.filter(matches)
+        steered.removeAll(where: matches)
+        for late in forgotten { onForget?(late.request) }
+    }
+
+    private func refuseSteered(_ late: Steered, reason: String) {
+        if nextTyped[late.conversation]?.request == late.request { nextTyped[late.conversation] = nil }
+        if reason == "filled", let onLeftInPromptBox {
+            filledWires[late.request] = late.wire
+            guard leftInBox[late.conversation] == nil else {
+                leftInBox[late.conversation]?.append(late)
+                return
+            }
+            leftInBox[late.conversation] = [late]
+            return onLeftInPromptBox(late.request, late.conversation, late.handle)
+        }
+        let receipt: AgentReceipt = switch reason {
+        case "draft": .kept(late.handle, reason: .composing)
+        case "filled": .kept(late.handle, reason: .inPromptBox(.afterStop))
+        case "added": .kept(late.handle, reason: .inPromptBox(.besideText))
+        default: .notSent(late.handle, reason: Self.notSent(reason))
+        }
+        report(receipt, for: late.request, in: late.conversation)
     }
 
     func takesPromptBox(_ id: String, images: [String]) -> Bool {

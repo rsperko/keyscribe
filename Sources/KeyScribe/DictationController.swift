@@ -1782,6 +1782,10 @@ final class DictationController {
         agentOutput.recordDelivery(fact, request: request)
     }
 
+    func sendLeftInPromptBox(request: String, conversation: String, handle: String) {
+        Task { await agentTake.sendLeftInPromptBox(request, in: conversation, handle: handle) }
+    }
+
     func forgetAgentReceipt(request: String) {
         agentOutput.forgetReceipt(request: request)
     }

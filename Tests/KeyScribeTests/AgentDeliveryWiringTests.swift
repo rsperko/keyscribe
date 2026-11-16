@@ -308,6 +308,7 @@ struct AgentDeliveryWiringTests {
         inputs.onInput = { [weak controller] in controller?.noteUserInput(at: $0) }
         hub.onNotice = { [weak controller] in controller?.showAgentNotice($0, request: $1, conversation: $2) }
         hub.onForget = { [weak controller] in controller?.forgetAgentReceipt(request: $0) }
+        hub.onLeftInPromptBox = { [weak controller] in controller?.sendLeftInPromptBox(request: $0, conversation: $1, handle: $2) }
         hub.onDelivery = { [weak controller] in controller?.recordAgentDelivery($1, request: $0) }
         controller.agentNoticeDelayOverride = .milliseconds(10)
         return Rig(
@@ -2633,6 +2634,136 @@ struct AgentDeliveryWiringTests {
         rig.controller.waitForHistoryWrites()
         let entry = rig.history.entries().first
         #expect(entry?.summary == "May not have reached keyscribe: check its terminal")
+        #expect(entry?.steps == nil)
+    }
+
+    private func steeredTake(
+        inFront: String? = "claude:s1", features: [String] = ["readiness", "steer"]
+    ) async -> (rig: Rig, request: String)? {
+        let said = inFront == "claude:s1" ? "Run the tests." : "Tell keyscribe, run the tests."
+        let rig = await rig(said, focused: "claude:s1", firstStatus: "busy", glance: Front(inFront))
+        rig.hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 10,
+                                    features: features, idle: false, gap: false)))
+        await take(rig)
+        let sent = await lastHistoryEntry(rig)
+        #expect(sent?.summary == "Sent to keyscribe")
+        guard case .submit(let request, _, _, _, _, _, _) = rig.sent.first?.0 else {
+            Issue.record("nothing handed off")
+            try? FileManager.default.removeItem(at: rig.supportDir)
+            return nil
+        }
+        return (rig, request)
+    }
+
+    @Test func aSteeredTakeTheConversationLaterTurnsAwayNoLongerReadsAsSentInHistory() async {
+        guard let (rig, request) = await steeredTake() else { return }
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        let kept = "Not sent to keyscribe: its prompt box already has text. Send or clear that text there, then say this again"
+
+        rig.hub.handle(.turnComplete(session: "claude:s1", reason: "aborted", answer: ""))
+        rig.hub.handle(.refused(request: request, reason: "draft"))
+        for _ in 0..<200 where rig.history.entries().first?.summary == "Sent to keyscribe" {
+            try? await Task.sleep(for: .milliseconds(5))
+            rig.controller.waitForHistoryWrites()
+        }
+        let entry = rig.history.entries().first
+        #expect(entry?.summary == kept)
+        #expect(entry?.steps?.map(\.text) == ["Sent to keyscribe", kept])
+    }
+
+    private func leftInBoxAfterEsc(inFront: String?) async -> Rig? {
+        guard let (rig, request) = await steeredTake(inFront: inFront, features: ["readiness", "steer", "fill"]) else { return nil }
+        rig.returns.typedBy = "claude:s1"
+        rig.controller.promptBoxConfirmation = .milliseconds(200)
+        rig.hub.handle(.turnComplete(session: "claude:s1", reason: "aborted", answer: ""))
+        rig.hub.handle(.refused(request: request, reason: "filled"))
+        return rig
+    }
+
+    private func settled(_ rig: Rig, until done: (HistoryEntry?) -> Bool) async -> HistoryEntry? {
+        for _ in 0..<200 where !done(rig.history.entries().first) {
+            try? await Task.sleep(for: .milliseconds(5))
+            rig.controller.waitForHistoryWrites()
+        }
+        return rig.history.entries().first
+    }
+
+    @Test func aSteeredTakeLeftInThePromptBoxAfterEscIsSentWithReturnWhenItsConversationIsInFront() async {
+        guard let rig = await leftInBoxAfterEsc(inFront: "claude:s1") else { return }
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        for _ in 0..<200 where rig.returns.pressed.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        try? await Task.sleep(for: .milliseconds(50))
+        rig.controller.waitForHistoryWrites()
+        #expect(rig.returns.pressed == [.return])
+        #expect(rig.history.entries().first?.summary == "Sent to keyscribe")
+        #expect(rig.history.entries().first?.steps == nil)
+    }
+
+    @Test func twoSteeredTakesLeftInOnePromptBoxAfterEscAreSentWithOneReturnAndBothStaySent() async {
+        guard let (rig, first) = await steeredTake(features: ["readiness", "steer", "fill"]) else { return }
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        guard case .submit(let second, _, _, _, _, _, _) = rig.sent.last?.0, second != first else {
+            Issue.record("the second take was not handed off")
+            return
+        }
+        rig.returns.typedBy = "claude:s1"
+        rig.controller.promptBoxConfirmation = .milliseconds(200)
+        rig.hub.handle(.turnComplete(session: "claude:s1", reason: "aborted", answer: ""))
+        rig.hub.handle(.refused(request: first, reason: "filled"))
+        rig.hub.handle(.refused(request: second, reason: "filled"))
+        for _ in 0..<200 where rig.returns.pressed.isEmpty { try? await Task.sleep(for: .milliseconds(5)) }
+        try? await Task.sleep(for: .milliseconds(100))
+        rig.controller.waitForHistoryWrites()
+        #expect(rig.returns.pressed == [.return])
+        #expect(rig.history.entries().prefix(2).map(\.summary) == ["Sent to keyscribe", "Sent to keyscribe"])
+    }
+
+    @Test func aSteeredTakeLeftInThePromptBoxAfterEscWaitsThereWhenItsConversationIsNotInFront() async {
+        guard let rig = await leftInBoxAfterEsc(inFront: "claude:s2") else { return }
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        let entry = await settled(rig) { $0?.summary != "Sent to keyscribe" }
+        #expect(rig.returns.pressed.isEmpty)
+        #expect(entry?.summary?.contains("Press Return there to send it") == true)
+    }
+
+    @Test func aSteeredTakeLeftInThePromptBoxAfterEscIsNeverSentWithReturnWhileARecordingIsOpen() async {
+        guard let (rig, request) = await steeredTake(features: ["readiness", "steer", "fill"]) else { return }
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.returns.typedBy = "claude:s1"
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        rig.hub.handle(.turnComplete(session: "claude:s1", reason: "aborted", answer: ""))
+        rig.hub.handle(.refused(request: request, reason: "filled"))
+        let entry = await settled(rig) { $0?.summary != "Sent to keyscribe" }
+        rig.controller.cancel()
+        #expect(rig.returns.pressed.isEmpty)
+        #expect(entry?.summary?.contains("Press Return there to send it") == true)
+    }
+
+    @Test func aSteeredTakeWhoseReplyIsFollowedAfterItsEntryWasWrittenSaysSoInHistory() async {
+        guard let (rig, _) = await steeredTake() else { return }
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+
+        rig.hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("Run the tests.")))
+        for _ in 0..<200 where fact(rig.history.entries().first, "Delivery")?.contains("its reply is followed") != true {
+            try? await Task.sleep(for: .milliseconds(5))
+            rig.controller.waitForHistoryWrites()
+        }
+        #expect(fact(rig.history.entries().first, "Delivery")?.contains("its reply is followed") == true)
+    }
+
+    @Test func aSteeredTakeTheTurnReadIsNoLongerTrackedForALateOutcome() async {
+        guard let (rig, request) = await steeredTake() else { return }
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+
+        rig.hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("Run the tests.")))
+        rig.hub.handle(.refused(request: request, reason: "draft"))
+        rig.controller.showAgentNotice(.kept("keyscribe", reason: .composing), request: request)
+        try? await Task.sleep(for: .milliseconds(50))
+        rig.controller.waitForHistoryWrites()
+        let entry = rig.history.entries().first
+        #expect(entry?.summary == "Sent to keyscribe")
         #expect(entry?.steps == nil)
     }
 

@@ -47,7 +47,7 @@ public enum AgentDeliveryPolicy {
         case .waitingApproval: return .queue(.approval)
         case .waitingQuestion: return .queue(.question)
         case .userDialog: return .queue(.userDialog)
-        case .working: return c.canSteer ? .handOff : c.canEnterPromptBox ? .enterPromptBox : .queue(.working)
+        case .working: return c.canEnterPromptBox ? .enterPromptBox : c.canSteer ? .handOff : .queue(.working)
         case .idle, .disconnected: return .handOff
         }
     }

@@ -16,7 +16,7 @@ const stallRetries = 3
 const late = { late: true }
 const unreachable = { unreachable: true }
 const freshSources = ['startup', 'clear', 'fork']
-const features = ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest', 'box']
+const features = ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest', 'box', 'steer']
 const readAloudTool = 'tell_me_when_done'
 
 let config = null
@@ -31,6 +31,8 @@ let ownSubmit = null
 let turnKnown = false
 let prompts = 0
 let looping = false
+const laterWork = []
+let wakeLater = null
 let titleSession = null
 let lastTitle = null
 let ownedStatus = false
@@ -49,8 +51,14 @@ const drawGrace = 500
 const personTools = new Set(['AskUserQuestion', 'ExitPlanMode'])
 let guard = null
 let lastAskAt = -Infinity
-let steer = null
+let filledText = null
 const receipts = []
+const steerLimit = 16
+const shownLimit = 64
+let steers = []
+let joined = []
+let batch = null
+const shown = new Map()
 let loadedFrom = null
 const appLabel = null
 let retired = false
@@ -372,6 +380,7 @@ function goQuiet($, on) {
   quiet = on
   if (!on) return
   drain((item) => item.kind !== 'observe')
+  dropSteers($)
   clearOwnedUI($)
 }
 
@@ -420,13 +429,19 @@ async function sendReceipts($) {
     if (now - receipts[i].at > receiptKeep) receipts.splice(i, 1)
   }
   if (!connection) return
+  for (let i = receipts.length - 1; i >= 0; i--) {
+    const outdated = receipts[i].reason === 'filled' && (submissions.get(receipts[i].id) || {}).boxSent
+    if (outdated && !receipts[i].sending) receipts.splice(i, 1)
+  }
   for (const receipt of receipts) {
     if (receipt.sending) continue
     const sub = submissions.get(receipt.id) || {}
     receipt.sending = true
     enqueue($, {
       kind: 'reply', generation, connection,
-      body: bound({ op: 'submitted', request: receipt.id, turn: sub.turn || '', handedAt: sub.handedAt, seenAt: sub.seenAt }),
+      body: bound(receipt.reason
+        ? { op: 'refused', request: receipt.id, reason: receipt.reason }
+        : { op: 'submitted', request: receipt.id, turn: sub.turn || '', handedAt: sub.handedAt, seenAt: sub.seenAt }),
       done: (outcome) => {
         receipt.sending = false
         if (outcome !== 'ok') return
@@ -455,6 +470,7 @@ function retire($) {
   helloSession = null
   forget()
   dropSubmissions()
+  dropSteers($)
   drain(() => false)
   clearOwnedUI($)
 }
@@ -467,6 +483,7 @@ function leave($, ended) {
   helloSession = null
   forget()
   dropSubmissions()
+  dropSteers($)
   currentTurn = null
   drain(() => false)
   clearOwnedUI($)
@@ -563,8 +580,195 @@ async function submit($, id, text, expiresAt, gen, expected) {
   return confirm($, id, seenAt)
 }
 
+function steerFrame(text) {
+  return 'The user sent a new message while you were working:\n' + text + '\n\nThis is how Claude Code surfaces messages the user sends mid-turn — within the running turn, often alongside the next tool result, rather than as a separate conversation turn. Address the message above as you continue this turn.'
+}
+
+function dropSteers($) {
+  if (!steers.length && !joined.length) return
+  steers = []
+  joined = []
+  quietly($.ui.invalidate('ui.render'))
+}
+
+async function holdSteer($, id, text, expiresAt, gen, expected) {
+  const now = await $.clock.now()
+  if (!current(expected, gen)) return refuse($, gen, id, 'sessionChanged')
+  if (!(now < expiresAt)) return refuse($, gen, id, 'expired')
+  if (quiet) return refuse($, gen, id, 'disconnected')
+  if (!currentTurn) return submit($, id, text, expiresAt, gen, expected)
+  if (steers.length >= steerLimit) return refuse($, gen, id, 'working')
+  steers.push({ id, text })
+  quietly($.ui.invalidate('ui.render'))
+  track(id, { state: 'seen', turn: '', handedAt: now, seenAt: now })
+  return confirm($, id, now)
+}
+
+async function steerIn($, toolUseId) {
+  const target = session
+  const turn = currentTurn
+  const taking = steers
+  steers = []
+  const mine = { after: [] }
+  batch = mine
+  try {
+    for (let i = 0; i < taking.length; i++) {
+      if (!stillFor(target)) return
+      if (currentTurn !== turn) return afterTurn([...taking.slice(i), ...mine.after.splice(0)], target)
+      let appended = null
+      try {
+        appended = await $.session.append({ message: { type: 'user', content: [{ type: 'text', text: steerFrame(taking[i].text) }] } })
+      } catch (err) {
+        appended = null
+      }
+      if (!stillFor(target)) return
+      if (!appended || appended.deny) {
+        if (currentTurn !== turn) return afterTurn([...taking.slice(i), ...mine.after.splice(0)], target)
+        steers = [...taking.slice(i), ...steers]
+        return
+      }
+      const one = { ...taking[i], toolUseId }
+      if (currentTurn === turn) joined.push(one)
+      else remember([one])
+    }
+    if (mine.after.length && stillFor(target)) afterTurn(mine.after.splice(0), target)
+  } finally {
+    if (batch === mine) batch = null
+  }
+}
+
+function afterTurn(held, target) {
+  laterWork.push({ held, target })
+  wake(wakeLater)
+  wakeLater = null
+}
+
+async function later($) {
+  for (;;) {
+    while (laterWork.length === 0) await new Promise((resolve) => { wakeLater = resolve })
+    const { held, target } = laterWork.shift()
+    quietly(submitSteers($, held, target))
+  }
+}
+
+function remember(read) {
+  for (const one of read) {
+    if (!one.toolUseId) continue
+    shown.set(one.toolUseId, [...(shown.get(one.toolUseId) || []), one.text])
+  }
+  for (const old of shown.keys()) {
+    if (shown.size <= shownLimit) break
+    shown.delete(old)
+  }
+}
+
+function confirmJoined($, turn) {
+  const read = joined
+  joined = []
+  for (const one of read) observe($, { op: 'absorbed', session, turn, prompt: promptDigest(one.text) })
+  remember(read)
+  quietly($.ui.invalidate('ui.render'))
+}
+
+function endTurnSteers($) {
+  remember(joined)
+  joined = []
+  const held = steers
+  steers = []
+  quietly($.ui.invalidate('ui.render'))
+  if (batch) batch.after.push(...held)
+  else if (held.length) quietly(submitSteers($, held, session))
+}
+
+async function lateRefuse($, held, reason) {
+  const at = await $.clock.now()
+  for (const one of held) {
+    track(one.id, { state: 'refused', reason })
+    receipts.push({ id: one.id, at, sending: false, reason })
+  }
+  while (receipts.length > receiptLimit) receipts.shift()
+  return sendReceipts($)
+}
+
+function stillFor(target) {
+  return session === target && !quiet && !retired
+}
+
+async function emptyBox($) {
+  try {
+    return !(await $.prompt.read()).text.trim()
+  } catch (err) {
+    return null
+  }
+}
+
+async function submitSteers($, held, target) {
+  const empty = await emptyBox($)
+  if (!stillFor(target)) return
+  if (empty === null) return lateRefuse($, held, 'stopped')
+  if (!empty) return lateRefuse($, held, 'draft')
+  for (let i = 0; i < held.length; i++) {
+    if (!stillFor(target)) return
+    let result = null
+    try {
+      result = await $.prompt.submit({ text: asText(held[i].text), asUser: true })
+    } catch (err) {
+      result = { drop: String(err && err.message || err) }
+    }
+    if (!result || !result.drop) continue
+    if (refusal(result.drop) === 'stopped') return leaveInBox($, held.slice(i), target)
+    await lateRefuse($, [held[i]], refusal(result.drop))
+  }
+}
+
+async function leaveInBox($, held, target) {
+  if (!stillFor(target)) return
+  const runs = (one) => /^[/!]/.test(one.text)
+  const commands = held.filter(runs)
+  if (commands.length) await lateRefuse($, commands, 'stopped')
+  const fillable = held.filter((one) => !runs(one))
+  if (!fillable.length) return
+  const empty = await emptyBox($)
+  if (!stillFor(target)) return
+  if (empty === null) return lateRefuse($, fillable, 'stopped')
+  if (!empty) return lateRefuse($, fillable, 'draft')
+  const text = fillable.map((one) => one.text).join('\n')
+  let filled = null
+  try {
+    filled = await $.prompt.fill({ text, mode: 'append' })
+  } catch (err) {
+    filled = null
+  }
+  const reason = !filled || !filled.isFilled ? 'stopped' : filled.text === text ? 'filled' : 'added'
+  if (reason === 'filled') for (const one of fillable) track(one.id, { box: text })
+  return lateRefuse($, fillable, reason)
+}
+
+function noteBoxSent(text) {
+  if (typeof text !== 'string') return
+  const sent = [...submissions].filter(([, sub]) => sub.box !== undefined && plainPrompt(sub.box) === plainPrompt(text))
+  for (const [id] of sent) track(id, { boxSent: true })
+}
+
+function shownUnder(ids) {
+  if (!shown.size) return []
+  return ids.flatMap((id) => (id && shown.get(id)) || [])
+}
+
+async function withShownRows($, e, next, ids) {
+  const texts = shownUnder(ids)
+  if (!texts.length) return next(e)
+  const { Box } = $.ui.resolve(e)
+  return h(Box, { flexDirection: 'column' }, await next(e), ...texts.map((text) => promptRow($, e, text)))
+}
+
+function promptRow($, e, text) {
+  const { Box, Text } = $.ui.resolve(e)
+  return h(Box, { backgroundColor: 'userMessageBackground' }, h(Text, { color: 'inactive' }, '❯ '), h(Text, { color: 'text' }, text))
+}
+
 async function fillBox($, id, text, expiresAt, gen, expected) {
-  if (/^[/!]/.test(text)) return refuse($, gen, id, 'working')
+  if (/^[/!]/.test(text)) return holdSteer($, id, text, expiresAt, gen, expected)
   const now = await $.clock.now()
   if (!(now < expiresAt)) return refuse($, gen, id, 'expired')
   if (!current(expected, gen)) return refuse($, gen, id, 'sessionChanged')
@@ -576,10 +780,13 @@ async function fillBox($, id, text, expiresAt, gen, expected) {
   } catch (err) {
     return
   }
-  if (!filled || !filled.isFilled) return refuse($, gen, id, filled && filled.refusal === 'dialog' ? 'dialog' : 'working')
+  if (!filled || !filled.isFilled) {
+    if (filled && filled.refusal === 'dialog') return refuse($, gen, id, 'dialog')
+    return holdSteer($, id, text, expiresAt, gen, expected)
+  }
   if (filled.text !== text) return refuse($, gen, id, 'added')
   track(id, { box: text })
-  steer = { text }
+  filledText = text
   return refuse($, gen, id, 'filled')
 }
 
@@ -691,13 +898,13 @@ async function handle($, cmd, gen) {
     const hold = () => {
       if (quiet) return 'disconnected'
       if (typeof cmd.expectedPrompts === 'number' && cmd.expectedPrompts !== prompts) return 'typedSince'
-      if (currentTurn && !cmd.box) return 'working'
       return null
     }
     if (hold()) return refuse($, gen, cmd.id, hold())
     const box = await $.prompt.read()
     if (hold()) return refuse($, gen, cmd.id, hold())
     if (box.text.trim()) return refuse($, gen, cmd.id, 'draft')
+    if (currentTurn && !cmd.box) return holdSteer($, cmd.id, cmd.text, cmd.expiresAt, gen, cmd.expectedSession)
     if (cmd.box && currentTurn) return fillBox($, cmd.id, cmd.text, cmd.expiresAt, gen, cmd.expectedSession)
     return submit($, cmd.id, cmd.text, cmd.expiresAt, gen, cmd.expectedSession)
   }
@@ -892,12 +1099,39 @@ function typedByUser(e) {
 }
 
 export function register(on) {
+  on('tool.call', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId !== undefined || !steers.length || (next.signal && next.signal.aborted)) return result
+    try {
+      await steerIn($, e.tool_use_id)
+    } catch (err) {}
+    return result
+  })
+
+  on('turn.step', async function* ($, e, next) {
+    if (e.agentId === undefined && joined.length) confirmJoined($, e.turnId)
+    return yield* next(e)
+  })
+
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const waiting = [...joined, ...steers]
+    if (!waiting.length || e.props.hasSurvey || (e.plugin && e.plugin !== $.plugin.name)) return next(e)
+    const { Box } = $.ui.resolve(e)
+    return h(Box, { flexDirection: 'column' }, ...waiting.map((s) => promptRow($, e, s.text)))
+  })
+
+  on('ui.render', { component: 'ToolGroup' }, ($, e, next) =>
+    e.props.isExpanded ? next(e) : withShownRows($, e, next, e.props.calls.map((c) => c.tool_use_id)))
+
+  on('ui.render', { component: 'ToolResult' }, ($, e, next) => withShownRows($, e, next, [e.props.tool_use_id]))
+
   on('session.start', async ($, e, next) => {
     await offerReadAloud($)
     const started = await next(e)
     if (!looping) {
       looping = true
       quietly(sender($))
+      quietly(later($))
       quietly(pollLoop($))
     }
     return started
@@ -954,9 +1188,9 @@ export function register(on) {
 
   on('prompt.attachment', { type: 'queued_command' }, async ($, e, next) => {
     const result = await next(e)
-    if (steer && typeof e.text === 'string' && e.text.includes(steer.text)) {
-      const text = steer.text
-      steer = null
+    if (filledText && typeof e.text === 'string' && e.text.includes(filledText)) {
+      const text = filledText
+      filledText = null
       observe($, { op: 'absorbed', session, turn: currentTurn || '', prompt: promptDigest(text) })
     }
     return result
@@ -964,6 +1198,7 @@ export function register(on) {
 
   on('prompt.submit', ($, e, next) => {
     if (typedByUser(e)) {
+      noteBoxSent(e.text)
       dropGuard()
       prompts += 1
       observe($, { op: 'typed', session, prompts })
@@ -984,10 +1219,11 @@ export function register(on) {
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     if (e.agentId === undefined && (currentTurn === null || currentTurn === e.turnId)) {
-      steer = null
+      filledText = null
       currentTurn = null
       turnKnown = true
       observe($, { op: 'turnComplete', session, reason: e.reason, answer: boundedAnswer(e.answer) })
+      endTurnSteers($)
     }
     return result
   })

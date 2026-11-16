@@ -847,6 +847,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 setups.onChange = { [weak hub = runtime.hub] in Task { @MainActor in await hub?.rescan(wantingHosts: true) } }
                 runtime.hub.onNotice = { [weak self] in self?.controller.showAgentNotice($0, request: $1, conversation: $2) }
                 runtime.hub.onForget = { [weak self] in self?.controller.forgetAgentReceipt(request: $0) }
+                runtime.hub.onLeftInPromptBox = { [weak self] in self?.controller.sendLeftInPromptBox(request: $0, conversation: $1, handle: $2) }
                 runtime.hub.onDelivery = { [weak self] in self?.controller.recordAgentDelivery($1, request: $0) }
                 runtime.hub.onChange = { [weak self, weak hub = runtime.hub] in
                     guard let hub else { return }

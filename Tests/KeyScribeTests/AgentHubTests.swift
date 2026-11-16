@@ -220,6 +220,112 @@ struct AgentHubTests {
         #expect(await receipt == .sent("keyscribe"))
     }
 
+    @Test func aConversationThatBothSteersAndTakesThePromptBoxIsTypedIntoInFrontAndSteeredElsewhere() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, working(["readiness", "fill", "box", "steer"]))
+        var sentBefore = transport.sent.count
+        async let inFront = hub.deliver("use the other file", to: "claude:s1", inFront: true)
+        await untilSent(transport, sentBefore + 1)
+        #expect(transport.sent.last.map(\.0)
+            == .submit(id: "r1", expectedSession: "claude:s1", text: "use the other file", expiresAt: Self.deadline, box: true))
+        hub.handle(.refused(request: "r1", reason: "filled"))
+        #expect(await inFront == .kept("keyscribe", reason: .inPromptBox(.awaitingReturn)))
+
+        sentBefore = transport.sent.count
+        async let behind = hub.deliver("and the next one", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        #expect(transport.sent.last.map(\.0) == .submit(id: "r2", expectedSession: "claude:s1", text: "and the next one", expiresAt: Self.deadline))
+        hub.handle(.submitted(request: "r2", turn: ""))
+        #expect(await behind == .sent("keyscribe"))
+    }
+
+    @Test(arguments: [
+        ("draft", AgentReceipt.kept("keyscribe", reason: .composing)),
+        ("filled", AgentReceipt.kept("keyscribe", reason: .inPromptBox(.afterStop))),
+        ("added", AgentReceipt.kept("keyscribe", reason: .inPromptBox(.besideText))),
+        ("stopped", AgentReceipt.notSent("keyscribe", reason: .stopped)),
+        ("another plugin dropped it", AgentReceipt.notSent("keyscribe", reason: .refused("another plugin dropped it"))),
+    ])
+    func aSteerTheConnectorLaterCannotDeliverIsReportedLateAgainstItsTake(reason: String, expected: AgentReceipt) async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, steering())
+        var notices: [(AgentReceipt, String)] = []
+        hub.onNotice = { receipt, request, _ in notices.append((receipt, request)) }
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("use the other file", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.submitted(request: "r1", turn: ""))
+        #expect(await receipt == .sent("keyscribe"))
+
+        hub.handle(.turnComplete(session: "claude:s1", reason: "aborted", answer: ""))
+        hub.handle(.refused(request: "r1", reason: reason))
+        #expect(notices.map(\.0) == [expected])
+        #expect(notices.map(\.1) == ["r1"])
+
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t2", prompt: AgentPromptDigest.of("use the other file")))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Typed by hand."))
+        #expect(origins.isEmpty)
+    }
+
+    @Test func takesLeftInOnePromptBoxAreSentWithOneReturnAndShareItsOutcome() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, steering())
+        var presses: [String] = []
+        hub.onLeftInPromptBox = { request, _, _ in presses.append(request) }
+        var notices: [(AgentReceipt, String)] = []
+        hub.onNotice = { receipt, request, _ in notices.append((receipt, request)) }
+        var forgotten: [String] = []
+        hub.onForget = { forgotten.append($0) }
+        for (index, text) in ["first", "second"].enumerated() {
+            let sentBefore = transport.sent.count
+            async let receipt = hub.deliver(text, to: "claude:s1")
+            await untilSent(transport, sentBefore + 1)
+            hub.handle(.submitted(request: "r\(index + 1)", turn: ""))
+            #expect(await receipt == .sent("keyscribe"))
+        }
+        hub.handle(.refused(request: "r1", reason: "filled"))
+        hub.handle(.refused(request: "r2", reason: "filled"))
+        #expect(presses == ["r1"])
+
+        hub.settleLeftInPromptBox("r1", in: "claude:s1", as: .kept("keyscribe", reason: .inPromptBox(.afterStop)))
+        #expect(notices.map(\.1) == ["r1", "r2"])
+    }
+
+    @Test func takesLeftInOnePromptBoxThatReturnSentAreAllForgotten() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, steering())
+        hub.onLeftInPromptBox = { _, _, _ in }
+        var forgotten: [String] = []
+        hub.onForget = { forgotten.append($0) }
+        for (index, text) in ["first", "second"].enumerated() {
+            let sentBefore = transport.sent.count
+            async let receipt = hub.deliver(text, to: "claude:s1")
+            await untilSent(transport, sentBefore + 1)
+            hub.handle(.submitted(request: "r\(index + 1)", turn: ""))
+            _ = await receipt
+        }
+        hub.handle(.refused(request: "r1", reason: "filled"))
+        hub.handle(.refused(request: "r2", reason: "filled"))
+        hub.settleLeftInPromptBox("r1", in: "claude:s1", as: nil)
+        #expect(Set(forgotten).isSuperset(of: ["r1", "r2"]))
+    }
+
+    @Test func aRefusalForATakeNeverSteeredIsIgnored() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry, status: "busy")
+        greet(hub, steering())
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        hub.handle(.refused(request: "r9", reason: "draft"))
+        #expect(notices.isEmpty)
+    }
+
     @Test func aSteerAcceptedBeforeItsTurnIsKnownIsSentAndHasTheReplyOfTheTurnThatTakesItIn() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry, status: "busy")

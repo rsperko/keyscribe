@@ -559,12 +559,14 @@ agent, for example to answer its prompt, say “tell docs cancel”.
 
 ### What happens if I talk to an agent while it's working?
 
-The agent reads it while it works, the same as anything you type there. Pi and bb take it wherever the
-conversation is. Claude Code takes it only when the conversation is in front of you: KeyScribe puts it in the
-prompt box and presses Return for you, and only while the box holds just your message and no dialog of the
-agent's is open. A Claude Code conversation that is not in front gets the message when it finishes, and so does an
-agent whose connector is out of date. A conversation waiting on you, for an approval or an answer, holds the
-message until you respond.
+The agent reads it while it works, the same as anything you type there, wherever the conversation is. When a
+Claude Code conversation is in front of you, KeyScribe puts your message in its prompt box and presses Return for
+you, only while the box holds just your message and no dialog of the agent's is open. Anywhere else, your message
+waits above Claude Code's prompt, as a message you type while it works does, and joins the work when the step it
+is on finishes; if the work ends first, it is sent as your next message. If you press Esc first, KeyScribe puts
+it in the prompt box and presses Return for you while that conversation is in front of you; otherwise it waits
+in the prompt box. An agent whose connector is out of date gets the message when it finishes.
+A conversation waiting on you, for an approval or an answer, holds the message until you respond.
 
 ### Can “open” select a conversation in kitty or WezTerm?
 

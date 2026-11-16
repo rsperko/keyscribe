@@ -34,7 +34,10 @@ struct AgentDeliveryPolicyTests {
 
     @Test func aWorkingConversationWhoseAgentSteersGetsItRightAway() {
         #expect(decide { $0.state = .working; $0.canSteer = true } == .handOff)
-        #expect(decide { $0.state = .working; $0.canSteer = true; $0.canEnterPromptBox = true } == .handOff)
+    }
+
+    @Test func aWorkingConversationInFrontIsTypedIntoRatherThanSteered() {
+        #expect(decide { $0.state = .working; $0.canSteer = true; $0.canEnterPromptBox = true } == .enterPromptBox)
     }
 
     @Test(arguments: [AgentLiveState.waitingApproval, .waitingQuestion, .userDialog, .disconnected])
