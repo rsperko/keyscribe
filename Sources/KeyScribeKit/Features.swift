@@ -5,8 +5,9 @@ import Foundation
 //
 // Add:      a `static let` with a unique snake_case id, listed in `allCases`; gate on isEnabled. The toggle
 //           renders automatically.
-// Roll out: delete the `static let` + its `allCases` entry and make the gate unconditional. A stale id in a
-//           user's settings.toml is ignored and dropped on next write.
+// Roll out: delete the `static let` + its `allCases` entry, add its id to `retiredIds`, and make the gate
+//           unconditional. A retired id in a user's settings.toml is dropped on next write; any other id this
+//           build does not know is kept, since a newer version may own it.
 //
 // Strictly opt-in (unset = off, no per-flag default-on), so a half-built feature can never silently ship
 // enabled. A struct with an empty catalog rather than an empty enum, so empty state doesn't read as
@@ -64,6 +65,8 @@ public struct Feature: CaseIterable, Hashable, Sendable {
         summary: "Say \u{201C}open\u{201D}, then the app and what you want to find, such as \u{201C}open Slack general\u{201D} or \u{201C}open Chrome weather\u{201D}. A browser is searched by its open tabs; another app by the items shown in its sidebar, read only when you ask. Some apps, such as Slack, turn on their accessibility support to be read, which stays on until the app quits and can make it use more memory.",
         requires: voiceCommands
     )
+
+    public static let retiredIds: Set<String> = []
 
     public static let allCases: [Feature] = [streamingTranscription, consumptionDrivenRestore, voiceCommands, findInApps]
 }

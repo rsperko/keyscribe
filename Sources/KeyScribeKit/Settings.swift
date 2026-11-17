@@ -367,7 +367,8 @@ public struct Settings: Codable, Equatable, Sendable {
         }
     }
 
-    // Opt-in flags for in-development features. Stores only enabled ids; retired ids are pruned on decode.
+    // Opt-in flags for in-development features. Stores only enabled ids. An id this build does not know is kept,
+    // so a flag a newer version (a beta) turned on survives this version saving the file; retired ids are dropped.
     public struct Features: Codable, Equatable, Sendable {
         private var overrides: [String: Bool]
 
@@ -402,11 +403,8 @@ public struct Settings: Codable, Equatable, Sendable {
             overrides[feature.id] = enabled ? true : nil
         }
 
-        // Off deviations carry no information (absent already means off), so drop them and any unknown ids —
-        // keeps the table minimal and makes equality track observable state.
         private static func pruned(_ overrides: [String: Bool]) -> [String: Bool] {
-            let known = Set(Feature.allCases.map(\.id))
-            return overrides.filter { known.contains($0.key) && $0.value }
+            overrides.filter { $0.value && !Feature.retiredIds.contains($0.key) }
         }
     }
 
