@@ -593,14 +593,20 @@ final class AgentTake {
         hud.present(.transcribing(mode: mode.name, status: "Sending to \(agents.handle(of: id) ?? "it")"))
         let clipboard = agentClipboard.note(for: text, attached: agents.takesImages(id))
         let images = agentClipboard.images(in: text)
-        let inFront = agents.takesPromptBox(id, images: images) ? await agents.sessionInFrontWithoutAsking()?.id == id : false
+        let checksFront = agents.takesPromptBox(id, images: images) || agents.showsDraft(id)
+        let inFront = checksFront ? await agents.sessionInFrontWithoutAsking()?.id == id : false
         guard lease.keepActing() else { return }
         var (request, receipt) = await output.deliver(text, to: id, via: agents, images: images, inFront: inFront)
+        if !checksFront, case .kept(_, .composing) = receipt, agents.joinsDrafts(id), lease.keepActing(),
+           await agents.sessionInFrontWithoutAsking()?.id == id, lease.keepActing() {
+            output.forgetReceipt(request: request)
+            (request, receipt) = await output.deliver(text, to: id, via: agents, images: images, inFront: true)
+        }
         if case .kept(let handle, .inPromptBox(let cause)) = receipt, cause != .besideText,
            let sent = await sendFromPromptBox(
-               id, handle: handle, steering: cause == .awaitingReturn ? text : nil, through: agents, keepActing: { lease.keepActing() },
+               id, handle: handle, steering: cause == .awaitingReturn || cause == .joinedDraftMidTurn ? text : nil, through: agents, keepActing: { lease.keepActing() },
                request: request) {
-            receipt = sent
+            receipt = sent == .sent(handle) && (cause == .joinedDraft || cause == .joinedDraftMidTurn) ? .sentWithDraft(handle) : sent
         }
         finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id, clipboard: clipboard),
                     outcome: AgentOutput.dictationOutcome(receipt),

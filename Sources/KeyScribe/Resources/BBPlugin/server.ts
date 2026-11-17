@@ -5,12 +5,16 @@ import { readFile } from "node:fs/promises"
 import { request } from "node:http"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { appNameOf, keyscribe, readAloudReply, rpcContract, type Exchange, type Response, type WindowReport } from "./keyscribe.ts"
+import {
+  appNameOf, composeChannel, keyscribe, readAloudReply, rpcContract, type ComposeAnswer, type Composed, type Exchange, type Response, type WindowReport,
+} from "./keyscribe.ts"
 
 const pageSize = 200
 const pageLimit = 10
 const historyLimit = "8"
 const responseLimit = 512 * 1024
+const startDeadline = 1000
+const composeDeadline = 6000
 
 const readAloudTool = "tell_me_when_done"
 
@@ -29,6 +33,36 @@ export function configPaths(moduleURL: string): string[] {
 }
 
 export { rpcContract }
+
+export function composeRelay(publish: (channel: string, payload: unknown) => void, after: (ms: number, fn: () => void) => () => void) {
+  const pending = new Map<string, { started: boolean; stop: () => void; settle: (answer: Composed | null) => void }>()
+  return {
+    compose: (window: string, thread: string, text: string) => new Promise<Composed | null>((resolve) => {
+      const id = randomBytes(6).toString("hex")
+      const settle = (answer: Composed | null) => {
+        const join = pending.get(id)
+        if (!join) return
+        pending.delete(id)
+        join.stop()
+        resolve(answer)
+      }
+      pending.set(id, { started: false, stop: after(startDeadline, () => settle({ outcome: "empty" })), settle })
+      publish(composeChannel, { id, window, thread, text })
+    }),
+    starting: (id: string): boolean => {
+      const join = pending.get(id)
+      if (!join || join.started) return false
+      join.started = true
+      join.stop()
+      join.stop = after(composeDeadline, () => join.settle(null))
+      return true
+    },
+    answered: ({ id, ...answer }: ComposeAnswer) => {
+      const join = pending.get(id)
+      if (join?.started) join.settle(answer as Composed)
+    },
+  }
+}
 
 export function labelsChanged(bb: BbPluginApi) {
   ;(bb.rpc as { experimental_invalidateAll?: () => void }).experimental_invalidateAll?.()
@@ -67,6 +101,11 @@ function post(socketPath: string, path: string, body: string, token: string): Ex
 }
 
 export default async function plugin(bb: BbPluginApi) {
+  const relay = composeRelay((channel, payload) => bb.realtime.publish(channel, payload), (ms, fn) => {
+    const timer = setTimeout(fn, ms)
+    timer.unref?.()
+    return () => clearTimeout(timer)
+  })
   const plugin = keyscribe({
     listThreads: async () => {
       const found: { id: string; status: string }[] = []
@@ -80,6 +119,7 @@ export default async function plugin(bb: BbPluginApi) {
     history: async (threadId) => (await bb.sdk.threads.promptHistory({ threadId, limit: historyLimit })).map((entry) => said(entry.input)),
     interaction: (threadId, interactionId) => interactionStatus(bb.sdk, threadId, interactionId),
     on: (event, handler) => bb.events.on(event as any, handler as any),
+    compose: relay.compose,
   }, {
     now: () => Date.now(),
     read: (path) => readFile(path, "utf8"),
@@ -107,6 +147,8 @@ export default async function plugin(bb: BbPluginApi) {
     window: (report: WindowReport) => { plugin.window(report); return null },
     labels: ({ keys }: { keys: string[] }) => plugin.labels(keys),
     readAloud: async ({ thread, on }: { thread: string; on: boolean }) => ({ message: await plugin.command(thread, on) }),
+    composing: ({ id }: { id: string }) => ({ go: relay.starting(id) }),
+    composed: (answer: ComposeAnswer) => { relay.answered(answer); return null },
   })
   const app = appNameOf(await plugin.settings)
   const tool = readAloudToolName(bb.pluginId)

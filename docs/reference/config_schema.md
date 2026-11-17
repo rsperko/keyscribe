@@ -440,6 +440,25 @@ a hello on any other protocol is refused with `426` and is never registered or s
 - **A submit is refused as `draft`** when the agent's prompt box holds text the user has not sent; the
   connector leaves that text in place and KeyScribe keeps the take for review. The connector checks the
   prompt count, a running turn, and the session again after reading the box, right before it submits.
+- **A submit with `merge: true` joins that text instead.** KeyScribe sets it only for the conversation in front,
+  and only for a connector whose hello lists `merge`; to an agent's own connector it sends a take without it
+  first and sends it again with `merge` only after a `draft` refusal. The dictation goes after the text in the box, separated by
+  a space unless that text is empty or already ends in whitespace, and the whole is sent as one message. Nothing
+  is joined when either the dictation or the text in the box starts with `/` or `!` once leading spaces are
+  ignored, since the send would run it as a command or in the shell; the submit is refused as `draft`. Claude
+  Code's connector adds the dictation to the box and refuses the submit as `joined`, or `joinedMidTurn` when a
+  turn is running, which KeyScribe answers as it does `filled`: it asks with `check` whether the box holds
+  exactly the joined text, then presses Return; for `joinedMidTurn` it follows the turn the connector reports
+  `absorbed`. Pi's connector clears its editor and sends the joined text itself, refuses as `draft` when Pi has
+  no terminal of its own, has no model, or is compacting, puts the text back if Pi turns the send away or has not taken it by its receipt deadline, and
+  marks its `submitted` with `withDraft: true`. bb's plugin has the bb window that shows the thread add the
+  dictation to its message box and send it through bb's own send, which steers a running turn. KeyScribe asks it
+  only while the plugin's `shown` for that thread carries `draft: true`. It answers `submitted`, or refuses as
+  `empty` when no window shows the thread, its message box is empty, or no window took up the request within a
+  second (KeyScribe then delivers through `bb` as usual), as `draft` when bb would not send now, and as `added`
+  when bb refused the send after the dictation went in, leaving both in the box; any other refusal means nothing
+  went in. A turn the joined message starts is reported under the digest of the dictation alone, so KeyScribe
+  follows its reply. The receipt says the text already in the box was sent too.
 - **A submit is refused as `dialog`** when the agent is showing a dialog of its own (Pi reports these around
   every extension prompt); KeyScribe keeps the take for review.
 - **The Pi connector waits for the keyboard.** A key pressed in that terminal within the last three seconds

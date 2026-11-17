@@ -1,9 +1,10 @@
 import { useEffect, useRef } from "react"
 import {
-  definePluginApp, experimental_Icon as Icon, experimental_useRpcKeyedQuery, useBbContext, useComposer, useRpc, useSidebarSplitLayout,
+  definePluginApp, experimental_Icon as Icon, experimental_useRpcKeyedQuery, useBbContext, useComposer, useComposers, useRealtime, useRpc,
+  useSidebarSplitLayout,
   type ExperimentalThreadRowMetadataDataInput, type ExperimentalThreadRowMetadataProps, type PluginComposerApi,
 } from "@get-bb/plugin-sdk/app"
-import { ComposerAnswers, rowLabel, rpcContract, shownThread } from "./keyscribe.ts"
+import { ComposerAnswers, composeChannel, composeInto, isComposeAsk, rowLabel, rpcContract, shownThread } from "./keyscribe.ts"
 
 type Labels = Record<string, string | null> | undefined
 
@@ -68,6 +69,24 @@ function ReadAloudAnswer() {
   return <div role="status" style={{ padding: "0.6em 0.8em", maxWidth: "28em" }}>{answers.answer(composer.key) ?? ""}</div>
 }
 
+function ComposeBridge() {
+  const rpc = useRpc<typeof rpcContract>()
+  const composers = useComposers()
+  const latest = useRef(composers)
+  latest.current = composers
+  useRealtime(composeChannel, (payload) => {
+    if (!isComposeAsk(payload) || payload.window !== windowId) return
+    void rpc.call("composing", { id: payload.id })
+      .then(async ({ go }) => {
+        if (!go) return
+        const answer = await composeInto(latest.current, payload.thread, payload.text)
+        await rpc.call("composed", { id: payload.id, ...answer })
+      })
+      .catch(() => {})
+  })
+  return null
+}
+
 const readAloudCommands = [
   { id: "read-reply-aloud", label: "Read this thread\u2019s reply aloud", on: true },
   { id: "stop-reading-reply-aloud", label: "Don\u2019t read this thread\u2019s reply aloud", on: false },
@@ -77,15 +96,17 @@ function FocusReporter() {
   const rpc = useRpc<typeof rpcContract>()
   const context = useBbContext()
   const split = useSidebarSplitLayout()
+  const composers = useComposers()
   const thread = shownThread(context?.threadId ?? null, split?.panes ?? null)
-  const latest = useRef(thread)
-  latest.current = thread
+  const draft = thread !== null && composers.some((box) => box.scope.kind === "thread" && box.scope.threadId === thread && !box.isEmpty)
+  const latest = useRef({ thread, draft })
+  latest.current = { thread, draft }
 
   const send = () => {
-    rpc.call("window", { window: windowId, focused: document.hasFocus(), thread: latest.current }).catch(() => {})
+    rpc.call("window", { window: windowId, focused: document.hasFocus(), ...latest.current }).catch(() => {})
   }
 
-  useEffect(send, [thread])
+  useEffect(send, [thread, draft])
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null
@@ -119,6 +140,7 @@ function FocusReporter() {
 export default definePluginApp((app) => {
   app.slots.experimental_appOverlay({ id: "focus-reporter", component: FocusReporter })
   app.slots.experimental_appOverlay({ id: "read-aloud-bridge", component: ReadAloudBridge })
+  app.slots.experimental_appOverlay({ id: "compose-bridge", component: ComposeBridge })
   app.slots.experimental_threadRowMetadata<Labels>({ id: "spoken-name", useData: useLabels, component: SpokenName })
   app.composer.customize({
     id: "read-aloud",

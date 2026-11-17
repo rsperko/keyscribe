@@ -24,6 +24,14 @@ struct AgentDeliveryTests {
             == "Handed off at 22:13:20.120; it entered the conversation +1.00 s, changed on its way in; confirmed +3.00 s; 2 reconnects while waiting")
     }
 
+    @Test func aDeliveryThatCarriedTheTextAlreadyInThePromptBoxSaysSo() {
+        var delivery = AgentDelivery(handedOff: start)
+        delivery.absorb(AgentDeliveryReport(state: .seen, seenAt: start.addingTimeInterval(0.4), withDraft: true))
+        delivery.confirmed = start.addingTimeInterval(0.5)
+        #expect(AgentHistoryFacts.delivery(delivery, agent: "Pi", timeZone: utc).value
+            == "Handed off at 22:13:20.120; sent with the text already in its prompt box; it entered the conversation +0.40 s; confirmed +0.50 s")
+    }
+
     @Test func aDoubtedDeliveryRecordsWhatTheCheckFoundAndWhyNothingMatched() {
         var delivery = AgentDelivery(handedOff: start)
         delivery.absorb(AgentDeliveryReport(state: .handed, handedAt: start.addingTimeInterval(0.2), miss: "other"))

@@ -341,6 +341,125 @@ struct AgentHostTests {
         return hub
     }
 
+    private func pluginJoined(
+        _ host: FakeHost, transport: FakeTransport, features: [String] = ["promptDigest", "merge"], draft: Bool = true
+    ) async -> AgentHub {
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host, transport: transport)
+        await hub.rescan()
+        var hello = Self.hello(Self.id("t1"), features: features)
+        hello.agent = "example"
+        transport.live.insert(Self.id("t1"))
+        hub.handle(.hello(hello))
+        await hub.rescan()
+        if draft { hub.handle(.shown(session: Self.id("t1"), on: true, draft: true)) }
+        return hub
+    }
+
+    private func joinCommands(_ transport: FakeTransport) -> [(id: String, text: String)] {
+        transport.sent.compactMap { if case .submit(let id, _, let text, _, _, _, _, true) = $0.0 { (id, text) } else { nil } }
+    }
+
+    private func deliverAnswering(
+        _ hub: AgentHub, _ transport: FakeTransport, inFront: Bool = true, answer: ((String) -> AgentEvent)?
+    ) async -> AgentReceipt {
+        let delivery = Task { await hub.deliver("run the tests", to: Self.id("t1"), request: "q1", inFront: inFront) }
+        for _ in 0..<200 where joinCommands(transport).isEmpty { await Task.yield() }
+        if let wire = joinCommands(transport).first?.id, let answer { hub.handle(answer(wire)) }
+        return await delivery.value
+    }
+
+    @Test func aDictationForTheThreadInFrontJoinsWhatTheUserTypedThroughTheHostsOwnPlugin() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await pluginJoined(host, transport: transport)
+        let receipt = await deliverAnswering(hub, transport) { .submitted(request: $0, turn: "") }
+        #expect(receipt == .sentWithDraft("docs"))
+        #expect(joinCommands(transport).map(\.text) == ["run the tests"])
+        #expect(host.delivered.isEmpty)
+    }
+
+    @Test(arguments: [
+        ("draft", AgentReceipt.kept("docs", reason: .composing)),
+        ("added", AgentReceipt.kept("docs", reason: .inPromptBox(.besideText))),
+    ])
+    func aDraftTheHostsPluginCouldNotSendIsKeptAndNeverSentAgainThroughTheHost(refusal: String, receipt: AgentReceipt) async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await pluginJoined(host, transport: transport)
+        #expect(await deliverAnswering(hub, transport) { .refused(request: $0, reason: refusal) } == receipt)
+        #expect(host.delivered.isEmpty)
+    }
+
+    @Test func aJoinTheHostsPluginNeverAnswersIsUncertainAndNeverSentAgainThroughTheHost() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await pluginJoined(host, transport: transport)
+        #expect(await deliverAnswering(hub, transport, answer: nil) == .uncertain("docs"))
+        #expect(host.delivered.isEmpty)
+    }
+
+    @Test(arguments: ["empty", "unsupported", "a reason this version does not know"])
+    func aJoinThatPutNothingInTheMessageBoxGoesThroughItsHostAsBefore(refusal: String) async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await pluginJoined(host, transport: transport)
+        #expect(await deliverAnswering(hub, transport) { .refused(request: $0, reason: refusal) } == .sent("docs"))
+        #expect(host.delivered.map(\.0) == ["run the tests"])
+    }
+
+    @Test func aThreadIsSaidToHaveTextInItsMessageBoxOnlyWhileItsPluginSaysSo() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await pluginJoined(host, transport: transport)
+        #expect(hub.showsDraft(Self.id("t1")))
+        hub.handle(.shown(session: Self.id("t1"), on: true))
+        #expect(!hub.showsDraft(Self.id("t1")))
+        hub.handle(.shown(session: Self.id("t1"), on: true, draft: true))
+        hub.handle(.shown(session: Self.id("t1"), on: false))
+        #expect(!hub.showsDraft(Self.id("t1")))
+    }
+
+    @Test func aThreadShownWithAnEmptyMessageBoxIsNeverAskedToJoin() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await pluginJoined(host, transport: transport, draft: false)
+        hub.handle(.shown(session: Self.id("t1"), on: true))
+        #expect(await hub.deliver("run the tests", to: Self.id("t1"), request: "q1", inFront: true) == .sent("docs"))
+        #expect(joinCommands(transport).isEmpty)
+        #expect(host.delivered.count == 1)
+    }
+
+    @Test func aThreadNotInFrontNeverHasItsDraftJoined() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await pluginJoined(host, transport: transport)
+        #expect(await hub.deliver("run the tests", to: Self.id("t1"), request: "q1") == .sent("docs"))
+        #expect(joinCommands(transport).isEmpty)
+        #expect(host.delivered.count == 1)
+    }
+
+    @Test func anAgentsOwnConnectorFiledUnderAHostedThreadIsNeverAskedToJoinItsDraft() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await joined(host, transport: transport, features: ["promptDigest", "merge"])
+        #expect(await hub.deliver("run the tests", to: Self.id("t1"), request: "q1", inFront: true) == .sent("docs"))
+        #expect(joinCommands(transport).isEmpty)
+        #expect(host.delivered.count == 1)
+    }
+
+    @Test func aDictationJoinedToADraftIsFollowedIntoTheTurnItsPluginReportsForIt() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await pluginJoined(host, transport: transport)
+        var replies: [String] = []
+        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        _ = await deliverAnswering(hub, transport) { .submitted(request: $0, turn: "") }
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("run the tests")))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "done"))
+        #expect(replies == ["done"])
+    }
+
     @Test func anAgentRunningInsideAHostedConversationIsFiledUnderItSoTheConversationIsListedOnceAndConnected() async throws {
         let hub = await joined(FakeHost())
         #expect(hub.directory.conversations.map(\.id) == [Self.id("t1")])
@@ -1046,6 +1165,17 @@ struct AgentHostTests {
         host.delivery = .accepted
         _ = await hub.deliver("say kiwi", to: Self.id("t1"), request: "q2")
         #expect(replies == ["kiwi"])
+    }
+
+    @Test func anUncertainJoinIsRecordedAsSentWithTheTypedTextOnceItsOwnTurnStarts() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await pluginJoined(host, transport: transport)
+        var notices: [AgentReceipt] = []
+        hub.onNotice = { receipt, _, _ in notices.append(receipt) }
+        #expect(await deliverAnswering(hub, transport, answer: nil) == .uncertain("docs"))
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("run the tests")))
+        #expect(notices == [.sentWithDraft("docs")])
     }
 
     @Test func anUncertainDictationIsRecordedAsSentOnceItsOwnTurnStarts() async {

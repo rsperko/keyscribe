@@ -851,6 +851,83 @@ test('a dictation for the prompt box never fills over what the user is typing', 
   expect(outcome(h)).toEqual(['ack', 'draft'])
 })
 
+const mergeCommand = (text = 'run the tests') => ({ ...submitCommand(text), merge: true })
+
+test('a dictation for the conversation in front joins what the user started typing, and waits for Return', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  h.box.text = 'half a thought'
+  await h.deliver([mergeCommand()])
+  await h.answerEvents()
+  expect(h.box.text).toBe('half a thought run the tests')
+  expect(h.submits).toEqual([])
+  expect(outcome(h)).toEqual(['ack', 'joined'])
+  await h.deliver([checkCommand('c1')])
+  await h.answerEvents()
+  expect(promptBox(h, 'c1')).toBe('ready')
+})
+
+test('a draft that already ends in a space or a new line takes the dictation with no extra space', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  h.box.text = 'first line\n'
+  await h.deliver([mergeCommand()])
+  await h.answerEvents()
+  expect(h.box.text).toBe('first line\nrun the tests')
+  expect(outcome(h)).toEqual(['ack', 'joined'])
+})
+
+test('a dictation joined to a draft while a turn runs is reported absorbed under the dictation it carried', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  await $.turn.start({ text: '', turnId: 't1' })
+  h.box.text = 'half a thought'
+  await h.deliver([{ ...mergeCommand(), box: true }])
+  await h.answerEvents()
+  expect(outcome(h)).toEqual(['ack', 'joinedMidTurn'])
+  await h.typed($, 'half a thought run the tests')
+  await $.prompt.attachment({ type: 'queued_command', text: absorbedText('half a thought run the tests'), origin: { kind: 'engine' } } as any)
+  await h.answerEvents()
+  expect(h.events().filter((b: any) => b.op === 'absorbed')).toMatchObject([{ turn: 't1', prompt: digest('run the tests') }])
+})
+
+test('a dictation that would run as a command is never joined to a draft', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  h.box.text = 'half a thought'
+  await h.deliver([mergeCommand('  /clear')])
+  await h.answerEvents()
+  expect(h.fills).toEqual([])
+  expect(h.box.text).toBe('half a thought')
+  expect(outcome(h)).toEqual(['ack', 'draft'])
+})
+
+test('a dictation joined while the user keeps typing is left beside their text, never sent', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  h.box.text = 'half'
+  h.fillRefusal.typedFirst = ' more'
+  await h.deliver([mergeCommand()])
+  await h.answerEvents()
+  expect(h.box.text).toBe('half more run the tests')
+  expect(outcome(h)).toEqual(['ack', 'added'])
+})
+
+test('a draft the prompt box will not add to keeps the dictation out of it', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  h.box.text = 'half a thought'
+  h.fillRefusal.reason = 'dialog'
+  await h.deliver([mergeCommand()])
+  await h.answerEvents()
+  expect(h.box.text).toBe('half a thought')
+  expect(h.submits).toEqual([])
+  expect(outcome(h)).not.toContain('joined')
+  await h.deliver([checkCommand('c1')])
+  await h.answerEvents()
+  expect(promptBox(h, 'c1')).toBeUndefined()
+})
+
 test('a dictation for the prompt box keeps what the user typed as it was filled, and is not sent', async ($, on) => {
   const h = harness(on)
   await h.connect($)
@@ -1883,7 +1960,7 @@ test('a session the module saw start says hello as fresh and idle', async ($, on
   await $.classic.SessionStart({ source: 'startup', session_id: 's1' })
   await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
   await h.settle()
-  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest', 'box', 'steer'] })
+  expect(h.events()[0]).toMatchObject({ op: 'hello', session: 's1', gap: false, idle: true, features: ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest', 'box', 'steer', 'merge'] })
 })
 
 test('hello reports the zellij pane its session runs in, which only its own process can read', async ($, on) => {
@@ -2172,4 +2249,26 @@ test('a focus definition is substituted whole, never by a shell, and never from 
   await h.answerEvents()
   expect(reasons('r6')).toEqual(['unsafeValue'])
   expect(h.runs.length).toBe(1)
+})
+
+for (const draft of ['/model', '  !ls']) {
+  test(`a draft like ${JSON.stringify(draft)} that would run as a command is never joined, so Return never runs it with the dictation`, async ($, on) => {
+    const h = harness(on)
+    await h.connect($)
+    h.box.text = draft
+    await h.deliver([mergeCommand()])
+    await h.answerEvents()
+    expect(h.fills).toEqual([])
+    expect(h.box.text).toBe(draft)
+    expect(outcome(h)).toEqual(['ack', 'draft'])
+  })
+}
+
+test('a draft that ends in a tab takes the dictation with no extra space', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  h.box.text = 'first\t'
+  await h.deliver([mergeCommand()])
+  await h.answerEvents()
+  expect(h.box.text).toBe('first\trun the tests')
 })

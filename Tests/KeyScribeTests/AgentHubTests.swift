@@ -1274,7 +1274,7 @@ struct AgentHubTests {
         let sentBefore = transport.sent.count
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
-        if case .submit(let id, _, _, _, _, _, _) = transport.sent.last?.0 { hub.handle(.submitted(request: id, turn: turn)) }
+        if case .submit(let id, _, _, _, _, _, _, _) = transport.sent.last?.0 { hub.handle(.submitted(request: id, turn: turn)) }
         _ = await receipt
         hub.handle(.turnStarted(session: "claude:s1", turn: turn))
     }
@@ -1440,7 +1440,7 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
-        if case .submit(let id, _, _, _, _, _, _) = transport.sent.last?.0 { hub.handle(.refused(request: id, reason: "stopped")) }
+        if case .submit(let id, _, _, _, _, _, _, _) = transport.sent.last?.0 { hub.handle(.refused(request: id, reason: "stopped")) }
         #expect(await receipt == .notSent("keyscribe", reason: .stopped))
     }
 

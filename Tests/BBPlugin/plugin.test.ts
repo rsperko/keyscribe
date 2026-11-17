@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { ComposerAnswers, commandAnswer, keyscribe, promptDigest, readAloudReply, rowLabel, shownThread, waitingFor, type Bb, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
+import { ComposerAnswers, commandAnswer, composeInto, keyscribe, promptDigest, readAloudReply, rowLabel, shownThread, waitingFor, type Bb, type Composed, type Host } from "../../Sources/KeyScribe/Resources/BBPlugin/keyscribe.ts"
 
 type Request = { path: string; body: any; auth: string; answer: (status: number, text?: string) => void; settled: boolean; cancelled: boolean }
 
@@ -27,6 +27,8 @@ function harness(options: { threads?: { id: string; status: string }[]; history?
   const interactions: Record<string, string | Error> = {}
   const checked: string[] = []
   let labelChanges = 0
+  const composes: Array<{ window: string; thread: string; text: string }> = []
+  const composing: { answer: Composed | null } = { answer: { outcome: "sent", joined: "half a thought run the tests" } }
   const bb: Bb = {
     listThreads: async () => threads,
     history: async (thread) => history[thread] ?? [],
@@ -37,6 +39,10 @@ function harness(options: { threads?: { id: string; status: string }[]; history?
       return status ?? null
     },
     on: (event, handler) => { handlers.set(event, handler) },
+    compose: async (window, thread, text) => {
+      composes.push({ window, thread, text })
+      return composing.answer
+    },
   }
   const host: Host = {
     now: () => now,
@@ -111,6 +117,7 @@ function harness(options: { threads?: { id: string; status: string }[]; history?
   return {
     bb, host, files, requests, open, sent, emit, settle, advance, answerHellos, answerEvents, timers, logs, configuration, watchers, appStarted,
     interactions, checked, labelChanges: () => labelChanges,
+    composes, composing,
   }
 }
 
@@ -138,7 +145,7 @@ test("says hello for every thread under its conversation key with what it knows,
   assert.equal(a.installation, "I9")
   assert.equal(a.pid, 0)
   assert.equal(a.idle, true)
-  assert.deepEqual(a.features, ["promptDigest", "readiness", "shown", "notify", "label"])
+  assert.deepEqual(a.features, ["promptDigest", "readiness", "shown", "notify", "label", "merge"])
   assert.equal(hellos.find((b) => b.session === session("thr_b")).idle, false)
   assert.equal(new Set(hellos.map((b) => b.connection)).size, 1)
   assert.equal(new Set(hellos.map((b) => b.instance)).size, 2)
@@ -961,4 +968,178 @@ test("a message box remembers answers for only a few message boxes", () => {
   answers.settle("c4", answers.begin("c4"), "c4")
   assert.equal(answers.answer("c3"), undefined)
   assert.equal(answers.settle("c2", late, "again"), true)
+})
+
+function composer(scope: { kind: string; threadId?: string }, draft: string, options: { blocked?: boolean; rejects?: string; attached?: boolean } = {}) {
+  const made = {
+    scope,
+    text: draft,
+    get isEmpty() { return made.text.trim() === "" && !options.attached },
+    isSubmittingBlocked: options.blocked ?? false,
+    inserted: [] as Array<{ text: string; at?: string }>,
+    submitted: [] as any[],
+    insert(text: string, at?: { at?: "cursor" | "end" }) {
+      made.inserted.push({ text, at: at?.at })
+      made.text += text
+    },
+    async submit(how?: any) {
+      made.submitted.push(how)
+      if (options.rejects) throw new Error(options.rejects)
+    },
+  }
+  return made
+}
+
+test("a dictation joins the draft at its end and is sent the way Enter steers a running turn", async () => {
+  const box = composer({ kind: "thread", threadId: "thr_a" }, "half a thought")
+  assert.deepEqual(await composeInto([box], "thr_a", "run the tests"), { outcome: "sent", joined: "half a thought run the tests" })
+  assert.deepEqual(box.inserted, [{ text: " run the tests", at: "end" }])
+  assert.deepEqual(box.submitted, [{ experimental_mode: "steer-if-active" }])
+})
+
+test("a draft that already ends in a new line takes the dictation with no extra space", async () => {
+  const box = composer({ kind: "thread", threadId: "thr_a" }, "first line\n")
+  assert.deepEqual(await composeInto([box], "thr_a", "run the tests"), { outcome: "sent", joined: "first line\nrun the tests" })
+})
+
+test("an empty message box, or none for the thread, is left alone so the dictation goes the usual way", async () => {
+  const empty = composer({ kind: "thread", threadId: "thr_a" }, "  ")
+  const other = composer({ kind: "thread", threadId: "thr_b" }, "their draft")
+  const fresh = composer({ kind: "new-thread" }, "a new idea")
+  assert.deepEqual(await composeInto([empty, other, fresh], "thr_a", "x"), { outcome: "empty" })
+  assert.deepEqual(await composeInto([other, fresh], "thr_a", "x"), { outcome: "empty" })
+  for (const box of [empty, other, fresh]) assert.deepEqual(box.inserted, [])
+})
+
+test("a draft bb would not send now, or two boxes for one thread, are never touched", async () => {
+  const blocked = composer({ kind: "thread", threadId: "thr_a" }, "half", { blocked: true })
+  assert.deepEqual(await composeInto([blocked], "thr_a", "x"), { outcome: "blocked" })
+  const one = composer({ kind: "thread", threadId: "thr_a" }, "half")
+  const two = composer({ kind: "thread", threadId: "thr_a" }, "half")
+  assert.deepEqual(await composeInto([one, two], "thr_a", "x"), { outcome: "blocked" })
+  for (const box of [blocked, one, two]) assert.deepEqual(box.inserted, [])
+})
+
+test("a joined draft bb refuses to send stays in the box with the dictation", async () => {
+  const box = composer({ kind: "thread", threadId: "thr_a" }, "half", { rejects: "Uploads failed" })
+  assert.deepEqual(await composeInto([box], "thr_a", "run the tests"), { outcome: "failed" })
+  assert.equal(box.text, "half run the tests")
+})
+
+async function shownIn(h: Awaited<ReturnType<typeof connected>>, thread: string) {
+  h.plugin.window({ window: "w1", focused: true, thread })
+  await h.settle()
+  await answerShown(h)
+}
+
+function mergeCommand(h: Awaited<ReturnType<typeof connected>>, thread = "thr_a") {
+  h.open("poll")[0].answer(200, JSON.stringify({
+    commands: [{ op: "submit", id: "j1", expectedSession: session(thread), text: "run the tests", expiresAt: 9e15, merge: true }], unknown: [],
+  }))
+  return h.settle()
+}
+
+const answersFor = (h: Awaited<ReturnType<typeof connected>>, request: string) =>
+  h.requests.filter((r) => r.path === "/event" && r.body.request === request).map((r) => r.body.reason ?? r.body.op)
+
+test("a dictation for the thread a window shows is joined there by that window, and said sent", async () => {
+  const h = await connected()
+  await shownIn(h, "thr_a")
+  await mergeCommand(h)
+  assert.deepEqual(h.composes, [{ window: "w1", thread: "thr_a", text: "run the tests" }])
+  assert.deepEqual(answersFor(h, "j1"), ["ack", "submitted"])
+})
+
+for (const [outcome, reason] of [["empty", "empty"], ["blocked", "draft"], ["failed", "added"]] as const) {
+  test(`a window that answers ${outcome} is reported as ${reason}`, async () => {
+    const h = await connected()
+    await shownIn(h, "thr_a")
+    h.composing.answer = { outcome }
+    await mergeCommand(h)
+    assert.deepEqual(answersFor(h, "j1"), ["ack", reason])
+  })
+}
+
+test("a window that never answers leaves the dictation unanswered rather than guessed", async () => {
+  const h = await connected()
+  await shownIn(h, "thr_a")
+  h.composing.answer = null
+  await mergeCommand(h)
+  assert.deepEqual(answersFor(h, "j1"), ["ack"])
+})
+
+test("a dictation for a thread no window shows is never joined there", async () => {
+  const h = await connected()
+  await shownIn(h, "thr_b")
+  await mergeCommand(h)
+  assert.deepEqual(h.composes, [])
+  assert.deepEqual(answersFor(h, "j1"), ["ack", "empty"])
+})
+
+test("the turn a joined message starts is named by the dictation it carried", async () => {
+  const h = await connected({ history: { thr_a: ["half a thought run the tests"] } })
+  await shownIn(h, "thr_a")
+  await mergeCommand(h)
+  await h.answerEvents()
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  assert.equal(h.sent("turnStarted")[0].prompt, promptDigest("run the tests"))
+})
+
+test("two empty message boxes for one thread are an empty box, not a draft", async () => {
+  const one = composer({ kind: "thread", threadId: "thr_a" }, "")
+  const two = composer({ kind: "thread", threadId: "thr_a" }, " ")
+  assert.deepEqual(await composeInto([one, two], "thr_a", "x"), { outcome: "empty" })
+})
+
+test("a draft that would run as a command is never joined, so bb's send never runs it with the dictation", async () => {
+  for (const draft of ["/model", "  !ls"]) {
+    const box = composer({ kind: "thread", threadId: "thr_a" }, draft)
+    assert.deepEqual(await composeInto([box], "thr_a", "x"), { outcome: "blocked" })
+    assert.deepEqual(box.inserted, [])
+  }
+})
+
+test("a draft that ends in a tab takes the dictation with no extra space", async () => {
+  const box = composer({ kind: "thread", threadId: "thr_a" }, "first\t")
+  assert.deepEqual(await composeInto([box], "thr_a", "run the tests"), { outcome: "sent", joined: "first\trun the tests" })
+})
+
+test("a dictation that would run as a command is never joined to a draft and never reaches a window", async () => {
+  const h = await connected()
+  await shownIn(h, "thr_a")
+  h.open("poll")[0].answer(200, JSON.stringify({
+    commands: [{ op: "submit", id: "j1", expectedSession: session("thr_a"), text: "  /compact", expiresAt: 9e15, merge: true }], unknown: [],
+  }))
+  await h.settle()
+  assert.deepEqual(h.composes, [])
+  assert.deepEqual(answersFor(h, "j1"), ["ack", "draft"])
+})
+
+test("the thread in front is said to have text in its message box as soon as the window reports it, and again when it is gone", async () => {
+  const h = await connected()
+  await shownIn(h, "thr_a")
+  h.plugin.window({ window: "w1", focused: true, thread: "thr_a", draft: true })
+  await h.settle()
+  await answerShown(h)
+  h.plugin.window({ window: "w1", focused: true, thread: "thr_a", draft: false })
+  await h.settle()
+  await answerShown(h)
+  assert.deepEqual(h.sent("shown").slice(1).map((b) => [b.session, b.on, b.draft]),
+    [[session("thr_a"), true, false], [session("thr_a"), true, true], [session("thr_a"), true, false]])
+})
+
+test("the turn a joined message starts is named by the dictation even when bb keeps the message without its trailing space", async () => {
+  const h = await connected({ history: { thr_a: ["half a thought run the tests"] } })
+  h.composing.answer = { outcome: "sent", joined: "half a thought run the tests " }
+  await shownIn(h, "thr_a")
+  await mergeCommand(h)
+  await h.answerEvents()
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  assert.equal(h.sent("turnStarted")[0].prompt, promptDigest("run the tests"))
+})
+
+test("a message box holding only an attachment takes the dictation with no space before it", async () => {
+  const box = composer({ kind: "thread", threadId: "thr_a" }, "", { attached: true })
+  assert.deepEqual(await composeInto([box], "thr_a", "what is this"), { outcome: "sent", joined: "what is this" })
+  assert.deepEqual(box.inserted, [{ text: "what is this", at: "end" }])
 })

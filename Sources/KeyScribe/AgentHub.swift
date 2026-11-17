@@ -17,11 +17,12 @@ extension AgentBridgeServer: AgentTransport {
 }
 
 enum AgentReceipt: Equatable {
-    enum PromptBoxCause: Equatable { case afterStop, awaitingReturn, besideText }
+    enum PromptBoxCause: Equatable { case afterStop, awaitingReturn, besideText, joinedDraft, joinedDraftMidTurn }
     enum KeptReason: Equatable { case composing, typedSince, interrupted, connectionGap, dialog, inPromptBox(PromptBoxCause) }
     enum NotSentReason: Equatable { case conversationEnded, connectorNotRunning, conversationChanged, stopped, expired, disconnected, refused(String), hostTakesNoMessages(String) }
 
     case sent(String)
+    case sentWithDraft(String)
     case queued(String, waitingOn: AgentDeliveryDecision.QueueReason = .working)
     case kept(String, reason: KeptReason)
     case notSent(String?, reason: NotSentReason)
@@ -88,7 +89,7 @@ final class AgentHub {
     private var linked: [String: String] = [:]
     private var matched: Set<String> = []
     private var heldResults: [String: () -> Void] = [:]
-    private var uncertainHosted: [String: (handle: String, conversation: String)] = [:]
+    private var uncertainHosted: [String: (handle: String, conversation: String, withDraft: Bool)] = [:]
     private struct TypedTurn {
         var request: String
         var typedAt: Date?
@@ -162,6 +163,9 @@ final class AgentHub {
         didSet { if filledWires.count > Self.keptDeliveries { filledWires.remove(at: filledWires.startIndex) } }
     }
     private var promptBoxChecks: [String: CheckedContinuation<Bool, Never>] = [:]
+    private enum HostJoin { case sent, empty, kept(AgentReceipt.KeptReason), unknown }
+    private var hostJoins: [String: CheckedContinuation<HostJoin, Never>] = [:]
+    private var hostOwned: Set<String> = []
     var promptBoxCheckWait: Duration = .seconds(1)
     private var connectorNames: [String: String?] = [:]
     private var registryNames: [String: String?] = [:]
@@ -171,6 +175,7 @@ final class AgentHub {
     private var turns: [String: String] = [:]
     private var lastUsed: [String: Date] = [:]
     private var shownByHost: [String: String] = [:]
+    private var shownWithDraft: [String: String] = [:]
 
     init(
         transport: AgentTransport, discovery: [any AgentDiscovery], names: AgentNameStore? = nil,
@@ -471,6 +476,7 @@ final class AgentHub {
         for (request, conversation) in delivering where conversation == id { stopFollowingHosted(request, in: id) }
         hostFollows[id] = nil
         shownByHost = shownByHost.filter { $0.value != id && $0.value != counterpart(of: id) }
+        shownWithDraft = shownWithDraft.filter { $0.value != id && $0.value != counterpart(of: id) }
         saveExclusions()
         for message in outbox.withdraw(conversation: id) {
             retries[message.id] = nil
@@ -879,6 +885,7 @@ final class AgentHub {
 
     private func forgetConnectorState(keepingEnvironments keptEnvironment: ((String) -> Bool)? = nil, keeping kept: (String) -> Bool) {
         features = features.filter { kept($0.key) }
+        hostOwned = hostOwned.filter(kept)
         loadedVersions = loadedVersions.filter { kept($0.key) }
         environments = environments.filter { keptEnvironment?($0.key) ?? kept($0.key) }
         prompts = prompts.filter { kept($0.key) }
@@ -937,6 +944,30 @@ final class AgentHub {
                 hostFollows[id, default: []].append(HostFollow(prompt: AgentPromptDigest.of(text), request: request, expires: nil))
                 if hostFollows[id, default: []].count > Self.hostFollowLimit { hostFollows[id]?.removeFirst() }
             }
+            if inFront, images.isEmpty, showsDraft(id), hostOwned.contains(id), joinsDrafts(id), transport.isLive(session: id) {
+                startTrace(request, in: id)
+                let joined = await joinDraft(text, in: id)
+                let waitEnds = now().addingTimeInterval(Self.hostTurnWait)
+                switch joined {
+                case .sent:
+                    trace(request) {
+                        $0.withDraft = true
+                        $0.confirmed = now()
+                    }
+                    settleHostDelivery(request, in: id, expires: waitEnds)
+                    if follows, running[id] != nil, let turn = turns[id] { follow(turn, of: id, for: request) }
+                    return .sentWithDraft(handle)
+                case .kept(let reason):
+                    stopFollowingHosted(request, in: id)
+                    return .kept(handle, reason: reason)
+                case .unknown:
+                    if follows { uncertainHosted[request] = (handle, id, true) }
+                    settleHostDelivery(request, in: id, expires: waitEnds)
+                    return .uncertain(handle)
+                case .empty:
+                    break
+                }
+            }
             let answer = await Self.within(receiptTimeout, otherwise: AgentHostDelivery.uncertain, {
                 await source.host.deliver(text, images: images, request: request, to: location)
             })
@@ -956,7 +987,7 @@ final class AgentHub {
                 settleHostDelivery(request, in: id, expires: waitEnds)
                 return .sent(handle)
             case .uncertain:
-                if follows { uncertainHosted[request] = (handle, id) }
+                if follows { uncertainHosted[request] = (handle, id, false) }
                 settleHostDelivery(request, in: id, expires: waitEnds)
                 return .uncertain(handle)
             case .refused(let why):
@@ -967,18 +998,19 @@ final class AgentHub {
             }
         }
         let message = AgentOutbox.Message(id: request ?? makeId(), conversation: id, text: text, images: images)
+        let merge = inFront && joinsDrafts(id)
         switch outbox.send(
             message, state: state(of: id), canEnterPromptBox: inFront && takesPromptBox(id, images: images), canSteer: steers(id)
         ) {
         case .handOff:
             return await withCheckedContinuation { continuation in
                 waiters[message.id] = continuation
-                handOff(message, handle: handle)
+                handOff(message, handle: handle, merge: merge)
             }
         case .enterPromptBox:
             return await withCheckedContinuation { continuation in
                 waiters[message.id] = continuation
-                handOff(message, handle: handle, box: true)
+                handOff(message, handle: handle, box: true, merge: merge)
             }
         case .queue(let reason):
             return .queued(handle, waitingOn: reason)
@@ -1036,6 +1068,7 @@ final class AgentHub {
             }
             resume(hello)
             features[hello.session] = Set(hello.features)
+            if hosts.contains(where: { $0.kind.id == hello.agent }) { hostOwned.insert(hello.session) } else { hostOwned.remove(hello.session) }
             installations[hello.session] = hello.installation
             loadedVersions[hello.session] = hosts.contains { $0.kind.id == hello.agent } ? nil : hello.version
             environments[hello.session] = hello.environment
@@ -1064,13 +1097,20 @@ final class AgentHub {
             Task { [weak self] in await self?.rescan(rereadingTitles: false) }
         case .notify(let session, let turn, let on):
             _ = notify(session: session, turn: turn, on: on)
-        case .shown(let session, let on):
+        case .shown(let session, let on, let draft):
             guard let host = AgentSessionID.split(session)?.agent, hosts.contains(where: { $0.kind.id == host }) else { break }
             shownByHost[host] = on ? session : nil
+            shownWithDraft[host] = on && draft ? session : nil
         case .focused(let request):
             focusWaiters.removeValue(forKey: request)?.resume(returning: .selected)
         case .ack:
             break
+        case .submitted(let request, _, _) where hostJoins[request] != nil:
+            hostJoins.removeValue(forKey: request)?.resume(returning: .sent)
+        case .refused(let request, let reason) where hostJoins[request] != nil:
+            hostJoins.removeValue(forKey: request)?.resume(returning: Self.hostJoin(refusal: reason))
+        case .undelivered(let request, _, let mayHaveArrived) where hostJoins[request] != nil:
+            hostJoins.removeValue(forKey: request)?.resume(returning: mayHaveArrived ? .unknown : .empty)
         case .submitted(let request, let turn, let report):
             confirm(request, turn: turn, report: report)
         case .checked(_, let check, let report) where promptBoxChecks[check] != nil:
@@ -1261,7 +1301,9 @@ final class AgentHub {
         else { return }
         if delivering[request] != nil { matched.insert(request) }
         follow(turn, of: session, for: request)
-        if let doubted = uncertainHosted.removeValue(forKey: request) { onNotice?(.sent(doubted.handle), request, session) }
+        if let doubted = uncertainHosted.removeValue(forKey: request) {
+            onNotice?(doubted.withDraft ? .sentWithDraft(doubted.handle) : .sent(doubted.handle), request, session)
+        }
     }
 
     private func announce(result origin: String?, _ speak: @escaping () -> Void) {
@@ -1523,7 +1565,8 @@ final class AgentHub {
             awaitingResult[conversation] = turn
             awaitedRequests[conversation] = request
         }
-        settle(request, .sent(requests[request]?.handle ?? ""))
+        let handle = requests[request]?.handle ?? ""
+        settle(request, report.withDraft ? .sentWithDraft(handle) : .sent(handle))
         if let conversation, handingOff[conversation] == request, features[conversation]?.contains("steer") == true {
             handingOff[conversation] = nil
             releaseHeld()
@@ -1587,6 +1630,10 @@ final class AgentHub {
             filledWires[request] = entry.wire
             settle(request, .kept(handle, reason: .inPromptBox(.awaitingReturn)))
         case "added": settle(request, .kept(handle, reason: .inPromptBox(.besideText)))
+        case "joined", "joinedMidTurn":
+            filledWires[request] = entry.wire
+            trace(request) { $0.withDraft = true }
+            settle(request, .kept(handle, reason: .inPromptBox(reason == "joined" ? .joinedDraft : .joinedDraftMidTurn)))
         case "filled":
             filledWires[request] = entry.wire
             settle(request, Self.filled(handle: handle, features: features[entry.message.conversation]))
@@ -1650,6 +1697,32 @@ final class AgentHub {
 
     func checksPromptBox(_ id: String) -> Bool { features[id]?.contains("box") == true }
 
+    func joinsDrafts(_ id: String) -> Bool { features[id]?.contains("merge") == true }
+
+    func showsDraft(_ id: String) -> Bool {
+        guard let conversation = directory.conversations.first(where: { $0.id == id }), let (source, _) = host(of: conversation) else { return false }
+        return shownWithDraft[source.kind.id] == id
+    }
+
+    private func joinDraft(_ text: String, in id: String) async -> HostJoin {
+        let wire = makeId()
+        let wait = receiptTimeout
+        transport.enqueue(.submit(id: wire, expectedSession: id, text: text, expiresAt: deadline(after: wait), merge: true), for: id)
+        Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            self?.hostJoins.removeValue(forKey: wire)?.resume(returning: .unknown)
+        }
+        return await withCheckedContinuation { hostJoins[wire] = $0 }
+    }
+
+    private static func hostJoin(refusal: String) -> HostJoin {
+        switch refusal {
+        case "draft": .kept(.composing)
+        case "added": .kept(.inPromptBox(.besideText))
+        default: .empty
+        }
+    }
+
     func promptBoxReady(_ request: String, in conversation: String) async -> Bool {
         guard let wire = filledWires.removeValue(forKey: request) else { return false }
         let check = makeId()
@@ -1671,7 +1744,7 @@ final class AgentHub {
         nextTyped[conversation] = TypedTurn(request: request, typedAt: now(), prompt: prompt)
     }
 
-    private func handOff(_ message: AgentOutbox.Message, handle: String, box: Bool = false) {
+    private func handOff(_ message: AgentOutbox.Message, handle: String, box: Bool = false, merge: Bool = false) {
         attempts += 1
         let attempt = attempts
         let entry = Request(message: message, handle: handle, attempt: attempt, retry: retries.removeValue(forKey: message.id) ?? 0, box: box)
@@ -1682,7 +1755,7 @@ final class AgentHub {
             .submit(
                 id: entry.wire, expectedSession: message.conversation, text: message.text,
                 expectedPrompts: prompts[message.conversation], expiresAt: deadline(after: receiptTimeout),
-                images: takesImages(message.conversation) ? message.images : [], box: box),
+                images: takesImages(message.conversation) ? message.images : [], box: box, merge: merge),
             for: message.conversation)
         let timeout = receiptTimeout
         Task { [weak self] in

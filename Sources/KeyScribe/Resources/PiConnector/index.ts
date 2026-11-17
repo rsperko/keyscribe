@@ -34,8 +34,14 @@ type Config = {
 type FocusDefinition = { id: string; requiresEnv: string[]; argv: string[] }
 type ReadAloud = boolean | "quiet" | null
 type Ready = { launch: string; protocol: number }
-type Pending = { id: string; generation: number; text: string; serial: number; late: boolean; cancel: () => void; prompt: string; steer: boolean }
-type Submission = { state: "holding" | "handed" | "seen" | "refused"; reason?: string; turn?: string; handedAt?: number; seenAt?: number; altered?: boolean; miss?: string }
+type Pending = {
+  id: string; generation: number; text: string; serial: number; late: boolean; cancel: () => void; prompt: string; steer: boolean
+  putBack?: string
+}
+type Submission = {
+  state: "holding" | "handed" | "seen" | "refused"; reason?: string; turn?: string; handedAt?: number; seenAt?: number; altered?: boolean; miss?: string
+  withDraft?: boolean
+}
 type Receipt = { id: string; at: number; sending: boolean }
 type Item = {
   stale?: boolean
@@ -57,6 +63,7 @@ type Command = {
   text?: string
   expiresAt?: number
   images?: string[]
+  merge?: boolean
   request?: string
   definition?: string
 }
@@ -87,7 +94,7 @@ const backoff = [30000, 60000, 120000, 300000]
 const late = { late: true } as const
 const unreachable = { unreachable: true } as const
 const freshReasons = ["startup", "new", "fork"]
-const features = ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check", "steer"]
+const features = ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check", "steer", "merge"]
 
 const readAloudTool = "tell_me_when_done"
 
@@ -107,6 +114,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   let turns = 0
   let prompts = 0
   let promptsOpen = 0
+  let compacting = false
   let waiting: Waiting | null = null
   let said = ""
   const tools: { id: string; name: string; args: unknown }[] = []
@@ -485,7 +493,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   function report(id: string): Record<string, unknown> {
     const sub = submissions.get(id)
     if (!sub) return { state: "unknown" }
-    return { state: sub.state, reason: sub.reason, turn: sub.turn, handedAt: sub.handedAt, seenAt: sub.seenAt, altered: sub.altered, miss: sub.miss }
+    return { state: sub.state, reason: sub.reason, turn: sub.turn, handedAt: sub.handedAt, seenAt: sub.seenAt, altered: sub.altered, miss: sub.miss, withDraft: sub.withDraft }
   }
 
   function confirm(id: string): void {
@@ -507,7 +515,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
       receipt.sending = true
       enqueue({
         kind: "reply", generation, connection,
-        body: bound({ op: "submitted", request: receipt.id, turn: (sub && sub.turn) || "", handedAt: sub && sub.handedAt, seenAt: sub && sub.seenAt, altered: sub && sub.altered }),
+        body: bound({ op: "submitted", request: receipt.id, turn: (sub && sub.turn) || "", handedAt: sub && sub.handedAt, seenAt: sub && sub.seenAt, altered: sub && sub.altered, withDraft: sub && sub.withDraft }),
         done: (outcome) => {
           receipt.sending = false
           if (outcome !== "ok") return
@@ -617,6 +625,21 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     return read.filter((image) => image !== null)
   }
 
+  function runsAsCommand(text: string): boolean {
+    return /^[/!]/.test(text.trimStart())
+  }
+
+  function joinable(cmd: Command): boolean {
+    if (!cmd.merge || !ctx || ctx.mode !== "tui" || !ctx.model || compacting) return false
+    return !runsAsCommand(ctx.ui.getEditorText()) && !runsAsCommand(cmd.text || "")
+  }
+
+  function putBack(draft: string): boolean {
+    if (!draft.trim() || !ctx || ctx.ui.getEditorText()) return false
+    ctx.ui.setEditorText(draft)
+    return true
+  }
+
   async function submit(cmd: Command, gen: number): Promise<void> {
     track(cmd.id, { state: "holding" })
     const expected = cmd.expectedSession
@@ -627,7 +650,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
       if (typeof cmd.expectedPrompts === "number" && cmd.expectedPrompts !== prompts) return "typedSince"
       if (pending.some((item) => !item.late)) return "working"
       if (promptsOpen > 0) return "dialog"
-      if (ctx && ctx.ui.getEditorText().trim()) return "draft"
+      if (ctx && ctx.ui.getEditorText().trim() && !joinable(cmd)) return "draft"
       return null
     }
     const attached = await images(cmd.images)
@@ -640,14 +663,17 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
       if (again) return refuse(gen, cmd.id, again)
     }
     serial += 1
-    const text = (cmd.text || "") + nonce + mark(serial)
+    const draft = ctx && joinable(cmd) ? ctx.ui.getEditorText() : ""
+    const joined = draft.trim() ? draft + (draft && !/\s$/.test(draft) ? " " : "") + (cmd.text || "") : cmd.text || ""
+    const text = joined + nonce + mark(serial)
     const item: Pending = { id: cmd.id, generation: gen, text, serial, late: false, cancel: () => {}, prompt: promptDigest(cmd.text || ""), steer: false }
     while (pending.length >= lateLimit) pending.shift()!.cancel()
     pending.push(item)
-    track(cmd.id, { state: "handed", handedAt: host.now() })
+    track(cmd.id, { state: "handed", handedAt: host.now(), withDraft: draft.trim() ? true : undefined })
     try {
       const deliverAs = idle() ? "followUp" : "steer"
       item.steer = deliverAs === "steer"
+      if (draft.trim() && ctx) ctx.ui.setEditorText("")
       const sent: unknown = pi.sendUserMessage(attached.length ? [{ type: "text", text }, ...attached] : text, { deliverAs })
       if (sent && typeof (sent as Promise<void>).then === "function") {
         (sent as Promise<void>).then(undefined, (err: unknown) => {
@@ -655,14 +681,19 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
           if (index < 0) return
           pending.splice(index, 1)
           item.cancel()
+          putBack(draft)
           refuse(gen, cmd.id, String((err && (err as Error).message) || err).slice(0, 500))
         })
       }
     } catch (err) {
       pending.splice(pending.indexOf(item), 1)
+      putBack(draft)
       return refuse(gen, cmd.id, String((err && (err as Error).message) || err).slice(0, 500))
     }
-    item.cancel = host.after(receiptDeadline, () => { item.late = true })
+    item.cancel = host.after(receiptDeadline, () => {
+      item.late = true
+      if (pending.includes(item) && putBack(draft)) item.putBack = draft
+    })
   }
 
   function watchForStaleTurn(): void {
@@ -724,6 +755,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     }
     const [item] = pending.splice(index, 1)
     item.cancel()
+    if (item.putBack !== undefined && ctx && ctx.ui.getEditorText() === item.putBack) ctx.ui.setEditorText("")
     return item
   }
 
@@ -1007,6 +1039,10 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     if (!session || !event.message || (event.message as { role?: string }).role !== "user") return
     received(event.message)
   })
+
+  pi.on("session_before_compact", () => { compacting = true })
+  pi.on("session_compact", () => { compacting = false })
+  pi.on("session_compact_failed", () => { compacting = false })
 
   pi.on("session_info_changed", (event) => {
     if (!session) return

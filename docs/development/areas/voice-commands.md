@@ -333,9 +333,30 @@ every rule above applies to it, with these sharpenings:
   already held or still being handed off keeps the hold; an attached image, a connector without `box`, a
   conversation not confirmed in front, or text the box will not take goes to the agent as a steer when its
   connector lists `steer`, and otherwise keeps the hold.
+- **A dictation for the conversation in front joins text already in its prompt box.** Only the take knows the
+  conversation is in front, and asking costs time on every take, so it asks (`AgentTake.deliver`) only once
+  there is a draft to join: a connector that lists `merge` (`AgentHub.joinsDrafts`) is sent the take without it
+  first, and only a `draft` refusal, which the connector decides from the box it reads anyway, has the take ask
+  what is in front and send it again with `merge`. bb's plugin reports the draft ahead of time, so for bb the take
+  asks only while the hub knows the thread's box has text (`AgentHub.showsDraft`). A conversation not in front
+  keeps the `draft` refusal, since text left in a box nobody is looking at may be stale. Each connector joins it the way its agent
+  sends typed text, and none joins when the dictation or the draft starts with `/` or `!` after leading spaces
+  (`runsAsCommand`, the same in each), since the send would run it with the other as its arguments. The joined
+  text is built the same way in each, with no space after an empty draft or one ending in whitespace. Claude
+  Code's appends to the box (`joinDraft`) and answers `joined`, or `joinedMidTurn` when its own turn runs, so the
+  connector, not the hub, decides whether the take follows an `absorbed` turn; the take sends either with Return
+  through `sendFromPromptBox`, as it does a filled box. Pi's has no call that sends its editor, so it reads the
+  editor, clears it and sends the joined text in one synchronous block after its last wait, so no key lands
+  between them; it never joins where a send could fail after the clear (no terminal of its own, no model,
+  compacting), and puts the draft back, unless the user typed meanwhile, when the send throws or rejects or when
+  Pi has not taken the message by its receipt deadline, since Pi's extension `sendUserMessage` reports most later
+  failures only to Pi's own error display. A send Pi takes after that deadline clears the draft put back again,
+  only while the editor still holds exactly that text, so it is never sent twice. A joined take reads “Sent to docs with the text in its prompt box” (`AgentReceipt.sentWithDraft`) and its
+  Delivery line says so (`AgentDelivery.withDraft`). bb's goes through its plugin (below). A connector filed under
+  a hosted conversation is never asked: only the host's own plugin joins there (`AgentHub.hostOwned`).
 - **Claude Code's connector steers at the next tool boundary, worded as typed text is.** A `submit` while a turn
   runs, with the prompt box empty, is held in the connector and confirmed at once, as Pi's is; a draft in the box
-  refuses it as `draft`, as at idle. Once the next main-loop `tool.call` returns, each held take is added with
+  refuses it as `draft`, or joins it for the conversation in front, as at idle. Once the next main-loop `tool.call` returns, each held take is added with
   `$.session.append` as its own user row, in the order said, in the frame Claude Code wraps typed mid-turn text
   in (`steerFrame`, copied from 2.1.325; a Claude Code that rewords its own frame needs it copied again). That is
   where and how typed text lands (measured on 2.1.325, 2026-11-14 and 2026-11-16). A call the user interrupted
@@ -629,6 +650,21 @@ every rule above applies to it, with these sharpenings:
   since a plugin's command can show nothing else. Only the latest request in a message box shows its answer
   (`ComposerAnswers`), so a slow answer to an earlier choice never replaces a newer one, and answers are kept for a
   bounded number of message boxes.
+- **bb's plugin joins a dictation to the message box of the thread in front.** bb's command cannot see a draft,
+  which lives in each window, so each window also reports whether the thread it shows has text in its message
+  box, and the plugin's `shown` carries it as `draft`. Only for the conversation in front with `draft` does the
+  hub first send the plugin a `submit` with `merge`, waiting at most its receipt timeout; an empty box, the common
+  case, goes straight to bb's command. The server half asks the window it reports as showing that thread over
+  bb's realtime channel. The window must take it up (the `composing` RPC) within a second, before it touches the
+  box, or the plugin answers `empty` and the hub delivers through bb's command, since nothing went in; a window
+  that takes it up late is told not to start. That window's overlay (`composeInto`) adds the dictation at the end
+  of that thread's one message box and sends it with the box's own send, steering a running turn as `--mode
+  auto` does, and answers through the `composed` RPC. Empty boxes answer `empty`; two boxes for the thread, one
+  with text, a draft that starts with `/` or `!`, or a box bb would not send answer `draft`; a send bb refused after
+  the dictation went in answers `added`. A window that took it up and never answered leaves it uncertain, never
+  sent again through the command, since the box may already have sent it. The plugin remembers each joined
+  message's text, without its surrounding whitespace, and names the turn it starts by the dictation's digest, so
+  its reply is followed.
 - **bb's plugin says which thread you are looking at.** Its window half (`app.tsx`, an `experimental_appOverlay`
   mounted once per bb window, which bb builds when it installs or reloads the plugin) reports over bb's plugin
   RPC whether the window has focus and which thread it shows: a thread only on a thread page, and in a split

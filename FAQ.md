@@ -568,6 +568,15 @@ it in the prompt box and presses Return for you while that conversation is in fr
 in the prompt box. An agent whose connector is out of date gets the message when it finishes.
 A conversation waiting on you, for an approval or an answer, holds the message until you respond.
 
+### Can I type part of a message and say the rest?
+
+Yes, in the conversation in front of you. When its prompt box already has text, KeyScribe adds what you say
+after it and sends the whole message, as if you had pressed Return, in Claude Code, Pi and bb; the receipt says
+your typed text went with it. In Claude Code, if the box changed or the conversation left the front before
+KeyScribe could press Return, the joined message stays in the box for you to send. A conversation that is not in
+front of you never gets text you left in its box sent along: KeyScribe says its prompt box already has text and
+sends nothing. Nothing is joined when your message or the typed text starts with `/` or `!`.
+
 ### Can “open” select a conversation in kitty or WezTerm?
 
 WezTerm works with no setup. “Open docs” switches to the pane docs runs in, but WezTerm cannot raise

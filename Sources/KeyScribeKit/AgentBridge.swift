@@ -1,7 +1,7 @@
 import Foundation
 
 public enum AgentCommand: Equatable, Sendable {
-    case submit(id: String, expectedSession: String, text: String, expectedPrompts: Int? = nil, expiresAt: Date, images: [String] = [], box: Bool = false)
+    case submit(id: String, expectedSession: String, text: String, expectedPrompts: Int? = nil, expiresAt: Date, images: [String] = [], box: Bool = false, merge: Bool = false)
     case status(id: String, expectedSession: String, text: String)
     case focus(id: String, expectedSession: String, expiresAt: Date, definition: String? = nil)
     case quiet(id: String, expectedSession: String)
@@ -10,14 +10,14 @@ public enum AgentCommand: Equatable, Sendable {
 
     public var id: String {
         switch self {
-        case .submit(let id, _, _, _, _, _, _), .status(let id, _, _): id
+        case .submit(let id, _, _, _, _, _, _, _), .status(let id, _, _): id
         case .focus(let id, _, _, _), .quiet(let id, _), .admit(let id, _), .check(let id, _, _, _): id
         }
     }
 
     public var expiresAt: Date? {
         switch self {
-        case .focus(_, _, let expiresAt, _), .submit(_, _, _, _, let expiresAt, _, _), .check(_, _, _, let expiresAt): expiresAt
+        case .focus(_, _, let expiresAt, _), .submit(_, _, _, _, let expiresAt, _, _, _), .check(_, _, _, let expiresAt): expiresAt
         case .status, .quiet, .admit: nil
         }
     }
@@ -41,10 +41,11 @@ public struct AgentDeliveryReport: Equatable, Sendable {
     public var altered: Bool
     public var miss: String?
     public var promptBox: String?
+    public var withDraft: Bool
 
     public init(
         state: State = .unknown, reason: String? = nil, turn: String = "", handedAt: Date? = nil, seenAt: Date? = nil,
-        altered: Bool = false, miss: String? = nil, promptBox: String? = nil
+        altered: Bool = false, miss: String? = nil, promptBox: String? = nil, withDraft: Bool = false
     ) {
         self.state = state
         self.reason = reason
@@ -54,6 +55,7 @@ public struct AgentDeliveryReport: Equatable, Sendable {
         self.altered = altered
         self.miss = miss
         self.promptBox = promptBox
+        self.withDraft = withDraft
     }
 }
 
@@ -135,7 +137,7 @@ public enum AgentEvent: Equatable, Sendable {
     case title(session: String, text: String)
     case waiting(session: String, prompt: AgentPrompt?)
     case notify(session: String, turn: String, on: Bool)
-    case shown(session: String, on: Bool)
+    case shown(session: String, on: Bool, draft: Bool = false)
 }
 
 extension AgentEvent {
@@ -143,7 +145,7 @@ extension AgentEvent {
         switch self {
         case .hello(let hello): hello.session
         case .typed(let session, _), .turnStarted(let session, _, _), .absorbed(let session, _, _), .turnComplete(let session, _, _),
-             .title(let session, _), .waiting(let session, _), .notify(let session, _, _), .shown(let session, _): session
+             .title(let session, _), .waiting(let session, _), .notify(let session, _, _), .shown(let session, _, _): session
         case .ack, .submitted, .checked, .refused, .undelivered, .focused: nil
         }
     }
@@ -160,7 +162,7 @@ extension AgentEvent {
         case .title(let session, let text): return .title(session: rename(session), text: text)
         case .waiting(let session, let prompt): return .waiting(session: rename(session), prompt: prompt)
         case .notify(let session, let turn, let on): return .notify(session: rename(session), turn: turn, on: on)
-        case .shown(let session, let on): return .shown(session: rename(session), on: on)
+        case .shown(let session, let on, let draft): return .shown(session: rename(session), on: on, draft: draft)
         case .ack, .submitted, .checked, .refused, .undelivered, .focused: return self
         }
     }
@@ -169,8 +171,8 @@ extension AgentEvent {
 extension AgentCommand {
     public func renamingSession(_ rename: (String) -> String) -> AgentCommand {
         switch self {
-        case .submit(let id, let s, let text, let prompts, let expiresAt, let images, let box):
-            .submit(id: id, expectedSession: rename(s), text: text, expectedPrompts: prompts, expiresAt: expiresAt, images: images, box: box)
+        case .submit(let id, let s, let text, let prompts, let expiresAt, let images, let box, let merge):
+            .submit(id: id, expectedSession: rename(s), text: text, expectedPrompts: prompts, expiresAt: expiresAt, images: images, box: box, merge: merge)
         case .status(let id, let s, let text): .status(id: id, expectedSession: rename(s), text: text)
         case .focus(let id, let s, let expiresAt, let definition): .focus(id: id, expectedSession: rename(s), expiresAt: expiresAt, definition: definition)
         case .quiet(let id, let s): .quiet(id: id, expectedSession: rename(s))
@@ -257,7 +259,10 @@ public enum AgentBridgeCodec {
         var on: Bool?
         var images: [String]?
         var box: Bool?
+        var merge: Bool?
         var promptBox: String?
+        var withDraft: Bool?
+        var draft: Bool?
         var state: String?
         var check: String?
         var handedAt: Double?
@@ -323,7 +328,7 @@ public enum AgentBridgeCodec {
             return .notify(session: try required(w.session), turn: w.turn ?? "", on: on)
         case "shown":
             guard let on = w.on else { throw CodecError.malformed }
-            return .shown(session: try required(w.session), on: on)
+            return .shown(session: try required(w.session), on: on, draft: w.draft ?? false)
         case "turnComplete":
             return .turnComplete(session: try required(w.session), reason: w.reason ?? "", answer: w.answer ?? "")
         default:
@@ -335,7 +340,7 @@ public enum AgentBridgeCodec {
         AgentDeliveryReport(
             state: state, reason: w.reason, turn: w.turn ?? "",
             handedAt: w.handedAt.map { Date(timeIntervalSince1970: $0 / 1000) }, seenAt: w.seenAt.map { Date(timeIntervalSince1970: $0 / 1000) },
-            altered: w.altered ?? false, miss: w.miss, promptBox: w.promptBox)
+            altered: w.altered ?? false, miss: w.miss, promptBox: w.promptBox, withDraft: w.withDraft ?? false)
     }
 
     private static func required(_ value: String?) throws -> String {
@@ -345,9 +350,9 @@ public enum AgentBridgeCodec {
 
     private static func wire(_ c: AgentCommand) -> Wire {
         switch c {
-        case .submit(let id, let s, let t, let prompts, let expiresAt, let images, let box):
+        case .submit(let id, let s, let t, let prompts, let expiresAt, let images, let box, let merge):
             Wire(op: "submit", id: id, expectedSession: s, text: t, expiresAt: milliseconds(expiresAt), expectedPrompts: prompts,
-                 images: images.isEmpty ? nil : images, box: box ? true : nil)
+                 images: images.isEmpty ? nil : images, box: box ? true : nil, merge: merge ? true : nil)
         case .status(let id, let s, let t): Wire(op: "status", id: id, expectedSession: s, text: t)
         case .focus(let id, let s, let expiresAt, let definition):
             Wire(op: "focus", id: id, expectedSession: s, expiresAt: milliseconds(expiresAt), definition: definition)
@@ -373,7 +378,7 @@ public enum AgentBridgeCodec {
         case "submit":
             return .submit(
                 id: id, expectedSession: s, text: try required(w.text), expectedPrompts: w.expectedPrompts, expiresAt: try date(w.expiresAt),
-                images: w.images ?? [], box: w.box ?? false)
+                images: w.images ?? [], box: w.box ?? false, merge: w.merge ?? false)
         case "status": return .status(id: id, expectedSession: s, text: try required(w.text))
         case "focus": return .focus(id: id, expectedSession: s, expiresAt: try date(w.expiresAt), definition: w.definition)
         case "quiet": return .quiet(id: id, expectedSession: s)

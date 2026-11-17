@@ -12,6 +12,7 @@ public struct AgentDelivery: Equatable, Sendable {
     public var entered: Date?
     public var confirmed: Date?
     public var altered = false
+    public var withDraft = false
     public var reconnects = 0
     public var doubted: Date?
     public var check: Check?
@@ -26,11 +27,13 @@ public struct AgentDelivery: Equatable, Sendable {
         handedToAgent = handedToAgent ?? report.handedAt
         entered = entered ?? report.seenAt
         altered = altered || report.altered
+        withDraft = withDraft || report.withDraft
         miss = report.miss ?? miss
     }
 
     public func describe(agent: String, timeZone: TimeZone = .current) -> String {
         var parts = ["Handed off at \(clock(handedOff, timeZone))"]
+        if withDraft { parts.append("sent with the text already in its prompt box") }
         if let handedToAgent { parts.append("\(agent) had it \(after(handedToAgent))") }
         if let entered { parts.append("it entered the conversation \(after(entered))" + (altered ? ", changed on its way in" : "")) }
         if let doubted { parts.append("not confirmed by \(after(doubted))") }

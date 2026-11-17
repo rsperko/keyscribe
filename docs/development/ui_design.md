@@ -792,9 +792,17 @@ message is and still cannot tell; when the answer is that it reached the convers
 “Sent to docs”. A take left uncertain still has its turn's reply spoken when nothing says that turn belongs to another
 message, and History's Delivery line records
 when each side saw the message, for diagnosing a receipt that went missing.
+A take for the conversation in front whose prompt box already holds text is added after that text, and the whole
+is sent as one message, the way Return sends it, so a message can be started by typing and finished by voice. The
+receipt is “Sent to docs with the text in its prompt box”, and History's Delivery line says the typed text went
+too, since History keeps only what was said. Claude Code's box is sent by the app pressing Return after the same
+checks as any message it puts in the box; when a check fails, the joined text stays there (“Not sent to docs: the
+message was added to its prompt box after text already there. Review it there and press Return to send it”).
+Nothing is joined when the take or the text in the box starts with `/` or `!`, and a take for a conversation that
+is not in front never is.
 A take that would no longer fit what is on screen is not sent, and never sends later on its own: for
 example, the user sent that conversation a message after the take was decided, its question was answered,
-or its prompt box already holds text. The HUD says so, why, and how to recover (“Not sent to docs: its
+or its prompt box already holds text that the take cannot join. The HUD says so, why, and how to recover (“Not sent to docs: its
 prompt box already has text. Send or clear that text there, then say this again”); it never says who wrote
 that text. Text already in the agent's prompt box is left exactly as it was, and what was said stays in
 History. With **Reply updates** on, a take the conversation did not take is also spoken once, as a short

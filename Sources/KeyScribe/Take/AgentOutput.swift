@@ -177,13 +177,13 @@ final class AgentOutput {
     private static func needsAttention(_ receipt: AgentReceipt) -> Bool {
         switch receipt {
         case .notSent, .kept, .uncertain: true
-        case .sent, .queued: false
+        case .sent, .sentWithDraft, .queued: false
         }
     }
 
     static func spokenRefusal(_ receipt: AgentReceipt) -> String? {
         switch receipt {
-        case .sent, .queued, .uncertain: return nil
+        case .sent, .sentWithDraft, .queued, .uncertain: return nil
         case .kept(let handle, let reason):
             switch reason {
             case .composing: return "\(handle) didn\u{2019}t take that: its prompt box has text"
@@ -211,7 +211,7 @@ final class AgentOutput {
 
     static func dictationOutcome(_ receipt: AgentReceipt) -> DictationOutcome {
         switch receipt {
-        case .sent, .queued, .kept: .inserted
+        case .sent, .sentWithDraft, .queued, .kept: .inserted
         case .notSent, .uncertain: .failed
         }
     }
@@ -219,7 +219,7 @@ final class AgentOutput {
     private static func mayStillSettle(_ receipt: AgentReceipt) -> Bool {
         switch receipt {
         case .queued, .uncertain: true
-        case .sent, .kept, .notSent: false
+        case .sent, .sentWithDraft, .kept, .notSent: false
         }
     }
 
@@ -351,6 +351,9 @@ final class AgentOutput {
         case .sent(let handle):
             if clipboard.missed { return .advisory(message: "Sent to \(handle), but \(ClipboardNote.missedLine)") }
             return .commandDone(summary: "Sent to \(handle)\(clipboard.suffix)", detail: mode)
+        case .sentWithDraft(let handle):
+            if clipboard.missed { return .advisory(message: "Sent to \(handle) with the text in its prompt box, but \(ClipboardNote.missedLine)") }
+            return .commandDone(summary: "Sent to \(handle) with the text in its prompt box\(clipboard.suffix)", detail: mode)
         case .queued(let handle, let reason):
             let respond = " Say \u{201C}open \(handle)\u{201D} to respond; this message stays queued"
             let detail = switch reason {
@@ -370,7 +373,8 @@ final class AgentOutput {
             case .connectionGap: "it lost its connection to \(Branding.appName) while this waited"
             case .inPromptBox(.afterStop): "its last turn was interrupted, so the message is waiting in its prompt box. Press Return there to send it"
             case .inPromptBox(.awaitingReturn): "the message is in its prompt box. Review it there and press Return to send it"
-            case .inPromptBox(.besideText): "the message was added to its prompt box after text already there. Review it there and press Return to send it"
+            case .inPromptBox(.besideText), .inPromptBox(.joinedDraft), .inPromptBox(.joinedDraftMidTurn):
+                "the message was added to its prompt box after text already there. Review it there and press Return to send it"
             }
             return .advisory(message: "Not sent to \(handle): \(why)")
         case .notSent(let handle, let reason):

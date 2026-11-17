@@ -12,14 +12,18 @@ export type Host = {
   labelled: () => void
 }
 export type Thread = { id: string; status: string }
-export type WindowReport = { window: string; focused: boolean; thread: string | null }
+export type WindowReport = { window: string; focused: boolean; thread: string | null; draft?: boolean }
 export type Pane = { threadId: string | null; isFocused: boolean }
 export type Bb = {
   listThreads: () => Promise<Thread[]>
   history: (thread: string) => Promise<string[]>
   interaction: (thread: string, id: string) => Promise<string | null>
   on: (event: string, handler: (payload: any) => void) => void
+  compose: (window: string, thread: string, text: string) => Promise<Composed | null>
 }
+export type Composed = { outcome: "sent"; joined: string } | { outcome: "empty" | "blocked" | "failed" }
+export type ComposeAsk = { id: string; window: string; thread: string; text: string }
+export type ComposeAnswer = { id: string } & Composed
 export type Waiting = { kind?: string; title?: string; tool?: string; detail?: string }
 export type ReadAloud = boolean | "quiet" | null
 
@@ -37,7 +41,7 @@ type Member = {
   resay: boolean
 }
 
-const features = ["promptDigest", "readiness", "shown", "notify", "label"]
+const features = ["promptDigest", "readiness", "shown", "notify", "label", "merge"]
 const labelLimit = 200
 const busy = new Set(["active", "starting", "stopping"])
 const answerLimit = 8192
@@ -52,6 +56,7 @@ const waitingCheck = 5000
 const waitingCheckLater = 30000
 const waitingCheckSlowsAfter = 60000
 const readAloudDeadline = 4000
+const joinedLimit = 32
 const waitingTitleLimit = 300
 const waitingDetailLimit = 1000
 
@@ -153,6 +158,58 @@ export function shownThread(route: string | null, panes: readonly Pane[] | null)
   return !focused || focused.threadId === route ? route : null
 }
 
+export type ComposerLike = {
+  readonly scope: { kind: string; threadId?: string }
+  readonly isEmpty: boolean
+  readonly isSubmittingBlocked: boolean
+  readonly text: string
+  insert(text: string, options: { at: "end" }): void
+  submit(options: { experimental_mode: "steer-if-active" }): Promise<void>
+}
+
+export function runsAsCommand(text: string): boolean {
+  return /^[/!]/.test(text.trimStart())
+}
+
+export async function composeInto(composers: readonly ComposerLike[], thread: string, said: string): Promise<Composed> {
+  const boxes = composers.filter((box) => box.scope.kind === "thread" && box.scope.threadId === thread)
+  if (boxes.every((box) => box.isEmpty)) return { outcome: "empty" }
+  const box = boxes[0]
+  if (boxes.length > 1 || box.isSubmittingBlocked || runsAsCommand(box.text)) return { outcome: "blocked" }
+  const draft = box.text
+  const joined = draft + (draft && !/\s$/.test(draft) ? " " : "") + said
+  box.insert(joined.slice(draft.length), { at: "end" })
+  try {
+    await box.submit({ experimental_mode: "steer-if-active" })
+    return { outcome: "sent", joined }
+  } catch {
+    return { outcome: "failed" }
+  }
+}
+
+export const composeChannel = "compose"
+
+export function isComposeAsk(value: unknown): value is ComposeAsk {
+  if (!value || typeof value !== "object") return false
+  const ask = value as Record<string, unknown>
+  return [ask.id, ask.window, ask.thread].every((part) => typeof part === "string" && part.length > 0 && part.length <= 128)
+    && typeof ask.text === "string"
+}
+
+function isComposeStart(value: unknown): value is { id: string } {
+  if (!value || typeof value !== "object") return false
+  const id = (value as Record<string, unknown>).id
+  return typeof id === "string" && id.length > 0 && id.length <= 128
+}
+
+function isComposeAnswer(value: unknown): value is ComposeAnswer {
+  if (!value || typeof value !== "object") return false
+  const answer = value as Record<string, unknown>
+  if (typeof answer.id !== "string" || answer.id.length > 128) return false
+  if (answer.outcome === "sent") return typeof answer.joined === "string"
+  return answer.outcome === "empty" || answer.outcome === "blocked" || answer.outcome === "failed"
+}
+
 type Checked<T> = { value: T } | { issues: { message: string }[] }
 type Schema<T> = {
   readonly "~standard": {
@@ -169,6 +226,7 @@ function isWindowReport(value: unknown): value is WindowReport {
   const report = value as Record<string, unknown>
   return typeof report.window === "string" && report.window.length > 0 && report.window.length <= 64 && typeof report.focused === "boolean"
     && (report.thread === null || (typeof report.thread === "string" && report.thread.length <= 128))
+    && (report.draft === undefined || typeof report.draft === "boolean")
 }
 
 function isThreadKeys(value: unknown): value is { keys: string[] } {
@@ -203,6 +261,14 @@ export const rpcContract = {
   readAloud: {
     input: schema(isReadAloudAsk, "expected { thread, on }"),
     output: schema(isMessage, "expected { message }"),
+  },
+  composing: {
+    input: schema(isComposeStart, "expected { id }"),
+    output: schema((value): value is { go: boolean } => !!value && typeof (value as Record<string, unknown>).go === "boolean", "expected { go }"),
+  },
+  composed: {
+    input: schema(isComposeAnswer, "expected { id, outcome }"),
+    output: schema((value): value is null => value === null, "expected null"),
   },
 }
 
@@ -247,6 +313,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
   const members = new Map<string, Member>()
   const names = new Map<string, string>()
   const queued = new Map<string, { thread: string; text: string }>()
+  const joinedAs = new Map<string, string>()
   let config: Config | null = null
   let token = ""
   let launch: string | null = null
@@ -258,11 +325,13 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
   let retry: (() => void) | null = null
   let unwatch: (() => void) | null = null
   let polling: { cancel: () => void } | null = null
-  const windows = new Map<string, { thread: string | null; focused: boolean; focusedAt: number; seenAt: number }>()
+  const windows = new Map<string, { thread: string | null; draft: boolean; focused: boolean; focusedAt: number; seenAt: number }>()
   let focusings = 0
   let turnCount = 0
   let wanted: string | null = null
+  let wantedDraft = false
   let told: string | null | undefined
+  let toldDraft = false
   let telling = false
   let retelling: (() => void) | null = null
   let sweeping: (() => void) | null = null
@@ -493,6 +562,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
         host.labelled()
       }
       void post("/event", { op: "ack", request: command.id, instance: instanceOf(thread), connection }, eventDeadline)
+      if (command.op === "submit") void join(thread, command)
     }
     const unknown: string[] = Array.isArray(parsed?.unknown) ? parsed.unknown : []
     for (const [thread, m] of members) if (unknown.includes(instanceOf(thread)) || readmitted.includes(thread)) m.helloed = false
@@ -532,25 +602,52 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
   }
 
   async function startedPrompt(thread: string, next: string | null | undefined): Promise<string | undefined> {
-    if (next !== undefined) return next === null ? undefined : promptDigest(next)
+    if (next !== undefined) return next === null ? undefined : digestFor(thread, next)
     try {
       const waiting = new Set([...queued.values()].filter((q) => q.thread === thread).map((q) => q.text))
       const newest = (await bb.history(thread)).find((entry) => !waiting.has(entry))
-      return newest === undefined ? undefined : promptDigest(newest)
+      return newest === undefined ? undefined : digestFor(thread, newest)
     } catch {
       return undefined
     }
   }
 
-  function front(): string | null {
+  function digestFor(thread: string, text: string): string {
+    return promptDigest(joinedAs.get(thread + "\n" + text.trim()) ?? text)
+  }
+
+  function frontWindow(): { id: string; thread: string | null; draft: boolean } | null {
     const now = host.now()
     for (const [id, w] of windows) if (now - w.seenAt > windowSilence) windows.delete(id)
-    const fresh = [...windows.values()]
+    const fresh = [...windows].map(([id, w]) => ({ id, ...w }))
     const focusedNow = fresh.filter((w) => w.focused)
     const pool = (focusedNow.length ? focusedNow : fresh).filter((w) => w.focusedAt > 0)
-    let best: { thread: string | null; focusedAt: number } | null = null
+    let best: { id: string; thread: string | null; draft: boolean; focusedAt: number } | null = null
     for (const w of pool) if (!best || w.focusedAt > best.focusedAt) best = w
-    return best?.thread ?? null
+    return best
+  }
+
+  function front(): string | null {
+    return frontWindow()?.thread ?? null
+  }
+
+  async function join(thread: string, command: any) {
+    const answer = (body: object) => post("/event", { ...body, request: command.id, instance: instanceOf(thread), connection }, eventDeadline)
+    if (command.merge !== true || typeof command.text !== "string") return answer({ op: "refused", reason: "unsupported" })
+    if (runsAsCommand(command.text)) return answer({ op: "refused", reason: "draft" })
+    const shown = frontWindow()
+    if (!shown || shown.thread !== thread) return answer({ op: "refused", reason: "empty" })
+    const composed = await bb.compose(shown.id, thread, command.text).catch(() => null)
+    if (!composed || stopped) return
+    if (composed.outcome !== "sent") return answer({ op: "refused", reason: composed.outcome === "empty" ? "empty" : composed.outcome === "failed" ? "added" : "draft" })
+    const key = thread + "\n" + composed.joined.trim()
+    joinedAs.delete(key)
+    joinedAs.set(key, command.text)
+    for (const oldest of joinedAs.keys()) {
+      if (joinedAs.size <= joinedLimit) break
+      joinedAs.delete(oldest)
+    }
+    return answer({ op: "submitted", turn: "" })
   }
 
   function reachable(thread: string | null | undefined): thread is string {
@@ -561,19 +658,22 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
   function tell() {
     if (!connected || stopped || telling || !config) return
     const target = reachable(wanted) ? wanted : null
-    if (told !== undefined && told === target) return
+    const draft = target !== null && wantedDraft
+    if (told !== undefined && told === target && toldDraft === draft) return
     const via = target ?? (reachable(told) ? told : [...members.keys()].find(reachable))
     if (!via) {
       told = target
+      toldDraft = draft
       return
     }
     telling = true
     retelling?.()
     retelling = null
-    void post("/event", { op: "shown", session: sessionOf(via), on: target !== null, instance: instanceOf(via), connection }, eventDeadline).then((response) => {
+    void post("/event", { op: "shown", session: sessionOf(via), on: target !== null, draft, instance: instanceOf(via), connection }, eventDeadline).then((response) => {
       telling = false
       if (response?.ok) {
         told = target
+        toldDraft = draft
         return tell()
       }
       if (response?.status === 409 && members.get(via)) {
@@ -585,7 +685,9 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
   }
 
   function settleFront() {
-    wanted = front()
+    const shown = frontWindow()
+    wanted = shown?.thread ?? null
+    wantedDraft = shown?.draft ?? false
     tell()
     if (windows.size && !sweeping && !stopped) {
       sweeping = host.after(windowSweep, () => {
@@ -602,6 +704,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     if (!known) host.log("a bb window started reporting")
     windows.set(report.window, {
       thread: typeof report.thread === "string" ? report.thread : null,
+      draft: report.draft === true,
       focused: report.focused === true,
       focusedAt: report.focused === true && !known?.focused ? ++focusings : known?.focusedAt ?? 0,
       seenAt: now,

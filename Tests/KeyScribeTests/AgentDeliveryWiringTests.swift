@@ -35,7 +35,9 @@ struct AgentDeliveryWiringTests {
         var live = true
         var unreachable: Set<String> = []
         var refusal: String?
+        var refusalWhenMerging: String?
         var onSubmit: (() -> Void)?
+        var onMerge: (() -> Void)?
         var promptBox: String?
         var onCheck: (() -> Void)?
         weak var hub: AgentHub?
@@ -50,6 +52,11 @@ struct AgentDeliveryWiringTests {
                 Task { @MainActor [weak hub] in
                     hub?.handle(.checked(request: request, check: check, report: .init(state: .refused, reason: "filled", promptBox: promptBox)))
                 }
+                return
+            }
+            if case .submit(_, _, _, _, _, _, _, true) = command, let refusalWhenMerging {
+                onMerge?()
+                Task { @MainActor [weak hub] in hub?.handle(.refused(request: command.id, reason: refusalWhenMerging)) }
                 return
             }
             if let refusal, case .submit = command {
@@ -134,10 +141,14 @@ struct AgentDeliveryWiringTests {
 
     private final class Front: AgentFronting, @unchecked Sendable {
         var answer: FrontSession?
+        private(set) var asked = 0
         init(_ id: String? = nil, window: String? = "cg:3") {
             answer = id.map { FrontSession(id: $0, app: FrontApp(bundle: "com.mitchellh.ghostty", pid: 9, name: "Ghostty", window: window)) }
         }
-        func shown(among agents: [AgentFrontCandidate], asking: @escaping @MainActor @Sendable (String) -> Void) async -> FrontSession? { answer }
+        func shown(among agents: [AgentFrontCandidate], asking: @escaping @MainActor @Sendable (String) -> Void) async -> FrontSession? {
+            asked += 1
+            return answer
+        }
     }
 
     private final class SlowFront: AgentFronting, @unchecked Sendable {
@@ -220,7 +231,7 @@ struct AgentDeliveryWiringTests {
 
         var sent: [(AgentCommand, String)] { transport.sent }
         var texts: [String] {
-            sent.compactMap { if case .submit(_, _, let text, _, _, _, _) = $0.0 { text } else { nil } }
+            sent.compactMap { if case .submit(_, _, let text, _, _, _, _, _) = $0.0 { text } else { nil } }
         }
     }
 
@@ -338,7 +349,7 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: features)))
         await take(rig)
-        guard case .submit(let request, _, _, _, _, _, _) = rig.sent.last?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _, _, _, _, _) = rig.sent.last?.0 else { Issue.record("nothing handed off"); return }
         rig.hub.handle(.submitted(request: request, turn: ""))
         await rig.controller.dictationTask?.value
         #expect(rig.hud.states.contains(.commandDone(summary: summary, detail: "Agent")))
@@ -348,7 +359,7 @@ struct AgentDeliveryWiringTests {
         let rig = await rig("Fix insert clipboard contents", focused: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        guard case .submit(let request, _, let text, _, _, _, _) = rig.sent.last?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, let text, _, _, _, _, _) = rig.sent.last?.0 else { Issue.record("nothing handed off"); return }
         #expect(text.lowercased().contains("insert clipboard contents"))
         rig.hub.handle(.submitted(request: request, turn: ""))
         await rig.controller.dictationTask?.value
@@ -367,7 +378,7 @@ struct AgentDeliveryWiringTests {
         #expect(saved.count == 1)
         let path = folder.appendingPathComponent(try #require(saved.first)).path
         #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == png)
-        guard case .submit(_, _, let text, _, _, let images, _) = rig.sent.last?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(_, _, let text, _, _, let images, _, _) = rig.sent.last?.0 else { Issue.record("nothing handed off"); return }
         #expect(text == "What is wrong here \(path)?")
         #expect(images == [path])
     }
@@ -392,8 +403,10 @@ struct AgentDeliveryWiringTests {
         rig.hud.states.compactMap { if case .recording(_, _, _, _, let agents) = $0 { agents } else { nil } }
     }
 
-    private func stoppedRig(_ inFront: String?, typed: Bool = true, refusal: String = "filled", features: [String] = ["fill"]) async -> Rig {
-        let rig = await rig("Tell keyscribe, run the tests.", glance: Front(inFront))
+    private func stoppedRig(
+        _ inFront: String?, typed: Bool = true, refusal: String? = "filled", features: [String] = ["fill"], front: Front? = nil
+    ) async -> Rig {
+        let rig = await rig("Tell keyscribe, run the tests.", glance: front ?? Front(inFront))
         rig.hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 10, features: features)))
         rig.transport.refusal = refusal
         rig.returns.typedBy = typed ? "claude:s1" : nil
@@ -451,6 +464,79 @@ struct AgentDeliveryWiringTests {
         #expect(rig.returns.pressed.isEmpty)
     }
 
+    private func merged(_ rig: Rig) -> [Bool] {
+        rig.sent.compactMap { if case .submit(_, _, _, _, _, _, _, let merge) = $0.0 { merge } else { nil } }
+    }
+
+    @Test func aDictationRefusedForTypedTextInTheConversationInFrontIsJoinedToItAndSentWithReturn() async {
+        let rig = await stoppedRig("claude:s1", refusal: "draft", features: ["merge"])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.transport.refusalWhenMerging = "joined"
+        await take(rig)
+        #expect(merged(rig) == [false, true])
+        #expect(rig.returns.pressed == [.return])
+        let entry = await settledEntry(rig)
+        #expect(entry?.outcome == .inserted)
+        #expect(entry?.summary == "Sent to keyscribe with the text in its prompt box")
+        #expect(entry?.facts?.first { $0.label == "Delivery" }?.value.contains("sent with the text already in its prompt box") == true)
+    }
+
+    @Test func aDictationToAnIdleConversationWithAnEmptyBoxNeverChecksWhatIsInFront() async {
+        let plain = Front("claude:s1")
+        let merging = Front("claude:s1")
+        let without = await stoppedRig(nil, refusal: nil, features: [], front: plain)
+        let with = await stoppedRig(nil, refusal: nil, features: ["merge"], front: merging)
+        defer {
+            try? FileManager.default.removeItem(at: without.supportDir)
+            try? FileManager.default.removeItem(at: with.supportDir)
+        }
+        await take(without)
+        await take(with)
+        #expect(merged(with) == [false])
+        #expect(merging.asked == plain.asked)
+        #expect((await settledEntry(with))?.summary == "Sent to keyscribe")
+    }
+
+    @Test func aDictationForAConversationNotInFrontNeverJoinsWhatTheUserTyped() async {
+        let rig = await stoppedRig("claude:s2", refusal: "draft", features: ["merge"])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(merged(rig) == [false])
+        #expect(rig.returns.pressed.isEmpty)
+        #expect(rig.hud.states.last == AgentOutput.receiptState(.kept("keyscribe", reason: .composing), mode: "Agent", heard: ""))
+    }
+
+    @Test func aConnectorThatNeverSaidItJoinsDraftsIsNeverAskedTo() async {
+        let rig = await stoppedRig("claude:s1", refusal: "draft", features: ["fill"])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig)
+        #expect(merged(rig) == [false])
+        #expect(rig.returns.pressed.isEmpty)
+    }
+
+    @Test func aJoinedDictationWhoseConversationLeavesTheFrontWaitsInItsPromptBox() async {
+        let front = Front("claude:s1")
+        let rig = await stoppedRig(nil, refusal: "draft", features: ["merge"], front: front)
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.transport.refusalWhenMerging = "joined"
+        rig.transport.onMerge = { front.answer = nil }
+        await take(rig)
+        #expect(merged(rig) == [false, true])
+        #expect(rig.returns.pressed.isEmpty)
+        #expect(rig.hud.states.last == AgentOutput.receiptState(.kept("keyscribe", reason: .inPromptBox(.joinedDraft)), mode: "Agent", heard: ""))
+    }
+
+    @Test func aDictationJoinedToADraftWhileTheConversationWorksIsSentWithReturnAsTyped() async {
+        let rig = await workingRig(Front("claude:s1"), features: ["readiness", "fill", "box", "merge"])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.transport.refusal = "joinedMidTurn"
+        await take(rig)
+        #expect(boxed(rig) == [true])
+        #expect(merged(rig) == [true])
+        #expect(rig.returns.pressed == [.return])
+        #expect((await settledEntry(rig))?.summary == "Sent to keyscribe with the text in its prompt box")
+    }
+
     @Test func aConnectorThatNeverSaidItFillsThePromptBoxIsNotTrustedToHaveFilledIt() async {
         let rig = await stoppedRig("claude:s1", features: ["focus"])
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
@@ -474,7 +560,7 @@ struct AgentDeliveryWiringTests {
     }
 
     private func boxed(_ rig: Rig) -> [Bool] {
-        rig.sent.compactMap { if case .submit(_, _, _, _, _, _, let box) = $0.0 { box } else { nil } }
+        rig.sent.compactMap { if case .submit(_, _, _, _, _, _, let box, _) = $0.0 { box } else { nil } }
     }
 
     @Test func aDictationForTheWorkingConversationInFrontIsEnteredInItsPromptBoxAsTyped() async {
@@ -618,7 +704,7 @@ struct AgentDeliveryWiringTests {
     }
 
     private func submittedRequest(_ rig: Rig) -> String? {
-        rig.sent.compactMap { if case .submit(let id, _, _, _, _, _, _) = $0.0 { id } else { nil } }.first
+        rig.sent.compactMap { if case .submit(let id, _, _, _, _, _, _, _) = $0.0 { id } else { nil } }.first
     }
 
     private func heard(_ text: String, connection: String? = nil, origin: String?) -> SpokenResultOutput.Heard {
@@ -2609,7 +2695,7 @@ struct AgentDeliveryWiringTests {
         #expect(uncertain?.summary == "May not have reached keyscribe: check its terminal")
         #expect(uncertain?.outcome == .failed)
 
-        guard case .submit(let request, _, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
         rig.hub.handle(.submitted(request: request, turn: ""))
         for _ in 0..<200 where rig.history.entries().first?.summary != "Sent to keyscribe" {
             try? await Task.sleep(for: .milliseconds(5))
@@ -2627,7 +2713,7 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.transport.confirms = false
         await take(rig)
-        guard case .submit(let request, _, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
         rig.controller.forgetAgentReceipt(request: request)
         rig.controller.showAgentNotice(.sent("keyscribe"), request: request)
         try? await Task.sleep(for: .milliseconds(50))
@@ -2647,7 +2733,7 @@ struct AgentDeliveryWiringTests {
         await take(rig)
         let sent = await lastHistoryEntry(rig)
         #expect(sent?.summary == "Sent to keyscribe")
-        guard case .submit(let request, _, _, _, _, _, _) = rig.sent.first?.0 else {
+        guard case .submit(let request, _, _, _, _, _, _, _) = rig.sent.first?.0 else {
             Issue.record("nothing handed off")
             try? FileManager.default.removeItem(at: rig.supportDir)
             return nil
@@ -2703,7 +2789,7 @@ struct AgentDeliveryWiringTests {
         guard let (rig, first) = await steeredTake(features: ["readiness", "steer", "fill"]) else { return }
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
-        guard case .submit(let second, _, _, _, _, _, _) = rig.sent.last?.0, second != first else {
+        guard case .submit(let second, _, _, _, _, _, _, _) = rig.sent.last?.0, second != first else {
             Issue.record("the second take was not handed off")
             return
         }
@@ -2845,7 +2931,7 @@ struct AgentDeliveryWiringTests {
         rig.transport.confirms = false
         await take(rig)
         let uncertain = await lastHistoryEntry(rig)
-        guard case .submit(let request, _, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
 
         rig.controller.agents = nil
         rig.controller.showAgentNotice(.sent("keyscribe"), request: request)
@@ -2904,7 +2990,7 @@ struct AgentDeliveryWiringTests {
         rig.registry.firstStatus = "idle"
         rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
         await rig.hub.rescan()
-        guard case .submit(let request, _, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
         rig.hub.handle(.refused(request: request, reason: "busy elsewhere"))
         for _ in 0..<200 where rig.history.entries().first?.outcome != .failed {
             try? await Task.sleep(for: .milliseconds(5))
@@ -3006,7 +3092,7 @@ struct AgentDeliveryWiringTests {
         rig.registry.firstStatus = "idle"
         rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: ""))
         await rig.hub.rescan()
-        guard case .submit(let request, _, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
+        guard case .submit(let request, _, _, _, _, _, _, _) = rig.sent.first?.0 else { Issue.record("nothing handed off"); return }
         rig.hub.handle(.refused(request: request, reason: "draft"))
         for _ in 0..<200 where rig.history.entries().first?.outcome != .failed {
             try? await Task.sleep(for: .milliseconds(5))

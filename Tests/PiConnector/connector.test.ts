@@ -42,7 +42,7 @@ function harness(options: Options = {}) {
   const timers: Array<{ at: number; fn: () => void; id: number }> = []
   let timerId = 0
   let now = options.now ?? 1_000_000
-  const live = { session: "s1", name: undefined as string | undefined, idle: true, editor: "", cwd: "/work", mode: options.mode ?? "tui" }
+  const live = { session: "s1", name: undefined as string | undefined, idle: true, editor: "", cwd: "/work", mode: options.mode ?? "tui", model: { id: "m" } as { id: string } | undefined }
   let keyHandler: ((data: string) => unknown) | null = null
   let execCode = 0
   let sendFails = false
@@ -112,10 +112,12 @@ function harness(options: Options = {}) {
     hasUI: true,
     get cwd() { return live.cwd },
     sessionManager: { getSessionId: () => live.session, getCwd: () => live.cwd },
+    get model() { return live.model },
     isIdle: () => live.idle,
     ui: {
       setStatus: (_key: string, text: string | undefined) => { statuses.push(text) },
       getEditorText: () => live.editor,
+      setEditorText: (text: string) => { live.editor = text },
       onTerminalInput: (handler: (data: string) => unknown) => {
         keyHandler = handler
         return () => { if (keyHandler === handler) keyHandler = null }
@@ -266,7 +268,7 @@ test("a session start says hello with the process, its directory, its name and w
   assert.equal(hello.cwd, "/work")
   assert.equal(hello.session, "s1")
   assert.equal(hello.title, "frontend")
-  assert.deepEqual(hello.features, ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check", "steer"])
+  assert.deepEqual(hello.features, ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check", "steer", "merge"])
   assert.equal(hello.prompts, 0)
   assert.equal(hello.idle, true)
   assert.equal(hello.gap, false)
@@ -982,6 +984,165 @@ test("dictation never submits over a message the user is still writing, and leav
   assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["draft"])
   assert.equal(h.live.editor, "half a thought")
   assert.equal(h.sends.length, 0)
+})
+
+test("dictation for the conversation in front joins what the user started typing and sends it as one message", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "half a thought"
+  await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+  assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), [])
+  assert.equal(h.sends.length, 1)
+  assert.ok(h.sends[0].text.startsWith("half a thought run the tests"))
+  assert.match(h.sends[0].text.slice("half a thought run the tests".length), invisible)
+  assert.equal(h.live.editor, "")
+})
+
+test("a draft that already ends in a new line takes the dictation with no extra space", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "first line\n"
+  await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+  assert.ok(h.sends[0].text.startsWith("first line\nrun the tests"))
+})
+
+for (const [why, setUp] of [
+  ["Pi runs without its own terminal", (h: any) => { h.live.mode = "rpc" }],
+  ["no model is chosen", (h: any) => { h.live.model = undefined }],
+  ["the draft would run as a command", (h: any) => { h.live.editor = "  /compact" }],
+  ["the draft would run in the shell", (h: any) => { h.live.editor = "!ls" }],
+  ["the conversation is being compacted", (h: any) => { h.emit("session_before_compact", {}) }],
+] as const) {
+  test(`dictation never clears a draft when ${why}`, async () => {
+    const h = harness()
+    await h.connect()
+    h.live.editor = "half a thought"
+    setUp(h)
+    const typed = h.live.editor
+    await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+    assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["draft"])
+    assert.equal(h.live.editor, typed)
+    assert.equal(h.sends.length, 0)
+  })
+}
+
+test("a joined message Pi refuses to send puts the user's draft back", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "half a thought"
+  h.sendFails = true
+  await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+  assert.equal(h.live.editor, "half a thought")
+})
+
+test("a joined message Pi turns away after it was sent puts the user's draft back", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "half a thought"
+  h.sendRejects = "no API key"
+  await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+  await h.settle()
+  assert.equal(h.live.editor, "half a thought")
+})
+
+test("a draft put back never overwrites what the user typed after it was cleared", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "half a thought"
+  h.sendRejects = "no API key"
+  await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+  h.live.editor = "something new"
+  await h.settle()
+  assert.equal(h.live.editor, "something new")
+})
+
+test("a draft that ends in a tab takes the dictation with no extra space", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "first\t"
+  await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+  assert.ok(h.sends[0].text.startsWith("first\trun the tests"))
+})
+
+test("a dictation that would run as a command after leading spaces is never joined either", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "half a thought"
+  await h.deliver([h.submit("r1", "  /compact", { merge: true })])
+  assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["draft"])
+})
+
+test("the receipt of a joined message says it carried the user's draft", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "half a thought"
+  await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+  h.emit("message_start", { message: { role: "user", content: h.sends[0].text } })
+  await h.settle()
+  assert.deepEqual(h.replies().filter((b) => b.op === "submitted").map((b) => b.withDraft), [true])
+})
+
+test("a joined message Pi never takes puts the user's draft back once its receipt is overdue", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "half a thought"
+  await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+  assert.equal(h.live.editor, "")
+  await h.advance(3000)
+  assert.equal(h.live.editor, "half a thought")
+})
+
+test("a joined message that arrives after its draft was put back clears that draft again, so it is never sent twice", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "half a thought"
+  await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+  await h.advance(3000)
+  assert.equal(h.live.editor, "half a thought")
+  h.emit("message_start", { message: { role: "user", content: h.sends[0].text } })
+  await h.settle()
+  assert.equal(h.live.editor, "")
+})
+
+test("a late joined message never clears what the user changed in the draft put back", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "half a thought"
+  await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+  await h.advance(3000)
+  h.live.editor = "half a thought, edited"
+  h.emit("message_start", { message: { role: "user", content: h.sends[0].text } })
+  await h.settle()
+  assert.equal(h.live.editor, "half a thought, edited")
+})
+
+test("a joined message Pi took leaves the editor empty after its receipt deadline", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "half a thought"
+  await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+  h.emit("message_start", { message: { role: "user", content: h.sends[0].text } })
+  await h.advance(3000)
+  assert.equal(h.live.editor, "")
+})
+
+test("dictation joins a draft again once compaction ends", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "half a thought"
+  h.emit("session_before_compact", {})
+  h.emit("session_compact_failed", {})
+  await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+  assert.equal(h.sends.length, 1)
+})
+
+test("a dictation that would run as a command is never joined to a draft", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "half a thought"
+  await h.deliver([h.submit("r1", "/compact", { merge: true })])
+  assert.deepEqual(h.replies().map((b) => b.reason).filter(Boolean), ["draft"])
+  assert.equal(h.live.editor, "half a thought")
 })
 
 test("dictation is refused while the agent shows a dialog and accepted once it closes", async () => {

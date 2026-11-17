@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import plugin, { configPaths, interactionStatus, readAloudToolName, rpcContract } from "../../Sources/KeyScribe/Resources/BBPlugin/server.ts"
+import plugin, { composeRelay, configPaths, interactionStatus, readAloudToolName, rpcContract } from "../../Sources/KeyScribe/Resources/BBPlugin/server.ts"
 
 function fakeBb(overrides: Record<string, unknown> = {}): any {
   return {
@@ -40,7 +40,7 @@ test("bb's windows report to the server through one method whose input is checke
   const bb = fakeBb({ rpc: { register: (contract: any, handlers: any) => registered.push({ contract, handlers }) } })
   await plugin(bb)
   assert.equal(registered.length, 1)
-  assert.deepEqual(Object.keys(registered[0].contract), ["window", "labels", "readAloud"])
+  assert.deepEqual(Object.keys(registered[0].contract), ["window", "labels", "readAloud", "composing", "composed"])
   assert.equal(registered[0].handlers.window({ window: "w1", focused: true, thread: "thr_a" }), null)
   const check = (value: unknown) => rpcContract.window.input["~standard"].validate(value)
   assert.deepEqual(check({ window: "w1", focused: true, thread: null }), { value: { window: "w1", focused: true, thread: null } })
@@ -116,4 +116,60 @@ test("a command in bb's message box asks for its thread's reply through one meth
   const output = (value: unknown) => rpcContract.readAloud.output["~standard"].validate(value)
   assert.deepEqual(output({ message: "ok" }), { value: { message: "ok" } })
   assert.ok("issues" in (output({ message: null }) as object))
+})
+
+test("a join is asked of every window over one channel and settled only by the answer of the window that took it", async () => {
+  const published: Array<{ channel: string; payload: any }> = []
+  const timers: Array<{ ms: number; fire: () => void; live: boolean }> = []
+  const relay = composeRelay((channel, payload) => published.push({ channel, payload }), (ms, fire) => {
+    const timer = { ms, fire, live: true }
+    timers.push(timer)
+    return () => { timer.live = false }
+  })
+  const joined = relay.compose("w1", "thr_a", "run the tests")
+  assert.deepEqual(published.map((p) => [p.channel, p.payload.window, p.payload.thread, p.payload.text]), [["compose", "w1", "thr_a", "run the tests"]])
+  const id = published[0].payload.id
+  relay.answered({ id, outcome: "sent", joined: "too early" })
+  assert.equal(relay.starting(id), true)
+  assert.equal(relay.starting(id), false)
+  relay.answered({ id: "someone else", outcome: "empty" })
+  relay.answered({ id, outcome: "sent", joined: "half run the tests" })
+  assert.deepEqual(await joined, { outcome: "sent", joined: "half run the tests" })
+  assert.ok(timers.every((t) => !t.live))
+})
+
+test("a join no window takes up in time touched nothing, so it reads as an empty box, and a window that answers late is told not to start", async () => {
+  const published: any[] = []
+  const timers: Array<() => void> = []
+  const relay = composeRelay((_channel, payload) => published.push(payload), (_ms, fire) => { timers.push(fire); return () => {} })
+  const joined = relay.compose("w1", "thr_a", "run the tests")
+  timers[0]()
+  assert.deepEqual(await joined, { outcome: "empty" })
+  assert.equal(relay.starting(published[0].id), false)
+})
+
+test("a join a window took up but never finished is left unanswered", async () => {
+  const published: any[] = []
+  const timers: Array<() => void> = []
+  const relay = composeRelay((_channel, payload) => published.push(payload), (_ms, fire) => { timers.push(fire); return () => {} })
+  const joined = relay.compose("w1", "thr_a", "run the tests")
+  assert.equal(relay.starting(published[0].id), true)
+  timers[1]()
+  assert.equal(await joined, null)
+})
+
+test("the windows answer a join through one method whose input is checked before it is used", async () => {
+  const registered: Array<{ contract: any }> = []
+  await plugin(fakeBb({ rpc: { register: (contract: any) => registered.push({ contract }) }, realtime: { publish: () => {} } }))
+  assert.deepEqual(Object.keys(registered[0].contract), ["window", "labels", "readAloud", "composing", "composed"])
+  const starting = (value: unknown) => rpcContract.composing.input["~standard"].validate(value)
+  assert.ok("value" in (starting({ id: "j1" }) as object))
+  assert.ok("issues" in (starting({ id: 7 }) as object))
+  assert.ok("value" in (rpcContract.composing.output["~standard"].validate({ go: false }) as object))
+  const check = (value: unknown) => rpcContract.composed.input["~standard"].validate(value)
+  assert.ok("value" in (check({ id: "j1", outcome: "sent", joined: "a b" }) as object))
+  assert.ok("value" in (check({ id: "j1", outcome: "blocked" }) as object))
+  for (const bad of [null, {}, { id: "j1", outcome: "sent" }, { id: "j1", outcome: "maybe" }, { id: 1, outcome: "empty" }]) {
+    assert.ok("issues" in (check(bad) as object))
+  }
 })

@@ -384,6 +384,19 @@ struct AgentBridgeCodecTests {
             seenAt: Date(timeIntervalSince1970: 1_793_400_000.5), altered: true)))
     }
 
+    @Test func aReceiptSaysWhenTheMessageCarriedTheTextAlreadyInThePromptBox() throws {
+        let joined = #"{"op":"submitted","request":"r1","turn":"","withDraft":true}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(joined.utf8))
+            == .submitted(request: "r1", turn: "", report: AgentDeliveryReport(state: .seen, withDraft: true)))
+    }
+
+    @Test func aShownThreadSaysWhetherItsMessageBoxHasText() throws {
+        let typed = #"{"op":"shown","session":"t1","on":true,"draft":true}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(typed.utf8)) == .shown(session: "t1", on: true, draft: true))
+        let plain = #"{"op":"shown","session":"t1","on":true}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(plain.utf8)) == .shown(session: "t1", on: true))
+    }
+
     @Test func aCheckAnswerSaysWhereTheMessageIsAndAnUnknownStateIsUnknown() throws {
         let handed = #"{"op":"checked","request":"r1","check":"c1","state":"handed","handedAt":1793400000250,"miss":"other"}"#
         #expect(try AgentBridgeCodec.decodeEvent(Data(handed.utf8)) == .checked(request: "r1", check: "c1", report: AgentDeliveryReport(
@@ -532,6 +545,17 @@ struct AgentBridgeCodecTests {
         #expect(try AgentBridgeCodec.decodeCommands(plain) == [.submit(id: "r1", expectedSession: "s1", text: "x", expiresAt: .distantFuture)])
         #expect(boxed[0].renamingSession { "claude:" + $0 }
             == .submit(id: "r1", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture, box: true))
+    }
+
+    @Test func aSubmitMayJoinADraftOnlyWhenItSaysSo() throws {
+        let merging: [AgentCommand] = [.submit(id: "r1", expectedSession: "s1", text: "x", expiresAt: .distantFuture, merge: true)]
+        let data = try AgentBridgeCodec.encode(merging)
+        #expect(String(decoding: data, as: UTF8.self).contains(#""merge":true"#))
+        #expect(try AgentBridgeCodec.decodeCommands(data) == merging)
+        let plain = try AgentBridgeCodec.encode([.submit(id: "r1", expectedSession: "s1", text: "x", expiresAt: .distantFuture)])
+        #expect(!String(decoding: plain, as: UTF8.self).contains("merge"))
+        #expect(merging[0].renamingSession { "claude:" + $0 }
+            == .submit(id: "r1", expectedSession: "claude:s1", text: "x", expiresAt: .distantFuture, merge: true))
     }
 
     @Test func aCheckSaysWhetherTheFilledPromptBoxIsReadyForReturn() throws {

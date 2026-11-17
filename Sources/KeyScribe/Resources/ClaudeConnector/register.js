@@ -16,7 +16,7 @@ const stallRetries = 3
 const late = { late: true }
 const unreachable = { unreachable: true }
 const freshSources = ['startup', 'clear', 'fork']
-const features = ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest', 'box', 'steer']
+const features = ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest', 'box', 'steer', 'merge']
 const readAloudTool = 'tell_me_when_done'
 
 let config = null
@@ -51,7 +51,7 @@ const drawGrace = 500
 const personTools = new Set(['AskUserQuestion', 'ExitPlanMode'])
 let guard = null
 let lastAskAt = -Infinity
-let filledText = null
+let boxFill = null
 const receipts = []
 const steerLimit = 16
 const shownLimit = 64
@@ -786,8 +786,33 @@ async function fillBox($, id, text, expiresAt, gen, expected) {
   }
   if (filled.text !== text) return refuse($, gen, id, 'added')
   track(id, { box: text })
-  filledText = text
+  boxFill = { text, prompt: text }
   return refuse($, gen, id, 'filled')
+}
+
+function runsAsCommand(text) {
+  return /^[/!]/.test(text.trimStart())
+}
+
+async function joinDraft($, id, draft, text, expiresAt, gen, expected) {
+  const now = await $.clock.now()
+  if (!(now < expiresAt)) return refuse($, gen, id, 'expired')
+  if (!current(expected, gen)) return refuse($, gen, id, 'sessionChanged')
+  if (quiet) return refuse($, gen, id, 'disconnected')
+  track(id, { state: 'handed', handedAt: now })
+  const joined = draft + (draft && !/\s$/.test(draft) ? ' ' : '') + text
+  let box
+  try {
+    box = await $.prompt.fill({ text: joined.slice(draft.length), mode: 'append' })
+  } catch (err) {
+    return refuse($, gen, id, 'draft')
+  }
+  if (!box || !box.isFilled) return refuse($, gen, id, box && box.refusal === 'dialog' ? 'dialog' : 'draft')
+  if (box.text !== joined) return refuse($, gen, id, 'added')
+  track(id, { box: joined })
+  if (!currentTurn) return refuse($, gen, id, 'joined')
+  boxFill = { text: joined, prompt: text }
+  return refuse($, gen, id, 'joinedMidTurn')
 }
 
 async function promptBoxState($, id) {
@@ -903,7 +928,10 @@ async function handle($, cmd, gen) {
     if (hold()) return refuse($, gen, cmd.id, hold())
     const box = await $.prompt.read()
     if (hold()) return refuse($, gen, cmd.id, hold())
-    if (box.text.trim()) return refuse($, gen, cmd.id, 'draft')
+    if (box.text.trim()) {
+      if (!cmd.merge || runsAsCommand(cmd.text) || runsAsCommand(box.text)) return refuse($, gen, cmd.id, 'draft')
+      return joinDraft($, cmd.id, box.text, cmd.text, cmd.expiresAt, gen, cmd.expectedSession)
+    }
     if (currentTurn && !cmd.box) return holdSteer($, cmd.id, cmd.text, cmd.expiresAt, gen, cmd.expectedSession)
     if (cmd.box && currentTurn) return fillBox($, cmd.id, cmd.text, cmd.expiresAt, gen, cmd.expectedSession)
     return submit($, cmd.id, cmd.text, cmd.expiresAt, gen, cmd.expectedSession)
@@ -1188,10 +1216,10 @@ export function register(on) {
 
   on('prompt.attachment', { type: 'queued_command' }, async ($, e, next) => {
     const result = await next(e)
-    if (filledText && typeof e.text === 'string' && e.text.includes(filledText)) {
-      const text = filledText
-      filledText = null
-      observe($, { op: 'absorbed', session, turn: currentTurn || '', prompt: promptDigest(text) })
+    if (boxFill && typeof e.text === 'string' && e.text.includes(boxFill.text)) {
+      const { prompt } = boxFill
+      boxFill = null
+      observe($, { op: 'absorbed', session, turn: currentTurn || '', prompt: promptDigest(prompt) })
     }
     return result
   })
@@ -1219,7 +1247,7 @@ export function register(on) {
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     if (e.agentId === undefined && (currentTurn === null || currentTurn === e.turnId)) {
-      filledText = null
+      boxFill = null
       currentTurn = null
       turnKnown = true
       observe($, { op: 'turnComplete', session, reason: e.reason, answer: boundedAnswer(e.answer) })
