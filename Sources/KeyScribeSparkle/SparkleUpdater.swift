@@ -15,6 +15,7 @@ public final class SparkleUpdater: NSObject, AppUpdater {
     public var onUpdateAvailable: (@MainActor () -> Void)?
 
     private let feedURL: String
+    private var channels = UpdateChannelSelection()
     private var controller: SPUStandardUpdaterController!
 
     public init(feedURL: String = SparkleUpdater.defaultFeedURL) {
@@ -31,6 +32,16 @@ public final class SparkleUpdater: NSObject, AppUpdater {
         controller.checkForUpdates(nil)
     }
 
+    public var betaOption: BetaUpdateOption? {
+        BetaUpdateOption(
+            label: "Get beta updates",
+            help: "Betas bring new features before a release and may have rough edges. You still get every release. If you turn this off, you keep the beta you have until a release replaces it.")
+    }
+
+    public func setReceivesBetaUpdates(_ beta: Bool) {
+        if channels.select(beta: beta) { controller.updater.resetUpdateCycle() }
+    }
+
     // Sparkle's own scheduler drives the update cadence; the per-dictation lifecycle hook is a no-op.
     public func dictationDidFinish() {}
 }
@@ -38,6 +49,10 @@ public final class SparkleUpdater: NSObject, AppUpdater {
 extension SparkleUpdater: SPUUpdaterDelegate {
     public nonisolated func feedURLString(for updater: SPUUpdater) -> String? {
         MainActor.assumeIsolated { feedURL }
+    }
+
+    public nonisolated func allowedChannels(for updater: SPUUpdater) -> Set<String> {
+        MainActor.assumeIsolated { channels.allowed }
     }
 
     public nonisolated func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {

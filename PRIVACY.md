@@ -71,7 +71,8 @@ KeyScribe only reaches the network for these things, and never to send your audi
    first automatic check and you can turn it off. It carries no speech, transcript, or usage data —
    only the metadata any HTTP request unavoidably reveals (your IP address and the app/OS version); the
    updater's optional anonymous system profiling is left disabled. Updates are cryptographically
-   verified before they run.
+   verified before they run. Turning on beta updates changes which versions it offers from the same
+   feed, not what it sends.
 
 There is no background phone-home or license check.
 

@@ -258,6 +258,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.onSelectSpeechModel = { [weak self] id in self?.speechModels.select(id) }
         menu.onAddVocabulary = { [weak self] in self?.correctionPanel.present() }
         menu.onUpdate = { [weak self] in self?.updater?.performUpdate() }
+        updater?.setReceivesBetaUpdates(settings.updates.beta)
         updater?.onUpdateAvailable = { [weak self] in self?.menu.setUpdateAvailable(true) }
         controller.onRecordingChanged = { [weak self] active in
             self?.menu.setDictating(active)
@@ -312,6 +313,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             detectProblems: { [weak self] in self?.currentProblems() ?? [] },
             accessibilityTapActive: { [weak self] in self?.hotkey?.isTapActive ?? false },
+            betaOption: updater?.betaOption,
             onRelaunch: { [weak self] in self?.relaunchForPermissionSetup() },
             onEraseAllData: { [weak self] in self?.eraseAllDataAndRelaunch() },
             clipboardPaste: { [weak self] in self?.controller.clipboardPaste(for: nil) ?? ClipboardPaste() })
@@ -687,6 +689,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         let previousHistory = settings.history
         let voiceCommandsChanged = updated.features.isEnabled(.voiceCommands) != settings.features.isEnabled(.voiceCommands)
         let previousAudio = settings.audio
+        let previousUpdates = settings.updates
         // Compared against the provider, not the old setting: launch already activated a replacement for a
         // retired saved id, and persisting it must not evict the engine that preload is warming.
         if updated.stt.engine != provider.active.id {
@@ -717,6 +720,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         hud.appearance = updated.hud.appearance
         rebuildHotkeyMonitor()
         applyLoginItem(updated.loadOnLogin)
+        updater?.setReceivesBetaUpdates(updated.updates.beta)
+        if previousUpdates.beta, !updated.updates.beta { menu.setUpdateAvailable(false) }
         settingsController.update(settings: updated)
         refreshStatus()
     }

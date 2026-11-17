@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major
+.PHONY: help build run release publish ship cask test test-release-tools check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major beta
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -16,18 +16,18 @@ run: build ## Build then launch the dev app
 
 # Bump can be positional (make release patch) or an explicit version (make release BUMP=vX.Y.Z).
 # When positional, it shows up as a goal in MAKECMDGOALS; pluck it out and feed it to release.sh.
-BUMP ?= $(filter patch minor major,$(MAKECMDGOALS))
-release: ## Cut a release: make release patch | minor | major   (or BUMP=vX.Y.Z; bare = re-run current tag)
+BUMP ?= $(filter patch minor major beta,$(MAKECMDGOALS))
+release: ## Cut a release: make release patch | minor | major | beta   (or BUMP=vX.Y.Z[-beta.N]; bare = re-run current tag)
 	./release.sh $(BUMP)
 
 # No-op stubs so `make release patch` treats 'patch' as the bump arg, not an unknown target to build.
-patch minor major:
+patch minor major beta:
 	@:
 
 publish: ## Publish the built+verified release: push tag + GitHub release (auto-notes) + cask + tap
 	./scripts/publish.sh
 
-ship: ## Fail-fast pre-notarize gate, build+notarize, human smoke, then publish: make ship patch|minor|major
+ship: ## Fail-fast pre-notarize gate, build+notarize, human smoke, then publish: make ship patch|minor|major|beta
 	$(MAKE) preflight-pre && $(MAKE) release BUMP="$(BUMP)" && ./scripts/preflight.sh && $(MAKE) publish
 
 cask: ## Refresh the Homebrew cask in ../homebrew-tap from the built DMG (then commit+push the tap)
@@ -40,6 +40,9 @@ BUILD_SYSTEM = $(shell ./scripts/swiftpm-build-system.sh test)
 
 test: ## Run the full test suite
 	swift test $(BUILD_SYSTEM)
+
+test-release-tools: ## Check the release version math and the update feed
+	python3 -B scripts/test_release_tools.py
 
 check-deps: ## Detect upstream dependency mutation (moved tags, re-uploaded binary assets)
 	./scripts/check-binary-artifacts.py
