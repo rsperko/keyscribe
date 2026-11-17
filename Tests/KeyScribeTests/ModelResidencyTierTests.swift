@@ -92,22 +92,13 @@ struct ModelResidencyTierTests {
         return Harness(controller: controller, engine: engine, provider: provider, captureURL: captureURL, supportDir: supportDir)
     }
 
-    private func fires(_ signal: Signal, within seconds: Double) async -> Bool {
-        let deadline = ContinuousClock.now + .seconds(seconds)
-        while ContinuousClock.now < deadline {
-            if signal.hasFired { return true }
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        return signal.hasFired
-    }
-
     private func expectResidency(_ eviction: Eviction, _ engine: ResidencySpyEngine) async {
         switch eviction {
         case .fastest:
             try? await Task.sleep(for: .milliseconds(300))
             #expect(engine.evictions == 0)
         case .balanced, .frugal:
-            #expect(await fires(engine.evicted, within: 10))
+            await engine.evicted.wait()
         }
     }
 
@@ -158,15 +149,15 @@ struct ModelResidencyTierTests {
         let h = makeHarness(.balanced)
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
         h.controller.preloadActiveEngineIfNeeded()
-        #expect(await fires(h.engine.loaded, within: 10))
-        #expect(await fires(h.engine.evicted, within: 10))
+        await h.engine.loaded.wait()
+        await h.engine.evicted.wait()
     }
 
     @Test func fastestLaunchPreloadKeepsTheModelLoaded() async {
         let h = makeHarness(.fastest)
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
         h.controller.preloadActiveEngineIfNeeded()
-        #expect(await fires(h.engine.loaded, within: 10))
+        await h.engine.loaded.wait()
         try? await Task.sleep(for: .milliseconds(300))
         #expect(h.engine.evictions == 0)
     }
@@ -204,7 +195,7 @@ struct ModelResidencyTierTests {
         await h.controller.captureBringUpTask?.value
         h.controller.cancel()
         loadRelease.fire()
-        #expect(await fires(h.engine.evicted, within: 10))
+        await h.engine.evicted.wait()
         try? await Task.sleep(for: .milliseconds(300))
         #expect(h.engine.transcribed.isEmpty)
         #expect(!h.engine.isLoaded)
@@ -221,10 +212,10 @@ struct ModelResidencyTierTests {
         try! h.provider.setActive(engineB.id)
         h.controller.evictSwitchedAwayEngine(previous)
         h.controller.preloadActiveEngineIfNeeded()
-        #expect(await fires(engineB.loaded, within: 10))
+        await engineB.loaded.wait()
         try? await Task.sleep(for: .milliseconds(100))
         releaseA.fire()
-        #expect(await fires(engineB.evicted, within: 10))
+        await engineB.evicted.wait()
         #expect(!engineB.isLoaded)
         #expect(!engineA.isLoaded)
     }
@@ -235,12 +226,12 @@ struct ModelResidencyTierTests {
                             serialized: true, idleSeconds: 3600)
         defer { try? FileManager.default.removeItem(at: h.supportDir) }
         h.controller.preloadActiveEngineIfNeeded()
-        #expect(await fires(h.engine.loadStarted, within: 10))
+        await h.engine.loadStarted.wait()
         var settings = h.controller.settings
         settings.stt.eviction = .frugal
         h.controller.updateSettings(settings)
         loadRelease.fire()
-        #expect(await fires(h.engine.evicted, within: 10))
+        await h.engine.evicted.wait()
         #expect(!h.engine.isLoaded)
     }
 }
