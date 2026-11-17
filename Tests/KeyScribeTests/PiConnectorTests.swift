@@ -25,22 +25,13 @@ struct PiCLITests {
         #expect(PiCLI.describe([1, 4, 0]) == "1.4.0")
     }
 
-    @Test func piIsFoundOnThePathFirstThenUnderTheNewestNodeVersionManagerInstall() {
+    @Test func piIsAlsoLookedForUnderTheNewestNodeVersionManagerInstallFirst() {
         let home = URL(fileURLWithPath: "/Users/me")
         let listing: (URL) -> [String] = { $0.path.hasSuffix(".nvm/versions/node") ? ["v22.1.0", "v24.21.0", "v9.0.0"] : [] }
-        let onPath = PiCLI.locate(environment: ["PATH": "/custom/bin"], home: home, isExecutable: { $0 == "/custom/bin/pi" || $0.hasPrefix("/Users/me/.nvm") }, listing: listing)
-        #expect(onPath == "/custom/bin/pi")
-        let newest = PiCLI.locate(environment: ["PATH": "/usr/bin"], home: home, isExecutable: { $0.hasPrefix("/Users/me/.nvm") }, listing: listing)
-        #expect(newest == "/Users/me/.nvm/versions/node/v24.21.0/bin/pi")
-        let volta = PiCLI.locate(environment: [:], home: home, isExecutable: { $0 == "/Users/me/.volta/bin/pi" }, listing: listing)
-        #expect(volta == "/Users/me/.volta/bin/pi")
-        #expect(PiCLI.locate(environment: [:], home: home, isExecutable: { _ in false }, listing: listing) == nil)
-    }
-
-    @Test func runningPiPutsItsOwnFolderFirstOnThePathSoItsNodeIsFound() {
-        let (status, output) = PiCLI.run(["/bin/sh", "-c", "echo $PATH"], environment: ["PATH": "/usr/bin"])
-        #expect(status == 0)
-        #expect(output.hasPrefix("/bin:/usr/bin"))
+        #expect(PiCLI.extraFolders(home: home, listing: listing) == [
+            "/Users/me/.nvm/versions/node/v24.21.0/bin", "/Users/me/.nvm/versions/node/v22.1.0/bin", "/Users/me/.nvm/versions/node/v9.0.0/bin",
+            "/Users/me/.bun/bin", "/Users/me/.npm-global/bin",
+        ])
     }
 
     @Test func theDefaultSetupIsPisOwnFolderNeverTheAppsEnvironment() {
@@ -198,9 +189,12 @@ struct PiConnectorStatusTests {
         var status: Int32 = 0
         var calls: [[String]] { lock.withLock { _calls } }
 
-        func run(_ argv: [String]) -> (Int32, String) {
-            lock.withLock { _calls.append(argv) }
-            return (status, status == 0 ? version : "boom")
+        func check(_ tool: String) async -> ToolCheck {
+            let (version, status) = lock.withLock {
+                _calls.append([tool, "--version"])
+                return (self.version, self.status)
+            }
+            return ToolCheck.judge(.exited(status), output: status == 0 ? version : "boom")
         }
     }
 
@@ -208,7 +202,8 @@ struct PiConnectorStatusTests {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ks-pi-conn-\(UUID().uuidString)")
         let agents = root.appendingPathComponent("agents")
         let home = root.appendingPathComponent("home")
-        let connector = PiConnector(locate: { pi }, run: cli.run, agentsDir: agents, pluginName: "keyscribe-dev", surfaces: .builtIn, script: script, home: home)
+        let tools = ToolEnvironment(appEnvironment: ["PATH": "/test-bin"], shell: "/bin/zsh", isExecutable: { pi != nil && $0 == "/test-bin/pi" })
+        let connector = PiConnector(version: cli.check, tools: tools, agentsDir: agents, pluginName: "keyscribe-dev", surfaces: .builtIn, script: script, home: home)
         return (connector, cli, agents, home.appendingPathComponent(".pi/agent"))
     }
 
@@ -238,7 +233,7 @@ struct PiConnectorStatusTests {
             folder: folder, isDefault: true, connector: connector, registry: ConnectorSetupRegistry(directory: agents), retire: { _ in })
         cli.status = 1
         await setup.install()
-        #expect(setup.hasError)
+        #expect(setup.toolMissing)
         #expect(!setup.isInstalled)
         #expect(setup.isEnrolled)
         #expect(setup.offersUninstall)
@@ -268,21 +263,6 @@ struct PiConnectorStatusTests {
         #expect(await connector.check(tool: "/bin/pi-test", target: target(folder)) == .status(.disabled))
     }
 
-    @Test func theVersionIsAskedOnceUntilTheToolChangesOnDisk() async throws {
-        let (connector, cli, _, folder) = make()
-        _ = await connector.check(tool: "/bin/pi-test", target: target(folder))
-        _ = await connector.check(tool: "/bin/pi-test", target: target(folder))
-        #expect(cli.calls.count == 1)
-        let tool = FileManager.default.temporaryDirectory.appendingPathComponent("ks-pi-tool-\(UUID().uuidString)")
-        try Data("#!/bin/sh\n".utf8).write(to: tool)
-        _ = await connector.check(tool: tool.path, target: target(folder))
-        _ = await connector.check(tool: tool.path, target: target(folder))
-        #expect(cli.calls.count == 2)
-        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: 60)], ofItemAtPath: tool.path)
-        _ = await connector.check(tool: tool.path, target: target(folder))
-        #expect(cli.calls.count == 3)
-    }
-
     @Test func aPiBelowTheFloorIsReportedBeforeAnyFileIsLooked() async {
         let cli = CLI()
         cli.version = "1.3.2\n"
@@ -295,7 +275,7 @@ struct PiConnectorStatusTests {
         let cli = CLI()
         cli.status = 1
         let (connector, _, _, folder) = make(cli: cli)
-        #expect(await connector.check(tool: "/bin/pi-test", target: target(folder)) == .failed("boom"))
+        #expect(await connector.check(tool: "/bin/pi-test", target: target(folder)) == .toolNotWorking(.exited(1, "boom")))
     }
 
     @Test func leftoverFilesOfASetupBeingRemovedReadAsUnfinished() async throws {
@@ -347,7 +327,8 @@ struct PiConnectorStatusTests {
         let focus = FocusDefinition(id: "mux", requiresEnv: ["MUX_PANE"], argv: ["/usr/bin/env", "mux", "focus", "{MUX_PANE}"])
         let definitions = ConnectorSurfaces.builtIn.focusDefinitions + (addsFocus ? [focus] : [])
         let after = PiConnector(
-            locate: { "/bin/pi-test" }, run: CLI().run, agentsDir: agents, pluginName: "keyscribe-dev",
+            version: CLI().check, tools: ToolEnvironment(appEnvironment: ["PATH": "/test-bin"], shell: "/bin/zsh", isExecutable: { $0 == "/test-bin/pi" }),
+            agentsDir: agents, pluginName: "keyscribe-dev",
             surfaces: ConnectorSurfaces(environmentKeys: ResolvedSurfaces.builtIn.environmentKeys.union(["MUX_PANE"]), focusDefinitions: definitions),
             script: PiConnectorFiles.indexTS, home: folder.deletingLastPathComponent().deletingLastPathComponent())
         let updated = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [after])
@@ -378,7 +359,8 @@ struct PiConnectorStatusTests {
         await model.refresh()
         await model.connectors[0].setups[0].install()
         let connector = PiConnector(
-            locate: { nil }, run: { _ in (0, "") }, agentsDir: agents, pluginName: "keyscribe-dev", surfaces: .builtIn, script: PiConnectorFiles.indexTS,
+            version: { _ in .working("1.5.0") }, tools: ToolEnvironment(appEnvironment: ["PATH": "/test-bin"], shell: "/bin/zsh", isExecutable: { _ in false }),
+            agentsDir: agents, pluginName: "keyscribe-dev", surfaces: .builtIn, script: PiConnectorFiles.indexTS,
             home: folder.deletingLastPathComponent().deletingLastPathComponent())
         let without = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
         await without.refresh()

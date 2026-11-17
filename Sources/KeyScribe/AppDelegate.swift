@@ -48,6 +48,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     private var replacementUsage: ReplacementUsageStore!
     private var correctionPanel: CorrectionPanelController!
     private var agentRuntime: AgentRuntime?
+    private var observingTools = false
     private var spokenResult: SpokenResultOutput?
     private var answers: SpokenAnswerOutput?
     private var answerOnPanel = false
@@ -907,6 +908,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 spokenResult = spoken
                 controller.spokenUpdates = spoken
                 agentRuntime = runtime
+                if !observingTools {
+                    observingTools = true
+                    ToolEnvironment.shared.observe { [weak self] in
+                        Task { @MainActor in
+                            guard let self, self.agentRuntime != nil else { return }
+                            await self.settingsController.agents.maintain()
+                        }
+                    }
+                }
+                ToolEnvironment.shared.waitWhile { [weak self] in await MainActor.run { self?.controller?.isBusy ?? false } }
+                ToolEnvironment.shared.turnedOn(true, keys: agentIntegrations.folderVariables)
                 runtime.settingsOpen = settingsController.isOpen
                 settingsController.onOpenChange = { [weak runtime] in runtime?.settingsOpen = $0 }
                 controller.agents = runtime.hub
@@ -918,6 +930,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 Log.agents.error("agent bridge did not start: \(String(describing: error), privacy: .public)")
             }
         } else {
+            ToolEnvironment.shared.turnedOn(false)
             agentRuntime?.stop()
             agentRuntime = nil
             settingsController.agents.setups.onChange = nil

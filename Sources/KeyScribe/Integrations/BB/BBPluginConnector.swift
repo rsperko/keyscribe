@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import KeyScribeKit
 
@@ -120,68 +121,112 @@ final class BBPluginConnector: AgentConnector {
     typealias Run = BBHost.Run
 
     let kind = BBHost.kind
-    let defaultFolder: URL
     let id: String
     private let agentsDir: URL
     private let sources: [String: String]?
     private let isExecutable: (String) -> Bool
     private let run: Run
     private let home: URL
+    private let find: @MainActor () async -> [BBBuild]
+    private let isOpen: @MainActor (BBBuild) -> Bool
+    private(set) var builds: [BBBuild] = []
+    private var preferred: BBBuild?
+    private var added: [String: BBBuild] = [:]
+    private let isDataFolder: (String) -> Bool
+    private let describe: (String) -> BBBuild?
 
     init(
         agentsDir: URL, pluginName: String, home: URL = FileManager.default.homeDirectoryForCurrentUser,
         sources: [String: String]? = BBPluginFiles.sources,
         isExecutable: @escaping (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
-        run: @escaping Run = { try await HostCLI.run($0, subcommand: $1, input: $2, environment: $3, timeout: .seconds(120)) }
+        run: @escaping Run = { try await HostCLI.run($0, subcommand: $1, input: $2, environment: $3, timeout: .seconds(120)) },
+        find: (@MainActor () async -> [BBBuild])? = nil,
+        isOpen: @escaping @MainActor (BBBuild) -> Bool = BBBuildFinder.isOpen,
+        isDataFolder: @escaping (String) -> Bool = BBBuildFinder.isDataFolder,
+        describe: @escaping (String) -> BBBuild? = BBBuildFinder.describe(folder:)
     ) {
+        self.isDataFolder = isDataFolder
+        self.describe = describe
         self.agentsDir = agentsDir
         id = pluginName
         self.home = home
         self.sources = sources
         self.isExecutable = isExecutable
         self.run = run
-        defaultFolder = home.appendingPathComponent(".bb", isDirectory: true)
+        self.find = find ?? {
+            let apps = BBBuildFinder.runningApps
+            let path = home.path
+            let declared = ToolEnvironment.shared.folder(BBBuilds.dataFolderKey).map { [$0] } ?? []
+            return await Task.detached { BBBuildFinder.find(home: path, apps: apps, also: declared) }.value
+        }
+        self.isOpen = isOpen
     }
 
-    private var pluginDir: URL { agentsDir.appendingPathComponent("bb-plugin", isDirectory: true) }
-    private var configURL: URL { pluginDir.appendingPathComponent("keyscribe.json") }
+    private var usualFolder: URL { home.appendingPathComponent(BBBuilds.usualFolder, isDirectory: true) }
+
+    var defaultFolder: URL { preferred.map { URL(fileURLWithPath: $0.folder, isDirectory: true) } ?? usualFolder }
+
+    var foundFolders: [URL] { builds.map { URL(fileURLWithPath: $0.folder, isDirectory: true) } }
+
+    func rediscover() async {
+        builds = await find()
+        preferred = BBBuilds.preferred(builds, open: isOpen, home: ConnectorFolders.canonical(home).path)
+    }
+
+    func name(of folder: URL) -> String? { (builds.first { $0.folder == folder.path } ?? added[folder.path])?.name }
+
+    private func pluginDir(_ folder: URL) -> URL {
+        guard ConnectorFolders.canonical(folder) != ConnectorFolders.canonical(usualFolder) else { return agentsDir.appendingPathComponent("bb-plugin", isDirectory: true) }
+        let digest = SHA256.hash(data: Data(ConnectorFolders.canonical(folder).path.utf8)).prefix(6).map { String(format: "%02x", $0) }.joined()
+        return agentsDir.appendingPathComponent("bb-plugin-\(digest)", isDirectory: true)
+    }
+
+    private func configURL(_ folder: URL) -> URL { pluginDir(folder).appendingPathComponent("keyscribe.json") }
 
     var isBundled: Bool { sources != nil }
     var bundledVersion: String? { sources.map(BBPluginFiles.version) }
 
-    func hasFiles(in target: ConnectorTarget) -> Bool { FileManager.default.fileExists(atPath: pluginDir.path) }
+    func hasFiles(in target: ConnectorTarget) -> Bool { FileManager.default.fileExists(atPath: pluginDir(target.folder).path) }
 
     func manualUninstall(for target: ConnectorTarget) -> [String] {
-        let bb = ShellWord.path(target.folder.appendingPathComponent("bin/bb").path, home: home.path)
-        return ["\(bb) plugin remove \(id)", "rm -r \(ShellWord.path(pluginDir.path, home: home.path))"]
+        let bb = ShellWord.path(target.folder.appendingPathComponent(BBBuilds.launcherPath).path, home: home.path)
+        return ["\(bb) plugin remove \(id)", "rm -r \(ShellWord.path(pluginDir(target.folder).path, home: home.path))"]
     }
 
-    func recognizes(folder: URL) -> Bool { ConnectorFolders.contains(any: ["bin/bb", "thread-storage"], in: folder) }
-
-    var allowsOtherFolders: Bool { false }
-
-    func locateTool() -> String? {
-        let tool = defaultFolder.appendingPathComponent("bin/bb").path
-        return isExecutable(tool) ? tool : nil
+    func recognizes(folder: URL) -> Bool {
+        let path = ConnectorFolders.canonical(folder).path
+        guard isDataFolder(path) else { return false }
+        if let build = describe(path) { added[path] = build }
+        return true
     }
+
+    var folderVariable: String? { BBBuilds.dataFolderKey }
+
+    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result {
+        let place = ToolSearch.Place(path: folder.appendingPathComponent(BBBuilds.launcherPath).path, source: .usual)
+        return ToolSearch.Result(tool: isExecutable(place.path) ? place : nil, searched: [place])
+    }
+
 
     private func filesCurrent(_ sources: [String: String], target: ConnectorTarget, installation: String) -> Bool {
         let expected = BBPluginFiles.config(
             agentsDir: agentsDir, instance: target.folder.path, installation: installation, version: BBPluginFiles.version(for: sources))
-        guard String(decoding: FileManager.default.contents(atPath: configURL.path) ?? Data(), as: UTF8.self) == expected else { return false }
+        guard String(decoding: FileManager.default.contents(atPath: configURL(target.folder).path) ?? Data(), as: UTF8.self) == expected else { return false }
+        let plugin = pluginDir(target.folder)
         return BBPluginFiles.written(sources, id: id).allSatisfy { name, text in
-            (try? String(contentsOf: pluginDir.appendingPathComponent(name), encoding: .utf8)) == text
+            (try? String(contentsOf: plugin.appendingPathComponent(name), encoding: .utf8)) == text
         }
     }
 
     func check(tool: String, target: ConnectorTarget) async -> AgentConnectorModel.State {
         guard let sources else { return .unavailable }
-        let config = FileManager.default.contents(atPath: configURL.path).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        let plugin = pluginDir(target.folder)
+        let config = FileManager.default.contents(atPath: configURL(target.folder).path).flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
         if target.removing { return config == nil ? .status(.notInstalled) : .removalUnfinished(nil) }
         guard let installation = target.installation, let config else { return .status(.notInstalled) }
         let installed = config["version"] as? String ?? ""
         let listing = try? await output(tool, ["plugin", "list", "--json"], subcommand: "plugin list", target: target)
-        guard let listing, listing.status == 0, let found = BBPluginFiles.listed(listing.stdout, id: id, folder: pluginDir.path) else {
+        guard let listing, listing.status == 0, let found = BBPluginFiles.listed(listing.stdout, id: id, folder: plugin.path) else {
             return .status(.unknown)
         }
         guard let plugin = found else { return .status(.notInstalled) }
@@ -202,7 +247,7 @@ final class BBPluginConnector: AgentConnector {
             "keyscribe.json",
             BBPluginFiles.config(agentsDir: agentsDir, instance: target.folder.path, installation: installation, version: BBPluginFiles.version(for: sources))
         )]
-        let folder = pluginDir
+        let folder = pluginDir(target.folder)
         let failure: String? = await Task.detached {
             do {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -225,17 +270,17 @@ final class BBPluginConnector: AgentConnector {
         await showNamesInSidebar(tool, target: target)
     }
 
-    private var sidebarURL: URL { pluginDir.appendingPathComponent("sidebar.json") }
+    private func sidebarURL(_ folder: URL) -> URL { pluginDir(folder).appendingPathComponent("sidebar.json") }
 
-    private func turnedOn() -> [BBSidebarSwitch]? {
-        guard let data = FileManager.default.contents(atPath: sidebarURL.path),
+    private func turnedOn(_ target: ConnectorTarget) -> [BBSidebarSwitch]? {
+        guard let data = FileManager.default.contents(atPath: sidebarURL(target.folder).path),
               let names = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["turnedOn"] as? [String]
         else { return nil }
         return names.compactMap(BBSidebarSwitch.init(rawValue:))
     }
 
     private func showNamesInSidebar(_ tool: String, target: ConnectorTarget) async {
-        guard turnedOn() == nil else { return }
+        guard turnedOn(target) == nil else { return }
         var states: [BBSidebarSwitch: Bool] = [:]
         for item in BBSidebarSwitch.allCases {
             guard let read = try? await output(tool, item.read, subcommand: item.readSubcommand, target: target), read.status == 0,
@@ -248,14 +293,14 @@ final class BBPluginConnector: AgentConnector {
             if (try? await call(tool, item.set(true), subcommand: item.setSubcommand, target: target)) != nil { changed.append(item) }
         }
         let record = try? JSONSerialization.data(withJSONObject: ["turnedOn": changed.map(\.rawValue)])
-        try? record?.write(to: sidebarURL, options: .atomic)
+        try? record?.write(to: sidebarURL(target.folder), options: .atomic)
     }
 
-    func undoesOnUninstall(in target: ConnectorTarget) -> Bool { !(turnedOn() ?? []).isEmpty }
+    func undoesOnUninstall(in target: ConnectorTarget) -> Bool { !(turnedOn(target) ?? []).isEmpty }
 
     func uninstall(tool: String, target: ConnectorTarget, undoing: Bool) async throws {
         if undoing {
-            for item in turnedOn() ?? [] { try? await call(tool, item.set(false), subcommand: item.setSubcommand, target: target) }
+            for item in turnedOn(target) ?? [] { try? await call(tool, item.set(false), subcommand: item.setSubcommand, target: target) }
         }
         try await uninstall(tool: tool, target: target)
     }
@@ -270,7 +315,7 @@ final class BBPluginConnector: AgentConnector {
            let problem = BBPluginFiles.problem(status: output.status, stdout: output.stdout, stderr: output.stderr) {
             throw AgentConnectorError(message: problem)
         }
-        let folder = pluginDir
+        let folder = pluginDir(target.folder)
         let failure: String? = await Task.detached {
             guard FileManager.default.fileExists(atPath: folder.path) else { return nil }
             do {
@@ -291,7 +336,7 @@ final class BBPluginConnector: AgentConnector {
     }
 
     private func output(_ tool: String, _ arguments: [String], subcommand: String, target: ConnectorTarget) async throws -> HostCLI.Output {
-        let environment = ["HOME": home.path, "PATH": "/usr/bin:/bin", "BB_TELEMETRY": "false", "BB_DATA_DIR": target.folder.path]
+        let environment = ["HOME": home.path, "PATH": "/usr/bin:/bin", "BB_TELEMETRY": "false", BBBuilds.dataFolderKey: target.folder.path]
         do {
             return try await run([tool] + arguments, subcommand, nil, environment)
         } catch {
@@ -305,7 +350,7 @@ final class BBPluginConnector: AgentConnector {
         uninstallTitle: "Uninstall the plugin from bb?",
         uninstallMessage: "\(Branding.appName) stops listing bb threads and sending to them. bb, its threads, your conversation names and disconnections, and other \(Branding.appName) settings are kept.",
         toolNotFoundLabel: "bb not found",
-        toolNotFoundAdvice: "Install bb, then come back here. \(Branding.appName) looks for bb in its usual folder.",
+        toolNotFoundAdvice: "Install bb and open it once, or add its data folder with Add Folder\u{2026}. \(Branding.appName) finds bb from the command bb sets up in its data folder when it opens.",
         unavailable: "This copy of \(Branding.appName) is missing its bb plugin. Reinstall \(Branding.appName) to add it.",
         disabledLabel: "Turned off in bb",
         disabledAdvice: "Turn the plugin back on in bb\u{2019}s settings.",
@@ -323,5 +368,7 @@ final class BBPluginConnector: AgentConnector {
         purpose: "Dictate to the bb thread you are looking at and hear its replies read aloud.",
         installNote: "To show the name to say for each thread, it turns on bb\u{2019}s thread row details (Organize \u{25B8} Rows \u{25B8} Metadata, which bb still calls experimental); a thread whose bb title already says its name shows nothing extra.",
         undoOnUninstallLabel: "Uninstall and Turn Off Row Details",
-        undoOnUninstallNote: "\(Branding.appName) turned on bb\u{2019}s thread row details to show thread names. Choose whether to turn them back off; other plugins also draw there.")
+        undoOnUninstallNote: "\(Branding.appName) turned on bb\u{2019}s thread row details to show thread names. Choose whether to turn them back off; other plugins also draw there.",
+        folderNoun: "data folder",
+        foldersHelp: "A data folder is where a bb build keeps its threads and the bb command it sets up. \(Branding.appName) lists the usual folder (~/.bb), each hidden folder in your home folder that holds a bb command, the folder a running bb declares, and BB_DATA_DIR from your login shell. If your bb keeps its data somewhere else, choose Add Folder\u{2026}; each build is connected and removed on its own.")
 }

@@ -80,4 +80,28 @@ struct ConnectorSetupsTests {
         #expect(object["schema_version"] as? Int == ConnectorSetups.schemaVersion)
         #expect(try JSONDecoder().decode(ConnectorSetups.self, from: data) == setups)
     }
+
+    @Test func aChosenCommandIsKeptWithTheFoldersEnrollment() throws {
+        var setups = ConnectorSetups()
+        let made = ids
+        setups.enroll(agent: "claude", folder: "/a", tool: "/Users/a/tools/claude", makeInstallation: made)
+        #expect(setups.setup(agent: "claude", folder: "/a")?.tool == "/Users/a/tools/claude")
+        setups.enroll(agent: "claude", folder: "/a", makeInstallation: made)
+        #expect(setups.setup(agent: "claude", folder: "/a")?.tool == "/Users/a/tools/claude")
+        setups.choose(tool: nil, agent: "claude", folder: "/a")
+        #expect(setups.setup(agent: "claude", folder: "/a")?.tool == nil)
+        setups.choose(tool: "/x/claude", agent: "claude", folder: "/missing")
+        #expect(setups.setup(agent: "claude", folder: "/missing") == nil)
+    }
+
+    @Test func aChosenCommandRoundTripsAndAnOlderFileWithoutOneStillReads() throws {
+        var setups = ConnectorSetups()
+        setups.enroll(agent: "pi", folder: "/p", tool: "/opt/pi", makeInstallation: { "id-1" })
+        let data = try JSONEncoder().encode(setups)
+        #expect(try JSONDecoder().decode(ConnectorSetups.self, from: data) == setups)
+        let older = Data(#"{"schema_version":1,"setups":[{"agent":"pi","folder":"/p","installation":"id-1","removing":false}]}"#.utf8)
+        #expect(try JSONDecoder().decode(ConnectorSetups.self, from: older).setup(agent: "pi", folder: "/p")?.tool == nil)
+        let json = String(decoding: try JSONEncoder().encode(ConnectorSetups(setups: [ConnectorSetup(agent: "pi", folder: "/p", installation: "i")])), as: UTF8.self)
+        #expect(!json.contains("tool"))
+    }
 }

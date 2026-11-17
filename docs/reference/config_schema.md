@@ -264,8 +264,12 @@ a hello on any other protocol is refused with `426` and is never registered or s
   `CLAUDE_CONFIG_DIR` names another). KeyScribe finds the setups conversations actually use from their own
   processes, never from its own environment, and lists the default too; finding a setup never installs into
   it. `agents/connectors.json` (`ConnectorSetups`, with `schema_version`) lists each setup a connector was
-  installed in, as `agent`, `folder` (with symlinks resolved), `installation` and `removing`. Installing
-  enrolls the setup with a new `installation` id before anything is written, and an update keeps the id.
+  installed in, as `agent`, `folder` (with symlinks resolved), `installation` and `removing`, plus an optional
+  `tool`: the agent command the user chose for that folder in Settings, used instead of searching for one. The
+  key is left out when nothing was chosen, so a file without it reads as before and no migration step exists for
+  it; an older copy of the app ignores it and drops it the next time it saves. Installing
+  enrolls the setup with a new `installation` id before anything is written, and an update keeps the id and the
+  chosen `tool`.
   Every hello carries the id its connector was loaded with, and KeyScribe refuses with `403` any id that is
   not enrolled, or whose setup is being removed. A file that cannot be read admits no connector and refuses
   every install and uninstall until it can; Settings says so and **Try Again** reads it again. One that

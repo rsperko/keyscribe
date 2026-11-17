@@ -103,6 +103,7 @@ extension AgentDirectory {
 
 extension AgentProcesses.Rule {
     public static let claude = AgentProcesses.Rule(
-        agent: AgentKind.claude.id, names: ["node", "claude"], anyVersionName: true, command: "claude", setupVariable: "CLAUDE_CONFIG_DIR",
+        agent: AgentKind.claude.id, command: "claude", packages: ["/@anthropic-ai/claude-code/", "/claude/versions/"], anyVersionName: true,
+        setupVariable: "CLAUDE_CONFIG_DIR",
         defaultSetup: "~/.claude", needsTerminal: false)
 }

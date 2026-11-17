@@ -8,7 +8,7 @@ struct BBHostTests {
     final class Runner: @unchecked Sendable {
         var answers: [String: Result<HostCLI.Output, HostCLI.Failure>] = [:]
         var answersOnlyOnceCancelled = false
-        private(set) var calls: [(argv: [String], input: String?, environment: [String: String])] = []
+        var calls: [(argv: [String], input: String?, environment: [String: String])] = []
 
         func run(_ argv: [String], subcommand: String, input: Data?, environment: [String: String]) async throws -> HostCLI.Output {
             calls.append((argv, input.map { String(decoding: $0, as: UTF8.self) }, environment))
@@ -27,15 +27,27 @@ struct BBHostTests {
     static let home = "/Users/a"
     static let cli = "/Users/a/.bb/bin/bb"
     static let location = AgentHostLocation(host: "bb", instance: "/Users/a/.bb", native: "thr_abc1")
+    static let bundle = "dev.bb.desktop"
+    static let usual = BBBuild(folder: "/Users/a/.bb", app: "/Applications/bb.app", bundle: bundle, name: "bb")
+    static let acme = BBBuild(folder: "/Users/a/.acme-bb", app: "/Applications/bb (Acme).app", bundle: "com.example.acme-bb", name: "bb (Acme)")
 
     private func host(
         _ runner: Runner, installed: Bool = true, running: Bool = true, frontmost: @escaping @MainActor () -> AgentHostApp? = { nil }
     ) -> (BBHost, () -> Int) {
-        var activations = 0
+        let (host, activated) = host(runner, builds: [Self.usual], installed: installed, open: { _ in running }, frontmost: frontmost)
+        return (host, { activated().count })
+    }
+
+    private func host(
+        _ runner: Runner, builds: [BBBuild], installed: Bool = true, open: @escaping @MainActor (BBBuild) -> Bool = { _ in true },
+        frontmost: @escaping @MainActor () -> AgentHostApp? = { nil }
+    ) -> (BBHost, () -> [String]) {
+        var activations: [String] = []
         let host = BBHost(
-            home: Self.home, installed: { $0 == Self.cli && installed }, running: { running },
+            home: Self.home, enrolled: { builds.map(\.folder) }, describe: { folder in builds.first { $0.folder == folder } },
+            installed: { path in installed && builds.contains { $0.launcher == path } }, isOpen: open,
             run: { try await runner.run($0, subcommand: $1, input: $2, environment: $3) },
-            activate: { activations += 1 }, frontmost: frontmost)
+            activate: { activations.append($0.folder) }, frontmost: { _ in frontmost() })
         return (host, { activations })
     }
 
@@ -87,7 +99,7 @@ struct BBHostTests {
                 AgentSession(agent: "bb", id: "thr_abc1", pid: nil, cwd: "/src/app", state: .working, startedAt: 1794629582057, host: Self.location),
                 AgentSession(agent: "bb", id: "thr_abc2", pid: nil, cwd: "/src/app", state: .idle, startedAt: 1794629582058, host: second),
             ],
-            titles: ["thr_abc1": "ks-probe pi"], shownInstead: ["thr_abc2": "Reply with ready"]))
+            titles: [Self.location.conversationKey: "ks-probe pi"], shownInstead: [second.conversationKey: "Reply with ready"]))
     }
 
     @Test func aListThatCannotBeReadIsUnreadableNotEmptyAndSaysWhatToTry() async {
@@ -215,7 +227,7 @@ struct BBHostTests {
     }
 
     @Test func theThreadInFrontIsTheOneThePluginLastSaidBbShowsAndOnlyWhileBbIsTheAppInFront() async {
-        let bb = AgentHostApp(bundle: BBHost.app, pid: 31, name: "bb", window: "cg:4")
+        let bb = AgentHostApp(bundle: Self.bundle, pid: 31, name: "bb", window: "cg:4")
         let other = AgentHostApp(bundle: "com.apple.Safari", pid: 32, name: "Safari")
         var front: AgentHostApp? = bb
         let (host, _) = host(Runner(), frontmost: { front })
@@ -227,18 +239,80 @@ struct BBHostTests {
         #expect(await host.front(among: [Self.location], reported: Self.location) == .elsewhere)
         front = nil
         #expect(await host.front(among: [Self.location], reported: Self.location) == .unknown)
-        front = AgentHostApp(bundle: BBHost.app, pid: 31, name: "bb")
+        front = AgentHostApp(bundle: Self.bundle, pid: 31, name: "bb")
         #expect(await host.front(among: [Self.location], reported: Self.location) == .unknown)
     }
 
+    @Test func aRebrandedBuildIsDrivenThroughItsOwnCommandAndDataFolderAndNamedAsItIsCalled() async {
+        let runner = Runner()
+        runner.answers["thread list"] = Self.output("[]")
+        runner.answers["thread tell"] = Self.output(#"{"ok":true,"delivery":"sent"}"#)
+        let (bb, _) = host(runner, builds: [Self.acme])
+        #expect(bb.isEnabled)
+        #expect(await bb.scan() == .found([]))
+        let thread = AgentHostLocation(host: "bb", instance: Self.acme.folder, native: "thr_abc1")
+        #expect(await bb.deliver("x", images: [], request: "r", to: thread) == .accepted)
+        #expect(runner.calls.map { $0.argv.first } == [Self.acme.launcher, Self.acme.launcher])
+        #expect(runner.calls.allSatisfy { $0.environment["BB_DATA_DIR"] == Self.acme.folder })
+        let environment = ["BB_THREAD_ID": "thr_abc1", "BB_THREAD_STORAGE": "/Users/a/.acme-bb/thread-storage/thr_abc1"]
+        #expect(bb.location(in: environment) == thread)
+        let (closed, _) = host(Runner(), builds: [Self.acme], open: { _ in false })
+        #expect(await closed.scan() == .unreadable("bb (Acme) isn\u{2019}t open. Open bb (Acme) to reach its threads."))
+        #expect(await closed.deliver("x", images: [], request: "r", to: thread) == .refused("bb (Acme) isn\u{2019}t open."))
+    }
+
+    @Test func twoBuildsSideBySideEachListTheirOwnThreadsAndEachThreadGoesToItsOwnBuild() async {
+        let runner = Runner()
+        runner.answers["thread list"] = Self.output(#"[{"id":"thr_abc1","status":"idle","visibility":"visible","environmentPath":"/src"}]"#)
+        runner.answers["thread tell"] = Self.output(#"{"ok":true,"delivery":"sent"}"#)
+        runner.answers["thread open"] = Self.output(#"{"delivered":1}"#)
+        var acmeOpen = true
+        let (bb, activated) = host(runner, builds: [Self.usual, Self.acme], open: { $0 == Self.usual || acmeOpen })
+        let mine = Self.location
+        let theirs = AgentHostLocation(host: "bb", instance: Self.acme.folder, native: "thr_abc1")
+        guard case .found(let sessions, _, _, let carried, let problem) = await bb.scan() else { Issue.record("expected threads"); return }
+        #expect(sessions.compactMap(\.host) == [mine, theirs])
+        #expect(carried.isEmpty && problem == nil)
+        runner.answers["thread list"] = Self.output("[]")
+        acmeOpen = false
+        guard case .found(let kept, _, _, let carriedNow, let problemNow) = await bb.scan() else { Issue.record("expected threads"); return }
+        #expect(kept.compactMap(\.host) == [theirs])
+        #expect(carriedNow == [theirs])
+        #expect(problemNow == "bb (Acme) isn\u{2019}t open. Open bb (Acme) to reach its threads.")
+        acmeOpen = true
+        runner.calls.removeAll()
+        #expect(await bb.deliver("x", images: [], request: "r", to: theirs) == .accepted)
+        #expect(await bb.open(mine, stillWanted: { true }) == .requested)
+        #expect(runner.calls.map { $0.argv.first } == [Self.acme.launcher, Self.usual.launcher])
+        #expect(activated() == [Self.usual.folder])
+    }
+
+    @Test func aThreadIsInFrontOnlyWhileItsOwnBuildIsTheAppInFront() async {
+        let acme = AgentHostApp(bundle: Self.acme.bundle!, pid: 41, name: "bb (Acme)", window: "cg:7")
+        let (bb, _) = host(Runner(), builds: [Self.usual, Self.acme], frontmost: { acme })
+        let theirs = AgentHostLocation(host: "bb", instance: Self.acme.folder, native: "thr_abc1")
+        #expect(await bb.front(among: [Self.location, theirs], reported: theirs) == .shown(theirs, in: acme))
+        #expect(await bb.front(among: [Self.location, theirs], reported: Self.location) == .unknown)
+        #expect(bb.focusedWindow() == acme)
+    }
+
+    @Test func aBuildNotConnectedIsNeverRun() async {
+        let runner = Runner()
+        runner.answers["thread tell"] = Self.output(#"{"ok":true,"delivery":"sent"}"#)
+        let (bb, _) = host(runner, builds: [Self.usual])
+        let theirs = AgentHostLocation(host: "bb", instance: Self.acme.folder, native: "thr_abc1")
+        #expect(await bb.deliver("x", images: [], request: "r", to: theirs) == .refused("bb no longer lists this thread."))
+        #expect(runner.calls.isEmpty)
+    }
+
     @Test func bbsWindowIsFocusedOnlyWhileBbIsTheAppInFrontWithAWindowFocused() {
-        let bb = AgentHostApp(bundle: BBHost.app, pid: 31, name: "bb", window: "cg:4")
+        let bb = AgentHostApp(bundle: Self.bundle, pid: 31, name: "bb", window: "cg:4")
         var front: AgentHostApp? = bb
         let (host, _) = host(Runner(), frontmost: { front })
         #expect(host.focusedWindow() == bb)
         front = AgentHostApp(bundle: "com.apple.Safari", pid: 32, name: "Safari", window: "cg:9")
         #expect(host.focusedWindow() == nil)
-        front = AgentHostApp(bundle: BBHost.app, pid: 31, name: "bb")
+        front = AgentHostApp(bundle: Self.bundle, pid: 31, name: "bb")
         #expect(host.focusedWindow() == nil)
         front = nil
         #expect(host.focusedWindow() == nil)
@@ -271,7 +345,7 @@ struct AgentHostConsentModelTests {
             run: { argv, subcommand, _, environment in
                 calls.record(argv, environment)
                 return calls.answer(subcommand)
-            })
+            }, find: { [] })
         let model = AgentsSettingsModel(
             describeTerminal: { _ in nil }, agentsDir: agents, setups: ConnectorSetupRegistry(directory: agents), connectors: [plugin],
             hosts: [BBHost.kind])
@@ -417,6 +491,33 @@ struct AgentHostConsentModelTests {
         await model.maintain()
         #expect(model.isTurnedOn(BBHost.kind))
         #expect(reported.isEmpty)
+    }
+
+    @Test func eachBbBuildIsItsOwnRowNamedAsItIsCalledAndConnectingAnyTurnsBbOn() async throws {
+        let calls = BBPluginConnectorTests.Calls()
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ks-bbbuilds-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        let home = root.appendingPathComponent("home", isDirectory: true)
+        let agents = root.appendingPathComponent("agents", isDirectory: true)
+        let usual = BBBuild(folder: ConnectorFolders.canonical(home.appendingPathComponent(".bb")).path, bundle: "dev.bb.desktop", name: "bb")
+        let acme = BBBuild(folder: ConnectorFolders.canonical(home.appendingPathComponent(".acme-bb")).path, bundle: "com.example.acme-bb", name: "bb (Acme)")
+        let plugin = BBPluginConnector(
+            agentsDir: agents, pluginName: "keyscribe-dev", home: home, sources: BBPluginConnectorTests.sources, isExecutable: { _ in true },
+            run: { argv, subcommand, _, environment in
+                calls.record(argv, environment)
+                return calls.answer(subcommand)
+            }, find: { [usual, acme] }, isOpen: { $0 == acme })
+        let model = AgentsSettingsModel(
+            describeTerminal: { _ in nil }, agentsDir: agents, setups: ConnectorSetupRegistry(directory: agents), connectors: [plugin],
+            hosts: [BBHost.kind])
+        await model.refresh()
+        let connector = try #require(model.connectors.first)
+        #expect(connector.setups.map(\.folder.path) == [acme.folder, usual.folder])
+        #expect(connector.setups.map(\.name) == ["bb (Acme)", "bb"])
+        let open = try #require(connector.setups.first { $0.isDefault })
+        #expect(open.folder.path == acme.folder)
+        await open.install()
+        #expect(model.isTurnedOn(BBHost.kind))
+        #expect(calls.all.allSatisfy { $0.0[0] == acme.launcher })
     }
 
     @Test func aHostsListingProblemIsShownBesideItsSwitchOnlyWhileItIsOn() {

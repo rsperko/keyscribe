@@ -102,6 +102,14 @@ struct AgentConversationListTests {
         #expect(ConnectionSummary.line(setup: "Updating\u{2026}", available: 2) == "Updating\u{2026} \u{00B7} 2 conversations available")
     }
 
+    @Test func openConversationsThatCannotReceiveYetAreNotCalledNoneOpen() {
+        #expect(ConnectionSummary.line(setup: nil, available: 0, open: 2) == "2 open, none connected")
+        #expect(ConnectionSummary.line(setup: nil, available: 0, open: 1) == "1 open, not connected")
+        #expect(ConnectionSummary.line(setup: "Not set up", available: 0, open: 2) == "Not set up \u{00B7} 2 open, none connected")
+        #expect(ConnectionSummary.line(setup: nil, available: 3, open: 5) == "3 conversations available")
+        #expect(ConnectionSummary.line(setup: nil, available: 0, open: 0) == "No conversations open")
+    }
+
     @Test func theFolderCountJoinsTheSummaryOnlyWhenThereIsMoreThanOneFolder() {
         #expect(ConnectionSummary.line(setup: nil, available: 10, folders: 1) == "10 conversations available")
         #expect(ConnectionSummary.line(setup: nil, available: 10, folders: 2) == "10 conversations available \u{00B7} 2 configuration folders")

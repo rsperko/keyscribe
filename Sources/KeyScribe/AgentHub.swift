@@ -2077,7 +2077,7 @@ final class AgentRuntime {
                 noun: AgentTerminalFocus.noun(surfaces)),
             front: AgentFront(surfaces: surfaces), glance: AgentFront.confirmingWithoutAsking(surfaces), exclusions: exclusions,
             places: Self.places(surfaces: surfaces, sources: placeSources),
-            hosts: hosts, hostAllowed: hostAllowed,
+            hosts: hosts.map { $0.bound(to: setups) }, hostAllowed: hostAllowed,
             processEnvironment: { pid, keys in SystemTerminalFacts.arguments(of: pid, keeping: keys)?.environment ?? [:] },
             processParent: { SystemTerminalFacts.parent(of: $0) })
         box.hub = hub

@@ -18,6 +18,8 @@ struct AgentHostTests {
         var conversations: [AgentSession] = []
         var titles: [String: String] = [:]
         var shownInstead: [String: String] = [:]
+        var carried: Set<AgentHostLocation> = []
+        var problem: String?
         var answers = true
         var hangs = false
         var opening = AgentHostOpen.opened
@@ -43,7 +45,8 @@ struct AgentHostTests {
 
         func scan() async -> AgentHostScan {
             scans += 1
-            return answers ? .found(conversations, titles: titles, shownInstead: shownInstead) : .unreadable("not running")
+            return answers
+                ? .found(conversations, titles: titles, shownInstead: shownInstead, carried: carried, problem: problem) : .unreadable("not running")
         }
 
         func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen {
@@ -147,6 +150,20 @@ struct AgentHostTests {
         #expect(hub.directory.conversations.map(\.id).contains(Self.id("t1")))
         #expect(settled > 0)
         #expect(reader.reads == settled)
+    }
+
+    @Test func conversationsOfAnInstanceTheHostCouldNotReadStayListedAsLastSeenWithItsProblem() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1"), Self.thread("t2", instance: "/other")]
+        host.titles = [Self.location("t2", instance: "/other").conversationKey: "release notes"]
+        host.carried = [Self.location("t2", instance: "/other")]
+        host.problem = "Other isn\u{2019}t open."
+        let hub = makeHub(host)
+        await hub.rescan()
+        #expect(Set(hub.directory.conversations.map(\.id)) == [Self.id("t1"), Self.id("t2", instance: "/other")])
+        #expect(hub.lastSeen == [Self.id("t2", instance: "/other")])
+        #expect(hub.discoveryProblems["example"] == "Other isn\u{2019}t open.")
+        #expect(hub.names["release notes"] == Self.id("t2", instance: "/other"))
     }
 
     @Test func aHostIsCalledOnlyWhileTheUserHasItTurnedOn() async {

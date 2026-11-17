@@ -31,13 +31,16 @@ struct BBPluginConnectorTests {
         return (home, root.appendingPathComponent("agents", isDirectory: true))
     }
 
-    private func connector(_ home: URL, _ agents: URL, calls: Calls, id: String = "keyscribe-dev", sources: [String: String]? = Self.sources) -> BBPluginConnector {
+    private func connector(
+        _ home: URL, _ agents: URL, calls: Calls, id: String = "keyscribe-dev", sources: [String: String]? = Self.sources, builds: [BBBuild] = [],
+        open: @escaping @MainActor (BBBuild) -> Bool = { _ in false }
+    ) -> BBPluginConnector {
         BBPluginConnector(
             agentsDir: agents, pluginName: id, home: home, sources: sources, isExecutable: { _ in true },
             run: { argv, subcommand, _, environment in
                 calls.record(argv, environment)
                 return calls.answer(subcommand)
-            })
+            }, find: { builds }, isOpen: open)
     }
 
     private func target(_ home: URL, installation: String? = "inst-bb", removing: Bool = false) -> ConnectorTarget {
@@ -54,7 +57,7 @@ struct BBPluginConnectorTests {
         let (home, agents) = scratch()
         let calls = Calls()
         let plugin = connector(home, agents, calls: calls)
-        let tool = try #require(plugin.locateTool())
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path)
         #expect(tool == home.appendingPathComponent(".bb/bin/bb").path)
         try await plugin.install(tool: tool, target: target(home))
         let folder = agents.appendingPathComponent("bb-plugin")
@@ -87,7 +90,7 @@ struct BBPluginConnectorTests {
         let calls = Calls()
         calls.set("plugin list", listing(agents))
         let plugin = connector(home, agents, calls: calls)
-        let tool = try #require(plugin.locateTool())
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path)
         try await plugin.update(tool: tool, target: target(home))
         #expect(calls.all.map { Array($0.0.dropFirst()) }.filter { $0[0] == "plugin" } == [["plugin", "list", "--json"], ["plugin", "reload", "keyscribe-dev", "--json"]])
     }
@@ -98,7 +101,7 @@ struct BBPluginConnectorTests {
         calls.set("plugin install", status: 1, #"{"ok":false,"error":{"code":"server_unavailable","message":"bb is not running"}}"#)
         let plugin = connector(home, agents, calls: calls)
         do {
-            try await plugin.install(tool: plugin.locateTool()!, target: target(home))
+            try await plugin.install(tool: plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool!.path, target: target(home))
             Issue.record("expected the install to fail")
         } catch let error as AgentConnectorError {
             #expect(error.message == "bb is not running")
@@ -109,7 +112,7 @@ struct BBPluginConnectorTests {
         let (home, agents) = scratch()
         let calls = Calls()
         let plugin = connector(home, agents, calls: calls)
-        let tool = try #require(plugin.locateTool())
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path)
         #expect(await plugin.check(tool: tool, target: target(home)) == .status(.notInstalled))
         #expect(calls.all.isEmpty)
         try await plugin.install(tool: tool, target: target(home))
@@ -133,7 +136,7 @@ struct BBPluginConnectorTests {
         let (home, agents) = scratch()
         let calls = Calls()
         let plugin = connector(home, agents, calls: calls)
-        let tool = try #require(plugin.locateTool())
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path)
         try await plugin.install(tool: tool, target: target(home))
         calls.set("plugin list", listing(agents))
         #expect(await plugin.check(tool: tool, target: target(home, installation: "other")) == .status(.outdated(installed: plugin.bundledVersion!)))
@@ -146,18 +149,18 @@ struct BBPluginConnectorTests {
         let (home, agents) = scratch()
         let calls = Calls()
         let plugin = connector(home, agents, calls: calls, id: "keyscribe")
-        try await plugin.install(tool: plugin.locateTool()!, target: target(home))
+        try await plugin.install(tool: plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool!.path, target: target(home))
         let manifest = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: agents.appendingPathComponent("bb-plugin/package.json"))) as? [String: Any])
         #expect(manifest["name"] as? String == "bb-plugin-keyscribe")
         calls.set("plugin list", listing(agents, id: "keyscribe-dev"))
-        #expect(await plugin.check(tool: plugin.locateTool()!, target: target(home)) == .status(.notInstalled))
+        #expect(await plugin.check(tool: plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool!.path, target: target(home)) == .status(.notInstalled))
     }
 
     @Test func uninstallingRemovesThePluginFromBbAndDeletesItsFolder() async throws {
         let (home, agents) = scratch()
         let calls = Calls()
         let plugin = connector(home, agents, calls: calls)
-        let tool = try #require(plugin.locateTool())
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path)
         try await plugin.install(tool: tool, target: target(home))
         try await plugin.uninstall(tool: tool, target: target(home, removing: true))
         #expect(calls.all.last?.0 == [tool, "plugin", "remove", "keyscribe-dev", "--json"])
@@ -169,7 +172,7 @@ struct BBPluginConnectorTests {
         let (home, agents) = scratch()
         let calls = Calls()
         let plugin = connector(home, agents, calls: calls)
-        let tool = try #require(plugin.locateTool())
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path)
         try await plugin.install(tool: tool, target: target(home))
         calls.set("plugin remove", status: 1, #"{"ok":false,"error":{"code":"plugin_not_found","message":"no such plugin"}}"#)
         try await plugin.uninstall(tool: tool, target: target(home, removing: true))
@@ -189,7 +192,7 @@ struct BBPluginConnectorTests {
         calls.set("settings show", Self.sidebarOff.settings)
         calls.set("thread-list prefs get", Self.sidebarOff.rows)
         let plugin = connector(home, agents, calls: calls)
-        let tool = try #require(plugin.locateTool())
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path)
         try await plugin.install(tool: tool, target: target(home))
         #expect(sidebarCalls(calls, tool) == [
             [tool, "settings", "show", "--json"],
@@ -206,7 +209,7 @@ struct BBPluginConnectorTests {
         calls.set("settings show", Self.sidebarOn.settings)
         calls.set("thread-list prefs get", Self.sidebarOn.rows)
         let plugin = connector(home, agents, calls: calls)
-        let tool = try #require(plugin.locateTool())
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path)
         try await plugin.install(tool: tool, target: target(home))
         #expect(sidebarCalls(calls, tool).count == 2)
         #expect(!plugin.undoesOnUninstall(in: target(home)))
@@ -221,7 +224,7 @@ struct BBPluginConnectorTests {
         calls.set("settings show", Self.sidebarOff.settings)
         calls.set("thread-list prefs get", Self.sidebarOff.rows)
         let plugin = connector(home, agents, calls: calls)
-        let tool = try #require(plugin.locateTool())
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path)
         try await plugin.update(tool: tool, target: target(home))
         #expect(sidebarCalls(calls, tool).count == 4)
         try await plugin.update(tool: tool, target: target(home))
@@ -234,7 +237,7 @@ struct BBPluginConnectorTests {
         calls.set("settings show", status: 1, #"{"ok":false,"error":{"code":"server_unavailable","message":"bb is not running"}}"#)
         calls.set("thread-list prefs get", Self.sidebarOff.rows)
         let plugin = connector(home, agents, calls: calls)
-        let tool = try #require(plugin.locateTool())
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path)
         try await plugin.install(tool: tool, target: target(home))
         #expect(sidebarCalls(calls, tool).count == 1)
         calls.set("settings show", Self.sidebarOff.settings)
@@ -249,7 +252,7 @@ struct BBPluginConnectorTests {
         calls.set("thread-list prefs get", Self.sidebarOff.rows)
         calls.set("settings experiment", status: 1, #"{"ok":false,"error":{"code":"x","message":"no"}}"#)
         let plugin = connector(home, agents, calls: calls)
-        let tool = try #require(plugin.locateTool())
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path)
         try await plugin.install(tool: tool, target: target(home))
         #expect(plugin.undoesOnUninstall(in: target(home)))
         try await plugin.uninstall(tool: tool, target: target(home, removing: true), undoing: true)
@@ -262,7 +265,7 @@ struct BBPluginConnectorTests {
         calls.set("settings show", Self.sidebarOn.settings)
         calls.set("thread-list prefs get", Self.sidebarOff.rows)
         let plugin = connector(home, agents, calls: calls)
-        let tool = try #require(plugin.locateTool())
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path)
         try await plugin.install(tool: tool, target: target(home))
         let kept = connector(home, agents, calls: calls)
         try await kept.uninstall(tool: tool, target: target(home, removing: true), undoing: false)
@@ -275,6 +278,61 @@ struct BBPluginConnectorTests {
         #expect(!after.contains([tool, "settings", "experiment", "threadRowMetadata", "false", "--json"]))
         #expect(calls.all.last?.0 == [tool, "plugin", "remove", "keyscribe-dev", "--json"])
         #expect(!plugin.hasFiles(in: target(home)))
+    }
+
+    @Test func everyBbBuildFoundIsOfferedAndTheOneOpenComesFirst() async throws {
+        let (home, agents) = scratch()
+        let usual = BBBuild(folder: ConnectorFolders.canonical(home.appendingPathComponent(".bb")).path, bundle: "dev.bb.desktop", name: "bb")
+        let acme = BBBuild(folder: ConnectorFolders.canonical(home.appendingPathComponent(".acme-bb")).path, bundle: "com.example.acme-bb", name: "bb (Acme)")
+        let plugin = connector(home, agents, calls: Calls(), builds: [usual, acme], open: { $0 == acme })
+        #expect(plugin.defaultFolder == home.appendingPathComponent(".bb", isDirectory: true))
+        await plugin.rediscover()
+        #expect(plugin.defaultFolder.path == acme.folder)
+        #expect(plugin.foundFolders.map(\.path) == [usual.folder, acme.folder])
+        #expect(plugin.name(of: URL(fileURLWithPath: acme.folder)) == "bb (Acme)")
+        #expect(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path == acme.launcher)
+        #expect(plugin.findTool(in: URL(fileURLWithPath: usual.folder), chosen: nil).tool?.path == usual.launcher)
+    }
+
+    @Test func aBbDataFolderAddedByHandIsListedNamedAndInstallable() async throws {
+        let (home, agents) = scratch()
+        let folder = home.appendingPathComponent("work/bb-data", isDirectory: true)
+        let path = ConnectorFolders.canonical(folder).path
+        let plugin = BBPluginConnector(
+            agentsDir: agents, pluginName: "keyscribe-dev", home: home, sources: Self.sources, isExecutable: { _ in true },
+            run: { _, subcommand, _, _ in Calls().answer(subcommand) }, find: { [] }, isOpen: { _ in false },
+            isDataFolder: { $0 == path }, describe: { BBBuild(folder: $0, bundle: "com.example.work-bb", name: "bb (Work)") })
+        let model = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [plugin])
+        let connector = try #require(model.connectors.first)
+        #expect(model.choose(folder: home.appendingPathComponent("Documents"), for: connector) == "\(ConnectorFolders.display(home.appendingPathComponent("Documents"))) doesn\u{2019}t look like a bb data folder.")
+        #expect(model.choose(folder: folder, for: connector) == nil)
+        let setup = try #require(connector.setup(for: path))
+        #expect(setup.name == "bb (Work)")
+        #expect(plugin.findTool(in: setup.folder, chosen: nil).tool?.path == setup.folder.appendingPathComponent("bin/bb").path)
+        #expect(model.consent?.setup === setup)
+    }
+
+    @Test func eachBbBuildGetsItsOwnCopyOfThePluginRunThroughItsOwnCommand() async throws {
+        let (home, agents) = scratch()
+        let calls = Calls()
+        let plugin = connector(home, agents, calls: calls)
+        let folder = home.appendingPathComponent(".acme-bb", isDirectory: true)
+        let acme = ConnectorTarget(folder: folder, isDefault: false, installation: "inst-acme")
+        let tool = try #require(plugin.findTool(in: folder, chosen: nil).tool?.path)
+        try await plugin.install(tool: tool, target: acme)
+        try await plugin.install(tool: plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool!.path, target: target(home))
+        let copies = try FileManager.default.contentsOfDirectory(atPath: agents.path).filter { $0.hasPrefix("bb-plugin") }.sorted()
+        #expect(copies.count == 2 && copies[0] == "bb-plugin")
+        let config = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: agents.appendingPathComponent("\(copies[1])/keyscribe.json"))) as? [String: Any])
+        #expect(config["instance"] as? String == folder.path)
+        #expect(config["installation"] as? String == "inst-acme")
+        let acmeCalls = calls.all.filter { $0.0[0] == tool }
+        #expect(!acmeCalls.isEmpty && acmeCalls.allSatisfy { $0.1["BB_DATA_DIR"] == folder.path })
+        #expect(acmeCalls.contains { $0.0 == [tool, "plugin", "install", agents.appendingPathComponent(copies[1]).path, "--yes", "--json"] })
+        #expect(plugin.hasFiles(in: acme))
+        try await plugin.uninstall(tool: tool, target: ConnectorTarget(folder: folder, isDefault: false, installation: "inst-acme", removing: true))
+        #expect(!plugin.hasFiles(in: acme))
+        #expect(plugin.hasFiles(in: target(home)))
     }
 
     @Test func theAppCarriesThePluginSources() throws {

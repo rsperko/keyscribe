@@ -238,6 +238,44 @@ struct PiDiscoveryTests {
         if case .found(let sessions, _) = scan { return sessions.sorted { $0.id < $1.id } }
         return []
     }
+
+    @Test func aConnectedPiWhoseProcessCannotBeReadTakesItsFolderFromItsInstallation() async {
+        let processes = Processes()
+        processes.found = AgentProcesses.Found(candidates: [], unreadable: [10])
+        let discovery = PiDiscovery(
+            processStart: processes.start, isRunning: processes.isRunning, processes: { processes.found },
+            folder: { $0 == "inst-work" ? "/Users/a/pi-work" : nil })
+        discovery.observe(.hello(.init(
+            protocolVersion: 2, agent: "pi", agentVersion: "", instance: "i10", session: "s1", pid: 10, idle: true, installation: "inst-work")))
+        guard case .found(let sessions, let extras) = await discovery.scan(rereadingTitles: false) else {
+            Issue.record("expected sessions")
+            return
+        }
+        #expect(sessions.map(\.setup) == ["/Users/a/pi-work"])
+        #expect(extras.setups == ["/Users/a/pi-work"])
+        #expect(extras.problem == PiDiscovery.partialProblem)
+    }
+
+    @Test func theInstallationsFolderOutranksWhatTheProcessSeemedToUse() async {
+        let processes = Processes()
+        processes.found = AgentProcesses.Found(candidates: [
+            AgentCandidate(agent: "pi", pid: 10, startedAt: 1_700_000_000_000, cwd: "/src/api", setup: "/Users/a/.pi/agent"),
+        ])
+        let discovery = PiDiscovery(
+            processStart: processes.start, isRunning: processes.isRunning, processes: { processes.found }, folder: { _ in "/Users/a/pi-work" })
+        discovery.observe(.hello(.init(
+            protocolVersion: 2, agent: "pi", agentVersion: "", instance: "i10", session: "s1", pid: 10, idle: true, installation: "inst-work")))
+        guard case .found(let sessions, _) = await discovery.scan(rereadingTitles: false) else { return }
+        #expect(sessions.map(\.setup) == ["/Users/a/pi-work"])
+    }
+
+    @Test func aFolderTheLoginShellNamesIsListedWithoutAnyConversation() async {
+        let processes = Processes()
+        let discovery = PiDiscovery(
+            processStart: processes.start, isRunning: processes.isRunning, processes: { processes.found }, declared: { "/Users/a/pi-shell" })
+        guard case .found(_, let extras) = await discovery.scan(rereadingTitles: false) else { return }
+        #expect(extras.setups == ["/Users/a/pi-shell"])
+    }
 }
 
 struct ProcessStartTests {

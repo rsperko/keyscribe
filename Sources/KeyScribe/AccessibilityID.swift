@@ -326,6 +326,10 @@ enum AccessibilityID {
             static let folderActions = "mode.agents.folderActions"
             static let addFolder = "mode.agents.addFolder"
             static let forgetFolder = "mode.agents.forgetFolder"
+            static let chooseTool = "mode.agents.chooseTool"
+            static let findToolAutomatically = "mode.agents.findToolAutomatically"
+            static let copyDetails = "mode.agents.copyDetails"
+            static let lookedIn = "mode.agents.lookedIn"
             static let viewAwaitingReload = "mode.agents.viewAwaitingReload"
             static let listFilter = "mode.agents.listFilter"
             static let showAllConversations = "mode.agents.showAllConversations"
@@ -390,7 +394,6 @@ enum AccessibilityID {
             static let conversationsDone = "mode.agents.conversationsDone"
             static let unavailableGroup = "mode.agents.unavailableGroup"
             static let detailsDone = "mode.agents.detailsDone"
-            static let replyOptions = "mode.agents.replyOptions"
             static let advanced = "mode.agents.advanced"
             static let whatCanISay = "mode.agents.whatCanISay"
             static let whatAgentsReceive = "mode.agents.whatAgentsReceive"
@@ -698,7 +701,8 @@ enum AccessibilityID {
         Settings.AI.Editor.delete,
         Settings.Advanced.revealConfig, Settings.Advanced.reloadConfig, Settings.Advanced.resetHUDPosition,
         Settings.Advanced.eraseAllData, Settings.Advanced.eraseConfirmConfirm, Settings.Advanced.eraseConfirmCancel,
-        Mode.Agents.folderRow, Mode.Agents.folderActions, Mode.Agents.addFolder, Mode.Agents.forgetFolder, Mode.Agents.viewAwaitingReload, Mode.Agents.listFilter, Mode.Agents.showAllConversations,
+        Mode.Agents.folderRow, Mode.Agents.folderActions, Mode.Agents.addFolder, Mode.Agents.forgetFolder, Mode.Agents.chooseTool,
+        Mode.Agents.findToolAutomatically, Mode.Agents.copyDetails, Mode.Agents.lookedIn, Mode.Agents.viewAwaitingReload, Mode.Agents.listFilter, Mode.Agents.showAllConversations,
         Mode.Agents.install, Mode.Agents.update, Mode.Agents.remove, Mode.Agents.finishUninstalling, Mode.Agents.manualUninstall,
         Mode.Agents.tryAgain, Mode.Agents.connect, Mode.Agents.disconnect,
         Mode.Agents.reconnect, Mode.Agents.disconnected, Mode.Agents.exclusionsProblem, Mode.Agents.recovery,
@@ -712,7 +716,7 @@ enum AccessibilityID {
         Mode.Agents.manageConversations, Mode.Agents.conversationList, Mode.Agents.conversationsDone,
         Mode.Agents.unavailableGroup, Mode.Agents.detailsDone,
         Settings.helpDone,
-        Mode.Agents.replyOptions, Mode.Agents.advanced, Mode.Agents.whatCanISay, Mode.Agents.whatAgentsReceive,
+        Mode.Agents.advanced, Mode.Agents.whatCanISay, Mode.Agents.whatAgentsReceive,
         Mode.Agents.aboutReplyUpdates, Mode.Agents.search,
         Mode.Agents.conversationDetail, Mode.Agents.example, Mode.Agents.conversationDetails,
         Mode.List.list, Mode.List.add, Mode.List.addBlank, Mode.List.chooserCancel,

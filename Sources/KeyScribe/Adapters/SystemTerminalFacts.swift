@@ -40,7 +40,35 @@ struct SystemTerminalFacts: TerminalFacts {
         return pids.prefix(filled).filter { $0 > 0 }
     }
 
-    private static func directory(of pid: Int) -> String? {
+    struct Own {
+        var pid: pid_t
+        var parent: Int
+        var started: Int?
+        var name: String
+    }
+
+    static func ownProcesses() -> [Own]? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_UID, Int32(bitPattern: getuid())]
+        var size = 0
+        for _ in 0..<3 {
+            guard sysctl(&mib, u_int(mib.count), nil, &size, nil, 0) == 0 else { return nil }
+            size += size / 4 + MemoryLayout<kinfo_proc>.stride * 16
+            var entries = [kinfo_proc](repeating: kinfo_proc(), count: size / MemoryLayout<kinfo_proc>.stride)
+            if sysctl(&mib, u_int(mib.count), &entries, &size, nil, 0) == 0 {
+                return entries.prefix(size / MemoryLayout<kinfo_proc>.stride).filter { $0.kp_proc.p_pid > 0 }.map { info in
+                    var command = info.kp_proc.p_comm
+                    let name = withUnsafeBytes(of: &command) { String(decoding: $0.prefix(while: { $0 != 0 }), as: UTF8.self) }
+                    return Own(
+                        pid: info.kp_proc.p_pid, parent: Int(info.kp_eproc.e_ppid), started: ProcessStart.milliseconds(info.kp_proc.p_un.__p_starttime),
+                        name: name)
+                }
+            }
+            guard errno == ENOMEM else { return nil }
+        }
+        return nil
+    }
+
+    static func directory(of pid: Int) -> String? {
         var info = proc_vnodepathinfo()
         let size = Int32(MemoryLayout<proc_vnodepathinfo>.size)
         guard proc_pidinfo(pid_t(pid), PROC_PIDVNODEPATHINFO, 0, &info, size) == size else { return nil }

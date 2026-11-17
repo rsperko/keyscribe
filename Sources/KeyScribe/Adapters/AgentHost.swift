@@ -2,7 +2,9 @@ import Foundation
 import KeyScribeKit
 
 public enum AgentHostScan: Equatable, Sendable {
-    case found([AgentSession], titles: [String: String] = [:], shownInstead: [String: String] = [:])
+    case found(
+        [AgentSession], titles: [String: String] = [:], shownInstead: [String: String] = [:], carried: Set<AgentHostLocation> = [],
+        problem: String? = nil)
     case unreadable(String)
 }
 
@@ -73,10 +75,19 @@ public struct AgentHostIntegration: Sendable {
     public var kind: AgentKind
     public var make: @MainActor @Sendable () -> any AgentHost
     var connector: (@MainActor @Sendable (_ agentsDir: URL, _ pluginName: String) -> any AgentConnector)?
+    var withSetups: (@MainActor @Sendable (ConnectorSetupRegistry) -> any AgentHost)?
+    public var folderVariable: String?
 
     public init(kind: AgentKind, make: @escaping @MainActor @Sendable () -> any AgentHost) {
         self.kind = kind
         self.make = make
+    }
+
+    func bound(to setups: ConnectorSetupRegistry) -> AgentHostIntegration {
+        guard let withSetups else { return self }
+        var bound = self
+        bound.make = { withSetups(setups) }
+        return bound
     }
 }
 
@@ -176,7 +187,7 @@ final class HostDiscovery: AgentDiscovery {
 
     private func fresh() async -> AgentScan {
         switch await host.scan() {
-        case .found(let sessions, let titles, let shownInstead):
+        case .found(let sessions, let titles, let shownInstead, let carried, let problem):
             var seen: Set<String> = []
             var placed: [String: AgentPlace] = [:]
             let owned: [AgentSession] = sessions.compactMap { session in
@@ -185,9 +196,11 @@ final class HostDiscovery: AgentDiscovery {
                 owned.agent = kind.id
                 owned.id = location.conversationKey
                 owned.pid = nil
+                let title = titles[location.conversationKey] ?? titles[location.native]
+                let instead = shownInstead[location.conversationKey] ?? shownInstead[location.native]
                 let labels = [
-                    titles[location.native].map { AgentPlace.Label(text: $0, level: .title, container: location.conversationKey, surface: kind.displayName, term: "title") },
-                    shownInstead[location.native].map {
+                    title.map { AgentPlace.Label(text: $0, level: .title, container: location.conversationKey, surface: kind.displayName, term: "title") },
+                    instead.map {
                         AgentPlace.Label(
                             text: $0, level: .title, container: location.conversationKey, surface: kind.displayName, term: "title", onlyAfterVerb: true)
                     },
@@ -198,7 +211,10 @@ final class HostDiscovery: AgentDiscovery {
                 }
                 return owned
             }
-            return .found(owned, AgentScanExtras(places: placed, listed: Set(owned.map { AgentSessionID.make(agent: kind.id, native: $0.id) })))
+            let unread = Set(carried.filter { $0.host == kind.id }.map(\.conversationKey))
+            return .found(owned, AgentScanExtras(
+                problem: problem, carried: unread.intersection(owned.map(\.id)), places: placed,
+                listed: Set(owned.map { AgentSessionID.make(agent: kind.id, native: $0.id) })))
         case .unreadable(let why):
             return .unreadable(why)
         }

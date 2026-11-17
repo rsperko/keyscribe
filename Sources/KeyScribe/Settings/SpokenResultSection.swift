@@ -4,8 +4,6 @@ import SwiftUI
 struct SpokenResultSection: View {
     @ObservedObject var model: AgentsSettingsModel
     let connections: [Connection]
-    @State private var optionsExpanded = false
-
 
     var body: some View {
         Section("Replies") {
@@ -19,19 +17,8 @@ struct SpokenResultSection: View {
                     .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenResultEnabled)
             }
             if model.spokenResult.enabled {
-                DisclosureSection(
-                    isExpanded: $optionsExpanded, hasError: missing || model.voice?.status == .needsAttention,
-                    headerID: AccessibilityID.Mode.Agents.replyOptions
-                ) {
-                    DisclosureSummaryLabel(title: "More reply options", summary: "Summary service, voice, summary instruction, and voice files")
-                } content: {
-                    serviceRows
-                    if let voice = model.voice {
-                        SpokenVoiceRows(
-                            voice: voice, selection: $model.voiceChoice, spokenVoice: model.chosenVoice,
-                            sharedNote: "This choice also applies to Ask modes\u{2019} answers.")
-                    }
-                    Divider()
+                serviceRows
+                if chosen != nil {
                     PromptEditor(
                         title: "Summary instruction",
                         placeholder: "How the AI should sum up a reply\u{2026}",
@@ -49,9 +36,12 @@ struct SpokenResultSection: View {
                             .disabled(model.spokenResult.prompt == nil)
                             .accessibilityIdentifier(AccessibilityID.Mode.Agents.spokenResultReset)
                     }
-                    if let voice = model.voice {
-                        SpokenVoiceFiles(voice: voice)
-                    }
+                }
+                if let voice = model.voice {
+                    SpokenVoiceRows(
+                        voice: voice, selection: $model.voiceChoice, spokenVoice: model.chosenVoice,
+                        sharedNote: "This choice also applies to Ask modes\u{2019} answers.")
+                    SpokenVoiceFiles(voice: voice)
                 }
             }
         }

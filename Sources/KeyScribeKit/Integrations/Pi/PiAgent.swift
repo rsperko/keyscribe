@@ -8,6 +8,6 @@ extension AgentKind {
 
 extension AgentProcesses.Rule {
     public static let pi = AgentProcesses.Rule(
-        agent: AgentKind.pi.id, names: ["node", "bun", "pi"], anyVersionName: false, command: "pi", setupVariable: "PI_CODING_AGENT_DIR",
+        agent: AgentKind.pi.id, command: "pi", packages: ["/pi-coding-agent/"], anyVersionName: false, setupVariable: "PI_CODING_AGENT_DIR",
         defaultSetup: "~/.pi/agent", needsTerminal: true)
 }

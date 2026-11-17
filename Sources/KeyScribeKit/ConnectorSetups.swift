@@ -5,8 +5,10 @@ public struct ConnectorSetup: Codable, Equatable, Sendable {
     public var folder: String
     public var installation: String
     public var removing: Bool
+    public var tool: String?
 
-    public init(agent: String, folder: String, installation: String, removing: Bool = false) {
+    public init(agent: String, folder: String, installation: String, removing: Bool = false, tool: String? = nil) {
+        self.tool = tool
         self.agent = agent
         self.folder = folder
         self.installation = installation
@@ -53,14 +55,21 @@ public struct ConnectorSetups: Codable, Equatable, Sendable {
     }
 
     @discardableResult
-    public mutating func enroll(agent: String, folder: String, makeInstallation: () -> String) -> ConnectorSetup {
+    public mutating func enroll(agent: String, folder: String, tool: String? = nil, makeInstallation: () -> String) -> ConnectorSetup {
         if let index = setups.firstIndex(where: { $0.agent == agent && $0.folder == folder }) {
+            let kept = tool ?? setups[index].tool
             if setups[index].removing { setups[index] = ConnectorSetup(agent: agent, folder: folder, installation: makeInstallation()) }
+            setups[index].tool = kept
             return setups[index]
         }
-        let made = ConnectorSetup(agent: agent, folder: folder, installation: makeInstallation())
+        let made = ConnectorSetup(agent: agent, folder: folder, installation: makeInstallation(), tool: tool)
         setups.append(made)
         return made
+    }
+
+    public mutating func choose(tool: String?, agent: String, folder: String) {
+        guard let index = setups.firstIndex(where: { $0.agent == agent && $0.folder == folder }) else { return }
+        setups[index].tool = tool
     }
 
     public mutating func beginRemoval(agent: String, folder: String) {

@@ -194,7 +194,9 @@ every rule above applies to it, with these sharpenings:
   and keep partial cleanup safe to retry; retrying never readmits the revoked installation.
 - **A connector is installed into a setup the user chose, never the app's own environment.** A setup is
   the folder an agent loads its configuration from, found from each conversation's own process
-  (`AgentProcesses`, `AgentProcessTable`), an enrolled setup, or a folder the user chose. A relative setup
+  (`AgentProcesses`, `AgentProcessTable`), a connected conversation's installation (the hello's `installation`
+  names the enrolled setup it was installed in, so a Pi whose process cannot be read still has its folder), the
+  folder variable in the user's login shell, an enrolled setup, or a folder the user chose. A relative setup
   variable is resolved from that process's working folder (`FolderPath`). Every
   operation takes an explicit `ConnectorTarget`, and a command run for it gets that setup's variable set
   (or removed for the default) explicitly. Discovery never installs or enrolls; only the consent sheet does
@@ -535,11 +537,56 @@ every rule above applies to it, with these sharpenings:
   (`AgentDiscovery.retire`). A running agent process no hello has identified is a candidate
   (`AgentCandidate`): listed so the user can connect it, never a recipient, and matched to its hello by
   process id and start time, never the process id alone. Processes that could not be read make the scan
-  partial, never empty, and only when the process's own name is the agent's; a candidate whose process
-  could not be read stays listed. The process table is listed once for every agent's discovery and reused
-  until it ages out (`AgentProcessTable`), so the liveness tick never sweeps it per agent.
-- **bb is a host reached through its own `bb` command** (`BBHost`). Every call runs the installed command with a
-  fixed environment that turns bb's telemetry off, never the app's own. Delivery uses `--mode auto`, which steers a
+  partial, never empty, and only when the process's own name is the agent's (a wrapped `.pi-wrapped` counts);
+  a candidate whose process could not be read stays listed. The process table is listed once for every agent's
+  discovery and reused until it ages out (`AgentProcessTable`), so the liveness tick never sweeps it per agent.
+- **An agent process is recognized by what it runs, never by a fixed process name.** `AgentProcesses.Rule.launch`
+  matches the program (its name with wrapper dots and `-wrapped` removed, or an install path the rule names) or, for a
+  known runtime or shell (`Rule.runtimes`), only the script in its interpreter slot (the first argument that is not a
+  flag, after a subcommand such as `run`), and only when it is a regular file that is the agent's executable or lies in
+  its install path. A program that merely opens or names the agent's file (an editor, a pager) is not the agent. A
+  wrapper script run by a shell that stays running is not the session when any process below it runs the agent, however
+  many wrappers or other programs sit between: that process is, so its pid and environment (a folder variable the script
+  exports) are the ones used. The wrappers are found from one snapshot of the matches, so the result never depends on
+  the order processes are listed in. Paths behind a
+  privacy prompt or on another volume are never looked at (`AgentProcesses.mayLookAt`), so a scan cannot raise a
+  permission prompt or wait on a mount; a symlink outside them that leads into them is resolved, which is the one
+  remaining way a scan could touch one. `AgentProcessLister` reads every process of the user in one
+  `KERN_PROC_UID` call and reads arguments only for processes it has not seen (keyed by pid, start time and name),
+  outside its lock, so the steady cost stays near the old name-filtered scan. Measured on an M5 Pro with 762 user processes
+  (2026-11-17): the name-filtered scan 0.6 ms, arguments for every process about 18 ms with one sysctl per process
+  and 6 ms after the bulk listing, the bulk listing alone 0.1 ms. A matched process reports the command it runs
+  (`AgentCandidate.tool`, through its wrapper when one sits beside it) and its runtime. A process started by an
+  agent is still not a session. Processes that resemble an agent but do not match are kept, by path and name only,
+  for Settings' Copy Details, after the matched ones, as program paths and argument paths of existing files only.
+- **A tool is chosen in one order and must answer.** `ToolEnvironment.search` (order in `ToolSearch.places`): a
+  command the user chose for the folder (stored on its enrollment, and then the only place looked), a running
+  conversation's command for that folder, the login shell's `PATH`, the app's `PATH`, the usual folders. The login
+  shell (`ShellEnvironment`) runs only while the Agent feature is on: once after the feature has been on for a quiet
+  period (never at launch), and then not while a take is in progress (`ToolEnvironment.waitWhile`), so a prompt an rc
+  file raises cannot take focus mid-dictation; on Settings refresh; and after a miss, throttled. A Settings refresh or
+  miss while the user dictates is not held back: the user is in Settings, or acting on a missing tool, then. It runs off the main thread in its own
+  process group (a timeout kills the group, so nothing an rc file started outlives it), with stdin closed, stderr
+  dropped, an output cap and per-run markers. It keeps only `PATH` and the folder variables the integrations declare
+  (`AgentIntegrations.folderVariables`, fixed when the feature turns on), and a failed run keeps the last good answer.
+  Nothing waits for it: Settings shows rows from the answer in hand, and observers (`ToolEnvironment.observe`) refresh
+  Settings and re-run connector maintenance when the answer changes. The command then runs with its own folder (and its runtime's) ahead of the shell's
+  `PATH`. Working means `--version` printed a version in time (`ToolCheck`); each failure keeps its own reason
+  (timed out, exit code, signal, no version, could not start), and a result is cached until the file changes; a failed one is
+  also forgotten on each Settings refresh. Output on the error stream is kept for `--version`, since that is where a
+  missing runtime says so. A connector's folder variable from the shell lists that folder for discovery and Settings; it is never
+  installed into.
+- **bb is a host reached through its own `bb` command** (`BBHost`). A bb build is found from what it publishes, never
+  from a fixed bundle id, app name or folder (`BBBuildFinder`, `BBBuilds`): a data folder holds the command bb writes
+  (`bin/bb`) and its runtime record or thread storage, and is the usual folder, a hidden folder in the home folder,
+  the `BB_DATA_DIR` a running app declares in its launch environment, the `BB_DATA_DIR` of the user's login shell, or
+  a folder the user adds that passes the same check (`BBBuildFinder.isDataFolder`). The app it runs from comes from the runtime
+  record's entry path, else the command's runtime path; its bundle id says whether it is open and which app in front
+  is it, and its app name is what Settings and every message call it. Each enrolled data folder is its own instance:
+  its threads are keyed by that folder, and every call for them runs that folder's own command with that folder as
+  `BB_DATA_DIR` and a fixed environment that turns bb's telemetry off, never the app's own. A build that is closed or
+  could not be read keeps the threads it last listed, as Last seen, while the others are listed fresh
+  (`AgentHostScan.found`'s `carried`); only when no build could be read is the list unreadable. Delivery uses `--mode auto`, which steers a
   running turn and starts one when the thread is idle, as typing in bb does. The hub holds nothing back for an open
   approval: bb queues the message itself and answers `queued` (measured with bb 0.49.0 on 2026-11-15, Claude Code in
   a thread stopped on a command approval). The approval stayed open, the message sat in bb's queue as
@@ -576,10 +623,10 @@ every rule above applies to it, with these sharpenings:
   (`BBSidebarSwitch`) and records what it changed in the plugin folder. The record keeps it from ever doing
   this again, so a switch the user turns off stays off. A switch bb could not read is left alone and tried at
   the next update, and a failed change never fails the install. Uninstalling turns off only recorded
-  switches, and only when the user picks that button (`AgentConnector.undoesOnUninstall`). A location that is not a thread of this bb's data folder is never passed to the command. A
+  switches, and only when the user picks that button (`AgentConnector.undoesOnUninstall`). A location that is not a thread of an enrolled build's data folder is never passed to any command. A
   list longer than `HostCLI`'s output cap reads as unreadable, not as the part that fit. An agent bb started
   is placed in its thread by `BB_THREAD_ID` together with `BB_THREAD_STORAGE`, which must be that thread's
-  folder in this bb's data folder (`BBThreads.thread(in:instance:)`); bb passes the dictated text to the agent
+  folder in an enrolled build's data folder (`BBThreads.thread(in:instance:)`); bb passes the dictated text to the agent
   unchanged, so its digest matches (checked with Claude Code in bb 0.49.0, 2026-11-14), while bb's own
   messages to a parent thread arrive as turns of their own and are never followed.
 - **One conversation per session id.** A discovery can list a session twice for a moment, for example while bb
@@ -587,8 +634,8 @@ every rule above applies to it, with these sharpenings:
   entry for each id as it assembles the list (`AgentHub.newestOfEach`), before anything downstream builds a
   dictionary keyed by conversation.
 - **bb's plugin is a connector for every bb thread** (`BBPluginConnector`, sources in `Resources/BBPlugin`). It is
-  installed like a connector, by the consent sheet's enrollment for bb's data folder, and bb is on exactly while
-  that setup is enrolled, read from the enrollment itself, never copied into settings
+  installed like a connector, by the consent sheet's enrollment for a bb build's data folder, each build on its own,
+  and bb is on exactly while any of those setups is enrolled, read from the enrollment itself, never copied into settings
   (`AgentsSettingsModel.isTurnedOn`; the hub rescans on every enrollment change,
   `ConnectorSetupRegistry.onChange`). Enrollment, not bb's report, decides it: a failed install or a plugin removed
   inside bb keeps bb on, reads Not installed, and offers Reinstall without asking again, and an enrolled setup always
@@ -596,7 +643,8 @@ every rule above applies to it, with these sharpenings:
   file (`ConnectorSetupRegistry.reload`); a grant that could not be saved changes nothing, so the file stays in
   charge. An unreadable setups file keeps the enrollment already loaded; at a launch that finds it unreadable, nothing is
   loaded yet, so bb reads as off until the file is fixed, as every connector is refused then. KeyScribe writes its sources and settings into its own support folder,
-  then has bb install it from there (`bb plugin install`, which builds a path source itself and runs `server.ts`
+  one copy per build (the usual folder's keeps `bb-plugin`, so an existing install stays where it is), then has that
+  build's bb install it from there (`bb plugin install`, which builds a path source itself and runs `server.ts`
   from that folder, so the settings file sits beside it). An update rewrites the files and asks bb to reload the
   plugin (`bb plugin reload`), which keeps the running copy if the new one fails to load; it runs at launch while
   bb is connected. Each copy of the app installs its own plugin id, the variant's connector slug, so release and

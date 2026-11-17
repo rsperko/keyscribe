@@ -506,7 +506,7 @@ agent replies.
 ### Can I get answers and agent updates without hearing them?
 
 Yes. Set **Voice** to **Off — text only**, either in an Ask mode's **Answer** section or under **Settings ▸ Modes ▸
-Agent ▸ Replies ▸ More reply options**. It is one shared choice, so it applies to both. Answers and agent updates then appear on
+Agent ▸ Replies**. It is one shared choice, so it applies to both. Answers and agent updates then appear on
 screen with their text, a copy button and a close button, and close themselves after time to read them; hovering
 keeps one open, and Escape closes it. Nothing is spoken and other audio is left alone. Agent updates still arrive
 one at a time, in order: the next appears when the current one closes, and they wait while you dictate.
@@ -534,16 +534,43 @@ own configuration is needed. A conversation that is already open picks the conne
 `/reload` in Pi or `/reload-plugins` in Claude Code, or restart it; its row says so until it connects. The
 Pi connector needs Pi 1.4.0 or later.
 
-If a conversation is not listed, choose **Check Again** below that list. KeyScribe can miss an agent started
-through an unusual wrapper or hosted inside another program.
+If a conversation is not listed, choose **Check Again** below that list. KeyScribe recognizes an agent by the
+program or script it runs, so a wrapper script, a Nix-style wrapped binary, or another JavaScript runtime is
+found too; an agent that hides what it runs can still connect once its folder has the connector.
+
+### KeyScribe found the wrong `claude` or `pi`, or says it is not found
+
+Opened from Finder, the Dock or as a login item, KeyScribe does not start with your terminal's `PATH`. So it
+looks, in order, at a command you chose, the command a running conversation of that folder uses, the `PATH` your
+login shell sets (it runs your shell to read it only while agents are turned on: once about a minute after they start,
+waiting until you are not dictating, and again when you open the Agent settings, never at launch; anything your shell's
+startup files start is stopped with it), its own
+`PATH`, and the usual install folders, including mise and asdf shims. From your shell it reads only `PATH` and
+the variables that point an agent at its folder, such as `CLAUDE_CONFIG_DIR`. The command it picks must answer `--version`; if it
+does not, the folder reads as **not working** and says why.
+
+When a command is not found, expand the folder under **Connections**: **Where KeyScribe looked** lists every
+place it checked. Choose **Choose…** to pick the command yourself; KeyScribe remembers it for that folder, and
+**Find … Automatically** in the folder's **⋯** menu goes back to searching. **Copy Details** in the same menu
+copies what KeyScribe searched, what your login shell reported for those settings, and the agent processes
+it saw (their paths and names only), to paste into a bug report.
+
+KeyScribe never looks at files in Documents, Desktop, Downloads, Pictures, Movies, Music, iCloud Drive, cloud
+storage folders or other volumes when it checks running processes, so checking never raises a permission prompt.
+An agent started from a script kept in one of those places is therefore not recognized from its process; Copy
+Details marks such paths "not looked at". Its conversations still connect once its configuration folder has the
+connector.
 
 ### I run Claude Code or Pi with more than one configuration folder. How do I connect them all?
 
 Expand that agent under **Connections**. Its **Configuration folders** list shows the default folder, every
 folder its connector is installed in, and every folder an open conversation uses. If one is missing, choose
 **Add Folder…** and pick it; KeyScribe asks before installing there. Each folder is connected and removed on its
-own, and in **Manage…** each conversation shows which folder it uses. bb has one data folder, so it has no Add
-Folder.
+own, and in **Manage…** each conversation shows which folder it uses. A folder set with `CLAUDE_CONFIG_DIR` or
+`PI_CODING_AGENT_DIR` in your shell's startup files is listed too. For bb, KeyScribe lists every copy of bb it
+finds on your Mac, by the name of its app, including one whose data folder your shell names with `BB_DATA_DIR`;
+each is connected on its own. Open a copy of bb once if it is missing, or choose **Add Folder…** and pick its data
+folder.
 
 ### How do I choose which conversation hears me?
 

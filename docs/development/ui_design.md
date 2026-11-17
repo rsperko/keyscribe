@@ -2127,11 +2127,11 @@ master/detail conversation list. Its everyday view is, in order:
 3. **Connections** — one grouped section with one compact `DisclosureSection` per supported integration, drawn from
    the build's integration inventory (`AgentsSettingsModel.integrationIDs`), separated by the form's native
    separators; no card or section per integration. Each row has the integration's name and, under it, a
-   short status line (`ConnectionSummary`): what is available (N conversations available, or No
-   conversations open), led by the setup only when it needs reading (Not set up, the agent's own turned-off
+   short status line (`ConnectionSummary`): what is available (N conversations available; when none is, how many
+   are open (“2 open, none connected”), or No conversations open when none is), led by the setup only when it needs reading (Not set up, the agent's own turned-off
    wording, a lifecycle step in progress, or the failing status; a healthy installed connector or a host
    that is on says nothing about setup, since its folders already show it), then, only when more than one
-   configuration folder is listed, how many (“2 configuration folders”). Conversations that are not
+   configuration folder is listed, how many (“2 configuration folders”). Beyond that open count, conversations that are not
    available are not counted here: ones that need a step are handled inside the expanded row (below), and
    the rest (last seen, disconnected) are counted under **Manage…**. The status wraps rather than
    truncating the name or squeezing the action. The whole header expands management inline, with a trailing
@@ -2145,7 +2145,7 @@ master/detail conversation list. Its everyday view is, in order:
    (`AgentsSettingsModel.conversationsSummary`; conversations that can't are explained by the agents'
    warnings and the list itself, not counted here) and **Manage…**, the one permanent entry to the
    conversation list (below), then any problem with saved conversation names or disconnections.
-4. **Replies** — **Read Agent Replies Aloud** and a disclosure for the rest (below).
+4. **Replies** — **Read Agent Replies Aloud**, then, while it is on, the rest of its settings in view (below).
 5. **Advanced** — one collapsed `DisclosureSection` (“Vocabulary, rewriting before sending, and history”)
    that, when open, shows **Words**, **Rewrite instructions before sending** (an optional AI rewrite with its
    **Rewrite service** and instruction), **Data sent with AI** (best-effort redaction of that rewrite request,
@@ -2206,12 +2206,12 @@ conversation, reported by the connector, else the title Claude Code generated, r
 of the session's own transcript (only the title is kept, and it is never logged); a brand-new conversation has
 neither yet.
 
-**Replies**' everyday view is one row and one disclosure. **Read Agent Replies Aloud** is its own switch, off by default.
+**Replies** collapses nothing, like a mode's AI section: every setting that decides what is sent stays in view. **Read Agent Replies Aloud** is its own switch, off by default.
 Its caption says what it does while off ("Get replies to messages you dictate or ask the agent to report, and
 know when it needs you.") and, while on, the current voice in one line ("Read aloud with the Heart voice.
-Longer replies are summarized by {service}." or "Shown as text, not read aloud. …"). **More reply options**,
-a collapsed `DisclosureSection` shown while the switch is on, holds **Summary service** and **Voice**, then,
-under a divider, the **Summary instruction** and the voice's files, and opens by itself when the service is missing or the voice needs attention. The summary
+Longer replies are summarized by {service}." or "Shown as text, not read aloud. …"). While the switch is on, the
+section shows **Summary service**, the **Summary instruction** (only while a service is chosen, as a mode's
+writing instruction shows only with its AI service), then **Voice** and the voice's files. The summary
 service is separate from the Agent mode's rewrite service, with a different name, so the service that
 rewrites what the user says is never mistaken for the one that summarizes replies; its row's caption is the data
 boundary in one line. **About reading replies aloud**, under the switch, opens a help dialog in three parts: **When
@@ -2299,7 +2299,7 @@ speaking panel) without reading them aloud; it is stored as its own setting besi
 (`text_only`), so choosing a speaker again turns speech back on with that speaker. While it is chosen, **Preview
 Voice** and the macOS-voice advisories are hidden. The same picker shows whether or not the voice is installed;
 before it is, a chosen speaker is read by the macOS voice. A caption under the row states the shared effect: in
-the Agent mode's More reply options, "This choice also applies to Ask modes’ answers."; in an Ask mode's **Answer** section, "This choice also applies to agent reply updates, so
+the Agent mode's **Replies** section, "This choice also applies to Ask modes’ answers."; in an Ask mode's **Answer** section, "This choice also applies to agent reply updates, so
 changing it here changes it there." Preview speaks a sample in whichever voice would read a summary now, never while recording, and
 interrupts a summary rather than overlapping one. Before the voice is installed, the row's caption reads
 "Using the macOS voice. Download the natural voice for better speech." and its prominent button names the
@@ -2325,9 +2325,8 @@ preparing its audio after that same limit hands the text to the macOS voice, and
 while stalled preparations are still running. Progress, failures and that
 advisory always sit at the Voice row, never with the voice files below it.
 
-Below the divider in More reply options, with no disclosure nested inside it, sit the **Summary
-instruction** prompt editor, seeded with the default instruction, and **Reset to Default**, enabled only once
-it was changed; then, once the voice has files to delete, its language and size on this Mac, a note that
+The **Summary instruction** prompt editor is seeded with the default instruction, with **Reset to Default**
+under it, enabled only once it was changed. Below the Voice row, once the voice has files to delete, sit its language and size on this Mac, a note that
 deleting returns playback to the macOS voice until it is downloaded again and keeps the speaker and summary
 settings, and the red trailing **Delete Voice**, which confirms first and stops anything the voice is speaking.
 A missing voice file is never fetched in the background: only **Download** or **Reinstall voice** downloads.
@@ -2367,9 +2366,13 @@ redaction hid from the service is spoken as "a hidden value", never read aloud.
 
 Each agent host (`AgentIntegrations.hosts`) has a row in Connections, named by the host. A host
 whose integration brings its own connector (`AgentHostIntegration.connector`, bb's plugin) has no switch: its
-expanded content is that connector's configuration folder list with its one folder (bb's data folder) and no
-**Add Folder…**, since the host reaches only that one, and the host is on exactly while its default setup is
-enrolled; its id in `agents.hosts` is ignored. **Install…** shows the connector consent sheet in its host form (**Connect {host}?**, what the host
+expanded content is that connector's configuration folder list: for bb, one row per bb build
+found on the Mac (each build's data folder, found from the command and runtime record bb writes there, from a
+running app's launch environment, or from `BB_DATA_DIR` in the user's login shell), named by the build's app name
+beside its folder. **Add Folder…** accepts a folder only when it holds bb's command and its runtime record or
+thread storage, and is otherwise refused as not a bb data folder. The folder a build that is
+open uses is the default, which **Connect…** offers; otherwise the usual folder. The host is on exactly while any of
+its setups is enrolled; its id in `agents.hosts` is ignored. **Install…** shows the connector consent sheet in its host form (**Connect {host}?**, what the host
 integration does, that it installs the plugin and keeps it up to date, and that uninstalling stops all of it);
 **Connect {host}** turns the host on and installs, and Cancel leaves it off. While the host is off, a caption under
 the expanded row says what the plugin gets you (the connector copy's `purpose`). **Uninstall Plugin…**, after its
@@ -2388,14 +2391,42 @@ An integration's expanded row holds its setup and repair in place; ordinary mana
 Each integration is drawn from that agent's own adapter. Its expanded content is a **Configuration folders**
 list (singular when there is one): the folders the agent loads its configuration from (Pi's agent folder,
 Claude Code's config folder). The folders shown are the default one, as an ordinary row, the ones a connector
-is installed in, the ones open conversations were found using, read from each conversation's own process, so
-a Finder launch and a terminal launch show the same folders, and any the user added this session; finding a
-folder never installs into it. Each folder is one compact row: the shortened path (full path on hover), its
-status word, at most one lifecycle action, and a **⋯** menu with **Show in Finder**, **Copy Path**,
-**Uninstall {Connector or Plugin}…** (red) while there is something to uninstall, and **Remove from List** for a
-folder the user added that was never installed. A folder's problems, its manual uninstall commands and a
+is installed in, the ones open conversations were found using, read from each conversation's own process or,
+for a connected conversation, from the setup its connector was installed in, so a Finder launch and a terminal
+launch show the same folders, the one the user's login shell names (`CLAUDE_CONFIG_DIR`, `PI_CODING_AGENT_DIR`),
+and any the user added this session; finding a folder never installs into it. Each folder is one compact row: the shortened path (full path on hover), its
+status word, at most one lifecycle action, and a **⋯** menu with **Show in Finder**, **Copy Path**, **Copy
+Details**, for an agent run through its own command **Choose {command} Command…** and, while one is chosen,
+**Find {command} Automatically**, **Uninstall {Connector or Plugin}…** (red) while there is something to
+uninstall, and **Remove from List** for a folder the user added that was never installed.
+
+The agent's command is looked for, per folder, in a fixed order: a command the user chose for that folder (then
+nowhere else, so a chosen command that has gone missing reads as not found rather than quietly replaced), the
+command a running conversation using that folder runs, the `PATH` the user's login shell sets, the app's own
+`PATH`, then the usual install folders (including mise and asdf shims, and the agent's own extras). The login
+shell is read only while the Agent feature is on: once after the feature has been on for a while and no take is in
+progress, when Settings refreshes its agents, and after a miss, all throttled, never at launch, and never while anything waits for it:
+the rows show what the last answer gives and update when a new answer changes it. It runs off the main thread in
+its own process group with no input, a timeout and an output cap, keeps only `PATH` and each integration's folder variable, and a failed read keeps the last good
+answer. The command found must answer `--version` with a version in time; no minimum
+version is imposed beyond the agent's own floor. A folder whose command is missing reads **{agent} not found**
+with advice that names the places looked and that the command can be chosen; one whose command fails reads
+**{agent} not working** with the distinct reason (did not finish in time, exit code with what it printed, stopped
+by a signal, printed no version, could not be started). Both are advisories, not errors, and offer **Choose…** as
+the row's action; unless a command is chosen (the line under the row already names it), a collapsed **Where {app}
+looked** `DisclosureSection` under the row lists every path checked with where it came from, and says when the login
+shell could not be read. The manual uninstall commands below are offered only while the command is not found, never
+for one that is found but not working, whose fix is to choose or repair the command; an enrolled folder whose command
+is not working still offers its Uninstall action. A chosen command shows under the row
+(“Uses the command you chose: …”) and is saved with that folder's enrollment, or held until it is installed.
+**Copy Details** copies the folder, the command search and its result, the `--version` result, the login
+shell's answer for those keys, every configuration folder listed with why, and the processes seen that
+are or resemble that agent, by process id, name and program paths only: never other environment values,
+arguments that are not paths, or conversation content. It says which locations are never looked at (privacy-protected
+folders and other volumes) and marks such a path "not looked at", so an agent started from there is not taken for a
+bug in matching. A folder's problems, its manual uninstall commands and a
 removed-outside-the-app warning sit directly under its row, so a failure is beside the folder it concerns.
-The list is labelled **Configuration folders** however many it holds. One **Add Folder…** follows the list for agents that can use more than one folder: it opens the native folder
+The list is labelled **Configuration folders** however many it holds. One **Add Folder…** follows the list: it opens the native folder
 picker, starting beside the default folder with hidden folders shown. A folder already listed, by any
 equivalent path (symlink, trailing slash, the default), is refused with an advisory naming it; a folder that
 does not look like that agent's configuration folder is explained the same way; any other opens the consent

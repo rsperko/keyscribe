@@ -115,7 +115,7 @@ final class AgentsSettingsModel: ObservableObject {
 
     func isTurnedOn(_ host: AgentKind) -> Bool {
         guard let connector = connector(of: host) else { return turnedOnHosts.contains(host.id) }
-        return connector.setups.first(where: \.isDefault)?.isEnrolled == true
+        return connector.setups.contains(where: \.isEnrolled)
     }
 
     func isTurnedOn(id: String) -> Bool { hosts.first { $0.id == id }.map(isTurnedOn) ?? false }
@@ -175,20 +175,34 @@ final class AgentsSettingsModel: ObservableObject {
 
     init(
         describeTerminal: @escaping @Sendable (Int) -> String?,
-        agentsDir: URL, setups: ConnectorSetupRegistry? = nil, connectors: [any AgentConnector], hosts: [AgentKind] = []
+        agentsDir: URL, setups: ConnectorSetupRegistry? = nil, connectors: [any AgentConnector], hosts: [AgentKind] = [],
+        tools: ToolEnvironment = .shared
     ) {
+        self.tools = tools
         self.hosts = hosts
         self.describeTerminal = describeTerminal
         self.agentsDir = agentsDir
         let registry = setups ?? ConnectorSetupRegistry(directory: agentsDir)
         self.setups = registry
-        self.connectors = connectors.map { AgentConnectorModel($0, registry: registry) }
+        self.connectors = connectors.map { AgentConnectorModel($0, registry: registry, tools: tools) }
         setupsProblem = registry.problem
+        tools.observe { [weak self] in
+            Task { @MainActor in await self?.shellChanged() }
+        }
     }
+
+    private let tools: ToolEnvironment
 
     func refresh() async {
         if setupsProblem != setups.problem { setupsProblem = setups.problem }
+        tools.forgetFailedChecks()
+        let tools = tools
+        Task.detached { await tools.refresh(.settings) }
         for connector in connectors { await connector.refresh() }
+    }
+
+    func shellChanged() async {
+        for connector in connectors where connector.hasRefreshed { await connector.refresh() }
     }
 
     func maintain() async {
@@ -457,7 +471,7 @@ final class AgentsSettingsModel: ObservableObject {
             return "\(listed.display) is already listed."
         }
         guard connector.connector.recognizes(folder: folder) else {
-            return "\(ConnectorFolders.display(folder)) doesn\u{2019}t look like a \(connector.kind.displayName) configuration folder."
+            return "\(ConnectorFolders.display(folder)) doesn\u{2019}t look like a \(connector.kind.displayName) \(connector.copy.folderNoun)."
         }
         guard let setup = connector.choose(folder: folder) else { return nil }
         Task { await setup.refresh() }

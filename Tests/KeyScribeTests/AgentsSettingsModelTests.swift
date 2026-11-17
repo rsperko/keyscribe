@@ -59,8 +59,11 @@ struct AgentsSettingsModelTests {
         script: String? = ClaudeConnectorFiles.registerJS, dir: URL? = nil
     ) -> (AgentsSettingsModel, CLI, URL) {
         let dir = dir ?? FileManager.default.temporaryDirectory.appendingPathComponent("ks-agents-model-\(UUID().uuidString)")
+        let tools = ToolEnvironment(
+            home: dir.appendingPathComponent("home").path, appEnvironment: ["PATH": "/test-bin"], shell: "/bin/zsh",
+            isExecutable: { (claude != nil && $0 == "/test-bin/claude") || ($0.hasPrefix(dir.path) && FileManager.default.isExecutableFile(atPath: $0)) })
         let connector = ClaudeConnector(
-            locate: { claude }, run: { argv, _ in cli.run(argv) }, agentsDir: dir, pluginName: "keyscribe-dev", surfaces: .builtIn, script: script,
+            run: { argv, _ in cli.run(argv) }, version: { _ in .working("2.1.326") }, tools: tools, agentsDir: dir, pluginName: "keyscribe-dev", surfaces: .builtIn, script: script,
             home: dir.appendingPathComponent("home"))
         let model = AgentsSettingsModel(describeTerminal: terminals.describe, agentsDir: dir, connectors: [connector])
         return (model, cli, dir)
@@ -90,6 +93,55 @@ struct AgentsSettingsModelTests {
         #expect(setup(model).state == .status(.notInstalled))
         await setup(model).install()
         #expect(setup(model).state == .status(.ready))
+    }
+
+    @Test func aCommandChosenByHandIsUsedAndKeptWithTheFoldersEnrollment() async throws {
+        let cli = CLI()
+        cli.installed = ClaudeConnectorFiles.registerJS.map { ClaudeConnectorFiles.version(for: $0, surfaces: .builtIn) }
+        let (model, _, dir) = makeModel(claude: nil, cli: cli)
+        await model.refresh()
+        #expect(setup(model).state == .toolNotFound)
+        #expect(setup(model).toolMissing)
+        let chosen = dir.appendingPathComponent("my-claude")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try Data("#!/bin/sh\n".utf8).write(to: chosen)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: chosen.path)
+        #expect(await setup(model).choose(tool: dir.appendingPathComponent("not-there")) != nil)
+        #expect(await setup(model).choose(tool: chosen) == nil)
+        #expect(setup(model).search?.tool == ToolSearch.Place(path: chosen.path, source: .chosen))
+        #expect(setup(model).state == .status(.notInstalled))
+        await setup(model).install()
+        #expect(setup(model).state == .status(.ready))
+        #expect(model.setups.setups?.setup(agent: "claude", folder: defaultFolder(dir))?.tool == chosen.path)
+        #expect(cli.calls.allSatisfy { $0.first == chosen.path })
+        #expect(await setup(model).choose(tool: nil) == nil)
+        #expect(model.setups.setups?.setup(agent: "claude", folder: defaultFolder(dir))?.tool == nil)
+        #expect(setup(model).state == .toolNotFound)
+    }
+
+    @Test func aChosenCommandThatFailsOffersOnlyChoosingAgain() async throws {
+        let (model, _, dir) = makeModel(claude: nil)
+        await model.refresh()
+        #expect(setup(model).lookedIn?.isEmpty == false)
+        let folder = URL(fileURLWithPath: defaultFolder(dir), isDirectory: true)
+        let marketplace = ClaudeConnectorInstaller.marketplaceDir(in: dir, setupFolder: folder)
+        try FileManager.default.createDirectory(at: marketplace, withIntermediateDirectories: true)
+        await model.refresh()
+        #expect(!setup(model).manualUninstall.isEmpty)
+        let chosen = dir.appendingPathComponent("broken-claude")
+        try Data("#!/bin/sh\nexit 1\n".utf8).write(to: chosen)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: chosen.path)
+        let failing = ClaudeConnector(
+            run: { _, _ in (0, "[]") }, version: { _ in .exited(1, "") },
+            tools: ToolEnvironment(home: dir.path, appEnvironment: ["PATH": "/test-bin"], shell: "/bin/zsh", isExecutable: { $0 == chosen.path }),
+            agentsDir: dir, pluginName: "keyscribe-dev", surfaces: .builtIn, home: dir.appendingPathComponent("home"))
+        let broken = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: dir, connectors: [failing])
+        await broken.refresh()
+        #expect(await broken.connectors[0].setups[0].choose(tool: chosen) == nil)
+        #expect(broken.connectors[0].setups[0].state == .toolNotWorking(.exited(1, "")))
+        #expect(broken.connectors[0].setups[0].lookedIn == nil)
+        #expect(broken.connectors[0].setups[0].manualUninstall.isEmpty)
+        #expect(!broken.connectors[0].setups[0].offersUninstall)
     }
 
     @Test func aConversationStillConnectedToASetupThatIsNotInstalledIsWarnedAbout() async {
@@ -886,15 +938,6 @@ struct AgentsSettingsModelTests {
 }
 
 struct ClaudeCLITests {
-    @Test func claudeIsFoundOnThePathFirstThenInTheUsualInstallPlaces() {
-        let home = URL(fileURLWithPath: "/Users/me")
-        let onPath = ClaudeCLI.locate(environment: ["PATH": "/custom/bin:/usr/bin"], home: home) { $0 == "/custom/bin/claude" || $0 == "/Users/me/.local/bin/claude" }
-        #expect(onPath == "/custom/bin/claude")
-        let usual = ClaudeCLI.locate(environment: ["PATH": "/usr/bin"], home: home) { $0 == "/Users/me/.local/bin/claude" }
-        #expect(usual == "/Users/me/.local/bin/claude")
-        #expect(ClaudeCLI.locate(environment: [:], home: home) { _ in false } == nil)
-    }
-
     @Test func runReturnsTheStatusAndBothOutputStreams() {
         let (status, output) = ClaudeCLI.run(["/bin/sh", "-c", "echo out; echo err >&2; exit 3"], environment: [:])
         #expect(status == 3)

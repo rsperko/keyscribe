@@ -46,7 +46,7 @@ struct AgentIntegrationRow: View {
     var body: some View {
         if let connector = agents.connectors.first(where: { $0.kind.id == id }) {
             ConnectorRow(
-                connector: connector, available: available, awaitingReload: agents.awaitingReload(of: connector).map(\.id),
+                connector: connector, available: available, open: open, awaitingReload: agents.awaitingReload(of: connector).map(\.id),
                 onConnect: { agents.requestInstall($0, of: connector) },
                 onAddFolder: { ConnectorFolderPicker.choose(for: connector).flatMap { agents.choose(folder: $0, for: connector) } },
                 onShow: { agents.showOnly($0, title: ConnectionSummary.awaitingReloadTitle(connector.kind.displayName)) })
@@ -56,7 +56,7 @@ struct AgentIntegrationRow: View {
                 DisclosureSection(isExpanded: $expanded, headerID: AccessibilityID.Mode.Agents.integration(id)) {
                     DisclosureSummaryLabel(
                         title: host.displayName,
-                        summary: ConnectionSummary.line(setup: on ? nil : "Not set up", available: available))
+                        summary: ConnectionSummary.line(setup: on ? nil : "Not set up", available: available, open: open))
                 } content: {
                     SettingRow(
                         title: "Reach conversations in \(host.displayName)",
@@ -74,11 +74,13 @@ struct AgentIntegrationRow: View {
     }
 
     private var available: Int { agents.rows.filter { $0.agent == id && $0.connected }.count }
+    private var open: Int { agents.rows.filter { $0.agent == id && !$0.lastSeen }.count }
 }
 
 private struct ConnectorRow: View {
     @ObservedObject var connector: AgentConnectorModel
     let available: Int
+    let open: Int
     let awaitingReload: [String]
     let onConnect: (ConnectorSetupModel) -> Void
     let onAddFolder: () -> String?
@@ -96,7 +98,7 @@ private struct ConnectorRow: View {
                 ) {
                     DisclosureSummaryLabel(
                         title: connector.kind.displayName,
-                        summary: ConnectionSummary.line(setup: connector.setupStatus, available: available, folders: connector.setups.count))
+                        summary: ConnectionSummary.line(setup: connector.setupStatus, available: available, open: open, folders: connector.setups.count))
                 }
                 if let connectable = connector.connectableSetup {
                     Button("Connect\u{2026}") { onConnect(connectable) }
@@ -123,15 +125,13 @@ private struct ConnectorRow: View {
             ForEach(connector.setups) { setup in
                 ConnectorFolderRow(
                     setup: setup, canForget: connector.canForget(setup), onInstall: { onConnect(setup) },
-                    onForget: { connector.forget(setup) })
+                    onForget: { connector.forget(setup) }, details: { await connector.details(for: setup) })
             }
-            if connector.connector.allowsOtherFolders {
-                Button("Add Folder\u{2026}") { folderProblem = onAddFolder() }
-                    .accessibilityLabel("Add a \(connector.kind.displayName) configuration folder")
-                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.addFolder)
-                if let folderProblem {
-                    IssueText(folderProblem, severity: .advisory)
-                }
+            Button("Add Folder\u{2026}") { folderProblem = onAddFolder() }
+                .accessibilityLabel("Add a \(connector.kind.displayName) \(connector.copy.folderNoun)")
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.addFolder)
+            if let folderProblem {
+                IssueText(folderProblem, severity: .advisory)
             }
             if let purpose = connector.copy.purpose, !connector.setups.contains(where: \.isEnrolled) {
                 Text(purpose).font(.caption).foregroundStyle(.secondary)
@@ -153,16 +153,33 @@ private struct ConnectorRow: View {
                 if !connector.copy.reloadHint.isEmpty {
                     HelpSection("Conversations already open") { Text(connector.copy.reloadHint) }
                 }
-                if connector.connector.allowsOtherFolders {
-                    HelpSection("Configuration folders") { Text(Self.foldersHelp(connector.kind.displayName)) }
-                }
+                HelpSection("Configuration folders") { Text(connector.copy.foldersHelp ?? Self.foldersHelp(connector.kind.displayName)) }
             }
         }
         .onChange(of: connector.setups.count) { _, _ in folderProblem = nil }
     }
 
     static func foldersHelp(_ agent: String) -> String {
-        "A configuration folder is where \(agent) loads its settings from. \(Branding.appName) lists the default folder, the folders its connector is installed in, and the folders open conversations use. If you run \(agent) with another folder, choose Add Folder\u{2026} to install the connector there; each folder is connected and removed on its own."
+        "A configuration folder is where \(agent) loads its settings from. \(Branding.appName) lists the default folder, the folders its connector is installed in, the folders open conversations use, and the one your login shell sets. If you run \(agent) with another folder, choose Add Folder\u{2026} to install the connector there; each folder is connected and removed on its own."
+    }
+}
+
+@MainActor
+enum ToolPicker {
+    static func choose(program: String, agent: String) -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.treatsFilePackagesAsDirectories = true
+        panel.canCreateDirectories = false
+        panel.resolvesAliases = false
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin", isDirectory: true)
+        panel.message = "Choose the \(program) command \(Branding.appName) should run for \(agent)."
+        panel.prompt = "Use Command"
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
     }
 }
 
@@ -176,7 +193,9 @@ enum ConnectorFolderPicker {
         panel.showsHiddenFiles = true
         panel.canCreateDirectories = false
         panel.directoryURL = connector.connector.defaultFolder.deletingLastPathComponent()
-        panel.message = "Choose the folder \(connector.kind.displayName) loads its configuration from."
+        panel.message = connector.copy.folderNoun == "configuration folder"
+            ? "Choose the folder \(connector.kind.displayName) loads its configuration from."
+            : "Choose a \(connector.kind.displayName) \(connector.copy.folderNoun)."
         panel.prompt = "Add Folder"
         guard panel.runModal() == .OK else { return nil }
         return panel.url
@@ -184,10 +203,12 @@ enum ConnectorFolderPicker {
 }
 
 enum ConnectionSummary {
-    static func line(setup: String?, available: Int, folders: Int = 1) -> String {
+    static func line(setup: String?, available: Int, open: Int = 0, folders: Int = 1) -> String {
         var parts = setup.map { [$0] } ?? []
         if available > 0 {
             parts.append(available == 1 ? "1 conversation available" : "\(available) conversations available")
+        } else if open > 0 {
+            parts.append(open == 1 ? "1 open, not connected" : "\(open) open, none connected")
         } else if setup == nil {
             parts.append("No conversations open")
         }
@@ -221,7 +242,7 @@ extension AgentConnectorModel {
         }
         if let enrolled = setups.first(where: \.isEnrolled) { return enrolled.statusText }
         if setups.contains(where: { $0.state == .checking }) { return "Checking\u{2026}" }
-        if let missing = setups.first(where: { $0.state == .toolNotFound || $0.state == .unavailable }) {
+        if let missing = setups.first(where: { $0.toolMissing || $0.state == .unavailable }) {
             return missing.statusText
         }
         if let old = setups.first(where: { if case .toolTooOld = $0.state { true } else { false } }) { return old.statusText }
@@ -241,19 +262,26 @@ private struct ConnectorFolderRow: View {
     let canForget: Bool
     let onInstall: () -> Void
     let onForget: () -> Void
+    let details: () async -> String
     @State private var confirmingRemove = false
+    @State private var lookedIn = false
+    @State private var toolProblem: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 HStack(spacing: 6) {
+                    if let name = setup.name {
+                        Text(name).lineLimit(1).fixedSize()
+                    }
                     Text(setup.display).lineLimit(1).truncationMode(.middle).help(setup.folder.path)
+                        .foregroundStyle(setup.name == nil ? .primary : .secondary)
                     if setup.hasError {
                         Circle().fill(.red).frame(width: 7, height: 7).accessibilityHidden(true)
                     }
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel(([setup.display, setup.statusText] + (setup.hasError ? ["Needs attention"] : [])).joined(separator: ", "))
+                .accessibilityLabel(([setup.name, setup.display, setup.statusText].compactMap { $0 } + (setup.hasError ? ["Needs attention"] : [])).joined(separator: ", "))
                 .accessibilityIdentifier(AccessibilityID.Mode.Agents.folderRow)
                 Spacer(minLength: 8)
                 Text(setup.statusText).font(.callout).foregroundStyle(.secondary).lineLimit(1).fixedSize()
@@ -262,6 +290,26 @@ private struct ConnectorFolderRow: View {
                 actions
             }
             issue
+            if let chosen = setup.chosenTool {
+                Text("Uses the command you chose: \(ConnectorFolders.display(URL(fileURLWithPath: chosen)))")
+                    .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
+            if let toolProblem {
+                IssueText(toolProblem, severity: .advisory)
+            }
+            if let searched = setup.lookedIn {
+                DisclosureSection("Where \(Branding.appName) looked", isExpanded: $lookedIn, headerID: AccessibilityID.Mode.Agents.lookedIn) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let problem = setup.shellProblem, setup.choosesTool {
+                            IssueText("Your login shell could not be read, so its PATH is missing here: \(problem)", severity: .advisory)
+                        }
+                        ForEach(searched, id: \.path) { place in
+                            Text("\(ConnectorFolders.display(URL(fileURLWithPath: place.path))) \u{2014} \(place.source.label)")
+                                .font(.caption.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                        }
+                    }
+                }
+            }
             if setup.showsRemovalWarning {
                 IssueText(setup.copy.stillConnected(setup.lingering), severity: .advisory)
             }
@@ -288,6 +336,16 @@ private struct ConnectorFolderRow: View {
         Menu {
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([setup.folder]) }
             Button("Copy Path") { _ = TextInserter.copyToClipboard(setup.folder.path) }
+            Button("Copy Details") { Task { _ = TextInserter.copyToClipboard(await details()) } }
+                .accessibilityIdentifier(AccessibilityID.Mode.Agents.copyDetails)
+            if let program = setup.connector.toolProgram {
+                Divider()
+                Button("Choose \(program) Command\u{2026}") { chooseTool() }
+                if setup.chosenTool != nil {
+                    Button("Find \(program) Automatically") { Task { toolProblem = await setup.choose(tool: nil) } }
+                        .accessibilityIdentifier(AccessibilityID.Mode.Agents.findToolAutomatically)
+                }
+            }
             if setup.offersUninstall || canForget {
                 Divider()
             }
@@ -324,9 +382,18 @@ private struct ConnectorFolderRow: View {
         .accessibilityIdentifier(AccessibilityID.Mode.Agents.manualUninstall)
     }
 
+    private func chooseTool() {
+        guard let program = setup.connector.toolProgram, let url = ToolPicker.choose(program: program, agent: setup.connector.kind.displayName) else { return }
+        Task { toolProblem = await setup.choose(tool: url) }
+    }
+
     @ViewBuilder private var primaryAction: some View {
         if setup.operation == nil {
             switch setup.state {
+            case .toolNotFound where setup.choosesTool, .toolNotWorking where setup.choosesTool:
+                Button("Choose\u{2026}") { chooseTool() }
+                    .accessibilityLabel("Choose the \(setup.connector.toolProgram ?? "") command for \(setupName)")
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.chooseTool)
             case .status(.notInstalled) where setup.offersReinstall:
                 Button("Reinstall") { Task { await setup.install() } }
                     .accessibilityLabel("Reinstall \(setupName)")
@@ -361,6 +428,11 @@ private struct ConnectorFolderRow: View {
         switch setup.state {
         case .toolNotFound:
             IssueText(setup.copy.toolNotFoundAdvice, severity: .advisory)
+        case .toolNotWorking(let check):
+            IssueText(check.describe(command: setup.search?.tool.map { ConnectorFolders.display(URL(fileURLWithPath: $0.path)) } ?? setup.connector.toolProgram ?? ""), severity: .advisory)
+            if setup.choosesTool {
+                IssueText("Choose the command \(Branding.appName) should use, or fix this one and check again.", severity: .advisory)
+            }
         case .toolTooOld(let found):
             IssueText(setup.copy.toolTooOldAdvice(found), severity: .advisory)
         case .unavailable, .failed, .broken:
@@ -384,6 +456,7 @@ extension ConnectorSetupModel {
         return switch state {
         case .checking: "Checking\u{2026}"
         case .toolNotFound: copy.toolNotFoundLabel
+        case .toolNotWorking: copy.toolNotWorkingLabel
         case .toolTooOld: copy.toolTooOldLabel
         case .unavailable: "Unavailable"
         case .failed: "Something went wrong"

@@ -81,4 +81,50 @@ struct AgentProcessTableTests {
         #expect(found.isPartial)
         #expect(!found.stale)
     }
+
+    @Test func sightingsKeepProgramPathsAndExistingFilesButNeverOtherArguments() {
+        let agent = TerminalProcess(
+            pid: 10, parent: 1, tty: "/dev/ttys001", arguments: ["claude", "-p", "fix /etc/hosts for me", "--user-data-dir=/Users/a/x"],
+            environment: [:], executable: "/Users/a/.local/share/claude/versions/2.1.326", app: nil, directory: "/Users/a", startedAt: 1)
+        let helper = TerminalProcess(
+            pid: 11, parent: 1, tty: nil, arguments: ["node", "/Users/a/tools/claude-helper.js", "/secret note"], environment: [:],
+            executable: "/usr/local/bin/node", app: nil, directory: "/Users/a", startedAt: 1)
+        let found = AgentProcesses.classify([agent, helper], rule: .claude, home: "/Users/a")
+        let sightings = AgentProcessTable.sightings(
+            [agent, helper], rule: .claude, found: found,
+            resolve: { $0 == "/Users/a/tools/claude-helper.js" ? AgentProcesses.Resolved(path: $0, executable: false) : nil })
+        #expect(sightings.map(\.paths) == [
+            ["/Users/a/.local/share/claude/versions/2.1.326"], ["/usr/local/bin/node", "/Users/a/tools/claude-helper.js"],
+        ])
+        #expect(sightings.map(\.matched) == [true, false])
+    }
+
+    @Test func onTheRealDiskOnlyARuntimeRunningTheAgentsFileIsTheAgent() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("ks-match-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for folder in ["pi", "claude", "bin"] {
+            try FileManager.default.createDirectory(at: root.appendingPathComponent(folder), withIntermediateDirectories: true)
+        }
+        let tool = root.appendingPathComponent("bin/pi")
+        try Data("#!/bin/sh\n".utf8).write(to: tool)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: tool.path)
+        let folder = root.path
+        func run(_ pid: Int, _ arguments: [String], executable: String) -> TerminalProcess {
+            TerminalProcess(
+                pid: pid, parent: 1, tty: "/dev/ttys001", arguments: arguments, environment: [:], executable: executable, app: nil,
+                directory: folder, startedAt: 1)
+        }
+        let processes = [
+            run(1, ["vim", "pi"], executable: "/usr/bin/vim"),
+            run(2, ["node", "pi"], executable: "/usr/local/bin/node"),
+            run(3, ["/Applications/Visual Studio Code.app/Contents/MacOS/Electron", "claude"], executable: "/Applications/Visual Studio Code.app/Contents/MacOS/Electron"),
+            run(4, ["less", tool.path], executable: "/usr/bin/less"),
+            run(5, ["vim", tool.path], executable: "/usr/bin/vim"),
+            run(6, ["node", tool.path], executable: "/usr/local/bin/node"),
+        ]
+        let resolve: (String) -> AgentProcesses.Resolved? = { AgentProcessTable.resolve($0, home: "/Users/nobody") }
+        #expect(AgentProcesses.classify(processes, rule: .pi, home: "/Users/nobody", resolve: resolve).candidates.map(\.pid) == [6])
+        #expect(AgentProcesses.classify(processes, rule: .claude, home: "/Users/nobody", resolve: resolve).candidates.isEmpty)
+        #expect(AgentProcessTable.resolve(root.appendingPathComponent("pi").path, home: "/Users/nobody") == nil)
+    }
 }

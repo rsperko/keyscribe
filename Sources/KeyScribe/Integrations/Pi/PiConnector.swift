@@ -4,26 +4,14 @@ import KeyScribeKit
 enum PiCLI {
     static let minimumVersion = [1, 4, 0]
 
-    static func locate(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
+    static func extraFolders(
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
-        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
         listing: (URL) -> [String] = { (try? FileManager.default.contentsOfDirectory(atPath: $0.path)) ?? [] }
-    ) -> String? {
+    ) -> [String] {
         let nodeVersions = home.appendingPathComponent(".nvm/versions/node", isDirectory: true)
         let nvm = listing(nodeVersions).sorted { $0.compare($1, options: .numeric) == .orderedDescending }
             .map { nodeVersions.appendingPathComponent($0).appendingPathComponent("bin").path }
-        let managers = [".volta/bin", ".bun/bin", ".npm-global/bin"].map { home.appendingPathComponent($0).path }
-        return ToolCLI.locate(named: "pi", environment: environment, home: home, alsoIn: nvm + managers, isExecutable: isExecutable)
-    }
-
-    static func run(_ argv: [String], timeout: TimeInterval = 30, environment: [String: String] = ProcessInfo.processInfo.environment) -> (Int32, String) {
-        var environment = environment
-        if let program = argv.first {
-            let bin = (program as NSString).deletingLastPathComponent
-            environment["PATH"] = ([bin] + (environment["PATH"] ?? "").split(separator: ":").map(String.init)).joined(separator: ":")
-        }
-        return ToolCLI.run(argv, timeout: timeout, environment: environment)
+        return nvm + [".bun/bin", ".npm-global/bin"].map { home.appendingPathComponent($0).path }
     }
 
     static func version(in output: String) -> [Int]? {
@@ -155,8 +143,8 @@ enum PiConnectorFiles {
 final class PiConnector: AgentConnector {
     let kind = AgentKind.pi
     let defaultFolder: URL
-    private let locate: () -> String?
-    private let run: @Sendable ([String]) -> (Int32, String)
+    private let version: @Sendable (String) async -> ToolCheck
+    private let tools: ToolEnvironment
     private let agentsDir: URL
     private let pluginName: String
     private let script: String?
@@ -164,14 +152,14 @@ final class PiConnector: AgentConnector {
     private let surfaces: ConnectorSurfaces
 
     init(
-        locate: @escaping () -> String? = { PiCLI.locate() },
-        run: @escaping @Sendable ([String]) -> (Int32, String) = { PiCLI.run($0) },
+        version: (@Sendable (String) async -> ToolCheck)? = nil,
+        tools: ToolEnvironment = .shared,
         agentsDir: URL, pluginName: String, surfaces: ConnectorSurfaces, script: String? = PiConnectorFiles.indexTS,
         home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) {
         self.surfaces = surfaces
-        self.locate = locate
-        self.run = run
+        self.version = version ?? { await tools.check(tool: $0, agent: AgentKind.pi.id) }
+        self.tools = tools
         self.agentsDir = agentsDir
         self.pluginName = pluginName
         self.script = script
@@ -179,7 +167,6 @@ final class PiConnector: AgentConnector {
         defaultFolder = PiConnectorInstaller.defaultSetupFolder(home: home)
     }
 
-    private var knownVersion: (tool: String, modified: Date?, version: [Int])?
     var isBundled: Bool { script != nil }
     var bundledVersion: String? { script.map { PiConnectorFiles.version(for: $0, surfaces: surfaces) } }
 
@@ -195,23 +182,20 @@ final class PiConnector: AgentConnector {
         ConnectorFolders.contains(any: ["settings.json", "auth.json", "models.json", "extensions", "sessions"], in: folder)
     }
 
-    func locateTool() -> String? { locate() }
+    var toolProgram: String? { "pi" }
+
+    var folderVariable: String? { AgentProcesses.Rule.pi.setupVariable }
+
+    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result {
+        return tools.search(program: "pi", agent: kind.id, setup: folder.path, chosen: chosen, extra: PiCLI.extraFolders(home: home))
+    }
+
+    func checkTool(_ tool: String) async -> ToolCheck? { await version(tool) }
 
     func check(tool: String, target: ConnectorTarget) async -> AgentConnectorModel.State {
         guard let installer = installer(for: target) else { return .unavailable }
-        let modified = (try? FileManager.default.attributesOfItem(atPath: tool))?[.modificationDate] as? Date
-        let version: [Int]
-        if let known = knownVersion, known.tool == tool, known.modified == modified {
-            version = known.version
-        } else {
-            let run = run
-            let (status, output) = await Task.detached { run([tool, "--version"]) }.value
-            guard status == 0, let found = PiCLI.version(in: output) else {
-                return .failed(Self.trimmed(output.isEmpty ? "pi --version did not answer." : output))
-            }
-            version = found
-            knownVersion = (tool, modified, found)
-        }
+        let working = await self.version(tool)
+        guard case .working(let text) = working, let version = PiCLI.version(in: text) else { return .toolNotWorking(working) }
         guard PiCLI.isSupported(version) else { return .toolTooOld(PiCLI.describe(version)) }
         let home = home
         let (installed, turnedOff) = await Task.detached {
@@ -257,18 +241,14 @@ final class PiConnector: AgentConnector {
         if let failure { throw AgentConnectorError(message: failure) }
     }
 
-    private nonisolated static func trimmed(_ output: String) -> String {
-        let text = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.count > 300 ? String(text.prefix(300)) + "…" : text
-    }
-
     let copy = AgentConnectorCopy(
         help: "\(Branding.appName) reaches Pi through a small extension installed in the folder Pi loads its configuration from. Installed means the extension is in place; each conversation using this folder then connects on its own, unless you disconnect it.",
         reloadHint: "Already running Pi here? Run /reload in each open conversation.",
         uninstallTitle: "Uninstall the Pi connector from this folder?",
         uninstallMessage: "Pi conversations using this folder disconnect now, and new ones will not connect. Work you already sent may still finish. Each open conversation unloads the connector when you run /reload in it or restart it. Other folders stay connected. The folder, its conversations, your conversation names and disconnections, and other \(Branding.appName) settings are kept.",
         toolNotFoundLabel: "Pi not found",
-        toolNotFoundAdvice: "Install Pi, then come back here. \(Branding.appName) looks for the pi command on your PATH, in the usual install folders, and under Node version managers.",
+        toolNotFoundAdvice: "Install Pi, or choose the pi command yourself. \(Branding.appName) looked for it in a running conversation, your login shell\u{2019}s PATH, its own PATH, the usual install folders, and under Node version managers.",
+        toolNotWorkingLabel: "Pi not working",
         unavailable: "This copy of \(Branding.appName) is missing its Pi connector. Reinstall \(Branding.appName) to connect Pi.",
         disabledLabel: "Turned off in Pi",
         disabledAdvice: "Turn the extension back on in Pi.",

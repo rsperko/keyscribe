@@ -9,6 +9,7 @@ struct AgentConnectorCopy {
     var uninstallMessage: String
     var toolNotFoundLabel: String
     var toolNotFoundAdvice: String
+    var toolNotWorkingLabel = ""
     var unavailable: String
     var disabledLabel: String
     var disabledAdvice: String
@@ -25,6 +26,8 @@ struct AgentConnectorCopy {
     var installNote: String?
     var undoOnUninstallLabel = ""
     var undoOnUninstallNote = ""
+    var folderNoun = "configuration folder"
+    var foldersHelp: String?
 }
 
 struct AgentConnectorError: Error {
@@ -48,8 +51,13 @@ protocol AgentConnector: AnyObject {
     func hasFiles(in target: ConnectorTarget) -> Bool
     func manualUninstall(for target: ConnectorTarget) -> [String]
     func recognizes(folder: URL) -> Bool
-    var allowsOtherFolders: Bool { get }
-    func locateTool() -> String?
+    var foundFolders: [URL] { get }
+    func rediscover() async
+    func name(of folder: URL) -> String?
+    var toolProgram: String? { get }
+    var folderVariable: String? { get }
+    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result
+    func checkTool(_ tool: String) async -> ToolCheck?
     func check(tool: String, target: ConnectorTarget) async -> AgentConnectorModel.State
     func install(tool: String, target: ConnectorTarget) async throws
     func update(tool: String, target: ConnectorTarget) async throws
@@ -59,7 +67,12 @@ protocol AgentConnector: AnyObject {
 }
 
 extension AgentConnector {
-    var allowsOtherFolders: Bool { true }
+    var foundFolders: [URL] { [] }
+    func rediscover() async {}
+    func name(of folder: URL) -> String? { nil }
+    var toolProgram: String? { nil }
+    var folderVariable: String? { nil }
+    func checkTool(_ tool: String) async -> ToolCheck? { nil }
     func undoesOnUninstall(in target: ConnectorTarget) -> Bool { false }
     func uninstall(tool: String, target: ConnectorTarget, undoing: Bool) async throws { try await uninstall(tool: tool, target: target) }
 }
@@ -100,7 +113,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
     }
 
     let folder: URL
-    let isDefault: Bool
+    @Published fileprivate(set) var isDefault: Bool
     let connector: any AgentConnector
     let registry: ConnectorSetupRegistry
     nonisolated let id: String
@@ -110,12 +123,19 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
     @Published fileprivate(set) var connectedCount = 0
     @Published fileprivate(set) var lingering = 0
     @Published fileprivate(set) var olderCount = 0
+    @Published private(set) var search: ToolSearch.Result?
+    @Published private var pendingTool: String?
     private(set) var failedOperation: Operation?
+    private let tools: ToolEnvironment
     private var undoingRemoval = false
     private let retire: (String) -> Void
     private var refreshes = 0
 
-    init(folder: URL, isDefault: Bool, connector: any AgentConnector, registry: ConnectorSetupRegistry, retire: @escaping (String) -> Void) {
+    init(
+        folder: URL, isDefault: Bool, connector: any AgentConnector, registry: ConnectorSetupRegistry, tools: ToolEnvironment = .shared,
+        retire: @escaping (String) -> Void
+    ) {
+        self.tools = tools
         self.folder = folder
         self.isDefault = isDefault
         self.connector = connector
@@ -125,6 +145,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
     }
 
     var display: String { ConnectorFolders.display(folder) }
+    var name: String? { connector.name(of: folder) }
     var copy: AgentConnectorCopy { connector.copy }
     private var agent: String { connector.kind.id }
 
@@ -134,6 +155,58 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
     }
 
     var isEnrolled: Bool { target.installation != nil && !target.removing }
+
+    var chosenTool: String? { registry.setups?.setup(agent: agent, folder: folder.path)?.tool ?? pendingTool }
+
+    var choosesTool: Bool { connector.toolProgram != nil }
+
+    var lookedIn: [ToolSearch.Place]? {
+        guard toolMissing, chosenTool == nil, let searched = search?.searched, !searched.isEmpty else { return nil }
+        return searched
+    }
+
+    var shellProblem: String? {
+        switch tools.state {
+        case .failed(let why): why
+        case .read(_, _, let failure): failure
+        case .notRun: nil
+        }
+    }
+
+    var toolMissing: Bool {
+        switch state {
+        case .toolNotFound, .toolNotWorking: true
+        default: false
+        }
+    }
+
+    func choose(tool: URL?) async -> String? {
+        let path = tool.map { $0.standardizedFileURL.path }
+        if let path, !FileManager.default.isExecutableFile(atPath: path) {
+            return "\(ConnectorFolders.display(URL(fileURLWithPath: path))) is not a command \(Branding.appName) can run."
+        }
+        if registry.setups?.setup(agent: agent, folder: folder.path) != nil {
+            do {
+                try registry.choose(tool: path, agent: agent, folder: folder.path)
+            } catch {
+                return error.localizedDescription
+            }
+        }
+        pendingTool = path
+        await refresh()
+        return nil
+    }
+
+    func details(folders: [DiscoveryReport.Folder]) async -> String {
+        let found = search ?? connector.findTool(in: folder, chosen: chosenTool)
+        var check: ToolCheck?
+        if case .toolNotWorking(let failed) = state { check = failed }
+        else if let tool = found.tool?.path { check = await connector.checkTool(tool) }
+        return DiscoveryReport(
+            app: Branding.appName, agent: connector.kind.displayName, folder: folder.path, search: found, check: check, shell: tools.state,
+            folders: folders, sightings: tools.sightings(agent: agent)
+        ).text
+    }
 
     var isInstalled: Bool {
         switch state {
@@ -162,6 +235,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
 
     var offersUninstall: Bool {
         if case .toolTooOld = state { return connector.hasFiles(in: target) }
+        if case .toolNotWorking = state, isEnrolled { return true }
         return isInstalled || canUninstallWithoutTool || (isEnrolled && isUnconfirmed)
     }
 
@@ -186,6 +260,13 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
         let found = await connector.check(tool: tool, target: target)
         guard ticket == refreshes, operation == nil else { return }
         state = found
+        if case .toolNotWorking = found { lookAgainAfterMiss() }
+    }
+
+    private func lookAgainAfterMiss() {
+        guard chosenTool == nil, connector.toolProgram != nil else { return }
+        let tools = tools
+        Task.detached { await tools.refresh(.miss) }
     }
 
     func retry() async {
@@ -201,7 +282,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
     func install() async {
         guard operation == nil else { return }
         do {
-            try registry.grant(agent: agent, folder: folder.path)
+            try registry.grant(agent: agent, folder: folder.path, tool: pendingTool)
         } catch {
             fail(.install, error.localizedDescription)
             return
@@ -242,8 +323,11 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
             state = .unavailable
             return nil
         }
-        guard let tool = connector.locateTool() else {
+        let found = connector.findTool(in: folder, chosen: chosenTool)
+        if search != found { search = found }
+        guard let tool = found.tool?.path else {
             state = .toolNotFound
+            lookAgainAfterMiss()
             return nil
         }
         return tool
@@ -283,6 +367,7 @@ final class AgentConnectorModel: ObservableObject, Identifiable {
     enum State: Equatable {
         case checking
         case toolNotFound
+        case toolNotWorking(ToolCheck)
         case toolTooOld(String)
         case unavailable
         case status(AgentConnectorStatus)
@@ -313,11 +398,14 @@ final class AgentConnectorModel: ObservableObject, Identifiable {
     private var discovered: [String] = []
     private var chosen: [String] = []
     private var uses: [Use] = []
-    private var hasRefreshed = false
+    private(set) var hasRefreshed = false
 
-    init(_ connector: any AgentConnector, registry: ConnectorSetupRegistry) {
+    private let tools: ToolEnvironment
+
+    init(_ connector: any AgentConnector, registry: ConnectorSetupRegistry, tools: ToolEnvironment = .shared) {
         self.connector = connector
         self.registry = registry
+        self.tools = tools
         id = connector.kind.id
         rebuild()
     }
@@ -342,6 +430,29 @@ final class AgentConnectorModel: ObservableObject, Identifiable {
         return setup(for: path)
     }
 
+    private var declared: String? {
+        guard let variable = connector.folderVariable, let path = tools.folder(variable) else { return nil }
+        let folder = URL(fileURLWithPath: path, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: folder.path), connector.recognizes(folder: folder) else { return nil }
+        return ConnectorFolders.canonical(folder).path
+    }
+
+    func sources(of setup: ConnectorSetupModel) -> [String] {
+        let path = setup.folder.path
+        var sources: [String] = []
+        if setup.isDefault { sources.append("default") }
+        if registry.setups?.setup(agent: kind.id, folder: path) != nil { sources.append("connector installed") }
+        if connector.foundFolders.contains(where: { ConnectorFolders.canonical($0).path == path }) { sources.append("found on this Mac") }
+        if discovered.contains(path) { sources.append("used by an open conversation") }
+        if let variable = connector.folderVariable, declared == path { sources.append("\(variable) in your login shell") }
+        if chosen.contains(path) { sources.append("added by you") }
+        return sources
+    }
+
+    func details(for setup: ConnectorSetupModel) async -> String {
+        await setup.details(folders: setups.map { DiscoveryReport.Folder(path: $0.folder.path, sources: sources(of: $0)) })
+    }
+
     func canForget(_ setup: ConnectorSetupModel) -> Bool {
         chosen.contains(setup.folder.path) && !discovered.contains(setup.folder.path) && !setup.isDefault
             && registry.setups?.setup(agent: kind.id, folder: setup.folder.path) == nil && setup.operation == nil
@@ -354,6 +465,7 @@ final class AgentConnectorModel: ObservableObject, Identifiable {
     }
 
     func maintain() async {
+        await connector.rediscover()
         rebuild()
         for setup in setups where setup.isEnrolled {
             await setup.refresh()
@@ -366,6 +478,7 @@ final class AgentConnectorModel: ObservableObject, Identifiable {
 
     func refresh() async {
         hasRefreshed = true
+        await connector.rediscover()
         rebuild()
         await withTaskGroup(of: Void.self) { group in
             for setup in setups { group.addTask { await setup.refresh() } }
@@ -374,14 +487,17 @@ final class AgentConnectorModel: ObservableObject, Identifiable {
 
     private func rebuild() {
         let defaultPath = ConnectorFolders.canonical(connector.defaultFolder).path
-        let known = (registry.setups ?? ConnectorSetups()).known(agent: kind.id, default: defaultPath, discovered: discovered + chosen)
+        let found = connector.foundFolders.map { ConnectorFolders.canonical($0).path }
+        let known = (registry.setups ?? ConnectorSetups()).known(
+            agent: kind.id, default: defaultPath, discovered: found + discovered + (declared.map { [$0] } ?? []) + chosen)
+        for setup in setups where setup.isDefault != (setup.folder.path == defaultPath) { setup.isDefault = setup.folder.path == defaultPath }
         guard known != setups.map(\.folder.path) else { return applyUses() }
         var made: [ConnectorSetupModel] = []
         setups = known.map { path in
             if let existing = setup(for: path) { return existing }
             let setup = ConnectorSetupModel(
                 folder: URL(fileURLWithPath: path, isDirectory: true), isDefault: path == defaultPath, connector: connector, registry: registry,
-                retire: { [weak self] installation in self?.onRetire?(installation) })
+                tools: tools, retire: { [weak self] installation in self?.onRetire?(installation) })
             made.append(setup)
             return setup
         }

@@ -3,6 +3,7 @@ import KeyScribeKit
 
 struct AgentIntegration: Sendable {
     let kind: AgentKind
+    var folderVariable: String?
     let discovery: @MainActor @Sendable (ConnectorSetupRegistry, AgentProcessTable) -> any AgentDiscovery
     let connector: @MainActor @Sendable (_ agentsDir: URL, _ pluginName: String, ConnectorSurfaces) -> any AgentConnector
 }
@@ -23,6 +24,10 @@ public struct AgentIntegrations: Sendable {
         self.surfaces = surfaces
         self.placeSources = placeSources
         self.agents = agents
+    }
+
+    var folderVariables: Set<String> {
+        Set(agents.compactMap(\.folderVariable) + hosts.compactMap(\.folderVariable))
     }
 
     @MainActor func discoveries(setups: ConnectorSetupRegistry, processes: AgentProcessTable) -> [any AgentDiscovery] {

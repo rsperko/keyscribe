@@ -10,12 +10,19 @@ final class PiDiscovery: AgentDiscovery {
     private let processStart: (Int) -> ProcessStart.Reading
     private let isRunning: @Sendable (Int) -> Bool
     private let processes: @Sendable () -> AgentProcesses.Found
+    private let folder: (String) -> String?
+    private let declared: () -> String?
+    private var installations: [String: String] = [:]
 
     init(
         processStart: @escaping (Int) -> ProcessStart.Reading = ProcessStart.read(pid:),
         isRunning: @escaping @Sendable (Int) -> Bool = ProcessStart.isRunning(pid:),
-        processes: @escaping @Sendable () -> AgentProcesses.Found
+        processes: @escaping @Sendable () -> AgentProcesses.Found,
+        folder: @escaping (String) -> String? = { _ in nil },
+        declared: @escaping () -> String? = { nil }
     ) {
+        self.folder = folder
+        self.declared = declared
         self.processStart = processStart
         self.isRunning = isRunning
         self.processes = processes
@@ -33,6 +40,8 @@ final class PiDiscovery: AgentDiscovery {
                 explicitName: hello.quiet ? known : Self.name(hello.title),
                 state: .idle,
                 startedAt: sessions[hello.session].flatMap { $0.pid == hello.pid ? $0.startedAt : nil } ?? startedAt(of: hello.pid))
+            if let installation = hello.installation { installations[hello.session] = installation }
+            sessions[hello.session]?.setup = installations[hello.session].flatMap(folder)
             mark(&inTurn, hello.session, !hello.knownIdle)
             mark(&waiting, hello.session, hello.waiting != nil)
             resolve(hello.session)
@@ -58,17 +67,22 @@ final class PiDiscovery: AgentDiscovery {
         sessions = sessions.filter { $0.value.pid.map { !pids.contains($0) || alive.contains($0) } ?? true }
         inTurn.formIntersection(sessions.keys)
         waiting.formIntersection(sessions.keys)
+        installations = installations.filter { sessions[$0.key] != nil }
         let candidates = found.candidates
         var unmatched: [AgentCandidate] = []
         for candidate in candidates {
             if let key = sessions.first(where: { Self.same(candidate, $0.value) })?.key {
-                sessions[key]?.setup = candidate.setup
+                sessions[key]?.setup = installations[key].flatMap(folder) ?? candidate.setup
             } else {
                 unmatched.append(candidate)
             }
         }
+        for key in sessions.keys {
+            if let reported = installations[key].flatMap(folder) { sessions[key]?.setup = reported }
+        }
         var setups: [String] = []
-        for setup in candidates.map(\.setup) where !setups.contains(setup) { setups.append(setup) }
+        let listed = sessions.values.compactMap(\.setup) + candidates.map(\.setup) + (declared().map { [$0] } ?? [])
+        for setup in listed where !setups.contains(setup) { setups.append(setup) }
         let problem = found.isPartial ? Self.partialProblem : nil
         return .found(sessions.values.sorted { $0.id < $1.id }, AgentScanExtras(candidates: unmatched, setups: setups, problem: problem))
     }
@@ -85,6 +99,7 @@ final class PiDiscovery: AgentDiscovery {
 
     func retire(sessions retiring: Set<String>) {
         sessions = sessions.filter { !retiring.contains($0.key) }
+        installations = installations.filter { !retiring.contains($0.key) }
         inTurn.subtract(retiring)
         waiting.subtract(retiring)
     }

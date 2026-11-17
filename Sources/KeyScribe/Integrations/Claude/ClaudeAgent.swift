@@ -35,11 +35,13 @@ final class ClaudeDiscovery: AgentDiscovery {
 
     convenience init(
         enrolled: @escaping @Sendable () -> [URL], defaultFolder: URL = ClaudeConnectorInstaller.defaultSetupFolder(),
+        declared: @escaping @Sendable () -> String? = { nil },
         processes: @escaping @Sendable () -> AgentProcesses.Found
     ) {
         self.init(scanEach: {
             let running = processes()
-            let fromProcesses = running.setups.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            let shell = declared().map { URL(fileURLWithPath: $0, isDirectory: true) }.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+            let fromProcesses = running.setups.map { URL(fileURLWithPath: $0, isDirectory: true) } + (shell.map { [ConnectorFolders.canonical($0)] } ?? [])
             var seen: Set<String> = []
             let dirs = ([ConnectorFolders.canonical(defaultFolder)] + enrolled() + fromProcesses).filter { seen.insert($0.path).inserted }
             var found = ClaudeRegistryScanner.scanEach(configDirs: dirs)
@@ -54,7 +56,7 @@ final class ClaudeDiscovery: AgentDiscovery {
     convenience init(setups: ConnectorSetupRegistry, processes: AgentProcessTable) {
         self.init(enrolled: {
             (setups.setups?.enrolled(agent: AgentKind.claude.id) ?? []).map { URL(fileURLWithPath: $0.folder, isDirectory: true) }
-        }, processes: { processes.found(.claude) })
+        }, declared: { ToolEnvironment.shared.folder(AgentProcesses.Rule.claude.setupVariable) }, processes: { processes.found(.claude) })
     }
 
     func scan(rereadingTitles: Bool) async -> AgentScan {
@@ -114,14 +116,8 @@ extension AgentHub {
 }
 
 enum ClaudeCLI {
-    static func locate(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        home: URL = FileManager.default.homeDirectoryForCurrentUser,
-        isExecutable: (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) }
-    ) -> String? {
-        ToolCLI.locate(
-            named: "claude", environment: environment, home: home, alsoIn: [home.appendingPathComponent(".claude/local").path],
-            isExecutable: isExecutable)
+    static func extraFolders(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> [String] {
+        [home.appendingPathComponent(".claude/local").path]
     }
 
     static func run(_ argv: [String], environment: [String: String], timeout: TimeInterval = 120, grace: TimeInterval = 2) -> (Int32, String) {
@@ -133,8 +129,10 @@ enum ClaudeCLI {
 final class ClaudeConnector: AgentConnector {
     let kind = AgentKind.claude
     let defaultFolder: URL
-    private let locate: () -> String?
     private let run: @Sendable ([String], [String: String]) -> (Int32, String)
+    private let version: @Sendable (String) async -> ToolCheck
+    private let tools: ToolEnvironment
+    private let home: URL
     private let agentsDir: URL
     private let pluginName: String
     private let script: String?
@@ -142,14 +140,17 @@ final class ClaudeConnector: AgentConnector {
     private let surfaces: ConnectorSurfaces
 
     init(
-        locate: @escaping () -> String? = { ClaudeCLI.locate() },
         run: @escaping @Sendable ([String], [String: String]) -> (Int32, String) = { ClaudeCLI.run($0, environment: $1) },
+        version: (@Sendable (String) async -> ToolCheck)? = nil,
+        tools: ToolEnvironment = .shared,
         agentsDir: URL, pluginName: String, surfaces: ConnectorSurfaces, script: String? = ClaudeConnectorFiles.registerJS,
         home: URL = FileManager.default.homeDirectoryForCurrentUser,
         baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
     ) {
-        self.locate = locate
         self.run = run
+        self.version = version ?? { await tools.check(tool: $0, agent: AgentKind.claude.id) }
+        self.tools = tools
+        self.home = home
         self.agentsDir = agentsDir
         self.pluginName = pluginName
         self.script = script
@@ -174,12 +175,26 @@ final class ClaudeConnector: AgentConnector {
         ConnectorFolders.contains(any: ["settings.json", ".credentials.json", "sessions", "projects", "plugins"], in: folder)
     }
 
-    func locateTool() -> String? { locate() }
+    var toolProgram: String? { "claude" }
+
+    var folderVariable: String? { AgentProcesses.Rule.claude.setupVariable }
+
+    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result {
+        return tools.search(program: "claude", agent: kind.id, setup: folder.path, chosen: chosen, extra: ClaudeCLI.extraFolders(home: home))
+    }
+
+    func checkTool(_ tool: String) async -> ToolCheck? { await version(tool) }
+
+    private func base(for tool: String) -> [String: String] {
+        tools.runEnvironment(tool: tool, agent: kind.id, base: baseEnvironment)
+    }
 
     func check(tool: String, target: ConnectorTarget) async -> AgentConnectorModel.State {
         guard let script else { return .unavailable }
+        let working = await version(tool)
+        guard working.isWorking else { return .toolNotWorking(working) }
         let (run, pluginId) = (run, pluginId)
-        let environment = ClaudeConnectorInstaller.environment(for: target.folder, isDefault: target.isDefault, base: baseEnvironment)
+        let environment = ClaudeConnectorInstaller.environment(for: target.folder, isDefault: target.isDefault, base: base(for: tool))
         let (status, output) = await Task.detached { run([tool, "plugin", "list", "--json"], environment) }.value
         guard status == 0 else { return .failed(Self.trimmed(output)) }
         let found = AgentConnectorStatus.parse(pluginList: Data(output.utf8), pluginId: pluginId, bundledVersion: ClaudeConnectorFiles.version(for: script, surfaces: surfaces))
@@ -212,7 +227,7 @@ final class ClaudeConnector: AgentConnector {
             socketPath: agentsDir.appendingPathComponent("bridge.sock").path,
             tokenPath: agentsDir.appendingPathComponent("token").path,
             readyPath: agentsDir.appendingPathComponent("ready.json").path,
-            script: script, surfaces: surfaces, run: run, baseEnvironment: baseEnvironment)
+            script: script, surfaces: surfaces, run: run, baseEnvironment: base(for: tool))
         let failure: String? = await Task.detached {
             do {
                 try action(installer)
@@ -237,7 +252,8 @@ final class ClaudeConnector: AgentConnector {
         uninstallTitle: "Uninstall the Claude Code connector from this folder?",
         uninstallMessage: "Claude Code conversations using this folder disconnect now, and new ones will not connect. Work you already sent may still finish. Each open conversation unloads the connector when you run /reload-plugins in it or restart it. Other folders stay connected. The folder, its conversations, your conversation names and disconnections, and other \(Branding.appName) settings are kept.",
         toolNotFoundLabel: "Claude Code not found",
-        toolNotFoundAdvice: "Install Claude Code, then come back here. \(Branding.appName) looks for the claude command on your PATH and in the usual install folders.",
+        toolNotFoundAdvice: "Install Claude Code, or choose the claude command yourself. \(Branding.appName) looked for it in a running conversation, your login shell\u{2019}s PATH, its own PATH, and the usual install folders.",
+        toolNotWorkingLabel: "Claude Code not working",
         unavailable: "This copy of \(Branding.appName) is missing its Claude Code connector. Reinstall \(Branding.appName) to connect Claude Code.",
         disabledLabel: "Turned off in Claude Code",
         disabledAdvice: "Turn the plugin back on with /plugin in Claude Code.",

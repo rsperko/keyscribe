@@ -55,10 +55,10 @@ final class ConnectorSetupRegistry: @unchecked Sendable {
     }
 
     @discardableResult
-    func grant(agent: String, folder: String) throws -> ConnectorSetup {
+    func grant(agent: String, folder: String, tool: String? = nil) throws -> ConnectorSetup {
         let (setup, changed) = try lock.withLock {
             guard var next = loaded else { throw Unavailable(reason: loadProblem ?? "\(Self.fileName) could not be read.") }
-            let setup = next.enroll(agent: agent, folder: folder, makeInstallation: makeInstallation)
+            let setup = next.enroll(agent: agent, folder: folder, tool: tool, makeInstallation: makeInstallation)
             let changed = next != loaded
             guard changed || unsaved else { return (setup, false) }
             try write(next)
@@ -68,6 +68,10 @@ final class ConnectorSetupRegistry: @unchecked Sendable {
         }
         if changed { onChange?() }
         return setup
+    }
+
+    func choose(tool: String?, agent: String, folder: String) throws {
+        try revoke { $0.choose(tool: tool, agent: agent, folder: folder) }
     }
 
     func beginRemoval(agent: String, folder: String) throws {
