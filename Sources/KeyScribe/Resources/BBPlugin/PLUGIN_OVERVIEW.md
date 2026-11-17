@@ -11,6 +11,8 @@ running it waits and sends nothing.
 
 - The reply to what you dictate to a bb thread, read aloud by the app.
 - Dictation that goes to the bb thread in front, the focused pane of a split included.
+- Dictation on the new-thread page that starts a new thread, sent from that page's message box the way Enter
+  sends it, with the project and settings chosen there.
 - Dictation to the thread in front whose message box already has text is added after that text and sent with it,
   the way Enter sends it.
 - A spoken line saying what a thread waits on when it stops for your approval or an answer.
@@ -23,8 +25,9 @@ running it waits and sends nothing.
 
 ## How it works
 
-Each bb window reports to the plugin whether it has focus and which thread its focused pane shows. The plugin
-tells the app which thread the most recently focused window shows, and forgets a window that stops reporting.
+Each bb window reports to the plugin whether it has focus and which thread its focused pane shows, or that it
+shows the new-thread page. The plugin tells the app which thread the most recently focused window shows, or that
+it shows the new-thread page, and forgets a window that stops reporting.
 The app trusts that only while bb is the app in front.
 
 The app installs and updates this plugin. To remove it, choose Uninstall Plugin under bb in the app's

@@ -141,6 +141,8 @@ are the ones that must never break; the guide explains why and what else applies
     in different browsers, tied for a switch are offered as a choice). A place label several Agent
     conversations share asks rather than taking the first.
   - Previews and uniqueness checks call the same matching function execution uses.
+  - An Agent take sends; it never leaves words in a box for the user to send. Press, speak, release is the
+    whole act, focused or not, new conversation or not. Reading before sending is what ordinary dictation is for.
 - **Feature flags** → `docs/development/areas/feature-flags.md`.
   - Flags are `static let`s on `Feature`, opt-in only, read through `settings.features.isEnabled`.
   - Do not delete `consumptionDrivenRestore` until its rollout debt in the guide is paid.

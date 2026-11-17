@@ -116,6 +116,7 @@ final class DictationController {
         var targetUnconfirmed = false
         var precedingTextTask: Task<String?, Never>?
         var agentFocus: CapturedFocus?
+        var agentNewConversation: CapturedFocus?
         var agentFocusUnconfirmed = false
         var agentFrontTask: Task<Void, Never>?
         var agentFrontCutoff: ContinuousClock.Instant?
@@ -1136,7 +1137,9 @@ final class DictationController {
             break
         case .cancelled:
             finish(machine: .finish(.noSpeech), cue: .cancel, state: .advisory(message: VoiceCommandRunner.cancelledMessage),
-                   hideAfter: 2, record: (.noSpeech, nil))
+                   hideAfter: 2, record: (.noSpeech, nil),
+                   history: HistoryWrite(heard: heard, transformed: transcript, result: "", insertion: .inserted, rewrite: nil,
+                                         outcome: .commandCancelled, summary: VoiceCommandRunner.cancelledMessage))
         case .abandoned:
             if captureWasLost {
                 finishCommandCaptureLost()
@@ -1213,18 +1216,18 @@ final class DictationController {
                hideAfter: 2, record: (.noSpeech, nil), completion: completion)
     }
 
-    // The user threw the take away by voice: nothing is inserted or kept in History, like a cancel.
-    func finishDiscarded(message: String = discardedMessage) {
+    func finishCancelled(message: String, heard: String, facts: [HistoryEntry.Fact]) {
         guard machine.beginInserting() else { return }
         hud.relinquishKeyFocus()
         let completion = DictationCompletion(
             outcome: .noSpeech, modeId: activeMode?.id, heard: "", finalText: "")
         finish(machine: .finish(.noSpeech), cue: .cancel,
                state: .advisory(message: message),
-               hideAfter: 2, record: (.noSpeech, nil), completion: completion)
+               hideAfter: 2, record: (.noSpeech, nil),
+               history: HistoryWrite(heard: heard, transformed: nil, result: "", insertion: .inserted, rewrite: nil,
+                                     outcome: .commandCancelled, summary: message, facts: facts),
+               completion: completion)
     }
-
-    static let discardedMessage = "Discarded: nothing was inserted"
 
     // Nothing was heard — a hardware/mute problem. Renders like an error with the microphone-settings repair
     // (longer hide, action button) but records the same .noSpeech outcome as finishNoSpeech.
@@ -1673,9 +1676,6 @@ final class DictationController {
             log.info("aborted: \(message, privacy: .public)")
             clearRewriteEscapeHatch()
             finishError(message, action: action)
-        case (.discard, _):
-            clearRewriteEscapeHatch()
-            finishDiscarded()
         case (.insert(let text, _, _), .agent(let id, let facts)):
             await agentTake.deliver(id, text: text, heard: heard, transformed: transformed, rewrite: rewrite, facts: facts)
         case (.insert(let text, _, _), .speak):
@@ -1987,7 +1987,6 @@ final class DictationController {
         case insert(String, bare: Bool, submit: Mode.Submit?)
         // leave the target untouched; surface this message, optionally with a repair action
         case abort(String, HUDErrorAction?)
-        case discard
     }
 
     // Defense-in-depth before insert (design.md §4.2): after the LIFO restore pass, no ISSUED nonce should
@@ -2046,7 +2045,6 @@ final class DictationController {
         let take = TakeText(transcript, pipeline: pipeline, trimsTrailingPunctuation: mode?.trimTrailingPunctuation ?? false)
         session?.replacementEffects = take.payload.replacementEffects
         session?.spokenEdits = SpokenEdit.summary(take.payload.spokenEdits)
-        if take.discarded { return (.discard, nil, nil) }
 
         // Whole-utterance replacement: one rule owned the entire utterance, so insert its generated
         // value verbatim — bypassing the LLM (the model never sees it; redaction is moot) and the
@@ -2653,6 +2651,9 @@ extension DictationController: AgentTakeHost {
     }
     var agentFocus: CapturedFocus? {
         get { session?.agentFocus } set { session?.agentFocus = newValue }
+    }
+    var agentNewConversation: CapturedFocus? {
+        get { session?.agentNewConversation } set { session?.agentNewConversation = newValue }
     }
     var agentFocusUnconfirmed: Bool {
         get { session?.agentFocusUnconfirmed ?? false } set { session?.agentFocusUnconfirmed = newValue }

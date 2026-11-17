@@ -2654,6 +2654,24 @@ struct AgentHubTests {
         #expect(labels(transport).count == 3)
     }
 
+    @Test func aConversationRunningAnOlderConnectorIsToldHowToReloadItInItsLabelUntilItReloads() async throws {
+        let (hub, transport, registry, _) = makeHub()
+        hub.bundledVersion = { $0 == "claude" ? "v2" : nil }
+        await connected(hub, transport, registry)
+        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["label"], version: "v1")))
+        await hub.rescan()
+        #expect(labels(transport).last == "\u{201C}keyscribe\u{201D} \u{00B7} Update: /reload-plugins")
+        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["label"], version: "v2")))
+        await hub.rescan()
+        #expect(labels(transport).last == "\u{201C}keyscribe\u{201D}")
+    }
+
+    @Test func aLongNameIsCutSoTheReloadStepStillFits() {
+        #expect(AgentHub.footerLabel("the quarterly budget review notes", reload: "/reload") == "\u{201C}the quarterly budget\u{2026}\u{201D} \u{00B7} Update: /reload")
+        #expect(AgentHub.footerLabel("the quarterly budget review notes", reload: nil) == "\u{201C}the quarterly budget review notes\u{201D}")
+        #expect(AgentHub.footerLabel("docs", reload: "/reload") == "\u{201C}docs\u{201D} \u{00B7} Update: /reload")
+    }
+
     @Test func aConnectorThatCannotShowLabelsIsNeverSentOne() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)

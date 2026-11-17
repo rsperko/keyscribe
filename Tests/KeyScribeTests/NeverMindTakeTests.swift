@@ -4,7 +4,7 @@ import Testing
 @testable import KeyScribeKit
 
 @MainActor
-struct DiscardTakeTests {
+struct NeverMindTakeTests {
     private final class FixedEngine: SpeechEngine, @unchecked Sendable {
         let id = "fixed"
         let displayName = "Fixed"
@@ -32,7 +32,7 @@ struct DiscardTakeTests {
 
     private func run(_ transcript: String) async -> (inserts: [String], hud: [HUDState], history: [HistoryEntry]) {
         let supportDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("keyscribe-discard-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("keyscribe-never-mind-\(UUID().uuidString)", isDirectory: true)
         let modesDir = supportDir.appendingPathComponent("modes", isDirectory: true)
         try? FileManager.default.createDirectory(at: modesDir, withIntermediateDirectories: true)
         var mode = Mode(id: "m", name: "M")
@@ -61,17 +61,9 @@ struct DiscardTakeTests {
         return (inserts.texts, hud.states, history.entries(limit: nil))
     }
 
-    @Test func neverMindAtTheEndInsertsNothingKeepsNothingAndSaysSo() async {
+    @Test func neverMindAtTheEndIsInsertedAndKept() async {
         let result = await run("Draft the memo for Sam. Never mind.")
-        #expect(result.inserts.isEmpty)
-        #expect(result.history.isEmpty)
-        #expect(result.hud.contains { if case .advisory(DictationController.discardedMessage) = $0 { true } else { false } })
-    }
-
-    @Test func neverMindInsideASentenceIsInserted() async {
-        let result = await run("Never mind the cost, ship it.")
-        #expect(result.inserts.count == 1)
-        #expect(result.inserts.first?.contains("Never mind the cost") == true)
+        #expect(result.inserts == ["Draft the memo for Sam. Never mind. "])
         #expect(result.history.count == 1)
     }
 }

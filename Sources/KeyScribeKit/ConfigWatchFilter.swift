@@ -6,7 +6,7 @@ import Foundation
 // Without this filter every dictation re-reads all config, recompiles stages, and rebuilds the hotkey
 // monitor, defeating "a normal dictation does zero config I/O".
 public enum ConfigWatchFilter {
-    public static let ignoredSubdirectories: Set<String> = ["history", "usage", "lkg", "models", "agents", AgentGuide.referenceDirectory]
+    public static let ignoredSubdirectories: Set<String> = ["history", "usage", "lkg", "models", "agents", "spoken-voice", AgentGuide.referenceDirectory]
 
     public static func isIgnoredTopLevelFile(_ name: String) -> Bool {
         name.lowercased().hasSuffix(".md")

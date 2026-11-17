@@ -204,6 +204,8 @@ final class AgentOutput {
             case .refused: "\(it) wouldn\u{2019}t accept it"
             case .disconnected: "\(it)\u{2019}s disconnected"
             case .hostTakesNoMessages(let host): "\(host) doesn\u{2019}t take messages from \(Branding.appName)"
+            case .newConversationNotInFront(let host): "\(host)\u{2019}s page for a new conversation is no longer in front"
+            case .couldNotStart(let host): "\(host) couldn\u{2019}t start a new conversation from that page"
             }
             return handle.map { "\($0) didn\u{2019}t take that: \(why)" } ?? "Your message wasn\u{2019}t sent: \(why)"
         }
@@ -388,6 +390,8 @@ final class AgentOutput {
             case .refused: "\(name) refused the message. \(nothingSent)"
             case .disconnected: "\(name) is disconnected. \(nothingSent)"
             case .hostTakesNoMessages(let host): "\(name) is in \(host), which doesn\u{2019}t take messages from \(Branding.appName). \(nothingSent)"
+            case .newConversationNotInFront(let host): "\(host)\u{2019}s page for a new conversation is no longer in front. \(nothingSent)"
+            case .couldNotStart(let host): "\(host) couldn\u{2019}t start a new conversation from that page. \(nothingSent)"
             }
             let action: HUDErrorAction? = switch reason {
             case .connectorNotRunning, .disconnected: settingsMode.map { HUDErrorAction.openAgents($0) }

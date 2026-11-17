@@ -101,6 +101,41 @@ struct HistoryPaneModelTests {
         #expect(model.groups.flatMap(\.rows).count == 3)
     }
 
+    @Test func aCancelledCommandReadsCancelled() {
+        var cancelled = entry("")
+        cancelled.outcome = .commandCancelled
+        #expect(outcomeLabel(cancelled) == "Cancelled")
+    }
+
+    @Test func typingDoesNotSearchUntilTheKeystrokesSettle() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try store.append(entry("alpha"), today: "2026-07-10")
+        let model = model(store)
+        model.reload()
+        for _ in 0..<80 where !model.hasEntries { try await Task.sleep(for: .milliseconds(25)) }
+        model.searchDebounce = .seconds(600)
+        model.query = "a"
+        model.query = "al"
+        for _ in 0..<20 {
+            try await Task.sleep(for: .milliseconds(25))
+            #expect(model.matchCount == nil)
+        }
+    }
+
+    @Test func aSecondStatusMessageIsNotClearedByTheFirstOnesTimer() async throws {
+        let (store, dir) = tempStore()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let model = model(store)
+        model.statusDuration = .seconds(600)
+        model.flash("first")
+        model.flash("second")
+        for _ in 0..<8 {
+            try await Task.sleep(for: .milliseconds(25))
+            #expect(model.statusMessage == "second")
+        }
+    }
+
     @Test func theSelectedCommandStaysSelectedWhenItFinishesLate() async throws {
         let (store, dir) = tempStore()
         defer { try? FileManager.default.removeItem(at: dir) }

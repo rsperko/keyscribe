@@ -102,6 +102,13 @@ struct AgentRosterTests {
         #expect(roster.rows.allSatisfy { !$0.target })
     }
 
+    @Test func aNewConversationInFrontIsTheTargetAndHighlightsNoRow() {
+        let frozen = [conversation("a", "keyscribe")]
+        let roster = AgentRoster(frozen: frozen, live: frozen, focused: nil, starting: "a new bb conversation")
+        #expect(roster.targetName == "a new bb conversation")
+        #expect(roster.rows.allSatisfy { !$0.target })
+    }
+
     @Test func anOpenDialogIsLabelledByThePromptsKindWhenItIsKnown() {
         let dialog = conversation("a", "k", state: .userDialog)
         #expect(AgentRoster.stateLabel(dialog, prompt: AgentPrompt(kind: "confirm")) == "Waiting for approval")

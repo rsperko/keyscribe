@@ -131,7 +131,6 @@ Useful phrases:
 - `insert clipboard contents`
 - `insert clipboard as code`
 - `scratch that`
-- `never mind` or `start over`, said on their own at the very end, throw the whole dictation away
 - `begin verbatim ... end verbatim`
 
 The insert commands use a deliberate carrier phrase so a stray "new line" spoken in prose stays as
@@ -156,10 +155,6 @@ When you go on with the same sentence after `scratch that`, without a pause that
 and repeat at least two of the words you scratched, only the part from there is replaced:
 `meet me at the gym at noon, scratch that, at the park` inserts `meet me at the park`. Otherwise the
 whole sentence so far is removed, so say it again in full: `I have 3 things, scratch that, I have 2 things`.
-
-`never mind` and `start over` throw the dictation away only when they end it as a sentence of their own
-(`I have three things. Never mind.`): nothing is inserted or saved to History, and the HUD says it was
-discarded. In the middle of a sentence (`we need to start over`) they stay text.
 
 Use verbatim spans when the words sound like commands but should stay literal:
 

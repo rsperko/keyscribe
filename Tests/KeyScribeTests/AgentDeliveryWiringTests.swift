@@ -246,7 +246,8 @@ struct AgentDeliveryWiringTests {
         front: FrontWindow? = nil, sessionInFront: Front = Front(),
         glance: (any AgentFronting)? = nil, engine: (any SpeechEngine)? = nil, frontGrace: Duration = .seconds(1),
         maxRecordingSeconds: Double = RecordingLimit.backstopSeconds, places: (any AgentPlaceReading)? = nil,
-        clipboard: String? = nil, pasteboard: ((NSPasteboard) -> Void)? = nil, unconnected: [AgentCandidate] = []
+        clipboard: String? = nil, pasteboard: ((NSPasteboard) -> Void)? = nil, unconnected: [AgentCandidate] = [],
+        hosts: [AgentHostIntegration] = []
     ) async -> Rig {
         let glance = glance ?? focused.map { Front($0) }
         let front = front ?? FrontWindow(glance == nil ? TargetSnapshot(bundleId: "test.bundle") : Self.terminal)
@@ -282,7 +283,8 @@ struct AgentDeliveryWiringTests {
         let hub = AgentHub(
             transport: transport, discovery: [ClaudeDiscovery(scan: { entries() }), Unconnected(candidates: unconnected)],
             names: AgentNameStore(directory: agentsDir), focus: focus, front: sessionInFront, glance: glance,
-            receiptTimeout: receiptTimeout, scanDeadline: .seconds(30), places: places)
+            receiptTimeout: receiptTimeout, scanDeadline: .seconds(30), places: places,
+            hosts: hosts, hostAllowed: { _ in true })
         transport.hub = hub
         await hub.rescan()
 
@@ -2007,6 +2009,73 @@ struct AgentDeliveryWiringTests {
     nonisolated private static let textEdit = TargetSnapshot(bundleId: "com.apple.TextEdit", pid: 42, focusedWindowId: "cg:7")
     nonisolated private static let terminal = TargetSnapshot(bundleId: "com.mitchellh.ghostty", pid: 9, focusedWindowId: "cg:3")
 
+    nonisolated private static let hostApp = TargetSnapshot(bundleId: "dev.example.app", pid: 50, focusedWindowId: "cg:7")
+
+    private func newConversationRig(_ said: String = "Plan the release.", window: String = "cg:7") async -> (Rig, AgentHostTests.FakeHost) {
+        let host = AgentHostTests.FakeHost()
+        host.window = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: window)
+        let rig = await rig(said, front: FrontWindow(Self.hostApp), hosts: [AgentHostIntegration(kind: AgentHostTests.kind, make: { host })])
+        let carrier = AgentHostTests.id("t1")
+        rig.hub.handle(.hello(.init(
+            protocolVersion: 3, agent: "example", agentVersion: "", instance: "i9", session: carrier, pid: 0, features: ["promptDigest", "start"])))
+        rig.hub.handle(.shown(session: carrier, on: false, newConversation: true))
+        return (rig, host)
+    }
+
+    private func starts(_ rig: Rig) -> [String] {
+        rig.sent.compactMap { if case .start(_, _, let text, _) = $0.0 { text } else { nil } }
+    }
+
+    @Test func dictationOnAHostsNewConversationPageStartsAConversationThereWithNoKeyPress() async {
+        let (rig, host) = await newConversationRig()
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig, readingTheFront: true)
+        #expect(starts(rig) == ["Plan the release."])
+        #expect(rig.returns.pressed.isEmpty)
+        #expect(host.delivered.isEmpty)
+        #expect(rosters(rig).last??.targetName == "a new Example conversation")
+        #expect(rig.hud.states.contains(.commandDone(summary: "Sent to a new Example conversation", detail: "Agent")))
+    }
+
+    @Test func aNewConversationPageThatLeftTheFrontBeforeSendingIsNeverSentTo() async {
+        let (rig, host) = await newConversationRig()
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.controller.setNextModeOverride(id: Mode.agentModeId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        await rig.controller.agentFrontTask?.value
+        host.window = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: "cg:8")
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        #expect(starts(rig).isEmpty)
+        #expect(rig.hud.states.contains { if case .error(let message, _, _) = $0 { message.hasPrefix("Example\u{2019}s page for a new conversation is no longer in front. Nothing sent.") } else { false } })
+    }
+
+    @Test func aKeyPressBeforeTheReadLandedKeepsTheNewConversationPageFromCounting() async {
+        let (rig, _) = await newConversationRig()
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.controller.setNextModeOverride(id: Mode.agentModeId)
+        rig.controller.handleStart()
+        await rig.controller.captureBringUpTask?.value
+        let switchedAt = (rig.controller.takePressedAt ?? .now()).uptimeNanoseconds + 1
+        await rig.controller.agentFrontTask?.value
+        #expect(rosters(rig).compactMap { $0 }.last?.targetName == "a new Example conversation")
+        rig.inputs.note(at: switchedAt)
+        #expect(rosters(rig).compactMap { $0 }.last?.targetName == nil)
+        rig.controller.handleCommit()
+        await rig.controller.dictationTask?.value
+        #expect(starts(rig).isEmpty)
+        #expect(rig.hud.states.contains { if case .error(let message, _, _) = $0 { message.hasPrefix(AgentRecipient.nothingFocused) } else { false } })
+    }
+
+    @Test func aNamedConversationStillGoesToThatConversationFromTheNewConversationPage() async {
+        let (rig, _) = await newConversationRig("Tell keyscribe, run the tests.")
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig, readingTheFront: true)
+        #expect(starts(rig).isEmpty)
+        #expect(rig.texts == ["run the tests."])
+    }
+
     @Test(arguments: [AgentFocusResult.exact, .app("Ghostty"), .unsupported("kitty")])
     func openingAConversationThatMovedFocusRecordsWhereTheUserWasForGoBack(result: AgentFocusResult) async {
         let runner = BackRunner()
@@ -2217,17 +2286,6 @@ struct AgentDeliveryWiringTests {
         #expect(fact(entry, "Command") == "Rename")
     }
 
-    @Test(arguments: ["Rename this session to docs. Never mind.", "Rename this session. Never mind."])
-    func neverMindAfterARenameThrowsTheTakeAway(text: String) async {
-        let rig = await rig(text, focused: "claude:s1")
-        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
-        await take(rig)
-        #expect(rig.sent.isEmpty)
-        #expect(rig.hub.handle(of: "claude:s1") == "keyscribe")
-        #expect(rig.hud.states.contains(.advisory(message: DictationController.discardedMessage)))
-        #expect(!rig.hud.states.contains { if case .error = $0 { true } else { false } })
-        #expect(await lastHistoryEntry(rig) == nil)
-    }
 
     @Test(arguments: [
         "Rename this session to docs, scratch that, notes.",
@@ -2363,14 +2421,19 @@ struct AgentDeliveryWiringTests {
     }
 
     @Test(arguments: ["Cancel.", "never mind", "Please cancel"])
-    func cancelAloneSendsNothing(text: String) async {
+    func cancelAloneSendsNothingAndLeavesACancelledEntry(text: String) async {
         let rig = await rig(text, focused: "claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         await take(rig)
+        let entry = await lastHistoryEntry(rig)
         #expect(rig.sent.isEmpty)
         #expect(rig.captured.insertedText == nil)
         #expect(rig.hud.states.contains(.advisory(message: "Cancelled. Nothing sent.")))
-        #expect(await lastHistoryEntry(rig) == nil)
+        #expect(entry?.outcome == .commandCancelled)
+        #expect(entry?.heard == text)
+        #expect(entry?.summary == "Cancelled. Nothing sent.")
+        #expect(fact(entry, "Command") == "Cancel")
+        #expect(fact(entry, "Conversation in front") == "keyscribe")
     }
 
     @Test func cancelInsideAMessageIsStillAMessage() async {

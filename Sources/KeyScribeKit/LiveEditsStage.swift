@@ -1,8 +1,7 @@
 import Foundation
 
 // Post-STT text stage, runs before replacements (design.md §4.2.1). Handles spoken editing commands:
-// insert newline / paragraph / tab, "scratch that" (deletes what was just said), and "never mind" (discards
-// the whole take, only when said on its own at the very end, so "we need to start over" stays text). Every command —
+// insert newline / paragraph / tab and "scratch that" (deletes what was just said). Every command —
 // a control char AND a verbatim/clipboard nonce token a prior tokenizer spliced in — is a hard scratch
 // boundary and its own undoable unit.
 //
@@ -51,24 +50,21 @@ public struct LiveEditsStage: PipelineStage {
         public var newParagraph: [String]
         public var scratchThat: [String]
         public var tab: [String]
-        public var discard: [String]
         public init(
             newLine: [String] = ["insert new line", "insert a new line", "insert a newline", "insert newline"],
             newParagraph: [String] = ["insert new paragraph", "insert a new paragraph"],
             scratchThat: [String] = ["scratch that", "scratch dat", "scratchdat", "stratch that", "stratchdat"],
-            tab: [String] = ["insert tab character", "insert a tab character"],
-            discard: [String] = ["never mind", "nevermind", "start over"]
+            tab: [String] = ["insert tab character", "insert a tab character"]
         ) {
             self.newLine = newLine
             self.newParagraph = newParagraph
             self.scratchThat = scratchThat
             self.tab = tab
-            self.discard = discard
         }
         public static let `default` = Commands()
     }
 
-    private enum Action { case newline, paragraph, tab, scratch, discard }
+    private enum Action { case newline, paragraph, tab, scratch }
     private let phrases: [(words: [String], action: Action)]
     public let commands: Commands
 
@@ -85,7 +81,6 @@ public struct LiveEditsStage: PipelineStage {
         add(commands.newParagraph, .paragraph)
         add(commands.scratchThat, .scratch)
         add(commands.tab, .tab)
-        add(commands.discard, .discard)
         phrases = list.sorted { $0.words.count > $1.words.count }
     }
 
@@ -108,17 +103,12 @@ public struct LiveEditsStage: PipelineStage {
 
         while i < tokens.count {
             if let (action, consumed) = firingCommand(tokens, lowered, at: i) {
-                if action == .discard {
-                    context.text = ""
-                    context.discarded = true
-                    return
-                }
                 let control: String?
                 switch action {
                 case .newline: control = Self.newline; context.spokenEdits.append(.newLine)
                 case .paragraph: control = Self.paragraph; context.spokenEdits.append(.newParagraph)
                 case .tab: control = Self.tab; context.spokenEdits.append(.tab)
-                case .scratch, .discard: control = nil; context.spokenEdits.append(.scratchThat)
+                case .scratch: control = nil; context.spokenEdits.append(.scratchThat)
                 }
                 if let control {
                     if !parts.isEmpty { parts[parts.count - 1] = Self.stripTrailingComma(parts[parts.count - 1]) }
@@ -197,8 +187,6 @@ public struct LiveEditsStage: PipelineStage {
         guard let (action, consumed) = match(lowered, at: i) else { return nil }
         let atUtteranceEnd = i + consumed >= tokens.count
         switch action {
-        case .discard:
-            return atUtteranceEnd && (i == 0 || Self.hasBoundaryPunct(tokens[i - 1])) ? (action, consumed) : nil
         case .scratch:
             return atUtteranceEnd || Self.hasBoundaryPunct(tokens[i + consumed - 1]) ? (action, consumed) : nil
         case .newline, .paragraph, .tab:

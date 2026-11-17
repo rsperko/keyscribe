@@ -16,7 +16,6 @@ struct CheatSheetPhraseTests {
 
     enum Effect {
         case edit(String)
-        case discard
         case help
         case mode(String)
         case voice(VoiceCommandResolution)
@@ -47,8 +46,6 @@ struct CheatSheetPhraseTests {
             "insert tab character": .edit("alpha beta\tgamma delta"),
             "insert a tab character": .edit("alpha beta\tgamma delta"),
             "scratch that": .edit("gamma delta"),
-            "never mind": .discard,
-            "start over": .discard,
             "insert clipboard contents": .edit("alpha beta COPIED gamma delta"),
             "insert the clipboard contents": .edit("alpha beta COPIED gamma delta"),
             "insert clipboard as code": .edit("alpha beta\n```\nCOPIED\n```\ngamma delta"),
@@ -153,7 +150,6 @@ struct CheatSheetPhraseTests {
         switch effect {
         case .help: #expect(VoiceCommandGrammar.parse(phrase.said) == .help)
         case .edit(let output): #expect(Self.edited(phrase.said) == output)
-        case .discard: #expect(Self.discards(phrase.said))
         case .mode(let id): #expect(Self.routed(phrase.said) == id)
         case .voice(let resolution): #expect(VoiceCommandResolver.resolve(phrase.said, catalog: Self.catalog) == resolution)
         case .answer(let answer): #expect(VoiceCommandChoiceAnswer.parse(phrase.said, count: 2) == answer)
@@ -180,10 +176,6 @@ struct CheatSheetPhraseTests {
         let pipeline = pipeline
         let payload = pipeline.forward("alpha beta, \(said), gamma delta")
         return pipeline.restore(payload.text)
-    }
-
-    private static func discards(_ said: String) -> Bool {
-        pipeline.forward("alpha beta. \(said)").discarded
     }
 
     private static func routed(_ said: String) -> String? {

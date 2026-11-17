@@ -1079,7 +1079,7 @@ function toolAnswer(answer) {
   const app = appName()
   if (answer === true) return app + ' will report your final reply when this turn ends. Say so in one short sentence and continue.'
   if (answer === false) {
-    return 'Reply updates are off in ' + app + '. Tell the user to turn on Reply updates in ' + app +
+    return 'Read Agent Replies Aloud is off in ' + app + '. Tell the user to turn on Read Agent Replies Aloud in ' + app +
       '\u2019s Agent settings and ask again. Nothing will be reported.'
   }
   if (answer === 'quiet') {
@@ -1097,7 +1097,7 @@ function commandAnswer(args, answer, running) {
     return cancelling ? app + ' didn\u2019t confirm the cancel.' : app + ' didn\u2019t confirm the request, so a reply update isn\u2019t certain.'
   }
   if (cancelling) return app + ' won\u2019t report this reply.'
-  if (answer === false) return 'Reply updates are off. Turn on Reply updates in ' + app + '\u2019s Agent settings.'
+  if (answer === false) return 'Read Agent Replies Aloud is off. Turn on Read Agent Replies Aloud in ' + app + '\u2019s Agent settings.'
   return running ? app + ' will report the result of this work.' : app + ' will report your next reply.'
 }
 

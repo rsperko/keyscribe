@@ -61,12 +61,6 @@ struct ClipboardTokenizerTests {
         #expect(t.restore(out) == "x \t\n```\nx \t\n```")
     }
 
-    @Test func neverMindRightAfterABlockStillDiscardsTheTake() {
-        let pipeline = TakeStages.dictation(text: [LiveEditsStage()], clipboard: { "x" }, redaction: false)
-        let take = TakeText("insert clipboard as code. Never mind.", pipeline: pipeline, trimsTrailingPunctuation: false)
-        #expect(take.discarded)
-    }
-
     @Test func aSentenceAfterABlockStartsOnItsOwnLineWithoutTheStrayPeriod() {
         let pipeline = TakeStages.dictation(text: [LiveEditsStage()], clipboard: { "x" }, redaction: false)
         let take = TakeText("Look: insert clipboard as code. Thanks.", pipeline: pipeline, trimsTrailingPunctuation: false)

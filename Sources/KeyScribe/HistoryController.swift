@@ -94,6 +94,8 @@ final class HistoryPaneModel: ObservableObject {
     private let saveReplacement: (String, String, CorrectionDestination.Scope) -> ConfigRepository.AddResult
     var openSettings: (SettingsDestination) -> Void
     var copyText: ((String) -> Void)?
+    var statusDuration: Duration = .seconds(4)
+    var searchDebounce: Duration = .milliseconds(150)
     enum Speaking: Equatable { case audio, macOSVoice }
     var readWithMacOSVoice: ((String, @escaping () -> Void) -> HistorySpeech.Start)?
     var spokenAudio: ((String) -> SpokenAttempt?)?
@@ -265,9 +267,9 @@ final class HistoryPaneModel: ObservableObject {
     private func scheduleRecompute() {
         recomputeTask?.cancel()
         searchTask?.cancel()
-        recomputeTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(150))
-            guard let self else { return }
+        recomputeTask = Task { @MainActor [weak self, searchDebounce] in
+            try? await Task.sleep(for: searchDebounce)
+            guard let self, !Task.isCancelled else { return }
             self.recomputeGroups()
         }
     }
@@ -335,7 +337,8 @@ final class HistoryPaneModel: ObservableObject {
             selectionTask?.cancel()
             selectionTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(50))
-                self?.selection = wanted
+                guard let self, !Task.isCancelled else { return }
+                self.selection = wanted
             }
             return
         }
@@ -343,7 +346,7 @@ final class HistoryPaneModel: ObservableObject {
         selectionTask?.cancel()
         selectionTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(50))
-            guard let self else { return }
+            guard let self, !Task.isCancelled else { return }
             let stillVisible = Set(self.groups.flatMap { $0.rows.map(\.id) })
             if let current = self.selection, stillVisible.contains(current) { return }
             self.selection = self.groups.first?.rows.first?.id
@@ -751,9 +754,9 @@ final class HistoryPaneModel: ObservableObject {
     func flash(_ message: String) {
         statusMessage = message
         statusTask?.cancel()
-        statusTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(4))
-            guard let self else { return }
+        statusTask = Task { @MainActor [weak self, statusDuration] in
+            try? await Task.sleep(for: statusDuration)
+            guard let self, !Task.isCancelled else { return }
             self.statusMessage = nil
         }
     }
@@ -1717,7 +1720,7 @@ func outcomeLabel(_ entry: HistoryEntry) -> String {
     case .commandFailed: "Command failed"
     case .commandStarted: "Command started"
     case .commandNeedsChoice: "Needs a choice"
-    case .commandCancelled: "Choice cancelled"
+    case .commandCancelled: "Cancelled"
     case .rewrittenLater: "Rewritten later, not inserted"
     case .answered: "Answered"
     }

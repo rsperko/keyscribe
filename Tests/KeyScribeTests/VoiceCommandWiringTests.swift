@@ -178,11 +178,13 @@ struct VoiceCommandWiringTests {
         #expect(result.hud.states.last == .commandDone(summary: "Ghostty"))
     }
 
-    @Test func cancelAloneRunsNothingAndKeepsNoHistory() async throws {
+    @Test func cancelAloneRunsNothingAndLeavesACancelledEntry() async throws {
         let result = try await run(transcript: "cancel", outcome: .cancelled)
         #expect(result.inserted == nil)
         #expect(result.hud.states.contains(.advisory(message: "Cancelled. Nothing ran.")))
-        #expect(result.history.isEmpty)
+        #expect(result.history.map(\.outcome) == [.commandCancelled])
+        #expect(result.history.first?.heard == "cancel")
+        #expect(result.history.first?.summary == "Cancelled. Nothing ran.")
     }
 
     @Test func aScriptStillRunningIsShownAndRecordedAsStarted() async throws {

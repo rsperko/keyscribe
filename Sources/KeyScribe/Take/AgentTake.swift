@@ -22,6 +22,7 @@ struct AgentSnapshot {
 struct CapturedFocus: Equatable {
     let id: String
     let readAt: UInt64
+    var app: FrontApp?
 }
 
 @MainActor
@@ -43,6 +44,7 @@ protocol AgentTakeHost: AnyObject {
     var spokenEdits: String? { get set }
     var agentSnapshot: AgentSnapshot? { get set }
     var agentFocus: CapturedFocus? { get set }
+    var agentNewConversation: CapturedFocus? { get set }
     var agentFocusUnconfirmed: Bool { get set }
     var takePressedAt: DispatchTime? { get }
     var agentFrontTask: Task<Void, Never>? { get set }
@@ -56,7 +58,7 @@ protocol AgentTakeHost: AnyObject {
     func clearRewriteEscapeHatch()
     func finishError(_ message: String, action: HUDErrorAction?)
     func finishNoSpeech()
-    func finishDiscarded(message: String)
+    func finishCancelled(message: String, heard: String, facts: [HistoryEntry.Fact])
     func finishCommandCaptureLost()
     func finishTruncatedCapture(transcript: String)
     func cancelQuietly()
@@ -127,16 +129,23 @@ final class AgentTake {
         guard let host, let identity = host.takeIdentity else { return }
         host.agentFrontTask?.cancel()
         host.agentFrontTask = Task { @MainActor [weak self, weak host, weak agents] in
-            guard let shown = await agents?.sessionInFrontWithoutAsking(), let self, let host, !Task.isCancelled,
+            var shown = await agents?.sessionInFrontWithoutAsking()
+            var starts = false
+            if shown == nil, !Task.isCancelled, let fresh = await agents?.newConversationInFront() {
+                shown = fresh
+                starts = true
+            }
+            guard let shown, let self, let host, !Task.isCancelled,
                   host.takeIdentity === identity,
                   host.agentFrontCutoff.map({ ContinuousClock.now <= $0 }) ?? true,
-                  snapshot.rows.contains(shown.id) || snapshot.disconnected.values.contains(shown.id),
+                  starts || snapshot.rows.contains(shown.id) || snapshot.disconnected.values.contains(shown.id),
                   host.captureOrigin?.leaving(shown).session == shown.id,
                   let pressed = host.takePressedAt?.uptimeNanoseconds
             else { return }
             switch inputAfter(pressed) {
             case false?:
-                host.agentFocus = CapturedFocus(id: shown.id, readAt: DispatchTime.now().uptimeNanoseconds)
+                let captured = CapturedFocus(id: shown.id, readAt: DispatchTime.now().uptimeNanoseconds, app: shown.app)
+                if starts { host.agentNewConversation = captured } else { host.agentFocus = captured }
                 host.redrawRecordingHUD()
             case nil:
                 host.agentFocusUnconfirmed = true
@@ -147,11 +156,17 @@ final class AgentTake {
     }
 
     func noteUserInput(at time: UInt64) {
-        guard let host, let focus = host.agentFocus, let pressed = host.takePressedAt?.uptimeNanoseconds,
-              time > pressed, time <= focus.readAt
-        else { return }
-        host.agentFocus = nil
-        host.redrawRecordingHUD()
+        guard let host, let pressed = host.takePressedAt?.uptimeNanoseconds, time > pressed else { return }
+        var cleared = false
+        if let focus = host.agentFocus, time <= focus.readAt {
+            host.agentFocus = nil
+            cleared = true
+        }
+        if let fresh = host.agentNewConversation, time <= fresh.readAt {
+            host.agentNewConversation = nil
+            cleared = true
+        }
+        if cleared { host.redrawRecordingHUD() }
     }
 
     private func settleAgentInFront() async {
@@ -166,7 +181,7 @@ final class AgentTake {
         return AgentRoster(
             frozen: snapshot.conversations, live: agents.directory.conversations, focused: host.agentFocus?.id,
             namesAvailable: snapshot.namesAvailable, disconnected: snapshot.namesAvailable ? agents.disconnected : [],
-            prompts: agents.openPrompts)
+            prompts: agents.openPrompts, starting: host.agentNewConversation.flatMap { agents.newConversationName($0.id) })
     }
 
     func finish(routed: PhaseBResult, heard: String, mode: Mode) async {
@@ -189,7 +204,9 @@ final class AgentTake {
             return
         case .cancel:
             host.agentFrontTask?.cancel()
-            host.finishDiscarded(message: AgentOutput.cancelledLine)
+            host.finishCancelled(
+                message: AgentOutput.cancelledLine, heard: heard,
+                facts: AgentHistoryFacts.cancel(focused: focused(), conversations: pressed.conversations))
             return
         case .repeatSummary:
             host.agentFrontTask?.cancel()
@@ -237,7 +254,10 @@ final class AgentTake {
             host.agentFrontTask?.cancel()
         }
         let inFront = focused()
-        let resolution = AgentRecipient.resolve(address, focused: inFront, rows: snapshot.rows, names: snapshot.addressable, shared: snapshot.sharedNames)
+        var resolution = AgentRecipient.resolve(address, focused: inFront, rows: snapshot.rows, names: snapshot.addressable, shared: snapshot.sharedNames)
+        if case .ask(let body, .nothingFocused) = resolution, let fresh = host.agentNewConversation {
+            resolution = .deliver(id: fresh.id, body: body, source: .front)
+        }
         let facts = AgentHistoryFacts.facts(
             address: address, resolution: resolution, focused: inFront, conversations: snapshot.conversations)
         if host.captureWasLost {
@@ -356,20 +376,10 @@ final class AgentTake {
         let rename: AgentRename
         switch request {
         case .failure(let problem):
-            guard !edited(transcript).discarded else {
-                host.agentFrontTask?.cancel()
-                host.finishDiscarded(message: DictationController.discardedMessage)
-                return
-            }
             rename = .invalid(problem)
         case .success(let spoken):
             let edited = edited(String(spoken))
             host.spokenEdits = SpokenEdit.summary(edited.payload.spokenEdits)
-            if edited.discarded {
-                host.agentFrontTask?.cancel()
-                host.finishDiscarded(message: DictationController.discardedMessage)
-                return
-            }
             let name = edited.isBlank ? "" : edited.localText
             rename = AgentRename.parse(name) ?? AgentRename.name(from: name)
         }
@@ -590,9 +600,22 @@ final class AgentTake {
         let lease = host.lease(for: .agents, stopsAtPress: nil)
         guard lease.keepActing() else { return }
         host.rememberResult(text)
-        hud.present(.transcribing(mode: mode.name, status: "Sending to \(agents.handle(of: id) ?? "it")"))
+        hud.present(.transcribing(mode: mode.name, status: "Sending to \(agents.handle(of: id) ?? agents.newConversationName(id) ?? "it")"))
         let clipboard = agentClipboard.note(for: text, attached: agents.takesImages(id))
         let images = agentClipboard.images(in: text)
+        if agents.newConversationName(id) != nil {
+            let captured = host.agentNewConversation?.app
+            let shown = await agents.newConversationInFront()
+            guard lease.keepActing() else { return }
+            let inFront = captured != nil && shown?.id == id && shown?.app == captured
+            let (request, receipt) = await output.deliver(text, to: id, via: agents, inFront: inFront)
+            finishAgent(state: AgentOutput.receiptState(receipt, mode: mode.name, heard: text, settingsMode: mode.id, clipboard: clipboard),
+                        outcome: AgentOutput.dictationOutcome(receipt),
+                        heard: heard, body: text, transformed: transformed, rewrite: rewrite, transitioned: true,
+                        facts: facts, awaitingReceipt: (request, receipt))
+            speakRefusal(receipt, conversation: id)
+            return
+        }
         let checksFront = agents.takesPromptBox(id, images: images) || agents.showsDraft(id)
         let inFront = checksFront ? await agents.sessionInFrontWithoutAsking()?.id == id : false
         guard lease.keepActing() else { return }

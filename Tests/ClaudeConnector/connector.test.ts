@@ -2141,7 +2141,7 @@ test('the read-aloud tool asks for the running turn and tells the model only wha
   await h.answerEvents()
   const cases: Array<[string | null, RegExp]> = [
     ['{"ok":true,"spoken":true}', /will report your final reply/],
-    ['{"ok":true,"spoken":false}', /Reply updates are off/],
+    ['{"ok":true,"spoken":false}', /Read Agent Replies Aloud is off/],
     ['{"ok":true,"quiet":true}', /disconnected/],
   ]
   for (const [answer, said] of cases) {

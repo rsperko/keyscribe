@@ -31,6 +31,11 @@ final class ConfigWatchFilterTests: XCTestCase {
             changedPath: base + "/usage/replacements.json", supportDir: base))
     }
 
+    func testSpokenVoiceBaselineWriteIsIgnored() {
+        XCTAssertFalse(ConfigWatchFilter.isConfigRelevant(
+            changedPath: base + "/spoken-voice/baseline.json", supportDir: base))
+    }
+
     func testModeWriteInvalidates() {
         XCTAssertTrue(ConfigWatchFilter.isConfigRelevant(
             changedPath: base + "/modes/x.toml", supportDir: base))

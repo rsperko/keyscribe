@@ -230,6 +230,19 @@ struct BBHostTests {
         front = AgentHostApp(bundle: BBHost.app, pid: 31, name: "bb")
         #expect(await host.front(among: [Self.location], reported: Self.location) == .unknown)
     }
+
+    @Test func bbsWindowIsFocusedOnlyWhileBbIsTheAppInFrontWithAWindowFocused() {
+        let bb = AgentHostApp(bundle: BBHost.app, pid: 31, name: "bb", window: "cg:4")
+        var front: AgentHostApp? = bb
+        let (host, _) = host(Runner(), frontmost: { front })
+        #expect(host.focusedWindow() == bb)
+        front = AgentHostApp(bundle: "com.apple.Safari", pid: 32, name: "Safari", window: "cg:9")
+        #expect(host.focusedWindow() == nil)
+        front = AgentHostApp(bundle: BBHost.app, pid: 31, name: "bb")
+        #expect(host.focusedWindow() == nil)
+        front = nil
+        #expect(host.focusedWindow() == nil)
+    }
 }
 
 @MainActor

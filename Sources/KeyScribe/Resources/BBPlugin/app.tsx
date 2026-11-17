@@ -74,12 +74,13 @@ function ComposeBridge() {
   const composers = useComposers()
   const latest = useRef(composers)
   latest.current = composers
+  for (const box of composers) void [box.text, box.isSubmittingBlocked]
   useRealtime(composeChannel, (payload) => {
     if (!isComposeAsk(payload) || payload.window !== windowId) return
     void rpc.call("composing", { id: payload.id })
       .then(async ({ go }) => {
         if (!go) return
-        const answer = await composeInto(latest.current, payload.thread, payload.text)
+        const answer = await composeInto(latest.current, payload.thread, payload.text, () => latest.current)
         await rpc.call("composed", { id: payload.id, ...answer })
       })
       .catch(() => {})
@@ -99,14 +100,15 @@ function FocusReporter() {
   const composers = useComposers()
   const thread = shownThread(context?.threadId ?? null, split?.panes ?? null)
   const draft = thread !== null && composers.some((box) => box.scope.kind === "thread" && box.scope.threadId === thread && !box.isEmpty)
-  const latest = useRef({ thread, draft })
-  latest.current = { thread, draft }
+  const newThread = thread === null && !context?.threadId && composers.some((box) => box.scope.kind === "new-thread")
+  const latest = useRef({ thread, draft, newThread })
+  latest.current = { thread, draft, newThread }
 
   const send = () => {
     rpc.call("window", { window: windowId, focused: document.hasFocus(), ...latest.current }).catch(() => {})
   }
 
-  useEffect(send, [thread, draft])
+  useEffect(send, [thread, draft, newThread])
 
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null

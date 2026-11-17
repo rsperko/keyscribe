@@ -7,17 +7,19 @@ public enum AgentCommand: Equatable, Sendable {
     case quiet(id: String, expectedSession: String)
     case admit(id: String, expectedSession: String)
     case check(id: String, expectedSession: String, request: String, expiresAt: Date)
+    case start(id: String, expectedSession: String, text: String, expiresAt: Date)
 
     public var id: String {
         switch self {
-        case .submit(let id, _, _, _, _, _, _, _), .status(let id, _, _): id
+        case .submit(let id, _, _, _, _, _, _, _), .status(let id, _, _), .start(let id, _, _, _): id
         case .focus(let id, _, _, _), .quiet(let id, _), .admit(let id, _), .check(let id, _, _, _): id
         }
     }
 
     public var expiresAt: Date? {
         switch self {
-        case .focus(_, _, let expiresAt, _), .submit(_, _, _, _, let expiresAt, _, _, _), .check(_, _, _, let expiresAt): expiresAt
+        case .focus(_, _, let expiresAt, _), .submit(_, _, _, _, let expiresAt, _, _, _), .check(_, _, _, let expiresAt), .start(_, _, _, let expiresAt):
+            expiresAt
         case .status, .quiet, .admit: nil
         }
     }
@@ -25,7 +27,7 @@ public enum AgentCommand: Equatable, Sendable {
     public var isState: Bool {
         switch self {
         case .status, .quiet, .admit: true
-        case .submit, .focus, .check: false
+        case .submit, .focus, .check, .start: false
         }
     }
 }
@@ -137,7 +139,7 @@ public enum AgentEvent: Equatable, Sendable {
     case title(session: String, text: String)
     case waiting(session: String, prompt: AgentPrompt?)
     case notify(session: String, turn: String, on: Bool)
-    case shown(session: String, on: Bool, draft: Bool = false)
+    case shown(session: String, on: Bool, draft: Bool = false, newConversation: Bool = false)
 }
 
 extension AgentEvent {
@@ -145,7 +147,7 @@ extension AgentEvent {
         switch self {
         case .hello(let hello): hello.session
         case .typed(let session, _), .turnStarted(let session, _, _), .absorbed(let session, _, _), .turnComplete(let session, _, _),
-             .title(let session, _), .waiting(let session, _), .notify(let session, _, _), .shown(let session, _, _): session
+             .title(let session, _), .waiting(let session, _), .notify(let session, _, _), .shown(let session, _, _, _): session
         case .ack, .submitted, .checked, .refused, .undelivered, .focused: nil
         }
     }
@@ -162,7 +164,8 @@ extension AgentEvent {
         case .title(let session, let text): return .title(session: rename(session), text: text)
         case .waiting(let session, let prompt): return .waiting(session: rename(session), prompt: prompt)
         case .notify(let session, let turn, let on): return .notify(session: rename(session), turn: turn, on: on)
-        case .shown(let session, let on, let draft): return .shown(session: rename(session), on: on, draft: draft)
+        case .shown(let session, let on, let draft, let newConversation):
+            return .shown(session: rename(session), on: on, draft: draft, newConversation: newConversation)
         case .ack, .submitted, .checked, .refused, .undelivered, .focused: return self
         }
     }
@@ -178,6 +181,7 @@ extension AgentCommand {
         case .quiet(let id, let s): .quiet(id: id, expectedSession: rename(s))
         case .admit(let id, let s): .admit(id: id, expectedSession: rename(s))
         case .check(let id, let s, let request, let expiresAt): .check(id: id, expectedSession: rename(s), request: request, expiresAt: expiresAt)
+        case .start(let id, let s, let text, let expiresAt): .start(id: id, expectedSession: rename(s), text: text, expiresAt: expiresAt)
         }
     }
 }
@@ -263,6 +267,7 @@ public enum AgentBridgeCodec {
         var promptBox: String?
         var withDraft: Bool?
         var draft: Bool?
+        var newConversation: Bool?
         var state: String?
         var check: String?
         var handedAt: Double?
@@ -328,7 +333,7 @@ public enum AgentBridgeCodec {
             return .notify(session: try required(w.session), turn: w.turn ?? "", on: on)
         case "shown":
             guard let on = w.on else { throw CodecError.malformed }
-            return .shown(session: try required(w.session), on: on, draft: w.draft ?? false)
+            return .shown(session: try required(w.session), on: on, draft: w.draft ?? false, newConversation: w.newConversation ?? false)
         case "turnComplete":
             return .turnComplete(session: try required(w.session), reason: w.reason ?? "", answer: w.answer ?? "")
         default:
@@ -360,6 +365,8 @@ public enum AgentBridgeCodec {
         case .admit(let id, let s): Wire(op: "admit", id: id, expectedSession: s)
         case .check(let id, let s, let request, let expiresAt):
             Wire(op: "check", id: id, expectedSession: s, request: request, expiresAt: milliseconds(expiresAt))
+        case .start(let id, let s, let t, let expiresAt):
+            Wire(op: "start", id: id, expectedSession: s, text: t, expiresAt: milliseconds(expiresAt))
         }
     }
 
@@ -384,6 +391,7 @@ public enum AgentBridgeCodec {
         case "quiet": return .quiet(id: id, expectedSession: s)
         case "admit": return .admit(id: id, expectedSession: s)
         case "check": return .check(id: id, expectedSession: s, request: try required(w.request), expiresAt: try date(w.expiresAt))
+        case "start": return .start(id: id, expectedSession: s, text: try required(w.text), expiresAt: try date(w.expiresAt))
         default: throw CodecError.unknownOp(w.op)
         }
     }

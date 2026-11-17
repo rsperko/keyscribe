@@ -252,7 +252,7 @@ These also work without saving anything:
   [Can KeyScribe read an agent's reply aloud?](#can-keyscribe-read-an-agents-reply-aloud)).
 - **“that sounded wrong”** keeps the reply you just heard with its History entry: its audio while it is
   still held, otherwise only its text and a report. They last until you delete the entry or History's
-  retention removes it. In Agent mode it is a command only while reply updates are on and a reply
+  retention removes it. In Agent mode it is a command only while Read Agent Replies Aloud is on and a reply
   has been heard; otherwise it is sent to the agent.
 - **“cancel”** or **“never mind”** on its own runs nothing. A “please” before or after a command is fine
   (“please open Mail”), except that for a script or shortcut that takes your words, a closing “please” is
@@ -651,7 +651,11 @@ disconnects bb: KeyScribe no longer lists bb's threads or sends to them. While K
 as soon as KeyScribe starts. Where a thread's agent has its own connector too, the plugin speaks for that
 thread. While bb is the app in front, dictation without a name goes to
 the thread its window shows, the
-focused pane of a split included, as it does for the terminal tab in front.
+focused pane of a split included, as it does for the terminal tab in front. On bb's new-thread page, dictation
+without a name starts a new thread: KeyScribe sends what you said from that page's message box, after anything you
+typed there, as if you had pressed Return, so the thread gets the project, agent and settings you picked on the
+page, and its reply is read aloud like any other. If you leave the page before it is sent, nothing is sent. This
+needs at least one thread in bb already, since the plugin reports through one.
 
 KeyScribe turns off bb's usage reporting for the commands it runs.
 
@@ -699,7 +703,7 @@ nothing: the question it is asking when it is short, else a description (with an
 Spoken replies), else that it is waiting for approval or an answer, with “open docs” to bring it forward.
 When nothing is pending, it tells you whether the agent is working or idle. Every answer starts with
 **Status** and says **Nothing sent.** **“Check on all conversations”** (or **“who needs me?”**) names
-every conversation waiting for you. The answer is shown, and given as a reply update when Reply updates is on.
+every conversation waiting for you. The answer is shown, and given as a reply update when Read Agent Replies Aloud is on.
 
 Any question you say, such as “what are you waiting for?” or “do you need anything from me?”, is a message
 to the conversation you are talking to, like the rest of your dictation. “Tell docs check on the build”
@@ -742,11 +746,12 @@ already gone. Then reload or restart each open conversation.
 
 Yes, in each folder you connected. When KeyScribe starts after an update, it updates the connector there, and
 never in a folder you did not connect or where you turned the connector off in the agent. Open conversations
-keep the version they loaded, which keeps working, until you reload them; their row says so.
+keep the version they loaded, which keeps working, until you reload them; their row says so, and so does the
+name KeyScribe shows on the agent's status line, for example “docs” · Update: /reload-plugins.
 
 ### Can KeyScribe read an agent's reply aloud?
 
-Yes. In **Settings ▸ Modes ▸ Agent ▸ Replies**, turn on **Reply updates**. For messages
+Yes. In **Settings ▸ Modes ▸ Agent ▸ Replies**, turn on **Read Agent Replies Aloud**. For messages
 you dictate, KeyScribe reads short replies and can summarize longer ones. It also tells you when a
 conversation you spoke to is waiting for your approval or an answer: KeyScribe says its name and "Waiting for
 approval." or "Waiting for an answer."; if its connector goes away before it finishes, you hear
@@ -807,7 +812,7 @@ A local service such as oMLX keeps the reply on your Mac.
 
 ### Can I type to the agent and still hear when it's done?
 
-Yes, with **Reply updates** on. Ask the agent in your own words, for example "fix the tests, and have
+Yes, with **Read Agent Replies Aloud** on. Ask the agent in your own words, for example "fix the tests, and have
 KeyScribe tell me when you're done", or "read your reply aloud when you finish". The agent tells KeyScribe, says
 whether KeyScribe accepted, and keeps working. When that reply ends you hear the conversation's name and its reply
 or a summary, the same as for a message you dictated, and you hear if it stops for your approval or an answer
@@ -825,10 +830,10 @@ beside the message box or from bb's command palette, where you can also give it 
 shows its answer above the message box. A reply
 you asked for is never dropped in favor of a later reply from the same conversation.
 
-A request is kept in memory only: quitting KeyScribe, turning **Reply updates** off or disconnecting the
+A request is kept in memory only: quitting KeyScribe, turning **Read Agent Replies Aloud** off or disconnecting the
 conversation drops it, and so does reloading the agent's plugins or extensions, for example after updating the
 connector; ask again after reloading. If the connection drops and the reply ends before it comes back, you hear "Replied. Open
-the conversation for the result." With reply updates off, the agent says so and nothing is set to play later.
+the conversation for the result." With Read Agent Replies Aloud off, the agent says so and nothing is set to play later.
 
 ### Where are my settings and history stored?
 
@@ -901,7 +906,7 @@ report includes what you said, so check it before sending.
 
 **Settings ▸ General ▸ Other audio** decides what happens to other playback while you dictate:
 **Quiet** (the default) turns it down, **Mute** silences it, and **Unchanged** leaves it alone. The same
-choice applies while **Reply updates** speaks (replies, notices, answers, and "repeat that"); the
+choice applies while **Read Agent Replies Aloud** speaks (replies, notices, answers, and "repeat that"); the
 voice itself stays at full level. If
 start/end sounds are also on, the change begins *after* the start sound so the cue isn't swallowed —
 turn the start sound off if you want it to take effect instantly.

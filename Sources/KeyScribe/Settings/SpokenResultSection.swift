@@ -10,7 +10,7 @@ struct SpokenResultSection: View {
     var body: some View {
         Section("Replies") {
             SettingRow(
-                title: "Reply updates",
+                title: "Read Agent Replies Aloud",
                 result: model.spokenResult.enabled ? currentSummary : "Get replies to messages you dictate or ask the agent to report, and know when it needs you.",
                 reference: aboutReplyUpdates)
             {
@@ -101,7 +101,7 @@ struct SpokenResultSection: View {
     private var aboutReplyUpdates: HelpTopic {
         let service = chosen?.name ?? "the summary service you choose"
         let app = Branding.appName
-        return HelpTopic("About reply updates", title: "Reply updates", id: AccessibilityID.Mode.Agents.aboutReplyUpdates, parts: [
+        return HelpTopic("About reply updates", title: "Read Agent Replies Aloud", id: AccessibilityID.Mode.Agents.aboutReplyUpdates, parts: [
             .init(heading: "When updates appear", paragraphs: [
                 "When a conversation finishes a message you dictated.",
                 "When you ask the agent to have \(app) tell you it\u{2019}s done with work you typed, or run /\(KeyScribePaths.variant.connectorSlug) in the conversation.",

@@ -15,7 +15,6 @@ Plain Dictation has it on by default. These edits affect the current take, befor
 | `insert new paragraph` | Spoken edits on | Starts a paragraph with a blank line before it. |
 | `insert tab character` | Spoken edits on | Inserts a tab in the text; does not move to another field. |
 | `scratch that` | Spoken edits on; **pause after it** or end the take | Removes the recent segment or last inserted edit. Say the correction next. |
-| `never mind`<br>Also: `start over` | Spoken edits on; **alone at the end** | Discards the whole take; nothing is inserted or saved to History. |
 | `insert clipboard contents` | Spoken edits on; copy text first | Inserts copied text here, without rewriting it or sending it to the rewrite service. |
 | `insert clipboard as code` | Spoken edits on; copy text first | Inserts copied text inside a Markdown code block. |
 | `begin verbatim [words] end verbatim` | Spoken edits on | Keeps the words literal, protected from edits, replacements, and rewriting. |
@@ -72,8 +71,8 @@ Say one command per recording. A saved command's name works only after its verb.
 | `run [saved action] [input]`<br>Example: `run new note buy milk` | Saved script or Shortcut | Runs that action, passing the words after its name if it takes them. |
 | `open [tab search] [title or site]`<br>Example: `open browser inbox` | Saved **Find a Browser Tab** | Finds the open tab that best matches. |
 | `go back` | After a switch | Returns to the window or app you were in before. |
-| `repeat that` | Reply updates on | Replays the last spoken reply. |
-| `that sounded wrong` | Reply updates on | Keeps the reply you just heard, with its audio and a report, alongside its History entry. |
+| `repeat that` | Read Agent Replies Aloud on | Replays the last spoken reply. |
+| `that sounded wrong` | Read Agent Replies Aloud on | Keeps the reply you just heard, with its audio and a report, alongside its History entry. |
 | `cancel`<br>Also: `never mind` | Said alone | Runs nothing. |
 | `what can I say?` | Said alone | Shows your apps and saved commands with their verbs. |
 
@@ -107,8 +106,8 @@ the agent in Settings > Modes > Agent). [Name] is a conversation name shown ther
 | `check on [name]` | Known conversation | Reports its status. Sends nothing. |
 | `check on all conversations` | Agent mode | Names the conversations waiting for you. Sends nothing. |
 | `rename this conversation to [name]` | Conversation in front | Renames it. Say only the rename. |
-| `repeat that` | Reply updates on | Replays the last spoken reply and names its conversation. |
-| `that sounded wrong` | Reply updates on | Keeps the reply you just heard, with its audio and a report, alongside its History entry. |
+| `repeat that` | Read Agent Replies Aloud on | Replays the last spoken reply and names its conversation. |
+| `that sounded wrong` | Read Agent Replies Aloud on | Keeps the reply you just heard, with its audio and a report, alongside its History entry. |
 | `cancel`<br>Also: `never mind` | Said alone | Sends nothing. To send the word, say `tell [name] cancel`. |
 | `what can I say?` | Said alone | Shows these phrases with your conversation names. |
 
@@ -143,7 +142,7 @@ These work too. The phrases on the earlier pages are the ones worth remembering.
 | --- | --- | --- |
 | `launch [app]` | Any installed app | Same as `open`. |
 | `go to [app or window]`<br>Also: `focus [app or window]`, `focus on [app or window]` | Already open | Same as `switch to`. |
-| `say that again` | Reply updates on | Same as `repeat that`. |
+| `say that again` | Read Agent Replies Aloud on | Same as `repeat that`. |
 | `number two`<br>Also: `second` | Numbered choice | Same as `two`. |
 | `please open Mail`<br>Also: `open Mail, please` | Any command | A "please" before or after a command changes nothing. |
 

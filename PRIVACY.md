@@ -46,7 +46,7 @@ LLM calls** to a service you configured, and all off unless you turn them on:
   for a mode you enabled it for. When a rewrite falls back, **Rewrite Again** in History sends that
   dictation's transcript to the mode's service once more, with no context. It is redacted if the original
   dictation was or the mode is now, so turning redaction off later never sends that dictation unredacted.
-- **Reply updates**, in the experimental Agent feature. Notices that a conversation is waiting for you or
+- **Read Agent Replies Aloud**, in the experimental Agent feature. Notices that a conversation is waiting for you or
   lost its connector are fixed sentences and send nothing, with one exception: when a Pi conversation or a bb thread you
   dictated to opens a prompt, or you check on one and its prompt has no short
   question to read as it is (whoever started that turn, you typing included), the prompt's kind and title, the tool call it seems to be about (its name and up
@@ -252,7 +252,7 @@ in the same `Application Support` folder:
   reads the thread's queued message or its most recent prompts inside bb, and keeps nothing it read. KeyScribe
   uses a reply only to read aloud the answer to what you dictated, under the same rules as a connector's.
   When a thread stops for your approval or an answer, the plugin also reports what bb records about that
-  request (described under Reply updates above), and while it is open asks bb every few seconds whether it still
+  request (described under Read Agent Replies Aloud above), and while it is open asks bb every few seconds whether it still
   is. The plugin also gives the agent in every bb thread a tool for asking KeyScribe to read its reply aloud; the
   agent calls it only when you ask, and it sends KeyScribe nothing but that request.
   Each bb window also tells the plugin whether it has focus and which thread its page shows (in a split, only
@@ -264,7 +264,7 @@ in the same `Application Support` folder:
   The Claude Code connector reports a short fingerprint of the prompt each turn starts with, never the prompt
   itself, so KeyScribe can tell which turn answers what you dictated. The fingerprint stays in memory and is
   not stored.
-  If you turn on **Reply updates** and choose an AI service for it, a longer final reply to an
+  If you turn on **Read Agent Replies Aloud** and choose an AI service for it, a longer final reply to an
   instruction you dictated, or to work you asked the agent to have KeyScribe read aloud, is sent to that service, after best-effort redaction, only to be summarized
   into a sentence or two; a reply of a few words is read as it is without any service. KeyScribe keeps
   the full reply in memory only and never writes it to History or logs; what the service you chose keeps

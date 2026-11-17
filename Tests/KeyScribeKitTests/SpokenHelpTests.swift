@@ -41,8 +41,7 @@ struct SpokenHelpTests {
         #expect(effects["insert clipboard contents"] == "Adds what you copied to the message")
         #expect(effects["insert clipboard as code"] == "Adds copied text to the message inside a Markdown code block")
         #expect(effects["begin verbatim \u{2026} end verbatim"] == "Keeps those words literal, without edits or rewriting")
-        #expect(effects["never mind"] == "Discards this message. Nothing is sent.")
-        #expect(on.rows.first { $0.said == "never mind" }?.note == "Say it last")
+        #expect(effects["never mind"] == nil)
         #expect(on.rows.map(\.said) == on.rows.map(\.said).sorted { $0.localizedStandardCompare($1) == .orderedAscending })
         let off = SpokenHelp.agent(
             title: "Agent", focused: "backend", example: nil, readsReplies: false, canRepeat: false,

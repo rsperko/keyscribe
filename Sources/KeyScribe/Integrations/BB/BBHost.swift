@@ -88,6 +88,11 @@ final class BBHost: AgentHost {
         return .shown(reported, in: front)
     }
 
+    func focusedWindow() -> AgentHostApp? {
+        guard let front = frontmost(), front.bundle == Self.app, front.window != nil else { return nil }
+        return front
+    }
+
     func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
         guard let thread = thread(at: location) else { return .refused("bb no longer lists this thread.") }
         guard running() else { return .refused("bb isn\u{2019}t open.") }
@@ -132,7 +137,11 @@ final class BBHost: AgentHost {
     }
 
     private static func frontmostApp() -> AgentHostApp? {
-        AgentFront.frontmost().map { AgentHostApp(bundle: $0.bundle, pid: $0.pid, name: $0.name, window: $0.window) }
+        guard let running = NSWorkspace.shared.frontmostApplication else { return nil }
+        guard running.bundleIdentifier == app else {
+            return AgentHostApp(bundle: running.bundleIdentifier ?? "", pid: Int(running.processIdentifier), name: running.localizedName ?? "")
+        }
+        return AgentFront.frontmost().map { AgentHostApp(bundle: $0.bundle, pid: $0.pid, name: $0.name, window: $0.window) }
     }
 
     private static func bringForward() {

@@ -46,7 +46,6 @@ public struct PipelineContext: Sendable {
     public var firedReplacements: [ReplacementRule] = []
     public var replacementEffects: [ReplacementEffect] = []
     public var spokenEdits: [SpokenEdit] = []
-    public var discarded = false
     public init(text: String) { self.text = text }
 }
 
@@ -76,14 +75,12 @@ public struct TokenizedPayload: Sendable {
     public let firedReplacements: [ReplacementRule]
     public let replacementEffects: [ReplacementEffect]
     public let spokenEdits: [SpokenEdit]
-    public let discarded: Bool
 
     init(
         text: String, issuedTokens: [String], bareReplacement: BareReplacement? = nil, bareSegments: [BareSegment]? = nil,
         firedReplacements: [ReplacementRule] = [], replacementEffects: [ReplacementEffect] = [],
-        spokenEdits: [SpokenEdit] = [], discarded: Bool = false
+        spokenEdits: [SpokenEdit] = []
     ) {
-        self.discarded = discarded
         self.spokenEdits = spokenEdits
         self.text = text
         self.issuedTokens = issuedTokens
@@ -121,8 +118,7 @@ public struct Pipeline: Sendable {
             bareSegments: context.bareSegments,
             firedReplacements: context.firedReplacements,
             replacementEffects: context.replacementEffects,
-            spokenEdits: context.spokenEdits,
-            discarded: context.discarded)
+            spokenEdits: context.spokenEdits)
     }
 
     // A capture's edge whitespace is what joins it to the rule's text or the next capture, and the text stages
@@ -135,7 +131,6 @@ public struct Pipeline: Sendable {
             else { return segment }
             var captured = PipelineContext(text: String(words[first...last]))
             stage.apply(&captured)
-            if captured.discarded { return segment }
             return .captured(String(words[..<first]) + captured.text + String(words[words.index(after: last)...]))
         }
     }

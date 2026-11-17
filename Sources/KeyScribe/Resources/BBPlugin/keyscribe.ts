@@ -12,17 +12,17 @@ export type Host = {
   labelled: () => void
 }
 export type Thread = { id: string; status: string }
-export type WindowReport = { window: string; focused: boolean; thread: string | null; draft?: boolean }
+export type WindowReport = { window: string; focused: boolean; thread: string | null; draft?: boolean; newThread?: boolean }
 export type Pane = { threadId: string | null; isFocused: boolean }
 export type Bb = {
   listThreads: () => Promise<Thread[]>
   history: (thread: string) => Promise<string[]>
   interaction: (thread: string, id: string) => Promise<string | null>
   on: (event: string, handler: (payload: any) => void) => void
-  compose: (window: string, thread: string, text: string) => Promise<Composed | null>
+  compose: (window: string, thread: string | null, text: string) => Promise<Composed | null>
 }
-export type Composed = { outcome: "sent"; joined: string } | { outcome: "empty" | "blocked" | "failed" }
-export type ComposeAsk = { id: string; window: string; thread: string; text: string }
+export type Composed = { outcome: "sent"; joined: string } | { outcome: "failed"; alone?: boolean; why?: string } | { outcome: "empty" | "blocked" }
+export type ComposeAsk = { id: string; window: string; thread: string | null; text: string }
 export type ComposeAnswer = { id: string } & Composed
 export type Waiting = { kind?: string; title?: string; tool?: string; detail?: string }
 export type ReadAloud = boolean | "quiet" | null
@@ -39,9 +39,10 @@ type Member = {
   waiting: { id: string; prompt: Waiting; openedAt: number; stop: () => void } | null
   unsaid: boolean
   resay: boolean
+  unstarted: { turn: string; next: string | null | undefined } | null
 }
 
-const features = ["promptDigest", "readiness", "shown", "notify", "label", "merge"]
+const features = ["promptDigest", "readiness", "shown", "notify", "label", "merge", "start"]
 const labelLimit = 200
 const busy = new Set(["active", "starting", "stopping"])
 const answerLimit = 8192
@@ -141,13 +142,13 @@ export function commandAnswer(app: string, cancelling: boolean, answer: ReadAlou
   if (answer === "quiet") return `This conversation is disconnected from ${app}. Reconnect it in ${app}\u2019s Agent settings.`
   if (answer === null) return cancelling ? `${app} didn\u2019t confirm the cancel.` : `${app} didn\u2019t confirm the request, so a reply update isn\u2019t certain.`
   if (cancelling) return `${app} won\u2019t report this reply.`
-  if (answer === false) return `Reply updates are off. Turn on Reply updates in ${app}\u2019s Agent settings.`
+  if (answer === false) return `Read Agent Replies Aloud is off. Turn on Read Agent Replies Aloud in ${app}\u2019s Agent settings.`
   return running ? `${app} will report the result of this work.` : `${app} will report your next reply.`
 }
 
 export function readAloudReply(app: string, answer: ReadAloud): string {
   if (answer === true) return `${app} will report your final reply when this turn ends. Say so in one short sentence and continue.`
-  if (answer === false) return `Reply updates are off in ${app}. Tell the user to turn on Reply updates in ${app}’s Agent settings and ask again. Nothing will be reported.`
+  if (answer === false) return `Read Agent Replies Aloud is off in ${app}. Tell the user to turn on Read Agent Replies Aloud in ${app}’s Agent settings and ask again. Nothing will be reported.`
   if (answer === "quiet") return `This conversation is disconnected from ${app}. Tell the user to reconnect it in ${app}’s Agent settings. Nothing will be reported.`
   return `${app} didn’t confirm the request, so a spoken reply can’t be promised. Tell the user.`
 }
@@ -164,26 +165,41 @@ export type ComposerLike = {
   readonly isSubmittingBlocked: boolean
   readonly text: string
   insert(text: string, options: { at: "end" }): void
-  submit(options: { experimental_mode: "steer-if-active" }): Promise<void>
+  submit(options?: { experimental_mode: "steer-if-active" }): Promise<void>
 }
 
 export function runsAsCommand(text: string): boolean {
   return /^[/!]/.test(text.trimStart())
 }
 
-export async function composeInto(composers: readonly ComposerLike[], thread: string, said: string): Promise<Composed> {
-  const boxes = composers.filter((box) => box.scope.kind === "thread" && box.scope.threadId === thread)
-  if (boxes.every((box) => box.isEmpty)) return { outcome: "empty" }
+const registerPause = 16
+const registerTries = 60
+
+export async function composeInto(
+  composers: readonly ComposerLike[], thread: string | null, said: string, current: () => readonly ComposerLike[] = () => composers,
+): Promise<Composed> {
+  const mine = (box: ComposerLike) => thread === null ? box.scope.kind === "new-thread" : box.scope.kind === "thread" && box.scope.threadId === thread
+  const boxes = composers.filter(mine)
+  if (thread === null ? boxes.length === 0 : boxes.every((box) => box.isEmpty)) return { outcome: "empty" }
   const box = boxes[0]
-  if (boxes.length > 1 || box.isSubmittingBlocked || runsAsCommand(box.text)) return { outcome: "blocked" }
+  const alone = box.isEmpty
+  if (boxes.length > 1 || (!alone && box.isSubmittingBlocked) || runsAsCommand(box.text)) return { outcome: "blocked" }
   const draft = box.text
   const joined = draft + (draft && !/\s$/.test(draft) ? " " : "") + said
   box.insert(joined.slice(draft.length), { at: "end" })
+  let shown = box
+  const ready = (box: ComposerLike) => !box.isSubmittingBlocked
+  for (let tries = 0; !ready(shown) && tries < registerTries; tries++) {
+    await new Promise((resolve) => setTimeout(resolve, registerPause))
+    shown = current().find(mine) ?? shown
+  }
   try {
-    await box.submit({ experimental_mode: "steer-if-active" })
+    await (thread === null ? shown.submit() : shown.submit({ experimental_mode: "steer-if-active" }))
     return { outcome: "sent", joined }
-  } catch {
-    return { outcome: "failed" }
+  } catch (error) {
+    const seen = shown.text.trim() === joined.trim() ? "after bb showed the words" : "before bb showed the words"
+    const why = { why: `${error instanceof Error && error.message ? error.message.slice(0, 200) : "no reason given"} (${seen})` }
+    return alone ? { outcome: "failed", alone: true, ...why } : { outcome: "failed", ...why }
   }
 }
 
@@ -192,7 +208,8 @@ export const composeChannel = "compose"
 export function isComposeAsk(value: unknown): value is ComposeAsk {
   if (!value || typeof value !== "object") return false
   const ask = value as Record<string, unknown>
-  return [ask.id, ask.window, ask.thread].every((part) => typeof part === "string" && part.length > 0 && part.length <= 128)
+  return [ask.id, ask.window].every((part) => typeof part === "string" && part.length > 0 && part.length <= 128)
+    && (ask.thread === null || (typeof ask.thread === "string" && ask.thread.length > 0 && ask.thread.length <= 128))
     && typeof ask.text === "string"
 }
 
@@ -207,7 +224,10 @@ function isComposeAnswer(value: unknown): value is ComposeAnswer {
   const answer = value as Record<string, unknown>
   if (typeof answer.id !== "string" || answer.id.length > 128) return false
   if (answer.outcome === "sent") return typeof answer.joined === "string"
-  return answer.outcome === "empty" || answer.outcome === "blocked" || answer.outcome === "failed"
+  if (answer.outcome === "failed") {
+    return (answer.alone === undefined || typeof answer.alone === "boolean") && (answer.why === undefined || typeof answer.why === "string")
+  }
+  return answer.outcome === "empty" || answer.outcome === "blocked"
 }
 
 type Checked<T> = { value: T } | { issues: { message: string }[] }
@@ -227,6 +247,7 @@ function isWindowReport(value: unknown): value is WindowReport {
   return typeof report.window === "string" && report.window.length > 0 && report.window.length <= 64 && typeof report.focused === "boolean"
     && (report.thread === null || (typeof report.thread === "string" && report.thread.length <= 128))
     && (report.draft === undefined || typeof report.draft === "boolean")
+    && (report.newThread === undefined || typeof report.newThread === "boolean")
 }
 
 function isThreadKeys(value: unknown): value is { keys: string[] } {
@@ -314,6 +335,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
   const names = new Map<string, string>()
   const queued = new Map<string, { thread: string; text: string }>()
   const joinedAs = new Map<string, string>()
+  const startedAs = new Map<string, string>()
   let config: Config | null = null
   let token = ""
   let launch: string | null = null
@@ -325,13 +347,15 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
   let retry: (() => void) | null = null
   let unwatch: (() => void) | null = null
   let polling: { cancel: () => void } | null = null
-  const windows = new Map<string, { thread: string | null; draft: boolean; focused: boolean; focusedAt: number; seenAt: number }>()
+  const windows = new Map<string, { thread: string | null; draft: boolean; newThread: boolean; focused: boolean; focusedAt: number; seenAt: number }>()
   let focusings = 0
   let turnCount = 0
   let wanted: string | null = null
   let wantedDraft = false
+  let wantedStart = false
   let told: string | null | undefined
   let toldDraft = false
+  let toldStart = false
   let telling = false
   let retelling: (() => void) | null = null
   let sweeping: (() => void) | null = null
@@ -347,7 +371,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     if (found) return { member: found, added: false }
     const made: Member = {
       status, helloed: false, greeting: false, quiet: false, turn: busy.has(status) ? newTurn() : null, next: undefined, chain: Promise.resolve(),
-      waiting: null, unsaid: false, resay: false,
+      waiting: null, unsaid: false, resay: false, unstarted: null,
     }
     members.set(thread, made)
     return { member: made, added: true }
@@ -510,6 +534,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     m.helloed = true
     if (!m.quiet) m.unsaid = false
     if (m.waiting !== announced) reportWaiting(thread, m)
+    reportStart(thread, m)
     return "ok"
   }
 
@@ -563,6 +588,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
       }
       void post("/event", { op: "ack", request: command.id, instance: instanceOf(thread), connection }, eventDeadline)
       if (command.op === "submit") void join(thread, command)
+      if (command.op === "start") void start(thread, command)
     }
     const unknown: string[] = Array.isArray(parsed?.unknown) ? parsed.unknown : []
     for (const [thread, m] of members) if (unknown.includes(instanceOf(thread)) || readmitted.includes(thread)) m.helloed = false
@@ -613,16 +639,25 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
   }
 
   function digestFor(thread: string, text: string): string {
-    return promptDigest(joinedAs.get(thread + "\n" + text.trim()) ?? text)
+    return promptDigest(joinedAs.get(thread + "\n" + text.trim()) ?? startedAs.get(text.trim()) ?? text)
   }
 
-  function frontWindow(): { id: string; thread: string | null; draft: boolean } | null {
+  function remember(map: Map<string, string>, key: string, said: string) {
+    map.delete(key)
+    map.set(key, said)
+    for (const oldest of map.keys()) {
+      if (map.size <= joinedLimit) break
+      map.delete(oldest)
+    }
+  }
+
+  function frontWindow(): { id: string; thread: string | null; draft: boolean; newThread: boolean } | null {
     const now = host.now()
     for (const [id, w] of windows) if (now - w.seenAt > windowSilence) windows.delete(id)
     const fresh = [...windows].map(([id, w]) => ({ id, ...w }))
     const focusedNow = fresh.filter((w) => w.focused)
     const pool = (focusedNow.length ? focusedNow : fresh).filter((w) => w.focusedAt > 0)
-    let best: { id: string; thread: string | null; draft: boolean; focusedAt: number } | null = null
+    let best: { id: string; thread: string | null; draft: boolean; newThread: boolean; focusedAt: number } | null = null
     for (const w of pool) if (!best || w.focusedAt > best.focusedAt) best = w
     return best
   }
@@ -640,14 +675,25 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     const composed = await bb.compose(shown.id, thread, command.text).catch(() => null)
     if (!composed || stopped) return
     if (composed.outcome !== "sent") return answer({ op: "refused", reason: composed.outcome === "empty" ? "empty" : composed.outcome === "failed" ? "added" : "draft" })
-    const key = thread + "\n" + composed.joined.trim()
-    joinedAs.delete(key)
-    joinedAs.set(key, command.text)
-    for (const oldest of joinedAs.keys()) {
-      if (joinedAs.size <= joinedLimit) break
-      joinedAs.delete(oldest)
-    }
+    remember(joinedAs, thread + "\n" + composed.joined.trim(), command.text)
     return answer({ op: "submitted", turn: "" })
+  }
+
+  async function start(thread: string, command: any) {
+    const answer = (body: object) => post("/event", { ...body, request: command.id, instance: instanceOf(thread), connection }, eventDeadline)
+    if (typeof command.text !== "string") return answer({ op: "refused", reason: "unsupported" })
+    if (runsAsCommand(command.text)) return answer({ op: "refused", reason: "command" })
+    const shown = frontWindow()
+    if (!shown || shown.thread !== null || !shown.newThread) return answer({ op: "refused", reason: "gone" })
+    const composed = await bb.compose(shown.id, null, command.text).catch(() => null)
+    if (!composed || stopped) return
+    if (composed.outcome === "sent") {
+      remember(startedAs, composed.joined.trim(), command.text)
+      return answer({ op: "submitted", turn: "", ...(composed.joined.trim() !== command.text.trim() ? { withDraft: true } : {}) })
+    }
+    if (composed.outcome === "failed") host.log(`bb did not start a new thread: ${composed.why ?? "no reason given"}`)
+    const reason = composed.outcome === "failed" ? (composed.alone ? "filled" : "added") : composed.outcome === "empty" ? "gone" : "draft"
+    return answer({ op: "refused", reason })
   }
 
   function reachable(thread: string | null | undefined): thread is string {
@@ -659,21 +705,25 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     if (!connected || stopped || telling || !config) return
     const target = reachable(wanted) ? wanted : null
     const draft = target !== null && wantedDraft
-    if (told !== undefined && told === target && toldDraft === draft) return
+    const starts = wanted === null && wantedStart
+    if (told !== undefined && told === target && toldDraft === draft && toldStart === starts) return
     const via = target ?? (reachable(told) ? told : [...members.keys()].find(reachable))
     if (!via) {
       told = target
       toldDraft = draft
+      toldStart = starts
       return
     }
     telling = true
     retelling?.()
     retelling = null
-    void post("/event", { op: "shown", session: sessionOf(via), on: target !== null, draft, instance: instanceOf(via), connection }, eventDeadline).then((response) => {
+    const body = { op: "shown", session: sessionOf(via), on: target !== null, draft, ...(starts ? { newConversation: true } : {}), instance: instanceOf(via), connection }
+    void post("/event", body, eventDeadline).then((response) => {
       telling = false
       if (response?.ok) {
         told = target
         toldDraft = draft
+        toldStart = starts
         return tell()
       }
       if (response?.status === 409 && members.get(via)) {
@@ -688,6 +738,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     const shown = frontWindow()
     wanted = shown?.thread ?? null
     wantedDraft = shown?.draft ?? false
+    wantedStart = shown?.newThread ?? false
     tell()
     if (windows.size && !sweeping && !stopped) {
       sweeping = host.after(windowSweep, () => {
@@ -705,6 +756,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     windows.set(report.window, {
       thread: typeof report.thread === "string" ? report.thread : null,
       draft: report.draft === true,
+      newThread: report.thread === null && report.newThread === true,
       focused: report.focused === true,
       focusedAt: report.focused === true && !known?.focused ? ++focusings : known?.focusedAt ?? 0,
       seenAt: now,
@@ -719,14 +771,15 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     repoll()
   }
 
-  function arrived(thread: any) {
+  function arrived(thread: any, created: boolean) {
     if (!thread?.id || members.has(thread.id)) return
-    member(thread.id, thread.status)
+    const { member: m } = member(thread.id, thread.status)
+    if (created && m.turn) m.unstarted = { turn: m.turn, next: undefined }
     changed()
   }
 
-  bb.on("thread.created", ({ thread }) => arrived(thread))
-  bb.on("thread.unarchived", ({ thread }) => arrived(thread))
+  bb.on("thread.created", ({ thread }) => arrived(thread, true))
+  bb.on("thread.unarchived", ({ thread }) => arrived(thread, false))
   const leave = ({ thread }: any) => {
     if (!thread?.id) return
     members.get(thread.id)?.waiting?.stop()
@@ -758,12 +811,22 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     m.next = undefined
     const turn = newTurn()
     m.turn = turn
+    m.unstarted = { turn, next }
     if (added) return changed()
-    report(thread.id, async () => {
-      const prompt = await startedPrompt(thread.id, next)
-      return prompt === undefined ? { op: "turnStarted", session: sessionOf(thread.id), turn } : { op: "turnStarted", session: sessionOf(thread.id), turn, prompt }
-    })
+    reportStart(thread.id, m)
   })
+
+  function reportStart(thread: string, m: Member) {
+    const started = m.unstarted
+    if (!started) return
+    report(thread, async () => {
+      if (m.unstarted !== started) return null
+      m.unstarted = null
+      const prompt = await startedPrompt(thread, started.next)
+      const event = { op: "turnStarted", session: sessionOf(thread), turn: started.turn }
+      return prompt === undefined ? event : { ...event, prompt }
+    })
+  }
   function stopWaiting(thread: string, m: Member) {
     if (!m.waiting) return
     m.waiting.stop()
@@ -832,6 +895,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     const m = thread?.id ? members.get(thread.id) : undefined
     if (!m) return
     stopWaiting(thread.id, m)
+    m.unstarted = null
     m.status = "idle"
     const turn = m.turn
     m.turn = null

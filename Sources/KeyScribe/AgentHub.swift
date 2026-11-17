@@ -19,7 +19,10 @@ extension AgentBridgeServer: AgentTransport {
 enum AgentReceipt: Equatable {
     enum PromptBoxCause: Equatable { case afterStop, awaitingReturn, besideText, joinedDraft, joinedDraftMidTurn }
     enum KeptReason: Equatable { case composing, typedSince, interrupted, connectionGap, dialog, inPromptBox(PromptBoxCause) }
-    enum NotSentReason: Equatable { case conversationEnded, connectorNotRunning, conversationChanged, stopped, expired, disconnected, refused(String), hostTakesNoMessages(String) }
+    enum NotSentReason: Equatable {
+        case conversationEnded, connectorNotRunning, conversationChanged, stopped, expired, disconnected, refused(String), hostTakesNoMessages(String)
+        case newConversationNotInFront(String), couldNotStart(String)
+    }
 
     case sent(String)
     case sentWithDraft(String)
@@ -75,6 +78,7 @@ final class AgentHub {
     private var attempts = 0
     private var retries: [String: Int] = [:]
     var speaks: () -> Bool = { false }
+    var bundledVersion: (_ agent: String) -> String? = { _ in nil }
     private var awaitingResult: [String: String] = [:]
     private var awaitedRequests: [String: String] = [:]
     private var nextTyped: [String: TypedTurn] = [:]
@@ -165,6 +169,10 @@ final class AgentHub {
     private var promptBoxChecks: [String: CheckedContinuation<Bool, Never>] = [:]
     private enum HostJoin { case sent, empty, kept(AgentReceipt.KeptReason), unknown }
     private var hostJoins: [String: CheckedContinuation<HostJoin, Never>] = [:]
+    private enum HostStart { case sent(withDraft: Bool), refused(String), unknown }
+    private var hostStarts: [String: CheckedContinuation<HostStart, Never>] = [:]
+    private var startFollows: [String: [HostFollow]] = [:]
+    private var newConversationShown: [String: String] = [:]
     private var hostOwned: Set<String> = []
     var promptBoxCheckWait: Duration = .seconds(1)
     private var connectorNames: [String: String?] = [:]
@@ -386,20 +394,104 @@ final class AgentHub {
         return await hostInFront()
     }
 
-    private func hostInFront() async -> FrontSession? {
-        let listed = directory.conversations + disconnected
-        for source in hosts where source.isEnabled {
-            let mine = listed.filter { $0.host?.host == source.kind.id }
-            guard !mine.isEmpty else { continue }
-            let locations = mine.compactMap(\.host)
-            let reported = shownByHost[source.kind.id].flatMap { id in transport.isLive(session: id) ? mine.first { $0.id == id }?.host : nil }
-            guard case .shown(let location, let app) = await Self.within(
-                hostDeadline, otherwise: AgentHostFront.unknown, { await source.host.front(among: locations, reported: reported) }),
-                  let shown = mine.first(where: { $0.host == location })
-            else { continue }
-            return FrontSession(id: shown.id, app: FrontApp(bundle: app.bundle, pid: app.pid, name: app.name, window: app.window))
+    static func newConversation(in host: String) -> String {
+        AgentSessionID.make(agent: host, native: newConversationNative)
+    }
+
+    private static let newConversationNative = "new conversation"
+
+    private func startingHost(_ id: String) -> HostDiscovery? {
+        guard let (agent, native) = AgentSessionID.split(id), native == Self.newConversationNative else { return nil }
+        return hosts.first { $0.kind.id == agent }
+    }
+
+    func newConversationName(_ id: String) -> String? {
+        startingHost(id).map { Self.newConversationName(of: $0.kind) }
+    }
+
+    private static func newConversationName(of kind: AgentKind) -> String {
+        "a new \(kind.displayName) conversation"
+    }
+
+    private func startCarrier(_ source: HostDiscovery) -> String? {
+        guard source.isEnabled, let carrier = newConversationShown[source.kind.id], transport.isLive(session: carrier),
+              features[carrier]?.contains("start") == true, !exclusions.excludes(carrier)
+        else { return nil }
+        return carrier
+    }
+
+    func newConversationInFront() async -> FrontSession? {
+        for source in hosts where startCarrier(source) != nil {
+            guard let app = source.host.focusedWindow() else { continue }
+            return FrontSession(id: Self.newConversation(in: source.kind.id), app: FrontApp(bundle: app.bundle, pid: app.pid, name: app.name, window: app.window))
         }
         return nil
+    }
+
+    private func start(_ text: String, through source: HostDiscovery, request: String, inFront: Bool) async -> AgentReceipt {
+        let host = source.kind.id
+        let name = Self.newConversationName(of: source.kind)
+        let notInFront = AgentReceipt.notSent(nil, reason: .newConversationNotInFront(source.kind.displayName))
+        guard inFront, let carrier = startCarrier(source) else { return notInFront }
+        let known = Set((directory.conversations + disconnected).filter { $0.host?.host == host }.map(\.id))
+        let at = now()
+        var follows = startFollows[host, default: []] + [HostFollow(
+            prompt: AgentPromptDigest.of(text), request: request, expires: at.addingTimeInterval(Self.hostTurnWait), known: known)]
+        let dropped = follows.enumerated().filter { index, follow in
+            (follow.expires ?? .distantFuture) <= at || index < follows.count - Self.hostFollowLimit
+        }.map(\.element.request)
+        follows.removeAll { dropped.contains($0.request) }
+        for old in dropped { uncertainHosted[old] = nil }
+        startFollows[host] = follows
+        let wire = makeId()
+        let wait = receiptTimeout
+        transport.enqueue(.start(id: wire, expectedSession: carrier, text: text, expiresAt: deadline(after: wait)), for: carrier)
+        Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            self?.hostStarts.removeValue(forKey: wire)?.resume(returning: .unknown)
+        }
+        let answer = await withCheckedContinuation { hostStarts[wire] = $0 }
+        switch answer {
+        case .sent(let withDraft):
+            return withDraft ? .sentWithDraft(name) : .sent(name)
+        case .unknown:
+            uncertainHosted[request] = (name, Self.newConversation(in: host), false)
+            return .uncertain(name)
+        case .refused(let reason):
+            startFollows[host]?.removeAll { $0.request == request }
+            switch reason {
+            case "draft": return .kept(name, reason: .composing)
+            case "added": return .kept(name, reason: .inPromptBox(.besideText))
+            case "filled": return .kept(name, reason: .inPromptBox(.awaitingReturn))
+            case "gone": return notInFront
+            default: return .notSent(nil, reason: .couldNotStart(source.kind.displayName))
+            }
+        }
+    }
+
+    private func hostInFront() async -> FrontSession? {
+        for source in hosts where source.isEnabled {
+            if let shown = await inFront(of: source) { return shown }
+        }
+        return nil
+    }
+
+    func hostShows(_ id: String) async -> Bool? {
+        guard let hosted = (directory.conversations + disconnected).first(where: { $0.id == id })?.host?.host else { return nil }
+        guard let source = hosts.first(where: { $0.kind.id == hosted }), source.isEnabled else { return false }
+        return await inFront(of: source)?.id == id
+    }
+
+    private func inFront(of source: HostDiscovery) async -> FrontSession? {
+        let mine = (directory.conversations + disconnected).filter { $0.host?.host == source.kind.id }
+        guard !mine.isEmpty else { return nil }
+        let locations = mine.compactMap(\.host)
+        let reported = shownByHost[source.kind.id].flatMap { id in transport.isLive(session: id) ? mine.first { $0.id == id }?.host : nil }
+        guard case .shown(let location, let app) = await Self.within(
+            hostDeadline, otherwise: AgentHostFront.unknown, { await source.host.front(among: locations, reported: reported) }),
+              let shown = mine.first(where: { $0.host == location })
+        else { return nil }
+        return FrontSession(id: shown.id, app: FrontApp(bundle: app.bundle, pid: app.pid, name: app.name, window: app.window))
     }
 
     var frontCandidates: [AgentFrontCandidate] {
@@ -477,6 +569,7 @@ final class AgentHub {
         hostFollows[id] = nil
         shownByHost = shownByHost.filter { $0.value != id && $0.value != counterpart(of: id) }
         shownWithDraft = shownWithDraft.filter { $0.value != id && $0.value != counterpart(of: id) }
+        newConversationShown = newConversationShown.filter { $0.value != id && $0.value != counterpart(of: id) }
         saveExclusions()
         for message in outbox.withdraw(conversation: id) {
             retries[message.id] = nil
@@ -919,10 +1012,22 @@ final class AgentHub {
         onAttention?(session, handle(of: session) ?? awaitedHandles[session] ?? "", wanted, requested.contains(session))
     }
 
+    static let footerNameLimit = 20
+
+    static func footerLabel(_ handle: String, reload: String?) -> String {
+        guard let reload else { return "\u{201C}\(handle)\u{201D}" }
+        let name = handle.count > footerNameLimit
+            ? String(handle.prefix(footerNameLimit)).trimmingCharacters(in: .whitespaces) + "\u{2026}" : handle
+        return "\u{201C}\(name)\u{201D} \u{00B7} Update: \(reload)"
+    }
+
     private func sendLabels() {
         for conversation in directory.conversations where conversation.connectorLive {
             guard features[conversation.id]?.contains("label") == true else { continue }
-            let label = "\u{201C}\(conversation.handle)\u{201D}"
+            let loaded = loadedVersions[conversation.id]
+            let bundled = bundledVersion(conversation.runningAgent)
+            let reload = loaded != nil && bundled != nil && loaded != bundled ? kind(of: conversation.id)?.reloadCommand : nil
+            let label = Self.footerLabel(conversation.handle, reload: reload)
             guard labels[conversation.id] != label else { continue }
             labels[conversation.id] = label
             transport.enqueue(.status(id: makeId(), expectedSession: conversation.id, text: label), for: conversation.id)
@@ -930,6 +1035,7 @@ final class AgentHub {
     }
 
     func deliver(_ text: String, to id: String, request: String? = nil, images: [String] = [], inFront: Bool = false) async -> AgentReceipt {
+        if let source = startingHost(id) { return await start(text, through: source, request: request ?? makeId(), inFront: inFront) }
         if exclusions.excludes(id) { return .notSent(disconnected.first { $0.id == id }?.handle, reason: .disconnected) }
         guard let conversation = directory.conversations.first(where: { $0.id == id }) else {
             return .notSent(nil, reason: .conversationEnded)
@@ -1097,14 +1203,21 @@ final class AgentHub {
             Task { [weak self] in await self?.rescan(rereadingTitles: false) }
         case .notify(let session, let turn, let on):
             _ = notify(session: session, turn: turn, on: on)
-        case .shown(let session, let on, let draft):
+        case .shown(let session, let on, let draft, let newConversation):
             guard let host = AgentSessionID.split(session)?.agent, hosts.contains(where: { $0.kind.id == host }) else { break }
             shownByHost[host] = on ? session : nil
             shownWithDraft[host] = on && draft ? session : nil
+            newConversationShown[host] = !on && newConversation ? session : nil
         case .focused(let request):
             focusWaiters.removeValue(forKey: request)?.resume(returning: .selected)
         case .ack:
             break
+        case .submitted(let request, _, let report) where hostStarts[request] != nil:
+            hostStarts.removeValue(forKey: request)?.resume(returning: .sent(withDraft: report.withDraft))
+        case .refused(let request, let reason) where hostStarts[request] != nil:
+            hostStarts.removeValue(forKey: request)?.resume(returning: .refused(reason))
+        case .undelivered(let request, _, let mayHaveArrived) where hostStarts[request] != nil:
+            hostStarts.removeValue(forKey: request)?.resume(returning: mayHaveArrived ? .unknown : .refused(""))
         case .submitted(let request, _, _) where hostJoins[request] != nil:
             hostJoins.removeValue(forKey: request)?.resume(returning: .sent)
         case .refused(let request, let reason) where hostJoins[request] != nil:
@@ -1267,6 +1380,7 @@ final class AgentHub {
         var prompt: String
         var request: String
         var expires: Date?
+        var known: Set<String> = []
     }
 
     private struct Filing {
@@ -1296,9 +1410,17 @@ final class AgentHub {
 
     private func followHosted(_ turn: String, of session: String, prompt: String) {
         let at = now()
-        guard let match = hostFollows[session]?.firstIndex(where: { follow in follow.prompt == prompt && follow.expires.map { $0 > at } ?? true }),
-              let request = hostFollows[session]?.remove(at: match).request
-        else { return }
+        let fits = { (follow: HostFollow) in follow.prompt == prompt && follow.expires.map { $0 > at } ?? true }
+        let request: String
+        if let match = hostFollows[session]?.firstIndex(where: fits), let found = hostFollows[session]?.remove(at: match).request {
+            request = found
+        } else if let host = AgentSessionID.agent(of: session),
+                  let match = startFollows[host]?.firstIndex(where: { fits($0) && !$0.known.contains(session) }),
+                  let found = startFollows[host]?.remove(at: match).request {
+            request = found
+        } else {
+            return
+        }
         if delivering[request] != nil { matched.insert(request) }
         follow(turn, of: session, for: request)
         if let doubted = uncertainHosted.removeValue(forKey: request) {

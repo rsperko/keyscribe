@@ -64,7 +64,7 @@ review keeps finding the same few of them.
 - **Local controls are whole utterances.** `cancel`/`never mind`, `go back`, and `repeat that` act only as the
   whole take, with an optional `please` around them (`VoiceCommandGrammar.parse`); inside a longer take they
   are text. A closing `please` is part of the words a text-taking script receives, and is dropped everywhere
-  else. A standalone cancel records nothing in either action mode.
+  else. A standalone cancel records a Cancelled History entry in either action mode, so it never looks lost.
 - **`conversation` and `session` are one word** wherever the grammar takes either (`AgentAddress.rowNouns`).
 
 ## One rule, one function
@@ -81,6 +81,14 @@ The agent bridge (`AgentHub`, `AgentBridge`, `AgentHandles`, `AgentRecipient`, `
 the terminal routes, the agent adapters and their connectors) delivers dictated text to another program, so
 every rule above applies to it, with these sharpenings:
 
+- **An Agent take sends; it never leaves words for the user to send.** The whole act is: press the Agent
+  key, speak, release. The user does not see the text and does not press Return, and they rely on that.
+  Whether the conversation is in front or behind, has a draft in its box, is mid-turn, or has no thread
+  yet (a fresh new-conversation page), the take is submitted for them, as close to the same experience as
+  the agent allows. A path that fills a box and waits for Return is a defect to fix, not an option to
+  offer: someone who wants to read before sending uses an ordinary dictation mode, after “open …” when
+  the conversation is in the background. Only when sending is impossible does a take read as waiting in
+  the prompt box, and the HUD says so.
 - **Work with agents, terminals, and multiplexers as people normally start them.** Never require a
   launch flag, a wrapper, an environment variable, a named session, or an edit the user makes to
   their own configuration; only what installing an integration sets up itself, and removes again, is
@@ -161,7 +169,7 @@ every rule above applies to it, with these sharpenings:
   entered that gate, and clears when its work really ends, so a refused check never holds a later commit.
   A check keeps nothing by itself; only
   `SpokenReplyCheck.calibratedCheckers` show the advisory. In Agent mode, "that sounded wrong" on its own is a
-  command only while reply updates are on and a reply has been heard; anything else, including a message addressed
+  command only while Read Agent Replies Aloud is on and a reply has been heard; anything else, including a message addressed
   to a conversation, reaches the agent.
 - **One synthesis at a time on the natural voice.** `KokoroVoice` admits replies, previews and the install check
   through one `InFlightWork.runAlone` gate, held until the work truly returns, not when it is cancelled or times
@@ -679,6 +687,23 @@ every rule above applies to it, with these sharpenings:
   it to the host only while that connector is live (`AgentHost.front(among:reported:)`). `BBHost` answers it only while bb is the frontmost app with a focused
   window, read on KeyScribe's side like a terminal's, since a window's own focus drops whenever another app is
   key, and the take then checks that window is the one focused at the press.
+- **A host's new-conversation page is a recipient only for a take that names none.** bb's window half also reports
+  whether its window shows the new-thread page (no thread, a `new-thread` composer on screen), and the plugin's
+  `shown` says `newConversation` instead of a thread, carried on any connected thread. The hub keeps that carrier
+  per host like the shown thread, forgets it on Disconnect, and puts the page in front (`AgentHub.newConversationInFront`)
+  only while the carrier is live, its hello lists `start`, and the host's own window check
+  (`AgentHost.focusedWindow`) finds the host's app in front with a window focused. The take captures it at the
+  press under the same input and same-window rules as a thread (`agentNewConversation`, separate from
+  `agentFocus`, so rename, `check on` and go back never act on a page), and it is used only when the take would
+  otherwise be held as `nothingFocused`. Delivery reads the page again right before sending and sends only when it
+  is the same app and window; the plugin checks its front window still shows the page before typing. It is a
+  `start` command, never bb's command, and its answers stay distinct: `gone` (page left; nothing sent), `filled` or
+  `added` (bb would not send; the words wait in the box and the HUD says to press Return), `draft`, and anything
+  else as could not start; no answer is uncertain. A new conversation's dictation is followed into the first
+  turn, with the dictation's digest, of a conversation of that host that was not listed or disconnected when it
+  was sent (`AgentHub.startFollows`, bounded like host follows), within `AgentHub.hostTurnWait`. The plugin reports
+  a turn that started before its thread's hello landed once the hello does, and never one that ended first. A bb
+  with no thread has no member to carry the report, so the page reads as nothing focused there.
 - **A host's command line runs through `HostCLI.run`.** It starts only an absolute program, in its own
   process group, with content on standard input rather than in the arguments. Standard output (the only
   output parsed) and standard error are kept apart, each capped, and cut output is marked. A deadline or a

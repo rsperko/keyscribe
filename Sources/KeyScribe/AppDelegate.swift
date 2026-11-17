@@ -876,7 +876,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                         (self?.settings.stt.eviction ?? .fastest, self?.settings.stt.evictionIdleSeconds.map(Double.init))
                     },
                     inFront: { [weak hub = runtime.hub] id in
-                        guard let candidates = hub?.frontCandidates else { return false }
+                        guard let hub else { return false }
+                        if let hosted = await hub.hostShows(id) { return hosted }
+                        let candidates = hub.frontCandidates
                         return await AgentFront.withoutAsking(surfaces).shown(among: candidates) { _ in }?.id == id
                     },
                     duck: { [weak self] in self?.lowerOtherAudio(for: "replies", $0) },
@@ -889,6 +891,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                 runtime.hub.onAttention = { [weak spoken] in spoken?.attention(conversation: $0, handle: $1, $2, requested: $3) }
                 runtime.hub.onWithdraw = { [weak spoken] in spoken?.withdraw(conversation: $0) }
                 runtime.hub.speaks = { [weak self] in self?.settings.agents.spokenResult.enabled ?? false }
+                let bundled = Dictionary(
+                    settingsController.agents.connectors.map { ($0.kind.id, $0.connector.bundledVersion) }, uniquingKeysWith: { first, _ in first })
+                runtime.hub.bundledVersion = { bundled[$0] ?? nil }
                 runtime.hub.onSilence = { [weak spoken] in spoken?.forget(conversation: $0) }
                 spoken.onSpeaking = { [weak self] name in self?.showSpeaking(name) }
                 spoken.onHeard = { [weak controller = self.controller] in controller?.recordSpokenReply($0) }

@@ -37,7 +37,7 @@ export { rpcContract }
 export function composeRelay(publish: (channel: string, payload: unknown) => void, after: (ms: number, fn: () => void) => () => void) {
   const pending = new Map<string, { started: boolean; stop: () => void; settle: (answer: Composed | null) => void }>()
   return {
-    compose: (window: string, thread: string, text: string) => new Promise<Composed | null>((resolve) => {
+    compose: (window: string, thread: string | null, text: string) => new Promise<Composed | null>((resolve) => {
       const id = randomBytes(6).toString("hex")
       const settle = (answer: Composed | null) => {
         const join = pending.get(id)

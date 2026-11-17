@@ -234,7 +234,7 @@ struct VoiceCommandRunnerTests {
                 == .done(summary: "docs", command: "Replays the last spoken reply."))
         sessions.replay = .off
         #expect(await runner.run(transcript: "repeat that", places: [], origin: nil, stillWanted: { true })
-                == .failed(message: "Reply updates are off.", command: "Replays the last spoken reply."))
+                == .failed(message: "Read Agent Replies Aloud is off.", command: "Replays the last spoken reply."))
         #expect(await runner.run(transcript: "repeat that", places: [], origin: nil, stillWanted: { false }) == .abandoned)
         #expect(sessions.replays == 2)
         #expect(system.activatedPids.isEmpty)

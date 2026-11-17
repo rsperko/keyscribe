@@ -108,9 +108,6 @@ public struct SpokenHelp: Equatable, Sendable {
             edits.newParagraph.first.map { Row(said: $0, effect: "New paragraph\(place)") },
             edits.tab.first.map { Row(said: $0, effect: "Tab\(place)") },
             edits.scratchThat.first.map { Row(said: $0, effect: "Removes what you just said") },
-            edits.discard.first.map {
-                Row(said: $0, effect: forMessage ? "Discards this message. Nothing is sent." : "Discards this take", note: "Say it last")
-            },
         ].compactMap { $0 } + [
             Row(
                 said: ClipboardTokenizer.defaultPhrases[0],

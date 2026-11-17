@@ -39,6 +39,10 @@ public enum AgentHistoryFacts {
         return next
     }
 
+    public static func cancel(focused: String?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
+        [fact(command: "Cancel")] + inFront(focused, in: conversations)
+    }
+
     public static func goBack(focused: String?, conversations: [AgentConversation]) -> [HistoryEntry.Fact] {
         [fact(command: "Go back")] + inFront(focused, in: conversations)
     }

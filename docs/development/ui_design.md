@@ -226,7 +226,7 @@ the only signal.
   which routes through the same output). So with the start sound **off** the change is instant — pick that
   for a dictation that feels immediate. The output device that was ducked is the one restored on
   completion, even if the default output changed mid-dictation.
-- The same "Other audio" choice applies to everything Reply updates and Ask answers speak (replies, notices, answers,
+- The same "Other audio" choice applies to everything Read Agent Replies Aloud and Ask answers speak (replies, notices, answers,
   "repeat that"; not the voice sample in Settings): the duck lands when the voice becomes audible and lifts
   a short grace after it stops, so a next reply that speaks within the grace does not pump the audio, while
   one still being prepared past it gets the audio back until it speaks. Stop gives the audio back at once.
@@ -329,7 +329,6 @@ because opening its mic switches it to call mode.
 | Voice command not recognized (Voice Commands mode) | “Command not recognized” | What the speech model heard, before any replacement: “Heard “stitch to Mail”” — omitted when the target was a password field or could not be confirmed | None; dismiss automatically |
 | Voice command matched nothing (Voice Commands mode) | What found nothing: “No script or shortcut is called “sorb legs”.”, “No matching app, place, or window found for “kiwi”.”, or “No open tab matches …” | The heard excerpt, under the same rules as above | None; dismiss automatically |
 | No speech (real audio, none spoken) | “No speech detected” | Mode name | None; dismiss automatically |
-| Discarded by voice (live edits, “never mind” or “start over” ending the take) | “Discarded: nothing was inserted” | — (an Advisory: the user chose this, so no failure styling) | None; dismiss automatically. Nothing is written to History |
 | Nothing heard (mic muted/dead) | “Nothing heard — check your microphone” | — | Open Microphone Settings |
 | Error | Plain-language failure | Single next action | Retry, open permissions, Open Speech Models when the selected model is not installed, or dismiss as applicable |
 | Config problem (idle, after an external edit) | “Couldn’t read [file] — [parser message] — previous version still in use” (or “— ignored until fixed”), or “[file] — “[key]” (did you mean “[key]”?) has no effect” | — | None; dismisses automatically |
@@ -453,7 +452,9 @@ name (one the user gave it, else the one the agent generated), and the project f
 show it labels its own session with the same name (the name in quotes on the agent's status line, after the
 connector's name, which Claude Code adds and the Pi connector writes itself), so the
 terminal on screen can be matched to its row; the label is display only and never renames the agent's
-conversation. A bb thread shows the same name on its row in bb's sidebar when its bb title differs.
+conversation. While the session runs a connector older than the one the app ships, the label adds the step that
+loads the new one (“docs” · Update: /reload-plugins, or `/reload` in Pi), and a long name is cut short with an
+ellipsis so the step still shows (`AgentHub.footerLabel`). A bb thread shows the same name on its row in bb's sidebar when its bb title differs.
 Installing the bb plugin turns on bb's row details for that, says so in the consent sheet, and records
 which of bb's switches it changed. The switches are changed once, so a user who later turns them off keeps
 them off. Uninstalling offers a second destructive button, "Uninstall and Turn Off Row Details", but only when
@@ -584,7 +585,7 @@ the same kind of local command on either trigger: it replays the last spoken rep
 exactly as it was heard, ahead of any still waiting, and sends nothing. The replay waits in its own place
 rather than the queue, so a newer result for the same conversation does not replace it and an unavailable
 notice is never merged again with notices still waiting. It does not repeat the front check, since the user asked for it.
-The HUD names the conversation (“docs”), or says “There’s nothing to repeat yet.” or “Reply updates are off.”;
+The HUD names the conversation (“docs”), or says “There’s nothing to repeat yet.” or “Read Agent Replies Aloud is off.”;
 History records the command and adds no second copy of the line. Inside a longer take or after “tell” and a name it is
 message text. A take that is only “rename this conversation to” or “rename this session to” a new name (“name this
 conversation …” and “call this session …” work too) renames the conversation in front when the take started,
@@ -601,9 +602,8 @@ message. Without “this”, “session” is not enough (“rename session to t
 code that is often a variable. Any other take without “this conversation” or “this session” (“rename this to
 parseConfig”, “rename this function to parseConfig”) is a message for the agent, and the command is recognized from the words as heard, so replacements never
 change it. The mode's local text stages (spoken edits, replacements, numbers), without the AI rewrite, then
-run on the words after it before the name is read (`AgentRename.request`, then `AgentRename.name`): “never
-mind” at the end discards the take (nothing in History), and “rename this conversation to docs, scratch that,
-notes” names it notes. The HUD shows “Renamed keyscribe to auth refactor” long enough to read, so a misheard name is caught
+run on the words after it before the name is read (`AgentRename.request`, then `AgentRename.name`): “rename this
+conversation to docs, scratch that, notes” names it notes. The HUD shows “Renamed keyscribe to auth refactor” long enough to read, so a misheard name is caught
 and fixed by saying it again. A name another conversation holds, or a row name such as “conversation three” or “session three”,
 is refused with the reason and nothing changes; with no conversation in front it says “Switch to a
 conversation, then say the rename command again” with **Open Agent Settings**. History records Rename, the conversation, the new name and how it was chosen. After “tell” and a
@@ -641,7 +641,7 @@ nothing. One that is not connected is “not connected. Its current status is un
 seen, and one whose state was carried over because its agent's session list could not be read is
 “last seen waiting for approval. Its current status is unavailable.” A description is used only while
 the prompt it describes is still the one pending; if the prompt or state changed meanwhile, the answer is
-rebuilt from what is pending now. The answer shows in the HUD, and is given as a reply update when reply updates are on,
+rebuilt from what is pending now. The answer shows in the HUD, and is given as a reply update when Read Agent Replies Aloud is on,
 even with the conversation in front; speech that has to wait (for the dictation HUD, or while its audio is
 prepared) is dropped if what it reports stopped being true, its state, prompt, connection or freshness,
 while “repeat that” still replays it as heard. An answer replaces a notice about the same conversation that
@@ -731,8 +731,14 @@ stayed in front. Exactly one listed conversation must be confirmed there, in the
 focus at the press, for it to be this take's conversation in front. The read never asks for Automation access, so a
 terminal not yet allowed reads as unknown. A bb thread is in front when bb is the app in front with the
 same window focused as at the press, and bb's plugin last said the window you used most recently shows that
-thread on its page (in a split, once the focused pane agrees with the page); a bb page that shows no thread, such as its
-settings, has no conversation in front. Being in front also means its reply is not read aloud while you look
+thread on its page (in a split, once the focused pane agrees with the page). bb's new-thread page, under the same
+checks, puts a new conversation in front: the headline reads “To a new bb conversation”, and an unnamed
+take is sent from that page's message box as if you had pressed Return, after any text already typed there, so bb
+starts the thread with the project, agent and settings chosen on the page. The receipt reads “Sent to a new bb
+conversation”, and its reply is read aloud like any dictated turn's. If the page left the front before sending,
+nothing is sent and the HUD says so; if bb would not send, the words are left in that box and the HUD says to
+press Return there. A bb with no thread at all has nothing to report the page through, so it reads as nothing
+focused. Any other bb page that shows no thread, such as its settings, has no conversation in front. Being in front also means its reply is not read aloud while you look
 at it, as for a terminal. Unknown, no terminal in front, a different app or window, or a
 front view that could belong to another session leaves the take with nothing focused. Recording still
 starts, since the take may name a conversation or be a command that needs none. The read runs beside the
@@ -805,7 +811,7 @@ example, the user sent that conversation a message after the take was decided, i
 or its prompt box already holds text that the take cannot join. The HUD says so, why, and how to recover (“Not sent to docs: its
 prompt box already has text. Send or clear that text there, then say this again”); it never says who wrote
 that text. Text already in the agent's prompt box is left exactly as it was, and what was said stays in
-History. With **Reply updates** on, a take the conversation did not take is also spoken once, as a short
+History. With **Read Agent Replies Aloud** on, a take the conversation did not take is also spoken once, as a short
 line naming the conversation and the reason (“docs didn’t take that: its prompt box has text”); what to do
 stays in the HUD and History. It is spoken whether that happens at once or after the take was queued, and even with the conversation in front:
 it is the only notice of a refusal that comes after the user has moved on. It waits like any spoken reply
@@ -2134,7 +2140,7 @@ master/detail conversation list. Its everyday view is, in order:
    (`AgentsSettingsModel.conversationsSummary`; conversations that can't are explained by the agents'
    warnings and the list itself, not counted here) and **Manage…**, the one permanent entry to the
    conversation list (below), then any problem with saved conversation names or disconnections.
-4. **Replies** — **Reply updates** and a disclosure for the rest (below).
+4. **Replies** — **Read Agent Replies Aloud** and a disclosure for the rest (below).
 5. **Advanced** — one collapsed `DisclosureSection` (“Vocabulary, rewriting before sending, and history”)
    that, when open, shows **Words**, **Rewrite instructions before sending** (an optional AI rewrite with its
    **Rewrite service** and instruction), **Data sent with AI** (best-effort redaction of that rewrite request,
@@ -2195,7 +2201,7 @@ conversation, reported by the connector, else the title Claude Code generated, r
 of the session's own transcript (only the title is kept, and it is never logged); a brand-new conversation has
 neither yet.
 
-**Replies**' everyday view is one row and one disclosure. **Reply updates** is its own switch, off by default.
+**Replies**' everyday view is one row and one disclosure. **Read Agent Replies Aloud** is its own switch, off by default.
 Its caption says what it does while off ("Get replies to messages you dictate or ask the agent to report, and
 know when it needs you.") and, while on, the current voice in one line ("Read aloud with the Heart voice.
 Longer replies are summarized by {service}." or "Shown as text, not read aloud. …"). **More reply options**,
@@ -2203,7 +2209,7 @@ a collapsed `DisclosureSection` shown while the switch is on, holds **Summary se
 under a divider, the **Summary instruction** and the voice's files, and opens by itself when the service is missing or the voice needs attention. The summary
 service is separate from the Agent mode's rewrite service, with a different name, so the service that
 rewrites what the user says is never mistaken for the one that summarizes replies; its row's caption is the data
-boundary in one line. **About reply updates**, under the switch, opens a help dialog in three parts: **When
+boundary in one line. **About reading replies aloud**, under the switch, opens a help dialog in three parts: **When
 updates appear** (a dictated message finishing, work the user asked to hear about, an approval request or a
 disconnection, and that a reply is skipped while its conversation is in front), **Speech and display** (each
 update is shown and read aloud unless the voice is **Off — text only**; speech is made on this Mac), and
@@ -2225,7 +2231,7 @@ shortcut; the answer the terminal command shows appears in a small popup above t
 running, or the next one when the agent is idle, and only that turn. A requested turn that finishes with no text to
 read is announced as "Finished without a written reply. Open the conversation for the result." Asking to hear a turn
 whose wait was skipped because the conversation was in front announces that wait then; one already queued or heard
-is not repeated. The app answers whether reply updates are on, so
+is not repeated. The app answers whether Read Agent Replies Aloud is on, so
 the agent never claims a request that was not accepted; with the switch off nothing is armed for later. The request
 lives in the hub's memory only; a reconnect that reports the same running turn keeps it, as it keeps a dictated
 turn's, and turning the switch off, disconnecting, or quitting drops it. A reconnect from a new connector instance
@@ -2279,7 +2285,7 @@ says so. A chosen service that no longer exists is an `IssueText`, and a longer 
 is then spoken as unavailable. With no saved services, an advisory saying summaries need one and what plays without it,
 and **Open AI Services**, take its place. While a service is chosen, the row's caption
 states the data boundary in one line, naming the service ("Long replies and waiting prompts go to {name}
-after best-effort redaction."); **About reply updates** adds that short replies are read without any service and that the app, named with
+after best-effort redaction."); **About reading replies aloud** adds that short replies are read without any service and that the app, named with
 `Branding.appName`, saves what was read aloud in History only while History is on, with no claim about what the provider keeps.
 
 **Voice** is one row, with **Preview Voice** beside its control, wrapping below it only when the pane is too
@@ -2642,7 +2648,7 @@ when nothing matches); without one it reads **Export All…**. Each row contains
   recognizable without opening it;
 - time and mode;
 - outcome (`Inserted`, `Copied`, `Local fallback`, `Rewrite skipped`, `Rewritten later, not inserted`, or `Failed`; a voice command reads `Command`,
-  `Command failed`, `Command started`, `Needs a choice`, or `Choice cancelled`);
+  `Command failed`, `Command started`, `Needs a choice`, or `Cancelled`);
   an entry that recorded its own summary shows that instead, so an agent take reads `Sent to backend`,
   `Queued for backend`, `Opened backend`, or why nothing was sent, never a generic `Inserted`;
 - data-boundary badges relevant to that dictation;
@@ -2693,11 +2699,12 @@ the entry can be deleted whether or not the pane saw the update. A command that 
 recorded as **Needs a choice**, its result listing the numbered rows. A spoken answer is its own entry —
 heard “two”, its result beginning “Selected Work Mail for “open mail”:” followed by what ran — so
 the pair reads correctly even when other entries fall between them or a filter hides one. A spoken
-cancel reads **Choice cancelled**, and a reply that was not an answer reads **Needs a choice** with the
+cancel reads **Cancelled**, and a reply that was not an answer reads **Needs a choice** with the
 standard instruction for answering (“Choose 1–2, say “cancel”, or give a new command.”), even when the
 HUD showed what was heard instead. Clicking a row completes the question's own entry instead, since nothing was spoken; the
-Cancel button marks it **Choice cancelled**. A take that is only “cancel” or “never mind”, with no question
-waiting, records nothing, in either action mode, like a dictation discarded with “never mind”. An idle timeout records nothing. A failed command adds a **Why it failed** row in Details explaining the
+Cancel button marks it **Cancelled**. A take that is only “cancel” or “never mind”, with no question
+waiting, records its own **Cancelled** entry, in either action mode, with what was heard and “Cancelled. Nothing ran.” or
+“Cancelled. Nothing sent.”, so a cancel never looks like a take that went missing. An idle timeout records nothing. A failed command adds a **Why it failed** row in Details explaining the
 failure, and a script that reported a result adds a **Reported** row with the message the HUD showed. That row can say more than the compact HUD: an unrecognized command keeps the full “Not a
 command. Say …” guidance there while the HUD shows only “Command not recognized” and what was heard.
 **Copy Result** stays available for commands. **Add to Dictionary** and **Create Replacement** on a command entry write to the

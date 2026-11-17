@@ -459,6 +459,20 @@ a hello on any other protocol is refused with `426` and is never registered or s
   when bb refused the send after the dictation went in, leaving both in the box; any other refusal means nothing
   went in. A turn the joined message starts is reported under the digest of the dictation alone, so KeyScribe
   follows its reply. The receipt says the text already in the box was sent too.
+- **A `start` command starts a new conversation from a host's new-conversation page.** A host's plugin whose
+  hello lists `start` sends `shown` with `on: false` and `newConversation: true` while the window it reports in
+  front shows a page that starts a conversation and no thread (bb's new-thread page), carried on any of its
+  connected conversations. While that is the latest `shown` and the host's app is in front with the same window
+  focused as at the press, an unnamed take goes there: KeyScribe sends `start` (`id`, `expectedSession` naming
+  that carrying conversation, `text`, `expiresAt`). bb's plugin has that window type the dictation into its
+  new-thread box, after any text already there, and send it with the box's own send, which creates the thread
+  with the project, agent and settings chosen on the page. It answers `submitted` (`withDraft: true` when text
+  already in the box went too), or refuses as `gone` when its front window no longer shows that page or no window
+  took it up within a second, `draft` when the box holds text it will not join, `filled` when bb would not send
+  and the dictation is left alone in the box, `added` when it is left there after text already in the box, and
+  `command` when the dictation starts with `/` or `!`. The new thread's first turn is reported under the digest
+  of the dictation alone, once that thread's hello lands, so KeyScribe follows its reply within the same wait as
+  any hosted dictation.
 - **A submit is refused as `dialog`** when the agent is showing a dialog of its own (Pi reports these around
   every extension prompt); KeyScribe keeps the take for review.
 - **The Pi connector waits for the keyboard.** A key pressed in that terminal within the last three seconds
@@ -730,7 +744,7 @@ context = { app = true, preceding_text = false }
 | `source` | enum | `dictation` \| `selection`. |
 | `output` | enum | `cursor` \| `replace_selection` \| `speak` \| `voice_command` \| `agent`. `speak` answers the spoken request about the selected text and reads the answer aloud; the selection is not changed. It needs `source = "selection"` (a file that pairs it with `dictation` fails to load), runs only while the `ask_about_selection` experimental flag is on, and ignores the insertion, `trailing`, `submit`, and context settings: only the selection and the spoken request are sent. `voice_command` is the Voice Commands system mode's output: the take is run as a command (`voice_commands.toml`) and nothing is inserted. `agent` is the Agent system mode's output: the take goes to an agent conversation ("Agent bridge" above). Any other mode file that sets either fails to load. |
 | `[agent]` | table | Retired. An earlier version used `target` to fix where a take without a name goes. `current` and `focused` (the old default) are ignored silently and dropped the next time the mode is saved (`ModeStore.retiredKeys(in:)`); a fixed conversation name or `ask` is ignored too but reported as a key with no effect, so the Agent mode says unnamed takes no longer go there and asks for the line to be removed. A take without a name always goes to the conversation the front terminal shows when the take starts, if that can be confirmed in the window that had focus, without asking for access, shortly after release at the latest; with none, it is held and nothing is sent. |
-| `commands.live_edits` | bool | Opt-in to the spoken-command list (insert new line, insert new paragraph, insert tab character, scratch that, **never mind** / **start over** to discard the whole take, **insert clipboard contents**, **begin/end verbatim**). |
+| `commands.live_edits` | bool | Opt-in to the spoken-command list (insert new line, insert new paragraph, insert tab character, scratch that, **insert clipboard contents**, **begin/end verbatim**). |
 | `commands.privacy` | bool | Opt-in to best-effort redaction. When true, **context is forced off** — `ai_rewrite.context` is locked to all-false so only the redacted transcript leaves. |
 | `commands.numbers` | bool | Opt-in to inverse text normalization ("twenty five" → "25"); bails on ambiguous/year-like runs. |
 | `dictionary` | table | `include_global` + `words[]`. |
@@ -1658,7 +1672,7 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
                                                  #   while its plugin is connected (connectors.json)
 
 [agents.spoken_result]               # Settings ▸ Modes ▸ Agent ▸ Replies
-# enabled = true                                 # Reply updates; absent = false
+# enabled = true                                 # Read Agent Replies Aloud; absent = false
 # connection = "omlx"                            # id of the AI service that summarizes a finished reply
                                                  #   and describes a Pi prompt; absent or "" = None:
                                                  #   a longer reply is announced without a summary, and

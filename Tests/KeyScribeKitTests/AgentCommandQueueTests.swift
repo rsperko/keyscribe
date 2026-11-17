@@ -397,6 +397,25 @@ struct AgentBridgeCodecTests {
         #expect(try AgentBridgeCodec.decodeEvent(Data(plain.utf8)) == .shown(session: "t1", on: true))
     }
 
+    @Test func aWindowShowingNoThreadSaysWhetherItShowsABoxThatStartsAConversation() throws {
+        let starts = #"{"op":"shown","session":"t1","on":false,"newConversation":true}"#
+        #expect(try AgentBridgeCodec.decodeEvent(Data(starts.utf8)) == .shown(session: "t1", on: false, newConversation: true))
+        #expect(AgentEvent.shown(session: "t1", on: false, newConversation: true).renamingSession { "bb:" + $0 }
+            == .shown(session: "bb:t1", on: false, newConversation: true))
+    }
+
+    @Test func aDictationThatStartsAConversationTravelsAsItsOwnCommandThroughTheMemberThatCarriesIt() throws {
+        let at = Date(timeIntervalSince1970: 1_793_400_000)
+        let command = AgentCommand.start(id: "r1", expectedSession: "t1", text: "plan the release", expiresAt: at)
+        let wire = String(decoding: try AgentBridgeCodec.encode([command]), as: UTF8.self)
+        #expect(wire.contains(#""op":"start""#))
+        #expect(try AgentBridgeCodec.decodeCommands(Data(wire.utf8)) == [command])
+        #expect(command.id == "r1")
+        #expect(command.expiresAt == at)
+        #expect(!command.isState)
+        #expect(command.renamingSession { "bb:" + $0 } == .start(id: "r1", expectedSession: "bb:t1", text: "plan the release", expiresAt: at))
+    }
+
     @Test func aCheckAnswerSaysWhereTheMessageIsAndAnUnknownStateIsUnknown() throws {
         let handed = #"{"op":"checked","request":"r1","check":"c1","state":"handed","handedAt":1793400000250,"miss":"other"}"#
         #expect(try AgentBridgeCodec.decodeEvent(Data(handed.utf8)) == .checked(request: "r1", check: "c1", report: AgentDeliveryReport(
