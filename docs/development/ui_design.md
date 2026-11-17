@@ -1108,7 +1108,7 @@ Next Dictation ▸
   Manage Modes…
 
 Paste Last Dictation
-Agent Reply Updates ✓
+Read Agent Replies Aloud ✓
 Last Reply in History…
 
 ────────────────
@@ -1166,7 +1166,7 @@ disabled while it cannot open.
 > affordance, rendered only when the updater reports one. The public build uses Sparkle (EdDSA-verified);
 > a build with no injected updater shows neither.
 
-**Agent Reply Updates** is shown only while the Agent feature is on. Its checkmark is the **Reply
+**Read Agent Replies Aloud** is shown only while the Agent feature is on. Its checkmark is the **Reply
 updates** switch (§7 Agent), with the same effects: off stops playback, closes a shown update and drops
 waiting and in-progress reply updates, on keeps the configuration and replays nothing. It needs no AI service, since notices are spoken
 without one.
@@ -2237,7 +2237,7 @@ reply is superseded only by another requested reply from the same conversation, 
 voice but not yet audible; a later automatic reply queues behind it. The command's answer is shown to the user, never added to what the model reads. Turning it off stops
 playback, cancels any summary being made, and drops spoken replies still waiting, while the chosen service,
 speaker and instruction are kept; turning it back on applies to the next reply and replays nothing.
-The **Agent Reply Updates** item in the menu bar menu (§6) is the same switch. The rest
+The **Read Agent Replies Aloud** item in the menu bar menu (§6) is the same switch. The rest
 of the section shows only while it is on.
 
 A notice is a fixed sentence after the conversation's name, in the session list's own words: "Waiting for

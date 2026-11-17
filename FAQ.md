@@ -780,7 +780,7 @@ audible, Esc goes to KeyScribe instead of the app you're in, and reaches your ap
 another app already holds Esc, the panel says only "Speaking" and the stop button is the way to stop it.
 Starting a dictation also stops it, and waiting summaries play once the dictation's own panel has gone.
 Both only stop the speech: the agent keeps working. The
-**Agent Reply Updates** item in the menu bar menu turns the feature off and on. Only instructions you dictated, and
+**Read Agent Replies Aloud** item in the menu bar menu turns the feature off and on. Only instructions you dictated, and
 work you asked the agent to have KeyScribe read aloud (below), are spoken about. To hear the last one again, say **"repeat that"** or **"say that
 again"** as the whole dictation, with either the Agent or the Voice Commands shortcut; with the Agent
 shortcut, a longer dictation that starts that way is sent to the agent as usual. A conversation that is in front of you when it finishes is

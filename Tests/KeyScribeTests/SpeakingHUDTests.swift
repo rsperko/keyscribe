@@ -404,7 +404,7 @@ struct SpokenUpdatesMenuTests {
         menu.install()
         let item = menu.spokenUpdatesMenuItem
         #expect(item.isHidden)
-        #expect(item.title == "Agent Reply Updates")
+        #expect(item.title == "Read Agent Replies Aloud")
         menu.setSpokenUpdates(available: true, on: true)
         #expect(!item.isHidden)
         #expect(item.isEnabled)
