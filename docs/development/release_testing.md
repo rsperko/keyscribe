@@ -9,7 +9,7 @@ matching stamp**, so a broken build cannot go public by forgetting a step.
 
 ```
 # 1. Build the notarized release artifact (Tier A inspects KeyScribe.app + the DMG).
-./release.sh patch|minor|major            # or a bare ./release.sh to rebuild the current tag
+./release.sh patch|minor|major|beta            # or a bare ./release.sh to rebuild the current tag
 
 # 2. Run the gate. Automated tiers run unattended; then it walks you through ~2 dictations.
 make preflight
@@ -91,6 +91,8 @@ actually catches the list above.
 - **The printable cheat sheet renders** (`make test-cheatsheet`) with one page per section on Letter
   and A4; a machine without `uv` skips it loudly. Separately, `swift test` checks every phrase the sheet
   teaches against the real parsers (`CheatSheetPhraseTests`), so the sheet cannot drift from the grammar.
+- **The release version math and update feed pass their tests** (`make test-release-tools`): they pick
+  the tag a release ships under and write the feed every install reads.
 - **Every agent connector's own tests pass** (`CONNECTOR_CHECKS` in `scripts/preflight.sh`): each
   connector runs inside its agent under Node, so these run there against a stubbed agent API. A machine
   without a recent Node skips them loudly.
@@ -201,11 +203,11 @@ already proves notarization) unless you want that end-to-end, and reinstall your
 
 ```
 make preflight-pre                 # FAIL-FAST: swift test + Tier B on the dev build, BEFORE notarizing
-./release.sh patch|minor|major     # build + notarize the app and DMG (background + poll; ~10–30 min)
+./release.sh patch|minor|major|beta     # build + notarize the app and DMG (background + poll; ~10–30 min)
 make preflight                     # Tier A packaging + Tier C smoke (A/B from the pre-run are cached) → stamp
 make publish                       # refuses unless .preflight-pass matches HEAD
 # or, all of it chained (this exact order):
-make ship patch|minor|major        # preflight-pre → release → preflight → publish
+make ship patch|minor|major|beta        # preflight-pre → release → preflight → publish
 ```
 
 **Why `preflight-pre` runs first.** `swift test` and the Tier B functional gates need a *built* app but

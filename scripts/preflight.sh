@@ -131,7 +131,7 @@ force_id()   { [ "$FORCE_ALL" = 1 ] && return 0; case ",${FORCE_LIST//[[:space:]
 CONNECTOR_CHECKS="a-connector-tests a-pi-connector-tests a-bb-plugin-tests"
 # The pre-notarize phase runs only these — swift test + Tier B. It must NOT run the Tier A packaging /
 # notarization checks (they need the notarized artifact, which does not exist yet) or Tier C (human).
-PRE_CHECKS=" a-deps a-swift-test $CONNECTOR_CHECKS a-catalog-contract a-min-xcode b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
+PRE_CHECKS=" a-deps a-swift-test $CONNECTOR_CHECKS a-release-tools a-catalog-contract a-min-xcode b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
 pre_check() { case "$PRE_CHECKS" in *" $1 "*) return 0;; esac; return 1; }
 
 # guard <id> <input-sig> <fn>  — the whole cache / run / retry / override / record cycle for one check.
@@ -280,6 +280,17 @@ chk_a_cheatsheet() {
   fi
 }
 guard a-cheatsheet "$(sig_source)" chk_a_cheatsheet
+
+chk_a_release_tools() {
+  # The version math picks the tag this release ships under, and the feed it writes reaches every install.
+  if timeout --foreground 60 make -C "$REPO_ROOT" test-release-tools >/tmp/preflight-release-tools.log 2>&1; then
+    result pass "release tools — version bumps and the update feed"
+  else
+    tail -20 /tmp/preflight-release-tools.log
+    result fail "release tools — see /tmp/preflight-release-tools.log"
+  fi
+}
+guard a-release-tools "$(sig_source)" chk_a_release_tools
 
 chk_a_catalog_contract() {
   # A downstream build swaps the AI service catalog, and the public one permits everything, so a test or
@@ -433,7 +444,7 @@ else
   }
   guard a-entitlements "$(sig_artifact)" chk_a_entitlements
 
-  VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+  VERSION="$(cd "$REPO_ROOT" && python3 scripts/release_tools.py current | sed 's/^v//')"
   DMG="$REPO_ROOT/KeyScribe-$VERSION.dmg"
   chk_a_dmg() {
     if [ -n "$VERSION" ] && [ -f "$DMG" ]; then
@@ -830,7 +841,7 @@ fi
 # Everything required is pass / override / skip → write the stamp keyed to this exact commit. First line
 # stays the raw SHA (publish.sh matches on it); the breakdown below records overrides and skips truthfully.
 SHA="$(git rev-parse HEAD)"
-TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo '(untagged)')"
+TAG="$(cd "$REPO_ROOT" && python3 scripts/release_tools.py current)"; TAG="${TAG:-(untagged)}"
 {
   echo "$SHA"
   echo "$TAG"

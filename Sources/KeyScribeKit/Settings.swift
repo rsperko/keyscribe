@@ -21,6 +21,7 @@ public struct Settings: Codable, Equatable, Sendable {
     public var hud: HUD
     public var features: Features
     public var agents: Agents
+    public var updates: Updates
 
     enum CodingKeys: String, CodingKey {
         case schemaVersion = "schema_version"
@@ -34,6 +35,7 @@ public struct Settings: Codable, Equatable, Sendable {
         case hud
         case features
         case agents = "agents"
+        case updates
     }
 
     public init(from decoder: Decoder) throws {
@@ -49,13 +51,14 @@ public struct Settings: Codable, Equatable, Sendable {
         hud = try c.decodeIfPresent(HUD.self, forKey: .hud) ?? Settings.defaults.hud
         features = try c.decodeIfPresent(Features.self, forKey: .features) ?? Settings.defaults.features
         agents = try c.decodeIfPresent(Agents.self, forKey: .agents) ?? Settings.defaults.agents
+        updates = try c.decodeIfPresent(Updates.self, forKey: .updates) ?? Settings.defaults.updates
     }
 
     public init(
         schemaVersion: Int, loadOnLogin: Bool,
         stt: STT, duringDictation: DuringDictation, history: History,
         shortcuts: Shortcuts = Shortcuts(), audio: Audio = Audio(), insertion: Insertion = Insertion(),
-        hud: HUD = HUD(), features: Features = Features(), agents: Agents = Agents()
+        hud: HUD = HUD(), features: Features = Features(), agents: Agents = Agents(), updates: Updates = Updates()
     ) {
         self.schemaVersion = schemaVersion
         self.loadOnLogin = loadOnLogin
@@ -68,6 +71,7 @@ public struct Settings: Codable, Equatable, Sendable {
         self.hud = hud
         self.features = features
         self.agents = agents
+        self.updates = updates
     }
 
     public struct Agents: Codable, Equatable, Sendable {
@@ -366,6 +370,28 @@ public struct Settings: Codable, Equatable, Sendable {
         }
     }
 
+    public struct Updates: Codable, Equatable, Sendable {
+        public var beta: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case beta
+        }
+
+        public init(beta: Bool = false) {
+            self.beta = beta
+        }
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            beta = try c.decodeIfPresent(Bool.self, forKey: .beta) ?? false
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            if beta { try c.encode(beta, forKey: .beta) }
+        }
+    }
+
     // Opt-in flags for in-development features. Stores only enabled ids; retired ids are pruned on decode.
     public struct Features: Codable, Equatable, Sendable {
         private var overrides: [String: Bool]
@@ -421,7 +447,8 @@ public struct Settings: Codable, Equatable, Sendable {
         insertion: Insertion(),
         hud: HUD(),
         features: Features(),
-        agents: Agents()
+        agents: Agents(),
+        updates: Updates()
     )
 
     func validate() throws {

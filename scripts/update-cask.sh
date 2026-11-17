@@ -8,7 +8,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 TAP_DIR="${KEYSCRIBE_TAP_DIR:-../homebrew-tap}"
-VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+VERSION="$(python3 scripts/release_tools.py current | sed 's/^v//')"
 [ -n "$VERSION" ] || { echo "error: no git tag — cut a release first (./release.sh vX.Y.Z)." >&2; exit 1; }
 DMG="KeyScribe-$VERSION.dmg"
 [ -f "$DMG" ] || { echo "error: $DMG not found — run ./release.sh to build it first." >&2; exit 1; }

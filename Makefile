@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test test-kit test-connector test-pi-connector test-bb-plugin check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major cheatsheet test-cheatsheet
+.PHONY: help build run release publish ship cask test test-kit test-release-tools test-connector test-pi-connector test-bb-plugin check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major beta cheatsheet test-cheatsheet
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -16,18 +16,18 @@ run: build ## Build then launch the dev app
 
 # Bump can be positional (make release patch) or an explicit version (make release BUMP=vX.Y.Z).
 # When positional, it shows up as a goal in MAKECMDGOALS; pluck it out and feed it to release.sh.
-BUMP ?= $(filter patch minor major,$(MAKECMDGOALS))
-release: ## Cut a release: make release patch | minor | major   (or BUMP=vX.Y.Z; bare = re-run current tag)
+BUMP ?= $(filter patch minor major beta,$(MAKECMDGOALS))
+release: ## Cut a release: make release patch | minor | major | beta   (or BUMP=vX.Y.Z[-beta.N]; bare = re-run current tag)
 	./release.sh $(BUMP)
 
 # No-op stubs so `make release patch` treats 'patch' as the bump arg, not an unknown target to build.
-patch minor major:
+patch minor major beta:
 	@:
 
 publish: ## Publish the built+verified release: push tag + GitHub release (auto-notes) + cask + tap
 	./scripts/publish.sh
 
-ship: ## Fail-fast pre-notarize gate, build+notarize, human smoke, then publish: make ship patch|minor|major
+ship: ## Fail-fast pre-notarize gate, build+notarize, human smoke, then publish: make ship patch|minor|major|beta
 	$(MAKE) preflight-pre && $(MAKE) release BUMP="$(BUMP)" && ./scripts/preflight.sh && $(MAKE) publish
 
 cask: ## Refresh the Homebrew cask in ../homebrew-tap from the built DMG (then commit+push the tap)
@@ -43,6 +43,9 @@ test: ## Run the full test suite
 
 test-kit: ## Run only the KeyScribeKit tests, without building the engine stack (FILTER=<regex> narrows)
 	swift test --package-path "$$(./scripts/kit-package.sh)" $(BUILD_SYSTEM) $(if $(FILTER),--filter '$(FILTER)')
+
+test-release-tools: ## Check the release version math and the update feed
+	python3 -B scripts/test_release_tools.py
 
 test-connector: ## Run the Claude Code connector's behavior tests (needs the claude CLI; never needed to build)
 	./scripts/test-claude-connector.sh

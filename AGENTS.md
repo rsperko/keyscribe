@@ -204,7 +204,7 @@ keyscribe/
                        #   include:s) + project.yml (this repo's targets), plus signing/export config; the
                        #   generated KeyScribe.xcodeproj is gitignored
   make-app.sh          # → KeyScribeDev.app (dev variant, default; self-signed — see BUILD.md)
-  release.sh           # → notarized production KeyScribe.app + DMG (./release.sh patch|minor|major)
+  release.sh           # → notarized production KeyScribe.app + DMG (./release.sh patch|minor|major|beta)
   scripts/             # dev helpers behind the make targets — `make help` lists them; prepare-xcode-project.sh
                        #   and collect-licenses.sh belong to the build itself. Cite a script by its make target.
   docs/                # user docs, plus development/reference specs; development/areas/ holds the

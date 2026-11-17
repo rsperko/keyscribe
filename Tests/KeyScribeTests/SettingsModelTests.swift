@@ -40,6 +40,25 @@ struct SettingsModelTests {
         #expect(model.hudAppearance == .light)
     }
 
+    @Test func turningOnBetaUpdatesPersistsImmediately() {
+        var saved: [Bool] = []
+        let model = model { saved.append($0.updates.beta) }
+
+        model.betaUpdates = true
+        model.betaUpdates = false
+
+        #expect(saved == [true, false])
+    }
+
+    @Test func applyingSettingsLoadsBetaUpdates() {
+        let model = model { _ in }
+        var incoming = Settings.defaults
+        incoming.updates.beta = true
+        model.apply(incoming)
+
+        #expect(model.betaUpdates)
+    }
+
     @Test func loadingSettingsIntoTheModelDoesNotWriteBack() {
         var writes = 0
         let model = model { _ in writes += 1 }

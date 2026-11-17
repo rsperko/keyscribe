@@ -6,8 +6,10 @@
 #
 # Usage:
 #   ./release.sh                 build/notarize the CURRENT latest tag (re-run a release)
-#   ./release.sh patch|minor|major   bump from the latest tag, create the new tag, then build/notarize
-#   ./release.sh vX.Y.Z          create that exact tag, then build/notarize
+#   ./release.sh patch|minor|major   bump from the latest release tag, create the new tag, then build/notarize
+#   ./release.sh beta            next beta of the beta in progress (vX.Y.Z-beta.N → N+1)
+#   ./release.sh vX.Y.Z          create that exact tag (vX.Y.Z-beta.1 starts a beta), then build/notarize
+# A new tag must be newer than every version tag behind HEAD; scripts/release_tools.py holds the rules.
 # It stops before anything public: it does NOT push the tag, cut the GitHub release, or bump the
 # Homebrew cask — it prints those commands for you to run. Bumping requires a clean working tree
 # (a release must be built from committed code).
@@ -65,24 +67,8 @@ if [ -n "$BUMP" ]; then
     echo "       points at the exact code you ship. 'git status' to see what's pending." >&2
     exit 1
   fi
-  LATEST="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
-  case "$BUMP" in
-    v[0-9]*.[0-9]*.[0-9]*)            # explicit version — works with or without a prior tag
-      NEW_TAG="$BUMP" ;;
-    major|minor|patch)                # relative bump needs a baseline to bump FROM
-      if [ -z "$LATEST" ]; then
-        echo "error: no existing tag to bump from — patch/minor/major needs a baseline." >&2
-        echo "       for the first release, pass an explicit version: ./release.sh v0.1.0" >&2
-        exit 1
-      fi
-      IFS=. read -r MAJ MIN PAT <<<"$LATEST"
-      case "$BUMP" in
-        major) NEW_TAG="v$((MAJ+1)).0.0" ;;
-        minor) NEW_TAG="v${MAJ}.$((MIN+1)).0" ;;
-        patch) NEW_TAG="v${MAJ}.${MIN}.$((PAT+1))" ;;
-      esac ;;
-    *) echo "error: first arg must be patch | minor | major | vX.Y.Z (got '$BUMP')." >&2; exit 1 ;;
-  esac
+  LATEST="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null | sed 's/^v//' || true)"
+  NEW_TAG="$(python3 scripts/release_tools.py next "$BUMP")" || exit 1
   if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
     echo "error: tag $NEW_TAG already exists." >&2; exit 1
   fi
@@ -92,7 +78,7 @@ fi
 
 # Version comes from the latest git tag (scripts/prepare-xcode-project.sh stamps it into Info.plist). A
 # release must be tagged so the DMG name and the in-app version agree — refuse to build an untagged release.
-SHORT_VERSION="$(git describe --tags --abbrev=0 2>/dev/null | sed 's/^v//' || true)"
+SHORT_VERSION="$(python3 scripts/release_tools.py current | sed 's/^v//')"
 if [ -z "$SHORT_VERSION" ]; then
   echo "error: no git tag found — pass a bump (./release.sh patch) or tag first (git tag v0.1.0)." >&2
   exit 1
@@ -137,7 +123,7 @@ if [ -z "$TEAM_ID" ]; then
   echo "error: could not read a team id from KEYSCRIBE_SIGN_ID ('$ID'); expected '… (TEAMID)'." >&2
   exit 1
 fi
-PREPARED="$(./scripts/prepare-xcode-project.sh)"
+PREPARED="$(KEYSCRIBE_VERSION="$SHORT_VERSION" ./scripts/prepare-xcode-project.sh)"
 VERSION_SETTINGS=()
 while IFS= read -r line; do VERSION_SETTINGS+=("$line"); done <<< "$PREPARED"
 DERIVED=".build/xcode"

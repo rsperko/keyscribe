@@ -148,6 +148,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
     let recordingState = HotkeyRecordingState()
     private var historyReplacementsLauncher: HistoryReplacementsLauncher?
     private let modesDir: URL
+    private let betaOption: BetaUpdateOption?
     private var rulePreviewSource: ((ReplacementPreview.Destination) -> RulePreviewModel.Source)?
 
     init(
@@ -158,11 +159,13 @@ final class SettingsController: NSObject, NSWindowDelegate {
         onPreviewSound: @escaping (Int) -> Void,
         detectProblems: @escaping () -> [SettingsProblem],
         accessibilityTapActive: @escaping () -> Bool = { true },
+        betaOption: BetaUpdateOption? = nil,
         onRelaunch: @escaping () -> Void = {},
         onEraseAllData: @escaping () -> Void = {}
     ) {
         self.detectProblems = detectProblems
         self.accessibilityTapActive = accessibilityTapActive
+        self.betaOption = betaOption
         self.onRelaunch = onRelaunch
         model = SettingsModel(
             settings: settings, onChange: onChange, onReload: onReload,
@@ -346,7 +349,7 @@ final class SettingsController: NSObject, NSWindowDelegate {
             general: model, speechModels: speechModels, dictionary: dictionary,
             replacements: replacements, shared: shared, aiServices: aiServices, modes: modes, history: history,
             problems: problems, navigation: navigation, recordingState: recordingState,
-            accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch,
+            accessibilityTapActive: accessibilityTapActive, betaOption: betaOption, onRelaunch: onRelaunch,
             onHistoryPaneChange: { [weak self] active in self?.handleHistoryPaneChange(active: active) },
             historyReplacements: historyReplacementsLauncher,
             rulePreviewSource: rulePreviewSource)
@@ -468,6 +471,7 @@ struct SettingsRootView: View {
     @ObservedObject var navigation: SettingsNavigationModel
     @ObservedObject var recordingState: HotkeyRecordingState
     var accessibilityTapActive: () -> Bool = { true }
+    var betaOption: BetaUpdateOption?
     var onRelaunch: () -> Void = {}
     var onHistoryPaneChange: (Bool) -> Void = { _ in }
     var historyReplacements: HistoryReplacementsLauncher? = nil
@@ -521,6 +525,7 @@ struct SettingsRootView: View {
                     vocabularyShadowed: shadowed.contains(GlobalHotkey.vocabularyId),
                     pasteLastShadowed: shadowed.contains(GlobalHotkey.pasteLastId),
                     directMode: modes.modes.first(where: { $0.id == Mode.directId }),
+                    betaOption: betaOption,
                     onEditPlainDictation: {
                         modes.selectedID = Mode.directId
                         navigation.destination = .modes
@@ -715,6 +720,7 @@ final class SettingsModel: ObservableObject {
     @Published var otherAudio: OtherAudio { didSet { persist() } }
     @Published var hudAppearance: HUDAppearance { didSet { persist() } }
     @Published var loadOnLogin: Bool { didSet { persist() } }
+    @Published var betaUpdates: Bool { didSet { persist() } }
     @Published var historyEnabled: Bool { didSet { persist() } }
     @Published var retentionDays: Int { didSet { persist() } }
     @Published var eviction: String { didSet { persist() } }
@@ -851,6 +857,7 @@ final class SettingsModel: ObservableObject {
         otherAudio = settings.duringDictation.otherAudio
         hudAppearance = settings.hud.appearance
         loadOnLogin = settings.loadOnLogin
+        betaUpdates = settings.updates.beta
         historyEnabled = settings.history.enabled
         retentionDays = settings.history.retentionDays
         eviction = settings.stt.eviction.rawValue
@@ -894,6 +901,7 @@ final class SettingsModel: ObservableObject {
         otherAudio = settings.duringDictation.otherAudio
         hudAppearance = settings.hud.appearance
         loadOnLogin = settings.loadOnLogin
+        betaUpdates = settings.updates.beta
         historyEnabled = settings.history.enabled
         retentionDays = settings.history.retentionDays
         eviction = settings.stt.eviction.rawValue
@@ -970,6 +978,7 @@ final class SettingsModel: ObservableObject {
             sounds: sounds, soundVolumePercent: soundVolumePercent)
         settings.hud.appearance = hudAppearance
         settings.loadOnLogin = loadOnLogin
+        settings.updates.beta = betaUpdates
         settings.history = .init(enabled: historyEnabled, retentionDays: retentionDays)
         settings.stt.eviction = Eviction(rawValue: eviction) ?? .fastest
         settings.shortcuts = .init(

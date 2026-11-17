@@ -37,6 +37,7 @@ enum AccessibilityID {
             static let hudAppearance = "settings.general.hudAppearance"
             static let inputDevice = "settings.general.inputDevice"
             static let loadOnLogin = "settings.general.loadOnLogin"
+            static let betaUpdates = "settings.general.betaUpdates"
             static let addVocabularyShortcut = "settings.general.addVocabularyShortcut"
             static let pasteLastShortcut = "settings.general.pasteLastShortcut"
             static let historyEnabled = "settings.general.historyEnabled"
@@ -649,7 +650,7 @@ enum AccessibilityID {
         Settings.Sidebar.advanced,
         Settings.General.sounds, Settings.General.soundVolume,
         Settings.General.keepDisplayAwake, Settings.General.otherAudio, Settings.General.hudAppearance,
-        Settings.General.inputDevice, Settings.General.loadOnLogin, Settings.General.addVocabularyShortcut,
+        Settings.General.inputDevice, Settings.General.loadOnLogin, Settings.General.betaUpdates, Settings.General.addVocabularyShortcut,
         Settings.General.pasteLastShortcut, Settings.General.historyEnabled, Settings.General.retentionDays,
         Settings.General.editPlainDictation,
         Settings.Speech.list, Settings.Speech.deleteConfirmConfirm, Settings.Speech.deleteConfirmCancel,

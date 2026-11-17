@@ -1654,6 +1654,9 @@ appearance = "system"           # "system" | "opposite" | "light" | "dark"; the 
 add_vocabulary = "control+option+shift+v"        # canonical chord; "" = off
 paste_last_dictation = ""                        # canonical chord; "" = off (default)
 
+[updates]                                   # written by Settings ▸ General ▸ Updates, when the build's updater offers betas
+# beta = true                                    # also offer beta versions; absent = releases only (default)
+
 [insertion]                                 # how a paste hands the clipboard back; TOML-only, no Settings UI
 # clipboard_restore_ms = 250                     # ms the dictation stays on the clipboard after the paste
                                                  #   keystroke, before your clipboard is put back (must be >= 1)

@@ -104,7 +104,7 @@ cp "${LOCKFILE:-$ROOT/Package.resolved}" "$LOCK_DIR/Package.resolved"
 # ("0.1.0-2-gc1dc4af", "-dirty" with uncommitted changes) so it can never be mistaken for the release.
 # Explicit KEYSCRIBE_VERSION / KEYSCRIBE_BUILD / KEYSCRIBE_SCM_REVISION win, so a mirror whose git history
 # is not this repo's can pass its own; the git fallbacks cover a non-git tarball.
-SHORT_VERSION="${KEYSCRIBE_VERSION:-$(git describe --tags --dirty 2>/dev/null | sed 's/^v//' || true)}"
+SHORT_VERSION="${KEYSCRIBE_VERSION:-$(git describe --tags --dirty --match 'v[0-9]*' 2>/dev/null | sed 's/^v//' || true)}"
 [ -z "$SHORT_VERSION" ] && SHORT_VERSION="0.1"
 BUILD_VERSION="${KEYSCRIBE_BUILD:-$(git rev-list --count HEAD 2>/dev/null || true)}"
 [ -z "$BUILD_VERSION" ] && BUILD_VERSION="1"

@@ -324,6 +324,25 @@ struct SettingsTests {
         #expect(try SettingsStore.decode(from: encoded).insertion.clipboardRestoreMs == 1500)
     }
 
+    @Test func betaUpdatesAreOffByDefaultAndStayOutOfToml() throws {
+        let s = try SettingsStore.decode(from: "schema_version = 1")
+        #expect(!s.updates.beta)
+        #expect(!Settings.defaults.updates.beta)
+        #expect(try !SettingsStore.encode(s).contains("beta"))
+    }
+
+    @Test func betaUpdatesDecodeAndRoundTrip() throws {
+        let s = try SettingsStore.decode(from: "schema_version = 1\n[updates]\nbeta = true")
+        #expect(s.updates.beta)
+        let encoded = try SettingsStore.encode(s)
+        #expect(encoded.contains("beta = true"))
+        #expect(try SettingsStore.decode(from: encoded).updates.beta)
+    }
+
+    @Test func betaUpdatesKeyIsKnown() {
+        #expect(SettingsStore.unknownKeys(in: "schema_version = 1\n[updates]\nbeta = true").isEmpty)
+    }
+
     @Test func clipboardRestoreMsBelowOneIsRejected() throws {
         for value in [0, -250] {
             #expect(throws: ConfigError.invalid("insertion.clipboard_restore_ms must be >= 1")) {

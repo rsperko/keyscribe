@@ -76,14 +76,14 @@ dev, production, or a `custom` white-label identity): `./make-app.sh` builds the
 **KeyScribeDev.app** (`com.keyscribe.app.dev` — its own config dir, TCC grants, and Keychain service;
 orange menu-bar tint) so it runs alongside an installed production app; `./release.sh` forces the
 production **KeyScribe.app** (`com.keyscribe.app`, Developer ID, hardened runtime, notarized + stapled
-DMG). `./release.sh patch|minor|major` bumps the tag, builds, notarizes, and prints the publish steps —
+DMG). `./release.sh patch|minor|major|beta` bumps the tag, builds, notarizes, and prints the publish steps —
 it stops before pushing anything public. Variant plumbing: `AppVariant` (KeyScribeKit) resolved through
 `KeyScribePaths`/`KeychainStore`; **downloaded models are shared** (pinned to `KeyScribe/models`, never
 per-variant — the easy-to-miss part).
 
 ## Shipping a release
 
-**Shipping a release** (`./release.sh patch|minor|major` → `make ship`): the build + double Apple
+**Shipping a release** (`./release.sh patch|minor|major|beta` → `make ship`): the build + double Apple
 notarization (app, then DMG) takes ~10–30 min, so it is a **background + poll** job, not a foreground
 one (see the global "Command Execution" discipline). Write the log to a file and `tail` it. Two resume
 footguns: (1) if a `patch`/`minor`/`major` run already created the next tag, re-running with the bump
@@ -94,6 +94,30 @@ process never clears it) and silently block all builds — if a build reports `A
 SwiftPM (PID: …) is already running` for minutes, confirm that PID is dead (`ps -p <pid>`), then
 `rm -f .build/.lock` and relaunch. Do not stack concurrent `make ship`/`make release` invocations:
 they race on the lock and on `make publish`.
+
+## Betas and release branches
+
+**A beta is a tag on `main`, never a branch.** `make ship BUMP=vX.Y.Z-beta.1` starts one, `make ship beta`
+cuts the next, and `make ship minor` (or `patch`/`major`) promotes it: relative bumps count from the latest
+release tag behind HEAD, and every new tag must be newer than all version tags behind HEAD
+(`scripts/release_tools.py`, tested by `make test-release-tools`). A beta takes the same full `make preflight`
+gate as a release. Publishing marks it a GitHub prerelease, posts its appcast item to the `beta` channel
+(`UpdateChannels`), and leaves the Homebrew cask alone. The app finds beta items only when `[updates] beta` is
+on; every install also gets every release.
+
+**Ordering comes from the build number, not the version string.** `CFBundleVersion` is the commit count, and
+Sparkle offers whatever has the higher one, so build order must match version order or an install is offered an
+older version or never offered a newer one. Two guards hold it: `release.sh` refuses a new tag on a commit that
+already carries a version tag (the two would share a build number), and the appcast write refuses an item whose
+build order disagrees with any item already in the feed. A user who turns betas off keeps the beta until a
+release outranks it, because Sparkle never moves an install to an older build.
+
+**Fix a release while a beta is out on a release branch**, never on `main`: branch `release/X.Y` from the
+release tag, cherry-pick the fix from `main`, and `make ship patch` there. Its smaller commit count keeps it
+away from beta users, who already have the fix; a branch that outgrew `main`'s count is refused at the appcast
+write. `scripts/publish.sh` writes the feed on `main`, since installs read it only from there: it refuses first
+if local `main` holds unpushed commits (they would ship with the feed), then switches back, also on failure.
+A release's notes start at the release before it, so they cover its betas' changes.
 
 ## The release gate
 

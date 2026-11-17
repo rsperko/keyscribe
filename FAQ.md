@@ -843,6 +843,13 @@ or delete any of it. Removing that folder resets KeyScribe. The spoken replies v
 files in `~/.cache/fluidaudio/Models/kokoro`, a folder other apps may share, so removing KeyScribe's folder
 leaves them.
 
+### Can I try new features before they are released?
+
+Yes. Turn on **Settings ▸ General ▸ Updates ▸ Get beta updates**. KeyScribe then also offers beta versions,
+which bring new features early and may have rough edges, alongside every regular release. If you turn it off
+later, you keep the beta you have until a regular release replaces it. Betas come only through the app's own
+updates; the Homebrew cask installs regular releases.
+
 ## Permissions
 
 ### Which permissions does KeyScribe need, and why?

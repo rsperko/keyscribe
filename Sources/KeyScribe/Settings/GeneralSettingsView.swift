@@ -6,6 +6,7 @@ struct GeneralSettingsView: View {
     var vocabularyShadowed = false
     var pasteLastShadowed = false
     var directMode: Mode?
+    var betaOption: BetaUpdateOption?
     var onEditPlainDictation: () -> Void = {}
 
     private var directTriggers: [Mode.TriggerKey] {
@@ -146,6 +147,17 @@ struct GeneralSettingsView: View {
             Section("Startup") {
                 Toggle("Open \(Branding.appName) when you log in", isOn: $model.loadOnLogin)
                     .accessibilityIdentifier(AccessibilityID.Settings.General.loadOnLogin)
+            }
+
+            if let betaOption {
+                Section {
+                    Toggle(betaOption.label, isOn: $model.betaUpdates)
+                        .accessibilityIdentifier(AccessibilityID.Settings.General.betaUpdates)
+                } header: {
+                    Text("Updates")
+                } footer: {
+                    Text(betaOption.help)
+                }
             }
 
         }

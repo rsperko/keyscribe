@@ -1323,6 +1323,11 @@ Show the few choices a new user is most likely to need:
   both apply while the user dictates, and that other audio also applies while reply updates and answers are read aloud.
 - Microphone choice, with a short explanation of following the Mac’s current input
 - Open at login
+- **Updates** holds the beta switch, shown only when the build's updater offers one (`AppUpdater.betaOption`),
+  which also supplies the switch's label and footer; a build whose updater offers none shows no section. The
+  public build's switch is **Get beta updates**, and its footer says betas may have rough edges, that every
+  release still arrives, and that turning it off keeps the installed beta until a release replaces it, because
+  an update never moves to an older version.
 - (History enable and retention live in the **History** pane, not here.)
 - **Shortcuts** immediately follows Dictation and shows global chords for **Add to Vocabulary**
   and **Paste Last Dictation**, both of which are always available from the menu. Each uses a
