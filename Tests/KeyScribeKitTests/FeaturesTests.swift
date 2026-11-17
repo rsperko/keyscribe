@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import KeyScribeKit
 
-// Covers storage behavior independent of any specific flag (absent table, unknown-id pruning,
+// Covers storage behavior independent of any specific flag (absent table, unknown and retired ids,
 // round-tripping) since Feature can ship with zero cases; per-flag tests live below with each case.
 struct FeaturesTests {
     @Test func absentFeaturesTableDecodesToNoOverrides() throws {
@@ -11,7 +11,7 @@ struct FeaturesTests {
         #expect(s == Settings.defaults)
     }
 
-    @Test func unknownFeatureIdsArePrunedOnDecode() throws {
+    @Test func aFlagFromANewerVersionSurvivesASave() throws {
         let toml = """
         schema_version = 1
         [features]
@@ -19,13 +19,22 @@ struct FeaturesTests {
         another_ghost = false
         """
         let s = try SettingsStore.decode(from: toml)
-        #expect(s.features == Settings.Features())
+        #expect(Feature.allCases.allSatisfy { !s.features.isSwitchedOn($0) })
+        let reencoded = try SettingsStore.encode(s)
+        #expect(reencoded.contains("not_a_real_flag = true"))
+        #expect(!reencoded.contains("another_ghost"))
     }
 
-    @Test func unknownFeatureIdsAreDroppedOnReencode() throws {
-        let toml = "schema_version = 1\n[features]\nnot_a_real_flag = true\n"
-        let reencoded = try SettingsStore.encode(SettingsStore.decode(from: toml))
-        #expect(!reencoded.contains("not_a_real_flag"))
+    @Test func aFlagFromANewerVersionIsNotReportedAsAnUnknownKey() {
+        #expect(SettingsStore.unknownKeys(in: "schema_version = 1\n[features]\nnot_a_real_flag = true").isEmpty)
+    }
+
+    @Test func turningAKnownFlagOnKeepsANewerVersionsFlag() throws {
+        var s = try SettingsStore.decode(from: "schema_version = 1\n[features]\nnot_a_real_flag = true")
+        s.features.setEnabled(true, for: .voiceCommands)
+        let reencoded = try SettingsStore.encode(s)
+        #expect(reencoded.contains("not_a_real_flag = true"))
+        #expect(reencoded.contains("voice_commands = true"))
     }
 
     @Test func defaultsRoundTripPreservesEmptyFeatures() throws {
@@ -33,8 +42,18 @@ struct FeaturesTests {
         #expect(decoded.features == Settings.defaults.features)
     }
 
-    @Test func constructorPrunesUnknownOverrides() {
-        #expect(Settings.Features(overrides: ["ghost": true]) == Settings.Features())
+    @Test func constructorKeepsUnknownOverrides() {
+        #expect(Settings.Features(overrides: ["ghost": true]) != Settings.Features())
+    }
+
+    @Test func retiredIdsAreDropped() {
+        for id in Feature.retiredIds {
+            #expect(Settings.Features(overrides: [id: true]) == Settings.Features())
+        }
+    }
+
+    @Test func noLiveFlagIsRetired() {
+        #expect(Feature.retiredIds.isDisjoint(with: Feature.allCases.map(\.id)))
     }
 
     @Test func offOverridesArePruned() {
@@ -44,6 +63,11 @@ struct FeaturesTests {
     @Test func featureIdsAreUnique() {
         let ids = Feature.allCases.map(\.id)
         #expect(ids.count == Set(ids).count)
+    }
+
+    @Test func theRenamedAgentFlagIsRetired() throws {
+        let s = try SettingsStore.decode(from: "schema_version = 1\n[features]\ncoding_agents = true")
+        #expect(try !SettingsStore.encode(s).contains("coding_agents"))
     }
 
     @Test func retiredStreamingTranscriptionIdLoadsCleanly() throws {

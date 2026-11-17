@@ -1,7 +1,8 @@
 import Foundation
 
 // Optional, injected update mechanism. The UI is wired to a passive update affordance; builds that
-// do not inject an updater keep it inert.
+// do not inject an updater keep it inert. What an updater offering betas must do is in
+// docs/reference/releases_and_updates.md, and UpdateOffer is the rule it follows.
 @MainActor
 public protocol AppUpdater: AnyObject {
     // The implementation decides whether it is actually time to check.

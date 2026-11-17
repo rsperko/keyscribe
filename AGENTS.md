@@ -176,6 +176,7 @@ are large references: search them for the section you need rather than reading t
 | Any user-facing surface | `docs/development/ui_design.md` — normative; implementation does not override it (first run §2, HUD §5, menu §6, Settings §7, History §8) |
 | Widgets, badges, status words | `docs/development/ui_components.md` — reuse its vocabulary; never invent a competing badge or status word |
 | On-disk formats, starter modes | `docs/reference/config_schema.md` |
+| Release and beta tags, version order, an updater offering betas | `docs/reference/releases_and_updates.md` |
 | The LLM rewrite prompt | `docs/development/prompt_design.md` |
 | What is built and what is not | `docs/development/roadmap.md` |
 | Release testing | `docs/development/release_testing.md` (the mandatory release gate) |

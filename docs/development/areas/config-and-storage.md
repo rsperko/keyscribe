@@ -10,6 +10,11 @@ Read before changing any on-disk config store, `schema_version` handling, or a m
   deliberate user choice (an exclusion, an override). A file that fails to read or decode is an error,
   never treated as absent and replaced.
 
+- **What a beta wrote survives a release.** Once a key, table, or feature flag ships in a beta, someone can go
+  back to a release that does not know it, so it is never renamed without a migration that carries the old one
+  over, and a release keeps or refuses to save over what it does not read, never drops it
+  (`docs/reference/releases_and_updates.md`, *Moving between a beta and a release*).
+
 Config lives under `~/Library/Application Support/<KeyScribe|KeyScribeDev>/` (per variant; the
 `models/` weights cache is shared), loaded once into `ConfigCache` and invalidated by an FSEvents
 watcher (no per-dictation I/O). File-based storage, **no SQLite**: config

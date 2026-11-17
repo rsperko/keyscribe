@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from release_tools import current_tag, next_tag, order_problem, previous_release, render_item, upsert_items
+from release_tools import current_tag, next_tag, order_problem, previous_release, render_item, untraced, upsert_items
 
 
 def item(version, build="1"):
@@ -115,6 +115,33 @@ class OrderTests(unittest.TestCase):
 
     def test_a_newer_version_with_an_older_build_is_refused(self):
         self.assertIn("0.9.4", order_problem([item("0.9.4", "352")], "0.9.5", "300"))
+
+
+MAIN_SHA = "33296f7fcca8f4151d7ab51fff4903ea55747a35"
+
+
+class TraceTests(unittest.TestCase):
+    def on_main(self, sha):
+        return sha == MAIN_SHA
+
+    def test_a_cherry_pick_of_a_main_commit_is_traced(self):
+        commits = [("aaa", f"Fix it\n\n(cherry picked from commit {MAIN_SHA})")]
+        self.assertEqual(untraced(commits, self.on_main), [])
+
+    def test_a_commit_that_says_why_it_has_no_main_commit_is_traced(self):
+        commits = [("aaa", "Pin the old feed URL\n\nNo main commit: main replaced this file")]
+        self.assertEqual(untraced(commits, self.on_main), [])
+
+    def test_a_commit_without_either_line_is_reported(self):
+        self.assertEqual(untraced([("aaa", "Fix it")], self.on_main), ["aaa"])
+
+    def test_a_cherry_pick_of_a_commit_not_on_main_is_reported(self):
+        other = "1" * 40
+        commits = [("aaa", f"Fix it\n\n(cherry picked from commit {other})")]
+        self.assertEqual(untraced(commits, self.on_main), ["aaa"])
+
+    def test_an_empty_reason_is_reported(self):
+        self.assertEqual(untraced([("aaa", "Fix it\n\nNo main commit:")], self.on_main), ["aaa"])
 
 
 class AppcastTests(unittest.TestCase):

@@ -8,7 +8,7 @@ Ship in-development features behind an opt-in toggle, exercise them, then roll t
 the flag. The single source of truth is the **`Feature`** type (`Sources/KeyScribeKit/Features.swift`) —
 a struct whose `static let` catalog (listed in `allCases`) is the set of flags;
 state lives in the global `settings.toml` `[features]` table as **deviations only** — it stores just
-the ids the user turned on, so an absent (or unknown, or pruned) id means **off**. Flags are strictly
+the ids the user turned on, so an absent, unknown, or retired id means **off**. Flags are strictly
 opt-in (no per-flag default-on) and appear in every build under **Settings → Maintenance → Experimental
 features** (the section hides itself when there are no flags).
 
@@ -23,8 +23,11 @@ features** (the section hides itself when there are no flags).
 - **Add a flag:** add one `static let` to `Feature` with its `id` (stable, unique snake_case TOML key — never
   rename once shipped; `FeaturesTests.featureIdsAreUnique` guards collisions), `title`, and `summary`, and
   append it to `allCases`. The Maintenance toggle renders automatically; no UI code to touch.
-- **Roll out / retire:** delete the `static let` and its `allCases` entry, and make the gate unconditional
-  (or delete the dead branch). A stale id left in a user's `settings.toml` is ignored and dropped on the next write.
+- **Roll out / retire:** delete the `static let` and its `allCases` entry, add its id to `Feature.retiredIds`,
+  and make the gate unconditional (or delete the dead branch). A retired id left in a user's `settings.toml` is
+  dropped on the next write. **Any other id this build does not know is kept:** a newer version, such as a beta,
+  may own it, and dropping it would turn that feature off when the user returns. A flag that has shipped in a
+  beta is never renamed; retire it and add a new one with a migration, if anything, carrying the choice over.
 
 `allCases` may be empty — that is the normal state once every flag has been rolled out, not a bug.
 `Feature` is a **struct** with a

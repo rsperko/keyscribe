@@ -3,6 +3,7 @@
 
   release_tools.py current                                               print the version tag being released
   release_tools.py next <patch|minor|major|beta|vX.Y.Z|vX.Y.Z-beta.N>   print the next tag
+  release_tools.py trace                                                 check release-branch commits name their main commit
   release_tools.py notes-start <tag>                                     print the release to start notes from
   release_tools.py appcast <file> <version> <build> <min_os> <enclosure_url> <sig_attrs>
 """
@@ -131,6 +132,29 @@ def order_problem(items, version, build):
     return None
 
 
+CHERRY_PICK = re.compile(r"^\(cherry picked from commit ([0-9a-f]{40})\)$", re.MULTILINE)
+NO_MAIN_COMMIT = re.compile(r"^No main commit: *\S", re.MULTILINE)
+
+
+# A downstream receives upstream only through main, so each fix made on a release branch has to say which main
+# commit it carries (git cherry-pick -x writes the line) or why there is none.
+def untraced(commits, on_main):
+    def traced(message):
+        picked = CHERRY_PICK.findall(message)
+        return (picked and all(map(on_main, picked))) or NO_MAIN_COMMIT.search(message)
+    return [sha for sha, message in commits if not traced(message)]
+
+
+def branch_commits():
+    base = git("merge-base", "HEAD", "origin/main")
+    log = git("log", "--format=%H%x00%B%x01", f"{base}..HEAD") if base else ""
+    return [tuple(entry.strip().split("\0", 1)) for entry in log.split("\x01") if entry.strip()]
+
+
+def on_origin_main(sha):
+    return subprocess.run(["git", "merge-base", "--is-ancestor", sha, "origin/main"], capture_output=True).returncode == 0
+
+
 HEADER = (
     '<?xml version="1.0" encoding="utf-8"?>\n'
     '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" '
@@ -173,6 +197,12 @@ def main(argv):
         print(current_tag(git("tag", "--points-at", "HEAD").split(),
                           git("describe", "--tags", "--abbrev=0", "--match", "v[0-9]*")))
         return 0
+    if argv == ["trace"]:
+        missing = untraced(branch_commits(), on_origin_main)
+        for sha in missing:
+            print(f"error: {sha[:12]} names no main commit; add (cherry picked from commit <sha>) or "
+                  "'No main commit: <why>'", file=sys.stderr)
+        return 1 if missing else 0
     if len(argv) == 2 and argv[0] == "notes-start":
         print(previous_release(argv[1], reachable_tags()) or "")
         return 0

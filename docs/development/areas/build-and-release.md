@@ -105,15 +105,16 @@ gate as a release. Publishing marks it a GitHub prerelease, posts its appcast it
 (`UpdateChannels`), and leaves the Homebrew cask alone. The app finds beta items only when `[updates] beta` is
 on; every install also gets every release.
 
-**Ordering comes from the build number, not the version string.** `CFBundleVersion` is the commit count, and
-Sparkle offers whatever has the higher one, so build order must match version order or an install is offered an
-older version or never offered a newer one. Two guards hold it: `release.sh` refuses a new tag on a commit that
-already carries a version tag (the two would share a build number), and the appcast write refuses an item whose
-build order disagrees with any item already in the feed. A user who turns betas off keeps the beta until a
-release outranks it, because Sparkle never moves an install to an older build.
+**Ordering is by version; upstream's build numbers have to agree with it.** The contract any build relies on (tag
+forms, version order, release-branch traceability, the updater contract) is
+`docs/reference/releases_and_updates.md`. Upstream's own updater is Sparkle, which offers whatever has the higher
+`CFBundleVersion` (the commit count), so two guards keep build order equal to version order: `release.sh` refuses
+a new tag on a commit that already carries a version tag (the two would share a build number), and the appcast
+write refuses an item whose build order disagrees with any item already in the feed.
 
 **Fix a release while a beta is out on a release branch**, never on `main`: branch `release/X.Y` from the
-release tag, cherry-pick the fix from `main`, and `make ship patch` there. Its smaller commit count keeps it
+release tag, `git cherry-pick -x` the fix from `main` (a change with no `main` commit says `No main commit: <why>`
+instead; `release.sh` refuses to tag a release branch otherwise), and `make ship patch` there. Its smaller commit count keeps it
 away from beta users, who already have the fix; a branch that outgrew `main`'s count is refused at the appcast
 write. `scripts/publish.sh` writes the feed on `main`, since installs read it only from there: it refuses first
 if local `main` holds unpushed commits (they would ship with the feed), then switches back, also on failure.

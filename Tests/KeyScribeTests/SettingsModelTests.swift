@@ -59,6 +59,20 @@ struct SettingsModelTests {
         #expect(model.betaUpdates)
     }
 
+    @Test func savingFromSettingsKeepsAFlagANewerVersionTurnedOn() throws {
+        var saved: [Settings] = []
+        let start = try SettingsStore.decode(from: "schema_version = 1\n[features]\nnot_a_real_flag = true")
+        let model = model(start) { saved.append($0) }
+
+        model.binding(for: .consumptionDrivenRestore).wrappedValue = true
+        model.hudAppearance = .dark
+
+        let last = try #require(saved.last)
+        let toml = try SettingsStore.encode(last)
+        #expect(toml.contains("not_a_real_flag = true"))
+        #expect(toml.contains("consumption_driven_restore = true"))
+    }
+
     @Test func loadingSettingsIntoTheModelDoesNotWriteBack() {
         var writes = 0
         let model = model { _ in writes += 1 }

@@ -68,7 +68,10 @@ if [ -n "$BUMP" ]; then
     exit 1
   fi
   LATEST="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null | sed 's/^v//' || true)"
-  NEW_TAG="$(python3 scripts/release_tools.py next "$BUMP")" || exit 1
+  case "$(git symbolic-ref --short -q HEAD || true)" in
+    release/*) git fetch -q origin main && python3 -B scripts/release_tools.py trace || exit 1 ;;
+  esac
+  NEW_TAG="$(python3 -B scripts/release_tools.py next "$BUMP")" || exit 1
   if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
     echo "error: tag $NEW_TAG already exists." >&2; exit 1
   fi

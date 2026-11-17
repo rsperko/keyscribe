@@ -5,8 +5,9 @@ import Foundation
 //
 // Add:      a `static let` with a unique snake_case id, listed in `allCases`; gate on isEnabled. The toggle
 //           renders automatically.
-// Roll out: delete the `static let` + its `allCases` entry and make the gate unconditional. A stale id in a
-//           user's settings.toml is ignored and dropped on next write.
+// Roll out: delete the `static let` + its `allCases` entry, add its id to `retiredIds`, and make the gate
+//           unconditional. A retired id in a user's settings.toml is dropped on next write; any other id this
+//           build does not know is kept, since a newer version may own it.
 //
 // Strictly opt-in (unset = off, no per-flag default-on), so a half-built feature can never silently ship
 // enabled. A struct with an empty catalog rather than an empty enum, so empty state doesn't read as
@@ -68,6 +69,8 @@ public struct Feature: CaseIterable, Hashable, Sendable {
         title: "Ask about selected text",
         summary: "Adds an Ask About Selection mode template: select text, use its shortcut, and ask a question. The selected text and your question go to the mode\u{2019}s AI service, and the answer is shown and read aloud. Your text is not changed."
     )
+
+    public static let retiredIds: Set<String> = ["streaming_transcription", "coding_agents"]
 
     public static let allCases: [Feature] = [consumptionDrivenRestore, voiceCommands, findInApps, agents, askAboutSelection]
 }
