@@ -111,14 +111,15 @@ struct ScriptLauncherTests {
     }
 
     @Test func aLongRunningScriptReportsItsResultWhenItFinishes() async throws {
-        let (dir, file) = try script("sleep 1\necho 'gave up' >&2\nexit 5")
+        let (dir, file) = try script("i=0\nwhile [ ! -f \"$(dirname \"$0\")/go\" ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done\necho 'gave up' >&2\nexit 5")
         defer { try? FileManager.default.removeItem(at: dir) }
         let late = AsyncStream<ScriptRun>.makeStream()
         let run = await ScriptLauncher.run(program: file.path, arguments: [], reportWithin: 0.2) { result in
             late.continuation.yield(result)
             late.continuation.finish()
         }
-        #expect(run == .stillRunning)
+        try #require(run == .stillRunning)
+        try Data().write(to: dir.appendingPathComponent("go"))
         var results: [ScriptRun] = []
         for await result in late.stream { results.append(result) }
         #expect(results == [.finished(status: 5, lastError: "gave up")])
@@ -199,7 +200,7 @@ struct ScriptLauncherTests {
     }
 
     @Test func aScriptStillRunningAtTheReportKeepsFillingItsCapture() async throws {
-        let (dir, file) = try script("sleep 1\necho 'later'\nexit 2")
+        let (dir, file) = try script("i=0\nwhile [ ! -f \"$(dirname \"$0\")/go\" ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done\necho 'later'\nexit 2")
         defer { try? FileManager.default.removeItem(at: dir) }
         let capture = ScriptOutputCapture()
         let late = AsyncStream<ScriptRun>.makeStream()
@@ -207,8 +208,9 @@ struct ScriptLauncherTests {
             late.continuation.yield(result)
             late.continuation.finish()
         }
-        #expect(run == .stillRunning)
+        try #require(run == .stillRunning)
         #expect(capture.snapshot.status == nil)
+        try Data().write(to: dir.appendingPathComponent("go"))
         for await _ in late.stream {}
         #expect(capture.snapshot.output.text == "later\n")
         #expect(capture.snapshot.status == 2)
