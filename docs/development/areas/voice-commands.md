@@ -673,10 +673,15 @@ every rule above applies to it, with these sharpenings:
   the folder is the server its runtime record names (`serverUrl`), as `BB_SERVER_URL`, only when that server is on this
   Mac (http or https) and only while the process that wrote the record is alive (`BBBuilds.environment`): bb's command
   otherwise goes to the default port, which for a copy started on another port is a different copy's server. A record
-  left behind by a crash names a port another copy may now hold, so it is ignored and bb's command finds its server as
-  bb's own `bin/bb` would. A failed match for an app that names a folder is never cached, so a folder set up while
+  left behind by a crash names a port another copy may now hold, so it is ignored while its process is gone, and bb's
+  command finds its server as bb's own `bin/bb` would; a reused process id defeats that check until bb rewrites the
+  record. A failed match for an app that names a folder is never cached, so a folder set up while
   that app is in front is found on the next take. When an app that is one of bb's copies launches or quits, the host
-  says its list changed (`AgentHost.watch`), and the hub scans it again at once instead of at its next interval. A build that is closed or
+  says its list changed (`AgentHost.watch`), and the hub scans it again at once instead of at its next interval. A
+  copy that just launched may not be serving yet, so until its folder lists the host asks again a bounded number of
+  times a few seconds apart; the other copies' listings never hold it back. The hub stops watching when it stops. Each
+  app path's resolved form is kept for the life of the app, so a symlink retargeted while it runs keeps its old
+  answer until relaunch. A build that is closed or
   could not be read keeps the threads it last listed, as Last seen, while the others are listed fresh
   (`AgentHostScan.found`'s `carried`); only when no build could be read is the list unreadable. Delivery uses `--mode auto`, which steers a
   running turn and starts one when the thread is idle, as typing in bb does. The hub holds nothing back for an open

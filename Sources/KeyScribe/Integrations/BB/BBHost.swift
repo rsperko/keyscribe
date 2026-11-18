@@ -30,8 +30,13 @@ final class BBHost: AgentHost {
     private let frontmost: @MainActor (Set<String>) -> AgentHostApp?
     private let dataFolder: @Sendable (String) -> String?
     private let frontApp: @MainActor () -> AgentHostApp?
-    private let appsChanging: @MainActor (@escaping @MainActor (String) -> Void) -> [NSObjectProtocol]
-    private var watching: [NSObjectProtocol] = []
+    typealias StopWatching = @Sendable () -> Void
+    private let appsChanging: @MainActor (@escaping @MainActor (_ app: String, _ launched: Bool) -> Void) -> StopWatching
+    nonisolated(unsafe) private var stopWatching: StopWatching?
+    private var listChanged: (@MainActor () -> Void)?
+    private let launchRetries: Int
+    private let launchRetryDelay: Duration
+    private var launching: [String: Int] = [:]
     private var known: [String: BBBuild] = [:]
     private var copies: [String: BBBuild?] = [:]
     private var listed: [String: [BBThreads.Thread]] = [:]
@@ -47,9 +52,13 @@ final class BBHost: AgentHost {
         frontmost: @escaping @MainActor (Set<String>) -> AgentHostApp? = BBBuildFinder.frontmost(among:),
         frontApp: @escaping @MainActor () -> AgentHostApp? = BBBuildFinder.frontApp,
         dataFolder: (@Sendable (String) -> String?)? = nil,
-        appsChanging: @escaping @MainActor (@escaping @MainActor (String) -> Void) -> [NSObjectProtocol] = BBBuildFinder.watchLaunches
+        appsChanging: @escaping @MainActor (@escaping @MainActor (_ app: String, _ launched: Bool) -> Void) -> StopWatching
+            = BBBuildFinder.watchLaunches,
+        launchRetries: Int = 8, launchRetryDelay: Duration = .seconds(2)
     ) {
         self.appsChanging = appsChanging
+        self.launchRetries = launchRetries
+        self.launchRetryDelay = launchRetryDelay
         self.home = home
         let usual = (home as NSString).appendingPathComponent(BBBuilds.usualFolder)
         self.enrolled = enrolled ?? { [usual] }
@@ -84,16 +93,50 @@ final class BBHost: AgentHost {
         BBBuildFinder.environment(folder: build.folder, home: home)
     }
 
-    func watch(_ changed: @escaping @MainActor (AgentHostChange) -> Void) {
-        watching = appsChanging { [weak self] app in
-            guard let self, self.isCopy(app) else { return }
-            changed(.listing)
+    deinit { stopWatching?() }
+
+    func watch(_ listChanged: @escaping @MainActor () -> Void) {
+        unwatch()
+        self.listChanged = listChanged
+        stopWatching = appsChanging { [weak self] app, launched in
+            guard let self else { return }
+            let copies = self.folders(of: app)
+            guard !copies.isEmpty else { return }
+            if launched { for folder in copies { self.launching[folder] = self.launchRetries } }
+            self.listChanged?()
         }
     }
 
-    private func isCopy(_ app: String) -> Bool {
-        if builds.contains(where: { $0.app == app }) { return true }
-        return dataFolder(app).map(folders.contains) ?? false
+    func unwatch() {
+        stopWatching?()
+        stopWatching = nil
+        listChanged = nil
+        launching = [:]
+    }
+
+    private func folders(of app: String) -> [String] {
+        let running = describedBuilds.filter { $0.app == app }.map(\.folder)
+        let declared = dataFolder(app).flatMap { folders.contains($0) ? [$0] : nil } ?? []
+        return Array(Set(running + declared))
+    }
+
+    private func retryLaunched(_ results: [String: Bool]) {
+        var again = false
+        for (folder, listedNow) in results {
+            guard let left = launching[folder] else { continue }
+            if listedNow || left <= 1 {
+                launching[folder] = nil
+            } else {
+                launching[folder] = left - 1
+                again = true
+            }
+        }
+        guard again else { return }
+        let delay = launchRetryDelay
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: delay)
+            self?.listChanged?()
+        }
     }
 
     var isEnabled: Bool { folders.contains { installed((($0 as NSString).appendingPathComponent(BBBuilds.launcherPath))) } }
@@ -118,13 +161,17 @@ final class BBHost: AgentHost {
         var shownInstead: [String: String] = [:]
         var carried: Set<AgentHostLocation> = []
         var problems: [String] = []
+        var listedNow: [String: Bool] = [:]
+        defer { retryLaunched(listedNow) }
         for build in builds {
             let threads: [BBThreads.Thread]
             switch await list(build) {
             case .threads(let found):
                 threads = found
                 listed[build.folder] = found
+                listedNow[build.folder] = true
             case .problem(let problem):
+                listedNow[build.folder] = false
                 problems.append(problem)
                 guard let kept = listed[build.folder] else { continue }
                 threads = kept

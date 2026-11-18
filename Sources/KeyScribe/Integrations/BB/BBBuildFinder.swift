@@ -17,15 +17,17 @@ enum BBBuildFinder {
         guard files.isExecutableFile(atPath: launcher) else { return nil }
         let target = canonical(folder)
         let running = apps.map { canonical($0.path) }
-        let recorded = {
+        let recordedApp = {
             let runtime = files.contents(atPath: (folder as NSString).appendingPathComponent(BBBuilds.runtimeFile))
             let script = files.contents(atPath: launcher).map { String(decoding: $0.prefix(16_384), as: UTF8.self) }
             return BBBuilds.app(runtime: runtime, launcher: script).map(canonical)
+        }
+        let app = declarer(of: target, among: running.sorted(), home: home) ?? {
+            let recorded = recordedApp()
+            return recorded.flatMap { running.contains($0) ? $0 : nil }
+                ?? declarer(of: target, among: remembered(declaring: target).subtracting(running).sorted(), home: home)
+                ?? recorded
         }()
-        let app = declarer(of: target, among: running.sorted(), home: home)
-            ?? recorded.flatMap { running.contains($0) ? $0 : nil }
-            ?? declarer(of: target, among: remembered(declaring: target).subtracting(running).sorted(), home: home)
-            ?? recorded
         let info = app.flatMap { NSDictionary(contentsOfFile: ($0 as NSString).appendingPathComponent("Contents/Info.plist")) as? [String: Any] }
         return BBBuild(folder: folder, app: app, bundle: info?["CFBundleIdentifier"] as? String, name: BBBuilds.name(info: info, app: app))
     }
@@ -119,20 +121,24 @@ enum BBBuildFinder {
         if let exact = paths.first(where: { $0.1 == app }) { return exact.0 }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let usual = ConnectorFolders.canonical(URL(fileURLWithPath: (home as NSString).appendingPathComponent(BBBuilds.usualFolder))).path
-        return paths.first { _, path in path.map { (declaredFolder(app: $0, home: home) ?? usual) == build.folder } ?? false }?.0
+        let target = canonical(build.folder)
+        return paths.first { _, path in path.map { (declaredFolder(app: $0, home: home) ?? usual) == target } ?? false }?.0
     }
 
     @MainActor static func isOpen(_ build: BBBuild) -> Bool { runningApp(build) != nil }
 
-    @MainActor static func watchLaunches(_ changed: @escaping @MainActor (String) -> Void) -> [NSObjectProtocol] {
+    @MainActor static func watchLaunches(_ changed: @escaping @MainActor (_ app: String, _ launched: Bool) -> Void) -> BBHost.StopWatching {
         let center = NSWorkspace.shared.notificationCenter
-        return [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification].map { name in
+        let observers = [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification].map { name in
             center.addObserver(forName: name, object: nil, queue: .main) { note in
                 guard let url = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleURL else { return }
                 let path = canonical(url.path)
-                MainActor.assumeIsolated { changed(path) }
+                let launched = name == NSWorkspace.didLaunchApplicationNotification
+                MainActor.assumeIsolated { changed(path, launched) }
             }
         }
+        nonisolated(unsafe) let tokens = observers
+        return { tokens.forEach(center.removeObserver) }
     }
 
     @MainActor static func bringForward(_ build: BBBuild) {

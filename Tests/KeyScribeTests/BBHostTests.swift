@@ -424,26 +424,103 @@ struct BBHostTests {
         #expect(bb.focusedWindow()?.instance == work.folder)
     }
 
-    @Test func aCopyOfBbLaunchingOrQuittingTellsTheHubItsListChanged() async {
-        final class Apps: @unchecked Sendable { var changed: (@MainActor (String) -> Void)? }
-        let apps = Apps()
-        let work = Self.work
-        let lab = "/Applications/bb Lab.app"
-        let bb = BBHost(
-            home: Self.home, enrolled: { [work.folder, "/Users/a/.bb-lab"] }, describe: { $0 == work.folder ? work : nil }, installed: { _ in true },
-            isOpen: { _ in true }, run: { _, _, _, _ in throw HostCLI.Failure.couldNotStart("") }, activate: { _ in },
-            frontmost: { _ in nil }, frontApp: { nil }, dataFolder: { $0 == lab ? "/Users/a/.bb-lab" : nil },
+    final class Apps: @unchecked Sendable {
+        var changed: (@MainActor (String, Bool) -> Void)?
+        var watches = 0
+        var cancelled = 0
+    }
+
+    @MainActor final class Changes {
+        var count = 0
+    }
+
+    static func within(_ limit: Duration = .seconds(5), _ condition: @MainActor () -> Bool) async -> Bool {
+        let end = ContinuousClock.now + limit
+        while !condition() {
+            guard ContinuousClock.now < end else { return false }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        return true
+    }
+
+    private func watched(
+        _ apps: Apps, builds: [BBBuild], run: @escaping BBHost.Run = { _, _, _, _ in throw HostCLI.Failure.couldNotStart("") },
+        dataFolders: [String: String] = [:], retries: Int = 8
+    ) -> BBHost {
+        BBHost(
+            home: Self.home, enrolled: { builds.map(\.folder) + dataFolders.values }, describe: { folder in builds.first { $0.folder == folder } },
+            installed: { _ in true }, isOpen: { _ in true }, run: run, activate: { _ in },
+            frontmost: { _ in nil }, frontApp: { nil }, dataFolder: { dataFolders[$0] },
             appsChanging: {
                 apps.changed = $0
-                return []
-            })
-        var changes: [AgentHostChange] = []
-        bb.watch { changes.append($0) }
+                apps.watches += 1
+                return { apps.cancelled += 1 }
+            },
+            launchRetries: retries, launchRetryDelay: .milliseconds(1))
+    }
+
+    @Test func aCopyOfBbLaunchingOrQuittingTellsTheHubItsListChanged() async {
+        let apps = Apps()
+        let lab = "/Applications/bb Lab.app"
+        let bb = watched(apps, builds: [Self.work], dataFolders: [lab: "/Users/a/.bb-lab"])
+        let changes = Changes()
+        bb.watch { changes.count += 1 }
+        apps.changed?(Self.work.app!, false)
+        apps.changed?(lab, false)
+        apps.changed?("/Applications/Safari.app", true)
+        #expect(changes.count == 2)
+    }
+
+    @Test func aCopyThatLaunchedIsScannedAgainUntilItListsWhileTheOtherCopiesListFine() async {
+        final class Lists: @unchecked Sendable { var failing = 1 }
+        let lists = Lists()
+        let apps = Apps()
+        let work = Self.work
+        let bb = watched(apps, builds: [Self.usual, work], run: { _, _, _, environment in
+            if environment["BB_DATA_DIR"] == work.folder, lists.failing > 0 {
+                lists.failing -= 1
+                throw HostCLI.Failure.couldNotStart("")
+            }
+            return HostCLI.Output(status: 0, stdout: Data("[]".utf8), stderr: "", truncated: false)
+        })
+        let changes = Changes()
+        bb.watch { changes.count += 1 }
+        apps.changed?(work.app!, true)
+        #expect(changes.count == 1)
+        guard case .found(_, _, _, _, let problem) = await bb.scan() else { Issue.record("expected a listing"); return }
+        #expect(problem == "bb Work could not list its threads. Try again in a moment.")
+        #expect(await Self.within { changes.count == 2 })
+        guard case .found(_, _, _, _, nil) = await bb.scan() else { Issue.record("expected every copy listed"); return }
+        lists.failing = 1
         _ = await bb.scan()
-        apps.changed?(work.app!)
-        apps.changed?(lab)
-        apps.changed?("/Applications/Safari.app")
-        #expect(changes == [.listing, .listing])
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(changes.count == 2)
+    }
+
+    @Test func aCopyThatNeverListsAfterLaunchingIsRetriedOnlyABoundedNumberOfTimes() async {
+        let apps = Apps()
+        let bb = watched(apps, builds: [Self.usual, Self.work], retries: 2)
+        let changes = Changes()
+        bb.watch { changes.count += 1 }
+        apps.changed?(Self.work.app!, true)
+        _ = await bb.scan()
+        #expect(await Self.within { changes.count == 2 })
+        _ = await bb.scan()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(changes.count == 2)
+    }
+
+    @Test func watchingAgainOrStoppingRemovesTheEarlierObservers() {
+        let apps = Apps()
+        let bb = watched(apps, builds: [Self.work])
+        bb.watch {}
+        bb.watch {}
+        #expect(apps.watches == 2)
+        #expect(apps.cancelled == 1)
+        bb.unwatch()
+        #expect(apps.cancelled == 2)
+        bb.unwatch()
+        #expect(apps.cancelled == 2)
     }
 
     @Test func aFolderNoAppIsKnownToUseSaysSoRatherThanThatBbIsNotOpen() async {

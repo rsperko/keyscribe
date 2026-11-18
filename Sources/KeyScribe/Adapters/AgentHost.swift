@@ -47,10 +47,6 @@ public struct AgentHostCopy: Equatable, Sendable {
     }
 }
 
-public enum AgentHostChange: Equatable, Sendable {
-    case listing
-}
-
 public enum AgentHostFront: Equatable, Sendable {
     case shown(AgentHostLocation, in: AgentHostApp)
     case unknown
@@ -78,7 +74,8 @@ public protocol AgentHost: AnyObject {
     func copyInFront() -> AgentHostCopy?
     func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery
     func rename(_ location: AgentHostLocation, to name: String) async -> Bool
-    func watch(_ changed: @escaping @MainActor (AgentHostChange) -> Void)
+    func watch(_ listChanged: @escaping @MainActor () -> Void)
+    func unwatch()
 }
 
 extension AgentHost {
@@ -95,7 +92,8 @@ extension AgentHost {
         .unsupported
     }
     public func rename(_ location: AgentHostLocation, to name: String) async -> Bool { false }
-    public func watch(_ changed: @escaping @MainActor (AgentHostChange) -> Void) {}
+    public func watch(_ listChanged: @escaping @MainActor () -> Void) {}
+    public func unwatch() {}
 }
 
 public struct AgentHostIntegration: Sendable {

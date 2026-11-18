@@ -233,13 +233,10 @@ final class AgentHub {
     }
 
     private func watch(_ source: HostDiscovery) {
-        source.host.watch { [weak self, weak source] change in
+        source.host.watch { [weak self, weak source] in
             guard let self, let source, !self.stopped else { return }
-            switch change {
-            case .listing:
-                source.expect()
-                Task { [weak self] in await self?.rescan(rereadingTitles: false) }
-            }
+            source.expect()
+            Task { [weak self] in await self?.rescan(rereadingTitles: false) }
         }
     }
 
@@ -843,6 +840,7 @@ final class AgentHub {
 
     func stop() {
         stopped = true
+        for source in hosts { source.host.unwatch() }
         scanTask?.cancel()
         scanTask = nil
         placeTracker?.stop()
