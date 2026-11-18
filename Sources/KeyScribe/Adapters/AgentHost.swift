@@ -151,7 +151,7 @@ final class HostDiscovery: AgentDiscovery {
             }
         case .waiting(let session, let prompt): self.prompt(session, open: prompt != nil)
         case .turnStarted(let session, _, _): if reportsTurns.contains(session) { turning[session] = (true, now()) }
-        case .turnComplete(let session, _, _):
+        case .turnComplete(let session, _, _, _):
             prompt(session, open: false)
             if reportsTurns.contains(session) { turning[session] = (false, now()) }
         default: break

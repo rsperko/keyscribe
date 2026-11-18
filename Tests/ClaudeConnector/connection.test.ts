@@ -34,8 +34,11 @@ test('events keep their order and a completion carries the final answer', async 
 
   expect(h.ops()).toEqual(['hello', 'typed', 'turnStarted', 'turnComplete'])
   expect(h.events()[1]).toMatchObject({ op: 'typed', session: 's1', prompts: 1 })
-  expect(h.events()[3]).toMatchObject({ op: 'turnComplete', session: 's1', reason: 'answer', answer: 'secret answer' })
-  expect(Object.keys(h.events()[3]).sort()).toEqual(['answer', 'connection', 'instance', 'op', 'reason', 'session'])
+  expect(h.events()[3]).toMatchObject({
+    op: 'turnComplete', session: 's1', reason: 'answer', answer: 'secret answer', prompt: digest('typed by me'),
+  })
+  expect(Object.keys(h.events()[3]).sort()).toEqual(['answer', 'connection', 'instance', 'op', 'prompt', 'reason', 'session'])
+  expect(JSON.stringify(h.events()[3])).not.toContain('typed by me')
 })
 
 test('a turn start names its prompt only by the digest the app matches a sent message against', async ($, on) => {

@@ -515,6 +515,12 @@ a hello on any other protocol is refused with `426` and is never registered or s
   thinking or tool calls, bounded by each connector to its opening and its ending. KeyScribe keeps it in
   memory only, for the spoken result of a turn its own dictation started or that the user asked to hear, and never
   writes it to History or logs. A turn that was stopped or failed carries no answer.
+- **A completed turn says what its reply came after**, the last message the turn took in, whether it started the
+  turn or arrived while it ran: `prompt`, that message's digest, and `from`, who sent it when that was someone
+  other than the user (`AgentTurnInput.Sender`). `from` is left out for the user's own messages and for any the connector
+  cannot place, and a connector that saw a message it cannot identify leaves both out; it never guesses. KeyScribe opens the spoken result with
+  the user's own dictation only when `prompt` is that dictation's digest, and names the sender only when `from` says
+  who (`SpokenResult.cause`), so a reply is never tied to the wrong request.
 - **A connector can ask for a turn's reply to be read aloud** with `notify` (`session`, `turn`, `on`): `turn` names
   the running turn, or is empty for the next one, and `on: false` cancels. The bridge answers `spoken`, whether spoken
   replies are on, or `quiet` for a disconnected conversation. A connector that sends it says so with the `notify`
@@ -1712,7 +1718,11 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
 > without any service call; a
 > `connection` that names no saved service speaks it as unavailable. A redacted span is never
 > restored into speech: the summary says "a hidden value" in its place. Every result starts with the name of
-> the conversation that produced it, and a summary that fails, times out or comes back empty is spoken as that
+> the conversation that produced it, joined by who the reply answered when the turn says it came after a message
+> someone other than the user sent ("{name}, answering another agent:"); a reply that came right after the user's
+> own dictation is summarized with that dictation, bounded to `SpokenResult.askedCharacterLimit` characters and
+> redacted with the reply, so the summary can open by naming it; a changed `prompt` is then also told which part is
+> the request and which the reply, since only the default instruction says so itself. A summary that fails, times out or comes back empty is spoken as that
 > name followed by "No summary of the long reply. Open the conversation for the result." Unavailable summaries waiting
 > together are spoken as one notice naming each conversation, followed by "No summaries of the long replies. Open the
 > conversations for the results." The `prompt` alone sets a summary's length: it is requested once and read as returned,

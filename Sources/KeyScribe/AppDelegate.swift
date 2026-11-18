@@ -889,7 +889,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
                         guard let self, self.answerOnPanel else { return true }
                         return self.answers?.isActive != true && self.answers?.showsText != true
                     })
-                runtime.hub.onResult = { [weak spoken] in spoken?.finished(conversation: $0, handle: $1, answer: $2, requested: $3, origin: $4) }
+                runtime.hub.onResult = { [weak spoken] in
+                    spoken?.finished(conversation: $0, handle: $1, answer: $2, requested: $3, origin: $4, cause: $5)
+                }
                 runtime.hub.onEnded = { [weak spoken] in spoken?.ended(conversation: $0, handle: $1, body: $2, requested: $3, origin: $4) }
                 runtime.hub.onAttention = { [weak spoken] in spoken?.attention(conversation: $0, handle: $1, $2, requested: $3) }
                 runtime.hub.onWithdraw = { [weak spoken] in spoken?.withdraw(conversation: $0) }

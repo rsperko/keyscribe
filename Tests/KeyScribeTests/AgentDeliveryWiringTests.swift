@@ -655,7 +655,7 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
         var origins: [String?] = []
-        rig.hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        rig.hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         await take(rig)
         rig.hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("Use the other file.")))
         rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Used the other file."))
@@ -667,7 +667,7 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
         var heard: [(String, String?)] = []
-        rig.hub.onResult = { _, _, answer, _, origin in heard.append((answer, origin)) }
+        rig.hub.onResult = { _, _, answer, _, origin, _ in heard.append((answer, origin)) }
         await take(rig)
         rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Finished the earlier work."))
         rig.hub.handle(.turnStarted(session: "claude:s1", turn: "t2", prompt: AgentPromptDigest.of("Use the other file.")))
@@ -680,7 +680,7 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
         var origins: [String?] = []
-        rig.hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        rig.hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         await take(rig)
         rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Finished the earlier work."))
         rig.hub.handle(.typed(session: "claude:s1"))
@@ -882,7 +882,7 @@ struct AgentDeliveryWiringTests {
         let rig = await stoppedRig("claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         var origins: [String?] = []
-        rig.hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        rig.hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         await take(rig)
         rig.hub.handle(.turnStarted(session: "claude:s1", turn: "t9"))
         rig.hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Renamed."))
@@ -893,7 +893,7 @@ struct AgentDeliveryWiringTests {
         let rig = await stoppedRig("claude:s1", typed: false)
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         var origins: [String?] = []
-        rig.hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        rig.hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         await take(rig)
         rig.hub.handle(.typed(session: "claude:s1"))
         rig.hub.handle(.turnStarted(session: "claude:s1", turn: "t9"))
@@ -905,7 +905,7 @@ struct AgentDeliveryWiringTests {
         let rig = await stoppedRig("claude:s1")
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         var origins: [String?] = []
-        rig.hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        rig.hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         await take(rig)
         #expect(rig.returns.pressed == [.return])
         rig.hub.handle(.typed(session: "claude:s1"))
@@ -919,7 +919,7 @@ struct AgentDeliveryWiringTests {
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
         rig.hub.typedTurnWindow = 0.05
         var origins: [String?] = []
-        rig.hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        rig.hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         await take(rig)
         try? await Task.sleep(for: .milliseconds(100))
         rig.hub.handle(.turnStarted(session: "claude:s1", turn: "t9"))

@@ -70,13 +70,15 @@ final class AgentHub {
     var onLeftInPromptBox: ((_ request: String, _ conversation: String, _ handle: String) -> Void)?
     var onChange: (() -> Void)?
     var onFirstConnection: (() -> Void)?
-    var onResult: ((_ conversation: String, _ handle: String, _ answer: String, _ requested: Bool, _ origin: String?) -> Void)?
+    var onResult: ((_ conversation: String, _ handle: String, _ answer: String, _ requested: Bool, _ origin: String?, _ cause: SpokenResult.Cause?) -> Void)?
     var onEnded: ((_ conversation: String, _ handle: String, _ body: String, _ requested: Bool, _ origin: String?) -> Void)?
     var onAttention: ((_ conversation: String, _ handle: String, _ attention: AgentAttention?, _ requested: Bool) -> Void)?
     var onWithdraw: ((_ conversation: String) -> Void)?
     var onDelivery: ((_ request: String, _ fact: HistoryEntry.Fact) -> Void)?
     private var traced: [String: Traced] = [:]
     private var tracedOrder: [String] = []
+    private var asked: [String: String] = [:]
+    private var askedOrder: [String] = []
     private var attempts = 0
     private var retries: [String: Int] = [:]
     var speaks: () -> Bool = { false }
@@ -474,6 +476,7 @@ final class AgentHub {
 
     private func start(_ text: String, through source: HostDiscovery, request: String, inFront: Bool) async -> AgentReceipt {
         let host = source.kind.id
+        remember(asked: text, for: request)
         let name = Self.newConversationName(of: source.kind)
         let notInFront = AgentReceipt.notSent(nil, reason: .newConversationNotInFront(source.kind.displayName))
         guard inFront, let carrier = startCarrier(source, instance: source.host.focusedWindow()?.instance) else { return notInFront }
@@ -1092,6 +1095,7 @@ final class AgentHub {
         let handle = conversation.handle
         if let (source, location) = host(of: conversation) {
             let request = request ?? makeId()
+            remember(asked: text, for: request)
             let follows = conversation.connectorLive && features[id]?.contains("promptDigest") == true
             if follows {
                 delivering[request] = id
@@ -1352,7 +1356,7 @@ final class AgentHub {
             running[session] = now()
             turns[session] = turn
             if hostOwned.contains(session) { Task { [weak self] in await self?.rescan(rereadingTitles: false) } }
-        case .turnComplete(let session, let reason, let answer):
+        case .turnComplete(let session, let reason, let answer, let after):
             absorbed[session] = nil
             handingOff[session] = nil
             for (id, entry) in requests where entry.message.conversation == session && entry.turnDuringHandOff != nil {
@@ -1365,8 +1369,10 @@ final class AgentHub {
                 let origin = awaitedRequests[session]
                 stopAwaiting(session)
                 let handle = handle(of: session) ?? ""
+                let dictated = origin.flatMap(forgetAsked)
                 if reason == "answer" || reason == "complete" {
-                    announce(result: origin) { [weak self] in self?.onResult?(session, handle, answer, wasRequested, origin) }
+                    let cause = SpokenResult.cause(after: after, asked: dictated)
+                    announce(result: origin) { [weak self] in self?.onResult?(session, handle, answer, wasRequested, origin, cause) }
                 } else if let body = SpokenResult.ending(reason) {
                     announce(result: origin) { [weak self] in self?.onEnded?(session, handle, body, wasRequested, origin) }
                 }
@@ -1709,6 +1715,17 @@ final class AgentHub {
         onDelivery?(request, fact)
     }
 
+    private func remember(asked text: String, for request: String) {
+        guard asked.updateValue(text, forKey: request) == nil else { return }
+        askedOrder.append(request)
+        if askedOrder.count > Self.keptDeliveries { asked[askedOrder.removeFirst()] = nil }
+    }
+
+    private func forgetAsked(_ request: String) -> String? {
+        askedOrder.removeAll { $0 == request }
+        return asked.removeValue(forKey: request)
+    }
+
     private func startTrace(_ request: String, in conversation: String) {
         if traced[request] == nil {
             tracedOrder.append(request)
@@ -1924,6 +1941,7 @@ final class AgentHub {
         let attempt = attempts
         let entry = Request(message: message, handle: handle, attempt: attempt, retry: retries.removeValue(forKey: message.id) ?? 0, box: box)
         requests[message.id] = entry
+        remember(asked: message.text, for: message.id)
         startTrace(message.id, in: message.conversation)
         handingOff[message.conversation] = message.id
         transport.enqueue(

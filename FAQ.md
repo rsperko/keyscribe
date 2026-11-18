@@ -790,7 +790,11 @@ after best-effort redaction, to say what it asks: the prompt's kind and title, t
 about (such as the command to approve, or a question and its options), and for Pi the agent's last words before it
 asked. For Pi, which tool call a prompt is about is a best guess; bb names it exactly. Without a service you hear "Waiting for approval." or "Waiting for an answer." when the prompt's kind says which, and "Waiting for you." otherwise. For summaries, also choose one of your saved AI services. When a conversation you spoke to finishes, KeyScribe says the conversation's
 name and a short summary of the agent's final reply: a longer reply goes to that service, after its
-best-effort redaction, to be summarized; a reply of a few words is read as it is without any service. With
+best-effort redaction, to be summarized; a reply of a few words is read as it is without any service. When the reply
+came right after what you dictated, your words go with it, so the summary opens with a few words naming what you asked.
+When it came after a message someone else sent the agent, the name is followed by who, such as "api, answering
+another agent:" or "api, after a background task:", so a reply you never asked for is never mistaken for an answer to
+you. When KeyScribe can't tell which message the reply answers, it names neither. With
 **AI service** set to **None**, a longer reply is announced as "Replied. Open the conversation for the result." and
 nothing is sent. A reply you asked to hear that has no written text is announced as "Finished without a
 written reply. Open the conversation for the result." A turn that ends with an error is announced as "Ended with an error."; one you interrupt

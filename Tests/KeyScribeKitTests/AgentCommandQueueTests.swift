@@ -660,6 +660,12 @@ struct AgentBridgeCodecTests {
         (#"{"op":"typed","session":"s1"}"#, .typed(session: "s1")),
         (#"{"op":"turnStarted","session":"s1","turn":"t7"}"#, .turnStarted(session: "s1", turn: "t7")),
         (#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done"}"#, .turnComplete(session: "s1", reason: "answer", answer: "done")),
+        (#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done","from":"agent","prompt":"0123456789abcdef"}"#,
+         .turnComplete(session: "s1", reason: "answer", answer: "done", after: AgentTurnInput(from: .agent, prompt: "0123456789abcdef"))),
+        (#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done","from":"user"}"#,
+         .turnComplete(session: "s1", reason: "answer", answer: "done")),
+        (#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done","from":"martian","prompt":"0123456789abcdef"}"#,
+         .turnComplete(session: "s1", reason: "answer", answer: "done", after: AgentTurnInput(from: nil, prompt: "0123456789abcdef"))),
     ])
     func eachEventShapeDecodes(json: String, expected: AgentEvent) throws {
         #expect(try AgentBridgeCodec.decodeEvent(Data(json.utf8)) == expected)

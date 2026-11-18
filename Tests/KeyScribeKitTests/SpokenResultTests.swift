@@ -114,6 +114,63 @@ struct SpokenResultTests {
         #expect(SpokenResult.waitingPrompt.contains("unrelated"))
     }
 
+    @Test func theCueNamesTheRequestOnlyWhenTheReplyCameRightAfterIt() {
+        let asked = "Yes to all four."
+        let mine = AgentPromptDigest.of(asked)
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: nil, prompt: mine), asked: asked) == .request(asked))
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: .other, prompt: mine), asked: asked) == .request(asked))
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: .agent, prompt: AgentPromptDigest.of("Found it.")), asked: asked)
+            == .sender(.agent))
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: nil, prompt: AgentPromptDigest.of("typed later")), asked: asked) == nil)
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: nil, prompt: mine), asked: nil) == nil)
+        #expect(SpokenResult.cause(after: nil, asked: asked) == nil)
+        #expect(SpokenResult.cause(after: AgentTurnInput(from: .task, prompt: nil), asked: nil) == .sender(.task))
+    }
+
+    @Test func aSenderCueJoinsTheConversationNameWithoutAddingASentence() {
+        #expect(SpokenResult.prefaced("Done.", name: "auth", cause: .sender(.agent)) == "auth, answering another agent: Done.")
+        #expect(SpokenResult.prefaced("Done.", name: "", cause: .sender(.task)) == "After a background task: Done.")
+        #expect(SpokenResult.prefaced("Done.", name: "auth", cause: .request("Fix it.")) == "auth: Done.")
+        #expect(SpokenResult.prefaced("Done.", name: "auth", cause: nil) == "auth: Done.")
+        for sender in AgentTurnInput.Sender.allCases {
+            let cue = SpokenResult.prefaced("Done.", name: "auth", cause: .sender(sender))
+            #expect(cue.split(separator: " ").count <= 6)
+            #expect(cue.filter { ".!?".contains($0) }.count == 1)
+        }
+    }
+
+    @Test func theSummarizerSeesTheRequestBeforeTheReplyBothRedacted() {
+        let tokenizer = Tokenizer()
+        let request = SpokenResult.request(
+            answer: "Rotated sk-abcdefghijklmnopqrstuvwxyz1234 and the tests pass.", asked: "Rotate the key sk-zyxwvutsrqponmlkjihgfedcba9876 please",
+            prompt: "Summarize.", tokenizer: tokenizer)
+        #expect(request.user.hasPrefix("Request:\n"))
+        #expect(request.user.contains("\n\nReply:\n"))
+        #expect(!request.user.contains("sk-abcdef"))
+        #expect(!request.user.contains("sk-zyxw"))
+        #expect(request.system.contains("⟦SN:"))
+        let long = String(repeating: "word ", count: 2_000)
+        let bounded = SpokenResult.request(answer: "Done.", asked: long, prompt: "p", tokenizer: Tokenizer())
+        #expect(bounded.user.count <= SpokenResult.askedCharacterLimit + 100)
+        #expect(SpokenResult.request(answer: "All green.", asked: nil, prompt: "p", tokenizer: Tokenizer()).user == "All green.")
+    }
+
+    @Test func aChangedInstructionIsToldWhichPartIsTheRequestOnlyWhenOneIsSent() {
+        let custom = SpokenResult.request(answer: "Done.", asked: "Fix it.", prompt: "Be brief.", tokenizer: Tokenizer()).system
+        #expect(custom.hasPrefix("Be brief.\n\n"))
+        #expect(custom.contains("Summarize the reply"))
+        #expect(SpokenResult.request(answer: "Done.", asked: nil, prompt: "Be brief.", tokenizer: Tokenizer()).system == "Be brief.")
+        let standard = SpokenResultSettings.defaultPrompt
+        #expect(SpokenResult.request(answer: "Done.", asked: "Fix it.", prompt: standard, tokenizer: Tokenizer()).system == standard)
+    }
+
+    @Test func theDefaultPromptOpensWithTheRequestAndKeepsTheSameLength() {
+        let prompt = SpokenResultSettings.defaultPrompt
+        #expect(prompt.contains("about 25 words in all"))
+        #expect(prompt.contains("under \"Request:\", open with two to five words naming"))
+        #expect(prompt.contains("comes first"))
+    }
+
     @Test func aPlainReplyNeedsNoTokenNoteAndABoundedRequestNeverExceedsTheInputLimit() {
         let tokenizer = Tokenizer()
         let request = SpokenResult.request(answer: "All green.", prompt: "Summarize.", tokenizer: tokenizer)

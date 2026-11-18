@@ -133,7 +133,7 @@ public enum AgentEvent: Equatable, Sendable {
     case typed(session: String, prompts: Int? = nil)
     case turnStarted(session: String, turn: String, prompt: String? = nil)
     case absorbed(session: String, turn: String, prompt: String)
-    case turnComplete(session: String, reason: String, answer: String)
+    case turnComplete(session: String, reason: String, answer: String, after: AgentTurnInput? = nil)
     case undelivered(request: String, reason: String, handedOff: Bool)
     case focused(request: String)
     case title(session: String, text: String)
@@ -146,7 +146,7 @@ extension AgentEvent {
     public var session: String? {
         switch self {
         case .hello(let hello): hello.session
-        case .typed(let session, _), .turnStarted(let session, _, _), .absorbed(let session, _, _), .turnComplete(let session, _, _),
+        case .typed(let session, _), .turnStarted(let session, _, _), .absorbed(let session, _, _), .turnComplete(let session, _, _, _),
              .title(let session, _), .waiting(let session, _), .notify(let session, _, _), .shown(let session, _, _, _): session
         case .ack, .submitted, .checked, .refused, .undelivered, .focused: nil
         }
@@ -160,7 +160,8 @@ extension AgentEvent {
         case .typed(let session, let prompts): return .typed(session: rename(session), prompts: prompts)
         case .turnStarted(let session, let turn, let prompt): return .turnStarted(session: rename(session), turn: turn, prompt: prompt)
         case .absorbed(let session, let turn, let prompt): return .absorbed(session: rename(session), turn: turn, prompt: prompt)
-        case .turnComplete(let session, let reason, let answer): return .turnComplete(session: rename(session), reason: reason, answer: answer)
+        case .turnComplete(let session, let reason, let answer, let after):
+            return .turnComplete(session: rename(session), reason: reason, answer: answer, after: after)
         case .title(let session, let text): return .title(session: rename(session), text: text)
         case .waiting(let session, let prompt): return .waiting(session: rename(session), prompt: prompt)
         case .notify(let session, let turn, let on): return .notify(session: rename(session), turn: turn, on: on)
@@ -203,6 +204,20 @@ extension AgentEvent.Hello {
     public var knownIdle: Bool { features.contains("readiness") && idle == true }
     public var reportsTurn: Bool { features.contains("notify") }
     public var resumesAfterGap: Bool { !features.contains("readiness") || gap != false }
+}
+
+public struct AgentTurnInput: Equatable, Sendable {
+    public enum Sender: String, CaseIterable, Sendable {
+        case agent, task, schedule, other
+    }
+
+    public var from: Sender?
+    public var prompt: String?
+
+    public init(from: Sender?, prompt: String?) {
+        self.from = from
+        self.prompt = prompt
+    }
 }
 
 public enum AgentPromptDigest {
@@ -278,6 +293,7 @@ public enum AgentBridgeCodec {
         var miss: String?
         var definition: String?
         var prompt: String?
+        var from: String?
     }
 
     public static func encode(_ commands: [AgentCommand]) throws -> Data {
@@ -338,7 +354,9 @@ public enum AgentBridgeCodec {
             guard let on = w.on else { throw CodecError.malformed }
             return .shown(session: try required(w.session), on: on, draft: w.draft ?? false, newConversation: w.newConversation ?? false)
         case "turnComplete":
-            return .turnComplete(session: try required(w.session), reason: w.reason ?? "", answer: w.answer ?? "")
+            let from = w.from.flatMap(AgentTurnInput.Sender.init(rawValue:))
+            let after = from == nil && w.prompt == nil ? nil : AgentTurnInput(from: from, prompt: w.prompt)
+            return .turnComplete(session: try required(w.session), reason: w.reason ?? "", answer: w.answer ?? "", after: after)
         default:
             throw CodecError.unknownOp(w.op)
         }

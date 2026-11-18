@@ -11,7 +11,9 @@ public struct SpokenResultSettings: Codable, Equatable, Sendable {
     The text below is an agent's reply to a developer. Tell the developer what they most need to know in one \
     or two short spoken sentences, about 25 words in all. Anything that failed, is unverified, or waits on their \
     answer or decision comes first; otherwise the main result. Leave out everything else, even if that drops \
-    several points. Speak plainly, as to a colleague, and output only what to say.
+    several points. When the developer's request is given under "Request:", open with two to five words naming \
+    what they asked; the order above still decides what follows. Speak plainly, as to a colleague, and output \
+    only what to say.
     """
 
     enum CodingKeys: String, CodingKey {
@@ -49,6 +51,10 @@ public enum SpokenResult {
     public static let inputCharacterLimit = 12_000
     private static let tokenNote = "Any ⟦SN:…⟧ token stands for text hidden from you: keep it exactly as written, or leave it out."
     private static let hiddenValue = "a hidden value"
+    private static let requestNote = """
+        The developer's request is under "Request:" and the agent's reply under "Reply:". Summarize the reply; \
+        the request only says what it answers.
+        """
 
     public enum Plan: Equatable, Sendable {
         case nothing
@@ -96,8 +102,35 @@ public enum SpokenResult {
         return Held(text: kept.joined(separator: " ") + "…", shortened: true)
     }
 
-    public static func prefaced(_ text: String, name: String) -> String {
-        name.isEmpty ? text : "\(name): \(text)"
+    public static func prefaced(_ text: String, name: String, cause: Cause? = nil) -> String {
+        guard case .sender(let sender) = cause else { return name.isEmpty ? text : "\(name): \(text)" }
+        let cue = cue(for: sender)
+        return name.isEmpty ? "\(cue.alone): \(text)" : "\(name), \(cue.joined): \(text)"
+    }
+
+    public enum Cause: Equatable, Sendable {
+        case request(String)
+        case sender(AgentTurnInput.Sender)
+
+        public var asked: String? {
+            guard case .request(let asked) = self else { return nil }
+            return asked
+        }
+    }
+
+    public static func cause(after input: AgentTurnInput?, asked: String?) -> Cause? {
+        guard let input else { return nil }
+        if let asked, let prompt = input.prompt, prompt == AgentPromptDigest.of(asked) { return .request(asked) }
+        return input.from.map(Cause.sender)
+    }
+
+    private static func cue(for sender: AgentTurnInput.Sender) -> (joined: String, alone: String) {
+        switch sender {
+        case .agent: ("answering another agent", "Answering another agent")
+        case .task: ("after a background task", "After a background task")
+        case .schedule: ("after a scheduled prompt", "After a scheduled prompt")
+        case .other: ("answering someone else", "Answering someone else")
+        }
     }
 
     public static let unavailableBody = "No summary of the long reply. Open the conversation for the result."
@@ -154,9 +187,15 @@ public enum SpokenResult {
         }
     }
 
-    public static func request(answer: String, prompt: String, tokenizer: Tokenizer) -> Request {
-        let user = RedactionTokenizer.apply(bounded(answer), into: tokenizer)
-        let system = tokenizer.issuedTokens.isEmpty ? prompt : prompt + "\n\n" + tokenNote
+    public static let askedCharacterLimit = 1_000
+
+    public static func request(answer: String, asked: String? = nil, prompt: String, tokenizer: Tokenizer) -> Request {
+        let reply = RedactionTokenizer.apply(bounded(answer), into: tokenizer)
+        let user = asked.map {
+            "Request:\n" + RedactionTokenizer.apply(bounded($0, limit: askedCharacterLimit), into: tokenizer) + "\n\nReply:\n" + reply
+        } ?? reply
+        let shaped = asked == nil || prompt == SpokenResultSettings.defaultPrompt ? prompt : prompt + "\n\n" + requestNote
+        let system = tokenizer.issuedTokens.isEmpty ? shaped : shaped + "\n\n" + tokenNote
         return Request(system: system, user: user)
     }
 

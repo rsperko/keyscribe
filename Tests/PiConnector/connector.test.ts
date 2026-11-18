@@ -1833,3 +1833,42 @@ test("a read-aloud request that timed out behind other events is never delivered
   await h.answerEvents()
   assert.ok(!h.ops().includes("notify"))
 })
+
+test("a reply to the dictation that started the run says it came after that dictation, even with context an extension added", async () => {
+  const h = harness()
+  await h.connect()
+  await h.deliver([h.submit("r1", "Yes to all four.", { expectedPrompts: 0 })])
+  await h.accepted()
+  h.emit("message_start", { message: { role: "custom", content: "Project notes for the agent." } })
+  h.emit("message_end", { message: { role: "assistant", content: [{ type: "text", text: "Done." }] } })
+  await h.finished()
+  await h.answerEvents()
+  const [done] = h.events().filter((b) => b.op === "turnComplete")
+  assert.equal(done.from, undefined)
+  assert.equal(done.prompt, digest("Yes to all four."))
+})
+
+test("a reply after a message added once the agent had answered names no request, and one typed or sent by another extension names its prompt", async () => {
+  const h = harness()
+  await h.connect()
+  await h.deliver([h.submit("r1", "Yes to all four.", { expectedPrompts: 0 })])
+  await h.accepted()
+  h.emit("message_end", { message: { role: "assistant", content: [{ type: "text", text: "Done." }] } })
+  h.emit("message_start", { message: { role: "custom", content: "Found a race in the cache." } })
+  await h.finished()
+  h.live.idle = false
+  h.emit("input", { text: "now the docs", source: "interactive" })
+  h.emit("agent_start")
+  h.emit("message_start", { message: { role: "user", content: "now the docs" } })
+  await h.finished()
+  h.live.idle = false
+  h.emit("input", { text: "from a bridge", source: "extension" })
+  h.emit("agent_start")
+  h.emit("message_start", { message: { role: "user", content: "from a bridge" } })
+  await h.finished()
+  await h.answerEvents()
+  assert.deepEqual(
+    h.events().filter((b) => b.op === "turnComplete").map((b) => [b.from, b.prompt]),
+    [[undefined, undefined], [undefined, digest("now the docs")], [undefined, digest("from a bridge")]],
+  )
+})

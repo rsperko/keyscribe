@@ -2301,8 +2301,8 @@ announced as "Replied. Open the conversation for the result.", and a Pi or bb pr
 says so. A chosen service that no longer exists is an `IssueText`, and a longer reply
 is then spoken as unavailable. With no saved services, an advisory saying summaries need one and what plays without it,
 and **Open AI Services**, take its place. While a service is chosen, the row's caption
-states the data boundary in one line, naming the service ("Long replies and waiting prompts go to {name}
-after best-effort redaction."); **About reading replies aloud** adds that short replies are read without any service and that the app, named with
+states the data boundary in one line, naming the service ("Long replies, the dictation they answer, and waiting
+prompts go to {name} after best-effort redaction."); **About reading replies aloud** adds that short replies are read without any service and that the app, named with
 `Branding.appName`, saves what was read aloud in History only while History is on, with no claim about what the provider keeps.
 
 **Voice** is one row, with **Preview Voice** beside its control, wrapping below it only when the pane is too
@@ -2346,8 +2346,13 @@ Speech is made on this Mac; only summarizing may use the chosen service. The voi
 a non-English summary is read by an English speaker or the macOS default voice.
 
 Every summary starts with the exact name of the conversation that produced it, even with only one open, and
-the default instruction asks for one or two short sentences, about 25 words, leading with anything that failed, is
-unverified, or waits on the developer, else the main result, and leaving out everything else. It gives no example: a
+the default instruction asks for one or two short sentences, about 25 words in all, leading with anything that failed, is
+unverified, or waits on the developer, else the main result, and leaving out everything else. When the reply came
+right after the user's own dictation, the summary is asked with that dictation and opens with two to five words naming
+it, within the same length, while the order above still decides what follows; when it came after a message someone else sent, the name is joined by who, in a few words and
+no new sentence ("{name}, answering another agent:", "{name}, after a background task:", "{name}, after a scheduled
+prompt:", "{name}, answering someone else:"), even for a short reply read as it is. When the connector cannot say which
+message the reply answers, it names neither: a cue that names the wrong request is worse than none. It gives no example: a
 small model copies an example's facts into the summary. The instruction alone sets the length: there is one request
 and its summary is read as written. Only a runaway summary, over
 `SpokenResult.runawayWordLimit` words, is cut, at the last sentence end that keeps at least half of that, or at the limit

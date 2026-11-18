@@ -38,14 +38,19 @@ type Member = {
   greeting: boolean
   quiet: boolean
   turn: string | null
-  next: string | null | undefined
+  next: Next | undefined
   chain: Promise<void>
   waiting: { id: string; prompt: Waiting; openedAt: number; stop: () => void } | null
   unsaid: boolean
   resay: boolean
-  unstarted: { turn: string; next: string | null | undefined } | null
+  unstarted: { turn: string; next: Next | undefined } | null
+  input: { turn: string; from?: string; prompt?: string } | null
 }
 
+type Next = { said: string | null; from?: string }
+
+const senders: Record<string, string> = { agent: "agent", automation: "other", system: "other" }
+const senderOf = (initiator: unknown) => (typeof initiator === "string" ? senders[initiator] : undefined)
 const features = ["promptDigest", "readiness", "shown", "notify", "label", "merge", "start"]
 const newThreadPage = "new conversation"
 const labelLimit = 200
@@ -399,7 +404,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     if (found) return { member: found, added: false }
     const made: Member = {
       status, helloed: false, greeting: false, quiet: false, turn: busy.has(status) ? newTurn() : null, next: undefined, chain: Promise.resolve(),
-      waiting: null, unsaid: false, resay: false, unstarted: null,
+      waiting: null, unsaid: false, resay: false, unstarted: null, input: null,
     }
     members.set(thread, made)
     return { member: made, added: true }
@@ -850,7 +855,13 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     queued.delete(entry.id)
     const m = members.get(entry.threadId)
     if (!m) return
-    m.next = entry.initiator === "system" ? null : text(entry.content)
+    const said = entry.initiator === "system" ? null : text(entry.content)
+    const from = senderOf(entry.initiator)
+    if (m.turn === null) {
+      m.next = { said, from }
+      return
+    }
+    m.input = { turn: m.turn, from, prompt: said === null ? undefined : digestFor(entry.threadId, said) }
   })
   bb.on("thread.active", ({ thread }) => {
     if (!thread?.id) return
@@ -871,7 +882,8 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     report(thread, async () => {
       if (m.unstarted !== started) return null
       m.unstarted = null
-      const prompt = await startedPrompt(thread, started.next)
+      const prompt = await startedPrompt(thread, started.next?.said)
+      if (m.input?.turn !== started.turn) m.input = { turn: started.turn, from: started.next?.from, prompt }
       const event = { op: "turnStarted", session: sessionOf(thread), turn: started.turn }
       return prompt === undefined ? event : { ...event, prompt }
     })
@@ -949,7 +961,11 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     const turn = m.turn
     m.turn = null
     if (!turn) return
-    report(thread.id, async () => ({ op: "turnComplete", session: sessionOf(thread.id), reason, answer: answer.slice(0, answerLimit) }))
+    report(thread.id, async () => {
+      const input = m.input?.turn === turn ? m.input : null
+      if (input) m.input = null
+      return { op: "turnComplete", session: sessionOf(thread.id), reason, answer: answer.slice(0, answerLimit), from: input?.from, prompt: input?.prompt }
+    })
   }
   bb.on("thread.idle", ({ thread, lastAssistantText }) => ended(thread, "complete", typeof lastAssistantText === "string" ? lastAssistantText : ""))
   bb.on("thread.failed", ({ thread }) => ended(thread, "error", ""))

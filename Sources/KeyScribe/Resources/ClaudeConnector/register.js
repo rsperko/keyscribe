@@ -18,6 +18,11 @@ const unreachable = { unreachable: true }
 const freshSources = ['startup', 'clear', 'fork']
 const features = ['focus', 'focusDefinitions', 'label', 'readiness', 'notify', 'fill', 'check', 'promptDigest', 'box', 'steer', 'merge']
 const readAloudTool = 'tell_me_when_done'
+const inputLimit = 16
+const senders = {
+  peer: 'agent', 'peer-send-message': 'agent', 'projects-relay': 'agent', coordinator: 'agent', observer: 'agent', 'observer-activity': 'agent',
+  'task-notification': 'task', 'scheduled-trigger': 'schedule', channel: 'other',
+}
 
 let config = null
 let token = ''
@@ -27,6 +32,9 @@ let endedSession = null
 let helloSession = null
 let generation = 0
 let currentTurn = null
+let lastInput = null
+let opening = []
+let during = []
 let ownSubmit = null
 let turnKnown = false
 let prompts = 0
@@ -485,6 +493,9 @@ function leave($, ended) {
   dropSubmissions()
   dropSteers($)
   currentTurn = null
+  lastInput = null
+  opening = []
+  during = []
   drain(() => false)
   clearOwnedUI($)
 }
@@ -628,8 +639,12 @@ async function steerIn($, toolUseId) {
         return
       }
       const one = { ...taking[i], toolUseId }
-      if (currentTurn === turn) joined.push(one)
-      else remember([one])
+      if (currentTurn === turn) {
+        lastInput = { prompt: promptDigest(taking[i].text) }
+        joined.push(one)
+      } else {
+        remember([one])
+      }
     }
     if (mine.after.length && stillFor(target)) afterTurn(mine.after.splice(0), target)
   } finally {
@@ -1122,6 +1137,36 @@ async function offerReadAloud($) {
 
 const userOrigins = ['composer', 'bridge', 'slack-ping', 'unclassified']
 
+function senderOf(origin) {
+  if (!origin) return undefined
+  if (origin.kind === 'plugin') return origin.asUser ? undefined : 'other'
+  return senders[origin.kind]
+}
+
+function noteInput(e) {
+  const text = plainPrompt(e.text)
+  if (!text) return
+  const list = e.turnId ? during : opening
+  list.push({ text, from: senderOf(e.origin) })
+  while (list.length > inputLimit) list.shift()
+}
+
+function matched(list, text) {
+  const block = '\n' + plainPrompt(text) + '\n'
+  let found = -1
+  let at = -1
+  list.forEach((input, index) => {
+    const where = block.lastIndexOf('\n' + input.text + '\n')
+    if (where >= 0 && where >= at) {
+      found = index
+      at = where
+    }
+  })
+  if (found < 0) return null
+  const [input] = list.splice(found, 1)
+  return { from: input.from, prompt: promptDigest(input.text) }
+}
+
 function typedByUser(e) {
   return e.origin && userOrigins.includes(e.origin.kind)
 }
@@ -1216,6 +1261,7 @@ export function register(on) {
 
   on('prompt.attachment', { type: 'queued_command' }, async ($, e, next) => {
     const result = await next(e)
+    if (currentTurn !== null && typeof e.text === 'string') lastInput = matched(during, e.text) || {}
     if (boxFill && typeof e.text === 'string' && e.text.includes(boxFill.text)) {
       const { prompt } = boxFill
       boxFill = null
@@ -1225,6 +1271,7 @@ export function register(on) {
   })
 
   on('prompt.submit', ($, e, next) => {
+    noteInput(e)
     if (typedByUser(e)) {
       noteBoxSent(e.text)
       dropGuard()
@@ -1238,7 +1285,10 @@ export function register(on) {
     if (e.agentId === undefined) {
       currentTurn = e.turnId
       turnKnown = true
-      if (ownSubmit && ownSubmit.turn === null && ownPrompt(e.text, ownSubmit.text)) ownSubmit.turn = e.turnId
+      const own = ownSubmit && ownSubmit.turn === null && ownPrompt(e.text, ownSubmit.text)
+      if (own) ownSubmit.turn = e.turnId
+      const named = matched(opening, e.text)
+      lastInput = plainPrompt(e.text) ? (!own && named) || { prompt: promptDigest(e.text) } : null
       observe($, { op: 'turnStarted', session, turn: e.turnId, prompt: promptDigest(e.text) })
     }
     return next(e)
@@ -1250,7 +1300,11 @@ export function register(on) {
       boxFill = null
       currentTurn = null
       turnKnown = true
-      observe($, { op: 'turnComplete', session, reason: e.reason, answer: boundedAnswer(e.answer) })
+      const after = lastInput || {}
+      lastInput = null
+      opening = during
+      during = []
+      observe($, { op: 'turnComplete', session, reason: e.reason, answer: boundedAnswer(e.answer), from: after.from, prompt: after.prompt })
       endTurnSteers($)
     }
     return result

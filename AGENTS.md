@@ -21,7 +21,8 @@ before you edit code in its area.
   payload and each to a connection the user chose for that purpose: a mode's rewrite of the transcript (or of
   the selected text by spoken instruction), a mode's answer to a spoken request about the selected text, and,
   when the user turns on the Agent mode's Read Agent Replies Aloud and chooses a service, the summary of an agent's final reply to the user's
-  own dictation, or to a turn the user asked from inside the agent to hear read aloud, and the description of a prompt
+  own dictation (sent with that dictation when the reply came right after it), or to a turn the user asked from
+  inside the agent to hear read aloud, and the description of a prompt
   that turn waits on, from the prompt's title, the tool call it seems to
   be about, and the agent's last words (`SpokenResultOutput`). One content-free exception: when the **Phase-A resolved mode is wired to a BYOK
   connection** — and only after the secure-aware snapshot has confirmed the field is not a password

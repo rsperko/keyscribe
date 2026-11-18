@@ -505,7 +505,7 @@ struct AgentHostTests {
         let transport = FakeTransport()
         let hub = await pluginJoined(host, transport: transport)
         var replies: [String] = []
-        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        hub.onResult = { _, _, reply, _, _, _ in replies.append(reply) }
         _ = await deliverAnswering(hub, transport) { .submitted(request: $0, turn: "") }
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("run the tests")))
         hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "done"))
@@ -731,7 +731,7 @@ struct AgentHostTests {
         let transport = FakeTransport()
         let hub = await startReady(host, transport: transport)
         var replies: [(String, String, String?)] = []
-        hub.onResult = { conversation, _, reply, _, origin in replies.append((conversation, reply, origin)) }
+        hub.onResult = { conversation, _, reply, _, origin, _ in replies.append((conversation, reply, origin)) }
         _ = await startAnswering(hub, transport) { .submitted(request: $0, turn: "") }
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "x", prompt: AgentPromptDigest.of("plan the release")))
         hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "not this one"))
@@ -747,7 +747,7 @@ struct AgentHostTests {
         let transport = FakeTransport()
         let hub = await startReady(host, transport: transport)
         var replies: [String] = []
-        hub.onResult = { conversation, _, _, _, _ in replies.append(conversation) }
+        hub.onResult = { conversation, _, _, _, _, _ in replies.append(conversation) }
         _ = await startAnswering(hub, transport) { .submitted(request: $0, turn: "") }
         let elsewhere = Self.id("t9", instance: "/Users/a/.work-bb")
         hub.handle(.turnStarted(session: elsewhere, turn: "b", prompt: AgentPromptDigest.of("plan the release")))
@@ -830,7 +830,7 @@ struct AgentHostTests {
         host.delivery = answer
         let hub = await joined(host)
         var results: [[String?]] = []
-        hub.onResult = { conversation, handle, reply, requested, origin in results.append([conversation, handle, reply, "\(requested)", origin]) }
+        hub.onResult = { conversation, handle, reply, requested, origin, _ in results.append([conversation, handle, reply, "\(requested)", origin]) }
         _ = await hub.deliver("say kiwi", to: Self.id("t1"), request: "q1")
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "typed", prompt: AgentPromptDigest.of("something the user typed")))
         hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "not ours"))
@@ -847,7 +847,7 @@ struct AgentHostTests {
         let hub = await joined(host)
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "running", prompt: AgentPromptDigest.of("the earlier work")))
         var results: [[String?]] = []
-        hub.onResult = { _, _, reply, _, origin in results.append([reply, origin]) }
+        hub.onResult = { _, _, reply, _, origin, _ in results.append([reply, origin]) }
         _ = await hub.deliver("use the other file", to: Self.id("t1"), request: "q1")
         hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "used it"))
         #expect(results == [["used it", "q1"]])
@@ -859,7 +859,7 @@ struct AgentHostTests {
         let hub = await joined(host)
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "running", prompt: AgentPromptDigest.of("the earlier work")))
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         _ = await hub.deliver("use the other file", to: Self.id("t1"), request: "q1")
         hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "the earlier answer"))
         #expect(!origins.contains("q1"))
@@ -871,7 +871,7 @@ struct AgentHostTests {
         let hub = await joined(host)
         var origins: [String?] = []
         var replies: [String] = []
-        hub.onResult = { _, _, reply, _, origin in
+        hub.onResult = { _, _, reply, _, origin, _ in
             replies.append(reply)
             origins.append(origin)
         }
@@ -890,7 +890,7 @@ struct AgentHostTests {
         host.delivery = .queued
         let hub = await joined(host, handOffLimit: .milliseconds(5))
         var replies: [String] = []
-        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        hub.onResult = { _, _, reply, _, _, _ in replies.append(reply) }
         _ = await hub.deliver("later", to: Self.id("t1"), request: "q1")
         try await Task.sleep(for: .milliseconds(60))
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("later")))
@@ -902,7 +902,7 @@ struct AgentHostTests {
         let host = FakeHost()
         let hub = await joined(host)
         var replies: [String] = []
-        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        hub.onResult = { _, _, reply, _, _, _ in replies.append(reply) }
         host.delivery = .refused("bb no longer has this thread.")
         host.whileDelivering = { hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("say kiwi"))) }
         _ = await hub.deliver("say kiwi", to: Self.id("t1"), request: "q1")
@@ -914,7 +914,7 @@ struct AgentHostTests {
         let host = FakeHost()
         let hub = await joined(host)
         var replies: [String] = []
-        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        hub.onResult = { _, _, reply, _, _, _ in replies.append(reply) }
         host.whileDelivering = { hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("say kiwi"))) }
         _ = await hub.deliver("say kiwi", to: Self.id("t1"), request: "q1")
         hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "kiwi"))
@@ -925,7 +925,7 @@ struct AgentHostTests {
         let host = FakeHost()
         let hub = await joined(host, features: [])
         var replies: [String] = []
-        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        hub.onResult = { _, _, reply, _, _, _ in replies.append(reply) }
         _ = await hub.deliver("say kiwi", to: Self.id("t1"), request: "q1")
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("say kiwi")))
         hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "kiwi"))
@@ -959,7 +959,7 @@ struct AgentHostTests {
         hub.handle(.hello(Self.hello("claude:s1")))
         hub.speaks = { true }
         var results: [(String, String, Bool)] = []
-        hub.onResult = { conversation, _, answer, requested, _ in results.append((conversation, answer, requested)) }
+        hub.onResult = { conversation, _, answer, requested, _, _ in results.append((conversation, answer, requested)) }
         var attention: [AgentAttention?] = []
         hub.onAttention = { _, _, wanted, _ in attention.append(wanted) }
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "p1", prompt: nil))
@@ -1093,7 +1093,7 @@ struct AgentHostTests {
         let transport = FakeTransport()
         let hub = await held(transport, turn: "p0")
         var results: [String] = []
-        hub.onResult = { _, _, answer, _, _ in results.append(answer) }
+        hub.onResult = { _, _, answer, _, _, _ in results.append(answer) }
         #expect(hub.notify(session: "claude:s1", turn: "c1", on: true))
         hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "this one"))
         await hub.rescan()
@@ -1113,7 +1113,7 @@ struct AgentHostTests {
         hub.handle(.hello(Self.hello("claude:s1")))
         hub.speaks = { true }
         var results: [String] = []
-        hub.onResult = { _, _, answer, _, _ in results.append(answer) }
+        hub.onResult = { _, _, answer, _, _, _ in results.append(answer) }
         #expect(!hub.notify(session: "claude:s1", turn: "c1", on: true))
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "p2", prompt: nil))
         hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "a later turn"))
@@ -1125,7 +1125,7 @@ struct AgentHostTests {
         let transport = FakeTransport()
         let hub = await held(transport, turn: nil)
         var results: [String] = []
-        hub.onResult = { _, _, answer, _, _ in results.append(answer) }
+        hub.onResult = { _, _, answer, _, _, _ in results.append(answer) }
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "p1", prompt: nil))
         #expect(hub.notify(session: Self.id("t1"), turn: "p1", on: true))
         let again = Self.pluginHello("t1", turn: "p1", waiting: AgentPrompt(kind: "confirm", detail: "make test"))
@@ -1142,7 +1142,7 @@ struct AgentHostTests {
         let hub = await held(transport, turn: nil)
         var results: [String] = []
         var ended: [String] = []
-        hub.onResult = { _, _, answer, _, _ in results.append(answer) }
+        hub.onResult = { _, _, answer, _, _, _ in results.append(answer) }
         hub.onEnded = { _, _, body, _, _ in ended.append(body) }
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "p1", prompt: nil))
         #expect(hub.notify(session: Self.id("t1"), turn: "p1", on: true))
@@ -1165,7 +1165,7 @@ struct AgentHostTests {
         hub.handle(.hello(Self.hello("claude:s1")))
         hub.speaks = { true }
         var results: [String] = []
-        hub.onResult = { conversation, _, _, _, _ in results.append(conversation) }
+        hub.onResult = { conversation, _, _, _, _, _ in results.append(conversation) }
         #expect(hub.notify(session: "claude:s1", turn: "c1", on: true))
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "p2", prompt: nil))
         hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "next"))
@@ -1514,7 +1514,7 @@ struct AgentHostTests {
         let host = FakeHost()
         let hub = await joined(host, now: { at })
         var replies: [String] = []
-        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        hub.onResult = { _, _, reply, _, _, _ in replies.append(reply) }
         _ = await hub.deliver("continue", to: Self.id("t1"), request: "q1")
         host.delivery = .queued
         _ = await hub.deliver("later", to: Self.id("t1"), request: "q2")
@@ -1531,7 +1531,7 @@ struct AgentHostTests {
         let host = FakeHost()
         let hub = await joined(host)
         var replies: [String] = []
-        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        hub.onResult = { _, _, reply, _, _, _ in replies.append(reply) }
         host.delivery = .refused("bb did not take it.")
         host.whileDelivering = {
             hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("say kiwi")))
@@ -1607,7 +1607,7 @@ struct AgentHostTests {
         let hub = await joined(host)
         hub.exclusions.adopt([])
         var replies: [String] = []
-        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        hub.onResult = { _, _, reply, _, _, _ in replies.append(reply) }
         host.whileDelivering = {
             hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("say kiwi")))
             hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "kiwi"))
@@ -1622,7 +1622,7 @@ struct AgentHostTests {
         let host = FakeHost()
         let hub = await joined(host, now: { at })
         var replies: [String] = []
-        hub.onResult = { _, _, reply, _, _ in replies.append(reply) }
+        hub.onResult = { _, _, reply, _, _, _ in replies.append(reply) }
         _ = await hub.deliver("continue", to: Self.id("t1"), request: "q1")
         at += AgentHub.hostTurnWait + 1
         hub.handle(.turnStarted(session: Self.id("t1"), turn: "a", prompt: AgentPromptDigest.of("continue")))

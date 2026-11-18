@@ -573,7 +573,7 @@ struct AgentDataHelp: View {
             Text("With Rewrite instructions before sending on, your words first go to the rewrite service you chose, after best-effort redaction when Hide recognizable sensitive text is on. The agent then receives the rewritten text in full.")
         }
         HelpSection("Replies") {
-            Text("Read Agent Replies Aloud sends nothing unless you choose a summary service. With one, longer replies and the prompts an agent waits on go to that service after best-effort redaction.")
+            Text("Read Agent Replies Aloud sends nothing unless you choose a summary service. With one, longer replies, the dictation they answer, and the prompts an agent waits on go to that service after best-effort redaction.")
         }
     }
 }

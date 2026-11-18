@@ -124,6 +124,8 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   const submissions = new Map<string, Submission>()
   const receipts: Receipt[] = []
   let lastAnswer = ""
+  let lastPrompt: string | null = null
+  let repliedThisRun = false
   let lastFailed = false
   let staleWatch: (() => void) | null = null
   let idleChecks = 0
@@ -732,10 +734,12 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     const taken = serialIn === null ? -1 : steered.findIndex((item) => item.serial === serialIn)
     if (taken >= 0) {
       const [item] = steered.splice(taken, 1)
+      lastPrompt = item.prompt
       if (session) observe({ op: "absorbed", session, turn: currentTurn || "", prompt: item.prompt })
       return
     }
     const item = take(text, serialIn)
+    lastPrompt = item ? item.prompt : promptDigest(text)
     if (item) settleSeen(item, text, currentTurn || "")
   }
 
@@ -1010,6 +1014,8 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     lastAnswer = ""
     said = ""
     lastFailed = false
+    lastPrompt = null
+    repliedThisRun = false
     turns += 1
     watchForStaleTurn()
     currentTurn = `${instance}.${turns}`
@@ -1022,8 +1028,9 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     currentTurn = null
     if (event.aborted) observe({ op: "turnComplete", session, reason: "aborted" })
     else if (lastFailed) observe({ op: "turnComplete", session, reason: "error" })
-    else observe({ op: "turnComplete", session, reason: "complete", answer: boundedAnswer(lastAnswer) })
+    else observe({ op: "turnComplete", session, reason: "complete", answer: boundedAnswer(lastAnswer), prompt: lastPrompt ?? undefined })
     lastAnswer = ""
+    lastPrompt = null
     lastFailed = false
   })
 
@@ -1032,11 +1039,14 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     const stop = (event.message as { stopReason?: string }).stopReason
     lastFailed = stop === "error" || stop === "aborted"
     lastAnswer = lastFailed ? "" : messageText(event.message)
+    repliedThisRun = true
     if (lastAnswer.trim()) said = lastAnswer.trim().slice(-waitingSaidLimit)
   })
 
   pi.on("message_start", (event) => {
-    if (!session || !event.message || (event.message as { role?: string }).role !== "user") return
+    const role = (event.message as { role?: string } | undefined)?.role
+    if (session && role === "custom" && repliedThisRun) lastPrompt = null
+    if (!session || !event.message || role !== "user") return
     received(event.message)
   })
 

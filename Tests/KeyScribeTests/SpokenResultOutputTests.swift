@@ -115,6 +115,30 @@ struct SpokenResultOutputTests {
         #expect(speech.spoken.map(\.text) == ["api: It set the token to a hidden value and went on."])
     }
 
+    @Test func aReplyToAnotherAgentSaysSoAndIsHeardWithTheCueUnderTheTakeItFollowed() async {
+        let (output, speech, llm) = make()
+        let heard = listening(output)
+        output.finished(conversation: "pi:s1", handle: "api", answer: "The cache has a race.", origin: "r1", cause: .sender(.agent))
+        await settled()
+        #expect(speech.spoken.map(\.text) == ["api, answering another agent: The cache has a race."])
+        #expect(llm.requests.isEmpty)
+        speech.start()
+        #expect(heard().map(\.text) == ["api, answering another agent: The cache has a race."])
+    }
+
+    @Test func aLongReplyToADictationIsSummarizedWithTheDictationAndAReplyToAnotherSenderWithout() async {
+        let (output, speech, llm) = make()
+        let long = Array(repeating: "Then more words.", count: 20).joined(separator: " ")
+        llm.replies = ["On all four, they are done.", "The cache has a race."]
+        output.finished(conversation: "pi:s1", handle: "api", answer: long, origin: "r1", cause: .request("Yes to all four."))
+        await settled()
+        speech.finish()
+        output.finished(conversation: "pi:s2", handle: "docs", answer: long, origin: "r2", cause: .sender(.agent))
+        await settled()
+        #expect(llm.requests.map(\.user) == ["Request:\nYes to all four.\n\nReply:\n" + long, long])
+        #expect(speech.spoken.map(\.text) == ["api: On all four, they are done.", "docs, answering another agent: The cache has a race."])
+    }
+
     @Test func aConversationInFrontWhenItFinishesIsNeitherSpokenNorSentForASummary() async {
         let (output, speech, llm) = make(inFront: { $0 == "pi:s1" })
         output.finished(conversation: "pi:s1", handle: "api", answer: "Done.")

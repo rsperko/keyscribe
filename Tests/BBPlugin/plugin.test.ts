@@ -195,8 +195,83 @@ test("a dictation bb queued is followed by the text of the row that starts the t
   await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "kiwi" })
   const complete = h.sent("turnComplete")
   assert.deepEqual(
-    complete.map((b) => [b.session, b.reason, b.answer]),
-    [[session("thr_a"), "complete", "kiwi"]])
+    complete.map((b) => [b.session, b.reason, b.answer, b.from, b.prompt]),
+    [[session("thr_a"), "complete", "kiwi", undefined, promptDigest("say kiwi")]])
+})
+
+test("a reply to a turn bb itself started says it came from someone else and names no prompt", async () => {
+  const h = await connected()
+  await h.emit("message.dispatched", { entry: { id: "s1", threadId: "thr_a", initiator: "system", content: [{ type: "text", text: "[bb system] child finished" }] } })
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "The child is done." })
+  await h.answerEvents()
+  assert.deepEqual(h.sent("turnComplete").map((b) => [b.from, b.prompt]), [["other", undefined]])
+})
+
+test("a reply reported late after the next turn took in a message names nothing and never erases that turn’s attribution", async () => {
+  const h = await connected()
+  await h.emit("message.dispatched", { entry: { id: "q1", threadId: "thr_a", initiator: "user", content: [{ type: "text", text: "say kiwi" }] } })
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "kiwi" })
+  await h.emit("message.dispatched", { entry: { id: "q2", threadId: "thr_a", initiator: "user", content: [{ type: "text", text: "say fig" }] } })
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.emit("message.dispatched", { entry: { id: "a1", threadId: "thr_a", initiator: "agent", content: [{ type: "text", text: "also check plum" }] } })
+  await h.answerEvents()
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "Plum checked." })
+  await h.answerEvents()
+  assert.deepEqual(h.sent("turnComplete").map((b) => [b.answer, b.from, b.prompt]), [
+    ["kiwi", undefined, undefined],
+    ["Plum checked.", "agent", promptDigest("also check plum")],
+  ])
+})
+
+test("a turn’s start reported only after the next turn took in a message never takes that turn’s attribution", async () => {
+  const h = await connected()
+  await h.emit("message.dispatched", { entry: { id: "q0", threadId: "thr_a", initiator: "user", content: [{ type: "text", text: "say pear" }] } })
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "pear" })
+  await h.emit("message.dispatched", { entry: { id: "q1", threadId: "thr_a", initiator: "user", content: [{ type: "text", text: "say kiwi" }] } })
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "kiwi" })
+  await h.emit("message.dispatched", { entry: { id: "q2", threadId: "thr_a", initiator: "user", content: [{ type: "text", text: "say fig" }] } })
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.emit("message.dispatched", { entry: { id: "a1", threadId: "thr_a", initiator: "agent", content: [{ type: "text", text: "also check plum" }] } })
+  await h.answerEvents()
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "Plum checked." })
+  await h.answerEvents()
+  assert.deepEqual(h.sent("turnComplete").map((b) => [b.answer, b.from, b.prompt]), [
+    ["pear", undefined, promptDigest("say pear")],
+    ["kiwi", undefined, undefined],
+    ["Plum checked.", "agent", promptDigest("also check plum")],
+  ])
+})
+
+test("a reply after another agent’s message names that agent, and one after a message taken into the running turn is tied to that message", async () => {
+  const h = await connected()
+  await h.emit("message.dispatched", { entry: { id: "a1", threadId: "thr_a", initiator: "agent", content: [{ type: "text", text: "found a race" }] } })
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "Fixed the race." })
+  await h.answerEvents()
+  await h.emit("message.dispatched", { entry: { id: "q1", threadId: "thr_a", initiator: "user", content: [{ type: "text", text: "say kiwi" }] } })
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  await h.emit("message.dispatched", { entry: { id: "a2", threadId: "thr_a", initiator: "agent", content: [{ type: "text", text: "also check plum" }] } })
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "Plum checked." })
+  await h.answerEvents()
+  await h.emit("message.dispatched", { entry: { id: "q2", threadId: "thr_a", initiator: "user", content: [{ type: "text", text: "say fig" }] } })
+  await h.emit("thread.active", { thread: { id: "thr_a", status: "active" } })
+  await h.answerEvents()
+  await h.emit("message.dispatched", { entry: { id: "q3", threadId: "thr_a", initiator: "user", content: [{ type: "text", text: "and grape" }] } })
+  await h.emit("thread.idle", { thread: { id: "thr_a", status: "idle" }, lastAssistantText: "Fig and grape." })
+  await h.answerEvents()
+  assert.deepEqual(h.sent("turnComplete").map((b) => [b.from, b.prompt]), [
+    ["agent", promptDigest("found a race")],
+    ["agent", promptDigest("also check plum")],
+    [undefined, promptDigest("and grape")],
+  ])
+  assert.deepEqual(h.sent("turnStarted").map((b) => b.prompt), [promptDigest("found a race"), promptDigest("say kiwi"), promptDigest("say fig")])
 })
 
 test("a turn bb started at once is named by the newest prompt in its history that is not still queued", async () => {

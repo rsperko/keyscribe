@@ -85,7 +85,7 @@ struct SpokenResultSection: View {
 
     private var boundary: String? {
         guard let chosen else { return missing ? nil : "Longer replies are announced without a summary. Nothing is sent." }
-        return "Long replies and waiting prompts go to \(chosen.name) after best-effort redaction."
+        return "Long replies, the dictation they answer, and waiting prompts go to \(chosen.name) after best-effort redaction."
     }
 
     private var aboutReadingReplies: HelpTopic {
@@ -96,6 +96,7 @@ struct SpokenResultSection: View {
                 "The agent\u{2019}s reply when a conversation finishes a message you dictated.",
                 "The agent\u{2019}s reply to work you typed, when you ask the agent to have \(app) read it to you, or run /\(KeyScribePaths.variant.connectorSlug) in the conversation.",
                 "A short notice when a conversation needs your approval or an answer, or disconnects before it finishes.",
+                "A reply that came after a message someone else sent the agent, such as another agent or a background task, says so after the conversation\u{2019}s name, so you never take it for an answer to you.",
                 "A reply to a message you dictated is skipped while you\u{2019}re looking at that conversation. When \(app) can\u{2019}t tell whether the conversation is in front, it gives the reply.",
             ]),
             .init(heading: "Read aloud or shown", paragraphs: [
@@ -104,7 +105,7 @@ struct SpokenResultSection: View {
             ]),
             .init(heading: "Summaries and what is sent", paragraphs: [
                 "A short reply is given as it is, and nothing is sent.",
-                "A longer reply is sent to \(service), and you get its summary instead. With None, nothing is sent, and you\u{2019}re told the conversation replied, so you can open it for the result.",
+                "A longer reply is sent to \(service), and you get its summary instead. When it came right after a message you dictated, your words go with it, so the summary can open by naming what you asked. With None, nothing is sent, and you\u{2019}re told the conversation replied, so you can open it for the result.",
                 "When a conversation waits on a prompt its connector describes, such as an approval, the prompt\u{2019}s title, the tool call it seems to be about (such as a command to approve) and the agent\u{2019}s last words are sent to \(service) to say what it asks.",
                 "Both go after best-effort redaction, which can miss things in code and command output.",
                 "With History on, \(app) saves each reply as you got it. Notices aren\u{2019}t saved.",

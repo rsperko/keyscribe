@@ -254,7 +254,7 @@ struct AgentHubTests {
         var notices: [(AgentReceipt, String)] = []
         hub.onNotice = { receipt, request, _ in notices.append((receipt, request)) }
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         let sentBefore = transport.sent.count
         async let receipt = hub.deliver("use the other file", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
@@ -326,13 +326,34 @@ struct AgentHubTests {
         #expect(notices.isEmpty)
     }
 
+    @Test(arguments: [
+        (AgentTurnInput(from: nil, prompt: AgentPromptDigest.of("Yes to all four.")), SpokenResult.Cause.request("Yes to all four.")),
+        (AgentTurnInput(from: .agent, prompt: AgentPromptDigest.of("Found a race in the cache.")), .sender(.agent)),
+        (AgentTurnInput(from: nil, prompt: AgentPromptDigest.of("typed while it ran")), nil),
+        (nil, nil),
+    ])
+    func aReplyNamesTheDictationItAnswersOnlyWhenItCameRightAfterIt(after: AgentTurnInput?, expected: SpokenResult.Cause?) async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        greet(hub, steering("idle"))
+        var causes: [SpokenResult.Cause?] = []
+        hub.onResult = { _, _, _, _, origin, cause in if origin == "r1" { causes.append(cause) } }
+        let sentBefore = transport.sent.count
+        async let receipt = hub.deliver("Yes to all four.", to: "claude:s1")
+        await untilSent(transport, sentBefore + 1)
+        hub.handle(.submitted(request: "r1", turn: "t1"))
+        #expect(await receipt == .sent("keyscribe"))
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done.", after: after))
+        #expect(causes == [expected])
+    }
+
     @Test func aSteerAcceptedBeforeItsTurnIsKnownIsSentAndHasTheReplyOfTheTurnThatTakesItIn() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry, status: "busy")
         greet(hub, steering())
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         let sentBefore = transport.sent.count
         async let receipt = hub.deliver("use the other file", to: "claude:s1")
         await untilSent(transport, sentBefore + 1)
@@ -471,7 +492,7 @@ struct AgentHubTests {
         greet(hub, working())
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("use the other file")))
         hub.followSteer(of: "claude:s1", for: "r9", text: "use the other file")
         hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Used it."))
@@ -484,7 +505,7 @@ struct AgentHubTests {
         greet(hub, working())
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         hub.followSteer(of: "claude:s1", for: "r8", text: "use the other file")
         hub.followSteer(of: "claude:s1", for: "r9", text: "and keep the tests")
         hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("use the other file")))
@@ -499,7 +520,7 @@ struct AgentHubTests {
         greet(hub, working())
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("use the other file")))
         hub.followSteer(of: "claude:s1", for: "r8", text: "use the other file")
         hub.handle(.absorbed(session: "claude:s1", turn: "t1", prompt: AgentPromptDigest.of("and keep the tests")))
@@ -958,7 +979,7 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         canCheck(hub)
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilChecked(transport)
         #expect(checks(transport) == [.check(id: "check-r1-1", expectedSession: "claude:s1", request: "r1", expiresAt: clock.now.addingTimeInterval(5))])
@@ -1086,7 +1107,7 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         var origins: [String?] = []
         var recorded: [HistoryEntry.Fact] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         hub.onDelivery = { request, fact in if request == "r1" { recorded.append(fact) } }
         #expect(await hub.deliver("run the tests", to: "claude:s1") == .uncertain("keyscribe"))
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
@@ -1100,7 +1121,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20))
         await connected(hub, transport, registry)
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
@@ -1113,7 +1134,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(40))
         await connected(hub, transport, registry)
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
@@ -1130,7 +1151,7 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         canCheck(hub)
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
@@ -1166,7 +1187,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(30))
         await connected(hub, transport, registry)
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.typed(session: "claude:s1"))
@@ -1183,7 +1204,7 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         canCheck(hub)
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         if turnStartedFirst { hub.handle(.turnStarted(session: "claude:s1", turn: "t1")) }
@@ -1202,7 +1223,7 @@ struct AgentHubTests {
         await connected(hub, transport, registry)
         canCheck(hub)
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
@@ -1224,7 +1245,7 @@ struct AgentHubTests {
         canCheck(hub)
         hub.speaks = { true }
         var results: [(Bool, String?)] = []
-        hub.onResult = { _, _, _, requested, origin in results.append((requested, origin)) }
+        hub.onResult = { _, _, _, requested, origin, _ in results.append((requested, origin)) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
@@ -1240,7 +1261,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20))
         await connected(hub, transport, registry)
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         #expect(await hub.deliver("run the tests", to: "claude:s1") == .uncertain("keyscribe"))
         hub.handle(.typed(session: "claude:s1"))
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
@@ -1448,7 +1469,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var reported: [String] = []
-        hub.onResult = { _, _, _, _, _ in reported.append("result") }
+        hub.onResult = { _, _, _, _, _, _ in reported.append("result") }
         hub.onAttention = { _, _, _, _ in reported.append("attention") }
         await dictated(hub, transport)
         hub.stop()
@@ -1479,7 +1500,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { conversation, handle, value, _, _ in results.append("\(conversation)|\(handle)|\(value)") }
+        hub.onResult = { conversation, handle, value, _, _, _ in results.append("\(conversation)|\(handle)|\(value)") }
         hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "a typed turn"))
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
@@ -1495,7 +1516,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var origins: [String?] = []
-        hub.onResult = { _, _, _, _, origin in origins.append(origin) }
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
         hub.onEnded = { _, _, _, _, origin in origins.append(origin) }
         async let first = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
@@ -1516,7 +1537,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { _, _, answer, _, origin in results.append("\(answer)|\(origin ?? "-")") }
+        hub.onResult = { _, _, answer, _, origin, _ in results.append("\(answer)|\(origin ?? "-")") }
         hub.awaitTypedTurn(of: "claude:s1", request: "r7")
         hub.handle(.typed(session: "claude:s1"))
         hub.handle(.turnStarted(session: "claude:s1", turn: "t5"))
@@ -1530,7 +1551,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { _, _, answer, _, _ in results.append(answer) }
+        hub.onResult = { _, _, answer, _, _, _ in results.append(answer) }
         hub.awaitTypedTurn(of: "claude:s1", request: "r7")
         hub.forgetTypedTurn(of: "claude:s1", request: "r7")
         hub.handle(.typed(session: "claude:s1"))
@@ -1543,7 +1564,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { _, _, value, _, _ in results.append(value) }
+        hub.onResult = { _, _, value, _, _, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: "t1"))
@@ -1559,7 +1580,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { _, _, value, _, _ in results.append(value) }
+        hub.onResult = { _, _, value, _, _, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: "t1"))
@@ -1573,7 +1594,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { _, _, value, _, _ in results.append(value) }
+        hub.onResult = { _, _, value, _, _, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: "1"))
@@ -1588,7 +1609,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { _, _, value, _, _ in results.append(value) }
+        hub.onResult = { _, _, value, _, _, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
@@ -1604,7 +1625,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { _, _, value, _, _ in results.append(value) }
+        hub.onResult = { _, _, value, _, _, _ in results.append(value) }
         async let receipt = hub.deliver("run the tests", to: "claude:s1")
         await untilSent(transport, 1)
         hub.handle(.submitted(request: "r1", turn: ""))
@@ -1618,7 +1639,7 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)
         var results: [String] = []
-        hub.onResult = { _, _, value, _, _ in results.append(value) }
+        hub.onResult = { _, _, value, _, _, _ in results.append(value) }
         for reason in ["aborted", "error"] {
             async let receipt = hub.deliver("one", to: "claude:s1")
             let before = transport.sent.count
@@ -2184,7 +2205,7 @@ struct AgentHubTests {
         await hub.rescan()
         hub.disconnect("fake:f1")
         var results: [String] = []
-        hub.onResult = { _, _, answer, _, _ in results.append(answer) }
+        hub.onResult = { _, _, answer, _, _, _ in results.append(answer) }
         hub.handle(.turnComplete(session: "fake:f1", reason: "complete", answer: "private"))
         #expect(results.isEmpty)
     }
@@ -2777,7 +2798,7 @@ struct AgentHubTests {
     private func listening(_ hub: AgentHub, speaks: Bool = true) -> Spoken {
         let spoken = Spoken()
         hub.speaks = { speaks }
-        hub.onResult = { _, _, answer, requested, _ in spoken.results.append("\(answer)|\(requested)") }
+        hub.onResult = { _, _, answer, requested, _, _ in spoken.results.append("\(answer)|\(requested)") }
         hub.onEnded = { _, handle, body, requested, _ in spoken.endings.append("\(handle)|\(body)|\(requested)") }
         hub.onWithdraw = { spoken.withdrawn.append($0) }
         return spoken

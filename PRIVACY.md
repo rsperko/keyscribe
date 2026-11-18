@@ -55,7 +55,8 @@ LLM calls** to a service you configured, and all off unless you turn them on:
   what it asks. For Pi, which tool call a prompt belongs to is a best guess, so another tool's arguments can be
   sent; for a bb thread it is the request bb itself is waiting on, along with a question's options or a plan's text. When an agent finishes an instruction you
   dictated, or work you asked it to have KeyScribe read aloud, a longer final reply is sent to the service you chose
-  under Replies, only to be summarized into a sentence or two to read aloud or show; a short reply is read without it,
+  under Replies, only to be summarized into a sentence or two to read aloud or show, together with the words you
+  dictated when the reply came right after them, so the summary can open by naming what you asked; a short reply is read without it,
   a longer one is only announced when no service is chosen, and nothing is sent for a dictated reply's
   conversation KeyScribe can confirm is in front of you when it finishes. When it can't confirm that, such as
   in a terminal it can't read, the reply is sent as usual. Agent replies often contain code and command output, and the
@@ -267,7 +268,8 @@ in the same `Application Support` folder:
   not stored.
   If you turn on **Read Agent Replies Aloud** and choose an AI service for it, a longer final reply to an
   instruction you dictated, or to work you asked the agent to have KeyScribe read aloud, is sent to that service, after best-effort redaction, only to be summarized
-  into a sentence or two; a reply of a few words is read as it is without any service. KeyScribe keeps
+  into a sentence or two; when the reply came right after words you dictated, those words go with it, redacted the
+  same way; a reply of a few words is read as it is without any service. KeyScribe keeps
   the full reply in memory only and never writes it to History or logs; what the service you chose keeps
   is up to that service. What KeyScribe actually reads aloud as a reply or a summary, or shows with the voice set
   to Off — text only, is saved in History exactly as you heard or saw it, with the service that summarized it, when History is on and the Agent

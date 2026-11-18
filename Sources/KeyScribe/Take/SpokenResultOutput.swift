@@ -22,7 +22,8 @@ final class SpokenResultOutput {
         var heardAlready = false
         var returned: String?
         var failure: String?
-        var text: String { standalone ? body : SpokenResult.prefaced(body, name: name) }
+        var cause: SpokenResult.Cause?
+        var text: String { standalone ? body : SpokenResult.prefaced(body, name: name, cause: cause) }
     }
 
     struct Source: Equatable {
@@ -287,13 +288,15 @@ final class SpokenResultOutput {
         playNext()
     }
 
-    func finished(conversation: String, handle: String, answer: String, requested: Bool = false, origin: String? = nil) {
+    func finished(
+        conversation: String, handle: String, answer: String, requested: Bool = false, origin: String? = nil, cause: SpokenResult.Cause? = nil
+    ) {
         let settings = settings()
         guard settings.enabled else { return }
         let plan = SpokenResult.plan(answer: answer, configured: !settings.connection.isEmpty)
         announce(
             conversation: conversation, handle: handle, plan == .nothing && requested ? .speak(SpokenResult.noTextBody) : plan,
-            requested: requested, origin: origin)
+            requested: requested, origin: origin, cause: cause)
     }
 
     func ended(conversation: String, handle: String, body: String, requested: Bool, origin: String? = nil) {
@@ -301,7 +304,9 @@ final class SpokenResultOutput {
         announce(conversation: conversation, handle: handle, .speak(body), requested: requested, origin: origin)
     }
 
-    private func announce(conversation: String, handle: String, _ plan: SpokenResult.Plan, requested: Bool, origin: String?) {
+    private func announce(
+        conversation: String, handle: String, _ plan: SpokenResult.Plan, requested: Bool, origin: String?, cause: SpokenResult.Cause? = nil
+    ) {
         let settings = settings()
         let usable = connection(settings.connection).flatMap { permits($0) ? $0 : nil }
         if plan == .nothing { return }
@@ -330,7 +335,8 @@ final class SpokenResultOutput {
                     summary.failure = Summary.unusable
                     break
                 }
-                let request = SpokenResult.request(answer: input, prompt: settings.effectivePrompt, tokenizer: Tokenizer())
+                let request = SpokenResult.request(
+                    answer: input, asked: cause?.asked, prompt: settings.effectivePrompt, tokenizer: Tokenizer())
                 summary = await self.summary(of: request, connection: usable, handle: handle, deadline: self.deadlineSeconds)
                 summarizedBy = usable.name
             }
@@ -339,10 +345,10 @@ final class SpokenResultOutput {
             self.enqueue(summary.text.isEmpty
                 ? Queued(
                     conversation: conversation, name: handle, body: SpokenResult.unavailableBody, unavailable: true, requested: requested,
-                    order: order, origin: origin, failure: summary.failure)
+                    order: order, origin: origin, failure: summary.failure, cause: cause)
                 : Queued(
                     conversation: conversation, name: handle, body: summary.text, requested: requested, order: order, connection: summarizedBy,
-                    origin: origin, returned: summary.returned))
+                    origin: origin, returned: summary.returned, cause: cause))
         }
     }
 
@@ -595,7 +601,7 @@ final class SpokenResultOutput {
             next = Queued(
                 conversation: next.conversation, name: notice.name, body: notice.body, unavailable: true, origin: next.origin,
                 merged: merged.isEmpty ? [] : ([next] + merged).map { Source(origin: $0.origin, failure: $0.failure) },
-                failure: next.failure)
+                failure: next.failure, cause: merged.isEmpty ? next.cause : nil)
         }
         play(next, requested: next.requested ? [next.conversation] : [])
     }

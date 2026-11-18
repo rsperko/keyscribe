@@ -126,7 +126,10 @@ every rule above applies to it, with these sharpenings:
   review; it never grants old queued commands permission to run again.
 - **Reply text is in memory only.** A turn's final reply crosses the bridge bounded, for the spoken result of a
   turn the user's dictation started or that the user asked from inside the agent to hear; it is never written to History or logs, and the only place it may go is
-  the AI service the user chose for summaries, after redaction. What was read aloud is the one exception, and only
+  the AI service the user chose for summaries, after redaction, together with the dictation the reply came right
+  after, which the hub holds in memory for its recent deliveries only. A connector reports what a reply came after
+  (`turnComplete`'s `from` and `prompt`) only from what its agent tells it; a message it cannot place or identify is
+  left unnamed, never guessed. What was read aloud is the one exception, and only
   once it is audible, or once it is shown when the voice is Off — text only (`SpokenResultOutput.onHeard`; a shown one has no
   reader): History keeps that line as heard, in its own field
   (`HistoryEntry.spokenReply`), never in `heard`, `transformed` or `result`, so nothing that learns from the user's
@@ -681,7 +684,9 @@ every rule above applies to it, with these sharpenings:
   members the bridge no longer knows, which say hello again on their own). It reports only what it saw: a
   `turnStarted` whose `prompt` is the digest of the queued row bb dispatched, or else of the newest prompt in the
   thread's history that is not still queued, and none for a row bb itself queued; a `turnComplete` only for a turn
-  it saw start or found running when it loaded. Delivery stays bb's command, so the hub's digest follow matches the dictation exactly as for an
+  it saw start or found running when it loaded, naming the sender bb records for a row an agent, an automation or bb
+  itself queued (never for one a plugin queued, since that can be the user's own dictation), and the newest row the
+  running turn took in when another was dispatched while it ran. Delivery stays bb's command, so the hub's digest follow matches the dictation exactly as for an
   agent's own connector. While it is live for a thread it holds that thread: an agent's own connector there is sent
   back and not filed until the plugin stops, so a thread never reports its turns twice. It lists bb's threads page by page, and a thread
   it had not listed says hello as soon as bb reports it working. Events the app cannot take are dropped, never
