@@ -16,7 +16,8 @@ instructions, and each zip has a fixed link:
 - https://github.com/rsperko/keyscribe/releases/tag/voice-kit
 - https://github.com/rsperko/keyscribe/releases/download/voice-kit/voice-kit-accents.zip
 
-`make publish-voice-kit` refreshes it after a study or the recorder changes. To build a kit yourself:
+The kit is not versioned: change it on main, push, then `make publish-voice-kit` replaces the zips and
+moves the release to that commit. To build a kit yourself:
 
 ```bash
 make voice-kit                       # every study → voice-kit/dist/

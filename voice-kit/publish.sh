@@ -1,7 +1,8 @@
 #!/bin/zsh
 # Usage: zsh publish.sh
-#   Uploads voice-kit-<study>.zip for every study to the long-lived `voice-kit` GitHub release, whose page
-#   carries each study's invite. Links never change: …/releases/download/voice-kit/voice-kit-<study>.zip
+#   Replaces voice-kit-<study>.zip for every study on the one `voice-kit` GitHub release and moves its tag to
+#   main, so the release always matches main. The kit is not versioned; links never change:
+#   …/releases/download/voice-kit/voice-kit-<study>.zip
 #   VOICE_KIT_DRY_RUN=<dir> builds into <dir> and uploads nothing.
 set -eu
 KIT="${0:A:h}"
@@ -26,7 +27,13 @@ for tsv in "$KIT"/studies/*.tsv; do
 done
 [ -n "${VOICE_KIT_DRY_RUN:-}" ] && { echo "dry run: $OUT"; exit 0; }
 
+cd "$KIT"
+git fetch -q origin main
+[ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || { echo "error: publish from main as pushed (HEAD is not origin/main)." >&2; exit 1; }
+[ -z "$(git status --porcelain -- .)" ] || { echo "error: voice-kit/ has uncommitted changes; commit and push them first." >&2; exit 1; }
+
 if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
+  git push -q -f origin "HEAD:refs/tags/$TAG"
   gh release upload "$TAG" "${assets[@]}" -R "$REPO" --clobber
   gh release edit "$TAG" -R "$REPO" --notes-file "$NOTES"
 else

@@ -8,7 +8,6 @@ set -u
 setopt extended_glob null_glob
 
 KIT_DIR="${0:A:h}"
-KIT_VERSION="1.2"
 APP=""
 OUT=""
 STUDY=""
@@ -147,7 +146,7 @@ write_manifest() {
     printf '    "consentedAt": %s\n' "$(json_str "$(profile_get consentedAt)")"
     echo '  },'
     echo '  "kit": {'
-    printf '    "name": "voice kit", "version": %s, "study": %s, "app": %s,\n' "$(json_str "$KIT_VERSION")" "$(json_str "$STUDY")" "$(json_str "$APP")"
+    printf '    "name": "voice kit", "study": %s, "app": %s,\n' "$(json_str "$STUDY")" "$(json_str "$APP")"
     printf '    "macOS": %s, "machine": %s\n' "$(json_str "$(sw_vers -productVersion)")" "$(json_str "$(sysctl -n hw.model)")"
     echo '  },'
     printf '  "startedAt": %s,\n' "$(json_str "$(profile_get startedAt)")"
