@@ -69,4 +69,13 @@ unzip -q "$PKG/voice-kit.zip" -d "$WORK/unzipped" || fail "package zip unreadabl
 grep -q '{{APP}}' "$WORK/unzipped/voice-kit/README.txt" "$PKG/accents-invite.md" && fail "unsubstituted {{APP}}"
 grep -q Dictator "$PKG/accents-invite.md" || fail "invite does not name the app"
 echo "voice kit package: ok"
+
+REL="$WORK/release"
+VOICE_KIT_DRY_RUN="$REL" zsh "$KIT/publish.sh" >/dev/null || fail "publish.sh dry run failed"
+unzip -q "$REL/voice-kit-accents.zip" -d "$WORK/rel" || fail "no voice-kit-accents.zip"
+[ -x "$WORK/rel/voice-kit/record.sh" ] && [ -f "$WORK/rel/voice-kit/studies/accents.tsv" ] || fail "accents zip lacks the recorder or study"
+[ "$(ls "$WORK/rel/voice-kit/studies" | wc -l)" -eq 1 ] || fail "accents zip carries other studies"
+grep -q "releases/download/voice-kit/voice-kit-accents.zip" "$REL/notes.md" || fail "release notes lack the download link"
+grep -q '{{APP}}' "$REL/notes.md" && fail "unsubstituted {{APP}} in release notes"
+echo "voice kit release: ok"
 echo "voice kit: ok"

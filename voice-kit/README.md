@@ -10,7 +10,13 @@ Each kind of corpus is a **study**: `studies/<study>.tsv` (the prompts and quest
 
 ## Hand it out
 
-Every release attaches `KeyScribe-voice-kit-<version>.zip` with all studies. To build one yourself:
+The easy way: send people to the `voice-kit` release, which never moves. Its page has each study's
+instructions, and each zip has a fixed link:
+
+- https://github.com/rsperko/keyscribe/releases/tag/voice-kit
+- https://github.com/rsperko/keyscribe/releases/download/voice-kit/voice-kit-accents.zip
+
+`make publish-voice-kit` refreshes it after a study or the recorder changes. To build a kit yourself:
 
 ```bash
 make voice-kit                       # every study → voice-kit/dist/

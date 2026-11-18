@@ -6,7 +6,7 @@ Nothing gets installed. The script uses the {{APP}} you already have, keeps a co
 
 ## What to do
 
-1. Unzip `voice-kit.zip` (it lands in Downloads as a folder called `voice-kit`).
+1. Download the zip and double-click it if your Mac did not unzip it already. You should have a folder called `voice-kit` in Downloads.
 2. Open Terminal (Command-Space, type `Terminal`, Return).
 3. Paste this line and press Return:
 

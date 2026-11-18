@@ -203,7 +203,7 @@ Cutting a release:
    runtime, entitlements, Sparkle embedded and signed by Xcode), notarizes/staples when notary
    credentials are configured, and writes `KeyScribe-<version>.dmg`.
 3. `make publish` — after reviewing the built DMG, pushes the tag, creates or updates the GitHub
-   release with the DMG and the voice kit (`voice-kit/README.md`), and refreshes the Homebrew cask in the tap checkout.
+   release asset, and refreshes the Homebrew cask in the tap checkout.
 
 ## Signing: getting permissions that survive rebuilds
 
