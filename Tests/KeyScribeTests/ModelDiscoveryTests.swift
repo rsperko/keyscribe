@@ -214,4 +214,18 @@ struct ModelDiscoveryTests {
         #expect(models == ["gemini-2.5-flash", "gemini-2.5-pro"])
         #expect(requestedURLs.count == 2)
     }
+
+    @Test func aListerHeldToOnePageStopsAfterTheFirstRequest() async throws {
+        nonisolated(unsafe) var requests = 0
+        StubURLProtocol.handler = { request in
+            requests += 1
+            let body = #"{"models": [{"name": "models/gemini-2.5-flash", "baseModelId": "gemini-2.5-flash", "supportedGenerationMethods": ["generateContent"]}], "nextPageToken": "abc"}"#
+            return (HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data(body.utf8))
+        }
+        let lister = HTTPModelLister(session: session(), keyProvider: { _ in .found("gemini-key") }, pageLimit: 1)
+        let connection = Connection(id: "gemini", name: "Gemini", provider: .gemini, model: "", keyRef: "k")
+
+        #expect(try await lister.listModels(for: connection, apiKey: nil) == ["gemini-2.5-flash"])
+        #expect(requests == 1)
+    }
 }

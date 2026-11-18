@@ -1748,7 +1748,9 @@ The latest test result remains in the header and beside the test action.
   saves every field still being edited, and a field that cannot be saved stops the test and says why.
   A model ID enables the test as it is typed; other required fields enable it once saved. When saving
   crosses into another service and asks to confirm, the test does not run; cancelling restores the
-  saved values in every field. A failure the model could cause names the model the test used.
+  saved values in every field. A failure the model could cause names the model the test used. When the
+  service refuses a model that its own list offers, the message says so and points at the service's
+  documentation for the form of the ID to use.
 
 Keep API parameters out of the first scan. Endpoint and authentication configuration live under
 **Connection options**. **Reasoning** and **Minimum output allowance** live under **Rewrite settings**;

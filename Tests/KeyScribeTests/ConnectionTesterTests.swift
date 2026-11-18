@@ -25,6 +25,13 @@ private struct BlockingClient: LLMClient {
     }
 }
 
+private final class Asked: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seen: [Connection] = []
+    var connections: [Connection] { lock.withLock { seen } }
+    func record(_ connection: Connection) { lock.withLock { seen.append(connection) } }
+}
+
 private final class StubURLProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var handler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
 
@@ -91,7 +98,8 @@ struct ConnectionTesterTests {
             id: "c", name: "C", provider: .openaiCompatible, model: "bogus-model", keyRef: "k",
             baseUrl: "http://127.0.0.1:11234/v1")
         let body = #"{"error":{"message":"The model `bogus-model` does not exist","type":"invalid_request_error","param":null,"code":"model_not_found"}}"#
-        let tester = ConnectionTester(client: FakeClient(result: .failure(ProviderTransportError.http(404, body: body))))
+        let tester = ConnectionTester(
+            client: FakeClient(result: .failure(ProviderTransportError.http(404, body: body))), listModels: { _ in ["other-model"] })
         guard case .failed(let message) = await tester.test(compat) else {
             Issue.record("expected a 404 to be a failure")
             return
@@ -107,7 +115,7 @@ struct ConnectionTesterTests {
             ProviderTransportError.http(500, body: nil), ProviderTransportError.missingKey("k"), URLError(.cannotConnectToHost),
         ]
         for error in failures {
-            guard case .failed(let message) = await ConnectionTester(client: FakeClient(result: .failure(error))).test(connection) else {
+            guard case .failed(let message) = await ConnectionTester(client: FakeClient(result: .failure(error)), listModels: { _ in nil }).test(connection) else {
                 Issue.record("expected \(error) to fail")
                 continue
             }
@@ -117,12 +125,48 @@ struct ConnectionTesterTests {
 
     @Test func theModelSentenceFollowsAProviderMessageWithoutClosingPunctuation() async {
         let body = "Invalid request"
-        let tester = ConnectionTester(client: FakeClient(result: .failure(ProviderTransportError.http(400, body: body))))
+        let tester = ConnectionTester(client: FakeClient(result: .failure(ProviderTransportError.http(400, body: body))), listModels: { _ in nil })
         guard case .failed(let message) = await tester.test(connection) else {
             Issue.record("expected a 400 to fail")
             return
         }
         #expect(message.hasSuffix("Invalid request. The test used the model “m”."), "\(message)")
+    }
+
+    @Test func aModelTheServerListsButRefusesSaysTheListOfferedIt() async {
+        let compat = Connection(
+            id: "c", name: "C", provider: .openaiCompatible, model: "model-x", keyRef: "k", baseUrl: "http://127.0.0.1:11234/v1")
+        let body = #"{"error":{"message":"no such model","code":"model_not_found"}}"#
+        let asked = Asked()
+        let tester = ConnectionTester(
+            client: FakeClient(result: .failure(ProviderTransportError.http(404, body: body))),
+            listModels: { asked.record($0); return ["model-x", "vendor/model-x"] })
+        #expect(await tester.test(compat) == .failed(
+            "The service lists “model-x” among its models but refused to run it. Some services expect another form of the ID, such as one with a provider name in front. Check the service's documentation for the ID to use."))
+        #expect(asked.connections == [compat])
+    }
+
+    @Test func whenTheListCannotBeReadARefusedModelKeepsTheMissingModelMessage() async {
+        let compat = Connection(
+            id: "c", name: "C", provider: .openaiCompatible, model: "model-x", keyRef: "k", baseUrl: "http://127.0.0.1:11234/v1")
+        let body = #"{"error":{"message":"no such model","code":"model_not_found"}}"#
+        let tester = ConnectionTester(
+            client: FakeClient(result: .failure(ProviderTransportError.http(404, body: body))), listModels: { _ in nil })
+        guard case .failed(let message) = await tester.test(compat) else {
+            Issue.record("expected a 404 to be a failure")
+            return
+        }
+        #expect(message.hasPrefix("The service could not find the model “model-x”."))
+    }
+
+    @Test func otherFailuresNeverAskForTheModelList() async {
+        let compat = Connection(
+            id: "c", name: "C", provider: .openaiCompatible, model: "model-x", keyRef: "k", baseUrl: "http://127.0.0.1:11234/v1")
+        let asked = Asked()
+        for error in [ProviderTransportError.http(401, body: nil), .http(404, body: nil), .http(500, body: nil)] {
+            _ = await ConnectionTester(client: FakeClient(result: .failure(error)), listModels: { asked.record($0); return [] }).test(compat)
+        }
+        #expect(asked.connections.isEmpty)
     }
 
     @Test func nonChatCompletionsStatusKeepsTheGenericMessage() async {
@@ -144,7 +188,7 @@ struct ConnectionTesterTests {
             baseUrl: "http://127.0.0.1:11234/v1")
         let missing = #"{"error":{"message":"no such model","code":"model_not_found"}}"#
         for error in [ProviderTransportError.http(400, body: nil), .http(404, body: nil), .http(404, body: missing), .http(422, body: nil)] {
-            guard case .failed(let message) = await ConnectionTester(client: FakeClient(result: .failure(error))).test(compat) else {
+            guard case .failed(let message) = await ConnectionTester(client: FakeClient(result: .failure(error)), listModels: { _ in nil }).test(compat) else {
                 Issue.record("expected \(error) to fail")
                 continue
             }

@@ -7,8 +7,7 @@ struct HTTPModelLister {
     var tokenCommandRunner: @Sendable (String) async throws -> String = { try await TokenCommandRunner.run($0) }
     var tokenCache: TokenCommandCache = .shared
     var now: @Sendable () -> Date = { Date() }
-
-    private static let maxPages = 20
+    var pageLimit = 20
 
     private var transport: ProviderTransport {
         ProviderTransport(session: session, keyProvider: keyProvider,
@@ -33,7 +32,7 @@ struct HTTPModelLister {
             listings.append(contentsOf: page.listings)
             pageToken = page.nextPageToken
             pages += 1
-        } while pageToken != nil && pages < Self.maxPages
+        } while pageToken != nil && pages < pageLimit
         var seen = Set<String>()
         return listings.filter { seen.insert($0.id).inserted }
     }

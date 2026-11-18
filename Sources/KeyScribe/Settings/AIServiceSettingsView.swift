@@ -7,6 +7,9 @@ struct ConnectionTester {
     static let shared = ConnectionTester()
 
     var client: any LLMClient = HTTPLLMClient(session: HTTPLLMClient.settingsSession())
+    var listModels: @Sendable (Connection) async -> [String]? = { try? await firstPageLister.listModels(for: $0, apiKey: nil) }
+    private static let firstPageLister = HTTPModelLister(
+        session: ProviderTransport.makeSession(requestTimeout: 5, resourceTimeout: 5), pageLimit: 1)
 
     func reasoningSummary(for connection: Connection) async -> String? {
         await client.reasoningOutcome(for: connection).map { "Reasoning: \($0.summary)" }
@@ -21,6 +24,10 @@ struct ConnectionTester {
                 ? .failed(Self.naming(connection.model, in: "The model service returned an empty response."))
                 : .passed
         } catch {
+            if Self.isMissingModel(error, connection: connection), !Task.isCancelled,
+               await listModels(connection)?.contains(connection.model) == true {
+                return .failed(Self.listedButRefused(connection.model))
+            }
             let message = Self.failureMessage(for: error, connection: connection)
             return .failed(Self.modelMatters(error) ? Self.naming(connection.model, in: message) : message)
         }
@@ -29,6 +36,10 @@ struct ConnectionTester {
     static func modelMatters(_ error: Error) -> Bool {
         guard case let ProviderTransportError.http(status, _) = error else { return false }
         return [400, 404, 405, 422].contains(status)
+    }
+
+    static func listedButRefused(_ model: String) -> String {
+        "The service lists “\(model)” among its models but refused to run it. Some services expect another form of the ID, such as one with a provider name in front. Check the service's documentation for the ID to use."
     }
 
     static func isMissingModel(_ error: Error, connection: Connection) -> Bool {
