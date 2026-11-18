@@ -4,6 +4,7 @@ import { request as httpRequest } from "node:http"
 
 const configPath: string | null = null
 const loadedFrom: string | null = null
+const installedFor: string | null = null
 
 export type Response = { status: number; ok: boolean; text: string }
 export type Exchange = { response: Promise<Response>; cancel: () => void }
@@ -95,6 +96,7 @@ const late = { late: true } as const
 const unreachable = { unreachable: true } as const
 const freshReasons = ["startup", "new", "fork"]
 const features = ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check", "steer", "merge"]
+const ompFeatures = ["focus", "focusDefinitions", "label", "readiness", "notify", "check", "steer", "merge"]
 
 const readAloudTool = "tell_me_when_done"
 
@@ -102,7 +104,41 @@ export function readAloudToolName(plugin: string): string {
   return `${plugin.replace(/[^A-Za-z0-9]+/g, "_")}_${readAloudTool}`
 }
 
-export function connector(pi: ExtensionAPI, host: Host, settings: Settings): void {
+type Adapter = {
+  agent: string
+  version: () => string
+  features: string[]
+  title: () => string | undefined
+  quiet: (context: ExtensionContext) => boolean
+  idleDelivery?: "followUp"
+  acceptsWhenSent: boolean
+}
+
+type Core = {
+  start: (id: string, reason: string, context: ExtensionContext) => void
+  end: () => void
+  typed: () => void
+  accepted: (text: string) => void
+  turnStarted: () => void
+  turnFinished: (aborted: boolean) => void
+  cleared: () => void
+  paused: (on: boolean) => void
+  assistantEnded: (message: unknown) => void
+  userStarted: (message: unknown) => void
+  compacting: (on: boolean) => void
+  titled: (text: string) => void
+  toolStarted: (id: string, name: string, args: unknown) => void
+  toolEnded: (id: string) => void
+  waitBegan: (kind: string | undefined, title: string | undefined) => void
+  waitEnded: () => void
+}
+
+function hostedByOmp(pi: ExtensionAPI): boolean {
+  const own = (pi as unknown as { pi?: { VERSION?: unknown; getAgentDir?: unknown } }).pi
+  return !!own && typeof own.VERSION === "string" && typeof own.getAgentDir === "function"
+}
+
+function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter): Core {
   const instance = Math.random().toString(36).slice(2, 10)
   let config: Config | null = null
   let token = ""
@@ -150,6 +186,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   let stopKeys: (() => void) | null = null
   let polling: Exchange | null = null
   let offered = false
+  let clears = 0
 
   const outbox: Item[] = []
   let outboxBytes = 0
@@ -417,13 +454,13 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     const attempt = { target, generation, connection: Math.random().toString(36).slice(2, 12), result: Promise.resolve(false) }
     const render = () => JSON.stringify(quiet ? {
       op: "hello", protocol: (config as Config).protocol, installation: (config as Config).installation,
-      version: (config as Config).version, agent: "pi", agentVersion: "",
-      instance, connection: attempt.connection, session: target, pid: host.pid, cwd, features, idle: idle(), gap: freshSession !== target,
+      version: (config as Config).version, agent: adapter.agent, agentVersion: adapter.version(),
+      instance, connection: attempt.connection, session: target, pid: host.pid, cwd, features: adapter.features, idle: idle(), gap: freshSession !== target,
     } : {
       op: "hello", protocol: (config as Config).protocol, installation: (config as Config).installation,
-      version: (config as Config).version, agent: "pi", agentVersion: "",
+      version: (config as Config).version, agent: adapter.agent, agentVersion: adapter.version(),
       instance, connection: attempt.connection, session: target, pid: host.pid, cwd,
-      features, title: pi.getSessionName() || undefined, prompts, waiting: waiting || undefined,
+      features: adapter.features, title: adapter.title() || undefined, prompts, waiting: waiting || undefined,
       idle: idle(), gap: freshSession !== target, turn: currentTurn || undefined,
       environment: terminalPlace(),
     })
@@ -645,8 +682,9 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
   async function submit(cmd: Command, gen: number): Promise<void> {
     track(cmd.id, { state: "holding" })
     const expected = cmd.expectedSession
+    const clearsAtStart = clears
     const hold = (): string | null => {
-      if (!current(expected, gen)) return "sessionChanged"
+      if (!current(expected, gen) || clears !== clearsAtStart) return "sessionChanged"
       if (quiet) return "disconnected"
       if (!(host.now() < (cmd.expiresAt || 0))) return "expired"
       if (typeof cmd.expectedPrompts === "number" && cmd.expectedPrompts !== prompts) return "typedSince"
@@ -673,12 +711,14 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     pending.push(item)
     track(cmd.id, { state: "handed", handedAt: host.now(), withDraft: draft.trim() ? true : undefined })
     try {
-      const deliverAs = idle() ? "followUp" : "steer"
+      const deliverAs = idle() ? adapter.idleDelivery : "steer"
       item.steer = deliverAs === "steer"
       if (draft.trim() && ctx) ctx.ui.setEditorText("")
-      const sent: unknown = pi.sendUserMessage(attached.length ? [{ type: "text", text }, ...attached] : text, { deliverAs })
+      const sent: unknown = pi.sendUserMessage(attached.length ? [{ type: "text", text }, ...attached] : text, deliverAs ? { deliverAs } : {})
       if (sent && typeof (sent as Promise<void>).then === "function") {
-        (sent as Promise<void>).then(undefined, (err: unknown) => {
+        (sent as Promise<void>).then(() => {
+          if (adapter.acceptsWhenSent && item.steer) accepted(text)
+        }, (err: unknown) => {
           const index = pending.indexOf(item)
           if (index < 0) return
           pending.splice(index, 1)
@@ -709,7 +749,7 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     staleWatch = host.after(staleCheck, () => {
       staleWatch = null
       if (currentTurn === null || !session) return
-      idleChecks = ctx && ctx.isIdle() ? idleChecks + 1 : 0
+      idleChecks = ctx && adapter.quiet(ctx) ? idleChecks + 1 : 0
       if (idleChecks >= 2) closeStaleTurn()
       else scheduleStaleCheck()
     })
@@ -985,104 +1025,283 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     })
   }
 
-  pi.on("session_start", (event, context) => {
-    if (context.mode !== "tui") return
-    adopt(context.sessionManager.getSessionId(), event.reason, context)
-    if (!looping) {
-      looping = true
-      quietly(sender())
-      quietly(pollLoop())
-    }
-  })
-
-  pi.on("session_shutdown", () => {
-    if (session) leave()
-  })
-
-  pi.on("input", (event) => {
-    if (!session) return
-    if (event.source === "extension" && event.streamingBehavior === "steer") accepted(event.text || "")
-    if (event.source === "interactive") {
-      if (currentTurn !== null && ctx && ctx.isIdle()) closeStaleTurn()
+  return {
+    start(id, reason, context) {
+      adopt(id, reason, context)
+      if (!looping) {
+        looping = true
+        quietly(sender())
+        quietly(pollLoop())
+      }
+    },
+    end() {
+      if (session) leave()
+    },
+    typed() {
+      if (!session) return
+      if (currentTurn !== null && ctx && adapter.quiet(ctx)) closeStaleTurn()
       prompts += 1
       observe({ op: "typed", session, prompts })
+    },
+    accepted(text) {
+      if (!session) return
+      accepted(text)
+    },
+    turnStarted() {
+      if (!session || currentTurn !== null) return
+      lastAnswer = ""
+      said = ""
+      lastFailed = false
+      lastPrompt = null
+      repliedThisRun = false
+      turns += 1
+      watchForStaleTurn()
+      currentTurn = `${instance}.${turns}`
+      observe({ op: "turnStarted", session, turn: currentTurn })
+    },
+    turnFinished(aborted) {
+      if (!session) return
+      stopStaleWatch()
+      currentTurn = null
+      if (aborted) observe({ op: "turnComplete", session, reason: "aborted" })
+      else if (lastFailed) observe({ op: "turnComplete", session, reason: "error" })
+      else observe({ op: "turnComplete", session, reason: "complete", answer: boundedAnswer(lastAnswer), prompt: lastPrompt ?? undefined })
+      lastAnswer = ""
+      lastPrompt = null
+      lastFailed = false
+    },
+    paused(on) {
+      if (on) stopStaleWatch()
+      else if (session && currentTurn !== null && staleWatch === null) watchForStaleTurn()
+    },
+    cleared() {
+      clears += 1
+      for (const item of pending.splice(0)) item.cancel()
+      steered.length = 0
+      if (session && currentTurn !== null) closeStaleTurn()
+    },
+    assistantEnded(message) {
+      if (!session || !message || (message as { role?: string }).role !== "assistant") return
+      const stop = (message as { stopReason?: string }).stopReason
+      lastFailed = stop === "error" || stop === "aborted"
+      lastAnswer = lastFailed ? "" : messageText(message)
+      repliedThisRun = true
+      if (lastAnswer.trim()) said = lastAnswer.trim().slice(-waitingSaidLimit)
+    },
+    userStarted(message) {
+      const role = (message as { role?: string } | undefined)?.role
+      if (session && role === "custom" && repliedThisRun) lastPrompt = null
+      if (!session || !message || role !== "user") return
+      received(message)
+    },
+    compacting(on) {
+      compacting = on
+    },
+    titled(text) {
+      if (!session) return
+      observe({ op: "title", session, text })
+    },
+    toolStarted(id, name, args) {
+      tools.push({ id, name, args })
+    },
+    toolEnded(id) {
+      const index = tools.findIndex((tool) => tool.id === id)
+      if (index >= 0) tools.splice(index, 1)
+    },
+    waitBegan(kind, title) {
+      promptsOpen += 1
+      if (promptsOpen > 1 || !session) return
+      waiting = waitingFor(kind, title, tools[tools.length - 1], said)
+      observe({ op: "waiting", session, waiting })
+    },
+    waitEnded() {
+      if (promptsOpen === 0) return
+      promptsOpen -= 1
+      if (promptsOpen > 0 || !session) return
+      waiting = null
+      observe({ op: "waiting", session })
+    },
+  }
+}
+
+export function connector(pi: ExtensionAPI, host: Host, settings: Settings): void {
+  if (hostedByOmp(pi)) return
+  const c = core(pi, host, settings, {
+    agent: "pi", version: () => "", features, title: () => pi.getSessionName(),
+    quiet: (context) => context.isIdle(), idleDelivery: "followUp", acceptsWhenSent: false,
+  })
+
+  pi.on("session_start", (event, context) => {
+    if (context.mode !== "tui") return
+    c.start(context.sessionManager.getSessionId(), event.reason, context)
+  })
+
+  pi.on("session_shutdown", () => c.end())
+
+  pi.on("input", (event) => {
+    if (event.source === "extension" && event.streamingBehavior === "steer") c.accepted(event.text || "")
+    if (event.source === "interactive") c.typed()
+  })
+
+  pi.on("agent_start", () => c.turnStarted())
+
+  pi.on("agent_settled", (event) => c.turnFinished(!!event.aborted))
+
+  pi.on("message_end", (event) => c.assistantEnded(event.message))
+
+  pi.on("message_start", (event) => c.userStarted(event.message))
+
+  pi.on("session_before_compact", () => c.compacting(true))
+  pi.on("session_compact", () => c.compacting(false))
+  pi.on("session_compact_failed", () => c.compacting(false))
+
+  pi.on("session_info_changed", (event) => c.titled(event.name || ""))
+
+  pi.on("tool_execution_start", (event) => c.toolStarted(event.toolCallId, event.toolName, event.args))
+
+  pi.on("tool_execution_end", (event) => c.toolEnded(event.toolCallId))
+
+  pi.on("ui_prompt_start", (event) => c.waitBegan(event.kind, event.title))
+
+  pi.on("ui_prompt_end", () => c.waitEnded())
+}
+
+type OmpEvents = (event: string, handler: (event: any, context: any) => unknown) => void
+
+export function ompConnector(pi: ExtensionAPI, host: Host, settings: Settings): void {
+  if (!hostedByOmp(pi)) return
+  const own = (pi as unknown as { pi: { VERSION: string } }).pi
+  const on = pi.on.bind(pi) as unknown as OmpEvents
+  let context: ExtensionContext | null = null
+  let session: string | null = null
+  let paused = false
+  let cleared = false
+  let lastStop: string | undefined
+  let sentTitle = ""
+  const waits = new Set<string>()
+
+  const title = (): string => {
+    const source = context ? (context.sessionManager as unknown as { titleSource?: string }).titleSource : undefined
+    return source === "user" ? pi.getSessionName() || "" : ""
+  }
+
+  const c = core(pi, host, settings, {
+    agent: "omp", version: () => String(own.VERSION), features: ompFeatures, title: () => title() || undefined,
+    quiet: (ctx) => ctx.isIdle() && !paused, acceptsWhenSent: true,
+  })
+
+  const retitle = () => {
+    const now = title()
+    if (now === sentTitle) return
+    sentTitle = now
+    c.titled(now)
+  }
+
+  const begin = (id: string, kind: string, heading?: string) => {
+    if (waits.has(id)) return
+    waits.add(id)
+    c.waitBegan(kind, heading)
+  }
+
+  const finish = (id: string) => {
+    if (waits.delete(id)) c.waitEnded()
+  }
+
+  const adopt = (ctx: ExtensionContext, reason: string) => {
+    if (ctx.mode !== "tui") return
+    waits.clear()
+    paused = false
+    cleared = false
+    lastStop = undefined
+    context = ctx
+    session = ctx.sessionManager.getSessionId()
+    sentTitle = title()
+    c.start(session, reason, ctx)
+  }
+
+  on("session_start", (_event, ctx) => adopt(ctx, "resume"))
+
+  on("session_switch", (event, ctx) => adopt(ctx, event.reason))
+
+  on("session_branch", (_event, ctx) => {
+    if (session !== null && ctx.sessionManager.getSessionId() !== session) adopt(ctx, "fork")
+  })
+
+  on("session_clear", () => {
+    for (const id of [...waits]) finish(id)
+    paused = false
+    cleared = true
+    lastStop = undefined
+    c.compacting(false)
+    c.cleared()
+  })
+
+  on("session_shutdown", () => {
+    waits.clear()
+    session = null
+    context = null
+    c.end()
+  })
+
+  on("input", (event) => {
+    if (event.source !== "interactive") return
+    c.typed()
+    retitle()
+  })
+
+  on("agent_start", () => {
+    paused = false
+    cleared = false
+    c.paused(false)
+    c.turnStarted()
+    retitle()
+  })
+
+  on("agent_end", (event) => {
+    if (event.willContinue) {
+      paused = true
+      c.paused(true)
+      return
     }
+    paused = false
+    for (const id of [...waits]) finish(id)
+    c.compacting(false)
+    if (cleared) {
+      cleared = false
+      return
+    }
+    c.turnFinished(lastStop === "aborted")
+    lastStop = undefined
+    retitle()
   })
 
-  pi.on("agent_start", () => {
-    if (!session || currentTurn !== null) return
-    lastAnswer = ""
-    said = ""
-    lastFailed = false
-    lastPrompt = null
-    repliedThisRun = false
-    turns += 1
-    watchForStaleTurn()
-    currentTurn = `${instance}.${turns}`
-    observe({ op: "turnStarted", session, turn: currentTurn })
+  on("message_end", (event) => {
+    if (event.message && event.message.role === "assistant") lastStop = event.message.stopReason
+    c.assistantEnded(event.message)
   })
 
-  pi.on("agent_settled", (event) => {
-    if (!session) return
-    stopStaleWatch()
-    currentTurn = null
-    if (event.aborted) observe({ op: "turnComplete", session, reason: "aborted" })
-    else if (lastFailed) observe({ op: "turnComplete", session, reason: "error" })
-    else observe({ op: "turnComplete", session, reason: "complete", answer: boundedAnswer(lastAnswer), prompt: lastPrompt ?? undefined })
-    lastAnswer = ""
-    lastPrompt = null
-    lastFailed = false
+  on("message_start", (event) => c.userStarted(event.message))
+
+  on("session_before_compact", () => c.compacting(true))
+  on("auto_compaction_start", () => c.compacting(true))
+  on("session_compact", () => c.compacting(false))
+  on("auto_compaction_end", () => c.compacting(false))
+
+  on("tool_execution_start", (event) => {
+    c.toolStarted(event.toolCallId, event.toolName, event.args)
+    if (event.toolName === "ask") begin(`tool:${event.toolCallId}`, "select")
   })
 
-  pi.on("message_end", (event) => {
-    if (!session || !event.message || (event.message as { role?: string }).role !== "assistant") return
-    const stop = (event.message as { stopReason?: string }).stopReason
-    lastFailed = stop === "error" || stop === "aborted"
-    lastAnswer = lastFailed ? "" : messageText(event.message)
-    repliedThisRun = true
-    if (lastAnswer.trim()) said = lastAnswer.trim().slice(-waitingSaidLimit)
+  on("tool_execution_end", (event) => {
+    finish(`tool:${event.toolCallId}`)
+    c.toolEnded(event.toolCallId)
   })
 
-  pi.on("message_start", (event) => {
-    const role = (event.message as { role?: string } | undefined)?.role
-    if (session && role === "custom" && repliedThisRun) lastPrompt = null
-    if (!session || !event.message || role !== "user") return
-    received(event.message)
-  })
+  on("tool_approval_requested", (event) => begin(`approval:${event.toolCallId}`, "confirm"))
+  on("tool_approval_resolved", (event) => finish(`approval:${event.toolCallId}`))
 
-  pi.on("session_before_compact", () => { compacting = true })
-  pi.on("session_compact", () => { compacting = false })
-  pi.on("session_compact_failed", () => { compacting = false })
-
-  pi.on("session_info_changed", (event) => {
-    if (!session) return
-    observe({ op: "title", session, text: event.name || "" })
-  })
-
-  pi.on("tool_execution_start", (event) => {
-    tools.push({ id: event.toolCallId, name: event.toolName, args: event.args })
-  })
-
-  pi.on("tool_execution_end", (event) => {
-    const index = tools.findIndex((tool) => tool.id === event.toolCallId)
-    if (index >= 0) tools.splice(index, 1)
-  })
-
-  pi.on("ui_prompt_start", (event) => {
-    promptsOpen += 1
-    if (promptsOpen > 1 || !session) return
-    waiting = waitingFor(event.kind, event.title, tools[tools.length - 1], said)
-    observe({ op: "waiting", session, waiting })
-  })
-
-  pi.on("ui_prompt_end", () => {
-    if (promptsOpen === 0) return
-    promptsOpen -= 1
-    if (promptsOpen > 0 || !session) return
-    waiting = null
-    observe({ op: "waiting", session })
-  })
-
+  on("plan_review_requested", (event) => begin(`plan:${event.reviewId}`, "confirm", event.title))
+  on("plan_review_resolved", (event) => finish(`plan:${event.reviewId}`))
 }
 
 type Waiting = { kind?: string; title?: string; tool?: string; detail?: string; said?: string }
@@ -1198,5 +1417,6 @@ export function nodeHost(pi: ExtensionAPI): Host {
 }
 
 export default function (pi: ExtensionAPI): void {
-  connector(pi, nodeHost(pi), { configPath, loadedFrom })
+  const start = installedFor === "omp" ? ompConnector : connector
+  start(pi, nodeHost(pi), { configPath, loadedFrom })
 }

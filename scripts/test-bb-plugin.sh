@@ -13,7 +13,7 @@ if [ -z "$NODE" ]; then
   echo "test-bb-plugin: node was not found (set NODE=/path/to/node); connector tests need $MIN_VERSION or later" >&2
   exit 2
 fi
-VERSION="$("$NODE" --version 2>/dev/null | sed 's/^v//')"
+VERSION="$("$NODE" --version 2>/dev/null | sed 's/^v//' || true)"
 if [ -z "$VERSION" ] || [ "$(printf '%s\n%s\n' "$MIN_VERSION" "$VERSION" | sort -V | head -1)" != "$MIN_VERSION" ]; then
   echo "test-bb-plugin: node ${VERSION:-unknown} is older than the validated $MIN_VERSION" >&2
   exit 2

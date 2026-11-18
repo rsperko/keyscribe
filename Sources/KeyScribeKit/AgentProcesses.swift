@@ -5,13 +5,13 @@ public struct AgentCandidate: Equatable, Sendable {
     public var pid: Int
     public var startedAt: Int?
     public var cwd: String
-    public var setup: String
+    public var setup: String?
     public var tty: String?
     public var tool: String?
     public var runtime: String?
 
     public init(
-        agent: String, pid: Int, startedAt: Int?, cwd: String, setup: String, tty: String? = nil, tool: String? = nil, runtime: String? = nil
+        agent: String, pid: Int, startedAt: Int?, cwd: String, setup: String?, tty: String? = nil, tool: String? = nil, runtime: String? = nil
     ) {
         self.tool = tool
         self.runtime = runtime
@@ -55,6 +55,8 @@ public enum AgentProcesses {
         public var setupVariable: String
         public var defaultSetup: String
         public var needsTerminal: Bool
+        public var profileFlags: [String]
+        public var profileVariables: [String]
 
         static let shells: Set<String> = ["sh", "bash", "zsh", "dash", "ksh", "fish"]
         static let runtimes: [String: Set<String>] = [
@@ -63,7 +65,7 @@ public enum AgentProcesses {
 
         public init(
             agent: String, command: String, packages: [String], anyVersionName: Bool, setupVariable: String, defaultSetup: String,
-            needsTerminal: Bool
+            needsTerminal: Bool, profileFlags: [String] = [], profileVariables: [String] = []
         ) {
             self.agent = agent
             self.command = command
@@ -72,6 +74,8 @@ public enum AgentProcesses {
             self.setupVariable = setupVariable
             self.defaultSetup = defaultSetup
             self.needsTerminal = needsTerminal
+            self.profileFlags = profileFlags
+            self.profileVariables = profileVariables
         }
 
         public static func unwrapped(_ name: String) -> String {
@@ -121,9 +125,15 @@ public enum AgentProcesses {
             }
         }
 
-        func setup(_ process: TerminalProcess, home: String) -> String {
+        func setup(_ process: TerminalProcess, home: String) -> String? {
+            guard !usesProfile(process) else { return nil }
             let raw = process.environment[setupVariable].flatMap { $0.isEmpty ? nil : $0 } ?? defaultSetup
             return FolderPath.resolve(raw, home: home, relativeTo: process.directory ?? "/")
+        }
+
+        func usesProfile(_ process: TerminalProcess) -> Bool {
+            let flagged = process.arguments.contains { argument in profileFlags.contains { argument == $0 || argument.hasPrefix($0 + "=") } }
+            return flagged || profileVariables.contains { !(process.environment[$0] ?? "").isEmpty }
         }
 
         public func isOwnName(_ name: String) -> Bool {
@@ -157,7 +167,7 @@ public enum AgentProcesses {
 
         public var setups: [String] {
             var seen: Set<String> = []
-            return candidates.map(\.setup).filter { seen.insert($0).inserted }
+            return candidates.compactMap(\.setup).filter { seen.insert($0).inserted }
         }
     }
 

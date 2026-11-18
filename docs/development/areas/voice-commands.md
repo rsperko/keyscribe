@@ -316,6 +316,18 @@ every rule above applies to it, with these sharpenings:
   the run (`agent-loop.js`). A steer Pi carries into a new run belongs to that run; a run that starts without a
   prompt digest keeps waiting for the `absorbed` (`AgentHub` `.turnStarted`). A later extension can still consume an
   accepted steer: it reads as sent, and no reply follows it.
+- **Pi and omp share one connector core, with an adapter per agent.** `Resources/PiConnector/index.ts` holds the core
+  (queue, poll loop, submissions, receipts, read aloud, focus) and each agent's adapter for the signals that differ;
+  the installer writes `installedFor` and gives each agent its own folder under `extensions/` (Pi's keeps the plugin
+  name, omp's adds `-omp`), and an adapter stays inert in another agent's host, so a folder both agents load holds
+  both connectors and never runs one in the wrong agent. A fix in the core is a fix for both: run both suites
+  (`make test-pi-connector`, `make test-omp-connector`). omp's adapter rests on behavior observed on omp 18.22.2
+  (2026-11-18), not on its docs: an idle conversation is never sent a follow-up (omp holds it until some later
+  run); a steer is confirmed when its send resolves (omp gives an extension's message no `input` event); delivery
+  holds while a tool approval, a plan review or the `ask` tool is open (a steer would deny or dismiss it); and only
+  an `agent_end` without `willContinue` finishes a turn (omp reports itself idle while background work keeps the run
+  open). On the Swift side both agents are an `ExtensionAgent` descriptor over `ExtensionConnector` and
+  `ExtensionDiscovery`, so the agent's own folder holds only its rule, CLI parsing and copy.
 - **A dictation for the conversation in front is typed into it, so it is the user's own prompt.** A connector's own
   prompt runs once the agent is idle (Claude Code queues a plugin's prompt behind the turn; measured on 2.1.325,
   2026-11-14), and only a prompt the user enters is recorded as theirs. So for the conversation in front,

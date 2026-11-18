@@ -2,7 +2,7 @@ import Combine
 import Foundation
 import KeyScribeKit
 
-struct AgentConnectorCopy {
+struct AgentConnectorCopy: Sendable {
     var help: String
     var reloadHint: String
     var uninstallTitle: String
@@ -18,9 +18,9 @@ struct AgentConnectorCopy {
     var noReason: String
     var manualUninstallLead: String
     var manualUninstallAfterDisconnect: String
-    var stillConnected: (Int) -> String
+    var stillConnected: @Sendable (Int) -> String
     var toolTooOldLabel = ""
-    var toolTooOldAdvice: (String) -> String = { _ in "" }
+    var toolTooOldAdvice: @Sendable (String) -> String = { _ in "" }
     var setupTitle = "Connector"
     var purpose: String?
     var installNote: String?
@@ -259,6 +259,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
         let ticket = refreshes
         let found = await connector.check(tool: tool, target: target)
         guard ticket == refreshes, operation == nil else { return }
+        if case .failed = found { failedOperation = nil }
         state = found
         if case .toolNotWorking = found { lookAgainAfterMiss() }
     }

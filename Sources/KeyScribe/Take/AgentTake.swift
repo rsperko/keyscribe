@@ -187,7 +187,8 @@ final class AgentTake {
         return AgentRoster(
             frozen: snapshot.conversations, live: agents.directory.conversations, focused: host.agentFocus?.id,
             namesAvailable: snapshot.namesAvailable, disconnected: snapshot.namesAvailable ? agents.disconnected : [],
-            prompts: agents.openPrompts, starting: host.agentNewConversation.flatMap { agents.newConversationName($0.id) })
+            prompts: agents.openPrompts, starting: host.agentNewConversation.flatMap { agents.newConversationName($0.id) },
+            agentNames: agents.agentNames)
     }
 
     func finish(routed: PhaseBResult, heard: String, mode: Mode) async {

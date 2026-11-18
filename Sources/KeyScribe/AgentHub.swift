@@ -352,6 +352,10 @@ final class AgentHub {
         directory.conversations.first { $0.id == id }?.handle
     }
 
+    var agentNames: [String: String] {
+        Dictionary(discoveries.map { ($0.kind.id, $0.kind.displayName) }, uniquingKeysWith: { first, _ in first })
+    }
+
     func kind(of id: String) -> AgentKind? {
         guard let conversation = directory.conversations.first(where: { $0.id == id }) else { return nil }
         return discoveries.first { $0.kind.id == conversation.runningAgent }?.kind
@@ -1065,6 +1069,10 @@ final class AgentHub {
 
     static let footerNameLimit = 20
 
+    static func updateStep(_ kind: AgentKind) -> String {
+        kind.reloadCommand ?? "restart"
+    }
+
     static func footerLabel(_ handle: String, reload: String?) -> String {
         guard let reload else { return "\u{201C}\(handle)\u{201D}" }
         let name = handle.count > footerNameLimit
@@ -1077,7 +1085,7 @@ final class AgentHub {
             guard features[conversation.id]?.contains("label") == true else { continue }
             let loaded = loadedVersions[conversation.id]
             let bundled = bundledVersion(conversation.runningAgent)
-            let reload = loaded != nil && bundled != nil && loaded != bundled ? kind(of: conversation.id)?.reloadCommand : nil
+            let reload = loaded != nil && bundled != nil && loaded != bundled ? kind(of: conversation.id).map(Self.updateStep) : nil
             let label = Self.footerLabel(conversation.handle, reload: reload)
             guard labels[conversation.id] != label else { continue }
             labels[conversation.id] = label

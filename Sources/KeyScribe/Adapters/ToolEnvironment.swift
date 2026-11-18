@@ -201,6 +201,12 @@ final class ToolEnvironment: @unchecked Sendable {
         return result
     }
 
+    func run(_ argv: [String], tool: String, agent: String) async -> ToolCLI.Ran {
+        let environment = runEnvironment(tool: tool, agent: agent, base: appEnvironment)
+        let execute = execute
+        return await Task.detached { execute(argv, Self.versionTimeout, environment, Self.outputLimit, true) }.value
+    }
+
     static func modification(of path: String) -> Date? {
         let real = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
         return (try? FileManager.default.attributesOfItem(atPath: real))?[.modificationDate] as? Date

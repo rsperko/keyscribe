@@ -28,7 +28,8 @@ public struct AgentRoster: Equatable, Sendable {
 
     public init(
         frozen: [AgentConversation], live: [AgentConversation], focused: String?, namesAvailable: Bool = true,
-        disconnected: [AgentConversation] = [], prompts: [String: AgentPrompt] = [:], starting: String? = nil
+        disconnected: [AgentConversation] = [], prompts: [String: AgentPrompt] = [:], starting: String? = nil,
+        agentNames: [String: String] = [:]
     ) {
         self.namesAvailable = namesAvailable
         self.starting = starting
@@ -39,7 +40,7 @@ public struct AgentRoster: Equatable, Sendable {
             let now = byId[conversation.id]
             return Row(
                 id: conversation.id, number: index + 1, name: conversation.handle,
-                detail: Self.detail(conversation, namingAgent: mixed),
+                detail: Self.detail(conversation, naming: mixed ? agentNames[conversation.agent] ?? conversation.agent.capitalized : nil),
                 state: now.map { Self.stateLabel($0, prompt: prompts[$0.id]) } ?? "Ended",
                 available: now.map(Self.isAvailable) ?? false,
                 target: conversation.id == focused)
@@ -96,9 +97,9 @@ public struct AgentRoster: Equatable, Sendable {
         return title
     }
 
-    private static func detail(_ conversation: AgentConversation, namingAgent: Bool) -> String {
+    private static func detail(_ conversation: AgentConversation, naming agent: String?) -> String {
         let parts: [String?] = [
-            namingAgent ? conversation.agent.capitalized : nil, distinctTitle(conversation),
+            agent, distinctTitle(conversation),
             URL(fileURLWithPath: conversation.cwd).lastPathComponent,
         ]
         return parts.compactMap(\.self).joined(separator: " \u{00B7} ")

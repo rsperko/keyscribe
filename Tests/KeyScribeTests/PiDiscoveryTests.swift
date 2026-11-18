@@ -17,8 +17,8 @@ struct PiDiscoveryTests {
         var deliver: (@MainActor () -> Void)?
     }
 
-    private func make(_ processes: Processes = Processes()) -> PiDiscovery {
-        PiDiscovery(processStart: processes.start, isRunning: processes.isRunning, processes: { processes.found })
+    private func make(_ processes: Processes = Processes()) -> ExtensionDiscovery {
+        ExtensionDiscovery(kind: .pi, processStart: processes.start, isRunning: processes.isRunning, processes: { processes.found })
     }
 
     private func hello(_ session: String, pid: Int = 10, cwd: String? = "/src/api", title: String? = nil, idle: Bool = true, features: [String] = ["readiness"]) -> AgentEvent {
@@ -118,7 +118,7 @@ struct PiDiscoveryTests {
 
     @Test func aHelloArrivingWhileAScanIsCheckingProcessesSurvivesIt() async {
         let during = DuringScan()
-        let discovery = PiDiscovery(
+        let discovery = ExtensionDiscovery(kind: .pi,
             processStart: Processes().start,
             isRunning: { pid in
                 DispatchQueue.main.async { MainActor.assumeIsolated { during.deliver?() } }
@@ -199,11 +199,11 @@ struct PiDiscoveryTests {
         processes.found = AgentProcesses.Found(candidates: [candidate(11, started: 1_700_000_050)], stale: true)
         let discovery = make(processes)
         guard case .found(_, let stale) = await discovery.scan(rereadingTitles: false) else { Issue.record("unreadable"); return }
-        #expect(stale.problem == PiDiscovery.partialProblem)
+        #expect(stale.problem == ExtensionDiscovery.partialProblem(.pi))
         #expect(stale.candidates.map(\.pid) == [11])
         processes.found = AgentProcesses.Found(candidates: [candidate(12, started: 1_700_000_060)], unreadable: [11])
         guard case .found(_, let partial) = await discovery.scan(rereadingTitles: false) else { Issue.record("unreadable"); return }
-        #expect(partial.problem == PiDiscovery.partialProblem)
+        #expect(partial.problem == ExtensionDiscovery.partialProblem(.pi))
         processes.found = AgentProcesses.Found(candidates: [candidate(12, started: 1_700_000_060)])
         guard case .found(_, let whole) = await discovery.scan(rereadingTitles: false) else { Issue.record("unreadable"); return }
         #expect(whole.problem == nil)
@@ -242,7 +242,7 @@ struct PiDiscoveryTests {
     @Test func aConnectedPiWhoseProcessCannotBeReadTakesItsFolderFromItsInstallation() async {
         let processes = Processes()
         processes.found = AgentProcesses.Found(candidates: [], unreadable: [10])
-        let discovery = PiDiscovery(
+        let discovery = ExtensionDiscovery(kind: .pi,
             processStart: processes.start, isRunning: processes.isRunning, processes: { processes.found },
             folder: { $0 == "inst-work" ? "/Users/a/pi-work" : nil })
         discovery.observe(.hello(.init(
@@ -253,7 +253,7 @@ struct PiDiscoveryTests {
         }
         #expect(sessions.map(\.setup) == ["/Users/a/pi-work"])
         #expect(extras.setups == ["/Users/a/pi-work"])
-        #expect(extras.problem == PiDiscovery.partialProblem)
+        #expect(extras.problem == ExtensionDiscovery.partialProblem(.pi))
     }
 
     @Test func theInstallationsFolderOutranksWhatTheProcessSeemedToUse() async {
@@ -261,7 +261,7 @@ struct PiDiscoveryTests {
         processes.found = AgentProcesses.Found(candidates: [
             AgentCandidate(agent: "pi", pid: 10, startedAt: 1_700_000_000_000, cwd: "/src/api", setup: "/Users/a/.pi/agent"),
         ])
-        let discovery = PiDiscovery(
+        let discovery = ExtensionDiscovery(kind: .pi,
             processStart: processes.start, isRunning: processes.isRunning, processes: { processes.found }, folder: { _ in "/Users/a/pi-work" })
         discovery.observe(.hello(.init(
             protocolVersion: 2, agent: "pi", agentVersion: "", instance: "i10", session: "s1", pid: 10, idle: true, installation: "inst-work")))
@@ -271,7 +271,7 @@ struct PiDiscoveryTests {
 
     @Test func aFolderTheLoginShellNamesIsListedWithoutAnyConversation() async {
         let processes = Processes()
-        let discovery = PiDiscovery(
+        let discovery = ExtensionDiscovery(kind: .pi,
             processStart: processes.start, isRunning: processes.isRunning, processes: { processes.found }, declared: { "/Users/a/pi-shell" })
         guard case .found(_, let extras) = await discovery.scan(rereadingTitles: false) else { return }
         #expect(extras.setups == ["/Users/a/pi-shell"])

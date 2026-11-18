@@ -30,79 +30,7 @@ enum PiCLI {
         return nil
     }
 
-    static func isSupported(_ version: [Int]) -> Bool {
-        version.lexicographicallyPrecedes(minimumVersion) == false
-    }
-
-    static func describe(_ version: [Int]) -> String { version.map(String.init).joined(separator: ".") }
-}
-
-struct PiConnectorInstaller {
-    let setupFolder: URL
-    let pluginName: String
-    let socketPath: String
-    let tokenPath: String
-    let readyPath: String
-    let script: String
-    let surfaces: ConnectorSurfaces
-
-    static func defaultSetupFolder(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
-        home.appendingPathComponent(".pi/agent", isDirectory: true)
-    }
-
-    static func pluginDir(in setupFolder: URL, pluginName: String) -> URL {
-        setupFolder.appendingPathComponent("extensions", isDirectory: true).appendingPathComponent(pluginName, isDirectory: true)
-    }
-
-    var pluginDir: URL { Self.pluginDir(in: setupFolder, pluginName: pluginName) }
-    var scriptURL: URL { pluginDir.appendingPathComponent("index.ts") }
-    var configURL: URL { pluginDir.appendingPathComponent("keyscribe.json") }
-
-    static func manualUninstall(pluginDir: URL, home: String = FileManager.default.homeDirectoryForCurrentUser.path) -> [String] {
-        ["rm -r \(ShellWord.path(pluginDir.path, home: home))"]
-    }
-
-    private func config(installation: String) -> String {
-        PiConnectorFiles.configJSON(
-            socketPath: socketPath, tokenPath: tokenPath, readyPath: readyPath, installation: installation, plugin: pluginName,
-            version: PiConnectorFiles.version(for: script, surfaces: surfaces), surfaces: surfaces)
-    }
-
-    func install(installation: String) throws {
-        try FileManager.default.createDirectory(at: pluginDir, withIntermediateDirectories: true)
-        let files: [(URL, String)] = [
-            (scriptURL, PiConnectorFiles.installedScript(script, installation: installation, configPath: configURL.path)),
-            (configURL, config(installation: installation)),
-        ]
-        for (url, text) in files {
-            try Data(text.utf8).write(to: url, options: .atomic)
-        }
-    }
-
-    func uninstall() throws {
-        guard FileManager.default.fileExists(atPath: pluginDir.path) else { return }
-        try FileManager.default.removeItem(at: pluginDir)
-    }
-
-    enum Installed: Equatable {
-        case absent
-        case current
-        case other(version: String)
-    }
-
-    func installed(installation: String?) -> Installed {
-        guard FileManager.default.fileExists(atPath: scriptURL.path), let data = FileManager.default.contents(atPath: configURL.path),
-              let config = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return .absent }
-        let version = config["version"] as? String ?? ""
-        guard let installation, version == PiConnectorFiles.version(for: script, surfaces: surfaces), config["installation"] as? String == installation,
-              String(decoding: data, as: UTF8.self) == self.config(installation: installation),
-              (try? String(contentsOf: scriptURL, encoding: .utf8)) == PiConnectorFiles.installedScript(script, installation: installation, configPath: configURL.path)
-        else { return .other(version: version) }
-        return .current
-    }
-
-    func turnedOffInPi(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> Bool {
+    static func turnedOff(setupFolder: URL, pluginDir: URL, home: URL) -> Bool {
         guard let data = FileManager.default.contents(atPath: setupFolder.appendingPathComponent("settings.json").path),
               let settings = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let entries = settings["extensions"] as? [String]
@@ -111,159 +39,41 @@ struct PiConnectorInstaller {
     }
 }
 
-enum PiConnectorFiles {
-    static let indexTS: String? = ConnectorResources.text(named: "index", extension: "ts")
-
-    static func version(for script: String, surfaces: ConnectorSurfaces) -> String {
-        ConnectorResources.version(for: script + "\n" + surfaces.fingerprint)
-    }
-
-    static func installedScript(_ script: String, installation: String, configPath: String) -> String {
-        script
-            .replacingOccurrences(of: "const configPath: string | null = null", with: "const configPath: string | null = \(quoted(configPath))")
-            .replacingOccurrences(of: "const loadedFrom: string | null = null", with: "const loadedFrom: string | null = \(quoted(installation))")
-    }
-
-    private static func quoted(_ text: String) -> String {
-        "\"" + text.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
-    }
-
-    static func configJSON(
-        socketPath: String, tokenPath: String, readyPath: String, installation: String, plugin: String, version: String,
-        surfaces: ConnectorSurfaces
-    ) -> String {
-        ConnectorResources.json([
-            "protocol": AgentBridgeCodec.protocolVersion, "socketPath": socketPath, "tokenPath": tokenPath, "readyPath": readyPath,
-            "installation": installation, "plugin": plugin, "version": version, "appName": Branding.appName,
-        ].merging(surfaces.configFields) { own, _ in own })
-    }
-}
-
-@MainActor
-final class PiConnector: AgentConnector {
-    let kind = AgentKind.pi
-    let defaultFolder: URL
-    private let version: @Sendable (String) async -> ToolCheck
-    private let tools: ToolEnvironment
-    private let agentsDir: URL
-    private let pluginName: String
-    private let script: String?
-    private let home: URL
-    private let surfaces: ConnectorSurfaces
-
-    init(
-        version: (@Sendable (String) async -> ToolCheck)? = nil,
-        tools: ToolEnvironment = .shared,
-        agentsDir: URL, pluginName: String, surfaces: ConnectorSurfaces, script: String? = PiConnectorFiles.indexTS,
-        home: URL = FileManager.default.homeDirectoryForCurrentUser
-    ) {
-        self.surfaces = surfaces
-        self.version = version ?? { await tools.check(tool: $0, agent: AgentKind.pi.id) }
-        self.tools = tools
-        self.agentsDir = agentsDir
-        self.pluginName = pluginName
-        self.script = script
-        self.home = home
-        defaultFolder = PiConnectorInstaller.defaultSetupFolder(home: home)
-    }
-
-    var isBundled: Bool { script != nil }
-    var bundledVersion: String? { script.map { PiConnectorFiles.version(for: $0, surfaces: surfaces) } }
-
-    func hasFiles(in target: ConnectorTarget) -> Bool {
-        FileManager.default.fileExists(atPath: PiConnectorInstaller.pluginDir(in: target.folder, pluginName: pluginName).path)
-    }
-
-    func manualUninstall(for target: ConnectorTarget) -> [String] {
-        PiConnectorInstaller.manualUninstall(pluginDir: PiConnectorInstaller.pluginDir(in: target.folder, pluginName: pluginName))
-    }
-
-    func recognizes(folder: URL) -> Bool {
-        ConnectorFolders.contains(any: ["settings.json", "auth.json", "models.json", "extensions", "sessions"], in: folder)
-    }
-
-    var toolProgram: String? { "pi" }
-
-    var folderVariable: String? { AgentProcesses.Rule.pi.setupVariable }
-
-    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result {
-        return tools.search(program: "pi", agent: kind.id, setup: folder.path, chosen: chosen, extra: PiCLI.extraFolders(home: home))
-    }
-
-    func checkTool(_ tool: String) async -> ToolCheck? { await version(tool) }
-
-    func check(tool: String, target: ConnectorTarget) async -> AgentConnectorModel.State {
-        guard let installer = installer(for: target) else { return .unavailable }
-        let working = await self.version(tool)
-        guard case .working(let text) = working, let version = PiCLI.version(in: text) else { return .toolNotWorking(working) }
-        guard PiCLI.isSupported(version) else { return .toolTooOld(PiCLI.describe(version)) }
-        let home = home
-        let (installed, turnedOff) = await Task.detached {
-            (installer.installed(installation: target.removing ? nil : target.installation), installer.turnedOffInPi(home: home))
-        }.value
-        if installed != .absent, target.removing { return .removalUnfinished(nil) }
-        guard target.installation != nil, !target.removing else { return .status(.notInstalled) }
-        switch installed {
-        case .absent: return .status(.notInstalled)
-        case .current: return .status(turnedOff ? .disabled : .ready)
-        case .other(let version): return .status(.outdated(installed: version))
-        }
-    }
-
-    func install(tool: String, target: ConnectorTarget) async throws {
-        guard let installation = target.installation else { throw AgentConnectorError(message: copy.noReason) }
-        try await perform(target) { try $0.install(installation: installation) }
-    }
-
-    func update(tool: String, target: ConnectorTarget) async throws { try await install(tool: tool, target: target) }
-    func uninstall(tool: String, target: ConnectorTarget) async throws { try await perform(target) { try $0.uninstall() } }
-
-    private func installer(for target: ConnectorTarget) -> PiConnectorInstaller? {
-        guard let script else { return nil }
-        return PiConnectorInstaller(
-            setupFolder: target.folder, pluginName: pluginName,
-            socketPath: agentsDir.appendingPathComponent("bridge.sock").path,
-            tokenPath: agentsDir.appendingPathComponent("token").path,
-            readyPath: agentsDir.appendingPathComponent("ready.json").path,
-            script: script, surfaces: surfaces)
-    }
-
-    private func perform(_ target: ConnectorTarget, _ action: @escaping @Sendable (PiConnectorInstaller) throws -> Void) async throws {
-        guard let installer = installer(for: target) else { throw AgentConnectorError(message: copy.unavailable) }
-        let failure: String? = await Task.detached {
-            do {
-                try action(installer)
-                return nil
-            } catch {
-                return error.localizedDescription
-            }
-        }.value
-        if let failure { throw AgentConnectorError(message: failure) }
-    }
-
-    let copy = AgentConnectorCopy(
-        help: "\(Branding.appName) reaches Pi through a small extension installed in the folder Pi loads its configuration from. Installed means the extension is in place; each conversation using this folder then connects on its own, unless you disconnect it.",
-        reloadHint: "Already running Pi here? Run /reload in each open conversation.",
-        uninstallTitle: "Uninstall the Pi connector from this folder?",
-        uninstallMessage: "Pi conversations using this folder disconnect now, and new ones will not connect. Work you already sent may still finish. Each open conversation unloads the connector when you run /reload in it or restart it. Other folders stay connected. The folder, its conversations, your conversation names and disconnections, and other \(Branding.appName) settings are kept.",
-        toolNotFoundLabel: "Pi not found",
-        toolNotFoundAdvice: "Install Pi, or choose the pi command yourself. \(Branding.appName) looked for it in a running conversation, your login shell\u{2019}s PATH, its own PATH, the usual install folders, and under Node version managers.",
-        toolNotWorkingLabel: "Pi not working",
-        unavailable: "This copy of \(Branding.appName) is missing its Pi connector. Reinstall \(Branding.appName) to connect Pi.",
-        disabledLabel: "Turned off in Pi",
-        disabledAdvice: "Turn the extension back on in Pi.",
-        removalUnfinishedAdvice: "The connector was uninstalled in \(Branding.appName), but its folder is still in Pi\u{2019}s extensions. Its sessions no longer connect. Finish uninstalling it, then install it again if you want it back.",
-        listUnreadable: "Pi\u{2019}s extensions folder could not be read.",
-        noReason: "Pi did not say why.",
-        manualUninstallLead: "To remove the connector from Pi, delete its folder in a terminal, then run /reload in each open session or restart it:",
-        manualUninstallAfterDisconnect: "Disconnected from \(Branding.appName). Delete the connector\u{2019}s folder in a terminal to finish uninstalling, then run /reload in each open session or restart it:",
-        stillConnected: { count in
-            count == 1
-                ? "The connector was removed outside \(Branding.appName), so 1 open session is still connected and keeps receiving what you say until you run /reload in it or restart it."
-                : "The connector was removed outside \(Branding.appName), so \(count) open sessions are still connected and keep receiving what you say until you run /reload in each one or restart them."
-        },
-        toolTooOldLabel: "Pi too old",
-        toolTooOldAdvice: { found in
-            "Pi \(found) is older than \(PiCLI.describe(PiCLI.minimumVersion)), the first version the connector works with. Update Pi, then come back here."
-        })
+extension ExtensionAgent {
+    static let pi = ExtensionAgent(
+        kind: .pi,
+        rule: .pi,
+        toolProgram: "pi",
+        extensionName: { $0 },
+        defaultFolder: { $0.appendingPathComponent(".pi/agent", isDirectory: true) },
+        extraFolders: { PiCLI.extraFolders(home: $0) },
+        minimumVersion: PiCLI.minimumVersion,
+        version: { PiCLI.version(in: $0) },
+        turnedOff: { PiCLI.turnedOff(setupFolder: $0.setupFolder, pluginDir: $0.pluginDir, home: $0.home) ? .yes : .no },
+        recognizedFiles: ["settings.json", "auth.json", "models.json", "extensions", "sessions"],
+        copy: AgentConnectorCopy(
+            help: "\(Branding.appName) reaches Pi through a small extension installed in the folder Pi loads its configuration from. Installed means the extension is in place; each conversation using this folder then connects on its own, unless you disconnect it.",
+            reloadHint: "Already running Pi here? Run /reload in each open conversation.",
+            uninstallTitle: "Uninstall the Pi connector from this folder?",
+            uninstallMessage: "Pi conversations using this folder disconnect now, and new ones will not connect. Work you already sent may still finish. Each open conversation unloads the connector when you run /reload in it or restart it. Other folders stay connected. The folder, its conversations, your conversation names and disconnections, and other \(Branding.appName) settings are kept.",
+            toolNotFoundLabel: "Pi not found",
+            toolNotFoundAdvice: "Install Pi, or choose the pi command yourself. \(Branding.appName) looked for it in a running conversation, your login shell\u{2019}s PATH, its own PATH, the usual install folders, and under Node version managers.",
+            toolNotWorkingLabel: "Pi not working",
+            unavailable: "This copy of \(Branding.appName) is missing its Pi connector. Reinstall \(Branding.appName) to connect Pi.",
+            disabledLabel: "Turned off in Pi",
+            disabledAdvice: "Turn the extension back on in Pi.",
+            removalUnfinishedAdvice: "The connector was uninstalled in \(Branding.appName), but its folder is still in Pi\u{2019}s extensions. Its sessions no longer connect. Finish uninstalling it, then install it again if you want it back.",
+            listUnreadable: "Pi\u{2019}s extensions folder could not be read.",
+            noReason: "Pi did not say why.",
+            manualUninstallLead: "To remove the connector from Pi, delete its folder in a terminal, then run /reload in each open session or restart it:",
+            manualUninstallAfterDisconnect: "Disconnected from \(Branding.appName). Delete the connector\u{2019}s folder in a terminal to finish uninstalling, then run /reload in each open session or restart it:",
+            stillConnected: { count in
+                count == 1
+                    ? "The connector was removed outside \(Branding.appName), so 1 open session is still connected and keeps receiving what you say until you run /reload in it or restart it."
+                    : "The connector was removed outside \(Branding.appName), so \(count) open sessions are still connected and keep receiving what you say until you run /reload in each one or restart them."
+            },
+            toolTooOldLabel: "Pi too old",
+            toolTooOldAdvice: { found in
+                "Pi \(found) is older than \(ExtensionAgent.describe(PiCLI.minimumVersion)), the first version the connector works with. Update Pi, then come back here."
+            }))
 }

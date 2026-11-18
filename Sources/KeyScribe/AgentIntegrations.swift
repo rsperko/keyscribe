@@ -17,7 +17,7 @@ public struct AgentIntegrations: Sendable {
     var agents: [AgentIntegration]
 
     public init(surfaces: AgentSurfaces, placeSources: [PlaceSource]) {
-        self.init(surfaces: surfaces, placeSources: placeSources, agents: [.claude, .pi])
+        self.init(surfaces: surfaces, placeSources: placeSources, agents: [.claude, .pi, .omp])
     }
 
     init(surfaces: AgentSurfaces, placeSources: [PlaceSource], agents: [AgentIntegration]) {

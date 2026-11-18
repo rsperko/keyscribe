@@ -27,6 +27,13 @@ struct ToolCheckTests {
         #expect(ToolCheck.version(in: "node 24.1") == "24.1")
     }
 
+    @Test func aVersionAfterTheProgramsNameAndASlashIsFound() {
+        #expect(ToolCheck.version(in: "omp/18.22.2\n") == "18.22.2")
+        #expect(ToolCheck.judge(.exited(0), output: "omp/18.22.2\n") == .working("18.22.2"))
+        #expect(ToolCheck.version(in: "see /usr/share/doc") == nil)
+        #expect(ToolCheck.version(in: "(node:1) Warning: /opt/homebrew/Cellar/node/24.1.0/bin/node is old\n1.5.0\n") == "1.5.0")
+    }
+
     @Test func outputShownWithAFailureIsTrimmedAndBounded() {
         let long = String(repeating: "x", count: 1_000)
         guard case .exited(_, let shown) = ToolCheck.judge(.exited(2), output: "  \n\(long)\n") else {

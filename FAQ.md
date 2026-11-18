@@ -527,12 +527,13 @@ it forward and sends nothing; while it stays in front, instructions without a na
 
 In **Settings ▸ Modes ▸ Agent**, choose **Manage…** beside **Conversations**, find the conversation under **Not available**, and
 choose **Connect…**, or choose **Connect…** beside that agent under **Connections**. KeyScribe finds the folder that conversation's agent loads its
-configuration from (for Pi usually `~/.pi/agent`, for Claude Code `~/.claude`, or whatever folder that
-agent was started with), and asks before installing there. Connecting a folder connects the conversations
+configuration from (for Pi usually `~/.pi/agent`, for omp `~/.omp/agent`, for Claude Code `~/.claude`, or whatever
+folder that agent was started with), and asks before installing there. Connecting a folder connects the conversations
 open in it now and future ones that use it; other folders are left alone. No flag, wrapper, or edit to your
 own configuration is needed. A conversation that is already open picks the connector up when you run
-`/reload` in Pi or `/reload-plugins` in Claude Code, or restart it; its row says so until it connects. The
-Pi connector needs Pi 1.4.0 or later.
+`/reload` in Pi or `/reload-plugins` in Claude Code, or restart it (omp has no reload command, so restart an open
+omp conversation); its row says so until it connects. The Pi connector needs Pi 1.4.0 or later, and the omp
+connector omp 18.22.2 or later.
 
 If a conversation is not listed, choose **Check Again** below that list. KeyScribe recognizes an agent by the
 program or script it runs, so a wrapper script, a Nix-style wrapped binary, or another JavaScript runtime is
@@ -561,13 +562,15 @@ An agent started from a script kept in one of those places is therefore not reco
 Details marks such paths "not looked at". Its conversations still connect once its configuration folder has the
 connector.
 
-### I run Claude Code or Pi with more than one configuration folder. How do I connect them all?
+### I run an agent with more than one configuration folder. How do I connect them all?
 
 Expand that agent under **Connections**. Its **Configuration folders** list shows the default folder, every
 folder its connector is installed in, and every folder an open conversation uses. If one is missing, choose
 **Add Folder…** and pick it; KeyScribe asks before installing there. Each folder is connected and removed on its
 own, and in **Manage…** each conversation shows which folder it uses. A folder set with `CLAUDE_CONFIG_DIR` or
-`PI_CODING_AGENT_DIR` in your shell's startup files is listed too. For bb, KeyScribe lists every copy of bb it
+`PI_CODING_AGENT_DIR` in your shell's startup files is listed too. An omp conversation started with `--profile`
+uses that profile's own folder, which KeyScribe learns only once the conversation connects, so add that folder
+yourself the first time. If Pi and omp read the same folder, each agent's connector works only in that agent. For bb, KeyScribe lists every copy of bb it
 finds on your Mac, by the name of its app, including one whose data folder your shell names with `BB_DATA_DIR`;
 each is connected on its own. Open a copy of bb once if it is missing, or choose **Add Folder…** and pick its data
 folder. If you dictate to a copy of bb that isn't connected, KeyScribe names that copy and tells you whether its
@@ -701,7 +704,7 @@ to the name KeyScribe would choose on its own.
 
 If it runs in herdr, a conversation is called by the name herdr shows on its pane, else the name you gave
 the agent in herdr (`herdr agent rename`, or the name you started it with). Otherwise a conversation you
-named in the agent itself (`/rename` in Claude Code, `/name` in Pi) is called by that name; otherwise by
+named in the agent itself (`/rename` in Claude Code and omp, `/name` in Pi) is called by that name; otherwise by
 its herdr tab, else its workspace, else its project folder. The other names you gave it still work: if
 herdr shows “marvin” on an agent you named “cos”, both “ask marvin …” and “ask cos …” reach it. The
 Rename sheet lists them. The same goes for names you give in tmux (a renamed window, a named session, if
@@ -752,7 +755,7 @@ conversation connects until it can, and Settings says so.
 Expand the agent under **Connections**, open the **⋯** menu beside that folder, and choose **Uninstall Connector…**. Conversations using it disconnect at once, and
 new ones do not connect; an instruction a conversation already received may still finish. Each open
 conversation unloads the connector the next time you run `/reload` (Pi) or `/reload-plugins` (Claude Code)
-in it, or restart it. Other folders stay connected, and your settings, history, conversation names and
+in it, or restart it (omp needs a restart). Other folders stay connected, and your settings, history, conversation names and
 disconnections are kept. The folder itself and its conversations are never deleted. If the uninstall cannot finish, the folder's row says what went wrong and offers **Finish
 Uninstalling**.
 
@@ -784,11 +787,12 @@ you dictate, KeyScribe reads short replies and can summarize longer ones. It als
 conversation you spoke to is waiting for your approval or an answer: KeyScribe says its name and "Waiting for
 approval." or "Waiting for an answer."; if its connector goes away before it finishes, you hear
 "Disconnected before it finished." These notices need no AI service, and one that is
-no longer true by the time it would play is dropped. Claude Code reports approvals and questions. Pi and bb report
+no longer true by the time it would play is dropped. Claude Code reports approvals and questions; omp reports
+its tool approvals, plan reviews and the questions its model asks, but not a dialog another omp extension opens. Pi, omp and bb report
 that a prompt is open and what kind it is, and with an AI service chosen, what is known about it is sent to that service,
 after best-effort redaction, to say what it asks: the prompt's kind and title, the tool call it seems to be
-about (such as the command to approve, or a question and its options), and for Pi the agent's last words before it
-asked. For Pi, which tool call a prompt is about is a best guess; bb names it exactly. Without a service you hear "Waiting for approval." or "Waiting for an answer." when the prompt's kind says which, and "Waiting for you." otherwise. For summaries, also choose one of your saved AI services. When a conversation you spoke to finishes, KeyScribe says the conversation's
+about (such as the command to approve, or a question and its options), and for Pi and omp the agent's last words before it
+asked. For Pi and omp, which tool call a prompt is about is a best guess; bb names it exactly. Without a service you hear "Waiting for approval." or "Waiting for an answer." when the prompt's kind says which, and "Waiting for you." otherwise. For summaries, also choose one of your saved AI services. When a conversation you spoke to finishes, KeyScribe says the conversation's
 name and a short summary of the agent's final reply: a longer reply goes to that service, after its
 best-effort redaction, to be summarized; a reply of a few words is read as it is without any service. When the reply
 came right after what you dictated, your words go with it, so the summary opens with a few words naming what you asked.

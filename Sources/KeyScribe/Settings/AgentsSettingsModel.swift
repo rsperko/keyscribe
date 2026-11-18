@@ -274,8 +274,8 @@ final class AgentsSettingsModel: ObservableObject {
                     older: runsOlderConnector(conversation, loadedVersions: loadedVersions))
             }
             let waiting = candidates.compactMap { candidate -> AgentConnectorModel.Use? in
-                guard candidate.agent == connector.kind.id else { return nil }
-                return AgentConnectorModel.Use(folder: candidate.setup, name: name(of: candidate), connected: false)
+                guard candidate.agent == connector.kind.id, let setup = candidate.setup else { return nil }
+                return AgentConnectorModel.Use(folder: setup, name: name(of: candidate), connected: false)
             }
             connector.show(discovered: discoveredSetups[connector.kind.id] ?? [], uses: uses + waiting)
         }

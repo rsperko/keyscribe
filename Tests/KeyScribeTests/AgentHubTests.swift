@@ -2693,6 +2693,12 @@ struct AgentHubTests {
         #expect(AgentHub.footerLabel("docs", reload: "/reload") == "\u{201C}docs\u{201D} \u{00B7} Update: /reload")
     }
 
+    @Test func anAgentWithNoReloadCommandIsToldToRestart() {
+        #expect(AgentHub.updateStep(.claude) == "/reload-plugins")
+        #expect(AgentHub.updateStep(.omp) == "restart")
+        #expect(AgentHub.footerLabel("docs", reload: AgentHub.updateStep(.omp)) == "\u{201C}docs\u{201D} \u{00B7} Update: restart")
+    }
+
     @Test func aConnectorThatCannotShowLabelsIsNeverSentOne() async {
         let (hub, transport, registry, _) = makeHub()
         await connected(hub, transport, registry)

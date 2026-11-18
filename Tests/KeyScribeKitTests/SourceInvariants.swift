@@ -115,6 +115,7 @@ enum SourceInvariants {
             allowed: [
                 "Sources/KeyScribe/Integrations/Claude/ClaudeConnector.swift": 1,
                 "Sources/KeyScribeKit/Integrations/Pi/PiAgent.swift": 1,
+                "Sources/KeyScribeKit/Integrations/Omp/OmpAgent.swift": 1,
                 "Sources/KeyScribeKit/Integrations/Claude/ClaudeRegistry.swift": 1,
             ],
             reason: "An agent's setup folder comes from the conversation's own process, an enrolled setup, or a folder the "
@@ -147,6 +148,17 @@ enum SourceInvariants {
             ],
             reason: "Everything Pi needs lives in its own Integrations/Pi/ folder; shared code never names an agent "
                 + "(docs/development/areas/voice-commands.md). The feature summary names the agents it works with.",
+            own: SourceInvariants.integrationTool
+        ),
+        SourceRule(
+            pattern: #"(?<![A-Za-z0-9_-])[Oo]mp(?![a-z])"#,
+            allowed: [
+                "Sources/KeyScribe/AgentIntegrations.swift": 1,
+                "Sources/KeyScribeKit/Features.swift": 1,
+            ],
+            reason: "Everything omp needs lives in its own Integrations/Omp/ folder; shared code never names an agent "
+                + "(docs/development/areas/voice-commands.md). The composition root lists the agents, and the feature "
+                + "summary names the agents it works with.",
             own: SourceInvariants.integrationTool
         ),
     ]

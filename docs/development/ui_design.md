@@ -446,14 +446,17 @@ the pane's name once the old one has closed, and nothing else of the old convers
 spoken replies and disconnection stay with the old one.
 Automatically generated titles never rename a conversation. For Claude Code, custom names are kept
 separate from generated titles, and a fresh registry rename can supersede the last connector report. For
-Pi, the name is the session name its user set (`/name`), as the connector reports it.
+Pi, the name is the session name its user set (`/name`), as the connector reports it; for omp, the name its
+user set (`/rename`), never the title omp generates, read by the connector at each run boundary because omp
+announces no rename.
 Each row's second line is the agent's title for the conversation, when it differs from the
 name (one the user gave it, else the one the agent generated), and the project folder; the agent is named only when the list mixes agents. A connector that can
 show it labels its own session with the same name (the name in quotes on the agent's status line, after the
 connector's name, which Claude Code adds and the Pi connector writes itself), so the
 terminal on screen can be matched to its row; the label is display only and never renames the agent's
 conversation. While the session runs a connector older than the one the app ships, the label adds the step that
-loads the new one (“docs” · Update: /reload-plugins, or `/reload` in Pi), and a long name is cut short with an
+loads the new one (“docs” · Update: /reload-plugins, or `/reload` in Pi, or a restart where the agent has no reload
+command), and a long name is cut short with an
 ellipsis so the step still shows (`AgentHub.footerLabel`). A bb thread shows the same name on its row in bb's sidebar when its bb title differs, only while the app that
 named it is running: a plugin that finds that app quit or relaunched, or is retired, stops showing the names it
 was given, since nothing could correct them, and shows them again once the app sends them. A brief loss of the
@@ -2522,6 +2525,17 @@ a command. Because Pi is only consulted for its version, a Pi older than the fir
 works with (`PiCLI.minimumVersion`) shows **Pi too old** with that version and advice to update, and offers
 no Install; when the folder is in place it still offers Uninstall Connector…, since removal needs nothing
 from Pi.
+
+The omp connector works the same way, in an omp setup's `extensions/` folder, with three differences that
+follow from omp itself. omp has no command that reloads an extension, so its copy says to restart an open
+conversation wherever Pi's says `/reload`, and the label's update step says to restart it. Whether omp turned
+the connector off is asked of omp (`omp config get disabledExtensions`), never read from its files, and shows
+**Turned off in omp**; when omp cannot answer, the folder shows **Something went wrong** with omp's own reason
+and **Try Again**, which asks omp again, never Ready and never Repair, since reinstalling cannot fix omp's
+configuration. An omp below the version the connector was proven on (`OmpCLI.minimumVersion`) shows
+**omp too old**, with advice to run `omp update`. Its **Configuration folders** help says that a conversation
+started with `--profile` uses that profile's folder, learned once it connects, and that when another agent reads
+the same folder each agent's connector works only in that agent.
 
 **Conversation rows and their connection.** Besides the conversations whose connectors connected, the list
 shows agent processes found without one, described honestly ("Pi in atlas", Not connected) with no Rename

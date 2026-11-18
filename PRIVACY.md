@@ -47,12 +47,12 @@ LLM calls** to a service you configured, and all off unless you turn them on:
   dictation's transcript to the mode's service once more, with no context. It is redacted if the original
   dictation was or the mode is now, so turning redaction off later never sends that dictation unredacted.
 - **Read Agent Replies Aloud**, in the experimental Agent feature. Notices that a conversation is waiting for you or
-  lost its connector are fixed sentences and send nothing, with one exception: when a Pi conversation or a bb thread you
+  lost its connector are fixed sentences and send nothing, with one exception: when a Pi or omp conversation or a bb thread you
   dictated to opens a prompt, or you check on one and its prompt has no short
   question to read as it is (whoever started that turn, you typing included), the prompt's kind and title, the tool call it seems to be about (its name and up
-  to a thousand characters of arguments, such as the command it asks you to approve), and for Pi the agent's last
+  to a thousand characters of arguments, such as the command it asks you to approve), and for Pi and omp the agent's last
   words before it asked are sent to the service you chose, after best-effort redaction, to say in a sentence
-  what it asks. For Pi, which tool call a prompt belongs to is a best guess, so another tool's arguments can be
+  what it asks. For Pi and omp, which tool call a prompt belongs to is a best guess, so another tool's arguments can be
   sent; for a bb thread it is the request bb itself is waiting on, along with a question's options or a plan's text. When an agent finishes an instruction you
   dictated, or work you asked it to have KeyScribe read aloud, a longer final reply is sent to the service you chose
   under Replies, only to be summarized into a sentence or two to read aloud or show, together with the words you
@@ -217,19 +217,21 @@ in the same `Application Support` folder:
   may connect from each, and `names.json`, the names you chose for conversations along with their agent
   session ids and the conversations you disconnected. A conversation's name, whether you chose it or it came
   from its folder, a terminal tab or pane label, or a bb thread's title, may also be remembered there, and
-  appears in Settings, in History lines about that conversation, and in KeyScribe's logs on this Mac. The Pi connector's files live in the extensions
-  folder of each Pi folder you connected, because that is where Pi loads them from; they hold the same
-  connection settings and nothing else. To find the conversations on your Mac and the folders their agents
-  use, KeyScribe looks at your own running Pi and Claude Code processes: their working folder, start time,
-  terminal, and a short list of environment variables (the agent's folder variable and the terminal and
-  multiplexer variables its terminal routes use). It never reads or keeps any other variable or a full
+  appears in Settings, in History lines about that conversation, and in KeyScribe's logs on this Mac. The Pi and omp
+  connectors' files live in the extensions folder of each folder you connected, because that is where the agent loads
+  them from; they hold the same connection settings and nothing else. To find the conversations on your Mac and the
+  folders their agents use, KeyScribe looks at your own running agent processes: their working folder, start time,
+  terminal, and a short list of environment variables (the agent's folder variable, the variables that pick an
+  omp profile, which only tell KeyScribe the folder is a profile's, and the terminal and multiplexer variables its
+  terminal routes use). It never reads or keeps any other variable or a full
   command line, and keeps what it found in memory only. A conversation you disconnect sends KeyScribe only
   who it is (its agent, session id, process and folder), never its title, prompts or replies. These are kept whether or not History
   is on, until you delete them. No message text is stored there. To show each conversation's title,
   KeyScribe reads the end of that conversation's own Claude Code transcript on your Mac; it keeps only
-  the title, in memory, and never logs or stores the transcript. Pi's titles come from the connector,
-  which reads nothing on disk but its own settings. To decide when to hand over what you said, the Pi
-  connector notes the time of the last key pressed in that session, never which key. When you start an
+  the title, in memory, and never logs or stores the transcript. Pi's and omp's titles come from the connector,
+  which reads nothing on disk but its own settings. To decide when to hand over what you said, the Pi and omp
+  connectors note the time of the last key pressed in that session, never which key. To tell whether you turned
+  its connector off in omp, KeyScribe runs omp's own `omp config get disabledExtensions` for that folder. When you start an
   Agent dictation, KeyScribe asks the terminal in front which tab or pane is selected and reads the same
   process details, so what you say goes to the conversation you are looking at; it never asks for permission to
   do so, and the answer stays on your Mac and is not stored. To tell whether you moved to another

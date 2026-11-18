@@ -128,7 +128,7 @@ led_write()  { printf '%s\t%s\t%s\n' "$2" "$3" "$4" > "$LEDGER_DIR/$1"; }
 
 only_match() { [ -z "$ONLY" ] && return 0; case ",${ONLY//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
 force_id()   { [ "$FORCE_ALL" = 1 ] && return 0; case ",${FORCE_LIST//[[:space:]]/,}," in *,"$1",*) return 0;; esac; return 1; }
-CONNECTOR_CHECKS="a-connector-tests a-pi-connector-tests a-bb-plugin-tests"
+CONNECTOR_CHECKS="a-connector-tests a-pi-connector-tests a-omp-connector-tests a-bb-plugin-tests"
 # The pre-notarize phase runs only these — swift test + Tier B. It must NOT run the Tier A packaging /
 # notarization checks (they need the notarized artifact, which does not exist yet) or Tier C (human).
 PRE_CHECKS=" a-deps a-swift-test $CONNECTOR_CHECKS a-release-tools a-catalog-contract a-min-xcode b-coverage b-commands b-vad-gate b-benchmark b-capture-probe "
@@ -233,21 +233,25 @@ chk_a_connector_tests() {
 }
 guard a-connector-tests "$(sig_source)" chk_a_connector_tests
 
-chk_a_pi_connector_tests() {
-  # The Pi connector runs inside Pi as a TypeScript extension, so its behavior tests run under Node against
-  # a stubbed extension API. A machine without a recent Node can still build and ship the app: a loud skip.
-  timeout --foreground 600 ./scripts/test-pi-connector.sh >/tmp/preflight-pi-connector.log 2>&1
+extension_connector_tests() {
+  # Pi's and omp's connector run inside their agent as a TypeScript extension, so each agent's behavior tests run
+  # under Node against a stubbed extension API. A machine without a recent Node can still build and ship: a loud skip.
+  local agent="$1" label="$2" log="/tmp/preflight-$1-connector.log"
+  timeout --foreground 600 ./scripts/test-extension-connector.sh "$agent" >"$log" 2>&1
   local status=$?
   if [ "$status" = 0 ]; then
-    result pass "Pi connector tests — $(head -1 /tmp/preflight-pi-connector.log | sed 's/^test-pi-connector: //')"
+    result pass "$label connector tests — $(head -1 "$log" | sed "s/^test-$agent-connector: //")"
   elif [ "$status" = 2 ]; then
-    result skip "Pi connector tests — $(tail -1 /tmp/preflight-pi-connector.log | sed 's/^test-pi-connector: //'); run make test-pi-connector on a machine with a recent node"
+    result skip "$label connector tests — $(tail -1 "$log" | sed "s/^test-$agent-connector: //"); run make test-$agent-connector on a machine with a recent node"
   else
-    tail -20 /tmp/preflight-pi-connector.log
-    result fail "Pi connector tests — see /tmp/preflight-pi-connector.log"
+    tail -20 "$log"
+    result fail "$label connector tests — see $log"
   fi
 }
+chk_a_pi_connector_tests() { extension_connector_tests pi Pi; }
+chk_a_omp_connector_tests() { extension_connector_tests omp omp; }
 guard a-pi-connector-tests "$(sig_source)" chk_a_pi_connector_tests
+guard a-omp-connector-tests "$(sig_source)" chk_a_omp_connector_tests
 
 chk_a_bb_plugin_tests() {
   # The bb plugin runs inside bb's server under Node, so its behavior tests run under Node against a stubbed
@@ -768,7 +772,8 @@ else
     if ! ask "Changed agent delivery, connectors, or the bb plugin this release?"; then result skip "agents (agent code unchanged)"; return; fi
     info "  Expected: give each agent you ship a long task (a Bash loop that waits for a file), then dictate to it while it runs."
     info "  Claude Code in front: the dictation shows as your own queued prompt and the agent answers it after the current step."
-    info "  Pi or a bb thread, not in front: the HUD says Sent and the agent answers after the current step."
+    info "  Pi, omp or a bb thread, not in front: the HUD says Sent and the agent answers after the current step."
+    info "  omp idle: a dictation starts a turn at once (omp would hold a follow-up), and its model's own question is never answered by one."
     info "  Any agent stopped on an approval: dictating never answers it; the HUD says it waits for approval; after you answer, the message goes through."
     info "  bb: an idle thread starts a turn; renaming a thread by voice sets its bb title, and its sidebar chip disappears."
     if ask "  every agent took the dictation mid-turn, and no approval was ever answered by a dictation"; then result pass "agents"; else result fail "an agent check failed"; fi

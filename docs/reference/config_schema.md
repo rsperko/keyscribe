@@ -252,15 +252,17 @@ never hand-edited, and a write to it does not reload configuration.
 ## Agent bridge
 
 Every agent connector talks to KeyScribe over HTTP on `agents/bridge.sock`, presenting `agents/token`
-as a bearer token; the Claude Code connector is a plugin, the Pi connector an extension, and both speak the
-same protocol. It sends events with `POST /event` and long-polls for commands with `POST /poll`; a
+as a bearer token; the Claude Code connector is a plugin, the Pi and omp connectors one extension (a shared core
+with an adapter for each agent), and all speak the same protocol. It sends events with `POST /event` and long-polls for commands with `POST /poll`; a
 `409` answer means KeyScribe no longer knows that connector, which says hello again. The message types are
 `AgentEvent` and `AgentCommand` in `AgentBridge.swift`, versioned by `AgentBridgeCodec.protocolVersion`;
 a hello on any other protocol is refused with `426` and is never registered or sent commands.
 
 - **A connector is installed into a setup, and only enrolled setups connect.** A setup is the folder an
   agent loads its configuration from: Pi's agent folder (`~/.pi/agent` unless a conversation's
-  `PI_CODING_AGENT_DIR` names another) and Claude Code's config folder (`~/.claude` unless its
+  `PI_CODING_AGENT_DIR` names another), omp's (`~/.omp/agent` unless its `PI_CODING_AGENT_DIR` names another; a
+  conversation started with `--profile`, `OMP_PROFILE` or `PI_PROFILE` uses its profile's folder, which is unknown
+  until its connector says hello, and is never guessed) and Claude Code's config folder (`~/.claude` unless its
   `CLAUDE_CONFIG_DIR` names another). KeyScribe finds the setups conversations actually use from their own
   processes, never from its own environment, and lists the default too; finding a setup never installs into
   it. `agents/connectors.json` (`ConnectorSetups`, with `schema_version`) lists each setup a connector was
@@ -295,6 +297,18 @@ a hello on any other protocol is refused with `426` and is never registered or s
   version, the environment keys the terminal routes read, and their focus commands (see Hello). An extension turned off in the setup's
   `settings.json` (an `extensions` entry `-path` or a matching `!pattern`, unless `+path` brings it back) is
   reported as turned off, and an update never turns it back on.
+- **The omp connector is a folder of its own in an omp setup's `extensions/`,** named `<plugin>-omp`, with the
+  same `keyscribe.json`. The installed `index.ts` is the Pi connector's, with `installedFor` written as `omp`, so it
+  runs omp's adapter. A folder Pi and omp share (one named by `PI_CODING_AGENT_DIR`) therefore holds both
+  connectors, each installed, updated and removed on its own, and each adapter stays inert when the other agent
+  loads it. omp has no command that reloads an extension, so an open conversation picks up an install, update or
+  removal only when restarted. Whether omp turned it off is asked only of an installed, current connector, with
+  `omp config get disabledExtensions --json` run for that setup: `PI_CODING_AGENT_DIR` set to it (removed for the
+  default setup) and `OMP_PROFILE` and `PI_PROFILE` removed, since a profile would win over the folder. An entry
+  `extension-module:<plugin>-omp` means turned off. An answer omp cannot give (an error, a timeout, output that is
+  not that setting) shows the folder as failed with omp's reason and **Try Again**, which asks again; it is never shown
+  as ready, and startup never reinstalls the connector over it. KeyScribe never
+  parses omp's `config.yml`.
 - **Updates keep setups as they are.** When KeyScribe starts, it updates the connector in each enrolled setup
   whose installed copy differs from the bundled one, and never in a setup that is not enrolled or whose
   connector the agent has turned off. Open conversations keep the connector they loaded, which keeps working,
@@ -505,6 +519,17 @@ a hello on any other protocol is refused with `426` and is never registered or s
   leaves the take uncertain. A submission stops holding further dictation after
   three seconds, and only the most recent such submissions are still matched; one dropped from that list
   stays uncertain. Text starting with `/` or `!` reaches Pi as plain text.
+- **The omp connector runs the same core on omp's own signals.** It waits for the keyboard and marks its
+  submissions the same way. omp gives an extension's message no `input` event, so an idle submit is confirmed by
+  its marked user message alone, and is sent with no delivery mode, since omp holds a follow-up sent to an idle
+  conversation until some later run. While omp works the text is a steer, confirmed when `sendUserMessage`
+  resolves (omp has queued it) and reported `absorbed` when it enters the conversation. A submit is refused as
+  `dialog` while a tool approval or a plan review is open or the model's `ask` tool runs, because a steer then
+  would deny the approval or dismiss the question; omp reports no other extension's dialog, so one holds only
+  through the keyboard rule. A turn ends only at an `agent_end` without `willContinue`: retries, stop-hook
+  continuations and a run kept open by background work (`awaitingAsyncWork`, during which omp reports itself
+  idle) are one turn, and the stale-run check ignores that idle. Text starting with `/` or `!` reaches omp as
+  plain text.
 - **A submit names its own turn.** The Claude connector reports the turn whose prompt is the text it
   submitted, and no turn when it cannot tell (another mod may rewrite the prompt), so a turn the user started
   meanwhile is never taken for the dictation's. A submit that names no turn is still confirmed as sent, but
@@ -540,7 +565,9 @@ a hello on any other protocol is refused with `426` and is never registered or s
   slash commands and `!` shell commands without the hook the connector listens on, so they send no typed
   event.
 - **Title events** carry the custom title the user gave the conversation, as reported in Claude Code's hook
-  payload, or the session name set in Pi, which reports every change including a cleared name. The connector sends one only when the payload includes the title field, and sends an empty
+  payload, or the session name set in Pi, which reports every change including a cleared name, or the name the user
+  set in omp (`titleSource: user`; omp's generated titles are never sent), which omp announces with no event, so its
+  connector reads it at each run boundary. The connector sends one only when the payload includes the title field, and sends an empty
   title (name cleared) only after it has reported a non-empty one, so a Claude Code build that omits the
   field never erases a name found elsewhere.
 - **Turn events** report a turn starting and ending, never the agent's answer. Pi's turn ends only when

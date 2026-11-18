@@ -2,8 +2,8 @@ import Foundation
 import KeyScribeKit
 
 @MainActor
-final class PiDiscovery: AgentDiscovery {
-    let kind = AgentKind.pi
+final class ExtensionDiscovery: AgentDiscovery {
+    let kind: AgentKind
     private var sessions: [String: AgentSession] = [:]
     private var inTurn: Set<String> = []
     private var waiting: Set<String> = []
@@ -15,12 +15,14 @@ final class PiDiscovery: AgentDiscovery {
     private var installations: [String: String] = [:]
 
     init(
+        kind: AgentKind,
         processStart: @escaping (Int) -> ProcessStart.Reading = ProcessStart.read(pid:),
         isRunning: @escaping @Sendable (Int) -> Bool = ProcessStart.isRunning(pid:),
         processes: @escaping @Sendable () -> AgentProcesses.Found,
         folder: @escaping (String) -> String? = { _ in nil },
         declared: @escaping () -> String? = { nil }
     ) {
+        self.kind = kind
         self.folder = folder
         self.declared = declared
         self.processStart = processStart
@@ -28,7 +30,9 @@ final class PiDiscovery: AgentDiscovery {
         self.processes = processes
     }
 
-    nonisolated static let partialProblem = "Some Pi conversations couldn\u{2019}t be checked. Conversations seen earlier stay listed."
+    nonisolated static func partialProblem(_ kind: AgentKind) -> String {
+        "Some \(kind.displayName) conversations couldn\u{2019}t be checked. Conversations seen earlier stay listed."
+    }
 
     func observe(_ event: AgentEvent) {
         switch event {
@@ -81,9 +85,9 @@ final class PiDiscovery: AgentDiscovery {
             if let reported = installations[key].flatMap(folder) { sessions[key]?.setup = reported }
         }
         var setups: [String] = []
-        let listed = sessions.values.compactMap(\.setup) + candidates.map(\.setup) + (declared().map { [$0] } ?? [])
+        let listed = sessions.values.compactMap(\.setup) + candidates.compactMap(\.setup) + (declared().map { [$0] } ?? [])
         for setup in listed where !setups.contains(setup) { setups.append(setup) }
-        let problem = found.isPartial ? Self.partialProblem : nil
+        let problem = found.isPartial ? Self.partialProblem(kind) : nil
         return .found(sessions.values.sorted { $0.id < $1.id }, AgentScanExtras(candidates: unmatched, setups: setups, problem: problem))
     }
 
@@ -120,5 +124,26 @@ final class PiDiscovery: AgentDiscovery {
     private static func name(_ title: String?) -> String? {
         guard let title = title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else { return nil }
         return title
+    }
+}
+
+extension AgentIntegration {
+    static func extensionAgent(_ agent: ExtensionAgent) -> AgentIntegration {
+        let rule = agent.rule
+        return AgentIntegration(
+            kind: agent.kind,
+            folderVariable: rule.setupVariable,
+            discovery: { setups, processes in
+                ExtensionDiscovery(
+                    kind: agent.kind,
+                    processes: { processes.found(rule) },
+                    folder: { installation in setups.setups?.setups.first { $0.agent == agent.kind.id && $0.installation == installation }?.folder },
+                    declared: {
+                        ToolEnvironment.shared.folder(rule.setupVariable).flatMap { path in
+                            FileManager.default.fileExists(atPath: path) ? ConnectorFolders.canonical(URL(fileURLWithPath: path, isDirectory: true)).path : nil
+                        }
+                    })
+            },
+            connector: { ExtensionConnector(agent: agent, agentsDir: $0, pluginName: $1, surfaces: $2) })
     }
 }

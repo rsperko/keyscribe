@@ -33,7 +33,8 @@ public enum ToolCheck: Equatable, Sendable {
     }
 
     public static func version(in output: String) -> String? {
-        for word in output.split(whereSeparator: { $0.isWhitespace || $0 == "(" || $0 == ")" || $0 == "," }) {
+        let words = output.split(whereSeparator: { $0.isWhitespace || $0 == "(" || $0 == ")" || $0 == "," })
+        for word in words.flatMap({ $0.hasPrefix("/") ? [$0] : $0.split(separator: "/") }) {
             let numeric = word.hasPrefix("v") ? word.dropFirst() : word[...]
             let core = numeric.prefix { $0.isNumber || $0 == "." }
             guard core.endIndex == numeric.endIndex || numeric[core.endIndex] == "-" || numeric[core.endIndex] == "+" else { continue }

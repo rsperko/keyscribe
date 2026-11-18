@@ -72,6 +72,12 @@ struct AgentRosterTests {
         #expect(roster.rows.map(\.detail) == ["Claude \u{00B7} keyscribe", "Codex \u{00B7} backend"])
     }
 
+    @Test func theAgentIsNamedAsItNamesItselfWhenItsNameIsKnown() {
+        let frozen = [conversation("a", "keyscribe"), conversation("b", "backend", cwd: "/src/backend", agent: "omp")]
+        let roster = AgentRoster(frozen: frozen, live: frozen, focused: nil, agentNames: ["claude": "Claude Code", "omp": "omp"])
+        #expect(roster.rows.map(\.detail) == ["Claude Code \u{00B7} keyscribe", "omp \u{00B7} backend"])
+    }
+
     @Test func statesUpdateInPlaceWithoutRenumberingAndNewSessionsStayOut() {
         let frozen = [conversation("a", "keyscribe"), conversation("b", "chatplay")]
         let live = [conversation("c", "aardvark"), conversation("b", "chatplay", state: .working), conversation("a", "keyscribe")]

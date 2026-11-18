@@ -45,7 +45,7 @@ final class AgentProcessTable: @unchecked Sendable {
             found = AgentProcesses.classify(processes, rule: rule, home: home, parent: SystemTerminalFacts.parent(of:), resolve: resolve)
             found.candidates = found.candidates.map { candidate in
                 var canonical = candidate
-                canonical.setup = ConnectorFolders.canonical(URL(fileURLWithPath: candidate.setup, isDirectory: true)).path
+                canonical.setup = candidate.setup.map { ConnectorFolders.canonical(URL(fileURLWithPath: $0, isDirectory: true)).path }
                 return canonical
             }
             let unread = Set(found.unreadable)
@@ -123,9 +123,13 @@ final class AgentProcessLister: @unchecked Sendable {
         self.resolve = resolve
     }
 
+    static func environmentKeys(keeping keys: Set<String>, rules: [AgentProcesses.Rule]) -> Set<String> {
+        keys.union(rules.flatMap { [$0.setupVariable] + $0.profileVariables })
+    }
+
     func list(_ rules: [AgentProcesses.Rule]) -> [TerminalProcess]? {
         guard let own = SystemTerminalFacts.ownProcesses() else { return nil }
-        let facts = SystemTerminalFacts(environmentKeys: keys.union(rules.map(\.setupVariable)))
+        let facts = SystemTerminalFacts(environmentKeys: Self.environmentKeys(keeping: keys, rules: rules))
         let agents = rules.map(\.agent)
         let known: [Key: Seen] = lock.withLock { cachedFor == agents ? cache : [:] }
         var next: [Key: Seen] = [:]

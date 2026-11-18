@@ -13,16 +13,16 @@ struct PiCLITests {
         #expect(PiCLI.version(in: "(node:123) DeprecationWarning: punycode since v22.1.0\n1.5.0\n") == [1, 5, 0])
         #expect(PiCLI.version(in: "(node:123) DeprecationWarning: punycode since v22.1.0\n") == nil)
         #expect(PiCLI.version(in: "1.4\n") == [1, 4, 0])
-        #expect(PiCLI.isSupported(PiCLI.version(in: "1.4\n") ?? []))
+        #expect(ExtensionAgent.pi.isSupported(PiCLI.version(in: "1.4\n") ?? []))
     }
 
     @Test func versionsBelowTheFloorAreNotSupported() {
-        #expect(PiCLI.isSupported([1, 4, 0]))
-        #expect(PiCLI.isSupported([1, 5, 0]))
-        #expect(PiCLI.isSupported([2, 0]))
-        #expect(!PiCLI.isSupported([1, 3, 9]))
-        #expect(!PiCLI.isSupported([0, 80, 3]))
-        #expect(PiCLI.describe([1, 4, 0]) == "1.4.0")
+        #expect(ExtensionAgent.pi.isSupported([1, 4, 0]))
+        #expect(ExtensionAgent.pi.isSupported([1, 5, 0]))
+        #expect(ExtensionAgent.pi.isSupported([2, 0]))
+        #expect(!ExtensionAgent.pi.isSupported([1, 3, 9]))
+        #expect(!ExtensionAgent.pi.isSupported([0, 80, 3]))
+        #expect(ExtensionAgent.describe([1, 4, 0]) == "1.4.0")
     }
 
     @Test func piIsAlsoLookedForUnderTheNewestNodeVersionManagerInstallFirst() {
@@ -36,8 +36,8 @@ struct PiCLITests {
 
     @Test func theDefaultSetupIsPisOwnFolderNeverTheAppsEnvironment() {
         let home = URL(fileURLWithPath: "/Users/me")
-        #expect(PiConnectorInstaller.defaultSetupFolder(home: home).path == "/Users/me/.pi/agent")
-        #expect(PiConnectorInstaller.pluginDir(in: URL(fileURLWithPath: "/scratch/pi"), pluginName: "keyscribe").path == "/scratch/pi/extensions/keyscribe")
+        #expect(ExtensionAgent.pi.defaultFolder(home).path == "/Users/me/.pi/agent")
+        #expect(ExtensionConnectorInstaller.pluginDir(in: URL(fileURLWithPath: "/scratch/pi"), pluginName: "keyscribe").path == "/scratch/pi/extensions/keyscribe")
     }
 }
 
@@ -45,13 +45,14 @@ struct PiConnectorInstallerTests {
     static let source = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Sources/KeyScribe/Resources/PiConnector/index.ts")
-    static let script = PiConnectorFiles.indexTS ?? ""
+    static let script = ExtensionConnectorFiles.indexTS ?? ""
 
-    private func setup(root: URL? = nil, surfaces: ConnectorSurfaces = .builtIn) -> (PiConnectorInstaller, URL, URL) {
+    private func setup(root: URL? = nil, surfaces: ConnectorSurfaces = .builtIn) -> (ExtensionConnectorInstaller, URL, URL) {
         let root = root ?? FileManager.default.temporaryDirectory.appendingPathComponent("ks-pi-\(UUID().uuidString)")
         let agents = root.appendingPathComponent("agents")
         let folder = root.appendingPathComponent("pi-setup")
-        let installer = PiConnectorInstaller(
+        let installer = ExtensionConnectorInstaller(
+            agent: .pi,
             setupFolder: folder, pluginName: "keyscribe-dev",
             socketPath: agents.appendingPathComponent("bridge.sock").path,
             tokenPath: agents.appendingPathComponent("token").path,
@@ -66,11 +67,11 @@ struct PiConnectorInstallerTests {
         try before.install(installation: "id-1")
         let added = ConnectorSurfaces(environmentKeys: ResolvedSurfaces.builtIn.environmentKeys.union(["MUX_PANE"]), focusDefinitions: ConnectorSurfaces.builtIn.focusDefinitions)
         let (after, _, _) = setup(root: root, surfaces: added)
-        #expect(after.installed(installation: "id-1") == .other(version: PiConnectorFiles.version(for: Self.script, surfaces: .builtIn)))
+        #expect(after.installed(installation: "id-1") == .other(version: ExtensionConnectorFiles.version(for: Self.script, surfaces: .builtIn)))
         try after.install(installation: "id-1")
         #expect(after.installed(installation: "id-1") == .current)
-        #expect(before.installed(installation: "id-1") == .other(version: PiConnectorFiles.version(for: Self.script, surfaces: added)))
-        #expect(PiConnectorFiles.version(for: Self.script, surfaces: added) == PiConnectorFiles.version(for: Self.script, surfaces: .builtIn))
+        #expect(before.installed(installation: "id-1") == .other(version: ExtensionConnectorFiles.version(for: Self.script, surfaces: added)))
+        #expect(ExtensionConnectorFiles.version(for: Self.script, surfaces: added) == ExtensionConnectorFiles.version(for: Self.script, surfaces: .builtIn))
         #expect(ClaudeConnectorFiles.version(for: Self.script, surfaces: added) == ClaudeConnectorFiles.version(for: Self.script, surfaces: .builtIn))
     }
 
@@ -94,7 +95,7 @@ struct PiConnectorInstallerTests {
         #expect(config["readyPath"] as? String == agents.appendingPathComponent("ready.json").path)
         #expect(config["plugin"] as? String == "keyscribe-dev")
         #expect(config["appName"] as? String == Branding.appName)
-        #expect(config["version"] as? String == PiConnectorFiles.version(for: Self.script, surfaces: .builtIn))
+        #expect(config["version"] as? String == ExtensionConnectorFiles.version(for: Self.script, surfaces: .builtIn))
         #expect(Set(config["environmentKeys"] as? [String] ?? []) == ResolvedSurfaces.builtIn.environmentKeys)
         let focus = try #require((config["focusDefinitions"] as? [[String: Any]])?.first { $0["id"] as? String == "cmux" })
         #expect(focus["requiresEnv"] as? [String] == ["CMUX_SURFACE_ID"])
@@ -102,14 +103,16 @@ struct PiConnectorInstallerTests {
         #expect(config["installation"] as? String == "id-1")
         let code = try String(contentsOf: plugin.appendingPathComponent("index.ts"), encoding: .utf8)
         #expect(code.contains("const loadedFrom: string | null = \"id-1\""))
+        #expect(code.contains("const installedFor: string | null = \"pi\""))
         #expect(code.contains("const configPath: string | null = \"\(plugin.appendingPathComponent("keyscribe.json").path)\""))
         let restored = code
             .replacingOccurrences(of: "const loadedFrom: string | null = \"id-1\"", with: "const loadedFrom: string | null = null")
+            .replacingOccurrences(of: "const installedFor: string | null = \"pi\"", with: "const installedFor: string | null = null")
             .replacingOccurrences(of: "const configPath: string | null = \"\(plugin.appendingPathComponent("keyscribe.json").path)\"", with: "const configPath: string | null = null")
         #expect(restored == Self.script)
         #expect(installer.installed(installation: "id-1") == .current)
-        #expect(installer.installed(installation: "id-2") == .other(version: PiConnectorFiles.version(for: Self.script, surfaces: .builtIn)))
-        #expect(installer.installed(installation: nil) == .other(version: PiConnectorFiles.version(for: Self.script, surfaces: .builtIn)))
+        #expect(installer.installed(installation: "id-2") == .other(version: ExtensionConnectorFiles.version(for: Self.script, surfaces: .builtIn)))
+        #expect(installer.installed(installation: nil) == .other(version: ExtensionConnectorFiles.version(for: Self.script, surfaces: .builtIn)))
     }
 
     @Test func uninstallRemovesOnlyTheConnectorsFolder() throws {
@@ -137,22 +140,22 @@ struct PiConnectorInstallerTests {
         try installer.install(installation: "id-1")
         #expect(installer.installed(installation: "id-1") == .current)
         try Data("edited\n".utf8).write(to: plugin.appendingPathComponent("index.ts"))
-        #expect(installer.installed(installation: "id-1") == .other(version: PiConnectorFiles.version(for: Self.script, surfaces: .builtIn)))
+        #expect(installer.installed(installation: "id-1") == .other(version: ExtensionConnectorFiles.version(for: Self.script, surfaces: .builtIn)))
     }
 
     @Test func anExtensionTurnedOffInPisSettingsIsSeen() throws {
         let (installer, _, extensions) = setup()
         try installer.install(installation: "id-1")
-        #expect(!installer.turnedOffInPi())
+        #expect(!PiCLI.turnedOff(setupFolder: installer.setupFolder, pluginDir: installer.pluginDir, home: FileManager.default.homeDirectoryForCurrentUser))
         let settings = extensions.deletingLastPathComponent().appendingPathComponent("settings.json")
         try Data(#"{"extensions": ["-extensions/keyscribe-dev"]}"#.utf8).write(to: settings)
-        #expect(installer.turnedOffInPi())
+        #expect(PiCLI.turnedOff(setupFolder: installer.setupFolder, pluginDir: installer.pluginDir, home: FileManager.default.homeDirectoryForCurrentUser))
     }
 
     @Test func theCommandToUninstallByHandNamesTheConnectorsOwnFolder() {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".pi/agent/extensions/keyscribe")
-        #expect(PiConnectorInstaller.manualUninstall(pluginDir: dir) == ["rm -r ~/.pi/agent/extensions/keyscribe"])
-        #expect(PiConnectorInstaller.manualUninstall(pluginDir: URL(fileURLWithPath: "/Users/a/pi work/extensions/keyscribe"), home: "/Users/a")
+        #expect(ExtensionConnectorInstaller.manualUninstall(pluginDir: dir) == ["rm -r ~/.pi/agent/extensions/keyscribe"])
+        #expect(ExtensionConnectorInstaller.manualUninstall(pluginDir: URL(fileURLWithPath: "/Users/a/pi work/extensions/keyscribe"), home: "/Users/a")
             == ["rm -r ~/'pi work/extensions/keyscribe'"])
     }
 
@@ -198,12 +201,12 @@ struct PiConnectorStatusTests {
         }
     }
 
-    private func make(pi: String? = "/bin/pi-test", cli: CLI = CLI(), script: String? = PiConnectorFiles.indexTS) -> (PiConnector, CLI, URL, URL) {
+    private func make(pi: String? = "/bin/pi-test", cli: CLI = CLI(), script: String? = ExtensionConnectorFiles.indexTS) -> (ExtensionConnector, CLI, URL, URL) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ks-pi-conn-\(UUID().uuidString)")
         let agents = root.appendingPathComponent("agents")
         let home = root.appendingPathComponent("home")
         let tools = ToolEnvironment(appEnvironment: ["PATH": "/test-bin"], shell: "/bin/zsh", isExecutable: { pi != nil && $0 == "/test-bin/pi" })
-        let connector = PiConnector(version: cli.check, tools: tools, agentsDir: agents, pluginName: "keyscribe-dev", surfaces: .builtIn, script: script, home: home)
+        let connector = ExtensionConnector(agent: .pi, version: cli.check, tools: tools, agentsDir: agents, pluginName: "keyscribe-dev", surfaces: .builtIn, script: script, home: home)
         return (connector, cli, agents, home.appendingPathComponent(".pi/agent"))
     }
 
@@ -326,11 +329,11 @@ struct PiConnectorStatusTests {
 
         let focus = FocusDefinition(id: "mux", requiresEnv: ["MUX_PANE"], argv: ["/usr/bin/env", "mux", "focus", "{MUX_PANE}"])
         let definitions = ConnectorSurfaces.builtIn.focusDefinitions + (addsFocus ? [focus] : [])
-        let after = PiConnector(
+        let after = ExtensionConnector(agent: .pi,
             version: CLI().check, tools: ToolEnvironment(appEnvironment: ["PATH": "/test-bin"], shell: "/bin/zsh", isExecutable: { $0 == "/test-bin/pi" }),
             agentsDir: agents, pluginName: "keyscribe-dev",
             surfaces: ConnectorSurfaces(environmentKeys: ResolvedSurfaces.builtIn.environmentKeys.union(["MUX_PANE"]), focusDefinitions: definitions),
-            script: PiConnectorFiles.indexTS, home: folder.deletingLastPathComponent().deletingLastPathComponent())
+            script: ExtensionConnectorFiles.indexTS, home: folder.deletingLastPathComponent().deletingLastPathComponent())
         let updated = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [after])
         await updated.refresh()
         let setup = updated.connectors[0].setups[0]
@@ -358,9 +361,9 @@ struct PiConnectorStatusTests {
         let model = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [installed])
         await model.refresh()
         await model.connectors[0].setups[0].install()
-        let connector = PiConnector(
+        let connector = ExtensionConnector(agent: .pi,
             version: { _ in .working("1.5.0") }, tools: ToolEnvironment(appEnvironment: ["PATH": "/test-bin"], shell: "/bin/zsh", isExecutable: { _ in false }),
-            agentsDir: agents, pluginName: "keyscribe-dev", surfaces: .builtIn, script: PiConnectorFiles.indexTS,
+            agentsDir: agents, pluginName: "keyscribe-dev", surfaces: .builtIn, script: ExtensionConnectorFiles.indexTS,
             home: folder.deletingLastPathComponent().deletingLastPathComponent())
         let without = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: agents, connectors: [connector])
         await without.refresh()

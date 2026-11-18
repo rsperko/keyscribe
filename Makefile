@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test test-kit test-release-tools test-connector test-pi-connector test-bb-plugin check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major beta cheatsheet test-cheatsheet voice-kit publish-voice-kit test-voice-kit
+.PHONY: help build run release publish ship cask test test-kit test-release-tools test-connector test-pi-connector test-omp-connector test-bb-plugin check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major beta cheatsheet test-cheatsheet voice-kit publish-voice-kit test-voice-kit
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -51,7 +51,10 @@ test-connector: ## Run the Claude Code connector's behavior tests (needs the cla
 	./scripts/test-claude-connector.sh
 
 test-pi-connector: ## Run the Pi connector's behavior tests (needs Node 22.18 or later; never needed to build)
-	./scripts/test-pi-connector.sh
+	./scripts/test-extension-connector.sh pi
+
+test-omp-connector: ## Run the omp connector's behavior tests (needs Node 22.18 or later; never needed to build)
+	./scripts/test-extension-connector.sh omp
 
 test-bb-plugin: ## Run the bb plugin's behavior tests (needs Node 22.18 or later; never needed to build)
 	./scripts/test-bb-plugin.sh

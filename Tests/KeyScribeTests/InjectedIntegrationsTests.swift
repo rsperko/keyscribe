@@ -157,15 +157,15 @@ struct InjectedIntegrationsTests {
         let processes = AgentProcessTable(list: { _ in [] })
         let surfaces = ConnectorSurfaces(environmentKeys: [])
         let builtIn = AgentIntegrations.builtIn
-        #expect(builtIn.discoveries(setups: setups, processes: processes).map(\.kind.id) == ["claude", "pi"])
-        #expect(builtIn.connectors(agentsDir: dir, pluginName: "p", surfaces: surfaces).map(\.kind.id) == ["claude", "pi", "bb"])
+        #expect(builtIn.discoveries(setups: setups, processes: processes).map(\.kind.id) == ["claude", "pi", "omp"])
+        #expect(builtIn.connectors(agentsDir: dir, pluginName: "p", surfaces: surfaces).map(\.kind.id) == ["claude", "pi", "omp", "bb"])
         let fake = AgentKind(id: "fake", displayName: "Fake", connectorName: "Fake connector")
         var extended = builtIn
         extended.agents.append(AgentIntegration(
             kind: fake, discovery: { _, _ in AgentHubTests.FakeDiscovery(kind: fake) },
             connector: { AgentIntegration.pi.connector($0, $1, $2) }))
-        #expect(extended.discoveries(setups: setups, processes: processes).map(\.kind.id) == ["claude", "pi", "fake"])
-        #expect(extended.connectors(agentsDir: dir, pluginName: "p", surfaces: surfaces).count == 4)
+        #expect(extended.discoveries(setups: setups, processes: processes).map(\.kind.id) == ["claude", "pi", "omp", "fake"])
+        #expect(extended.connectors(agentsDir: dir, pluginName: "p", surfaces: surfaces).count == 5)
     }
 
     @Test @MainActor func aHostWhoseIdAnotherAgentOrHostUsesIsRejectedBeforeAnythingStarts() throws {
