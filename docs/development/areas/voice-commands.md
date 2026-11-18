@@ -318,16 +318,48 @@ every rule above applies to it, with these sharpenings:
   accepted steer: it reads as sent, and no reply follows it.
 - **Pi and omp share one connector core, with an adapter per agent.** `Resources/PiConnector/index.ts` holds the core
   (queue, poll loop, submissions, receipts, read aloud, focus) and each agent's adapter for the signals that differ;
-  the installer writes `installedFor` and gives each agent its own folder under `extensions/` (Pi's keeps the plugin
-  name, omp's adds `-omp`), and an adapter stays inert in another agent's host, so a folder both agents load holds
-  both connectors and never runs one in the wrong agent. A fix in the core is a fix for both: run both suites
+  the installer writes `installedFor` and gives each agent its own folder under `extensions/` (the plugin name with
+  the agent's id added, `ExtensionAgent.folderName`; only Pi's keeps the bare plugin name it had first), and an adapter stays inert in another agent's host, so a folder both agents load holds
+  both connectors and never runs one in the wrong agent. `installedFor` picks the adapter; the host check
+  (`hostedByOmp`) only guards it, and it takes the host for omp only on a positive marker of omp's extension API
+  that Pi's has no counterpart for (`arktype` on the API object, as measured on omp 18.22.2 and Pi 1.5.0,
+  2026-11-18). Anything else is Pi: omp is never inferred from something missing, and a name both agents' packages
+  export never decides it. omp's adapter reads its version from the package omp puts on the API (`pi.pi.VERSION`)
+  and reports an empty one when that is missing. A fix in the core is a fix for both: run both suites
   (`make test-pi-connector`, `make test-omp-connector`). omp's adapter rests on behavior observed on omp 18.22.2
   (2026-11-18), not on its docs: an idle conversation is never sent a follow-up (omp holds it until some later
-  run); a steer is confirmed when its send resolves (omp gives an extension's message no `input` event); delivery
-  holds while a tool approval, a plan review or the `ask` tool is open (a steer would deny or dismiss it); and only
+  run); a steer is confirmed when its send resolves, which is when omp queues it (omp gives an extension's message no
+  `input` event; an idle send resolves only when its run ends); while a tool approval or the `ask` tool is open, a
+  dictation goes as an aside (the adapter's `promptDelivery`; Pi's adapter sets none, since every Pi prompt holds
+  delivery), which omp delivers at the next step without answering the prompt (a steer would deny
+  or dismiss it), and is confirmed the same way; delivery holds while a plan review is open, because omp is idle then
+  and any send starts a run that replaces the review; a message omp refuses (its cost cap) is put back in its editor
+  by omp, so the connector swaps it for the user's own draft or clears it; a tool approval reports waiting with
+  omp's reason for asking as its title when omp gives one (such as a bash safety pattern, a bash rule from the user's
+  settings, or a restricted folder; an approval the approval mode alone asks for gives none), and names the tool
+  being approved by its call id rather than the last tool started, because omp runs tools side by side and an
+  approval arrives just after its own tool's start (an MCP tool is approved as omp's `write` to an `xd://` path);
+  omp raises no event for a picker or confirm that one of its own commands or another extension opens, so those are
+  not seen: the connector reports no wait and holds nothing for them; a rename raises no event either, so the
+  adapter reads the name the user set (`titleSource: user`; a generated title is `auto` and never sent) at run
+  boundaries, each time the core's poll returns (`Adapter.retitle`, at most one poll hold apart, sooner when the
+  app sends a command), and once `retitleDelay` after the user's input, because a typed `/rename` changes the
+  name only after omp's `input` event, once its title model has put an icon on it (470–520 ms later in three
+  renames); each read is a name lookup and a compare, and only a change sends anything; an image
+  sent with a dictation, idle, as a steer or as an aside during an approval, reaches the model as Pi's does, but omp passes it on only to a model
+  its configuration says takes images and gives any other model a note in its place; and only
   an `agent_end` without `willContinue` finishes a turn (omp reports itself idle while background work keeps the run
-  open). On the Swift side both agents are an `ExtensionAgent` descriptor over `ExtensionConnector` and
-  `ExtensionDiscovery`, so the agent's own folder holds only its rule, CLI parsing and copy.
+  open). omp also has no way to load a new connector into an open conversation: `/reload-plugins` keeps the
+  loaded extension module, and an extension command's `ctx.reload()` only re-reads the conversation's file while
+  aborting its running turn and dropping queued messages (omp 18.22.2, 2026-11-18). So omp's `AgentKind` has no
+  `reloadCommand` but a `resumeCommand`, and its copy says to quit a conversation and reopen it with
+  `omp --resume`, which loads the installed connector into the same conversation, history and title kept. On the Swift side both agents are an `ExtensionAgent` descriptor over `ExtensionConnector` and
+  `ExtensionDiscovery`, so the agent's own folder holds only its rule, CLI parsing and the copy that is its own. The
+  rule (`AgentProcesses.Rule`) is the one place an agent's command, folder variable and default folder are spelled;
+  the integration, connector and discovery read them from it. The rest of the copy is built from the agent's name and
+  reload command (`AgentConnectorCopy.extensionAgent`), so every agent's wording stays the same. A connector whose
+  files are current but whose agent cannot say whether it is turned off is installed but unconfirmed
+  (`AgentConnectorModel.State.unconfirmed`): never Ready, never repaired by an update, and checked again by Try Again.
 - **A dictation for the conversation in front is typed into it, so it is the user's own prompt.** A connector's own
   prompt runs once the agent is idle (Claude Code queues a plugin's prompt behind the turn; measured on 2.1.325,
   2026-11-14), and only a prompt the user enters is recorded as theirs. So for the conversation in front,
@@ -543,8 +575,12 @@ every rule above applies to it, with these sharpenings:
   event by the hello's agent and handing connectors their native id back, so two agents may reuse an id
   and never meet. Saved names carry the namespaced key; a legacy key gets the agent the composition root
   names. A connector advertises what it can do
-  on its hello (`features`); a missing feature is unsupported unless that agent's shipped connector has it,
-  which is the only case that reads as an outdated connector.
+  on its hello (`features`); a missing feature reads as an outdated connector only when the connector that said
+  hello is not the one the app bundles for that agent, and as unsupported otherwise. `AgentHub.runsOlderConnector`
+  is the one test of that, for focus, the footer's update step and Settings alike. It compares the hello's
+  `codeVersion`, which the installer writes into the connector's code (`builtVersion`), never the settings file's
+  version, which an older connector reads again after an update; a hello without `codeVersion` is from before the
+  field and so older, and a host's own connector is never compared.
 - **Discovery failure is not an empty roster.** A scan that cannot read its source says so, the hub keeps
   the sessions last seen for that agent, and Settings shows the problem beside that agent's connector. A
   scan that read only part of its source keeps what it last saw from the unread part (`AgentScanExtras.carried`)

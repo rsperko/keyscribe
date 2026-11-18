@@ -47,7 +47,9 @@ enum AgentFocusResult: Equatable, Sendable {
     }
 
     private static func reload(_ agent: AgentKind?, in handle: String) -> String {
-        agent?.reloadCommand.map { "run \($0) in \(handle)" } ?? "restart \(handle)"
+        agent?.reloadCommand.map { "run \($0) in \(handle)" }
+            ?? agent?.resumeCommand.map { "quit \(handle) and reopen it with \($0)" }
+            ?? "restart \(handle)"
     }
 }
 

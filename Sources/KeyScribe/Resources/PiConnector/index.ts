@@ -5,6 +5,7 @@ import { request as httpRequest } from "node:http"
 const configPath: string | null = null
 const loadedFrom: string | null = null
 const installedFor: string | null = null
+const builtVersion: string | null = null
 
 export type Response = { status: number; ok: boolean; text: string }
 export type Exchange = { response: Promise<Response>; cancel: () => void }
@@ -18,7 +19,7 @@ export type Host = {
   exec: (command: string, args: string[], timeoutMs: number) => Promise<{ code: number }>
   post: (socketPath: string, path: string, body: string, token: string) => Exchange
 }
-export type Settings = { configPath: string | null; loadedFrom: string | null }
+export type Settings = { configPath: string | null; loadedFrom: string | null; builtVersion?: string | null }
 
 type Config = {
   protocol: number
@@ -76,6 +77,7 @@ const pollDeadline = 28000
 const discoveryInterval = 10000
 const admitLimit = 4096
 const keystrokeQuiet = 3000
+const retitleDelay = 3000
 const keystrokeHoldLimit = 6000
 const receiptDeadline = 3000
 const lateLimit = 8
@@ -96,7 +98,7 @@ const late = { late: true } as const
 const unreachable = { unreachable: true } as const
 const freshReasons = ["startup", "new", "fork"]
 const features = ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check", "steer", "merge"]
-const ompFeatures = ["focus", "focusDefinitions", "label", "readiness", "notify", "check", "steer", "merge"]
+const ompFeatures = ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check", "steer", "merge"]
 
 const readAloudTool = "tell_me_when_done"
 
@@ -111,7 +113,9 @@ type Adapter = {
   title: () => string | undefined
   quiet: (context: ExtensionContext) => boolean
   idleDelivery?: "followUp"
+  promptDelivery?: "aside"
   acceptsWhenSent: boolean
+  retitle?: () => void
 }
 
 type Core = {
@@ -129,13 +133,17 @@ type Core = {
   titled: (text: string) => void
   toolStarted: (id: string, name: string, args: unknown) => void
   toolEnded: (id: string) => void
-  waitBegan: (kind: string | undefined, title: string | undefined) => void
-  waitEnded: () => void
+  waitBegan: (kind: string | undefined, title: string | undefined, holds: boolean, tool?: { id: string; name: string }) => void
+  waitEnded: (holds: boolean) => void
 }
 
 function hostedByOmp(pi: ExtensionAPI): boolean {
-  const own = (pi as unknown as { pi?: { VERSION?: unknown; getAgentDir?: unknown } }).pi
-  return !!own && typeof own.VERSION === "string" && typeof own.getAgentDir === "function"
+  return (pi as unknown as { arktype?: unknown }).arktype !== undefined
+}
+
+function ompVersion(pi: ExtensionAPI): string {
+  const own = (pi as unknown as { pi?: { VERSION?: unknown } }).pi
+  return own && typeof own.VERSION === "string" ? own.VERSION : ""
 }
 
 function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter): Core {
@@ -150,6 +158,7 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
   let turns = 0
   let prompts = 0
   let promptsOpen = 0
+  let holdsOpen = 0
   let compacting = false
   let waiting: Waiting | null = null
   let said = ""
@@ -164,6 +173,7 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
   let repliedThisRun = false
   let lastFailed = false
   let staleWatch: (() => void) | null = null
+  let titleCheck: (() => void) | null = null
   let idleChecks = 0
   const nonce = instanceNonce()
   let serial = 0
@@ -252,6 +262,8 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
     dormant = true
     token = ""
     endCooldown()
+    if (titleCheck) titleCheck()
+    titleCheck = null
   }
 
   function endCooldown(): void {
@@ -454,11 +466,11 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
     const attempt = { target, generation, connection: Math.random().toString(36).slice(2, 12), result: Promise.resolve(false) }
     const render = () => JSON.stringify(quiet ? {
       op: "hello", protocol: (config as Config).protocol, installation: (config as Config).installation,
-      version: (config as Config).version, agent: adapter.agent, agentVersion: adapter.version(),
+      codeVersion: settings.builtVersion ?? undefined, agent: adapter.agent, agentVersion: adapter.version(),
       instance, connection: attempt.connection, session: target, pid: host.pid, cwd, features: adapter.features, idle: idle(), gap: freshSession !== target,
     } : {
       op: "hello", protocol: (config as Config).protocol, installation: (config as Config).installation,
-      version: (config as Config).version, agent: adapter.agent, agentVersion: adapter.version(),
+      codeVersion: settings.builtVersion ?? undefined, agent: adapter.agent, agentVersion: adapter.version(),
       instance, connection: attempt.connection, session: target, pid: host.pid, cwd,
       features: adapter.features, title: adapter.title() || undefined, prompts, waiting: waiting || undefined,
       idle: idle(), gap: freshSession !== target, turn: currentTurn || undefined,
@@ -620,6 +632,7 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
     currentTurn = null
     prompts = 0
     promptsOpen = 0
+    holdsOpen = 0
     waiting = null
     said = ""
     tools.length = 0
@@ -689,7 +702,7 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
       if (!(host.now() < (cmd.expiresAt || 0))) return "expired"
       if (typeof cmd.expectedPrompts === "number" && cmd.expectedPrompts !== prompts) return "typedSince"
       if (pending.some((item) => !item.late)) return "working"
-      if (promptsOpen > 0) return "dialog"
+      if (holdsOpen > 0) return "dialog"
       if (ctx && ctx.ui.getEditorText().trim() && !joinable(cmd)) return "draft"
       return null
     }
@@ -711,8 +724,8 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
     pending.push(item)
     track(cmd.id, { state: "handed", handedAt: host.now(), withDraft: draft.trim() ? true : undefined })
     try {
-      const deliverAs = idle() ? adapter.idleDelivery : "steer"
-      item.steer = deliverAs === "steer"
+      const deliverAs = idle() ? adapter.idleDelivery : promptsOpen > 0 && adapter.promptDelivery ? adapter.promptDelivery : "steer"
+      item.steer = deliverAs === "steer" || deliverAs === "aside"
       if (draft.trim() && ctx) ctx.ui.setEditorText("")
       const sent: unknown = pi.sendUserMessage(attached.length ? [{ type: "text", text }, ...attached] : text, deliverAs ? { deliverAs } : {})
       if (sent && typeof (sent as Promise<void>).then === "function") {
@@ -723,7 +736,8 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
           if (index < 0) return
           pending.splice(index, 1)
           item.cancel()
-          putBack(draft)
+          if (ctx && ctx.ui.getEditorText() === text) ctx.ui.setEditorText(draft)
+          else putBack(draft)
           refuse(gen, cmd.id, String((err && (err as Error).message) || err).slice(0, 500))
         })
       }
@@ -918,6 +932,7 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
         lose()
         continue
       }
+      if (adapter.retitle) adapter.retitle()
       for (const cmd of commands) {
         if (!current(target, gen)) break
         if (cmd.op === "retire") {
@@ -1042,6 +1057,13 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
       if (currentTurn !== null && ctx && adapter.quiet(ctx)) closeStaleTurn()
       prompts += 1
       observe({ op: "typed", session, prompts })
+      const retitle = adapter.retitle
+      if (!retitle) return
+      if (titleCheck) titleCheck()
+      titleCheck = host.after(retitleDelay, () => {
+        titleCheck = null
+        if (!dormant && session) retitle()
+      })
     },
     accepted(text) {
       if (!session) return
@@ -1108,15 +1130,18 @@ function core(pi: ExtensionAPI, host: Host, settings: Settings, adapter: Adapter
       const index = tools.findIndex((tool) => tool.id === id)
       if (index >= 0) tools.splice(index, 1)
     },
-    waitBegan(kind, title) {
+    waitBegan(kind, title, holds, tool) {
       promptsOpen += 1
+      if (holds) holdsOpen += 1
       if (promptsOpen > 1 || !session) return
-      waiting = waitingFor(kind, title, tools[tools.length - 1], said)
+      const shown = tool ? tools.find((started) => started.id === tool.id) ?? { name: tool.name, args: undefined } : tools[tools.length - 1]
+      waiting = waitingFor(kind, title, shown, said)
       observe({ op: "waiting", session, waiting })
     },
-    waitEnded() {
+    waitEnded(holds) {
       if (promptsOpen === 0) return
       promptsOpen -= 1
+      if (holds && holdsOpen > 0) holdsOpen -= 1
       if (promptsOpen > 0 || !session) return
       waiting = null
       observe({ op: "waiting", session })
@@ -1161,16 +1186,15 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
 
   pi.on("tool_execution_end", (event) => c.toolEnded(event.toolCallId))
 
-  pi.on("ui_prompt_start", (event) => c.waitBegan(event.kind, event.title))
+  pi.on("ui_prompt_start", (event) => c.waitBegan(event.kind, event.title, true))
 
-  pi.on("ui_prompt_end", () => c.waitEnded())
+  pi.on("ui_prompt_end", () => c.waitEnded(true))
 }
 
 type OmpEvents = (event: string, handler: (event: any, context: any) => unknown) => void
 
 export function ompConnector(pi: ExtensionAPI, host: Host, settings: Settings): void {
   if (!hostedByOmp(pi)) return
-  const own = (pi as unknown as { pi: { VERSION: string } }).pi
   const on = pi.on.bind(pi) as unknown as OmpEvents
   let context: ExtensionContext | null = null
   let session: string | null = null
@@ -1178,7 +1202,7 @@ export function ompConnector(pi: ExtensionAPI, host: Host, settings: Settings): 
   let cleared = false
   let lastStop: string | undefined
   let sentTitle = ""
-  const waits = new Set<string>()
+  const waits = new Map<string, boolean>()
 
   const title = (): string => {
     const source = context ? (context.sessionManager as unknown as { titleSource?: string }).titleSource : undefined
@@ -1186,8 +1210,8 @@ export function ompConnector(pi: ExtensionAPI, host: Host, settings: Settings): 
   }
 
   const c = core(pi, host, settings, {
-    agent: "omp", version: () => String(own.VERSION), features: ompFeatures, title: () => title() || undefined,
-    quiet: (ctx) => ctx.isIdle() && !paused, acceptsWhenSent: true,
+    agent: "omp", version: () => ompVersion(pi), features: ompFeatures, title: () => title() || undefined,
+    quiet: (ctx) => ctx.isIdle() && !paused, promptDelivery: "aside", acceptsWhenSent: true, retitle: () => retitle(),
   })
 
   const retitle = () => {
@@ -1197,14 +1221,15 @@ export function ompConnector(pi: ExtensionAPI, host: Host, settings: Settings): 
     c.titled(now)
   }
 
-  const begin = (id: string, kind: string, heading?: string) => {
+  const begin = (id: string, kind: string, heading: string | undefined, holds: boolean, tool?: { id: string; name: string }) => {
     if (waits.has(id)) return
-    waits.add(id)
-    c.waitBegan(kind, heading)
+    waits.set(id, holds)
+    c.waitBegan(kind, heading, holds, tool)
   }
 
   const finish = (id: string) => {
-    if (waits.delete(id)) c.waitEnded()
+    const holds = waits.get(id)
+    if (holds !== undefined && waits.delete(id)) c.waitEnded(holds)
   }
 
   const adopt = (ctx: ExtensionContext, reason: string) => {
@@ -1228,7 +1253,7 @@ export function ompConnector(pi: ExtensionAPI, host: Host, settings: Settings): 
   })
 
   on("session_clear", () => {
-    for (const id of [...waits]) finish(id)
+    for (const id of [...waits.keys()]) finish(id)
     paused = false
     cleared = true
     lastStop = undefined
@@ -1264,7 +1289,7 @@ export function ompConnector(pi: ExtensionAPI, host: Host, settings: Settings): 
       return
     }
     paused = false
-    for (const id of [...waits]) finish(id)
+    for (const id of [...waits.keys()]) finish(id)
     c.compacting(false)
     if (cleared) {
       cleared = false
@@ -1289,7 +1314,7 @@ export function ompConnector(pi: ExtensionAPI, host: Host, settings: Settings): 
 
   on("tool_execution_start", (event) => {
     c.toolStarted(event.toolCallId, event.toolName, event.args)
-    if (event.toolName === "ask") begin(`tool:${event.toolCallId}`, "select")
+    if (event.toolName === "ask") begin(`tool:${event.toolCallId}`, "select", undefined, false)
   })
 
   on("tool_execution_end", (event) => {
@@ -1297,10 +1322,11 @@ export function ompConnector(pi: ExtensionAPI, host: Host, settings: Settings): 
     c.toolEnded(event.toolCallId)
   })
 
-  on("tool_approval_requested", (event) => begin(`approval:${event.toolCallId}`, "confirm"))
+  on("tool_approval_requested", (event) =>
+    begin(`approval:${event.toolCallId}`, "confirm", event.reason, false, { id: event.toolCallId, name: event.toolName }))
   on("tool_approval_resolved", (event) => finish(`approval:${event.toolCallId}`))
 
-  on("plan_review_requested", (event) => begin(`plan:${event.reviewId}`, "confirm", event.title))
+  on("plan_review_requested", (event) => begin(`plan:${event.reviewId}`, "confirm", event.title, true))
   on("plan_review_resolved", (event) => finish(`plan:${event.reviewId}`))
 }
 
@@ -1418,5 +1444,5 @@ export function nodeHost(pi: ExtensionAPI): Host {
 
 export default function (pi: ExtensionAPI): void {
   const start = installedFor === "omp" ? ompConnector : connector
-  start(pi, nodeHost(pi), { configPath, loadedFrom })
+  start(pi, nodeHost(pi), { configPath, loadedFrom, builtVersion })
 }

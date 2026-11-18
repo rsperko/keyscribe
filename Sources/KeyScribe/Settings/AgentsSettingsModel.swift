@@ -48,7 +48,7 @@ final class AgentsSettingsModel: ObservableObject {
 
     enum RowAction: Equatable {
         case connect
-        case recover(reload: String?)
+        case recover(AgentKind?)
         case connected
         case unknown
     }
@@ -163,7 +163,7 @@ final class AgentsSettingsModel: ObservableObject {
         var setups: [String: [String]]
         var candidates: [AgentCandidate]
         var disconnected: [AgentConversation]
-        var loadedVersions: [String: String]
+        var olderConnectors: Set<String>
         var lastSeen: Set<String>
         var readAloud: Set<String>
         var readNextAloud: Set<String>
@@ -218,12 +218,12 @@ final class AgentsSettingsModel: ObservableObject {
     func show(
         _ conversations: [AgentConversation], namesProblem: String? = nil, namesNotSaved: String? = nil,
         discoveryProblems: [String: String]? = nil, discoveredSetups: [String: [String]] = [:], candidates: [AgentCandidate] = [],
-        disconnected: [AgentConversation] = [], exclusionsNotSaved: String? = nil, loadedVersions: [String: String] = [:],
+        disconnected: [AgentConversation] = [], exclusionsNotSaved: String? = nil, olderConnectors: Set<String> = [],
         lastSeen: Set<String> = [], readAloud: Set<String> = [], readNextAloud: Set<String> = [], prompts: [String: AgentPrompt] = [:]
     ) {
         if exclusionsNotSaved != self.exclusionsNotSaved { self.exclusionsNotSaved = exclusionsNotSaved }
         shownExtras = Extras(
-            setups: discoveredSetups, candidates: candidates, disconnected: disconnected, loadedVersions: loadedVersions, lastSeen: lastSeen,
+            setups: discoveredSetups, candidates: candidates, disconnected: disconnected, olderConnectors: olderConnectors, lastSeen: lastSeen,
             readAloud: readAloud, readNextAloud: readNextAloud)
         if setupsProblem != setups.problem { setupsProblem = setups.problem }
         if namesProblem != self.namesProblem { self.namesProblem = namesProblem }
@@ -243,7 +243,7 @@ final class AgentsSettingsModel: ObservableObject {
                 agent: conversation.runningAgent, terminal: conversation.pid.flatMap { terminals[$0] ?? nil },
                 title: conversation.title, setup: conversation.setup,
                 key: conversation.pid.map { Self.key(pid: $0, milliseconds: conversation.startedAt.map { Int(($0.timeIntervalSince1970 * 1000).rounded()) }) } ?? conversation.id,
-                lastSeen: lastSeen, olderConnector: runsOlderConnector(conversation, loadedVersions: loadedVersions), startedAt: conversation.startedAt,
+                lastSeen: lastSeen, olderConnector: conversation.connectorLive && olderConnectors.contains(conversation.id), startedAt: conversation.startedAt,
                 readAloud: readAloud.contains(conversation.id) ? .thisReply : readNextAloud.contains(conversation.id) ? .nextReply : nil,
                 place: conversation.placeName, renamed: conversation.nameSource == .chosen,
                 surface: conversation.placeSurface, otherNames: conversation.otherNames, unreadSince: conversation.placeUnreadSince,
@@ -271,7 +271,7 @@ final class AgentsSettingsModel: ObservableObject {
                 guard conversation.runningAgent == connector.kind.id, let setup = conversation.setup else { return nil }
                 return AgentConnectorModel.Use(
                     folder: setup, name: conversation.handle, connected: conversation.connectorLive,
-                    older: runsOlderConnector(conversation, loadedVersions: loadedVersions))
+                    older: conversation.connectorLive && olderConnectors.contains(conversation.id))
             }
             let waiting = candidates.compactMap { candidate -> AgentConnectorModel.Use? in
                 guard candidate.agent == connector.kind.id, let setup = candidate.setup else { return nil }
@@ -295,7 +295,7 @@ final class AgentsSettingsModel: ObservableObject {
                 self.show(
                     shown, namesProblem: self.namesProblem, namesNotSaved: self.namesNotSaved,
                     discoveredSetups: extras.setups, candidates: extras.candidates, disconnected: extras.disconnected,
-                    exclusionsNotSaved: self.exclusionsNotSaved, loadedVersions: extras.loadedVersions, lastSeen: extras.lastSeen,
+                    exclusionsNotSaved: self.exclusionsNotSaved, olderConnectors: extras.olderConnectors, lastSeen: extras.lastSeen,
                     readAloud: extras.readAloud, readNextAloud: extras.readNextAloud)
             }
         }
@@ -303,18 +303,8 @@ final class AgentsSettingsModel: ObservableObject {
 
     private static let waitsOnUser: [AgentLiveState] = [.waitingApproval, .waitingQuestion, .userDialog]
 
-    static func older(_ loaded: String?, than bundled: String?) -> Bool {
-        guard let loaded, let bundled else { return false }
-        return loaded != bundled
-    }
-
     static func key(pid: Int, milliseconds: Int?) -> String {
         "\(pid):\(milliseconds ?? 0)"
-    }
-
-    private func runsOlderConnector(_ conversation: AgentConversation, loadedVersions: [String: String]) -> Bool {
-        conversation.connectorLive && Self.older(
-            loadedVersions[conversation.id], than: connectors.first { $0.kind.id == conversation.runningAgent }?.connector.bundledVersion)
     }
 
     private func name(of candidate: AgentCandidate) -> String {
@@ -348,7 +338,7 @@ final class AgentsSettingsModel: ObservableObject {
         if row.connected { return .connected }
         guard let setup = setup(for: row) else { return .unknown }
         guard setup.isEnrolled else { return .connect }
-        if setup.isInstalled { return .recover(reload: connector(for: row)?.kind.reloadCommand) }
+        if setup.isInstalled { return .recover(connector(for: row)?.kind) }
         return setup.state == .checking ? .unknown : .connect
     }
 

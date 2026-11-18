@@ -403,6 +403,11 @@ struct AgentTerminalFocusTests {
         #expect(result.hudState(handle: "backend", detail: "Agent", agent: .claude) == state)
     }
 
+    @Test func anOutdatedConnectorOnAnAgentWithNoReloadCommandSaysHowToReopenTheConversation() {
+        #expect(AgentFocusResult.connectorOutdated("cmux").hudState(handle: "backend", detail: "Agent", agent: .omp) == .advisory(
+            message: "Brought cmux forward. Update the omp connector in Settings, then quit backend and reopen it with omp --resume to open its tab."))
+    }
+
     @Test(arguments: [
         (AgentFocusResult.exact, "Opened backend"),
         (.requested("Warp"), "Asked Warp to show backend"),

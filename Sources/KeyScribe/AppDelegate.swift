@@ -962,7 +962,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsController.agents.show(
             hub.directory.conversations, namesProblem: hub.namesProblem, namesNotSaved: hub.namesNotSaved,
             discoveryProblems: hub.discoveryProblems, discoveredSetups: hub.discoveredSetupsByAgent, candidates: hub.candidates,
-            disconnected: hub.disconnected, exclusionsNotSaved: hub.exclusionsNotSaved, loadedVersions: hub.loadedVersions,
+            disconnected: hub.disconnected, exclusionsNotSaved: hub.exclusionsNotSaved, olderConnectors: hub.olderConnectors,
             lastSeen: hub.lastSeen, readAloud: hub.readAloud.union(spokenResult?.pendingRequested ?? []), readNextAloud: hub.readNextAloud,
             prompts: hub.openPrompts)
         if hadError != settingsController.agents.hasError { settingsController.refreshProblems() }

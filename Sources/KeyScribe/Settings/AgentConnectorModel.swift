@@ -210,7 +210,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
 
     var isInstalled: Bool {
         switch state {
-        case .status(.ready), .status(.outdated), .status(.disabled), .broken: true
+        case .status(.ready), .status(.outdated), .status(.disabled), .broken, .unconfirmed: true
         default: false
         }
     }
@@ -221,7 +221,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
 
     var hasError: Bool {
         switch state {
-        case .unavailable, .failed, .removalUnfinished, .broken: true
+        case .unavailable, .failed, .removalUnfinished, .broken, .unconfirmed: true
         default: false
         }
     }
@@ -259,7 +259,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
         let ticket = refreshes
         let found = await connector.check(tool: tool, target: target)
         guard ticket == refreshes, operation == nil else { return }
-        if case .failed = found { failedOperation = nil }
+        failedOperation = nil
         state = found
         if case .toolNotWorking = found { lookAgainAfterMiss() }
     }
@@ -375,6 +375,7 @@ final class AgentConnectorModel: ObservableObject, Identifiable {
         case removalUnfinished(String?)
         case failed(String)
         case broken(String)
+        case unconfirmed(String)
     }
 
     struct Use: Equatable {

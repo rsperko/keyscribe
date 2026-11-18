@@ -3,9 +3,11 @@ import KeyScribeKit
 
 struct AgentIntegration: Sendable {
     let kind: AgentKind
-    var folderVariable: String?
+    var rule: AgentProcesses.Rule?
     let discovery: @MainActor @Sendable (ConnectorSetupRegistry, AgentProcessTable) -> any AgentDiscovery
     let connector: @MainActor @Sendable (_ agentsDir: URL, _ pluginName: String, ConnectorSurfaces) -> any AgentConnector
+
+    var folderVariable: String? { rule?.setupVariable }
 }
 
 public struct AgentIntegrations: Sendable {

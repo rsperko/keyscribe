@@ -132,7 +132,7 @@ extension AgentIntegration {
         let rule = agent.rule
         return AgentIntegration(
             kind: agent.kind,
-            folderVariable: rule.setupVariable,
+            rule: rule,
             discovery: { setups, processes in
                 ExtensionDiscovery(
                     kind: agent.kind,

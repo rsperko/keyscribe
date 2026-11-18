@@ -4,21 +4,87 @@ import KeyScribeKit
 struct ExtensionAgent: Sendable {
     let kind: AgentKind
     let rule: AgentProcesses.Rule
-    let toolProgram: String
-    let extensionName: @Sendable (_ pluginName: String) -> String
-    let defaultFolder: @Sendable (_ home: URL) -> URL
+    var keepsPluginName = false
     let extraFolders: @Sendable (_ home: URL) -> [String]
     let minimumVersion: [Int]
     let version: @Sendable (_ output: String) -> [Int]?
     let turnedOff: @Sendable (TurnedOffQuery) async -> TurnedOff
     let recognizedFiles: [String]
-    let copy: AgentConnectorCopy
+    let wording: Wording
+
+    struct Wording: Sendable {
+        var disabledAdvice: String
+        var updateStep: String
+        var alsoSearched: [String] = []
+        var foldersHelp: String?
+    }
+
+    var toolProgram: String { rule.command }
+
+    func folderName(plugin: String) -> String { keepsPluginName ? plugin : "\(plugin)-\(kind.id)" }
 
     func isSupported(_ version: [Int]) -> Bool {
         version.lexicographicallyPrecedes(minimumVersion) == false
     }
 
     static func describe(_ version: [Int]) -> String { version.map(String.init).joined(separator: ".") }
+}
+
+extension AgentConnectorCopy {
+    static func extensionAgent(_ agent: ExtensionAgent) -> AgentConnectorCopy {
+        let kind = agent.kind
+        let wording = agent.wording
+        let name = kind.displayName
+        let app = Branding.appName
+        let places = ["a running conversation", "your login shell\u{2019}s PATH", "its own PATH", "the usual install folders"] + wording.alsoSearched
+        let searched = places.dropLast().joined(separator: ", ") + ", and " + places[places.count - 1]
+        let unloadEach: String
+        let unloadOne: String
+        let unloadMany: String
+        let reloadHint: String
+        if let reload = kind.reloadCommand {
+            reloadHint = "Already running \(name) here? Run \(reload) in each open conversation."
+            unloadEach = "run \(reload) in each open conversation or restart it"
+            unloadOne = "run \(reload) in it or restart it"
+            unloadMany = "run \(reload) in each one or restart them"
+        } else if let resume = kind.resumeCommand {
+            reloadHint = "Already running \(name) here? Quit each open conversation and reopen it with \(resume) to connect it."
+            unloadEach = "quit each open conversation and reopen it with \(resume)"
+            unloadOne = "quit it and reopen it with \(resume)"
+            unloadMany = "quit them and reopen them with \(resume)"
+        } else {
+            reloadHint = "Already running \(name) here? Restart each open conversation to connect it."
+            unloadEach = "restart each open conversation"
+            unloadOne = "restart it"
+            unloadMany = "restart them"
+        }
+        return AgentConnectorCopy(
+            help: "\(app) reaches \(name) through a small extension installed in the folder \(name) loads its configuration from. Installed means the extension is in place; each conversation using this folder then connects on its own, unless you disconnect it.",
+            reloadHint: reloadHint,
+            uninstallTitle: "Uninstall the \(kind.connectorName) from this folder?",
+            uninstallMessage: "\(name) conversations using this folder disconnect now, and new ones will not connect. Work you already sent may still finish. Each open conversation unloads the connector when you \(unloadOne). Other folders stay connected. The folder, its conversations, your conversation names and disconnections, and other \(app) settings are kept.",
+            toolNotFoundLabel: "\(name) not found",
+            toolNotFoundAdvice: "Install \(name), or choose the \(agent.toolProgram) command yourself. \(app) looked for it in \(searched).",
+            toolNotWorkingLabel: "\(name) not working",
+            unavailable: "This copy of \(app) is missing its \(kind.connectorName). Reinstall \(app) to connect \(name).",
+            disabledLabel: "Turned off in \(name)",
+            disabledAdvice: wording.disabledAdvice,
+            removalUnfinishedAdvice: "The connector was uninstalled in \(app), but its folder is still in \(name)\u{2019}s extensions. Its conversations no longer connect. Finish uninstalling it, then install it again if you want it back.",
+            listUnreadable: "\(name)\u{2019}s extensions folder could not be read.",
+            noReason: "\(name) did not say why.",
+            manualUninstallLead: "To remove the connector from \(name), delete its folder in a terminal, then \(unloadEach):",
+            manualUninstallAfterDisconnect: "Disconnected from \(app). Delete the connector\u{2019}s folder in a terminal to finish uninstalling, then \(unloadEach):",
+            stillConnected: { count in
+                count == 1
+                    ? "The connector was removed outside \(app), so 1 open conversation is still connected and keeps receiving what you say until you \(unloadOne)."
+                    : "The connector was removed outside \(app), so \(count) open conversations are still connected and keep receiving what you say until you \(unloadMany)."
+            },
+            toolTooOldLabel: "\(name) too old",
+            toolTooOldAdvice: { found in
+                "\(name) \(found) is older than \(ExtensionAgent.describe(agent.minimumVersion)), the first version the connector works with. \(wording.updateStep), then come back here."
+            },
+            foldersHelp: wording.foldersHelp)
+    }
 }
 
 enum TurnedOff: Equatable, Sendable {
@@ -48,7 +114,7 @@ struct ExtensionConnectorInstaller {
         setupFolder.appendingPathComponent("extensions", isDirectory: true).appendingPathComponent(pluginName, isDirectory: true)
     }
 
-    var pluginDir: URL { Self.pluginDir(in: setupFolder, pluginName: agent.extensionName(pluginName)) }
+    var pluginDir: URL { Self.pluginDir(in: setupFolder, pluginName: agent.folderName(plugin: pluginName)) }
     var scriptURL: URL { pluginDir.appendingPathComponent("index.ts") }
     var configURL: URL { pluginDir.appendingPathComponent("keyscribe.json") }
 
@@ -63,7 +129,9 @@ struct ExtensionConnectorInstaller {
     }
 
     private func installedScript(_ installation: String) -> String {
-        ExtensionConnectorFiles.installedScript(script, installation: installation, configPath: configURL.path, agent: agent.kind.id)
+        ExtensionConnectorFiles.installedScript(
+            script, installation: installation, configPath: configURL.path, agent: agent.kind.id,
+            version: ExtensionConnectorFiles.version(for: script, surfaces: surfaces))
     }
 
     func install(installation: String) throws {
@@ -109,11 +177,12 @@ enum ExtensionConnectorFiles {
         ConnectorResources.version(for: script + "\n" + surfaces.fingerprint)
     }
 
-    static func installedScript(_ script: String, installation: String, configPath: String, agent: String) -> String {
+    static func installedScript(_ script: String, installation: String, configPath: String, agent: String, version: String) -> String {
         script
             .replacingOccurrences(of: "const configPath: string | null = null", with: "const configPath: string | null = \(quoted(configPath))")
             .replacingOccurrences(of: "const loadedFrom: string | null = null", with: "const loadedFrom: string | null = \(quoted(installation))")
             .replacingOccurrences(of: "const installedFor: string | null = null", with: "const installedFor: string | null = \(quoted(agent))")
+            .replacingOccurrences(of: "const builtVersion: string | null = null", with: "const builtVersion: string | null = \(quoted(version))")
     }
 
     private static func quoted(_ text: String) -> String {
@@ -158,11 +227,12 @@ final class ExtensionConnector: AgentConnector {
         self.pluginName = pluginName
         self.script = script
         self.home = home
-        defaultFolder = agent.defaultFolder(home)
+        defaultFolder = agent.rule.defaultFolder(home: home)
+        copy = .extensionAgent(agent)
     }
 
     var kind: AgentKind { agent.kind }
-    var copy: AgentConnectorCopy { agent.copy }
+    let copy: AgentConnectorCopy
     var isBundled: Bool { script != nil }
     var bundledVersion: String? { script.map { ExtensionConnectorFiles.version(for: $0, surfaces: surfaces) } }
 
@@ -175,7 +245,7 @@ final class ExtensionConnector: AgentConnector {
     }
 
     private func pluginDir(in target: ConnectorTarget) -> URL {
-        ExtensionConnectorInstaller.pluginDir(in: target.folder, pluginName: agent.extensionName(pluginName))
+        ExtensionConnectorInstaller.pluginDir(in: target.folder, pluginName: agent.folderName(plugin: pluginName))
     }
 
     func recognizes(folder: URL) -> Bool {
@@ -207,7 +277,7 @@ final class ExtensionConnector: AgentConnector {
             switch await agent.turnedOff(query(tool: tool, target: target, installer: installer)) {
             case .no: return .status(.ready)
             case .yes: return .status(.disabled)
-            case .unknown(let reason): return .failed(reason)
+            case .unknown(let reason): return .unconfirmed(reason)
             }
         }
     }

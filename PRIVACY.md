@@ -297,7 +297,7 @@ files removes that history; removing the application support folder resets KeySc
 When you say “insert clipboard contents” in an agent message and the clipboard holds an image or a PDF,
 KeyScribe saves it to a file in your Mac's temporary folder so the agent can open it. Once the file is a day
 old, KeyScribe deletes it within the hour while it is running, or the next time it starts. The message names
-that file; Pi also receives the image with the message. Like anything you send an agent, the agent may pass
+that file; Pi and omp also receive the image with the message. Like anything you send an agent, the agent may pass
 it to its own AI service. History and Paste last dictation keep the message as sent, so they keep the
 file's path, not the image.
 

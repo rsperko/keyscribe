@@ -41,10 +41,10 @@ struct ClaudeConnectorInstaller {
     let run: @Sendable ([String], [String: String]) -> (Int32, String)
     var baseEnvironment: [String: String] = ProcessInfo.processInfo.environment
 
-    static let setupVariable = "CLAUDE_CONFIG_DIR"
+    static let setupVariable = AgentProcesses.Rule.claude.setupVariable
 
     static func defaultSetupFolder(home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
-        home.appendingPathComponent(".claude", isDirectory: true)
+        AgentProcesses.Rule.claude.defaultFolder(home: home)
     }
 
     static func environment(for setupFolder: URL, isDefault: Bool, base: [String: String]) -> [String: String] {
@@ -186,6 +186,7 @@ enum ClaudeConnectorFiles {
         try reading(surfaces.environmentKeys, in: script)
             .replacingOccurrences(of: "let loadedFrom = null", with: "let loadedFrom = \"\(installation)\"")
             .replacingOccurrences(of: "const appLabel = null", with: "const appLabel = \(literal(Branding.appName))")
+            .replacingOccurrences(of: "const builtVersion = null", with: "const builtVersion = \(literal(version(for: script, surfaces: surfaces)))")
     }
 
     private static let readerStart = "async function readEnvironment($) {\n"

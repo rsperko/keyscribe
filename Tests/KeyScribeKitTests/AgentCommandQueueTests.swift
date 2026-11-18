@@ -499,6 +499,15 @@ struct AgentBridgeCodecTests {
         #expect(plain.cwd == nil)
     }
 
+    @Test func aHelloCarriesTheVersionOfTheCodeRunningNeverItsSettingsFiles() throws {
+        let hello = #"{"op":"hello","protocol":1,"agent":"pi","instance":"i1","session":"s1","pid":0,"version":"v2","codeVersion":"v1"}"#
+        guard case .hello(let built) = try AgentBridgeCodec.decodeEvent(Data(hello.utf8)) else { Issue.record("not a hello"); return }
+        #expect(built.codeVersion == "v1")
+        let legacy = #"{"op":"hello","protocol":1,"agent":"pi","instance":"i1","session":"s1","pid":0,"version":"v2"}"#
+        guard case .hello(let old) = try AgentBridgeCodec.decodeEvent(Data(legacy.utf8)) else { Issue.record("not a hello"); return }
+        #expect(old.codeVersion == nil)
+    }
+
     @Test func aHostsConnectorSaysWhichOfItsConversationsItsWindowShowsAndWhenItStops() throws {
         #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"shown","session":"s1","on":true}"#.utf8)) == .shown(session: "s1", on: true))
         #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"shown","session":"s1","on":false}"#.utf8)) == .shown(session: "s1", on: false))

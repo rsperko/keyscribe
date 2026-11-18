@@ -175,12 +175,14 @@ final class ClaudeConnector: AgentConnector {
         ConnectorFolders.contains(any: ["settings.json", ".credentials.json", "sessions", "projects", "plugins"], in: folder)
     }
 
-    var toolProgram: String? { "claude" }
+    private static let rule = AgentProcesses.Rule.claude
 
-    var folderVariable: String? { AgentProcesses.Rule.claude.setupVariable }
+    var toolProgram: String? { Self.rule.command }
+
+    var folderVariable: String? { Self.rule.setupVariable }
 
     func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result {
-        return tools.search(program: "claude", agent: kind.id, setup: folder.path, chosen: chosen, extra: ClaudeCLI.extraFolders(home: home))
+        tools.search(program: Self.rule.command, agent: kind.id, setup: folder.path, chosen: chosen, extra: ClaudeCLI.extraFolders(home: home))
     }
 
     func checkTool(_ tool: String) async -> ToolCheck? { await version(tool) }
@@ -257,14 +259,14 @@ final class ClaudeConnector: AgentConnector {
         unavailable: "This copy of \(Branding.appName) is missing its Claude Code connector. Reinstall \(Branding.appName) to connect Claude Code.",
         disabledLabel: "Turned off in Claude Code",
         disabledAdvice: "Turn the plugin back on with /plugin in Claude Code.",
-        removalUnfinishedAdvice: "The connector was uninstalled in \(Branding.appName), but Claude Code has not finished removing it. Its sessions no longer connect. Finish uninstalling it, then install it again if you want it back.",
+        removalUnfinishedAdvice: "The connector was uninstalled in \(Branding.appName), but Claude Code has not finished removing it. Its conversations no longer connect. Finish uninstalling it, then install it again if you want it back.",
         listUnreadable: "Claude Code's plugin list could not be read.",
         noReason: "Claude Code did not say why.",
-        manualUninstallLead: "To remove the connector from Claude Code, run these in a terminal, then run /reload-plugins in each open session or restart it:",
-        manualUninstallAfterDisconnect: "Disconnected from \(Branding.appName). Run these in a terminal to finish uninstalling, then run /reload-plugins in each open session or restart it:",
+        manualUninstallLead: "To remove the connector from Claude Code, run these in a terminal, then run /reload-plugins in each open conversation or restart it:",
+        manualUninstallAfterDisconnect: "Disconnected from \(Branding.appName). Run these in a terminal to finish uninstalling, then run /reload-plugins in each open conversation or restart it:",
         stillConnected: { count in
             count == 1
-                ? "The connector was uninstalled outside \(Branding.appName), so 1 open session is still connected and keeps receiving what you say until you run /reload-plugins in it or restart it."
-                : "The connector was uninstalled outside \(Branding.appName), so \(count) open sessions are still connected and keep receiving what you say until you run /reload-plugins in each one or restart them."
+                ? "The connector was uninstalled outside \(Branding.appName), so 1 open conversation is still connected and keeps receiving what you say until you run /reload-plugins in it or restart it."
+                : "The connector was uninstalled outside \(Branding.appName), so \(count) open conversations are still connected and keep receiving what you say until you run /reload-plugins in each one or restart them."
         })
 }

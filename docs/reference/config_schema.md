@@ -296,17 +296,22 @@ a hello on any other protocol is refused with `426` and is never registered or s
   is run. The folder's `keyscribe.json` carries the connection settings, the installation id, the connector
   version, the environment keys the terminal routes read, and their focus commands (see Hello). An extension turned off in the setup's
   `settings.json` (an `extensions` entry `-path` or a matching `!pattern`, unless `+path` brings it back) is
-  reported as turned off, and an update never turns it back on.
-- **The omp connector is a folder of its own in an omp setup's `extensions/`,** named `<plugin>-omp`, with the
+  reported as turned off, and an update never turns it back on. A `settings.json` Pi cannot read or parse is read as
+  no settings, as Pi itself does (Pi 1.5.0 starts with defaults then), so the connector reads as on; one whose
+  `extensions` is not a list of entries leaves the connector installed but unconfirmed, shown as failed with the
+  reason and **Try Again**, never as ready.
+- **The omp connector is a folder of its own in an omp setup's `extensions/`,** named `<plugin>-omp` (an agent's
+  connector folder is the plugin name with the agent's id added, and only Pi's keeps the bare plugin name), with the
   same `keyscribe.json`. The installed `index.ts` is the Pi connector's, with `installedFor` written as `omp`, so it
   runs omp's adapter. A folder Pi and omp share (one named by `PI_CODING_AGENT_DIR`) therefore holds both
   connectors, each installed, updated and removed on its own, and each adapter stays inert when the other agent
-  loads it. omp has no command that reloads an extension, so an open conversation picks up an install, update or
-  removal only when restarted. Whether omp turned it off is asked only of an installed, current connector, with
+  loads it: the connector takes its host for omp only on a positive marker of omp's extension API, and for Pi
+  otherwise. omp has no command that reloads an extension, so an open conversation picks up an install, update or
+  removal only when restarted (`omp --resume` reopens it). Whether omp turned it off is asked only of an installed, current connector, with
   `omp config get disabledExtensions --json` run for that setup: `PI_CODING_AGENT_DIR` set to it (removed for the
   default setup) and `OMP_PROFILE` and `PI_PROFILE` removed, since a profile would win over the folder. An entry
   `extension-module:<plugin>-omp` means turned off. An answer omp cannot give (an error, a timeout, output that is
-  not that setting) shows the folder as failed with omp's reason and **Try Again**, which asks again; it is never shown
+  not that setting) leaves the connector installed but unconfirmed, shown as failed with omp's reason and **Try Again**, which asks again; it is never shown
   as ready, and startup never reinstalls the connector over it. KeyScribe never
   parses omp's `config.yml`.
 - **Updates keep setups as they are.** When KeyScribe starts, it updates the connector in each enrolled setup
@@ -325,7 +330,9 @@ a hello on any other protocol is refused with `426` and is never registered or s
   quiet until the next session or a plugin reload. It clears only a status line or button it showed
   itself.
 - **Hello** names the agent, the connector instance, the session id, the agent's process id, the connector
-  `version`, and the features the connector offers. A connector whose agent keeps no session registry (Pi) also sends the session's
+  `codeVersion` (the version written into its code at install, so it names the code running even after an update
+  rewrote the settings file), and the features the connector offers. A hello without
+  `codeVersion` comes from a connector older than that field, so it reads as an older connector. A connector whose agent keeps no session registry (Pi) also sends the session's
   working directory (`cwd`), and its hello is how KeyScribe learns the session exists: the session is listed
   while its process runs, and a hello from the same process for another session id replaces the earlier one
   (`/new`, `/resume`, `/fork`). The start time recorded for such a session is its process's start time; a
@@ -523,10 +530,13 @@ a hello on any other protocol is refused with `426` and is never registered or s
   submissions the same way. omp gives an extension's message no `input` event, so an idle submit is confirmed by
   its marked user message alone, and is sent with no delivery mode, since omp holds a follow-up sent to an idle
   conversation until some later run. While omp works the text is a steer, confirmed when `sendUserMessage`
-  resolves (omp has queued it) and reported `absorbed` when it enters the conversation. A submit is refused as
-  `dialog` while a tool approval or a plan review is open or the model's `ask` tool runs, because a steer then
-  would deny the approval or dismiss the question; omp reports no other extension's dialog, so one holds only
-  through the keyboard rule. A turn ends only at an `agent_end` without `willContinue`: retries, stop-hook
+  resolves (omp has queued it) and reported `absorbed` when it enters the conversation. While a tool approval is
+  open or the model's `ask` tool runs, the text is sent as an aside instead, confirmed the same way: omp delivers
+  it at the next step and leaves the prompt open, where a steer would deny the approval or dismiss the question. A
+  submit is refused as `dialog` while a plan review is open, because omp is idle then and any message would start
+  a run that replaces the review; omp reports no other extension's dialog, so one holds only through the keyboard
+  rule. When omp refuses a message (its cost cap), it puts the message back in its editor; the connector replaces
+  it with the user's own draft, or clears it when there was none, and the submit is refused with omp's reason. A turn ends only at an `agent_end` without `willContinue`: retries, stop-hook
   continuations and a run kept open by background work (`awaitingAsyncWork`, during which omp reports itself
   idle) are one turn, and the stale-run check ignores that idle. Text starting with `/` or `!` reaches omp as
   plain text.
@@ -567,7 +577,8 @@ a hello on any other protocol is refused with `426` and is never registered or s
 - **Title events** carry the custom title the user gave the conversation, as reported in Claude Code's hook
   payload, or the session name set in Pi, which reports every change including a cleared name, or the name the user
   set in omp (`titleSource: user`; omp's generated titles are never sent), which omp announces with no event, so its
-  connector reads it at each run boundary. The connector sends one only when the payload includes the title field, and sends an empty
+  connector reads it at each run boundary, each time its poll returns (at least once per poll hold, `AgentBridgeServer`'s `pollHold`, and whenever the app
+  sends a command), and once a few seconds after the user enters input, where a typed `/rename` lands. The connector sends one only when the payload includes the title field, and sends an empty
   title (name cleared) only after it has reported a non-empty one, so a Claude Code build that omits the
   field never erases a name found elsewhere.
 - **Turn events** report a turn starting and ending, never the agent's answer. Pi's turn ends only when

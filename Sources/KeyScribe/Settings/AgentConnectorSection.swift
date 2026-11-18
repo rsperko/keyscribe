@@ -138,7 +138,7 @@ private struct ConnectorRow: View {
             }
             if !awaitingReload.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
-                    IssueText(ConnectionSummary.awaitingReload(awaitingReload.count, reload: connector.kind.reloadCommand), severity: .advisory)
+                    IssueText(ConnectionSummary.awaitingReload(awaitingReload.count, for: connector.kind), severity: .advisory)
                     Button("View affected conversations\u{2026}") { onShow(awaitingReload) }
                         .buttonStyle(.link)
                         .font(.caption)
@@ -216,8 +216,13 @@ enum ConnectionSummary {
         return parts.joined(separator: " \u{00B7} ")
     }
 
-    static func awaitingReload(_ count: Int, reload: String?) -> String {
-        guard let reload else {
+    static func awaitingReload(_ count: Int, for kind: AgentKind) -> String {
+        guard let reload = kind.reloadCommand else {
+            if let resume = kind.resumeCommand {
+                return count == 1
+                    ? "1 conversation needs the connector loaded. Quit it and reopen it with \(resume)."
+                    : "\(count) conversations need the connector loaded. Quit each and reopen it with \(resume)."
+            }
             return count == 1 ? "1 conversation hasn\u{2019}t connected yet." : "\(count) conversations haven\u{2019}t connected yet."
         }
         return count == 1
@@ -402,7 +407,7 @@ private struct ConnectorFolderRow: View {
                 Button("Install\u{2026}", action: onInstall)
                     .accessibilityLabel("Install \(setupName)")
                     .accessibilityIdentifier(AccessibilityID.Mode.Agents.install)
-            case .failed:
+            case .failed, .unconfirmed:
                 Button("Try Again") { Task { await setup.retry() } }
                     .accessibilityLabel("Try again for \(setupName)")
                     .accessibilityIdentifier(AccessibilityID.Mode.Agents.tryAgain)
@@ -435,7 +440,7 @@ private struct ConnectorFolderRow: View {
             }
         case .toolTooOld(let found):
             IssueText(setup.copy.toolTooOldAdvice(found), severity: .advisory)
-        case .unavailable, .failed, .broken:
+        case .unavailable, .failed, .broken, .unconfirmed:
             if let message = setup.failureMessage { IssueText(message) }
         case .status(.disabled):
             IssueText(setup.copy.disabledAdvice, severity: .advisory)
@@ -459,7 +464,7 @@ extension ConnectorSetupModel {
         case .toolNotWorking: copy.toolNotWorkingLabel
         case .toolTooOld: copy.toolTooOldLabel
         case .unavailable: "Unavailable"
-        case .failed: "Something went wrong"
+        case .failed, .unconfirmed: "Something went wrong"
         case .removalUnfinished: "Uninstall not finished"
         case .broken: "Not working"
         case .status(.ready): "Installed"
@@ -473,7 +478,7 @@ extension ConnectorSetupModel {
     var failureMessage: String? {
         switch state {
         case .unavailable: copy.unavailable
-        case .failed(let message), .broken(let message): message.isEmpty ? copy.noReason : message
+        case .failed(let message), .broken(let message), .unconfirmed(let message): message.isEmpty ? copy.noReason : message
         case .removalUnfinished(let message): message.flatMap { $0.isEmpty ? nil : $0 } ?? copy.removalUnfinishedAdvice
         default: nil
         }

@@ -5,14 +5,14 @@ public struct AgentKind: Hashable, Sendable {
     public var displayName: String
     public var connectorName: String
     public var reloadCommand: String?
-    public var connectorFeatures: Set<String>
+    public var resumeCommand: String?
 
-    public init(id: String, displayName: String, connectorName: String, reloadCommand: String? = nil, connectorFeatures: Set<String> = []) {
+    public init(id: String, displayName: String, connectorName: String, reloadCommand: String? = nil, resumeCommand: String? = nil) {
         self.id = id
         self.displayName = displayName
         self.connectorName = connectorName
         self.reloadCommand = reloadCommand
-        self.connectorFeatures = connectorFeatures
+        self.resumeCommand = resumeCommand
     }
 }
 

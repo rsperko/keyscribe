@@ -2431,7 +2431,7 @@ struct AgentHubTests {
         #expect(await receipt == .sent("backend"))
     }
 
-    @Test func aLiveConnectorWithoutFocusIsUnsupportedWhenItsAgentsConnectorNeverFocuses() async {
+    @Test func aLiveConnectorWithoutFocusIsUnsupportedWhenTheAppBundlesNoConnectorForItsAgent() async {
         let fake = FakeDiscovery()
         fake.result = .found([Self.fakeSession("f1")])
         let transport = FakeTransport()
@@ -2523,8 +2523,9 @@ struct AgentHubTests {
     @Test(arguments: ["cmux", "mux"])
     func aConnectorFromBeforeNamedFocusIsNeverAskedAndSaysItNeedsAnUpdate(definition: String) async {
         let (hub, transport, registry, _) = makeHub()
+        hub.bundledVersion = { _ in "v2" }
         await connected(hub, transport, registry)
-        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["focus"])))
+        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["focus"], codeVersion: "v1")))
         #expect(await hub.focusInPlace("claude:s1", definition: definition) == .outdated)
         #expect(transport.sent.isEmpty)
     }
@@ -2543,9 +2544,19 @@ struct AgentHubTests {
 
     @Test func aLiveConnectorThatCannotFocusIsNeverAskedAndSaysItNeedsAnUpdate() async {
         let (hub, transport, registry, _) = makeHub()
+        hub.bundledVersion = { _ in "v2" }
         await connected(hub, transport, registry)
         hub.handle(hello("claude:s1"))
         #expect(await hub.focusInPlace("claude:s1", definition: "cmux") == .outdated)
+        #expect(transport.sent.isEmpty)
+    }
+
+    @Test func aConnectorAsNewAsTheBundledOneThatCannotFocusIsUnsupportedNotOutdated() async {
+        let (hub, transport, registry, _) = makeHub()
+        hub.bundledVersion = { agent in agent == "claude" ? "v2" : nil }
+        await connected(hub, transport, registry)
+        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["focus"], codeVersion: "v2")))
+        #expect(await hub.focusInPlace("claude:s1", definition: "cmux") == .unsupported)
         #expect(transport.sent.isEmpty)
     }
 
@@ -2679,12 +2690,23 @@ struct AgentHubTests {
         let (hub, transport, registry, _) = makeHub()
         hub.bundledVersion = { $0 == "claude" ? "v2" : nil }
         await connected(hub, transport, registry)
-        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["label"], version: "v1")))
+        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["label"], codeVersion: "v1")))
         await hub.rescan()
         #expect(labels(transport).last == "\u{201C}keyscribe\u{201D} \u{00B7} Update: /reload-plugins")
-        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["label"], version: "v2")))
+        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["label"], codeVersion: "v2")))
         await hub.rescan()
         #expect(labels(transport).last == "\u{201C}keyscribe\u{201D}")
+    }
+
+    @Test func aConnectorFromBeforeItReportedItsOwnCodeIsOlder() async throws {
+        let (hub, transport, registry, _) = makeHub()
+        hub.bundledVersion = { $0 == "claude" ? "v2" : nil }
+        await connected(hub, transport, registry)
+        hub.handle(.hello(.init(protocolVersion: 1, agent: "claude", agentVersion: "", instance: "i1", session: "claude:s1", pid: 0, features: ["label"])))
+        await hub.rescan()
+        #expect(labels(transport).last == "\u{201C}keyscribe\u{201D} \u{00B7} Update: /reload-plugins")
+        #expect(hub.olderConnectors == ["claude:s1"])
+        #expect(await hub.focusInPlace("claude:s1", definition: "cmux") == .outdated)
     }
 
     @Test func aLongNameIsCutSoTheReloadStepStillFits() {
@@ -2693,10 +2715,11 @@ struct AgentHubTests {
         #expect(AgentHub.footerLabel("docs", reload: "/reload") == "\u{201C}docs\u{201D} \u{00B7} Update: /reload")
     }
 
-    @Test func anAgentWithNoReloadCommandIsToldToRestart() {
+    @Test func anAgentWithNoReloadCommandIsToldHowToRestartItsConversation() {
         #expect(AgentHub.updateStep(.claude) == "/reload-plugins")
-        #expect(AgentHub.updateStep(.omp) == "restart")
-        #expect(AgentHub.footerLabel("docs", reload: AgentHub.updateStep(.omp)) == "\u{201C}docs\u{201D} \u{00B7} Update: restart")
+        #expect(AgentHub.updateStep(.omp) == "restart with omp --resume")
+        #expect(AgentHub.footerLabel("docs", reload: AgentHub.updateStep(.omp)) == "\u{201C}docs\u{201D} \u{00B7} Update: restart with omp --resume")
+        #expect(AgentHub.updateStep(AgentKind(id: "other", displayName: "Other", connectorName: "Other connector")) == "restart")
     }
 
     @Test func aConnectorThatCannotShowLabelsIsNeverSentOne() async {

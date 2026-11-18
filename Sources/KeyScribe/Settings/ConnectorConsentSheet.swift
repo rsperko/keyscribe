@@ -92,6 +92,8 @@ struct ConnectorConsentSheet: View {
             }
             if !affected.isEmpty, let reload = request.connector.kind.reloadCommand {
                 Text("Conversations already open may need \(reload).").font(.caption).foregroundStyle(.secondary)
+            } else if !affected.isEmpty, let resume = request.connector.kind.resumeCommand {
+                Text("Conversations already open may need to be quit and reopened with \(resume).").font(.caption).foregroundStyle(.secondary)
             }
         }
     }

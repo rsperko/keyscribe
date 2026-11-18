@@ -69,6 +69,7 @@ let batch = null
 const shown = new Map()
 let loadedFrom = null
 const appLabel = null
+const builtVersion = null
 let retired = false
 let quiet = false
 
@@ -344,11 +345,11 @@ function sayHello($, target, attemptLaunch) {
   if (hello && hello.target === target && hello.generation === generation) return hello.result
   const attempt = { target, generation, connection: Math.random().toString(36).slice(2, 12) }
   const render = () => JSON.stringify(quiet ? {
-    op: 'hello', protocol: config.protocol, installation: config.installation, version: config.version, agent: 'claude', agentVersion: '',
+    op: 'hello', protocol: config.protocol, installation: config.installation, codeVersion: builtVersion ?? undefined, agent: 'claude', agentVersion: '',
     instance, connection: attempt.connection, session: target, pid: 0,
     features, idle: turnKnown && currentTurn === null, gap: freshSession !== target,
   } : {
-    op: 'hello', protocol: config.protocol, installation: config.installation, version: config.version, agent: 'claude', agentVersion: '',
+    op: 'hello', protocol: config.protocol, installation: config.installation, codeVersion: builtVersion ?? undefined, agent: 'claude', agentVersion: '',
     instance, connection: attempt.connection, session: target, pid: 0,
     features, title: (titleSession === target && lastTitle) || undefined, prompts,
     idle: turnKnown && currentTurn === null, gap: freshSession !== target, turn: currentTurn || undefined,

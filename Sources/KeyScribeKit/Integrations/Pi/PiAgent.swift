@@ -2,8 +2,7 @@ import Foundation
 
 extension AgentKind {
     public static let pi = AgentKind(
-        id: "pi", displayName: "Pi", connectorName: "Pi connector", reloadCommand: "/reload",
-        connectorFeatures: ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check", "steer", "merge"])
+        id: "pi", displayName: "Pi", connectorName: "Pi connector", reloadCommand: "/reload")
 }
 
 extension AgentProcesses.Rule {

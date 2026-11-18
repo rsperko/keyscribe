@@ -14,6 +14,14 @@ struct AgentProcessesTests {
             app: nil, directory: directory, startedAt: startedAt, argumentsReadable: readable)
     }
 
+    @Test func eachRulesDefaultFolderIsItsDefaultSetupUnderTheHomeFolder() {
+        let home = URL(fileURLWithPath: "/Users/a", isDirectory: true)
+        #expect(AgentProcesses.Rule.pi.defaultFolder(home: home).path == "/Users/a/.pi/agent")
+        #expect(AgentProcesses.Rule.omp.defaultFolder(home: home).path == "/Users/a/.omp/agent")
+        #expect(AgentProcesses.Rule.claude.defaultFolder(home: home).path == "/Users/a/.claude")
+        #expect(AgentProcesses.Rule.claude.defaultFolder(home: home).hasDirectoryPath)
+    }
+
     @Test func aPiProcessUsesItsOwnSetupFolderOrPisDefault() {
         let found = AgentProcesses.classify([
             process(10, arguments: ["pi"], environment: ["PI_CODING_AGENT_DIR": "/Users/a/pi-work"]),

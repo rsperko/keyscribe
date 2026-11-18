@@ -1395,11 +1395,13 @@ struct AgentHostTests {
 
     @Test func theHostsOwnConnectorIsNeverComparedWithTheVersionOfTheAgentRunningInTheConversation() async {
         let hub = await joined(FakeHost())
+        hub.bundledVersion = { _ in "0.2.0" }
         var hello = Self.hostHello("t1")
-        hello.version = "0.1.0-plugin"
+        hello.codeVersion = "0.1.0-plugin"
         #expect(hub.filing(for: hello) == nil)
         hub.handle(.hello(hello))
         #expect(hub.loadedVersions[Self.id("t1")] == nil)
+        #expect(hub.olderConnectors.isEmpty)
     }
 
     @Test func theHostsOwnConnectorHoldsNothingForAConversationItsHostDoesNotList() async {

@@ -116,11 +116,16 @@ struct AgentConversationListTests {
     }
 
     @Test func conversationsAwaitingAReloadAreCountedWithTheStepThatConnectsThem() {
-        #expect(ConnectionSummary.awaitingReload(1, reload: "/reload-plugins")
+        #expect(ConnectionSummary.awaitingReload(1, for: .claude)
             == "1 conversation needs the connector loaded. Run /reload-plugins in it, or restart it.")
-        #expect(ConnectionSummary.awaitingReload(8, reload: "/reload-plugins")
+        #expect(ConnectionSummary.awaitingReload(8, for: .claude)
             == "8 conversations need the connector loaded. Run /reload-plugins in each, or restart them.")
-        #expect(ConnectionSummary.awaitingReload(2, reload: nil) == "2 conversations haven\u{2019}t connected yet.")
+        #expect(ConnectionSummary.awaitingReload(1, for: .omp)
+            == "1 conversation needs the connector loaded. Quit it and reopen it with omp --resume.")
+        #expect(ConnectionSummary.awaitingReload(8, for: .omp)
+            == "8 conversations need the connector loaded. Quit each and reopen it with omp --resume.")
+        #expect(ConnectionSummary.awaitingReload(2, for: AgentKind(id: "other", displayName: "Other", connectorName: "Other connector"))
+            == "2 conversations haven\u{2019}t connected yet.")
     }
 
     @Test func everyIntegrationIsListedOnceWithItsHostAfterConnectorsOfItsOwn() {

@@ -79,6 +79,7 @@ struct ClaudeConnectorInstallerTests {
         #expect(try json(plugin.appendingPathComponent("hooks/hooks.json"))["modules"] as? [String] == ["./register.js"])
         let code = try String(contentsOf: plugin.appendingPathComponent("hooks/register.js"), encoding: .utf8)
         #expect(code.contains("let loadedFrom = \"id-1\""))
+        #expect(code.contains("const builtVersion = \"\(ClaudeConnectorFiles.version(for: Self.script, surfaces: .builtIn))\""))
         #expect(ClaudeConnectorFiles.packagedReader(in: code) == ClaudeConnectorFiles.environmentReader(ConnectorSurfaces.builtIn.environmentKeys))
         let config = try json(plugin.appendingPathComponent("keyscribe.json"))
         #expect(config["socketPath"] as? String == dir.appendingPathComponent("bridge.sock").path)
@@ -233,12 +234,14 @@ struct ClaudeConnectorInstallerTests {
         #expect(Data(bundled.utf8) == (try Data(contentsOf: Self.source)))
     }
 
-    @Test func installWritesThePackagedConnectorChangingOnlyTheInstallationItCameFromTheAppsNameAndItsReader() throws {
+    @Test func installWritesThePackagedConnectorChangingOnlyTheInstallationItCameFromTheAppsNameItsVersionAndItsReader() throws {
         let (installer, _, dir) = setup()
         try installer.install(installation: "id-1")
         let installed = try String(contentsOf: market(dir).appendingPathComponent("keyscribe-dev/hooks/register.js"), encoding: .utf8)
         let restored = installed.replacingOccurrences(of: "let loadedFrom = \"id-1\"", with: "let loadedFrom = null")
             .replacingOccurrences(of: "const appLabel = \"\(Branding.appName)\"", with: "const appLabel = null")
+            .replacingOccurrences(
+                of: "const builtVersion = \"\(ClaudeConnectorFiles.version(for: Self.script, surfaces: .builtIn))\"", with: "const builtVersion = null")
             .replacingOccurrences(
                 of: ClaudeConnectorFiles.environmentReader(ConnectorSurfaces.builtIn.environmentKeys), with: ClaudeConnectorFiles.environmentReader([]))
         #expect(restored != installed)

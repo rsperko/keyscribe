@@ -184,7 +184,7 @@ In the Agent mode, the clipboard can hold more than text:
 - **Copied files** (from the Finder, for example) are inserted as their full paths, so the agent can
   open them.
 - **A copied image or PDF**, such as a screenshot, is saved as a file and inserted as its path. Claude
-  Code opens it from there. Pi also receives the image itself along with your message. The saved file
+  Code opens it from there. Pi and omp also receive the image itself along with your message. The saved file
   stays in your Mac's temporary folder for about a day, so ask about it while it is fresh. History keeps
   the path, which points to nothing once the file is gone. The message's confirmation says whether the
   image went with it or only its path did.

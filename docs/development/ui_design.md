@@ -895,7 +895,7 @@ in an agent message as they do in any dictation when the clipboard holds text. W
 files, the message gets their full paths; when it holds an image or a PDF, the app saves it as a file in the
 temporary folder and the message gets that path. A saved file is deleted once it is a day old: by an hourly
 check while the app runs, at launch, and on the next save. History keeps the message as sent, path
-included. Paths are never put in a code block. Pi also receives the image itself with the message; Claude
+included. Paths are never put in a code block. Pi and omp also receive the image itself with the message; Claude
 Code opens the file from its path. Saying the phrase again before copying anything new reuses the file
 already saved. When the clipboard's text is only a web address and it also holds an image, as a browser's
 Copy Image can leave it, the image is used. The HUD says what went: “Sent to docs with 1 image” when the
@@ -2524,11 +2524,14 @@ which every Pi using that setup loads on its own, and Uninstall deletes that fol
 a command. Because Pi is only consulted for its version, a Pi older than the first version the connector
 works with (`PiCLI.minimumVersion`) shows **Pi too old** with that version and advice to update, and offers
 no Install; when the folder is in place it still offers Uninstall Connector…, since removal needs nothing
-from Pi.
+from Pi. A `settings.json` whose `extensions` setting is not a list shows **Something went wrong** with the file named
+and **Try Again**, never Ready, because whether Pi turned the connector off is then unknown; a file Pi cannot read
+at all is ignored, as Pi ignores it.
 
 The omp connector works the same way, in an omp setup's `extensions/` folder, with three differences that
-follow from omp itself. omp has no command that reloads an extension, so its copy says to restart an open
-conversation wherever Pi's says `/reload`, and the label's update step says to restart it. Whether omp turned
+follow from omp itself. omp has no command that reloads an extension, so wherever Pi's copy says `/reload`,
+omp's says to quit the conversation and reopen it with `omp --resume`, which keeps the conversation; the
+Conversations row offers `omp --resume` to copy, and the label's update step reads “restart with omp --resume”. Whether omp turned
 the connector off is asked of omp (`omp config get disabledExtensions`), never read from its files, and shows
 **Turned off in omp**; when omp cannot answer, the folder shows **Something went wrong** with omp's own reason
 and **Try Again**, which asks omp again, never Ready and never Repair, since reinstalling cannot fix omp's

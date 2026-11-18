@@ -94,17 +94,17 @@ public enum AgentEvent: Equatable, Sendable {
         public var environment: [String: String]
         public var cwd: String?
         public var waiting: AgentPrompt?
-        public var version: String?
+        public var codeVersion: String?
         public var quiet: Bool
         public var turn: String?
         public init(
             protocolVersion: Int, agent: String, agentVersion: String, instance: String, session: String, pid: Int,
             features: [String] = [], title: String? = nil, prompts: Int? = nil, idle: Bool? = nil, gap: Bool? = nil,
             connection: String? = nil, installation: String? = nil, environment: [String: String] = [:], cwd: String? = nil,
-            waiting: AgentPrompt? = nil, version: String? = nil, quiet: Bool = false, turn: String? = nil
+            waiting: AgentPrompt? = nil, codeVersion: String? = nil, quiet: Bool = false, turn: String? = nil
         ) {
             self.turn = turn
-            self.version = version
+            self.codeVersion = codeVersion
             self.quiet = quiet
             self.waiting = waiting
             self.cwd = cwd
@@ -276,7 +276,7 @@ public enum AgentBridgeCodec {
         var environment: [String: String]?
         var cwd: String?
         var waiting: AgentPrompt?
-        var version: String?
+        var codeVersion: String?
         var on: Bool?
         var images: [String]?
         var box: Bool?
@@ -322,8 +322,8 @@ public enum AgentBridgeCodec {
             return .hello(.init(
                 protocolVersion: p, agent: agent, agentVersion: w.agentVersion ?? "", instance: instance, session: session, pid: pid,
                 features: w.features ?? [], title: w.title, prompts: w.prompts, idle: w.idle, gap: w.gap, connection: w.connection,
-                installation: w.installation, environment: w.environment ?? [:], cwd: w.cwd, waiting: w.waiting, version: w.version,
-                turn: w.turn))
+                installation: w.installation, environment: w.environment ?? [:], cwd: w.cwd, waiting: w.waiting,
+                codeVersion: w.codeVersion, turn: w.turn))
         case "ack":
             return .ack(request: try required(w.request))
         case "submitted":

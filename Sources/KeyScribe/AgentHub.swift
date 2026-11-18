@@ -559,9 +559,8 @@ final class AgentHub {
 
     func focusInPlace(_ session: String, definition: String, within timeout: Duration = focusTimeout) async -> TerminalSelection {
         guard transport.isLive(session: session), let features = features[session] else { return .notFound }
-        let shipped = kind(of: session)?.connectorFeatures ?? []
         guard features.contains("focus"), features.contains("focusDefinitions") else {
-            return shipped.contains("focus") && shipped.contains("focusDefinitions") ? .outdated : .unsupported
+            return directory.conversations.first(where: { $0.id == session }).map(runsOlderConnector) == true ? .outdated : .unsupported
         }
         let id = makeId()
         let expiresAt = deadline(after: timeout)
@@ -579,6 +578,14 @@ final class AgentHub {
             Task { @MainActor [weak self] in self?.abandonFocus(id) }
         }
     }
+
+    func runsOlderConnector(_ conversation: AgentConversation) -> Bool {
+        guard features[conversation.id] != nil, !hostOwned.contains(conversation.id), let bundled = bundledVersion(conversation.runningAgent)
+        else { return false }
+        return loadedVersions[conversation.id] != bundled
+    }
+
+    var olderConnectors: Set<String> { Set(directory.conversations.filter(runsOlderConnector).map(\.id)) }
 
     private func abandonFocus(_ id: String) {
         guard let waiter = focusWaiters.removeValue(forKey: id) else { return }
@@ -1070,7 +1077,7 @@ final class AgentHub {
     static let footerNameLimit = 20
 
     static func updateStep(_ kind: AgentKind) -> String {
-        kind.reloadCommand ?? "restart"
+        kind.reloadCommand ?? kind.resumeCommand.map { "restart with \($0)" } ?? "restart"
     }
 
     static func footerLabel(_ handle: String, reload: String?) -> String {
@@ -1083,9 +1090,7 @@ final class AgentHub {
     private func sendLabels() {
         for conversation in directory.conversations where conversation.connectorLive {
             guard features[conversation.id]?.contains("label") == true else { continue }
-            let loaded = loadedVersions[conversation.id]
-            let bundled = bundledVersion(conversation.runningAgent)
-            let reload = loaded != nil && bundled != nil && loaded != bundled ? kind(of: conversation.id).map(Self.updateStep) : nil
+            let reload = runsOlderConnector(conversation) ? kind(of: conversation.id).map(Self.updateStep) : nil
             let label = Self.footerLabel(conversation.handle, reload: reload)
             guard labels[conversation.id] != label else { continue }
             labels[conversation.id] = label
@@ -1236,7 +1241,7 @@ final class AgentHub {
             features[hello.session] = Set(hello.features)
             if hosts.contains(where: { $0.kind.id == hello.agent }) { hostOwned.insert(hello.session) } else { hostOwned.remove(hello.session) }
             installations[hello.session] = hello.installation
-            loadedVersions[hello.session] = hosts.contains { $0.kind.id == hello.agent } ? nil : hello.version
+            loadedVersions[hello.session] = hosts.contains { $0.kind.id == hello.agent } ? nil : hello.codeVersion
             environments[hello.session] = hello.environment
             prompts[hello.session] = hello.prompts
             waitingPrompts[hello.session] = hello.waiting

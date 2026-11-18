@@ -346,8 +346,8 @@ private struct AgentConversationDetail: View {
                             .accessibilityIdentifier(AccessibilityID.Mode.Agents.connect)
                     }
                 }
-            case .recover(let reload):
-                Section { recovery(reload: reload) }
+            case .recover(let kind):
+                Section { recovery(kind) }
             case .connected, .unknown:
                 if !row.connected {
                     Section {
@@ -358,11 +358,16 @@ private struct AgentConversationDetail: View {
         }
     }
 
-    private func recovery(reload: String?) -> some View {
+    private func recovery(_ kind: AgentKind?) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let reload {
+            if let reload = kind?.reloadCommand {
                 Text("Connector installed. Run \(reload) in this conversation.")
                 CopyableValue(reload, value: reload, what: "command", of: row.name)
+                    .font(.callout.monospaced())
+                    .accessibilityIdentifier(AccessibilityID.Mode.Agents.reloadCommand)
+            } else if let resume = kind?.resumeCommand {
+                Text("Connector installed. Quit this conversation and reopen it with \(resume).")
+                CopyableValue(resume, value: resume, what: "command", of: row.name)
                     .font(.callout.monospaced())
                     .accessibilityIdentifier(AccessibilityID.Mode.Agents.reloadCommand)
             } else {

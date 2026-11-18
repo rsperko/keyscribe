@@ -2,8 +2,7 @@ import Foundation
 
 extension AgentKind {
     public static let omp = AgentKind(
-        id: "omp", displayName: "omp", connectorName: "omp connector",
-        connectorFeatures: ["focus", "focusDefinitions", "label", "readiness", "notify", "check", "steer", "merge"])
+        id: "omp", displayName: "omp", connectorName: "omp connector", resumeCommand: "omp --resume")
 }
 
 extension AgentProcesses.Rule {

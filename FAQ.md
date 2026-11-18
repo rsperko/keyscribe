@@ -531,8 +531,8 @@ configuration from (for Pi usually `~/.pi/agent`, for omp `~/.omp/agent`, for Cl
 folder that agent was started with), and asks before installing there. Connecting a folder connects the conversations
 open in it now and future ones that use it; other folders are left alone. No flag, wrapper, or edit to your
 own configuration is needed. A conversation that is already open picks the connector up when you run
-`/reload` in Pi or `/reload-plugins` in Claude Code, or restart it (omp has no reload command, so restart an open
-omp conversation); its row says so until it connects. The Pi connector needs Pi 1.4.0 or later, and the omp
+`/reload` in Pi or `/reload-plugins` in Claude Code, or restart it (omp has no reload command, so quit an open
+omp conversation and reopen it with `omp --resume`, which keeps the conversation); its row says so until it connects. The Pi connector needs Pi 1.4.0 or later, and the omp
 connector omp 18.22.2 or later.
 
 If a conversation is not listed, choose **Check Again** below that list. KeyScribe recognizes an agent by the
@@ -755,7 +755,7 @@ conversation connects until it can, and Settings says so.
 Expand the agent under **Connections**, open the **⋯** menu beside that folder, and choose **Uninstall Connector…**. Conversations using it disconnect at once, and
 new ones do not connect; an instruction a conversation already received may still finish. Each open
 conversation unloads the connector the next time you run `/reload` (Pi) or `/reload-plugins` (Claude Code)
-in it, or restart it (omp needs a restart). Other folders stay connected, and your settings, history, conversation names and
+in it, or restart it (in omp, quit it and reopen it with `omp --resume`). Other folders stay connected, and your settings, history, conversation names and
 disconnections are kept. The folder itself and its conversations are never deleted. If the uninstall cannot finish, the folder's row says what went wrong and offers **Finish
 Uninstalling**.
 

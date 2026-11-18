@@ -9,12 +9,13 @@ type Request = {
   answer: (status: number, text?: string) => void
 }
 
-type Options = { mode?: string; host?: "omp" | "pi"; load?: "omp" | "pi" }
+type Options = { mode?: string; host?: "omp" | "pi" | "piWithItsPackage" | "ompWithoutItsPackage"; load?: "omp" | "pi" }
 
 function harness(options: Options = {}) {
   const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>()
   const requests: Request[] = []
-  const sends: Array<{ text: string; options: any; settle: () => void }> = []
+  const sends: Array<{ text: string; content: any; options: any; settle: () => void; drop: (error: Error) => void }> = []
+  const images: Record<string, string> = {}
   const statuses: Array<string | undefined> = []
   const files: Record<string, string | undefined> = {
     "/plugin/keyscribe.json": JSON.stringify({
@@ -44,7 +45,11 @@ function harness(options: Options = {}) {
       if (text === undefined) throw new Error("ENOENT")
       return text
     },
-    readBase64: async () => { throw new Error("ENOENT") },
+    readBase64: async (path) => {
+      const data = images[path]
+      if (data === undefined) throw new Error("ENOENT")
+      return data
+    },
     after: (ms, fn) => {
       const id = ++timerId
       timers.push({ at: now + ms, fn, id })
@@ -113,8 +118,9 @@ function harness(options: Options = {}) {
     sendUserMessage: (content: any, sendOptions: any) => {
       const text = typeof content === "string" ? content : content.filter((part: any) => part.type === "text").map((part: any) => part.text).join("\n")
       let settle: () => void = () => {}
-      const done = new Promise<void>((resolve) => { settle = resolve })
-      sends.push({ text, options: sendOptions, settle })
+      let drop: (error: Error) => void = () => {}
+      const done = new Promise<void>((resolve, reject) => { settle = resolve; drop = reject })
+      sends.push({ text, content, options: sendOptions, settle, drop })
       if (!(sendOptions && sendOptions.deliverAs) || !busySendsQueue) return done
       settle()
       return done
@@ -122,7 +128,10 @@ function harness(options: Options = {}) {
     getSessionName: () => live.name,
     exec: async () => ({ code: 0 }),
   }
-  if ((options.host ?? "omp") === "omp") pi.pi = { VERSION: "18.22.2", getAgentDir: () => "/Users/a/.omp/agent" }
+  const shape = options.host ?? "omp"
+  if (shape === "omp" || shape === "ompWithoutItsPackage") pi.arktype = {}
+  if (shape === "omp") pi.pi = { VERSION: "18.22.2", getAgentDir: () => "/Users/a/.omp/agent" }
+  if (shape === "piWithItsPackage") pi.pi = { VERSION: "1.5.0", getAgentDir: () => "/Users/a/.pi/agent" }
 
   const settings = { configPath: "/plugin/keyscribe.json", loadedFrom: null }
   if ((options.load ?? "omp") === "omp") ompConnector(pi, host, settings)
@@ -212,7 +221,7 @@ function harness(options: Options = {}) {
   const runCommand = (name: string, args: string) => commands.get(name).handler(args, commandCtx)
 
   return {
-    requests, sends, statuses, files, live, tools, commands, notes, runCommand,
+    requests, sends, statuses, files, images, live, tools, commands, notes, runCommand,
     set busySendsQueue(value: boolean) { busySendsQueue = value },
     set autoEvents(value: boolean) { autoEvents = value },
     get timersMade() { return timerId },
@@ -248,6 +257,24 @@ test("the omp connector loaded by another host stays inert", async () => {
   assert.equal(h.tools.length, 0)
 })
 
+test("a Pi that exposes its own package to extensions is still Pi: the Pi connector says hello and omp's stays inert", async () => {
+  const pi = harness({ host: "piWithItsPackage", load: "pi" })
+  const hello = await pi.connect()
+  assert.equal(hello.agent, "pi")
+  const omp = harness({ host: "piWithItsPackage", load: "omp" })
+  await omp.start()
+  await omp.advance(60_000)
+  assert.equal(omp.requests.length, 0)
+  assert.equal(omp.tools.length, 0)
+})
+
+test("an omp that does not expose its package still runs omp's adapter, with no agent version", async () => {
+  const h = harness({ host: "ompWithoutItsPackage" })
+  const hello = await h.connect()
+  assert.equal(hello.agent, "omp")
+  assert.equal(hello.agentVersion, "")
+})
+
 test("the Pi connector loaded by omp, from a folder they share, stays inert", async () => {
   const h = harness({ host: "omp", load: "pi" })
   await h.start()
@@ -256,7 +283,7 @@ test("the Pi connector loaded by omp, from a folder they share, stays inert", as
   assert.equal(h.tools.length, 0)
 })
 
-test("hello names omp, its version and what it offers, and never offers images", async () => {
+test("hello names omp, its version and what it offers", async () => {
   const h = harness()
   const hello = await h.connect()
   assert.equal(hello.agent, "omp")
@@ -264,7 +291,7 @@ test("hello names omp, its version and what it offers, and never offers images",
   assert.equal(hello.installation, "I1")
   assert.equal(hello.session, "s1")
   assert.equal(hello.cwd, "/work")
-  assert.deepEqual(hello.features, ["focus", "focusDefinitions", "label", "readiness", "notify", "check", "steer", "merge"])
+  assert.deepEqual(hello.features, ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check", "steer", "merge"])
   assert.equal(hello.idle, true)
 })
 
@@ -285,15 +312,63 @@ test("a name the user gave is the title; a generated one never is", async () => 
   assert.equal("title" in (await generated.connect()), false)
 })
 
-test("a rename has no event in omp, so it is noticed at the next run boundary and reported once", async () => {
+test("a rename has no event in omp, so an idle conversation's new name is reported when the poll next returns, once", async () => {
   const h = harness()
   await h.connect()
   h.live.name = "backend"
   h.live.titleSource = "user"
-  await h.runStarts()
-  await h.runEnds()
-  await h.typed()
+  await h.deliver([])
   assert.deepEqual(h.events().filter((b) => b.op === "title").map((b) => b.text), ["backend"])
+  await h.deliver([])
+  await h.deliver([])
+  assert.deepEqual(h.events().filter((b) => b.op === "title").map((b) => b.text), ["backend"])
+})
+
+test("a rename the user types lands after omp's input event, so the name is read again a moment later", async () => {
+  const h = harness()
+  await h.connect()
+  await h.typed("/rename backend")
+  h.live.name = "backend"
+  h.live.titleSource = "user"
+  assert.equal(h.events().filter((b) => b.op === "title").length, 0)
+  await h.advance(3_000)
+  assert.deepEqual(h.events().filter((b) => b.op === "title").map((b) => b.text), ["backend"])
+})
+
+test("a generated title is never reported when the poll returns, and losing a user name there reports it cleared", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.name = "Auto title"
+  h.live.titleSource = "auto"
+  await h.deliver([])
+  assert.equal(h.events().filter((b) => b.op === "title").length, 0)
+  h.live.name = "backend"
+  h.live.titleSource = "user"
+  await h.deliver([])
+  h.live.name = "Auto title"
+  h.live.titleSource = "auto"
+  await h.deliver([])
+  assert.deepEqual(h.events().filter((b) => b.op === "title").map((b) => b.text), ["backend", ""])
+})
+
+test("a retired connector reads no name after typing", async () => {
+  const h = harness()
+  await h.connect()
+  await h.deliver([{ op: "retire", id: "x" }])
+  const before = h.requests.length
+  await h.typed("/rename backend")
+  h.live.name = "backend"
+  h.live.titleSource = "user"
+  await h.advance(30_000)
+  assert.equal(h.requests.length, before)
+})
+
+test("Pi reports a rename from its own event, never from a poll returning", async () => {
+  const h = harness({ host: "pi", load: "pi" })
+  await h.connect()
+  h.live.name = "backend"
+  await h.deliver([])
+  assert.equal(h.events().filter((b) => b.op === "title").length, 0)
 })
 
 test("a generated title replacing nothing is never reported, and losing a user name reports it cleared", async () => {
@@ -348,6 +423,51 @@ test("a user message without the connector's mark is no receipt", async () => {
   assert.equal(h.replies().filter((b) => b.op === "submitted").length, 0)
 })
 
+test("a clipboard image goes to omp with the words that name its file, at idle and as a steer", async () => {
+  const h = harness()
+  await h.connect()
+  h.images["/clip/shot.png"] = "UE5H"
+  h.images["/clip/other.PNG"] = "SlBH"
+  await h.deliver([h.submit("r1", "look at /clip/shot.png and /clip/other.PNG", { images: ["/clip/shot.png", "/clip/other.PNG"] })])
+  assert.equal(h.sends.length, 1)
+  assert.deepEqual(h.sends[0].options, {})
+  const [words, ...attached] = h.sends[0].content
+  assert.equal(words.type, "text")
+  assert.ok(words.text.startsWith("look at /clip/shot.png and /clip/other.PNG"))
+  assert.deepEqual(attached, [
+    { type: "image", data: "UE5H", mimeType: "image/png" },
+    { type: "image", data: "SlBH", mimeType: "image/png" },
+  ])
+  await h.taken()
+  await h.deliver([h.submit("r2", "and /clip/shot.png", { images: ["/clip/shot.png"] })])
+  assert.equal(h.sends.length, 2)
+  assert.deepEqual(h.sends[1].options, { deliverAs: "steer" })
+  assert.deepEqual(h.sends[1].content.slice(1), [{ type: "image", data: "UE5H", mimeType: "image/png" }])
+})
+
+test("a clipboard image sent while an approval is open goes with the words as an aside", async () => {
+  const h = harness()
+  await h.connect()
+  await h.runStarts()
+  h.images["/clip/shot.png"] = "UE5H"
+  h.emit("tool_execution_start", { toolCallId: "t1", toolName: "bash", args: { command: "ls" } })
+  h.emit("tool_approval_requested", { toolCallId: "t1", toolName: "bash" })
+  await h.settle()
+  await h.deliver([h.submit("r1", "look at /clip/shot.png", { images: ["/clip/shot.png"] })])
+  assert.deepEqual(h.sends[0].options, { deliverAs: "aside" })
+  assert.deepEqual(h.sends[0].content.slice(1), [{ type: "image", data: "UE5H", mimeType: "image/png" }])
+})
+
+test("an image omp's connector cannot read, or that is not a PNG, leaves only the words naming its file", async () => {
+  const h = harness()
+  await h.connect()
+  h.images["/clip/photo.jpg"] = "SlBH"
+  await h.deliver([h.submit("r1", "read /clip/gone.png", { images: ["/clip/gone.png", "/clip/photo.jpg"] })])
+  assert.equal(h.sends.length, 1)
+  assert.equal(typeof h.sends[0].content, "string")
+  assert.ok(h.sends[0].text.startsWith("read /clip/gone.png"))
+})
+
 test("dictation while omp works is steered and confirmed as soon as omp queues it", async () => {
   const h = harness()
   await h.connect()
@@ -370,6 +490,50 @@ test("a steer is reported taken into the turn when omp delivers it at the next b
   const absorbed = h.events().find((b) => b.op === "absorbed")
   assert.equal(absorbed?.turn, h.turn(1))
   assert.equal(h.replies().filter((b) => b.op === "submitted").length, 1)
+})
+
+const costCap = "Cost cap reached: this session spent $0.0005 of its $0.0000 cap (--max-cost / session.maxCost), so the next model request was not sent."
+
+const refusedByOmp = (h: ReturnType<typeof harness>) => {
+  h.live.editor = h.sends[0].text
+  h.sends[0].drop(Object.assign(new Error(costCap), { name: "PromptDroppedError" }))
+}
+
+test("a message omp does not admit is refused with omp's words, the user's own draft replaces the message omp put back, and the next send still goes through", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "and also"
+  await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+  assert.equal(h.live.editor, "")
+  refusedByOmp(h)
+  await h.settle()
+  assert.deepEqual(h.replies().filter((b) => b.request === "r1").map((b) => [b.op, b.reason]), [["ack", undefined], ["refused", costCap]])
+  assert.equal(h.live.editor, "and also")
+  h.live.editor = ""
+  await h.deliver([h.submit("r2", "and this")])
+  await h.taken()
+  assert.equal(h.replies().find((b) => b.op === "submitted")?.request, "r2")
+})
+
+test("a refused message with no draft leaves the editor empty, never holding the dictated words", async () => {
+  const h = harness()
+  await h.connect()
+  await h.deliver([h.submit("r1", "run the tests")])
+  refusedByOmp(h)
+  await h.settle()
+  assert.equal(h.replies().find((b) => b.op === "refused")?.reason, costCap)
+  assert.equal(h.live.editor, "")
+})
+
+test("a refused message leaves alone whatever the user typed after omp put it back", async () => {
+  const h = harness()
+  await h.connect()
+  h.live.editor = "and also"
+  await h.deliver([h.submit("r1", "run the tests", { merge: true })])
+  h.live.editor = "typed meanwhile"
+  h.sends[0].drop(Object.assign(new Error(costCap), { name: "PromptDroppedError" }))
+  await h.settle()
+  assert.equal(h.live.editor, "typed meanwhile")
 })
 
 test("a finished run is the run's own end, never a loop that omp will continue", async () => {
@@ -490,26 +654,87 @@ test("a run whose end was missed is still closed once omp has been idle across t
   assert.equal(h.events().find((b) => b.op === "turnComplete")?.reason, "unknown")
 })
 
-test("a tool approval holds dictation, because a steer would deny it", async () => {
+test("dictation during a tool approval goes as an aside, which leaves the approval open, and is confirmed when omp takes it", async () => {
   const h = harness()
   await h.connect()
   await h.runStarts()
   h.emit("tool_execution_start", { toolCallId: "t1", toolName: "bash", args: { command: "echo APPROVED" } })
-  h.emit("tool_approval_requested", { toolCallId: "t1", toolName: "bash", reason: "target not yet approved", approvalMode: "always-ask" })
+  h.emit("tool_approval_requested", { toolCallId: "t1", toolName: "bash", approvalMode: "always-ask" })
   await h.settle()
   await h.deliver([h.submit()])
-  assert.equal(h.sends.length, 0)
-  assert.equal(h.replies().find((b) => b.op === "refused")?.reason, "dialog")
-  const waiting = h.events().find((b) => b.op === "waiting")
-  assert.deepEqual(waiting?.waiting, { kind: "confirm", tool: "bash", detail: '{"command":"echo APPROVED"}' })
+  assert.deepEqual(h.sends[0].options, { deliverAs: "aside" })
+  h.sends[0].settle()
+  await h.advance(5_000)
+  assert.equal(h.replies().find((b) => b.op === "submitted")?.request, "r1")
+  assert.equal(h.replies().find((b) => b.op === "refused"), undefined)
   h.emit("tool_approval_resolved", { toolCallId: "t1", toolName: "bash", approved: true })
   await h.settle()
-  assert.equal(h.events().filter((b) => b.op === "waiting").at(-1)?.waiting, undefined)
+  assert.deepEqual(h.events().filter((b) => b.op === "waiting").map((b) => "waiting" in b), [true, false])
+  h.emit("message_start", h.user(h.sends[0].text))
+  await h.settle()
+  assert.equal(h.events().find((b) => b.op === "absorbed")?.turn, h.turn(1))
   await h.deliver([h.submit("r2")])
-  assert.equal(h.sends.length, 1)
+  assert.deepEqual(h.sends[1].options, { deliverAs: "steer" })
 })
 
-test("the model's question holds dictation for as long as its ask tool runs, because a steer would dismiss it", async () => {
+test("an approval omp gives a reason for reports waiting with that reason as its title, on the tool being approved", async () => {
+  const h = harness()
+  await h.connect()
+  await h.runStarts()
+  h.emit("tool_execution_start", { toolCallId: "t1", toolName: "bash", args: { command: "rm -rf build" } })
+  h.emit("tool_approval_requested", { toolCallId: "t1", toolName: "bash", reason: "Critical pattern detected", approvalMode: "always-ask" })
+  await h.settle()
+  assert.deepEqual(h.events().find((b) => b.op === "waiting")?.waiting, {
+    kind: "confirm", title: "Critical pattern detected", tool: "bash", detail: '{"command":"rm -rf build"}',
+  })
+})
+
+test("an approval with no reason reports waiting with no title", async () => {
+  const h = harness()
+  await h.connect()
+  await h.runStarts()
+  h.emit("tool_execution_start", { toolCallId: "t1", toolName: "write", args: { path: "README.md", content: "hello" } })
+  h.emit("tool_approval_requested", { toolCallId: "t1", toolName: "write", approvalMode: "always-ask" })
+  await h.settle()
+  assert.deepEqual(h.events().find((b) => b.op === "waiting")?.waiting, {
+    kind: "confirm", tool: "write", detail: '{"path":"README.md","content":"hello"}',
+  })
+})
+
+test("an approval names the tool being approved even when a tool running beside it started later", async () => {
+  const h = harness()
+  await h.connect()
+  await h.runStarts()
+  h.emit("tool_execution_start", { toolCallId: "t1", toolName: "write", args: { path: "a.txt" } })
+  h.emit("tool_execution_start", { toolCallId: "t2", toolName: "read", args: { path: "b.txt" } })
+  h.emit("tool_approval_requested", { toolCallId: "t1", toolName: "write", approvalMode: "always-ask" })
+  await h.settle()
+  const waiting = h.events().find((b) => b.op === "waiting")?.waiting
+  assert.equal(waiting?.tool, "write")
+  assert.equal(waiting?.detail, '{"path":"a.txt"}')
+})
+
+test("an approval whose tool was never seen starting still names the tool from the approval", async () => {
+  const h = harness()
+  await h.connect()
+  await h.runStarts()
+  h.emit("tool_execution_start", { toolCallId: "t0", toolName: "read", args: { path: "b.txt" } })
+  h.emit("tool_approval_requested", { toolCallId: "t1", toolName: "bash", approvalMode: "always-ask" })
+  await h.settle()
+  assert.deepEqual(h.events().find((b) => b.op === "waiting")?.waiting, { kind: "confirm", tool: "bash" })
+})
+
+test("a long approval reason is cut to the title limit", async () => {
+  const h = harness()
+  await h.connect()
+  await h.runStarts()
+  h.emit("tool_execution_start", { toolCallId: "t1", toolName: "write", args: { path: "x" } })
+  h.emit("tool_approval_requested", { toolCallId: "t1", toolName: "write", reason: `Restricted folder: /${"d/".repeat(400)}` })
+  await h.settle()
+  assert.equal(h.events().find((b) => b.op === "waiting")?.waiting.title, `Restricted folder: /${"d/".repeat(400)}`.slice(0, 300))
+})
+
+test("dictation while the model's ask tool is open goes as an aside, which leaves the question open", async () => {
   const h = harness()
   await h.connect()
   await h.runStarts()
@@ -517,11 +742,25 @@ test("the model's question holds dictation for as long as its ask tool runs, bec
   await h.settle()
   assert.equal(h.events().find((b) => b.op === "waiting")?.waiting.kind, "select")
   await h.deliver([h.submit()])
-  assert.equal(h.replies().find((b) => b.op === "refused")?.reason, "dialog")
+  assert.deepEqual(h.sends[0].options, { deliverAs: "aside" })
+  assert.equal(h.replies().find((b) => b.op === "refused"), undefined)
   h.emit("tool_execution_end", { toolCallId: "a1", toolName: "ask", isError: false })
   await h.settle()
+  assert.deepEqual(h.events().filter((b) => b.op === "waiting").map((b) => "waiting" in b), [true, false])
   await h.deliver([h.submit("r2")])
-  assert.equal(h.sends.length, 1)
+  assert.deepEqual(h.sends[1].options, { deliverAs: "steer" })
+})
+
+test("an open plan review still holds dictation while an approval is open beside it", async () => {
+  const h = harness()
+  await h.connect()
+  await h.runStarts()
+  h.emit("tool_approval_requested", { toolCallId: "t1", toolName: "bash" })
+  h.emit("plan_review_requested", { reviewId: "p1", sessionId: "s1", title: "Refactor the parser", planFilePath: "/p.md", planContent: "", options: [] })
+  await h.settle()
+  await h.deliver([h.submit()])
+  assert.equal(h.sends.length, 0)
+  assert.equal(h.replies().find((b) => b.op === "refused")?.reason, "dialog")
 })
 
 test("a plan review holds dictation and is described by its title", async () => {
@@ -543,8 +782,7 @@ test("a wait whose closing event never came ends with the run, so dictation is n
   const h = harness()
   await h.connect()
   await h.runStarts()
-  h.emit("tool_execution_start", { toolCallId: "t1", toolName: "bash", args: {} })
-  h.emit("tool_approval_requested", { toolCallId: "t1", toolName: "bash" })
+  h.emit("plan_review_requested", { reviewId: "p1", title: "One" })
   h.emit("message_end", h.assistant("", "aborted"))
   await h.runEnds()
   await h.deliver([h.submit()])
@@ -555,11 +793,12 @@ test("a repeated or unmatched closing event never opens dictation early", async 
   const h = harness()
   await h.connect()
   await h.runStarts()
-  h.emit("tool_approval_requested", { toolCallId: "t1", toolName: "bash" })
-  h.emit("tool_approval_requested", { toolCallId: "t1", toolName: "bash" })
-  h.emit("tool_execution_start", { toolCallId: "a1", toolName: "ask", args: {} })
-  h.emit("tool_approval_resolved", { toolCallId: "t9", toolName: "bash" })
-  h.emit("tool_approval_resolved", { toolCallId: "t1", toolName: "bash" })
+  h.emit("plan_review_requested", { reviewId: "p1", title: "One" })
+  h.emit("plan_review_requested", { reviewId: "p1", title: "One" })
+  h.emit("plan_review_requested", { reviewId: "p2", title: "Two" })
+  h.emit("plan_review_resolved", { reviewId: "p9" })
+  h.emit("plan_review_resolved", { reviewId: "p1" })
+  h.emit("plan_review_resolved", { reviewId: "p1" })
   await h.settle()
   await h.deliver([h.submit()])
   assert.equal(h.replies().find((b) => b.op === "refused")?.reason, "dialog")

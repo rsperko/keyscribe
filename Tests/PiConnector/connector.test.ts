@@ -13,7 +13,7 @@ type Request = {
   refuse: () => void
 }
 
-type Options = { configPath?: string | null; loadedFrom?: string | null; mode?: string; now?: number }
+type Options = { configPath?: string | null; loadedFrom?: string | null; builtVersion?: string | null; mode?: string; now?: number; api?: Record<string, unknown> }
 
 function harness(options: Options = {}) {
   const handlers = new Map<string, Array<(event: any, ctx: any) => unknown>>()
@@ -146,9 +146,10 @@ function harness(options: Options = {}) {
     },
     getSessionName: () => live.name,
     exec: async () => ({ code: 0 }),
+    ...options.api,
   }
 
-  connector(pi as any, host, { configPath: options.configPath === undefined ? "/plugin/keyscribe.json" : options.configPath, loadedFrom: options.loadedFrom ?? null })
+  connector(pi as any, host, { configPath: options.configPath === undefined ? "/plugin/keyscribe.json" : options.configPath, loadedFrom: options.loadedFrom ?? null, builtVersion: options.builtVersion ?? null })
 
   const emit = (event: string, payload: any = {}) => {
     for (const handler of handlers.get(event) ?? []) handler({ type: event, ...payload }, ctx)
@@ -275,6 +276,22 @@ test("a session start says hello with the process, its directory, its name and w
   assert.deepEqual(hello.environment, { ZELLIJ_PANE_ID: "7" })
   assert.equal(h.requests[0].auth, "secret")
   assert.equal(h.requests[0].socketPath, "/tmp/ks.sock")
+})
+
+test("hello reports the version of the code that is running, never the one its settings file names after an update", async () => {
+  const built = harness({ builtVersion: "v-loaded" })
+  built.files["/plugin/keyscribe.json"] = JSON.stringify({ ...built.config, version: "v-updated" })
+  const hello = await built.connect()
+  assert.equal(hello.codeVersion, "v-loaded")
+  assert.equal("version" in hello, false)
+  const unbuilt = harness()
+  assert.equal("codeVersion" in (await unbuilt.connect()), false)
+})
+
+test("a Pi that exposes its own package to extensions still connects as Pi", async () => {
+  const h = harness({ api: { pi: { VERSION: "1.5.0", getAgentDir: () => "/Users/a/.pi/agent" } } })
+  const hello = await h.connect()
+  assert.equal(hello.agent, "pi")
 })
 
 test("hello without a name or terminal facts omits them", async () => {

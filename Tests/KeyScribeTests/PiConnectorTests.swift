@@ -36,7 +36,7 @@ struct PiCLITests {
 
     @Test func theDefaultSetupIsPisOwnFolderNeverTheAppsEnvironment() {
         let home = URL(fileURLWithPath: "/Users/me")
-        #expect(ExtensionAgent.pi.defaultFolder(home).path == "/Users/me/.pi/agent")
+        #expect(ExtensionAgent.pi.rule.defaultFolder(home: home).path == "/Users/me/.pi/agent")
         #expect(ExtensionConnectorInstaller.pluginDir(in: URL(fileURLWithPath: "/scratch/pi"), pluginName: "keyscribe").path == "/scratch/pi/extensions/keyscribe")
     }
 }
@@ -104,10 +104,13 @@ struct PiConnectorInstallerTests {
         let code = try String(contentsOf: plugin.appendingPathComponent("index.ts"), encoding: .utf8)
         #expect(code.contains("const loadedFrom: string | null = \"id-1\""))
         #expect(code.contains("const installedFor: string | null = \"pi\""))
+        let version = ExtensionConnectorFiles.version(for: Self.script, surfaces: .builtIn)
+        #expect(code.contains("const builtVersion: string | null = \"\(version)\""))
         #expect(code.contains("const configPath: string | null = \"\(plugin.appendingPathComponent("keyscribe.json").path)\""))
         let restored = code
             .replacingOccurrences(of: "const loadedFrom: string | null = \"id-1\"", with: "const loadedFrom: string | null = null")
             .replacingOccurrences(of: "const installedFor: string | null = \"pi\"", with: "const installedFor: string | null = null")
+            .replacingOccurrences(of: "const builtVersion: string | null = \"\(version)\"", with: "const builtVersion: string | null = null")
             .replacingOccurrences(of: "const configPath: string | null = \"\(plugin.appendingPathComponent("keyscribe.json").path)\"", with: "const configPath: string | null = null")
         #expect(restored == Self.script)
         #expect(installer.installed(installation: "id-1") == .current)
@@ -146,10 +149,44 @@ struct PiConnectorInstallerTests {
     @Test func anExtensionTurnedOffInPisSettingsIsSeen() throws {
         let (installer, _, extensions) = setup()
         try installer.install(installation: "id-1")
-        #expect(!PiCLI.turnedOff(setupFolder: installer.setupFolder, pluginDir: installer.pluginDir, home: FileManager.default.homeDirectoryForCurrentUser))
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        #expect(PiCLI.turnedOff(setupFolder: installer.setupFolder, pluginDir: installer.pluginDir, home: home) == .no)
         let settings = extensions.deletingLastPathComponent().appendingPathComponent("settings.json")
+        try Data(#"{"theme": "dark"}"#.utf8).write(to: settings)
+        #expect(PiCLI.turnedOff(setupFolder: installer.setupFolder, pluginDir: installer.pluginDir, home: home) == .no)
         try Data(#"{"extensions": ["-extensions/keyscribe-dev"]}"#.utf8).write(to: settings)
-        #expect(PiCLI.turnedOff(setupFolder: installer.setupFolder, pluginDir: installer.pluginDir, home: FileManager.default.homeDirectoryForCurrentUser))
+        #expect(PiCLI.turnedOff(setupFolder: installer.setupFolder, pluginDir: installer.pluginDir, home: home) == .yes)
+    }
+
+    @Test(arguments: ["", "   ", #"{"extensions": ["-extensions/keyscribe-dev""#, #"["-extensions/keyscribe-dev"]"#, "null"])
+    func settingsPiStartsWithoutBecauseItCannotReadThemLeaveTheConnectorOn(text: String) throws {
+        let (installer, _, extensions) = setup()
+        try installer.install(installation: "id-1")
+        try Data(text.utf8).write(to: extensions.deletingLastPathComponent().appendingPathComponent("settings.json"))
+        #expect(PiCLI.turnedOff(setupFolder: installer.setupFolder, pluginDir: installer.pluginDir, home: FileManager.default.homeDirectoryForCurrentUser) == .no)
+    }
+
+    @Test(arguments: [#"{"extensions": "-extensions/keyscribe-dev"}"#, #"{"extensions": {"-extensions/keyscribe-dev": true}}"#, #"{"extensions": [1]}"#])
+    func anExtensionsSettingThatIsNotAListOfEntriesIsUnknown(text: String) throws {
+        let (installer, _, extensions) = setup()
+        try installer.install(installation: "id-1")
+        try Data(text.utf8).write(to: extensions.deletingLastPathComponent().appendingPathComponent("settings.json"))
+        guard case .unknown(let reason) = PiCLI.turnedOff(setupFolder: installer.setupFolder, pluginDir: installer.pluginDir, home: FileManager.default.homeDirectoryForCurrentUser) else {
+            Issue.record("read as known")
+            return
+        }
+        #expect(reason.contains("settings.json"))
+    }
+
+    @Test func theCopySpeaksOfConversationsAndNamesPisReloadCommandWhereOneIsNeeded() {
+        let copy = AgentConnectorCopy.extensionAgent(.pi)
+        let reloading = [copy.reloadHint, copy.uninstallMessage, copy.manualUninstallLead, copy.manualUninstallAfterDisconnect, copy.stillConnected(1), copy.stillConnected(2)]
+        for text in reloading { #expect(text.contains("/reload"), "\(text)") }
+        for text in reloading + [copy.help, copy.removalUnfinishedAdvice, copy.toolNotFoundAdvice] {
+            #expect(!text.lowercased().contains("session"), "\(text)")
+        }
+        #expect(copy.toolNotFoundAdvice.hasSuffix("the usual install folders, and under Node version managers."))
+        #expect(copy.uninstallTitle == "Uninstall the Pi connector from this folder?")
     }
 
     @Test func theCommandToUninstallByHandNamesTheConnectorsOwnFolder() {
@@ -266,6 +303,26 @@ struct PiConnectorStatusTests {
         #expect(await connector.check(tool: "/bin/pi-test", target: target(folder)) == .status(.disabled))
     }
 
+    @MainActor @Test func aConnectorWhoseExtensionsSettingIsNotAListIsInstalledButUnconfirmed() async throws {
+        let (connector, _, agents, folder) = make()
+        let setup = ConnectorSetupModel(
+            folder: folder, isDefault: true, connector: connector, registry: ConnectorSetupRegistry(directory: agents), retire: { _ in })
+        await setup.install()
+        try Data(#"{"extensions": "-extensions/keyscribe-dev"}"#.utf8).write(to: folder.appendingPathComponent("settings.json"))
+        await setup.refresh()
+        guard case .unconfirmed = setup.state else {
+            Issue.record("\(setup.state)")
+            return
+        }
+        #expect(setup.isInstalled)
+        #expect(setup.hasError)
+        #expect(setup.offersUninstall)
+        #expect(!setup.offersReinstall)
+        try Data(#"{"extensions": []}"#.utf8).write(to: folder.appendingPathComponent("settings.json"))
+        await setup.refresh()
+        #expect(setup.state == .status(.ready))
+    }
+
     @Test func aPiBelowTheFloorIsReportedBeforeAnyFileIsLooked() async {
         let cli = CLI()
         cli.version = "1.3.2\n"
@@ -340,8 +397,7 @@ struct PiConnectorStatusTests {
         #expect(setup.state == .status(.outdated(installed: loaded)))
         await setup.update()
         #expect(setup.state == .status(.ready))
-        #expect(AgentsSettingsModel.older(loaded, than: after.bundledVersion) == addsFocus)
-        #expect(!AgentsSettingsModel.older(after.bundledVersion, than: after.bundledVersion))
+        #expect((loaded != after.bundledVersion) == addsFocus)
     }
 
     @Test func installingOneSetupLeavesAnotherUntouched() async throws {

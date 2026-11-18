@@ -3,11 +3,10 @@ import KeyScribeKit
 import Testing
 
 struct PiAgentTests {
-    @Test func piIsAnAgentKindWithItsOwnReloadCommandAndShippedFeatures() {
+    @Test func piIsAnAgentKindWithItsOwnReloadCommand() {
         #expect(AgentKind.pi.id == "pi")
         #expect(AgentKind.pi.displayName == "Pi")
         #expect(AgentKind.pi.reloadCommand == "/reload")
-        #expect(AgentKind.pi.connectorFeatures == ["focus", "focusDefinitions", "label", "readiness", "notify", "images", "check", "steer", "merge"])
         #expect(AgentKind.pi != AgentKind.claude)
     }
 

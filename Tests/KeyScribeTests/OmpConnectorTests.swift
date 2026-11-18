@@ -118,7 +118,7 @@ struct OmpConnectorTests {
         #expect(runs.argv.isEmpty)
     }
 
-    @Test func aConfigOmpCannotAnswerIsAProblemNamedInSettingsNeverReady() async throws {
+    @Test func aConfigOmpCannotAnswerLeavesTheConnectorInstalledButUnconfirmedNeverReady() async throws {
         let runs = Runs()
         let made = make(runs: runs)
         try await made.omp.install(tool: "/test-bin/omp", target: target(made.folder))
@@ -130,7 +130,7 @@ struct OmpConnectorTests {
         for (answer, said) in answers {
             runs.answer = answer
             let state = await made.omp.check(tool: "/test-bin/omp", target: target(made.folder))
-            guard case .failed(let reason) = state else {
+            guard case .unconfirmed(let reason) = state else {
                 Issue.record("\(state)")
                 continue
             }
@@ -150,10 +150,11 @@ struct OmpConnectorTests {
         let written = try FileManager.default.attributesOfItem(atPath: script.path)[.systemFileNumber] as? Int
         runs.answer = ToolCLI.Ran(end: .timedOut(10), output: Data())
         await model.maintain()
-        guard case .failed = setup.state else {
+        guard case .unconfirmed = setup.state else {
             Issue.record("\(setup.state)")
             return
         }
+        #expect(setup.isInstalled)
         #expect(setup.statusText == "Something went wrong")
         #expect(try FileManager.default.attributesOfItem(atPath: script.path)[.systemFileNumber] as? Int == written)
         runs.answer = nil
@@ -169,21 +170,18 @@ struct OmpConnectorTests {
         #expect(made.omp.copy.toolTooOldAdvice("18.21.9").contains("18.22.2"))
     }
 
-    @Test func theCopyNamesNoReloadCommandOmpDoesNotHave() {
+    @Test func theCopyNamesNoReloadCommandOmpDoesNotHaveAndSaysHowToReopenTheConversation() {
         let made = make()
+        let copy = made.omp.copy
         #expect(made.omp.kind.reloadCommand == nil)
-        for text in [made.omp.copy.reloadHint, made.omp.copy.uninstallMessage, made.omp.copy.manualUninstallLead, made.omp.copy.stillConnected(2)] {
+        #expect(made.omp.kind.resumeCommand == "omp --resume")
+        #expect(copy.reloadHint == "Already running omp here? Quit each open conversation and reopen it with omp --resume to connect it.")
+        #expect(copy.uninstallMessage.contains("Each open conversation unloads the connector when you quit it and reopen it with omp --resume."))
+        #expect(copy.manualUninstallLead == "To remove the connector from omp, delete its folder in a terminal, then quit each open conversation and reopen it with omp --resume:")
+        #expect(copy.stillConnected(1).hasSuffix("until you quit it and reopen it with omp --resume."))
+        #expect(copy.stillConnected(2).hasSuffix("until you quit them and reopen them with omp --resume."))
+        for text in [copy.reloadHint, copy.uninstallMessage, copy.manualUninstallLead, copy.manualUninstallAfterDisconnect, copy.stillConnected(2)] {
             #expect(!text.contains("/reload"), "\(text)")
-            #expect(text.lowercased().contains("restart"), "\(text)")
         }
-    }
-
-    @Test func theFeaturesTheConnectorAnnouncesInOmpAreTheOnesTheAppExpects() throws {
-        let script = try #require(ExtensionConnectorFiles.indexTS)
-        let line = try #require(script.split(separator: "\n").first { $0.hasPrefix("const ompFeatures = [") })
-        let listed = line.dropFirst("const ompFeatures = [".count).dropLast().split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\"")) }
-        #expect(Set(listed) == AgentKind.omp.connectorFeatures)
-        #expect(listed.count == AgentKind.omp.connectorFeatures.count)
     }
 }

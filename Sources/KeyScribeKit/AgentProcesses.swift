@@ -125,6 +125,10 @@ public enum AgentProcesses {
             }
         }
 
+        public func defaultFolder(home: URL) -> URL {
+            URL(fileURLWithPath: FolderPath.resolve(defaultSetup, home: home.path, relativeTo: home.path), isDirectory: true)
+        }
+
         func setup(_ process: TerminalProcess, home: String) -> String? {
             guard !usesProfile(process) else { return nil }
             let raw = process.environment[setupVariable].flatMap { $0.isEmpty ? nil : $0 } ?? defaultSetup

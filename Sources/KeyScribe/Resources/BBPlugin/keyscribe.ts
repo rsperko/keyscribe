@@ -556,7 +556,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     const announced = m.waiting
     const response = await post("/event", {
       op: "hello", protocol: config.protocol, agent: "bb", agentVersion: "", instance: instanceOf(thread), session: sessionOf(thread),
-      pid: 0, features, idle: !busy.has(m.status), gap: true, connection, installation: config.installation, version: config.version,
+      pid: 0, features, idle: !busy.has(m.status), gap: true, connection, installation: config.installation,
       ...(m.waiting ? { waiting: m.waiting.prompt } : {}),
       ...(m.turn ? { turn: m.turn } : {}),
     }, eventDeadline)
