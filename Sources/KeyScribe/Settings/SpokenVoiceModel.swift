@@ -163,8 +163,8 @@ final class SpokenVoiceModel: ObservableObject {
         Task {
             do {
                 try await installer.download { progress in
-                    Task { @MainActor [weak self] in
-                        guard let self, case .downloading(let phase, let fraction) = self.status else { return }
+                    Task { @MainActor in
+                        guard case .downloading(let phase, let fraction) = self.status else { return }
                         guard phase != progress.phase || Int(fraction * 100) != Int(progress.fraction * 100) else { return }
                         self.status = .downloading(phase: progress.phase, fraction: progress.fraction)
                     }

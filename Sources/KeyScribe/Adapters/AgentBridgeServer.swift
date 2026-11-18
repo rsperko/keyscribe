@@ -387,7 +387,7 @@ final class AgentBridgeServer: @unchecked Sendable {
         case .hello(let hello):
             greeting.insert(fd)
             onHello(hello) { [weak self] filed in
-                self?.queue.async { self?.register(hello, filedUnder: filed, answering: fd) }
+                self?.queue.async { [weak self] in self?.register(hello, filedUnder: filed, answering: fd) }
             }
             return
         case .ack(let request), .submitted(let request, _, _), .refused(let request, _), .focused(let request):
@@ -396,7 +396,7 @@ final class AgentBridgeServer: @unchecked Sendable {
             }
         case .notify:
             onNotify(event) { [weak self] spoken in
-                self?.queue.async { self?.respond(fd, status: 200, body: Data(#"{"ok":true,"spoken":\#(spoken)}"#.utf8)) }
+                self?.queue.async { [weak self] in self?.respond(fd, status: 200, body: Data(#"{"ok":true,"spoken":\#(spoken)}"#.utf8)) }
             }
             return
         case .typed, .turnStarted, .absorbed, .turnComplete, .undelivered, .title, .waiting, .checked, .shown:

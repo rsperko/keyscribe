@@ -191,7 +191,7 @@ struct SystemTerminalFacts: TerminalFacts {
     static func name(of pid: pid_t) -> String {
         var buffer = [CChar](repeating: 0, count: Int(MAXCOMLEN) * 2 + 1)
         guard proc_name(pid, &buffer, UInt32(buffer.count)) > 0 else { return "" }
-        return String(cString: buffer)
+        return String(decoding: buffer.prefix { $0 != 0 }.map(UInt8.init(bitPattern:)), as: UTF8.self)
     }
 
     private static func tty(_ device: dev_t) -> String? {

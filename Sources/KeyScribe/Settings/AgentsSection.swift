@@ -535,7 +535,7 @@ struct AgentPhrasesReference: View {
     @ObservedObject var model: AgentsSettingsModel
     let onDone: () -> Void
 
-    static let exampleName = "Backend"
+    nonisolated static let exampleName = "Backend"
     static let renameExample = "\u{201C}rename this conversation to \(exampleName)\u{201D}"
     static let routingExample = "\u{201C}tell \(exampleName) run the unit tests\u{201D} sends only that instruction to \(exampleName)."
 

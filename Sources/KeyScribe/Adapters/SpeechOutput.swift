@@ -350,10 +350,10 @@ final class NaturalSpeech: SpeechSynthesizing {
         let seconds = Double(limit.components.seconds) + Double(limit.components.attoseconds) / 1e18
         active = .making
         unfinished.begin()
-        var task: Task<Void, Never>?
+        let started = StartedTask()
         let busyWait = busyWait
         let details = details
-        task = Task { [weak self] in
+        started.task = Task { [weak self] in
             let made: Result<(SpokenAudio, [SpokenAttempt.Detail]), any Error>
             do {
                 made = .success(try await runWithDeadline(
@@ -366,7 +366,7 @@ final class NaturalSpeech: SpeechSynthesizing {
             } catch {
                 made = .failure(error)
             }
-            guard !Task.isCancelled, let self, self.making == task else { return }
+            guard !Task.isCancelled, let self, self.making == started.task else { return }
             self.making = nil
             var reason = Self.reason(for: made.map(\.0))
             if case .success(let (audio, details)) = made {
@@ -392,7 +392,7 @@ final class NaturalSpeech: SpeechSynthesizing {
             self.outcome(false, reason, self.attempt)
             self.speakWholeWithFallback(text, because: reason)
         }
-        making = task
+        making = started.task
     }
 
     private static func reason(for made: Result<SpokenAudio, any Error>) -> String {
@@ -423,8 +423,8 @@ final class NaturalSpeech: SpeechSynthesizing {
         let busyWait = busyWait
         let unfinished = unfinished
         let limits = texts.map(followingLimit)
-        var task: Task<Void, Never>?
-        task = Task { [weak self] in
+        let started = StartedTask()
+        started.task = Task { [weak self] in
             for (text, limit) in zip(texts, limits) {
                 let seconds = Double(limit.components.seconds) + Double(limit.components.attoseconds) / 1e18
                 unfinished.begin()
@@ -432,7 +432,7 @@ final class NaturalSpeech: SpeechSynthesizing {
                     seconds: seconds,
                     operation: { try await Self.waitingWhileBusy(upTo: busyWait) { try await synthesize(text, voice) } },
                     onSettled: { unfinished.end() })
-                guard !Task.isCancelled, let self, self.prefetch == task else { return }
+                guard !Task.isCancelled, let self, self.prefetch == started.task else { return }
                 if let audio { self.prepared.append(audio) } else { self.restFailed = true }
                 if self.awaitingNext {
                     self.awaitingNext = false
@@ -441,7 +441,7 @@ final class NaturalSpeech: SpeechSynthesizing {
                 if audio == nil { return }
             }
         }
-        prefetch = task
+        prefetch = started.task
     }
 
     private func playFollowing() {
@@ -483,14 +483,14 @@ final class NaturalSpeech: SpeechSynthesizing {
         active = .fallback
         fallback.speak(text, voice: nil)
         let limit = fallbackLimit(text)
-        var task: Task<Void, Never>?
-        task = Task { [weak self] in
+        let started = StartedTask()
+        started.task = Task { [weak self] in
             try? await Task.sleep(for: limit)
-            guard !Task.isCancelled, let self, self.watchdog == task, self.active == .fallback else { return }
+            guard !Task.isCancelled, let self, self.watchdog == started.task, self.active == .fallback else { return }
             Log.agents.error("system voice did not finish; ending it")
             self.stop()
         }
-        watchdog = task
+        watchdog = started.task
     }
 
     func stop() {
@@ -527,6 +527,11 @@ final class NaturalSpeech: SpeechSynthesizing {
         watchdog = nil
         onFinished?()
     }
+}
+
+// Lets a task check that it is still the one its owner keeps, which it cannot name from inside itself.
+@MainActor private final class StartedTask {
+    var task: Task<Void, Never>?
 }
 
 private final class UnfinishedSyntheses: @unchecked Sendable {
