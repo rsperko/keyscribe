@@ -129,7 +129,7 @@ public enum AgentEvent: Equatable, Sendable {
     case ack(request: String)
     case submitted(request: String, turn: String, report: AgentDeliveryReport = AgentDeliveryReport(state: .seen))
     case checked(request: String, check: String, report: AgentDeliveryReport)
-    case refused(request: String, reason: String)
+    case refused(request: String, reason: String, detail: String? = nil)
     case typed(session: String, prompts: Int? = nil)
     case turnStarted(session: String, turn: String, prompt: String? = nil)
     case absorbed(session: String, turn: String, prompt: String)
@@ -220,6 +220,7 @@ public enum AgentPromptDigest {
 public enum AgentBridgeCodec {
     public static let protocolVersion = 3
     public static let maxFrameBytes = 256 * 1024
+    public static let refusalDetailLimit = 300
 
     public enum CodecError: Error, Equatable { case tooLarge, unknownOp(String), malformed }
 
@@ -240,6 +241,7 @@ public enum AgentBridgeCodec {
         var request: String?
         var turn: String?
         var reason: String?
+        var detail: String?
         var session: String?
         var answer: String?
         var `protocol`: Int?
@@ -315,7 +317,8 @@ public enum AgentBridgeCodec {
                 request: try required(w.request), check: try required(w.check),
                 report: report(w, state: w.state.flatMap(AgentDeliveryReport.State.init(rawValue:)) ?? .unknown))
         case "refused":
-            return .refused(request: try required(w.request), reason: w.reason ?? "")
+            let detail = w.detail.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(refusalDetailLimit)) }
+            return .refused(request: try required(w.request), reason: w.reason ?? "", detail: detail?.isEmpty == false ? detail : nil)
         case "typed":
             return .typed(session: try required(w.session), prompts: w.prompts)
         case "absorbed":

@@ -454,7 +454,10 @@ connector's name, which Claude Code adds and the Pi connector writes itself), so
 terminal on screen can be matched to its row; the label is display only and never renames the agent's
 conversation. While the session runs a connector older than the one the app ships, the label adds the step that
 loads the new one (“docs” · Update: /reload-plugins, or `/reload` in Pi), and a long name is cut short with an
-ellipsis so the step still shows (`AgentHub.footerLabel`). A bb thread shows the same name on its row in bb's sidebar when its bb title differs.
+ellipsis so the step still shows (`AgentHub.footerLabel`). A bb thread shows the same name on its row in bb's sidebar when its bb title differs, only while the app that
+named it is running: a plugin that finds that app quit or relaunched, or is retired, stops showing the names it
+was given, since nothing could correct them, and shows them again once the app sends them. A brief loss of the
+connection to the same launch keeps them.
 Installing the bb plugin turns on bb's row details for that, says so in the consent sheet, and records
 which of bb's switches it changed. The switches are changed once, so a user who later turns them off keeps
 them off. Uninstalling offers a second destructive button, "Uninstall and Turn Off Row Details", but only when
@@ -736,9 +739,13 @@ checks, puts a new conversation in front: the headline reads “To a new bb conv
 take is sent from that page's message box as if you had pressed Return, after any text already typed there, so bb
 starts the thread with the project, agent and settings chosen on the page. The receipt reads “Sent to a new bb
 conversation”, and its reply is read aloud like any dictated turn's. If the page left the front before sending,
-nothing is sent and the HUD says so; if bb would not send, the words are left in that box and the HUD says to
-press Return there. A bb with no thread at all has nothing to report the page through, so it reads as nothing
-focused. Any other bb page that shows no thread, such as its settings, has no conversation in front. Being in front also means its reply is not read aloud while you look
+nothing is sent and the HUD says so; if bb would not send, the words are left in that box and the HUD says what
+bb said (“Not sent to a new bb conversation: bb said “Enter a prompt or attach a file.” Your words are in its
+prompt box”), or, when bb gave no reason, says to press Return there. This works in a bb with no thread yet too. With nothing in front while a copy of bb is the app
+in front, the take says which copy and why instead of “No conversation focused”: “bb Work doesn’t have the
+KeyScribe plugin. Nothing sent. Agent settings shows how to install it.” when its folder was never connected,
+and otherwise “bb Work isn’t connected. Nothing sent. Agent settings shows its status.”, each with **Open Agent
+Settings**, where the plugin's check says why. Any other bb page that shows no thread, such as its settings, has no conversation in front. Being in front also means its reply is not read aloud while you look
 at it, as for a terminal. Unknown, no terminal in front, a different app or window, or a
 front view that could belong to another session leaves the take with nothing focused. Recording still
 starts, since the take may name a conversation or be a command that needs none. The read runs beside the
@@ -2373,8 +2380,8 @@ Each agent host (`AgentIntegrations.hosts`) has a row in Connections, named by t
 whose integration brings its own connector (`AgentHostIntegration.connector`, bb's plugin) has no switch: its
 expanded content is that connector's configuration folder list: for bb, one row per bb build
 found on the Mac (each build's data folder, found from the command and runtime record bb writes there, from a
-running app's launch environment, or from `BB_DATA_DIR` in the user's login shell), named by the build's app name
-beside its folder. **Add Folder…** accepts a folder only when it holds bb's command and its runtime record or
+running app's launch environment, or from `BB_DATA_DIR` in the user's login shell), named by its app's file name,
+as Finder shows it, beside its folder, so two copies of one app read apart. **Add Folder…** accepts a folder only when it holds bb's command and its runtime record or
 thread storage, and is otherwise refused as not a bb data folder. The folder a build that is
 open uses is the default, which **Connect…** offers; otherwise the usual folder. The host is on exactly while any of
 its setups is enrolled; its id in `agents.hosts` is ignored. **Install…** shows the connector consent sheet in its host form (**Connect {host}?**, what the host

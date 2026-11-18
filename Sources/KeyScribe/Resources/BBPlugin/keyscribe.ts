@@ -21,7 +21,11 @@ export type Bb = {
   on: (event: string, handler: (payload: any) => void) => void
   compose: (window: string, thread: string | null, text: string) => Promise<Composed | null>
 }
-export type Composed = { outcome: "sent"; joined: string } | { outcome: "failed"; alone?: boolean; why?: string } | { outcome: "empty" | "blocked" }
+export type Composed =
+  | { outcome: "sent"; joined: string }
+  | { outcome: "failed"; alone?: boolean; why?: string; said?: string }
+  | { outcome: "unclear"; why?: string }
+  | { outcome: "empty" | "blocked" }
 export type ComposeAsk = { id: string; window: string; thread: string | null; text: string }
 export type ComposeAnswer = { id: string } & Composed
 export type Waiting = { kind?: string; title?: string; tool?: string; detail?: string }
@@ -43,6 +47,7 @@ type Member = {
 }
 
 const features = ["promptDigest", "readiness", "shown", "notify", "label", "merge", "start"]
+const newThreadPage = "new conversation"
 const labelLimit = 200
 const busy = new Set(["active", "starting", "stopping"])
 const answerLimit = 8192
@@ -163,6 +168,7 @@ export type ComposerLike = {
   readonly scope: { kind: string; threadId?: string }
   readonly isEmpty: boolean
   readonly isSubmittingBlocked: boolean
+  readonly submittingBlockedReason?: string | null
   readonly text: string
   insert(text: string, options: { at: "end" }): void
   submit(options?: { experimental_mode: "steer-if-active" }): Promise<void>
@@ -174,6 +180,9 @@ export function runsAsCommand(text: string): boolean {
 
 const registerPause = 16
 const registerTries = 60
+const resendPause = 100
+const resendWindow = 1500
+const emptyDraftRefusals = ["Enter a prompt or attach a file.", "Type a message first."]
 
 export async function composeInto(
   composers: readonly ComposerLike[], thread: string | null, said: string, current: () => readonly ComposerLike[] = () => composers,
@@ -184,6 +193,7 @@ export async function composeInto(
   const box = boxes[0]
   const alone = box.isEmpty
   if (boxes.length > 1 || (!alone && box.isSubmittingBlocked) || runsAsCommand(box.text)) return { outcome: "blocked" }
+  const emptyRefusal = box.isEmpty ? box.submittingBlockedReason?.trim() || null : null
   const draft = box.text
   const joined = draft + (draft && !/\s$/.test(draft) ? " " : "") + said
   box.insert(joined.slice(draft.length), { at: "end" })
@@ -193,13 +203,29 @@ export async function composeInto(
     await new Promise((resolve) => setTimeout(resolve, registerPause))
     shown = current().find(mine) ?? shown
   }
-  try {
-    await (thread === null ? shown.submit() : shown.submit({ experimental_mode: "steer-if-active" }))
-    return { outcome: "sent", joined }
-  } catch (error) {
-    const seen = shown.text.trim() === joined.trim() ? "after bb showed the words" : "before bb showed the words"
-    const why = { why: `${error instanceof Error && error.message ? error.message.slice(0, 200) : "no reason given"} (${seen})` }
-    return alone ? { outcome: "failed", alone: true, ...why } : { outcome: "failed", ...why }
+  const holdsWhatWasTyped = (box: ComposerLike) => box.text.trim() === joined.trim()
+  const firstTry = Date.now()
+  for (;;) {
+    const blockedFor = shown.isSubmittingBlocked ? shown.submittingBlockedReason?.trim() || null : null
+    try {
+      await (thread === null ? shown.submit() : shown.submit({ experimental_mode: "steer-if-active" }))
+      return { outcome: "sent", joined }
+    } catch (error) {
+      const said = error instanceof Error && error.message.trim() ? error.message.trim().slice(0, 200) : undefined
+      const unsentAsEmpty = said !== undefined && (said === emptyRefusal || emptyDraftRefusals.includes(said))
+      const catchingUp = (box: ComposerLike) => unsentAsEmpty && holdsWhatWasTyped(box) && !box.isSubmittingBlocked
+      shown = current().find(mine) ?? shown
+      if (catchingUp(shown) && Date.now() - firstTry < resendWindow) {
+        await new Promise((resolve) => setTimeout(resolve, resendPause))
+        shown = current().find(mine) ?? shown
+        if (catchingUp(shown)) continue
+      }
+      const seen = holdsWhatWasTyped(shown) ? "after bb showed the words" : "before bb showed the words"
+      const why = `${said ?? "no reason given"} (${seen})`
+      if (!unsentAsEmpty && (blockedFor === null || said !== blockedFor)) return { outcome: "unclear", why }
+      const failed = { why, ...(said ? { said } : {}) }
+      return alone ? { outcome: "failed", alone: true, ...failed } : { outcome: "failed", ...failed }
+    }
   }
 }
 
@@ -226,7 +252,9 @@ function isComposeAnswer(value: unknown): value is ComposeAnswer {
   if (answer.outcome === "sent") return typeof answer.joined === "string"
   if (answer.outcome === "failed") {
     return (answer.alone === undefined || typeof answer.alone === "boolean") && (answer.why === undefined || typeof answer.why === "string")
+      && (answer.said === undefined || typeof answer.said === "string")
   }
+  if (answer.outcome === "unclear") return answer.why === undefined || typeof answer.why === "string"
   return answer.outcome === "empty" || answer.outcome === "blocked"
 }
 
@@ -403,6 +431,12 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     void connect()
   }
 
+  function forgetNames() {
+    if (!names.size) return
+    names.clear()
+    host.labelled()
+  }
+
   function fail() {
     if (connected) host.log("lost the connection to the app; trying again later")
     connected = false
@@ -417,6 +451,7 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     stopped = true
     settled(config)
     connected = false
+    forgetNames()
     polling?.cancel()
     polling = null
     retry?.()
@@ -461,14 +496,19 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
       }
       if (stopped) return
       if (!ready || typeof ready.launch !== "string") {
+        forgetNames()
         if (failures === 0) host.log("the app is not running; waiting for it")
         return schedule()
       }
       token = (await host.read(config.tokenPath)).trim()
-      if (ready.launch !== launch) for (const m of members.values()) m.helloed = false
+      if (ready.launch !== launch) {
+        if (launch !== null) forgetNames()
+        for (const m of members.values()) m.helloed = false
+      }
       launch = ready.launch
       if (!listed) {
         for (const thread of await bb.listThreads()) member(thread.id, thread.status)
+        member(newThreadPage)
         listed = true
       }
     } catch {
@@ -674,7 +714,11 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
     if (!shown || shown.thread !== thread) return answer({ op: "refused", reason: "empty" })
     const composed = await bb.compose(shown.id, thread, command.text).catch(() => null)
     if (!composed || stopped) return
-    if (composed.outcome !== "sent") return answer({ op: "refused", reason: composed.outcome === "empty" ? "empty" : composed.outcome === "failed" ? "added" : "draft" })
+    if (composed.outcome === "unclear") host.log(`bb may not have sent a dictation: ${composed.why ?? "no reason given"}`)
+    if (composed.outcome !== "sent") {
+      const reason = composed.outcome === "empty" ? "empty" : composed.outcome === "failed" ? "added" : composed.outcome === "unclear" ? "unclear" : "draft"
+      return answer({ op: "refused", reason })
+    }
     remember(joinedAs, thread + "\n" + composed.joined.trim(), command.text)
     return answer({ op: "submitted", turn: "" })
   }
@@ -692,8 +736,13 @@ export function keyscribe(bb: Bb, host: Host, configPaths: string[]): {
       return answer({ op: "submitted", turn: "", ...(composed.joined.trim() !== command.text.trim() ? { withDraft: true } : {}) })
     }
     if (composed.outcome === "failed") host.log(`bb did not start a new thread: ${composed.why ?? "no reason given"}`)
+    if (composed.outcome === "unclear") {
+      host.log(`bb may not have started a new thread: ${composed.why ?? "no reason given"}`)
+      return answer({ op: "refused", reason: "unclear" })
+    }
     const reason = composed.outcome === "failed" ? (composed.alone ? "filled" : "added") : composed.outcome === "empty" ? "gone" : "draft"
-    return answer({ op: "refused", reason })
+    const said = composed.outcome === "failed" ? composed.said : undefined
+    return answer({ op: "refused", reason, ...(said ? { detail: said } : {}) })
   }
 
   function reachable(thread: string | null | undefined): thread is string {

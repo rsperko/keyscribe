@@ -466,14 +466,23 @@ a hello on any other protocol is refused with `426` and is never registered or s
 - **A `start` command starts a new conversation from a host's new-conversation page.** A host's plugin whose
   hello lists `start` sends `shown` with `on: false` and `newConversation: true` while the window it reports in
   front shows a page that starts a conversation and no thread (bb's new-thread page), carried on any of its
-  connected conversations. While that is the latest `shown` and the host's app is in front with the same window
+  connected members. bb's plugin always says hello under the key `new conversation` at its instance as well as
+  for each thread, so a bb with no thread yet can carry it; no host lists that key as a conversation. While that is the latest `shown` and the host's app is in front with the same window
   focused as at the press, an unnamed take goes there: KeyScribe sends `start` (`id`, `expectedSession` naming
   that carrying conversation, `text`, `expiresAt`). bb's plugin has that window type the dictation into its
   new-thread box, after any text already there, and send it with the box's own send, which creates the thread
   with the project, agent and settings chosen on the page. It answers `submitted` (`withDraft: true` when text
   already in the box went too), or refuses as `gone` when its front window no longer shows that page or no window
   took it up within a second, `draft` when the box holds text it will not join, `filled` when bb would not send
-  and the dictation is left alone in the box, `added` when it is left there after text already in the box, and
+  before sending (its box blocked, or the box rejected as empty, which is retried for a moment while the box holds
+  exactly what was typed and bb still says it can send, since bb can lag behind typed words; an empty draft is
+  never sent, so the retry cannot send twice). A refusal counts as empty when it is the reason bb gave for that box
+  while it was still empty, so bb's wording does not matter, or one of bb's known empty-draft messages
+  and the dictation is left alone in the box, `added` when it is left there after text already in the box (either
+  with an optional `detail`: bb's own words for why, which KeyScribe shows, trimmed and bounded by
+  `AgentBridgeCodec.refusalDetailLimit`), `unclear` when the failure does not prove nothing was sent (only bb's
+  empty-draft refusal, or the exact reason bb gave for a box blocked just before the send, proves that), so the
+  message may have gone (never retried; KeyScribe reads it like no answer), and
   `command` when the dictation starts with `/` or `!`. The new thread's first turn is reported under the digest
   of the dictation alone, once that thread's hello lands, so KeyScribe follows its reply within the same wait as
   any hosted dictation.

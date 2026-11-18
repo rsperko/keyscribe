@@ -45,6 +45,11 @@ public enum BBBuilds {
         return value.hasPrefix("/") ? value : nil
     }
 
+    public static func name(info: [String: Any]?, app: String?) -> String {
+        let file = app.map { (($0 as NSString).lastPathComponent as NSString).deletingPathExtension } ?? ""
+        return file.isEmpty ? name(info: info) : file
+    }
+
     public static func name(info: [String: Any]?) -> String {
         for key in ["CFBundleDisplayName", "CFBundleName"] {
             if let name = (info?[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty { return name }

@@ -62,10 +62,18 @@ struct AgentHostTests {
         }
 
         var window: AgentHostApp?
+        private(set) var windowReads = 0
 
-        func focusedWindow() -> AgentHostApp? { window }
+        func focusedWindow() -> AgentHostApp? {
+            windowReads += 1
+            return window
+        }
 
-        func front(among locations: [AgentHostLocation], reported: AgentHostLocation?) async -> AgentHostFront {
+        var copy: AgentHostCopy?
+
+        func copyInFront() -> AgentHostCopy? { copy }
+
+        func front(among locations: [AgentHostLocation], reported: AgentHostLocation?, in app: AgentHostApp?) async -> AgentHostFront {
             asked.append(locations)
             self.reported.append(reported)
             await stall()
@@ -435,6 +443,14 @@ struct AgentHostTests {
         #expect(host.delivered.isEmpty)
     }
 
+    @Test func aJoinThePluginCannotTellWhetherBbSentIsUncertainAndNeverSentAgainThroughTheHost() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await pluginJoined(host, transport: transport)
+        #expect(await deliverAnswering(hub, transport) { .refused(request: $0, reason: "unclear") } == .uncertain("docs"))
+        #expect(host.delivered.isEmpty)
+    }
+
     @Test(arguments: ["empty", "unsupported", "a reason this version does not know"])
     func aJoinThatPutNothingInTheMessageBoxGoesThroughItsHostAsBefore(refusal: String) async {
         let host = FakeHost()
@@ -497,7 +513,7 @@ struct AgentHostTests {
     }
 
     static let newConversation = AgentHub.newConversation(in: "example")
-    static let window = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: "cg:7")
+    static let window = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: "cg:7", instance: instance)
 
     private func startReady(_ host: FakeHost, transport: FakeTransport, features: [String] = ["promptDigest", "merge", "start"]) async -> AgentHub {
         let hub = await pluginJoined(host, transport: transport, features: features, draft: false)
@@ -539,6 +555,95 @@ struct AgentHostTests {
         #expect(await hub.newConversationInFront() == front)
         hub.handle(.shown(session: Self.id("t1"), on: false))
         #expect(await hub.newConversationInFront() == nil)
+    }
+
+    @Test func aHostWithNoConversationsYetStartsOneThroughThePluginsNewConversationConnection() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = makeHub(host, transport: transport)
+        await hub.rescan()
+        let carrier = Self.id("new conversation")
+        var hello = Self.hello(carrier, features: ["promptDigest", "merge", "start"])
+        hello.agent = "example"
+        transport.live.insert(carrier)
+        let scans = host.scans
+        hub.handle(.hello(hello))
+        await hub.rescan()
+        #expect(host.scans == scans)
+        #expect(hub.directory.conversations.isEmpty)
+        host.window = Self.window
+        hub.handle(.shown(session: carrier, on: false, newConversation: true))
+        let receipt = await startAnswering(hub, transport) {
+            .submitted(request: $0, turn: "", report: AgentDeliveryReport(state: .seen, withDraft: false))
+        }
+        #expect(receipt == .sent("a new Example conversation"))
+        #expect(startCommands(transport).map(\.session) == [carrier])
+        #expect(hub.directory.conversations.isEmpty)
+    }
+
+    @Test func aCopyWithoutThePluginIsNamedEvenBeforeTheHostIsTurnedOn() async {
+        let host = FakeHost()
+        host.copy = AgentHostCopy(name: "Example Work", instance: Self.instance, enrolled: false)
+        let hub = makeHub(host, allowed: { _ in false })
+        #expect(hub.hostCopyUnheardInFront() == .missing("Example Work"))
+    }
+
+    @Test func aNewConversationPageOneCopyReportedIsNeverInFrontWhileAnotherCopyIs() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await startReady(host, transport: transport)
+        host.window?.instance = "/Users/a/.work-bb"
+        #expect(await hub.newConversationInFront() == nil)
+        host.window?.instance = Self.instance
+        #expect(await hub.newConversationInFront() != nil)
+        host.window?.instance = nil
+        #expect(await hub.newConversationInFront() == nil)
+    }
+
+    @Test func eachCopyOfAHostKeepsWhatItLastShowedSoSwitchingCopiesNeedsNoNewReport() async {
+        let other = "/Users/a/.work-bb"
+        let host = FakeHost()
+        host.conversations = [Self.thread("a1"), Self.thread("b1", instance: other)]
+        let transport = FakeTransport()
+        let hub = makeHub(host, transport: transport)
+        await hub.rescan()
+        for id in [Self.id("a1"), Self.id("b1", instance: other), Self.id("new conversation"), Self.id("new conversation", instance: other)] {
+            transport.live.insert(id)
+            var hello = Self.hello(id, features: ["promptDigest", "merge", "start"])
+            hello.agent = "example"
+            hub.handle(.hello(hello))
+        }
+        await hub.rescan()
+        hub.handle(.shown(session: Self.id("a1"), on: true))
+        hub.handle(.shown(session: Self.id("b1", instance: other), on: true))
+        host.window = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: "cg:7", instance: Self.instance)
+        _ = await hub.sessionInFrontWithoutAsking()
+        #expect(host.reported.last == Self.location("a1"))
+        hub.handle(.shown(session: Self.id("new conversation"), on: false, newConversation: true))
+        hub.handle(.shown(session: Self.id("new conversation", instance: other), on: true))
+        #expect(await hub.newConversationInFront() != nil)
+    }
+
+    @Test func aCopyOfAHostInFrontThatCannotBeHeardIsNamedWithWhatIsMissing() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = makeHub(host, transport: transport)
+        await hub.rescan()
+        #expect(hub.hostCopyUnheardInFront() == nil)
+        host.copy = AgentHostCopy(name: "Example Work", instance: Self.instance, enrolled: false)
+        #expect(hub.hostCopyUnheardInFront() == .missing("Example Work"))
+        host.copy?.enrolled = true
+        #expect(hub.hostCopyUnheardInFront() == .notConnected("Example Work"))
+        transport.live.insert(Self.id("new conversation"))
+        #expect(hub.hostCopyUnheardInFront() == nil)
+        transport.live = []
+        host.conversations = [Self.thread("t1")]
+        transport.live.insert(Self.id("t1"))
+        var hello = Self.hello(Self.id("t1"))
+        hello.agent = "example"
+        hub.handle(.hello(hello))
+        await hub.rescan()
+        #expect(hub.hostCopyUnheardInFront() == nil)
     }
 
     @Test func aPluginThatCannotStartConversationsNeverPutsANewConversationInFront() async {
@@ -587,11 +692,28 @@ struct AgentHostTests {
         #expect(joinCommands(transport).isEmpty)
     }
 
+    @Test(arguments: ["filled", "added"])
+    func aNewConversationTheHostWouldNotStartSaysWhatTheHostSaid(refusal: String) async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await startReady(host, transport: transport)
+        let receipt = await startAnswering(hub, transport) { .refused(request: $0, reason: refusal, detail: "Enter a prompt or attach a file.") }
+        #expect(receipt == .kept(
+            "a new Example conversation", reason: .declined(by: "Example", saying: "Enter a prompt or attach a file.", besideText: refusal == "added")))
+    }
+
     @Test func aNewConversationThePluginNeverAnswersIsUncertain() async {
         let host = FakeHost()
         let transport = FakeTransport()
         let hub = await startReady(host, transport: transport)
         #expect(await startAnswering(hub, transport, answer: nil) == .uncertain("a new Example conversation"))
+    }
+
+    @Test func aNewConversationThePluginCannotTellWhetherBbStartedIsUncertain() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await startReady(host, transport: transport)
+        #expect(await startAnswering(hub, transport) { .refused(request: $0, reason: "unclear") } == .uncertain("a new Example conversation"))
     }
 
     @Test func aNewConversationNoLongerInFrontIsNeverStarted() async {
@@ -618,6 +740,21 @@ struct AgentHostTests {
         #expect(replies.map(\.0) == [Self.id("t2")])
         #expect(replies.map(\.1) == ["planned"])
         #expect(replies.map(\.2) == ["q1"])
+    }
+
+    @Test func aNewConversationStartedInOneCopyIsNeverFollowedIntoAnotherCopysThreadWithTheSameText() async {
+        let host = FakeHost()
+        let transport = FakeTransport()
+        let hub = await startReady(host, transport: transport)
+        var replies: [String] = []
+        hub.onResult = { conversation, _, _, _, _ in replies.append(conversation) }
+        _ = await startAnswering(hub, transport) { .submitted(request: $0, turn: "") }
+        let elsewhere = Self.id("t9", instance: "/Users/a/.work-bb")
+        hub.handle(.turnStarted(session: elsewhere, turn: "b", prompt: AgentPromptDigest.of("plan the release")))
+        hub.handle(.turnComplete(session: elsewhere, reason: "complete", answer: "theirs"))
+        hub.handle(.turnStarted(session: Self.id("t2"), turn: "a", prompt: AgentPromptDigest.of("plan the release")))
+        hub.handle(.turnComplete(session: Self.id("t2"), reason: "complete", answer: "planned"))
+        #expect(replies == [Self.id("t2")])
     }
 
     @Test func anUncertainNewConversationWhoseTurnArrivesIsReportedSent() async {
@@ -1104,6 +1241,75 @@ struct AgentHostTests {
         host.conversations = [Self.thread("t1")]
         at += HostDiscovery.fallbackInterval + 1
         await hub.rescan(wantingHosts: true)
+        #expect(hub.directory.conversations.first?.state == .idle)
+    }
+
+    @Test func aTurnTheHostsOwnConnectorReportsShowsAtOnceUntilANewerHostListSaysOtherwise() async throws {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let transport = FakeTransport()
+        var at = Date(timeIntervalSince1970: 1000)
+        let hub = makeHub(host, transport: transport, now: { at })
+        await hub.rescan()
+        transport.live.insert(Self.id("t1"))
+        var hello = Self.hostHello("t1")
+        hello.features = ["promptDigest", "readiness", "notify"]
+        hello.idle = true
+        hub.handle(.hello(hello))
+        await hub.rescan()
+        let scans = host.scans
+        at += 1
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a"))
+        await hub.rescan()
+        #expect(hub.directory.conversations.first?.state == .working)
+        #expect(host.scans == scans)
+        var working = Self.thread("t1")
+        working.state = .working
+        host.conversations = [working]
+        at += HostDiscovery.fallbackInterval + 1
+        await hub.rescan(wantingHosts: true)
+        #expect(hub.directory.conversations.first?.state == .working)
+        let listed = host.scans
+        at += 1
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "done"))
+        await hub.rescan()
+        #expect(hub.directory.conversations.first?.state == .idle)
+        #expect(host.scans == listed)
+        at += HostDiscovery.fallbackInterval + 1
+        await hub.rescan(wantingHosts: true)
+        #expect(hub.directory.conversations.first?.state == .working)
+    }
+
+    @Test func aTurnFromAConnectorThatDoesNotReportTurnsLeavesTheHostsListStanding() async throws {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let transport = FakeTransport()
+        let hub = makeHub(host, transport: transport)
+        await hub.rescan()
+        transport.live.insert(Self.id("t1"))
+        hub.handle(.hello(Self.hostHello("t1")))
+        await hub.rescan()
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "a"))
+        await hub.rescan()
+        #expect(hub.directory.conversations.first?.state == .idle)
+    }
+
+    @Test func aTurnThatEndsWhileItsPromptWasOpenReadsAsIdleNotAsWorking() async throws {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let transport = FakeTransport()
+        let hub = makeHub(host, transport: transport)
+        await hub.rescan()
+        transport.live.insert(Self.id("t1"))
+        var hello = Self.hostHello("t1")
+        hello.features = ["promptDigest", "readiness", "notify"]
+        hello.idle = false
+        hub.handle(.hello(hello))
+        hub.handle(.waiting(session: Self.id("t1"), prompt: AgentPrompt(kind: "confirm", detail: "make test")))
+        await hub.rescan()
+        #expect(hub.directory.conversations.first?.state == .userDialog)
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "done"))
+        await hub.rescan()
         #expect(hub.directory.conversations.first?.state == .idle)
     }
 

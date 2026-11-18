@@ -40,6 +40,13 @@ struct BBBuildsTests {
         #expect(BBBuilds.name(info: nil) == "bb")
     }
 
+    @Test func twoCopiesOfOneAppAreCalledWhatFinderCallsEachCopy() {
+        let info = ["CFBundleDisplayName": "bb", "CFBundleName": "bb"]
+        #expect(BBBuilds.name(info: info, app: "/Applications/bb Work.app") == "bb Work")
+        #expect(BBBuilds.name(info: info, app: "/Applications/bb.app") == "bb")
+        #expect(BBBuilds.name(info: info, app: nil) == "bb")
+    }
+
     @Test func theBuildOfferedFirstIsOneThatIsOpenThenTheUsualFolder() {
         let usual = BBBuild(folder: "/Users/a/.bb", bundle: "dev.bb.desktop", name: "bb")
         let acme = BBBuild(folder: "/Users/a/.acme-bb", bundle: "com.example.acme-bb", name: "bb (Acme)")

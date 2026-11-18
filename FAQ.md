@@ -570,7 +570,8 @@ own, and in **Manage…** each conversation shows which folder it uses. A folder
 `PI_CODING_AGENT_DIR` in your shell's startup files is listed too. For bb, KeyScribe lists every copy of bb it
 finds on your Mac, by the name of its app, including one whose data folder your shell names with `BB_DATA_DIR`;
 each is connected on its own. Open a copy of bb once if it is missing, or choose **Add Folder…** and pick its data
-folder.
+folder. If you dictate to a copy of bb that isn't connected, KeyScribe names that copy and tells you whether its
+plugin is missing or not connected, so you know which row to fix.
 
 ### How do I choose which conversation hears me?
 
@@ -657,7 +658,7 @@ is it, what time it is in London” reaches the thread whose first message was �
 When you rename a bb thread in KeyScribe, by voice or in Settings, KeyScribe also sets that name as its bb
 title, so bb's sidebar shows what to call it. Names KeyScribe picked on its own are never written to bb. A name
 you give stays fixed even if bb later changes the thread's title. Under any thread whose bb title says
-something else, bb's sidebar shows the name to say: installing the plugin turns on bb's thread row details
+something else, bb's sidebar shows the name to say, while KeyScribe is running: installing the plugin turns on bb's thread row details
 (**Organize ▸ Rows ▸ Metadata**, which bb still calls experimental), unless they were already on. If you turn
 them off, KeyScribe leaves them off. When you uninstall the plugin, KeyScribe offers to turn them back off,
 but only if it was the one that turned them on.
@@ -681,8 +682,8 @@ the thread its window shows, the
 focused pane of a split included, as it does for the terminal tab in front. On bb's new-thread page, dictation
 without a name starts a new thread: KeyScribe sends what you said from that page's message box, after anything you
 typed there, as if you had pressed Return, so the thread gets the project, agent and settings you picked on the
-page, and its reply is read aloud like any other. If you leave the page before it is sent, nothing is sent. This
-needs at least one thread in bb already, since the plugin reports through one.
+page, and its reply is read aloud like any other. This works for your very first thread too. If you leave the
+page before it is sent, nothing is sent.
 
 KeyScribe turns off bb's usage reporting for the commands it runs.
 

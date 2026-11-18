@@ -28,6 +28,12 @@ struct BBHostTests {
     static let cli = "/Users/a/.bb/bin/bb"
     static let location = AgentHostLocation(host: "bb", instance: "/Users/a/.bb", native: "thr_abc1")
     static let bundle = "dev.bb.desktop"
+
+    static func seen(_ app: AgentHostApp, _ folder: String) -> AgentHostApp {
+        var seen = app
+        seen.instance = folder
+        return seen
+    }
     static let usual = BBBuild(folder: "/Users/a/.bb", app: "/Applications/bb.app", bundle: bundle, name: "bb")
     static let acme = BBBuild(folder: "/Users/a/.acme-bb", app: "/Applications/bb (Acme).app", bundle: "com.example.acme-bb", name: "bb (Acme)")
 
@@ -39,15 +45,18 @@ struct BBHostTests {
     }
 
     private func host(
-        _ runner: Runner, builds: [BBBuild], installed: Bool = true, open: @escaping @MainActor (BBBuild) -> Bool = { _ in true },
-        frontmost: @escaping @MainActor () -> AgentHostApp? = { nil }
+        _ runner: Runner, builds: [BBBuild], enrolled: [String]? = nil, installed: Bool = true,
+        open: @escaping @MainActor (BBBuild) -> Bool = { _ in true }, frontmost: @escaping @MainActor () -> AgentHostApp? = { nil },
+        dataFolders: [String: String] = [:]
     ) -> (BBHost, () -> [String]) {
         var activations: [String] = []
         let host = BBHost(
-            home: Self.home, enrolled: { builds.map(\.folder) }, describe: { folder in builds.first { $0.folder == folder } },
+            home: Self.home, enrolled: { enrolled ?? builds.map(\.folder) }, describe: { folder in builds.first { $0.folder == folder } },
             installed: { path in installed && builds.contains { $0.launcher == path } }, isOpen: open,
             run: { try await runner.run($0, subcommand: $1, input: $2, environment: $3) },
-            activate: { activations.append($0.folder) }, frontmost: { _ in frontmost() })
+            activate: { activations.append($0.folder) }, frontmost: { _ in frontmost() },
+            frontApp: { frontmost().map { AgentHostApp(bundle: $0.bundle, pid: $0.pid, name: $0.name, path: $0.path) } },
+            dataFolder: { dataFolders[$0] })
         return (host, { activations })
     }
 
@@ -232,15 +241,15 @@ struct BBHostTests {
         var front: AgentHostApp? = bb
         let (host, _) = host(Runner(), frontmost: { front })
         let elsewhere = AgentHostLocation(host: "bb", instance: "/Users/a/.bb", native: "thr_other")
-        #expect(await host.front(among: [Self.location], reported: Self.location) == .shown(Self.location, in: bb))
-        #expect(await host.front(among: [Self.location], reported: nil) == .unknown)
-        #expect(await host.front(among: [Self.location], reported: elsewhere) == .unknown)
+        #expect(await host.front(among: [Self.location], reported: Self.location, in: host.focusedWindow()) == .shown(Self.location, in: Self.seen(bb, Self.usual.folder)))
+        #expect(await host.front(among: [Self.location], reported: nil, in: host.focusedWindow()) == .unknown)
+        #expect(await host.front(among: [Self.location], reported: elsewhere, in: host.focusedWindow()) == .unknown)
         front = other
-        #expect(await host.front(among: [Self.location], reported: Self.location) == .elsewhere)
+        #expect(await host.front(among: [Self.location], reported: Self.location, in: host.focusedWindow()) == .unknown)
         front = nil
-        #expect(await host.front(among: [Self.location], reported: Self.location) == .unknown)
+        #expect(await host.front(among: [Self.location], reported: Self.location, in: host.focusedWindow()) == .unknown)
         front = AgentHostApp(bundle: Self.bundle, pid: 31, name: "bb")
-        #expect(await host.front(among: [Self.location], reported: Self.location) == .unknown)
+        #expect(await host.front(among: [Self.location], reported: Self.location, in: host.focusedWindow()) == .unknown)
     }
 
     @Test func aRebrandedBuildIsDrivenThroughItsOwnCommandAndDataFolderAndNamedAsItIsCalled() async {
@@ -291,9 +300,9 @@ struct BBHostTests {
         let acme = AgentHostApp(bundle: Self.acme.bundle!, pid: 41, name: "bb (Acme)", window: "cg:7")
         let (bb, _) = host(Runner(), builds: [Self.usual, Self.acme], frontmost: { acme })
         let theirs = AgentHostLocation(host: "bb", instance: Self.acme.folder, native: "thr_abc1")
-        #expect(await bb.front(among: [Self.location, theirs], reported: theirs) == .shown(theirs, in: acme))
-        #expect(await bb.front(among: [Self.location, theirs], reported: Self.location) == .unknown)
-        #expect(bb.focusedWindow() == acme)
+        #expect(await bb.front(among: [Self.location, theirs], reported: theirs, in: bb.focusedWindow()) == .shown(theirs, in: Self.seen(acme, Self.acme.folder)))
+        #expect(await bb.front(among: [Self.location, theirs], reported: Self.location, in: bb.focusedWindow()) == .unknown)
+        #expect(bb.focusedWindow()?.instance == Self.acme.folder)
     }
 
     @Test func aBuildNotConnectedIsNeverRun() async {
@@ -305,11 +314,108 @@ struct BBHostTests {
         #expect(runner.calls.isEmpty)
     }
 
+    static let work = BBBuild(folder: "/Users/a/.work-bb", app: "/Applications/bb Work.app", bundle: bundle, name: "bb Work")
+
+    @Test func twoCopiesOfOneAppAreToldApartByWhereEachIsInstalled() async {
+        let front = AgentHostApp(bundle: Self.bundle, pid: 41, name: "bb", window: "cg:7", path: Self.work.app)
+        let (bb, _) = host(Runner(), builds: [Self.usual, Self.work], frontmost: { front })
+        let theirs = AgentHostLocation(host: "bb", instance: Self.work.folder, native: "thr_abc1")
+        #expect(await bb.front(among: [Self.location, theirs], reported: Self.location, in: bb.focusedWindow()) == .unknown)
+        #expect(await bb.front(among: [Self.location, theirs], reported: theirs, in: bb.focusedWindow()) == .shown(theirs, in: Self.seen(front, Self.work.folder)))
+        #expect(bb.focusedWindow()?.instance == Self.work.folder)
+    }
+
+    @Test func aCopyOfBbInFrontIsNamedByItsAppAndSaysWhetherThePluginIsInstalledForIt() async {
+        var front: AgentHostApp? = AgentHostApp(bundle: Self.bundle, pid: 41, name: "bb", window: "cg:7", path: Self.work.app)
+        let (bb, _) = host(
+            Runner(), builds: [Self.usual, Self.work], enrolled: [Self.usual.folder], frontmost: { front },
+            dataFolders: [Self.work.app!: Self.work.folder])
+        #expect(bb.copyInFront() == AgentHostCopy(name: "bb Work", instance: Self.work.folder, enrolled: false))
+        front = AgentHostApp(bundle: Self.bundle, pid: 42, name: "bb", window: "cg:8", path: Self.usual.app)
+        #expect(bb.copyInFront() == AgentHostCopy(name: "bb", instance: Self.usual.folder, enrolled: true))
+        front = AgentHostApp(bundle: "com.apple.Safari", pid: 32, name: "Safari", window: "cg:9", path: "/Applications/Safari.app")
+        #expect(bb.copyInFront() == nil)
+        front = nil
+        #expect(bb.copyInFront() == nil)
+    }
+
+    @Test func aCopyWhoseRecordedAppPathIsStaleIsStillFoundByTheDataFolderItsAppUses() async {
+        let moved = BBBuild(folder: Self.usual.folder, app: "/Applications/Old/bb.app", bundle: Self.bundle, name: "bb")
+        let front = AgentHostApp(bundle: Self.bundle, pid: 41, name: "bb", window: "cg:7", path: "/Applications/bb.app")
+        let (bb, _) = host(Runner(), builds: [moved], frontmost: { front })
+        #expect(await bb.front(among: [Self.location], reported: Self.location, in: bb.focusedWindow()) == .shown(Self.location, in: Self.seen(front, Self.usual.folder)))
+        #expect(bb.focusedWindow()?.instance == Self.usual.folder)
+        #expect(bb.copyInFront()?.enrolled == true)
+    }
+
+    @Test func aCopyWithoutThePluginIsNeverTakenForAnotherCopyOfTheSameAppThatHasIt() async {
+        let moved = BBBuild(folder: Self.usual.folder, app: "/Applications/Old/bb.app", bundle: Self.bundle, name: "bb")
+        let front = AgentHostApp(bundle: Self.bundle, pid: 41, name: "bb", window: "cg:7", path: Self.work.app)
+        let (bb, _) = host(
+            Runner(), builds: [moved, Self.work], enrolled: [moved.folder], frontmost: { front }, dataFolders: [Self.work.app!: Self.work.folder])
+        #expect(await bb.front(among: [Self.location], reported: Self.location, in: bb.focusedWindow()) == .unknown)
+        #expect(bb.focusedWindow() == nil)
+        #expect(bb.copyInFront() == AgentHostCopy(name: "bb Work", instance: Self.work.folder, enrolled: false))
+    }
+
+    @Test func aCopyWhoseDataFolderWasAddedByHandIsNamedWhenItIsInFront() async {
+        let added = BBBuild(folder: "/srv/bb", app: "/Applications/bb Lab.app", bundle: Self.bundle, name: "bb Lab")
+        let front = AgentHostApp(bundle: Self.bundle, pid: 41, name: "bb", window: "cg:7", path: added.app)
+        let (bb, _) = host(Runner(), builds: [added], frontmost: { front })
+        #expect(bb.copyInFront() == AgentHostCopy(name: "bb Lab", instance: added.folder, enrolled: true))
+    }
+
+    @Test func aSymlinkedUsualDataFolderIsTheSameCopyAsTheFolderItPointsTo() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("ks-bblink-\(UUID().uuidString.prefix(8))", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let real = root.appendingPathComponent("real-bb", isDirectory: true)
+        try FileManager.default.createDirectory(at: real, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent(".bb"), withDestinationURL: real)
+        let folder = ConnectorFolders.canonical(real).path
+        let build = BBBuild(folder: folder, app: "/Applications/Old/bb.app", bundle: Self.bundle, name: "bb")
+        let front = AgentHostApp(bundle: Self.bundle, pid: 41, name: "bb", window: "cg:7", path: "/Applications/bb.app")
+        let bb = BBHost(
+            home: root.path, enrolled: { [folder] }, describe: { $0 == folder ? build : nil }, installed: { _ in true }, isOpen: { _ in true },
+            run: { _, _, _, _ in throw HostCLI.Failure.couldNotStart("") }, activate: { _ in }, frontmost: { _ in front },
+            frontApp: { front }, dataFolder: { _ in nil })
+        #expect(bb.copyInFront() == AgentHostCopy(name: "bb", instance: folder, enrolled: true))
+    }
+
+    @Test func tellingWhichCopyIsInFrontNeverReadsItsWindow() async {
+        var reads = 0
+        let front = AgentHostApp(bundle: Self.bundle, pid: 41, name: "bb", window: "cg:7", path: Self.usual.app)
+        let usual = Self.usual
+        let bb = BBHost(
+            home: Self.home, enrolled: { [usual.folder] }, describe: { $0 == usual.folder ? usual : nil }, installed: { _ in true },
+            isOpen: { _ in true }, run: { _, _, _, _ in throw HostCLI.Failure.couldNotStart("") }, activate: { _ in },
+            frontmost: { _ in
+                reads += 1
+                return front
+            },
+            frontApp: { AgentHostApp(bundle: front.bundle, pid: front.pid, name: front.name, path: front.path) }, dataFolder: { _ in nil })
+        #expect(bb.copyInFront()?.instance == Self.usual.folder)
+        #expect(reads == 0)
+    }
+
+    @Test func whichThreadIsInFrontIsDecidedFromTheReadingItIsGivenWithoutReadingBbsWindowAgain() async {
+        var reads = 0
+        let front = AgentHostApp(bundle: Self.bundle, pid: 41, name: "bb", window: "cg:7", path: Self.usual.app)
+        let (bb, _) = host(Runner(), builds: [Self.usual], frontmost: {
+            reads += 1
+            return front
+        })
+        let reading = bb.focusedWindow()
+        #expect(reads == 1)
+        #expect(await bb.front(among: [Self.location], reported: Self.location, in: reading) == .shown(Self.location, in: Self.seen(front, Self.usual.folder)))
+        #expect(await bb.front(among: [Self.location], reported: Self.location, in: nil) == .unknown)
+        #expect(reads == 1)
+    }
+
     @Test func bbsWindowIsFocusedOnlyWhileBbIsTheAppInFrontWithAWindowFocused() {
         let bb = AgentHostApp(bundle: Self.bundle, pid: 31, name: "bb", window: "cg:4")
         var front: AgentHostApp? = bb
         let (host, _) = host(Runner(), frontmost: { front })
-        #expect(host.focusedWindow() == bb)
+        #expect(host.focusedWindow()?.pid == bb.pid)
         front = AgentHostApp(bundle: "com.apple.Safari", pid: 32, name: "Safari", window: "cg:9")
         #expect(host.focusedWindow() == nil)
         front = AgentHostApp(bundle: Self.bundle, pid: 31, name: "bb")

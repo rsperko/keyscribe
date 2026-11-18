@@ -46,6 +46,7 @@ protocol AgentTakeHost: AnyObject {
     var agentFocus: CapturedFocus? { get set }
     var agentNewConversation: CapturedFocus? { get set }
     var agentFocusUnconfirmed: Bool { get set }
+    var agentUnheardHost: AgentHub.UnheardHost? { get set }
     var takePressedAt: DispatchTime? { get }
     var agentFrontTask: Task<Void, Never>? { get set }
     var agentFrontCutoff: ContinuousClock.Instant? { get }
@@ -134,6 +135,11 @@ final class AgentTake {
             if shown == nil, !Task.isCancelled, let fresh = await agents?.newConversationInFront() {
                 shown = fresh
                 starts = true
+            }
+            if shown == nil, !Task.isCancelled, let unheard = agents?.hostCopyUnheardInFront(),
+               let host, !Task.isCancelled, host.takeIdentity === identity {
+                host.agentUnheardHost = unheard
+                return
             }
             guard let shown, let self, let host, !Task.isCancelled,
                   host.takeIdentity === identity,
@@ -273,6 +279,12 @@ final class AgentTake {
         if case .ask(let body, .nothingFocused) = resolution, host.agentFocusUnconfirmed {
             let line = Self.unconfirmedLine
             finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: .openAccessibilitySettings, heard: HeardExcerpt(heard: body)),
+                        outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
+            return
+        }
+        if case .ask(let body, .nothingFocused) = resolution, let unheard = host.agentUnheardHost {
+            let line = AgentOutput.unheardLine(unheard)
+            finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: .openAgents(mode.id), heard: HeardExcerpt(heard: body)),
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
             return
         }

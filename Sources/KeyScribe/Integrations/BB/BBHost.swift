@@ -28,7 +28,10 @@ final class BBHost: AgentHost {
     private let run: Run
     private let activate: @MainActor (BBBuild) -> Void
     private let frontmost: @MainActor (Set<String>) -> AgentHostApp?
+    private let dataFolder: @Sendable (String) -> String?
+    private let frontApp: @MainActor () -> AgentHostApp?
     private var known: [String: BBBuild] = [:]
+    private var copies: [String: BBBuild?] = [:]
     private var listed: [String: [BBThreads.Thread]] = [:]
 
     init(
@@ -39,7 +42,9 @@ final class BBHost: AgentHost {
         isOpen: @escaping @MainActor (BBBuild) -> Bool = BBBuildFinder.isOpen,
         run: @escaping Run = { try await HostCLI.run($0, subcommand: $1, input: $2, environment: $3) },
         activate: @escaping @MainActor (BBBuild) -> Void = BBBuildFinder.bringForward,
-        frontmost: @escaping @MainActor (Set<String>) -> AgentHostApp? = BBBuildFinder.frontmost(among:)
+        frontmost: @escaping @MainActor (Set<String>) -> AgentHostApp? = BBBuildFinder.frontmost(among:),
+        frontApp: @escaping @MainActor () -> AgentHostApp? = BBBuildFinder.frontApp,
+        dataFolder: (@Sendable (String) -> String?)? = nil
     ) {
         self.home = home
         let usual = (home as NSString).appendingPathComponent(BBBuilds.usualFolder)
@@ -50,6 +55,8 @@ final class BBHost: AgentHost {
         self.run = run
         self.activate = activate
         self.frontmost = frontmost
+        self.dataFolder = dataFolder ?? { BBBuildFinder.declaredFolder(app: $0, home: home) }
+        self.frontApp = frontApp
     }
 
     private var folders: [String] {
@@ -65,6 +72,7 @@ final class BBHost: AgentHost {
         let describe = self.describe
         let found = await Task.detached { folders.map { ($0, describe($0)) } }.value
         for (folder, build) in found { known[folder] = build ?? BBBuild(folder: folder, name: BBBuilds.fallbackName) }
+        copies = [:]
         return builds
     }
 
@@ -136,21 +144,54 @@ final class BBHost: AgentHost {
         return .requested
     }
 
-    func front(among locations: [AgentHostLocation], reported: AgentHostLocation?) async -> AgentHostFront {
-        if folders.contains(where: { known[$0] == nil }) { await refreshBuilds() }
-        let builds = self.builds
-        guard let front = frontmost(Set(builds.compactMap(\.bundle))) else { return .unknown }
-        guard let build = builds.first(where: { $0.bundle == front.bundle }) else { return .elsewhere }
-        guard front.window != nil else { return .unknown }
-        guard let reported, locations.contains(reported), reported.instance == build.folder, thread(at: reported) != nil else { return .unknown }
-        return .shown(reported, in: front)
+    func front(among locations: [AgentHostLocation], reported: AgentHostLocation?, in app: AgentHostApp?) async -> AgentHostFront {
+        guard let app, app.window != nil, let instance = app.instance, folders.contains(instance) else { return .unknown }
+        guard let reported, locations.contains(reported), reported.instance == instance, thread(at: reported) != nil else { return .unknown }
+        return .shown(reported, in: app)
+    }
+
+    private var describedBuilds: [BBBuild] {
+        for folder in folders where known[folder] == nil { known[folder] = describe(folder) ?? BBBuild(folder: folder, name: BBBuilds.fallbackName) }
+        return builds
     }
 
     func focusedWindow() -> AgentHostApp? {
-        for folder in folders where known[folder] == nil { known[folder] = describe(folder) ?? BBBuild(folder: folder, name: BBBuilds.fallbackName) }
-        let bundles = Set(builds.compactMap(\.bundle))
-        guard let front = frontmost(bundles), bundles.contains(front.bundle), front.window != nil else { return nil }
+        let builds = describedBuilds
+        guard var front = frontmost(Set(builds.compactMap(\.bundle))), front.window != nil,
+              let build = build(runningAs: front, among: builds)
+        else { return nil }
+        front.instance = build.folder
         return front
+    }
+
+    func copyInFront() -> AgentHostCopy? {
+        let builds = describedBuilds
+        guard let front = frontApp(), let path = front.path,
+              let copy = build(runningAs: front, among: builds) ?? copy(at: path, bundle: front.bundle)
+        else { return nil }
+        return AgentHostCopy(name: BBBuilds.name(info: nil, app: path), instance: copy.folder, enrolled: folders.contains(copy.folder))
+    }
+
+    private func build(runningAs front: AgentHostApp, among builds: [BBBuild]) -> BBBuild? {
+        guard let path = front.path else {
+            let sharing = builds.filter { $0.bundle != nil && $0.bundle == front.bundle }
+            return sharing.count == 1 ? sharing[0] : nil
+        }
+        if let exact = builds.first(where: { $0.app == path }) { return exact }
+        guard let copy = copy(at: path, bundle: front.bundle) else { return nil }
+        return builds.first { $0.folder == copy.folder }
+    }
+
+    private func copy(at path: String, bundle: String) -> BBBuild? {
+        let key = path + "\n" + bundle
+        if let cached = copies[key] { return cached }
+        let usual = ConnectorFolders.canonical(URL(fileURLWithPath: (home as NSString).appendingPathComponent(BBBuilds.usualFolder))).path
+        let folder = dataFolder(path) ?? usual
+        let found = (known[folder] ?? describe(folder)).flatMap { build in
+            build.app == path || (build.bundle != nil && build.bundle == bundle) ? build : nil
+        }
+        copies[key] = .some(found)
+        return found
     }
 
     func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {

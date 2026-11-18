@@ -475,7 +475,11 @@ every rule above applies to it, with these sharpenings:
   or another host's (`AgentIntegrations.resolve`). Each capability a host's API lacks answers
   unsupported, never a guess.
 - **A hosted conversation is reachable through its host.** It reads as Ready or Working rather than Not
-  connected, offers Disconnect like any connected conversation, and Settings names it by the host. Its
+  connected, offers Disconnect like any connected conversation, and Settings names it by the host. While its
+  connector reports turns, a turn's start or end shows at once rather than at the host's next list
+  (`HostDiscovery.withPrompts`), until a host list read after that report says otherwise. Only a connector whose
+  hello says it reports turns (`notify` and `readiness`) moves the row, and a turn that ends while a prompt was open
+  reads as idle. Its
   remembered name is kept until the host has answered once, so a refresh before the first scan never drops it.
 - **A host call is bounded and never retried.** Delivery is one call with the request id: accepted reads as
   sent, queued as queued, and an uncertain or late answer as uncertain, never as not sent. Open and in-front
@@ -581,8 +585,19 @@ every rule above applies to it, with these sharpenings:
   (`bin/bb`) and its runtime record or thread storage, and is the usual folder, a hidden folder in the home folder,
   the `BB_DATA_DIR` a running app declares in its launch environment, the `BB_DATA_DIR` of the user's login shell, or
   a folder the user adds that passes the same check (`BBBuildFinder.isDataFolder`). The app it runs from comes from the runtime
-  record's entry path, else the command's runtime path; its bundle id says whether it is open and which app in front
-  is it, and its app name is what Settings and every message call it. Each enrolled data folder is its own instance:
+  record's entry path, else the command's runtime path. That app's location, not its bundle id, says whether it is
+  open and which app in front is it, since copies of one app share a bundle id. When the recorded location is stale,
+  the data folder the running app uses (its launch environment's `BB_DATA_DIR`, else the usual folder) decides,
+  never the bundle id alone, so a copy without the plugin is never taken for another copy of the same app that has
+  it. Each copy keeps its own last report of what it shows (`AgentHub` keys those by host and data folder), so
+  switching between copies needs no new report. The app's file name, as Finder shows it, is what Settings and every message call it. A take with
+  nothing in front while a copy of bb is the app in front says why, from that copy's own data folder
+  (`AgentHub.hostCopyUnheardInFront`), naming the copy, with **Open Agent Settings**: the plugin is missing when
+  the copy's folder is not enrolled; otherwise the copy is not connected, and Agent settings, which checks the
+  plugin when it opens, shows why. The take never checks the plugin itself, since enrollment outlives a failed
+  install and a removal inside bb and only that check could tell them apart. Telling which copy is in front uses
+  the front app's own details, never its window. Finding the thread in front reads bb's focused window once and
+  hands that reading to `AgentHost.front`, and a send reads it again right before sending, never reusing it. Each enrolled data folder is its own instance:
   its threads are keyed by that folder, and every call for them runs that folder's own command with that folder as
   `BB_DATA_DIR` and a fixed environment that turns bb's telemetry off, never the app's own. A build that is closed or
   could not be read keeps the threads it last listed, as Last seen, while the others are listed fresh
@@ -737,7 +752,10 @@ every rule above applies to it, with these sharpenings:
   key, and the take then checks that window is the one focused at the press.
 - **A host's new-conversation page is a recipient only for a take that names none.** bb's window half also reports
   whether its window shows the new-thread page (no thread, a `new-thread` composer on screen), and the plugin's
-  `shown` says `newConversation` instead of a thread, carried on any connected thread. The hub keeps that carrier
+  `shown` says `newConversation` instead of a thread, carried on any connected member. Besides its threads, the
+  plugin always says hello as one member under its host's new-conversation key (`new conversation` at its
+  instance), so the page is reported, and `start` reaches the plugin, in a bb with no thread yet. No host lists that
+  key, so it never becomes a conversation, and its hello never asks the host for its list. The hub keeps that carrier
   per host like the shown thread, forgets it on Disconnect, and puts the page in front (`AgentHub.newConversationInFront`)
   only while the carrier is live, its hello lists `start`, and the host's own window check
   (`AgentHost.focusedWindow`) finds the host's app in front with a window focused. The take captures it at the
@@ -746,12 +764,17 @@ every rule above applies to it, with these sharpenings:
   otherwise be held as `nothingFocused`. Delivery reads the page again right before sending and sends only when it
   is the same app and window; the plugin checks its front window still shows the page before typing. It is a
   `start` command, never bb's command, and its answers stay distinct: `gone` (page left; nothing sent), `filled` or
-  `added` (bb would not send; the words wait in the box and the HUD says to press Return), `draft`, and anything
-  else as could not start; no answer is uncertain. A new conversation's dictation is followed into the first
-  turn, with the dictation's digest, of a conversation of that host that was not listed or disconnected when it
+  `added` (bb refused before sending: its box was blocked, or it rejected the box as empty, which the plugin
+  retries for a moment while bb still says the box can send, since that is bb not yet having caught up with the
+  typed words; "empty" is recognized by the reason bb gave the box before anything was typed, not by its wording; the words wait in the box, and the HUD gives bb's own reason when the refusal's `detail` carries
+  one, else says to press Return), `unclear` (any failure whose error does not prove nothing was sent, which only bb's
+  empty-draft refusal or the exact reason bb gave for a box blocked just before the send do; what the box shows
+  afterwards proves nothing; never retried, and read like no answer), `draft`, and anything else as could not start; no answer is uncertain. A join into a
+  thread's draft answers `unclear` the same way, and it is never sent again through bb's command. A new conversation's dictation is followed into the first
+  turn, with the dictation's digest, of a conversation in the same copy of that host (its data folder) that was not
+  listed or disconnected when it
   was sent (`AgentHub.startFollows`, bounded like host follows), within `AgentHub.hostTurnWait`. The plugin reports
-  a turn that started before its thread's hello landed once the hello does, and never one that ended first. A bb
-  with no thread has no member to carry the report, so the page reads as nothing focused there.
+  a turn that started before its thread's hello landed once the hello does, and never one that ended first.
 - **A host's command line runs through `HostCLI.run`.** It starts only an absolute program, in its own
   process group, with content on standard input rather than in the arguments. Standard output (the only
   output parsed) and standard error are kept apart, each capped, and cut output is marked. A deadline or a

@@ -192,6 +192,7 @@ final class AgentOutput {
             case .dialog: return "\(handle) didn\u{2019}t take that: it has a dialog open"
             case .connectionGap: return "\(handle) didn\u{2019}t take that: it lost its connection"
             case .inPromptBox: return "\(handle) has your message in its prompt box. Press Return there to send it."
+            case .declined(let host, let said, _): return "\(host) didn\u{2019}t start it: \(said)"
             }
         case .notSent(let handle, let reason):
             let it = handle == nil ? "the conversation" : "it"
@@ -277,6 +278,15 @@ final class AgentOutput {
     }
 
     static let nothingSent = "Nothing sent."
+
+    static func unheardLine(_ unheard: AgentHub.UnheardHost) -> String {
+        switch unheard {
+        case .missing(let name):
+            "\(name) doesn\u{2019}t have the \(Branding.appName) plugin. \(nothingSent) Agent settings shows how to install it."
+        case .notConnected(let name):
+            "\(name) isn\u{2019}t connected. \(nothingSent) Agent settings shows its status."
+        }
+    }
     static let keptHint = "Your words are kept for Paste last dictation."
 
     static func kept(_ line: String, body: String) -> String {
@@ -377,6 +387,8 @@ final class AgentOutput {
             case .inPromptBox(.awaitingReturn): "the message is in its prompt box. Review it there and press Return to send it"
             case .inPromptBox(.besideText), .inPromptBox(.joinedDraft), .inPromptBox(.joinedDraftMidTurn):
                 "the message was added to its prompt box after text already there. Review it there and press Return to send it"
+            case .declined(let host, let said, let besideText):
+                "\(host) said \u{201C}\(said)\u{201D} Your words are in its prompt box" + (besideText ? ", after the text already there" : "")
             }
             return .advisory(message: "Not sent to \(handle): \(why)")
         case .notSent(let handle, let reason):

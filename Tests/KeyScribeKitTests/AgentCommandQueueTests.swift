@@ -654,11 +654,20 @@ struct AgentBridgeCodecTests {
         (#"{"op":"ack","request":"r1"}"#, AgentEvent.ack(request: "r1")),
         (#"{"op":"submitted","request":"r1","turn":"t9"}"#, .submitted(request: "r1", turn: "t9", report: AgentDeliveryReport(state: .seen, turn: "t9"))),
         (#"{"op":"refused","request":"r1","reason":"stopLocked"}"#, .refused(request: "r1", reason: "stopLocked")),
+        (#"{"op":"refused","request":"r1","reason":"filled","detail":" Enter a prompt or attach a file. "}"#,
+         .refused(request: "r1", reason: "filled", detail: "Enter a prompt or attach a file.")),
+        (#"{"op":"refused","request":"r1","reason":"filled","detail":"  "}"#, .refused(request: "r1", reason: "filled")),
         (#"{"op":"typed","session":"s1"}"#, .typed(session: "s1")),
         (#"{"op":"turnStarted","session":"s1","turn":"t7"}"#, .turnStarted(session: "s1", turn: "t7")),
         (#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"done"}"#, .turnComplete(session: "s1", reason: "answer", answer: "done")),
     ])
     func eachEventShapeDecodes(json: String, expected: AgentEvent) throws {
         #expect(try AgentBridgeCodec.decodeEvent(Data(json.utf8)) == expected)
+    }
+
+    @Test func aRefusalsDetailIsCutToItsBound() throws {
+        let long = String(repeating: "x", count: AgentBridgeCodec.refusalDetailLimit + 50)
+        let event = try AgentBridgeCodec.decodeEvent(Data(#"{"op":"refused","request":"r1","reason":"filled","detail":"\#(long)"}"#.utf8))
+        #expect(event == .refused(request: "r1", reason: "filled", detail: String(long.prefix(AgentBridgeCodec.refusalDetailLimit))))
     }
 }

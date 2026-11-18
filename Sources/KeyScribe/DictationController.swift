@@ -118,6 +118,7 @@ final class DictationController {
         var agentFocus: CapturedFocus?
         var agentNewConversation: CapturedFocus?
         var agentFocusUnconfirmed = false
+        var agentUnheardHost: AgentHub.UnheardHost?
         var agentFrontTask: Task<Void, Never>?
         var agentFrontCutoff: ContinuousClock.Instant?
         var agentSnapshot: AgentSnapshot?
@@ -2658,6 +2659,9 @@ extension DictationController: AgentTakeHost {
     }
     var agentNewConversation: CapturedFocus? {
         get { session?.agentNewConversation } set { session?.agentNewConversation = newValue }
+    }
+    var agentUnheardHost: AgentHub.UnheardHost? {
+        get { session?.agentUnheardHost } set { session?.agentUnheardHost = newValue }
     }
     var agentFocusUnconfirmed: Bool {
         get { session?.agentFocusUnconfirmed ?? false } set { session?.agentFocusUnconfirmed = newValue }

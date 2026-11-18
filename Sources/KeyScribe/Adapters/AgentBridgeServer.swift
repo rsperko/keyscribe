@@ -390,7 +390,7 @@ final class AgentBridgeServer: @unchecked Sendable {
                 self?.queue.async { [weak self] in self?.register(hello, filedUnder: filed, answering: fd) }
             }
             return
-        case .ack(let request), .submitted(let request, _, _), .refused(let request, _), .focused(let request):
+        case .ack(let request), .submitted(let request, _, _), .refused(let request, _, _), .focused(let request):
             if let instance = envelope.instance, let connection = envelope.connection {
                 commands.ack(request, instance: instance, connection: connection)
             }

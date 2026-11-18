@@ -641,6 +641,15 @@ struct AgentDeliveryWiringTests {
             == .advisory(message: "Not sent to docs: the message was added to its prompt box after text already there. Review it there and press Return to send it"))
     }
 
+    @Test func aNewConversationTheHostWouldNotStartSaysWhatTheHostSaid() {
+        let alone = AgentReceipt.kept("a new bb conversation", reason: .declined(by: "bb", saying: "Enter a prompt or attach a file.", besideText: false))
+        #expect(AgentOutput.receiptState(alone, mode: "Agent", heard: "")
+            == .advisory(message: "Not sent to a new bb conversation: bb said \u{201C}Enter a prompt or attach a file.\u{201D} Your words are in its prompt box"))
+        let beside = AgentReceipt.kept("a new bb conversation", reason: .declined(by: "bb", saying: "Uploads failed.", besideText: true))
+        #expect(AgentOutput.receiptState(beside, mode: "Agent", heard: "")
+            == .advisory(message: "Not sent to a new bb conversation: bb said \u{201C}Uploads failed.\u{201D} Your words are in its prompt box, after the text already there"))
+    }
+
     @Test func aDictationTheRunningTurnTookInHasThatTurnsReplyHeardForIt() async {
         let rig = await workingRig(Front("claude:s1"))
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
@@ -2013,7 +2022,7 @@ struct AgentDeliveryWiringTests {
 
     private func newConversationRig(_ said: String = "Plan the release.", window: String = "cg:7") async -> (Rig, AgentHostTests.FakeHost) {
         let host = AgentHostTests.FakeHost()
-        host.window = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: window)
+        host.window = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: window, instance: AgentHostTests.instance)
         let rig = await rig(said, front: FrontWindow(Self.hostApp), hosts: [AgentHostIntegration(kind: AgentHostTests.kind, make: { host })])
         let carrier = AgentHostTests.id("t1")
         rig.hub.handle(.hello(.init(
@@ -2037,6 +2046,22 @@ struct AgentDeliveryWiringTests {
         #expect(rig.hud.states.contains(.commandDone(summary: "Sent to a new Example conversation", detail: "Agent")))
     }
 
+    @Test(arguments: [
+        (false, "Example Work doesn\u{2019}t have the \(Branding.appName) plugin. Nothing sent. Agent settings shows how to install it."),
+        (true, "Example Work isn\u{2019}t connected. Nothing sent. Agent settings shows its status."),
+    ])
+    func dictationWithACopyOfAHostInFrontThatCannotBeHeardNamesItAndWhatIsMissing(enrolled: Bool, line: String) async {
+        let host = AgentHostTests.FakeHost()
+        host.copy = AgentHostCopy(name: "Example Work", instance: "/Users/a/.work", enrolled: enrolled)
+        let rig = await rig("Plan the release.", front: FrontWindow(Self.hostApp), hosts: [AgentHostIntegration(kind: AgentHostTests.kind, make: { host })])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        rig.transport.unreachable.insert(AgentSessionID.make(
+            agent: "example", native: AgentHostLocation(host: "example", instance: "/Users/a/.work", native: "new conversation").conversationKey))
+        await take(rig, readingTheFront: true)
+        #expect(starts(rig).isEmpty)
+        #expect(rig.hud.states.contains { if case .error(let message, .openAgents?, _) = $0 { message.hasPrefix(line) } else { false } })
+    }
+
     @Test func aNewConversationPageThatLeftTheFrontBeforeSendingIsNeverSentTo() async {
         let (rig, host) = await newConversationRig()
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }
@@ -2044,7 +2069,7 @@ struct AgentDeliveryWiringTests {
         rig.controller.handleStart()
         await rig.controller.captureBringUpTask?.value
         await rig.controller.agentFrontTask?.value
-        host.window = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: "cg:8")
+        host.window = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: "cg:8", instance: AgentHostTests.instance)
         rig.controller.handleCommit()
         await rig.controller.dictationTask?.value
         #expect(starts(rig).isEmpty)

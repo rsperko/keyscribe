@@ -19,7 +19,8 @@ running it waits and sends nothing.
 - Read this thread's reply aloud, or don't, from the message box's + menu or the command palette.
 - A tool every thread's agent can call when you ask it to have the app read its reply aloud. bb adds it when it
   next starts a thread's agent.
-- The name to say for a thread, under its title in the sidebar, when its title says something else. The app turns
+- The name to say for a thread, under its title in the sidebar, when its title says something else, while the app
+  is running. The app turns
   on bb's thread row details (Organize ▸ Rows ▸ Metadata) when it installs this plugin, unless they were already
   on, and offers to turn them back off when you uninstall it.
 

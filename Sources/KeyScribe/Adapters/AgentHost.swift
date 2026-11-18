@@ -20,18 +20,33 @@ public struct AgentHostApp: Equatable, Sendable {
     public var pid: Int
     public var name: String
     public var window: String?
+    public var path: String?
+    public var instance: String?
 
-    public init(bundle: String, pid: Int, name: String, window: String? = nil) {
+    public init(bundle: String, pid: Int, name: String, window: String? = nil, path: String? = nil, instance: String? = nil) {
         self.bundle = bundle
         self.pid = pid
         self.name = name
         self.window = window
+        self.path = path
+        self.instance = instance
+    }
+}
+
+public struct AgentHostCopy: Equatable, Sendable {
+    public var name: String
+    public var instance: String
+    public var enrolled: Bool
+
+    public init(name: String, instance: String, enrolled: Bool) {
+        self.name = name
+        self.instance = instance
+        self.enrolled = enrolled
     }
 }
 
 public enum AgentHostFront: Equatable, Sendable {
     case shown(AgentHostLocation, in: AgentHostApp)
-    case elsewhere
     case unknown
     case unsupported
 }
@@ -52,8 +67,9 @@ public protocol AgentHost: AnyObject {
     func location(in environment: [String: String]) -> AgentHostLocation?
     func scan() async -> AgentHostScan
     func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen
-    func front(among locations: [AgentHostLocation], reported: AgentHostLocation?) async -> AgentHostFront
+    func front(among locations: [AgentHostLocation], reported: AgentHostLocation?, in app: AgentHostApp?) async -> AgentHostFront
     func focusedWindow() -> AgentHostApp?
+    func copyInFront() -> AgentHostCopy?
     func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery
     func rename(_ location: AgentHostLocation, to name: String) async -> Bool
 }
@@ -63,8 +79,11 @@ extension AgentHost {
     public var identityKeys: [String] { [] }
     public func location(in environment: [String: String]) -> AgentHostLocation? { nil }
     public func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen { .unsupported }
-    public func front(among locations: [AgentHostLocation], reported: AgentHostLocation?) async -> AgentHostFront { .unsupported }
+    public func front(among locations: [AgentHostLocation], reported: AgentHostLocation?, in app: AgentHostApp?) async -> AgentHostFront {
+        .unsupported
+    }
     public func focusedWindow() -> AgentHostApp? { nil }
+    public func copyInFront() -> AgentHostCopy? { nil }
     public func deliver(_ text: String, images: [String], request: String, to location: AgentHostLocation) async -> AgentHostDelivery {
         .unsupported
     }
@@ -105,6 +124,8 @@ final class HostDiscovery: AgentDiscovery {
     private var wanted = false
     private var prompting: [String: Date] = [:]
     private var answeredSinceList: Set<String> = []
+    private var turning: [String: (working: Bool, at: Date)] = [:]
+    private var reportsTurns: Set<String> = []
 
     init(_ integration: AgentHostIntegration, allowed: @escaping @MainActor () -> Bool, now: @escaping () -> Date = Date.init) {
         kind = integration.kind
@@ -119,9 +140,20 @@ final class HostDiscovery: AgentDiscovery {
 
     func observe(_ event: AgentEvent) {
         switch event {
-        case .hello(let hello): prompt(hello.session, open: hello.waiting != nil)
+        case .hello(let hello):
+            prompt(hello.session, open: hello.waiting != nil)
+            if hello.reportsTurn, hello.features.contains("readiness") {
+                reportsTurns.insert(hello.session)
+                turning[hello.session] = (!hello.knownIdle, now())
+            } else {
+                reportsTurns.remove(hello.session)
+                turning[hello.session] = nil
+            }
         case .waiting(let session, let prompt): self.prompt(session, open: prompt != nil)
-        case .turnComplete(let session, _, _): prompt(session, open: false)
+        case .turnStarted(let session, _, _): if reportsTurns.contains(session) { turning[session] = (true, now()) }
+        case .turnComplete(let session, _, _):
+            prompt(session, open: false)
+            if reportsTurns.contains(session) { turning[session] = (false, now()) }
         default: break
         }
     }
@@ -138,14 +170,18 @@ final class HostDiscovery: AgentDiscovery {
     func retire(sessions: Set<String>) {
         prompting = prompting.filter { !sessions.contains($0.key) }
         answeredSinceList.subtract(sessions)
+        turning = turning.filter { !sessions.contains($0.key) }
+        reportsTurns.subtract(sessions)
     }
 
     private func withPrompts(_ scan: AgentScan) -> AgentScan {
-        guard case .found(let sessions, let extras) = scan, !prompting.isEmpty || !answeredSinceList.isEmpty else { return scan }
+        guard case .found(let sessions, let extras) = scan, !prompting.isEmpty || !answeredSinceList.isEmpty || !turning.isEmpty else { return scan }
         return .found(sessions.map { session in
             var shown = session
             if prompting[session.id] != nil {
                 shown.state = .userDialog
+            } else if let turn = turning[session.id] {
+                shown.state = turn.working ? .working : .idle
             } else if answeredSinceList.contains(session.id), [.waitingApproval, .waitingQuestion, .userDialog].contains(session.state) {
                 shown.state = .working
             }
@@ -175,6 +211,7 @@ final class HostDiscovery: AgentDiscovery {
             let idle = Set(sessions.filter { $0.state == .idle }.map(\.id))
             let listed = Set(sessions.map(\.id))
             prompting = prompting.filter { listed.contains($0.key) && ($0.value > started || !idle.contains($0.key)) }
+            turning = turning.filter { listed.contains($0.key) && $0.value.at > started }
             if isEnabled { answered = true }
         }
         return withPrompts(scan)
