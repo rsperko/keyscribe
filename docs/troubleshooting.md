@@ -6,7 +6,7 @@ up where you expected.
 
 ## Collect a diagnostic snapshot
 
-Open **Settings ▸ Maintenance ▸ Diagnostics** and click **Copy Diagnostics**. That puts the whole
+Open **Settings ▸ Advanced ▸ Diagnostics** and click **Copy Diagnostics**. That puts the whole
 snapshot on your clipboard, ready to paste into a bug report.
 
 If you prefer the terminal, or want to hand the output straight to a script, run the app binary with

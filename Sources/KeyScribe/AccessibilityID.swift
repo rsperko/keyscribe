@@ -37,7 +37,6 @@ enum AccessibilityID {
             static let hudAppearance = "settings.general.hudAppearance"
             static let inputDevice = "settings.general.inputDevice"
             static let loadOnLogin = "settings.general.loadOnLogin"
-            static let betaUpdates = "settings.general.betaUpdates"
             static let addVocabularyShortcut = "settings.general.addVocabularyShortcut"
             static let pasteLastShortcut = "settings.general.pasteLastShortcut"
             static let historyEnabled = "settings.general.historyEnabled"
@@ -221,6 +220,7 @@ enum AccessibilityID {
             static func configIssue(_ path: String) -> String { "settings.advanced.configIssue.\(path)" }
             static let resetHUDPosition = "settings.advanced.resetHUDPosition"
             static let copyDiagnostics = "settings.advanced.copyDiagnostics"
+            static let betaUpdates = "settings.advanced.betaUpdates"
             static let eraseAllData = "settings.advanced.eraseAllData"
             static let eraseConfirmConfirm = "settings.advanced.eraseConfirm.confirm"
             static let eraseConfirmCancel = "settings.advanced.eraseConfirm.cancel"
@@ -653,7 +653,7 @@ enum AccessibilityID {
         Settings.Sidebar.advanced,
         Settings.General.sounds, Settings.General.soundVolume,
         Settings.General.keepDisplayAwake, Settings.General.otherAudio, Settings.General.hudAppearance,
-        Settings.General.inputDevice, Settings.General.loadOnLogin, Settings.General.betaUpdates, Settings.General.addVocabularyShortcut,
+        Settings.General.inputDevice, Settings.General.loadOnLogin, Settings.General.addVocabularyShortcut,
         Settings.General.pasteLastShortcut, Settings.General.historyEnabled, Settings.General.retentionDays,
         Settings.General.editPlainDictation,
         Settings.Speech.list, Settings.Speech.deleteConfirmConfirm, Settings.Speech.deleteConfirmCancel,
@@ -700,7 +700,7 @@ enum AccessibilityID {
         Settings.AI.Editor.testConnection,
         Settings.AI.Editor.delete,
         Settings.Advanced.revealConfig, Settings.Advanced.reloadConfig, Settings.Advanced.resetHUDPosition,
-        Settings.Advanced.eraseAllData, Settings.Advanced.eraseConfirmConfirm, Settings.Advanced.eraseConfirmCancel,
+        Settings.Advanced.betaUpdates, Settings.Advanced.eraseAllData, Settings.Advanced.eraseConfirmConfirm, Settings.Advanced.eraseConfirmCancel,
         Mode.Agents.folderRow, Mode.Agents.folderActions, Mode.Agents.addFolder, Mode.Agents.forgetFolder, Mode.Agents.chooseTool,
         Mode.Agents.findToolAutomatically, Mode.Agents.copyDetails, Mode.Agents.lookedIn, Mode.Agents.viewAwaitingReload, Mode.Agents.listFilter, Mode.Agents.showAllConversations,
         Mode.Agents.install, Mode.Agents.update, Mode.Agents.remove, Mode.Agents.finishUninstalling, Mode.Agents.manualUninstall,

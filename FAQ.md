@@ -182,18 +182,18 @@ Escape or click anywhere else to leave it where it is.
 
 You can also drag the HUD, or the panel that reads a reply aloud, while it is showing; when you let go it
 snaps to the nearest of the same positions. One position is kept and used on every display, and both panels
-use it. **Reset HUD Position** under Settings ▸ Maintenance puts it back at the bottom center.
+use it. **Reset HUD Position** under Settings ▸ Advanced puts it back at the bottom center.
 
 ### Can I switch apps or run actions by voice?
 
-Yes, with the experimental **Voice Commands** mode. Turn it on in **Settings ▸ Maintenance ▸
+Yes, with the experimental **Voice Commands** mode. Turn it on in **Settings ▸ Advanced ▸
 Experimental features**, then assign a shortcut in **Settings ▸ Modes ▸ Voice Commands**. It can't
 be shared with another mode: if you pick one that a dictation mode already uses, KeyScribe asks before
 moving it, names the modes that lose it, and offers **Undo** afterwards.
 
 Use that shortcut, then say “open” and an app, window, or tab: **“open Mail”** works with nothing saved.
 “Open” starts an app that isn't running. To use only what's already open, say **“switch to”** instead
-(below). To reach something inside an app, turn on **Find items in apps by voice** under **Maintenance ▸
+(below). To reach something inside an app, turn on **Find items in apps by voice** under **Settings ▸ Advanced ▸
 Experimental features** (under **Voice Commands**) and say the app, then what you want in it:
 
 - **“open Slack general”**, **“open Mail sent”**: opens the channel, mailbox, folder, or person shown in the
@@ -494,7 +494,7 @@ selected text unchanged.
 
 ### Can KeyScribe answer a question about text I select?
 
-Yes, as an experimental feature. Turn on **Ask about selected text** in Settings > Maintenance >
+Yes, as an experimental feature. Turn on **Ask about selected text** in Settings > Advanced >
 Experimental features, add the **Ask About Selection** template in Settings > Modes, choose its AI service,
 and give it a shortcut. Select text in any app, use the shortcut, and ask something like "summarize this" or
 "what do I need to do?" The answer appears and is read aloud; your selected text is not changed. Only the
@@ -872,7 +872,7 @@ leaves them.
 
 ### Can I try new features before they are released?
 
-Yes. Turn on **Settings ▸ General ▸ Updates ▸ Get beta updates**. KeyScribe then also offers beta versions,
+Yes. Turn on **Settings ▸ Advanced ▸ Updates ▸ Get beta updates**. KeyScribe then also offers beta versions,
 which bring new features early and may have rough edges, alongside every regular release. If you turn it off
 later, you keep the beta you have until a regular release replaces it. Betas come only through the app's own
 updates; the Homebrew cask installs regular releases.
@@ -922,7 +922,7 @@ For other permissions, remove KeyScribe from that permission's list and re-add i
 
 ### How do I collect information for a bug report?
 
-Open **Settings ▸ Maintenance ▸ Diagnostics** and click **Copy Diagnostics**. It copies your version,
+Open **Settings ▸ Advanced ▸ Diagnostics** and click **Copy Diagnostics**. It copies your version,
 granted permissions, speech model, mode settings, and recent dictation outcomes — with no transcript
 text, clipboard contents, or API keys. The same report is available from a terminal as
 `/Applications/KeyScribe.app/Contents/MacOS/KeyScribe --diagnose`. See

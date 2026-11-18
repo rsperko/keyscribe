@@ -286,7 +286,7 @@ left behind. It is disabled while a dictation is arming, recording, transcribing
 while a voice-command question is waiting, and while a reply is being read aloud. The picker never delays
 work: pressing a dictation trigger, or anything else that shows the HUD or the spoken-reply panel, closes
 it without saving first. Opening it records nothing, plays no cue, and changes neither the frontmost app
-nor the next dictation's mode or conversation. **Reset HUD Position** (Settings ▸ Maintenance) returns the
+nor the next dictation's mode or conversation. **Reset HUD Position** (Settings ▸ Advanced) returns the
 anchor to `HUDAnchor.default`.
 
 **Timing contract: the HUD never appears until speech spoken immediately after its appearance will
@@ -335,7 +335,7 @@ because opening its mic switches it to call mode.
 | Settings replaced (after an edit to `settings.toml` that sets something else, while app-wide changes made in Settings were not saved) | “settings.toml was changed outside [app], so its contents replaced Settings changes that hadn’t been saved. Check Settings and make them again.” | — | None; dismisses after eight seconds. Shown in place of that reload's config-problem notice, which Settings still lists. During a dictation it waits until the dictation's result has shown, or until a cancelled dictation ends |
 
 **Config problems.** The HUD names only problems an external edit just introduced — each new unreadable
-file or unread key once, never during a dictation. Settings → Maintenance keeps listing every current
+file or unread key once, never during a dictation. Settings → Advanced keeps listing every current
 problem until it is fixed, and an unreadable file also stays in the menu status. An unread key is an advisory, not a
 failure: it shows with an info icon rather than the error triangle, and a batch that includes an
 unreadable file shows as the failure. While a voice-command question is waiting, the announcement becomes
@@ -1147,7 +1147,7 @@ When ready it reads **`<next mode> · <model>`** — the mode being the pending 
 is set, otherwise the mode that Automatic resolves to (never the literal word "Automatic"); the model
 is the active STT engine. When something needs attention it is **replaced** by a short, clickable
 summary that opens the Settings pane where it is fixed — `Settings file needs attention…` /
-`A config file needs attention…` / `N config files need attention…` (Maintenance), a missing permission,
+`A config file needs attention…` / `N config files need attention…` (Advanced), a missing permission,
 or `Relaunch to finish setup…` (Permissions), in that precedence. It stays the menu's normal width and
 color; the detail lives in the pane, and the red badge marks it. A config advisory never appears here. There is no
 separate "Next dictation" row — selecting a one-shot mode is reflected here, in the `Next Dictation`
@@ -1228,7 +1228,7 @@ glance and can show simultaneously:
   Test Connection**. The
   **`Settings…` menu item carries a matching red dot** while any of these hold, so opening the menu
   points at where the problem is fixed instead of dead-ending at the glyph. Opening
-  Settings **flags the offending sidebar pane with a matching red dot** — Maintenance (config) ·
+  Settings **flags the offending sidebar pane with a matching red dot** — Advanced (config) ·
   Permissions · Speech Models (model) · AI Services (connection) · Modes — and the offending connection's row (orange = incomplete, red = test failed)
   and any mode wired to a failed connection (its row, red ⚠) are flagged in-pane. A mode whose shortcut
   can never fire is flagged the same way, in its Modes-list row (**Shortcut never fires**) as well as in
@@ -1236,7 +1236,7 @@ glance and can show simultaneously:
   while open and clears the flag the moment it's fixed. The menu-bar dot and the `Settings…` dot are
   driven by the sidebar's flags, never by a check of their own, so every refresh — including that poll —
   moves all three together and they cannot disagree. A config **advisory** — a key a config file
-  carries that nothing reads, usually a typo — puts an **amber** dot on the Maintenance sidebar row
+  carries that nothing reads, usually a typo — puts an **amber** dot on the Advanced sidebar row
   instead, and nothing on the menu bar: it means "an edit did nothing", not "something is broken". Red
   outranks amber on the same row. **A missing key is not always an error** —
   it is legitimate when an OpenAI-compatible endpoint is set to No Auth, but hosted providers and
@@ -1267,10 +1267,11 @@ fixed — a new pane takes its place in this progression rather than being appen
 5. **Modes** — automatic rules and per-mode behavior.
 6. **History** — audit/correction/diagnostics of past dictations, with the history enable and
    retention controls inline (see §8).
-8. **Permissions** — review and repair macOS access.
-9. **Maintenance** — configuration, diagnostics, interface repair, experimental features, and reset.
+7. **Permissions** — review and repair macOS access.
+8. **Advanced** — configuration, diagnostics, interface repair, experimental features, beta updates, and
+   reset.
 
-General, Speech Models, Vocabulary, and Maintenance stand on the local-only product. AI Services, and
+General, Speech Models, Vocabulary, and Advanced stand on the local-only product. AI Services, and
 the rewrite-related parts of Modes, govern the optional cloud rewrite.
 
 **Where a failure appears.** A failed operation (save, add, delete) and a config file the pane can't
@@ -1323,11 +1324,6 @@ Show the few choices a new user is most likely to need:
   both apply while the user dictates, and that other audio also applies while reply updates and answers are read aloud.
 - Microphone choice, with a short explanation of following the Mac’s current input
 - Open at login
-- **Updates** holds the beta switch, shown only when the build's updater offers one (`AppUpdater.betaOption`),
-  which also supplies the switch's label and footer; a build whose updater offers none shows no section. The
-  public build's switch is **Get beta updates**, and its footer says betas may have rough edges, that every
-  release still arrives, and that turning it off keeps the installed beta until a release replaces it, because
-  an update never moves to an older version.
 - (History enable and retention live in the **History** pane, not here.)
 - **Shortcuts** immediately follows Dictation and shows global chords for **Add to Vocabulary**
   and **Paste Last Dictation**, both of which are always available from the menu. Each uses a
@@ -1898,7 +1894,7 @@ never typed: a command it understands runs, one that matches more than one desti
 (§5), and anything else shows an Error naming what was wrong (a command it did not recognize, with what was
 heard; no match; or too many matches) and changes nothing.
 
-Before first enabling Voice Commands in Maintenance, a notice titled **Using Voice Commands** explains
+Before first enabling Voice Commands in Settings ▸ Advanced, a notice titled **Using Voice Commands** explains
 that the assigned shortcut switches apps and windows by voice, and users can add commands that run scripts
 or Shortcuts. It explains that recognition can get a name or input wrong, bringing an unintended window
 into view during screen sharing or starting an unintended saved action. Scripts and Shortcuts run by
@@ -2615,10 +2611,11 @@ someone who chose clipboard fallback. A launch with no recorded verdict (an inst
 build that never recorded one) counts as lost and opens the pane once. Onboarding, not this rule, owns
 a launch before first run is complete.
 
-### Maintenance
+### Advanced
 
-Separates configuration, diagnostics, interface repair, experimental features, and the destructive
-reset. (Notices live in the separate **About & Notices** window, not here.)
+Holds what most people never need: configuration, diagnostics, interface repair, the choices to try
+unfinished work (experimental features and beta updates), and the destructive reset. (Notices live in the
+separate **About & Notices** window, not here.)
 
 - **Reveal Config in Finder** opens the support folder (`~/Library/Application Support/KeyScribe/`,
   `config_schema.md`) so a user can read, edit, back up, or version the plain-TOML config
@@ -2646,10 +2643,16 @@ reset. (Notices live in the separate **About & Notices** window, not here.)
 - **Experimental features** lists one toggle per flag. A flag that builds on another sits indented under
   it and is disabled while that one is off. **Find items in apps by voice** sits under **Voice Commands**;
   its summary says what to say, what is read, and that some apps turn on their accessibility support to be
-  read. Maintenance
+  read. This pane
   only enables experiments: there is no setup button here.
 - *(Parked, not v1:)* a dedicated diagnostics/migration-error surface and a separate `models/`
   weights-folder reveal (the folder is reachable via Reveal Config today); plus an optional
+- **Updates** follows Experimental features and holds the beta switch, shown only when the build's updater
+  offers one (`AppUpdater.betaOption`), which also supplies the switch's label and caption; a build whose
+  updater offers none shows no section. The public build's switch is **Get beta updates**, and its caption
+  says betas may have rough edges, that every release still arrives, and that turning it off keeps the
+  installed beta until a release replaces it, because an update never moves to an older version. It sits
+  here, beside the experiments, because both opt in to unfinished work; the destructive reset stays last.
   `KEYSCRIBE_CONFIG_DIR` override for users who keep config in a dotfiles directory — added only if
   asked for (`design.md` keeps Application Support the default; YAGNI).
 

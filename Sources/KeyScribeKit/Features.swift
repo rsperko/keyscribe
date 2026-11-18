@@ -1,7 +1,7 @@
 import Foundation
 
 // Single source of truth for in-development feature flags. Each value is one opt-in toggle under
-// Settings → Maintenance → Experimental features, read at its gate via `settings.features.isEnabled(.someFlag)`.
+// Settings → Advanced → Experimental features, read at its gate via `settings.features.isEnabled(.someFlag)`.
 //
 // Add:      a `static let` with a unique snake_case id, listed in `allCases`; gate on isEnabled. The toggle
 //           renders automatically.

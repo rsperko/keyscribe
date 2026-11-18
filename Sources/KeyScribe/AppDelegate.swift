@@ -1314,7 +1314,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // settings.toml decode failures (owned by AppDelegate) plus any malformed vocabulary/connection/mode
-    // file surfaced by the config cache — they light the Maintenance pane's malformed-config problem and
+    // file surfaced by the config cache — they light the Advanced pane's malformed-config problem and
     // the menu status line so a broken config file is never silently swallowed.
     private var configProblems: [ConfigFileIssue] { configErrors + config.fileWarnings }
 

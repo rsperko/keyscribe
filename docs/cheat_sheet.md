@@ -60,7 +60,7 @@ more concise" or "turn this into bullet points." Requires a rewrite service.
 
 ## Move around & run commands
 
-Use the **Voice Commands shortcut** (Settings > Maintenance > Experimental features turns it on).
+Use the **Voice Commands shortcut** (Settings > Advanced > Experimental features turns it on).
 Say one command per recording. A saved command's name works only after its verb.
 
 | Say | Works in | What happens |
@@ -93,7 +93,7 @@ what it would do. Nothing opens or runs. A saved name said alone does nothing an
 
 ## Talk to agents
 
-Use the **Agent shortcut** (Settings > Maintenance > Experimental features turns it on; connect
+Use the **Agent shortcut** (Settings > Advanced > Experimental features turns it on; connect
 the agent in Settings > Modes > Agent). [Name] is a conversation name shown there or while recording.
 
 | Say | Works in | What happens |

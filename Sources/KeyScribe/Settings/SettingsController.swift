@@ -525,7 +525,6 @@ struct SettingsRootView: View {
                     vocabularyShadowed: shadowed.contains(GlobalHotkey.vocabularyId),
                     pasteLastShadowed: shadowed.contains(GlobalHotkey.pasteLastId),
                     directMode: modes.modes.first(where: { $0.id == Mode.directId }),
-                    betaOption: betaOption,
                     onEditPlainDictation: {
                         modes.selectedID = Mode.directId
                         navigation.destination = .modes
@@ -558,7 +557,7 @@ struct SettingsRootView: View {
                 PermissionsSettingsView(
                     accessibilityTapActive: accessibilityTapActive, onRelaunch: onRelaunch)
             case .advanced:
-                MaintenanceSettingsView(model: general)
+                AdvancedSettingsView(model: general, betaOption: betaOption)
             }
         }
         .frame(minWidth: 760, idealWidth: 940, minHeight: 520, idealHeight: 640)
@@ -597,7 +596,7 @@ enum SettingsDestination: CaseIterable, Hashable, Identifiable {
         case .modes: "Modes"
         case .history: "History"
         case .permissions: "Permissions"
-        case .advanced: "Maintenance"
+        case .advanced: "Advanced"
         }
     }
 
@@ -610,13 +609,14 @@ enum SettingsDestination: CaseIterable, Hashable, Identifiable {
         case .modes: "square.stack.3d.up"
         case .history: "clock"
         case .permissions: "lock"
-        case .advanced: "wrench.and.screwdriver"
+        case .advanced: "slider.horizontal.3"
         }
     }
 }
 
-private struct MaintenanceSettingsView: View {
+private struct AdvancedSettingsView: View {
     @ObservedObject var model: SettingsModel
+    let betaOption: BetaUpdateOption?
     @State private var confirmingErase = false
 
     private func featureToggle(_ feature: Feature) -> some View {
@@ -687,6 +687,15 @@ private struct MaintenanceSettingsView: View {
                         .accessibilityIdentifier(AccessibilityID.Mode.VoiceCommands.appNoticeCancel)
                 } message: {
                     Text(VoiceCommandNotices.Kind.apps.message)
+                }
+            }
+            if let betaOption {
+                Section("Updates") {
+                    Toggle(betaOption.label, isOn: $model.betaUpdates)
+                        .accessibilityIdentifier(AccessibilityID.Settings.Advanced.betaUpdates)
+                    Text(betaOption.help)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             Section("Reset \(Branding.appName)") {

@@ -715,7 +715,7 @@ final class HistoryPaneModel: ObservableObject {
     }
 
     static let saveFailedMessage =
-        "Couldn't save — a configuration file may be malformed. Open Settings ▸ Maintenance to fix it."
+        "Couldn't save — a configuration file may be malformed. Open Settings ▸ \(SettingsDestination.advanced.title) to fix it."
 
     // The same one step as Vocabulary: a word added from History is checked against History at once, and the
     // finder opens only when it finds likely mishearings.

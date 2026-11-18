@@ -870,7 +870,7 @@ carries a **`schema_version`**.
   Direct file is rewritten only to force back a locked setting, and never while it carries a key the app
   does not read.
 - **Reporting:** recovery is never silent. A load failure shows in the menu status, the Settings problem
-  indicator, and the Maintenance pane; one introduced by an external edit while no dictation runs also
+  indicator, and the Advanced pane; one introduced by an external edit while no dictation runs also
   gets an idle Error HUD (`ui_design.md` §5). The message names the file and the parser's line, and says
   the previous version is still in use only when one is ("ignored until fixed" otherwise).
 - Every config file KeyScribe writes ends with a newline, so a table appended by hand or with `>>`

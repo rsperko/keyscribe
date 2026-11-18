@@ -171,11 +171,11 @@ final class CorrectionPanelController {
     static func saveFailedMessage(for destination: CorrectionDestination) -> String {
         switch destination.scope {
         case .global:
-            return "\(Branding.appName) could not save this — a configuration file may be malformed. Open Settings ▸ Maintenance to fix it."
+            return "\(Branding.appName) could not save this — a configuration file may be malformed. Open Settings ▸ \(SettingsDestination.advanced.title) to fix it."
         case .mode:
-            return "\(Branding.appName) could not save this to \(destination.title). Its mode file may be malformed. Open Settings ▸ Modes to fix it."
+            return "\(Branding.appName) could not save this to \(destination.title). Its mode file may be malformed. Open Settings ▸ \(SettingsDestination.modes.title) to fix it."
         case .shared:
-            return "\(Branding.appName) could not save this to \(destination.title). Its file may be malformed. Open Settings ▸ Vocabulary to fix it."
+            return "\(Branding.appName) could not save this to \(destination.title). Its file may be malformed. Open Settings ▸ \(SettingsDestination.vocabulary.title) to fix it."
         }
     }
 

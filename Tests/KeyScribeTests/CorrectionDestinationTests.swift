@@ -26,12 +26,17 @@ struct CorrectionDestinationTests {
     @MainActor
     @Test func saveFailedMessageNamesTheRightSurface() {
         let global = CorrectionPanelController.saveFailedMessage(for: .global)
-        #expect(global.contains("Maintenance"))
+        #expect(global.contains("Open Settings ▸ Advanced to fix it."))
 
         let mode = CorrectionPanelController.saveFailedMessage(
             for: .mode(id: "email", name: "Email"))
-        #expect(mode.contains("Modes"))
+        #expect(mode.contains("Open Settings ▸ Modes to fix it."))
         #expect(mode.contains("Email"))
+    }
+
+    @MainActor
+    @Test func aHistorySaveFailurePointsToTheAdvancedPane() {
+        #expect(HistoryPaneModel.saveFailedMessage.hasSuffix("Open Settings ▸ Advanced to fix it."))
     }
 
     @Test func duplicateWordProducesVisibleExistingStatusAndDisablesCommit() {

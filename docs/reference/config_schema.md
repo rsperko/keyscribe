@@ -1658,7 +1658,7 @@ appearance = "system"           # "system" | "opposite" | "light" | "dark"; the 
 add_vocabulary = "control+option+shift+v"        # canonical chord; "" = off
 paste_last_dictation = ""                        # canonical chord; "" = off (default)
 
-[updates]                                   # written by Settings ▸ General ▸ Updates, when the build's updater offers betas
+[updates]                                   # written by Settings ▸ Advanced ▸ Updates, when the build's updater offers betas
 # beta = true                                    # also offer beta versions; absent = releases only (default)
 
 [insertion]                                 # how a paste hands the clipboard back; TOML-only, no Settings UI
@@ -1776,7 +1776,7 @@ paste_last_dictation = ""                        # canonical chord; "" = off (de
   and saves them once the key is gone; when the file sets something else, its contents replace them and the
   HUD says so, after the result of a dictation in progress.
 - **Unknown keys are reported, not fatal.** A key this schema does not read — usually a typo such as
-  `trigger_key` for `trigger_keys` — loads as if absent and is listed in Settings → Maintenance (and in the
+  `trigger_key` for `trigger_keys` — loads as if absent and is listed in Settings → Advanced (and in the
   mode's editor for a mode file), with the nearest real key when one is close. Retired keys noted in this
   document are exempt.
 - **Secrets never in TOML** — saved LLM keys live in Keychain; command-generated tokens live only in

@@ -32,7 +32,7 @@ struct SettingsProblemTests {
         #expect(problems == [.accessibilityPermission])
     }
 
-    @Test func malformedConfigFlagsTheMaintenancePane() {
+    @Test func malformedConfigFlagsTheAdvancedPane() {
         let problems = SettingsProblem.detect(
             hasConfigError: true, microphoneGranted: true,
             accessibilityGranted: true)
@@ -114,7 +114,7 @@ struct SettingsProblemTests {
 
 @MainActor
 struct SettingsPaneMarkerTests {
-    @Test func aConfigWarningMarksMaintenanceAmber() {
+    @Test func aConfigWarningMarksAdvancedAmber() {
         let model = SettingsProblemModel()
         model.updateAdvisories([.advanced])
         #expect(model.marker(for: .advanced) == .advisory)
