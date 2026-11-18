@@ -124,6 +124,23 @@ struct AgentProcessesTests {
         #expect(found.candidates.first?.runtime == "/opt/homebrew/Cellar/bun/1.4.2/bin/bun")
     }
 
+    @Test func aForkPublishedUnderAnotherScopeIsNotPi() {
+        let fork = "/Users/a/.bun/install/global/node_modules/@oh-my-pi/pi-coding-agent/dist/cli.js"
+        let legacy = "/Users/a/.npm/lib/node_modules/@mariozechner/pi-coding-agent/dist/cli.js"
+        let links: [String: AgentProcesses.Resolved] = [
+            "/Users/a/.bun/bin/omp": .init(path: fork, executable: true),
+            "/Users/a/.npm/bin/pi": .init(path: legacy, executable: true),
+        ]
+        var forked = process(54, name: "bun", arguments: ["bun", "/Users/a/.bun/bin/omp"])
+        forked.executable = "/Users/a/.bun/bin/bun"
+        let found = AgentProcesses.classify([
+            forked,
+            process(55, name: "bun", arguments: ["bun", fork]),
+            process(56, name: "node", arguments: ["node", "/Users/a/.npm/bin/pi"]),
+        ], rule: .pi, home: home, resolve: { links[$0] ?? self.resolve($0) })
+        #expect(found.candidates.map(\.pid) == [56])
+    }
+
     @Test func aScriptLinkedUnderAnotherNameIsFoundByWhereItLeads() {
         let found = AgentProcesses.classify([process(60, arguments: ["node", "/Users/a/bin/cc"])], rule: .claude, home: home, resolve: resolve)
         #expect(found.candidates.map(\.pid) == [60])
