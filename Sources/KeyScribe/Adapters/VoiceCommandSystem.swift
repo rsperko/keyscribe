@@ -203,9 +203,11 @@ protocol VoiceCommandRunning: AnyObject {
         scripts: [VoiceCommandScript], stillWanted: @escaping @MainActor () -> Bool,
         onLateResult: @escaping @MainActor (VoiceCommandOutcome) -> Void
     ) async -> VoiceCommandSelection?
+    func runningTabBrowser() async -> String?
 }
 
 extension VoiceCommandRunning {
+    func runningTabBrowser() async -> String? { nil }
     var pendingChoice: VoiceCommandPendingChoice? { nil }
     func recordReturn(to origin: VoiceCommandOrigin) {}
     func returnToSessions(_ sessions: SessionReturns?) {}
@@ -258,6 +260,12 @@ final class VoiceCommandRunner: VoiceCommandRunning {
     }
 
     var pendingChoice: VoiceCommandPendingChoice? { live?.choice }
+
+    func runningTabBrowser() async -> String? {
+        guard findsInApps() else { return nil }
+        let tabBrowsers = await system.tabBrowsers()
+        return system.runningApps().first { tabBrowsers.contains($0.bundleId) }?.name
+    }
 
     init(
         system: VoiceCommandSystem = LiveVoiceCommandSystem.shared,

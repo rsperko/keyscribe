@@ -15,7 +15,7 @@ struct HUDStateTests {
             "microphone-error", "command-not-recognized", "command-not-recognized-long", "accessibility-error",
             "recording-countdown", "stopped-at-limit", "stopped-at-limit-local", "choice", "choice-five",
             "choice-listening", "choice-retry", "choice-heard", "choice-heard-long", "recording-agents", "recording-agents-long",
-            "help-agent", "help-dictation", "help-short",
+            "help-agent", "help-agent-unfocused", "help-dictation", "help-voice", "help-short",
         ])
         for name in HUDPreview.names {
             #expect(HUDPreview.state(named: name) != nil)
@@ -24,12 +24,13 @@ struct HUDStateTests {
     }
 
     @Test func helpKeepsTheHUDWidthAndScrollsOnlyAListTallerThanItsScreenAwareCap() {
-        let short = SpokenHelp(title: "Email", rows: (1...3).map { SpokenHelp.Row(said: "phrase \($0)", effect: "Does a thing") })
+        let short = SpokenHelp(title: "Email", groups: [.init(
+            heading: SpokenHelp.Heading.edits, rows: (1...3).map { SpokenHelp.Row(said: "phrase \($0)", effect: "Does a thing") })])
         #expect(HUDState.helpListHeight(short, screenHeight: 900) == nil)
         let rows = (1...12).map {
             SpokenHelp.Row(said: "a long spoken phrase number \($0) that wraps", effect: String(repeating: "New paragraph + Best, ", count: 6))
         }
-        let long = SpokenHelp(title: "Email", rows: rows)
+        let long = SpokenHelp(title: "Email", groups: [.init(heading: SpokenHelp.Heading.edits, rows: rows)])
         #expect(HUDState.helpListHeight(long, screenHeight: 900) == HUDAnchor.listCap(screenHeight: 900))
         #expect(HUDState.helpListHeight(long, screenHeight: 500) == HUDAnchor.listCap(screenHeight: 500))
         #expect(HUDState.help(long).panelWidth == HUDState.recording(mode: "Email", level: 0, latchedTrigger: nil).panelWidth)
@@ -39,7 +40,7 @@ struct HUDStateTests {
     @Test(arguments: HUDAnchor.allCases)
     func aListNeverMovesTheHeaderAwayFromTheAnchor(_ anchor: HUDAnchor) {
         let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
-        let help = HUDState.help(SpokenHelp(title: "Email", rows: [SpokenHelp.Row(said: "insert new line", effect: "New line")]))
+        let help = HUDState.help(SpokenHelp(title: "Email", groups: [.init(heading: SpokenHelp.Heading.edits, rows: [SpokenHelp.Row(said: "insert new line", effect: "New line")])]))
         let header = CGSize(width: help.panelWidth, height: HUDState.listHeaderExtent)
         let expected = CGRect(origin: anchor.origin(in: screen, size: header), size: header)
         for height in [CGFloat(140), 300, 420] {
@@ -54,16 +55,21 @@ struct HUDStateTests {
             == CGRect(origin: anchor.origin(in: screen, size: size), size: size))
     }
 
-    @Test func helpMeasuresTheSuffixGroupAndWrappedText() {
+    @Test func helpMeasuresEveryHeadingItsGapAndWrappedText() {
         let row = SpokenHelp.Row(said: "insert new line", effect: "New line")
-        let one = HUDState.helpContentHeight(SpokenHelp(title: "", rows: [row]))
-        let two = HUDState.helpContentHeight(SpokenHelp(title: "", rows: [row, row]))
-        #expect(two == one * 2 + HUDState.helpRowSpacing)
-        let grouped = HUDState.helpContentHeight(SpokenHelp(title: "", rows: [row], suffixes: [row]))
-        #expect(grouped > two + HUDState.helpGroupGap)
-        let wrapped = HUDState.helpContentHeight(SpokenHelp(title: "", rows: [
+        func help(_ groups: [[SpokenHelp.Row]]) -> SpokenHelp {
+            SpokenHelp(title: "", groups: groups.enumerated().map { .init(heading: "Heading \($0.offset)", rows: $0.element) })
+        }
+        let one = HUDState.helpContentHeight(help([[row]]))
+        let two = HUDState.helpContentHeight(help([[row, row]]))
+        let rowHeight = two - one - HUDState.helpRowSpacing
+        let headingHeight = one - rowHeight - HUDState.helpRowSpacing
+        #expect(rowHeight > 0 && headingHeight > 0)
+        let grouped = HUDState.helpContentHeight(help([[row], [row]]))
+        #expect(grouped == one * 2 + HUDState.helpRowSpacing + HUDState.helpGroupGap)
+        let wrapped = HUDState.helpContentHeight(help([[
             SpokenHelp.Row(said: "insert new line", effect: String(repeating: "Wraps across several lines. ", count: 5)),
-        ]))
+        ]]))
         #expect(wrapped > one + 20)
     }
 

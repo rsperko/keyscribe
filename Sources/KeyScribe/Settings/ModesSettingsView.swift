@@ -74,7 +74,8 @@ struct ModesSettingsView: View {
                                     mode: mode, allModes: model.modes, onUpdate: { model.update($0) },
                                     onMoveShortcut: model.proposeMove(to:), model: model.voiceCommands,
                                     onEditVocabulary: { onEditVocabulary(mode.id) },
-                                    sharedVocabularyNames: model.sharedVocabularyNames(for: mode))
+                                    sharedVocabularyNames: model.sharedVocabularyNames(for: mode),
+                                    readsReplies: model.readsAgentReplies)
                             } else {
                                 ModeEditorView(
                                     mode: mode, allModes: model.modes,

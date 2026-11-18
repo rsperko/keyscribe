@@ -540,6 +540,7 @@ enum AccessibilityID {
         static let choiceCancel = "hud.choice.cancel"
         static let agentRow = "hud.agent.row"
         static let helpRow = "hud.help.row"
+        static let helpHeading = "hud.help.heading"
         static let helpClose = "hud.help.close"
         static func positionTarget(_ anchor: String) -> String { "hud.position.target.\(anchor)" }
     }

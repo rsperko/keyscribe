@@ -454,9 +454,10 @@ extension HUDState {
         }
         let said = NSFont.systemFont(ofSize: 13, weight: .medium)
         let detail = NSFont.systemFont(ofSize: 11)
-        var heights = (help.rows + help.suffixes).map { height($0.said, said) + 1 + height(helpDetail($0), detail) }
-        if !help.suffixes.isEmpty {
-            heights.append(helpGroupGap + height(SpokenHelp.suffixHeading, NSFont.systemFont(ofSize: 11, weight: .semibold)))
+        let heading = NSFont.systemFont(ofSize: 11, weight: .semibold)
+        let heights = help.groups.enumerated().flatMap { index, group in
+            [(index == 0 ? 0 : helpGroupGap) + height(group.heading, heading)]
+                + group.rows.map { height($0.said, said) + 1 + height(helpDetail($0), detail) }
         }
         return heights.reduce(0, +) + CGFloat(max(0, heights.count - 1)) * helpRowSpacing
     }

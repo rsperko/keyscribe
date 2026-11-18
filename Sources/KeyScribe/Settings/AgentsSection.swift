@@ -536,7 +536,6 @@ struct AgentPhrasesReference: View {
     let onDone: () -> Void
 
     nonisolated static let exampleName = "Backend"
-    static let renameExample = "\u{201C}rename this conversation to \(exampleName)\u{201D}"
     static let routingExample = "\u{201C}tell \(exampleName) run the unit tests\u{201D} sends only that instruction to \(exampleName)."
 
     nonisolated static func phrases(readsReplies: Bool) -> [HelpPhrase] {
@@ -548,17 +547,13 @@ struct AgentPhrasesReference: View {
             HelpSection {
                 Text("Start with \u{201C}tell\u{201D} and a conversation\u{2019}s name to send it an instruction. These examples use a conversation named \u{201C}\(Self.exampleName).\u{201D}")
             }
-            HelpSection("Phrases") {
+            HelpSection(SpokenHelp.Heading.commands) {
                 ForEach(Self.phrases(readsReplies: model.spokenResult.enabled), id: \.self) { HelpPhraseRow(phrase: $0) }
             }
             HelpSection("Where instructions go") {
                 Text("Without a name, an instruction goes to the conversation focused when you start speaking. With none focused, nothing is sent.")
                 Text(Self.routingExample)
                     .accessibilityIdentifier(AccessibilityID.Mode.Agents.example)
-                Text("While recording, conversations are numbered. Say \u{201C}conversation\u{201D} and the number to use one without its name.")
-            }
-            HelpSection("Names") {
-                Text("Say \(Self.renameExample) to give the conversation you\u{2019}re talking to a name of your own.")
             }
             HelpSection("While recording") {
                 Text("Say \u{201C}what can I say\u{201D} to see this list with your own conversations\u{2019} names and vocabulary.")

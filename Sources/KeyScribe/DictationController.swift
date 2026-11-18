@@ -1625,7 +1625,7 @@ final class DictationController {
         }
 
         if VoiceCommandGrammar.parse(raw) == .help, !(activeMode?.runsVoiceCommands == true && session?.choiceId != nil) {
-            finishHelp(mode: activeMode)
+            await finishHelp(mode: activeMode)
             return
         }
         if activeMode?.runsVoiceCommands == true {
@@ -2559,20 +2559,24 @@ final class DictationController {
                hideAfter: action == nil ? 2 : 8, record: (.failed, message))
     }
 
-    private func finishHelp(mode: Mode?) {
-        finish(machine: .finish(.inserted), cue: nil, endsQuietly: true, state: .help(spokenHelp(for: mode)), record: (.command, nil))
-        guard hud.lastPresented?.spokenHelp != nil else { return }
-        help.shown()
+    private func finishHelp(mode: Mode?) async {
+        let browser = mode?.runsVoiceCommands == true && config.findsInAppsEnabled ? await voiceCommands.runningTabBrowser() : nil
+        if Task.isCancelled { return }
+        finish(machine: .finish(.inserted), cue: nil, endsQuietly: true, state: .help(spokenHelp(for: mode, browser: browser)), record: (.command, nil))
+        guard let shown = hud.lastPresented?.spokenHelp else { return }
+        help.shown(rows: shown.rows.count)
     }
 
-    private func spokenHelp(for mode: Mode?) -> SpokenHelp {
+    private func spokenHelp(for mode: Mode?, browser: String?) -> SpokenHelp {
         let stages = plan.postSTTTextStages(for: mode)
         let title = mode?.name ?? currentModeName
         if mode?.source == .selection { return .selection(title: title, answers: mode?.answersAloud == true) }
         if mode?.runsVoiceCommands == true {
             let commands = config.voiceCommands
             return SpokenHelp.voiceCommands(
-                title: title, apps: runningAppNames(), places: commands.places, scripts: commands.scripts, stages: stages)
+                title: title, apps: runningAppNames(), browser: browser, places: commands.places, scripts: commands.scripts,
+                findsInApps: config.findsInAppsEnabled, readsReplies: spokenUpdates?.readsReplies == true,
+                canRepeat: spokenUpdates?.hasReplyToRepeat == true, stages: stages)
         }
         if mode?.output == .agent {
             return SpokenHelp.agent(

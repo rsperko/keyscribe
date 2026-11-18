@@ -130,6 +130,22 @@ struct VoiceCommandRunnerTests {
         return (VoiceCommandRunner(system: system), system)
     }
 
+    @Test func theRunningTabBrowserIsTheFirstRunningAppTheCommandReadsTabsFrom() async {
+        let system = FakeSystem()
+        system.running = [textEdit, ghostty, chrome]
+        system.tabBrowserIds = [chrome.bundleId, ghostty.bundleId]
+        #expect(await VoiceCommandRunner(system: system, findsInApps: { true }).runningTabBrowser() == ghostty.name)
+        system.tabBrowserIds = ["com.apple.Safari"]
+        #expect(await VoiceCommandRunner(system: system, findsInApps: { true }).runningTabBrowser() == nil)
+    }
+
+    @Test func thereIsNoRunningTabBrowserWhileFindingInAppsIsOff() async {
+        let system = FakeSystem()
+        system.running = [chrome]
+        system.tabBrowserIds = [chrome.bundleId]
+        #expect(await VoiceCommandRunner(system: system, findsInApps: { false }).runningTabBrowser() == nil)
+    }
+
     @Test func switchesToARunningApp() async {
         let (runner, system) = make()
         let outcome = await runner.run(transcript: "Switch to Ghostty.", places: [], origin: .init(bundleId: textEdit.bundleId))

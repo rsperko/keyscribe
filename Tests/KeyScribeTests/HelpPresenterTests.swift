@@ -48,6 +48,23 @@ struct HelpPresenterTests {
         #expect(registrar.lastRegistrations.isEmpty)
     }
 
+    @Test func aLongerListStaysOpenLongerUpToACap() {
+        #expect(HelpPresenter.duration(base: 15, rows: 4) == 15)
+        #expect(HelpPresenter.duration(base: 15, rows: HelpPresenter.rowsPerBase) == 15)
+        #expect(HelpPresenter.duration(base: 15, rows: HelpPresenter.rowsPerBase * 2) == 30)
+        #expect(HelpPresenter.duration(base: 15, rows: 200) == 15 * HelpPresenter.maxStretch)
+    }
+
+    @Test func showingAListTimesItByItsLength() {
+        let help = presenter()
+        help.shown(rows: HelpPresenter.rowsPerBase * 2)
+        #expect(help.duration == help.seconds * 2)
+        help.release()
+        help.shown(rows: 1)
+        #expect(help.duration == help.seconds)
+        help.release()
+    }
+
     @Test func thePointerHoldsItOpenAndLeavingRestartsTheTimer() async throws {
         var hides = 0
         let help = presenter { hides += 1 }

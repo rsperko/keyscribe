@@ -45,6 +45,8 @@ final class ModesSettingsModel: ObservableObject {
     private(set) var agentsEnabled: Bool
     private(set) var askAboutSelectionEnabled = false
 
+    var readsAgentReplies: Bool { agentsEnabled && agents?.spokenResult.enabled == true }
+
     init(repository: ConfigRepository, voiceCommandsEnabled: Bool = false, agentsEnabled: Bool = false) {
         self.repository = repository
         self.voiceCommandsEnabled = voiceCommandsEnabled

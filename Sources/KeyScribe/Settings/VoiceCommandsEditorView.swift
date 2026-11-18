@@ -10,6 +10,7 @@ struct VoiceCommandsEditorView: View {
     @ObservedObject var model: VoiceCommandsSettingsModel
     var onEditVocabulary: () -> Void = {}
     var sharedVocabularyNames: [String] = []
+    var readsReplies = false
     @State private var editing: PlaceDraft?
     @State private var editingScript: ScriptDraft?
     @State private var editingShortcut: ShortcutDraft?
@@ -54,7 +55,8 @@ struct VoiceCommandsEditorView: View {
             Section("What you can say") {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Open apps by name, with nothing to configure. Commands you save below add places, scripts, and shortcuts.")
-                    HelpLink(Self.phrasesHelp(findsInApps: model.findsInApps))
+                    HelpLink(Self.phrasesHelp(
+                        findsInApps: model.findsInApps, readsReplies: readsReplies, places: model.places, scripts: model.scripts))
                 }
                 .fixedSize(horizontal: false, vertical: true)
             }
@@ -134,17 +136,22 @@ struct VoiceCommandsEditorView: View {
 
     static let switchingNote = "\u{201C}Open\u{201D} can start an app. Use \u{201C}switch to\u{201D} to stay with what\u{2019}s already running."
 
-    static func phrasesHelp(findsInApps: Bool) -> HelpTopic {
-        HelpTopic("What can I say?", id: AccessibilityID.Mode.VoiceCommands.whatCanISay, parts: [
-            .init(paragraphs: ["Open apps by name. Nothing to configure."]),
-            .init(heading: "Phrases", phrases: SpokenHelp.voiceCommandPhrases(findsInApps: findsInApps).map {
-                HelpPhrase(said: $0.said, meaning: $0.effect, note: $0.note)
-            }),
+    static let exampleApps = ["Safari", "Notes"]
+
+    static func phrasesHelp(
+        findsInApps: Bool, readsReplies: Bool = false, places: [VoiceCommandPlace] = [], scripts: [VoiceCommandScript] = []
+    ) -> HelpTopic {
+        func phrases(_ rows: [SpokenHelp.Row]) -> [HelpPhrase] { rows.map { HelpPhrase(said: $0.said, meaning: $0.effect, note: $0.note) } }
+        let saved = SpokenHelp.savedRows(places: places, scripts: scripts)
+        let howSaved = "For a command you save, say \u{201C}open\u{201D} and its name for a place, or \u{201C}run\u{201D} and its name for a script or shortcut."
+        return HelpTopic("What can I say?", id: AccessibilityID.Mode.VoiceCommands.whatCanISay, parts: [
+            .init(paragraphs: ["Open apps by name. Nothing to configure. These examples use \(exampleApps.joined(separator: " and ")); while recording, your own running apps are shown."]),
+            .init(heading: SpokenHelp.Heading.commands, phrases: phrases(
+                SpokenHelp.voiceCommandPhrases(
+                    apps: exampleApps, browser: exampleApps[0], findsInApps: findsInApps, readsReplies: readsReplies))),
             .init(heading: "Opening and switching", paragraphs: [switchingNote]),
-            .init(heading: "Saved commands", paragraphs: [
-                "For a command you save, say \u{201C}open\u{201D} and its name for a place, or \u{201C}run\u{201D} and its name for a script or shortcut.",
-            ]),
-            .init(heading: "While recording", paragraphs: ["Say \u{201C}what can I say\u{201D} to see this list with your own commands."]),
+            .init(heading: SpokenHelp.Heading.saved, paragraphs: [howSaved], phrases: phrases(saved)),
+            .init(heading: "While recording", paragraphs: ["Say \u{201C}what can I say\u{201D} to see this list with your running apps."]),
         ])
     }
 

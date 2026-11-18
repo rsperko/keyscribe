@@ -6,12 +6,12 @@ struct CheatSheetPhraseTests {
     private static let sheet = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("docs/cheat_sheet.md")
-    private static let alternativesPage = "Other ways to say it"
+    static let alternativesPage = "Other ways to say it"
 
     private static let fills = [
         "[name]": "backend", "[instruction]": "run the tests", "[question]": "what changed", "[message]": "lunch is at noon",
         "[words]": "scratch that", "[app]": "Mail", "[app or window]": "Notes", "[saved place]": "reading list",
-        "[saved action]": "new note", "[input]": "buy milk", "[tab search]": "browser", "[title or site]": "inbox",
+        "[saved action]": "new note", "[input]": "buy milk", "[tab search]": "browser", "[title or site]": "inbox", "[item]": "inbox",
     ]
 
     enum Effect {
@@ -28,6 +28,9 @@ struct CheatSheetPhraseTests {
 
     private static let mail = VoiceCommandCatalog.App(name: "Mail", bundleId: "com.apple.mail")
     private static let notes = VoiceCommandCatalog.App(name: "Notes", bundleId: "com.apple.Notes")
+    private static let slack = VoiceCommandCatalog.App(name: "Slack", bundleId: "com.tinyspeck.slackmacgap")
+    private static let mailInbox = VoiceCommandCatalog.SidebarItem(bundleId: mail.bundleId, pid: 1, name: "Inbox", section: nil, path: [0])
+    private static let slackGeneral = VoiceCommandCatalog.SidebarItem(bundleId: slack.bundleId, pid: 2, name: "general", section: nil, path: [0])
     private static let readingList = VoiceCommandPlace(name: "Reading list", target: .url("https://example.com/list"))
     private static let browser = VoiceCommandPlace(name: "Browser", target: .tabSearch)
     private static let newNote = VoiceCommandScript(name: "New note", run: ["/bin/note", "{text}"])
@@ -71,6 +74,8 @@ struct CheatSheetPhraseTests {
             "open reading list": .voice(.action(.place(readingList, .openURL("https://example.com/list", browser: nil)))),
             "run new note buy milk": .voice(.action(.script(newNote, arguments: ["buy milk"]))),
             "open browser inbox": .voice(.action(.tab(inbox))),
+            "open Mail inbox": .voice(.action(.sidebarItem(mailInbox))),
+            "open Slack general": .voice(.action(.sidebarItem(slackGeneral))),
             "go back": .voice(.action(.goBack)),
             "repeat that": .voice(.action(.repeatSummary)),
             "say that again": .voice(.action(.repeatSummary)),
@@ -107,6 +112,7 @@ struct CheatSheetPhraseTests {
             "rename conversation to backend": .rename("backend"),
             "repeat that": .intent(.repeatSummary),
             "that sounded wrong": .intent(.keepReply),
+            "go back": .intent(.goBack),
             "cancel": .intent(.cancel),
             "never mind": .intent(.cancel),
             "what can I say?": .help,
@@ -116,8 +122,11 @@ struct CheatSheetPhraseTests {
     struct Phrase: CustomStringConvertible {
         let section: String
         let said: String
+        let isAlternative: Bool
         var description: String { "\(section): \(said)" }
     }
+
+    static let pageFills = ["Dictate & fix": "scratch that", "Move around & run commands": "inbox", "Talk to agents": "run the tests"]
 
     static func phrases() throws -> [Phrase] {
         var page = ""
@@ -133,7 +142,7 @@ struct CheatSheetPhraseTests {
                 var said = span.element
                 for (placeholder, value) in fills { said = said.replacingOccurrences(of: placeholder, with: value) }
                 guard !said.contains("[") else { continue }
-                phrases.append(Phrase(section: section, said: said))
+                phrases.append(Phrase(section: section, said: said, isAlternative: page == alternativesPage))
             }
         }
         return phrases
@@ -160,10 +169,50 @@ struct CheatSheetPhraseTests {
         }
     }
 
+    static func kind(of said: String, on page: String) -> String? {
+        if VoiceCommandGrammar.parse(said) == .help { return "help" }
+        switch page {
+        case "Dictate & fix":
+            return "edit:\(edited(said))"
+        case "Move around & run commands":
+            let intent = VoiceCommandGrammar.parse(said)
+            if intent == nil, case .select = VoiceCommandChoiceAnswer.parse(said, count: 2) { return "answer" }
+            let reach = if case .focus(_, let reach) = intent { "\(reach)" } else { "" }
+            switch VoiceCommandResolver.resolve(said, catalog: catalog) {
+            case .action(let action): return "voice:\(reach):\(caseName(action))"
+            case .cancelled: return "voice:cancel"
+            case let other: return "unresolved:\(caseName(other))"
+            }
+        case "Talk to agents":
+            if case .rename = AgentRename.parse(said) { return "rename" }
+            if let query = AgentStatusQuery.parse(said, names: ["backend"]) {
+                if case .check(let address?) = query { return "status:check:\(caseName(address))" }
+                return "status:\(String(describing: query))"
+            }
+            if let intent = VoiceCommandGrammar.parse(said), [.repeatSummary, .keepReply, .cancel, .goBack].contains(intent) {
+                return "intent:\(intent)"
+            }
+            let address = AgentAddress.parse(said, names: ["backend"])
+            let asks = said.lowercased().hasPrefix("ask ") ? ":ask" : ""
+            if case .open(let inner) = address { return "address:open:\(caseName(inner))" }
+            return "address:\(caseName(address))\(asks)"
+        default:
+            return nil
+        }
+    }
+
+    private static func caseName(_ value: Any) -> String {
+        String(String(describing: value).prefix { $0 != "(" })
+    }
+
     private static var catalog: VoiceCommandCatalog {
-        VoiceCommandCatalog(
-            places: [readingList, browser], scripts: [newNote], runningApps: [mail, notes], installedApps: [mail, notes],
+        var catalog = VoiceCommandCatalog(
+            places: [readingList, browser], scripts: [newNote], runningApps: [mail, notes, slack], installedApps: [mail, notes, slack],
             tabs: [inbox], windows: .complete([]))
+        catalog.findsInApps = true
+        catalog.sidebarItems = [mailInbox, slackGeneral]
+        catalog.tabBrowsers = [inbox.browserBundleId]
+        return catalog
     }
 
     private static var pipeline: Pipeline {

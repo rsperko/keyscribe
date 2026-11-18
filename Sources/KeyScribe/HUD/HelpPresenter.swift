@@ -24,6 +24,9 @@ final class EscapeClaim {
 final class HelpPresenter {
     var escape: EscapeClaim
     var seconds: Double = 15
+    private(set) var duration: Double = 15
+    static let rowsPerBase = 10
+    static let maxStretch: Double = 3
     var voiceOverRunning: () -> Bool = { NSWorkspace.shared.isVoiceOverEnabled }
     private(set) var showing = false
     private var timer: Task<Void, Never>?
@@ -34,7 +37,12 @@ final class HelpPresenter {
         self.hide = hide
     }
 
-    func shown() {
+    static func duration(base: Double, rows: Int) -> Double {
+        base * min(maxStretch, max(1, Double(rows) / Double(rowsPerBase)))
+    }
+
+    func shown(rows: Int = 0) {
+        duration = Self.duration(base: seconds, rows: rows)
         showing = true
         escape.claim { [weak self] in self?.dismiss() }
         scheduleHide()
@@ -61,9 +69,9 @@ final class HelpPresenter {
     private func scheduleHide() {
         timer?.cancel()
         guard !voiceOverRunning() else { return }
-        let seconds = seconds
+        let duration = duration
         timer = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(seconds))
+            try? await Task.sleep(for: .seconds(duration))
             guard !Task.isCancelled else { return }
             self?.dismiss()
         }

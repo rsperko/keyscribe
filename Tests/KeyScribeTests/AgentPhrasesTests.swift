@@ -25,38 +25,52 @@ struct AgentPhrasesTests {
         }
     }
 
-    @Test func openingANameShowsItWithoutAMessage() {
-        let said = phrases(readsReplies: false)[1]
+    private func phrase(_ prefix: String, readsReplies: Bool = false) throws -> String {
+        try #require(phrases(readsReplies: readsReplies).first { $0.hasPrefix(prefix) })
+    }
+
+    @Test func openingANameShowsItWithoutAMessage() throws {
+        let said = try phrase("open ")
         #expect(AgentStatusQuery.parse(said, names: ["backend"]) == nil)
         #expect(AgentAddress.parse(said, names: ["backend"]) == .open(.name("backend", body: "")))
     }
 
-    @Test func theStatusChecksAreAnsweredWithoutSendingAnything() {
-        let said = phrases(readsReplies: false)
-        #expect(AgentStatusQuery.parse(said[2], names: ["backend"]) == .check(.name("backend", body: "")))
-        #expect(AgentStatusQuery.parse(said[3], names: ["backend"]) == .all)
+    @Test func theStatusChecksAreAnsweredWithoutSendingAnything() throws {
+        #expect(AgentStatusQuery.parse(try phrase("check on B"), names: ["backend"]) == .check(.name("backend", body: "")))
+        #expect(AgentStatusQuery.parse(try phrase("check on all"), names: ["backend"]) == .all)
+    }
+
+    @Test func askingAQuestionSendsIt() throws {
+        #expect(AgentAddress.parse(try phrase("ask "), names: ["backend"]) == .name("backend", body: "what changed"))
+    }
+
+    @Test func theNumberedExampleUsesTheListShownWhileRecording() throws {
+        let said = try phrase("tell conversation")
+        #expect(AgentAddress.parse(said.replacingOccurrences(of: "\u{2026}", with: "run the tests"), names: ["backend"]) == .row(1, body: "run the tests"))
+    }
+
+    @Test func renamingIsAPhraseAndRenamesTheConversationInFront() throws {
+        let said = try phrase("rename ")
+        #expect(AgentRename.parse(said.replacingOccurrences(of: "\u{2026}", with: AgentPhrasesReference.exampleName)) == .rename(AgentPhrasesReference.exampleName))
     }
 
     @Test func goBackCancelAndRepeatAreTheBuiltInCommands() {
         let said = phrases(readsReplies: false)
-        #expect(VoiceCommandGrammar.parse(said[4]) == .goBack)
-        #expect(VoiceCommandGrammar.parse(said[5]) == .cancel)
-        #expect(said.count == 6)
+        #expect(said.suffix(2).map { VoiceCommandGrammar.parse($0) } == [.goBack, .cancel])
+        #expect(!said.contains(VoiceCommandGrammar.repeatSummary[0]))
         let reading = phrases(readsReplies: true)
-        #expect(reading.count == 8)
-        #expect(VoiceCommandGrammar.parse(reading[4]) == .repeatSummary)
-        #expect(VoiceCommandGrammar.parse(reading[5]) == .keepReply)
+        #expect(reading.count == said.count + 2)
+        let replies = reading.filter { !said.contains($0) }
+        #expect(replies.map { VoiceCommandGrammar.parse($0) } == [.repeatSummary, .keepReply])
     }
 
     @Test func withoutNamesTheExamplesUseTheConversationNumber() {
         let said = SpokenHelp.agentPhrases(name: "conversation two", readsReplies: false).map(\.said)
         #expect(AgentAddress.parse(said[0], names: [], namesKnown: false) == .row(2, body: "run the unit tests"))
-        #expect(AgentAddress.parse(said[1], names: [], namesKnown: false) == .open(.row(2, body: "")))
-        #expect(AgentStatusQuery.parse(said[2], names: [], namesKnown: false) == .check(.row(2, body: "")))
-    }
-
-    @Test func renamingNamesTheConversationInstructionsGoTo() {
-        #expect(AgentRename.parse(unquoted(AgentPhrasesReference.renameExample)) == .rename(AgentPhrasesReference.exampleName))
+        #expect(AgentAddress.parse("open conversation two", names: [], namesKnown: false) == .open(.row(2, body: "")))
+        #expect(said.contains("open conversation two"))
+        #expect(said.contains("check on conversation two"))
+        #expect(AgentStatusQuery.parse("check on conversation two", names: [], namesKnown: false) == .check(.row(2, body: "")))
     }
 
     @Test func theRoutingExampleIsTheFirstPhraseAndSendsOnlyThatInstruction() {

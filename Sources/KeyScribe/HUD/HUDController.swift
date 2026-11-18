@@ -498,13 +498,13 @@ private struct HUDView: View {
 
     private func helpList(_ help: SpokenHelp) -> some View {
         let list = VStack(alignment: .leading, spacing: HUDState.helpRowSpacing) {
-            ForEach(Array(help.rows.enumerated()), id: \.offset) { helpRow($0.element) }
-            if !help.suffixes.isEmpty {
-                Text(SpokenHelp.suffixHeading)
+            ForEach(Array(help.groups.enumerated()), id: \.offset) { index, group in
+                Text(group.heading)
                     .font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
-                    .padding(.top, HUDState.helpGroupGap)
+                    .padding(.top, index == 0 ? 0 : HUDState.helpGroupGap)
                     .accessibilityAddTraits(.isHeader)
-                ForEach(Array(help.suffixes.enumerated()), id: \.offset) { helpRow($0.element) }
+                    .accessibilityIdentifier(AccessibilityID.HUD.helpHeading)
+                ForEach(Array(group.rows.enumerated()), id: \.offset) { helpRow($0.element) }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -517,7 +517,7 @@ private struct HUDView: View {
                 ScrollView(.vertical) { list.padding(.trailing, HUDState.helpScrollGutter) }
                     .frame(height: height)
                     .padding(.trailing, -HUDState.helpScrollGutter)
-            } else if !help.rows.isEmpty || !help.suffixes.isEmpty {
+            } else if !help.groups.isEmpty {
                 list
             }
         }

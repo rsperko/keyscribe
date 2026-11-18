@@ -754,10 +754,60 @@ struct VoiceCommandChoiceWiringTests {
         await h.dictate("show commands")
         let shown = try #require(help(h.hud.last))
         #expect(shown.title == Mode.voiceCommands.name)
-        #expect(shown.rows.contains { $0.said == "open personal mail" })
-        #expect(shown.rows.contains { $0.said == "open Safari" } && shown.rows.contains { $0.said == "switch to Ghostty" })
-        #expect(shown.rows.map(\.said) == shown.rows.map(\.said).sorted { $0.localizedStandardCompare($1) == .orderedAscending })
+        #expect(shown.groups.map(\.heading) == [SpokenHelp.Heading.commands, SpokenHelp.Heading.saved])
+        #expect(shown.group(SpokenHelp.Heading.saved).map(\.said) == ["open personal mail", "open work mail"])
+        #expect(shown.group(SpokenHelp.Heading.commands).prefix(2).map(\.said) == ["open Safari", "switch to Ghostty"])
+        #expect(shown.group(SpokenHelp.Heading.commands).suffix(2).map(\.said) == ["go back", "cancel"])
         #expect(h.system.openedURLs.isEmpty && h.system.opened.isEmpty)
+    }
+
+    private func helpCommands(_ h: Harness, readsReplies: Bool) async throws -> [SpokenHelp.Row] {
+        let output = SpokenResultOutput(
+            client: HTTPLLMClient(), permits: { _ in true }, speech: SpokenResultOutputTests.FakeSpeech(), silencer: SpeechSilencer(),
+            settings: { SpokenResultSettings(enabled: readsReplies) }, connection: { _ in nil })
+        h.controller.spokenUpdates = output
+        await h.dictate("what can I say")
+        withExtendedLifetime(output) {}
+        return try #require(help(h.hud.last)).group(SpokenHelp.Heading.commands)
+    }
+
+    @Test func voiceCommandHelpOffersRepeatWhileRepliesAreReadAloud() async throws {
+        let commands = try await helpCommands(try Harness(places: []), readsReplies: true)
+        #expect(commands.first { $0.said == "repeat that" }?.note == "There\u{2019}s nothing to repeat yet")
+        #expect(commands.contains { $0.said == "that sounded wrong" })
+    }
+
+    @Test func voiceCommandHelpLeavesRepeatOutWhileRepliesAreNotReadAloud() async throws {
+        let commands = try await helpCommands(try Harness(places: []), readsReplies: false)
+        #expect(!commands.contains { $0.said == "repeat that" || $0.said == "that sounded wrong" })
+    }
+
+    private func findRow(tabBrowsers: Set<String>) async throws -> SpokenHelp.Row? {
+        let h = try Harness(places: [], findsInApps: true)
+        h.config.findsInAppsEnabled = true
+        h.system.tabBrowserIds = tabBrowsers
+        await h.dictate("what can I say")
+        return try #require(help(h.hud.last)).rows.first { $0.said.hasSuffix("\u{2026}") }
+    }
+
+    @Test func theFindExampleUsesARunningAppTheCommandReadsTabsFrom() async throws {
+        let row = try await findRow(tabBrowsers: ["com.mitchellh.ghostty"])
+        #expect(row == .init(said: "open Ghostty \u{2026}", effect: "Finds the open tab or window in Ghostty that best matches what you say."))
+    }
+
+    @Test func aRunningAppTheCommandReadsNoTabsFromIsNotPromisedTabs() async throws {
+        let row = try await findRow(tabBrowsers: [])
+        #expect(row == .init(said: "open Safari \u{2026}", effect: "Finds a window or sidebar item you name in Safari."))
+    }
+
+    @Test func aLongHelpListStaysOpenLongerThanAShortOne() async throws {
+        let places = (1...(HelpPresenter.rowsPerBase * 2)).map { VoiceCommandPlace(name: "Place \($0)", target: .url("https://example.com/\($0)")) }
+        let h = try Harness(places: places)
+        await h.dictate("what can I say")
+        let shown = try #require(help(h.hud.last))
+        #expect(shown.rows.count > HelpPresenter.rowsPerBase * 2)
+        #expect(h.controller.help.duration == HelpPresenter.duration(base: h.controller.help.seconds, rows: shown.rows.count))
+        #expect(h.controller.help.duration > h.controller.help.seconds)
     }
 
     @Test func escapeOrTheNextRecordingClosesHelpAndReleasesEscape() async throws {

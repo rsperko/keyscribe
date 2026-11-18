@@ -10,7 +10,7 @@ enum HUDPreview {
         "microphone-error", "command-not-recognized", "command-not-recognized-long", "accessibility-error",
         "recording-countdown", "stopped-at-limit", "stopped-at-limit-local", "choice", "choice-five",
         "choice-listening", "choice-retry", "choice-heard", "choice-heard-long", "recording-agents", "recording-agents-long",
-        "help-agent", "help-dictation", "help-short",
+        "help-agent", "help-agent-unfocused", "help-dictation", "help-voice", "help-short",
     ]
 
     static let reasoningLimitReason = ProviderTransportError.limitBeforeAnswer(reasoningEvidence: true).rewriteFailureReason
@@ -172,6 +172,21 @@ enum HUDPreview {
             .help(SpokenHelp.agent(
                 title: "Agent", focused: "backend", example: nil, readsReplies: true, canRepeat: false,
                 stages: TakeStages.text(liveEdits: true, rules: [
+                    ReplacementRule(heard: "slash resume", replace: "/resume", isRegex: false, wholeDictation: true),
+                ], numbers: false, dictionary: [])))
+        case "help-agent-unfocused":
+            .help(SpokenHelp.agent(
+                title: "Agent", focused: nil, example: "backend", readsReplies: false, canRepeat: false, stages: []))
+        case "help-voice":
+            .help(SpokenHelp.voiceCommands(
+                title: "Voice Commands", apps: ["Safari", "Notes"],
+                places: [
+                    VoiceCommandPlace(name: "Reading list", target: .url("https://example.com/list")),
+                    VoiceCommandPlace(name: "Browser", target: .tabSearch),
+                ],
+                scripts: [VoiceCommandScript(name: "New note", run: ["/bin/note", "{text}"])],
+                findsInApps: true, readsReplies: true, canRepeat: true,
+                stages: TakeStages.text(liveEdits: false, rules: [
                     ReplacementRule(heard: "slash resume", replace: "/resume", isRegex: false, wholeDictation: true),
                 ], numbers: false, dictionary: [])))
         case "help-dictation":

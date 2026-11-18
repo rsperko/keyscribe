@@ -286,12 +286,36 @@ struct VoiceCommandsSettingsModelTests {
         #expect(search.place == VoiceCommandPlace(id: search.commandId, name: "Chrome", target: .tabSearch, browser: "com.google.Chrome"))
     }
 
-    @Test func theFirstExamplesNeedNothingSaved() {
-        func said(_ findsInApps: Bool) -> [String] {
-            VoiceCommandsEditorView.phrasesHelp(findsInApps: findsInApps).parts.flatMap(\.phrases).map(\.said)
+    @Test func theDialogListsTheSameCommandsTheRecordingHelpDoes() {
+        func said(_ findsInApps: Bool, readsReplies: Bool = false, places: [VoiceCommandPlace] = []) -> [String] {
+            VoiceCommandsEditorView.phrasesHelp(findsInApps: findsInApps, readsReplies: readsReplies, places: places)
+                .parts.flatMap(\.phrases).map(\.said)
         }
-        #expect(said(true) == ["open Mail", "open Slack general", "go back"])
-        #expect(said(false) == ["open Mail", "go back"])
+        #expect(said(false) == ["open Safari", "switch to Notes", "go back", "cancel"])
+        #expect(said(true, readsReplies: true) == [
+            "open Safari", "switch to Notes", "open Safari \u{2026}", "repeat that", "that sounded wrong", "go back", "cancel",
+        ])
+        #expect(said(false, places: [VoiceCommandPlace(name: "Reading list", target: .url("https://example.com"))]).last == "open reading list")
+        let topic = VoiceCommandsEditorView.phrasesHelp(findsInApps: false)
+        #expect(topic.parts.compactMap(\.heading).prefix(1) == [SpokenHelp.Heading.commands])
+        #expect(topic.parts.contains { $0.heading == SpokenHelp.Heading.saved && $0.phrases.isEmpty && !$0.paragraphs.isEmpty })
+    }
+
+    private func modes(agentsEnabled: Bool, readsAloud: Bool) throws -> ModesSettingsModel {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("keyscribe-replies-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("modes"), withIntermediateDirectories: true)
+        let model = ModesSettingsModel(
+            repository: ConfigRepository(supportDir: dir, config: ConfigCache(supportDir: dir)), agentsEnabled: agentsEnabled)
+        let agents = AgentsSettingsModel(describeTerminal: { _ in nil }, agentsDir: dir.appendingPathComponent("agents"), connectors: [])
+        agents.load(spokenResult: SpokenResultSettings(enabled: readsAloud))
+        model.agents = agents
+        return model
+    }
+
+    @Test func theDialogOffersReplyCommandsOnlyWhereTheRecordingHelpWould() throws {
+        #expect(try modes(agentsEnabled: true, readsAloud: true).readsAgentReplies)
+        #expect(!(try modes(agentsEnabled: false, readsAloud: true).readsAgentReplies))
+        #expect(!(try modes(agentsEnabled: true, readsAloud: false).readsAgentReplies))
     }
 
     @Test func anOldSidebarCommandEditsAsAPlainAppCommand() {
