@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Publish an already-built, self-verified release: push the tag, create the GitHub release (with the
-# DMG and auto-generated notes), refresh the cask in the tap, and commit + push the tap. This is the
+# DMG, the voice kit, and auto-generated notes), refresh the cask in the tap, and commit + push the tap. This is the
 # outward-facing tail — run it deliberately, after ./release.sh has built + verified
 # KeyScribe-<version>.dmg. Re-runnable (re-uploads the asset, skips an unchanged cask).
 #
@@ -51,17 +51,24 @@ if [ "$BRANCH" != "main" ]; then
   fi
 fi
 
+# The voice kit rides each release so a recipient can fetch it beside the DMG it was tested with.
+KIT_ZIP="KeyScribe-voice-kit-$VERSION.zip"
+KIT_BUILD="$(mktemp -d)"
+zsh voice-kit/package.sh --out "$KIT_BUILD"
+mv "$KIT_BUILD/voice-kit.zip" "$KIT_ZIP"
+rm -rf "$KIT_BUILD"
+
 echo "== push tag $TAG =="
 git push origin "$TAG"
 
 echo "== GitHub release $TAG =="
 if gh release view "$TAG" -R "$REPO" >/dev/null 2>&1; then
-  echo "  release exists — replacing the DMG asset"
-  gh release upload "$TAG" "$DMG" -R "$REPO" --clobber
+  echo "  release exists — replacing the DMG and voice kit assets"
+  gh release upload "$TAG" "$DMG" "$KIT_ZIP" -R "$REPO" --clobber
 else
   # A release's notes start at the release before it, so they cover its betas' changes too.
   NOTES_START="$(python3 scripts/release_tools.py notes-start "$TAG")"
-  gh release create "$TAG" "$DMG" -R "$REPO" $PRERELEASE \
+  gh release create "$TAG" "$DMG" "$KIT_ZIP" -R "$REPO" $PRERELEASE \
     --title "KeyScribe $VERSION" --generate-notes ${NOTES_START:+--notes-start-tag "$NOTES_START"}
 fi
 

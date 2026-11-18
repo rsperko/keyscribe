@@ -2,7 +2,7 @@
 # The scripts under ./ and scripts/ stay the implementation; this just makes them
 # discoverable and gives a uniform interface. Full detail: BUILD.md.
 .DEFAULT_GOAL := help
-.PHONY: help build run release publish ship cask test test-kit test-release-tools test-connector test-pi-connector test-bb-plugin check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major beta cheatsheet test-cheatsheet
+.PHONY: help build run release publish ship cask test test-kit test-release-tools test-connector test-pi-connector test-bb-plugin check-deps check-catalog-contract check-min-xcode fix-deps preflight preflight-pre setup reset-permissions verify icon clean patch minor major beta cheatsheet test-cheatsheet voice-kit test-voice-kit
 
 help: ## List available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -55,6 +55,12 @@ test-pi-connector: ## Run the Pi connector's behavior tests (needs Node 22.18 or
 
 test-bb-plugin: ## Run the bb plugin's behavior tests (needs Node 22.18 or later; never needed to build)
 	./scripts/test-bb-plugin.sh
+
+voice-kit: ## Build the voice kit to hand out: make voice-kit [STUDY=accents] [APP=Name] → voice-kit/dist/
+	zsh voice-kit/package.sh $(if $(APP),--app '$(APP)') $(STUDY)
+
+test-voice-kit: ## Check the voice kit's recorder and packager without an app or a microphone
+	zsh voice-kit/test.sh
 
 check-deps: ## Detect upstream dependency mutation (moved tags, re-uploaded binary assets)
 	./scripts/check-binary-artifacts.py

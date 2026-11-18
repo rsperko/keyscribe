@@ -1,0 +1,52 @@
+@study	accents
+@title	Accent recordings
+@intro	You will read 35 short sentences, about ten minutes in all.
+@consent	These recordings go only to the person who gave you this kit, to test and improve speech recognition for your accent.
+?firstLanguage	Your first language:
+?accent	How would you describe your English accent? (e.g. Indian English, Hyderabad):
+?grewUpIn	Where did you grow up?
+?englishSince	When did you start speaking English?	from birth|as a child|as a teenager|as an adult
+?microphone	Which microphone are you using?	built-in Mac microphone|headset or earbuds|external microphone
+?room	How is the room?	quiet|some background noise|noisy
+#	Everyday sentences	Read each sentence in your normal voice, at the pace you would use talking to a friend. Mistakes are fine: dictate it again and the new take replaces the old one.
+w01	casual			Thank you for waiting. The weather this weekend should be warm, with a light breeze in the evening.
+w02	casual			My brother bought three thick blue blankets and a small red lamp for the living room.
+w03	casual			Could you call the vet about Victor's visit on Thursday? The van will be there by eleven.
+w04	casual			We walked along the river, then sat near the old bridge until the rain started.
+w05	casual			Her little sister still writes letters by hand, which is rare these days.
+w06	casual			Please leave the package with the neighbor if nobody answers the door.
+#	Work messages	These are the kinds of things people dictate at work: quick updates, scheduling, replies.
+d01	status			Quick update: the deploy went out this morning and the error rate is back to normal.
+d02	status			Can we move the meeting to Thursday at 3:30? I have a conflict at two.
+d03	tech			I pushed the fix to the pull request, so it should be ready for review after lunch.
+d04	tech	Postgres,Kubernetes		The Postgres migration finished, but the Kubernetes rollout is still pending.
+d05	status			Let's schedule a thirty minute call to walk through the budget before Friday.
+d06	status			Thanks for the feedback. I will revise the draft and send it back by end of day.
+d07	status			The customer said the invoice total looked wrong, so please double check the tax line.
+d08	status			Reminder: the office is closed on Monday for the holiday, and we reopen on Tuesday.
+#	Numbers, dates and times	Say the numbers the way you naturally would. There is no right way; we want to hear yours.
+n01	numbers		Say the order number digit by digit.	The order number is 47291, placed on March 3rd at 4:15 p.m.
+n02	numbers		Digit by digit.	My phone number ends in 6552, and the zip code is 94103.
+n03	numbers		Say "two point eight point one".	Version 2.8.1 fixes the crash, and version 3 is due in 2027.
+n04	numbers		Say "one hundred and eighty five dollars".	It cost $185, which is 15 percent more than last year.
+#	Tricky sounds	These sentences pack in sounds that differ between accents. Read them naturally. Do not try to change how you speak.
+s01	sounds			The ship left early, so the sheep stayed on the hill.
+s02	sounds			I think those three trees are free to take.
+s03	sounds			He bet that the bad bat would be back by bedtime.
+s04	sounds			Very berry jam is my favorite, with a bit of vanilla.
+s05	sounds			Turn right at the light, then walk to the left of the library.
+s06	sounds			We worked and walked all week, then watched a film on Wednesday.
+s07	sounds			Thirty birds were heard on the third of the month.
+s08	sounds			Jess said yes to the yellow jacket and the wine from the vineyard.
+s09	sounds			Put the pot on the stove, then pass the salt and the pepper.
+#	Spoken corrections	People often correct themselves out loud while dictating. Read these as if you were dictating and changing your mind.
+c01	cmd		A full stop and a short pause before and after "scratch that".	Send the report tomorrow morning. Scratch that. Send the report tonight.
+c02	cmd		Pause briefly around "new line".	Add milk, eggs, and bread to the list. New line. Then call the dentist.
+c03	cmd			Open the settings tab and switch to the dark theme.
+c04	cmd			Delete the last sentence and start a new paragraph.
+#	Two longer passages	Take a breath. Read each one straight through; a small stumble is fine.
+l01	long			When I first started working remotely, I thought the hardest part would be staying focused. It turned out to be the opposite: I kept working late because there was no clear end to the day, so I had to set a firm stopping time.
+l02	long,tech			If the build fails again, roll back to the previous release, open a ticket with the logs attached, and let the team know in the channel so nobody keeps testing against a broken version.
+#	In your own words	Last two. There is nothing to read. Just talk for ten to twenty seconds.
+ff01	freeform	FREEFORM		Describe what you did yesterday, in two or three sentences.
+ff02	freeform	FREEFORM		Tell us about a place you like to visit, and why.

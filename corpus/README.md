@@ -24,6 +24,9 @@ flat and are organized by **semantic id prefix**, not subfolders. A clip needed 
 | `aliases/` | Held-out real-voice clips for the History phrase finder (dictionary-word mishearings, sound-alike distractors, controls) | `manifest.json` | `KeyScribe --alias-discovery corpus/aliases` |
 | `blips/` | No-speech admission gate: empty trigger presses vs. genuine short utterances, pulled from the app capture archive | `manifest.json` | `KeyScribe --vad-probe corpus/blips [--chunks]` |
 
+Clips recorded by other people come in through the voice kit (`voice-kit/README.md`) and land under
+`corpus/received/`, which stays out of git.
+
 ## Manifest schema (unified, `schemaVersion: 1`)
 
 Every `manifest.json` has the same shape: a top-level `{ schemaVersion, corpus, description?, context?, clips[] }`,

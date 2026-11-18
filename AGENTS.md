@@ -216,6 +216,8 @@ keyscribe/
                        #   its own README. Runners: KeyScribe --benchmark <dir> (engine WER, ranked by
                        #   compare.sh) and --commands-check <dir> (spoken-command regression).
                        #   Record: bash corpus/record.sh [--commands].
+  voice-kit/           # guided recorder for collecting studies (accents, …) from other people's voices
+                       #   with the app they already run; one study = studies/<study>.tsv. See its README.
 ```
 
 ---
