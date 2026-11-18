@@ -20,7 +20,7 @@ before you edit code in its area.
 - **The only outbound network calls that carry content are explicit BYOK LLM calls**, each over a redacted
   payload and each to a connection the user chose for that purpose: a mode's rewrite of the transcript (or of
   the selected text by spoken instruction), a mode's answer to a spoken request about the selected text, and,
-  when the user turns on the Agent mode's spoken updates and chooses a service, the summary of an agent's final reply to the user's
+  when the user turns on the Agent mode's Read Agent Replies Aloud and chooses a service, the summary of an agent's final reply to the user's
   own dictation, or to a turn the user asked from inside the agent to hear read aloud, and the description of a prompt
   that turn waits on, from the prompt's title, the tool call it seems to
   be about, and the agent's last words (`SpokenResultOutput`). One content-free exception: when the **Phase-A resolved mode is wired to a BYOK

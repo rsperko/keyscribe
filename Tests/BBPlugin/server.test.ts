@@ -107,7 +107,7 @@ test("a command in bb's message box asks for its thread's reply through one meth
   const bb = fakeBb({ rpc: { register: (_contract: any, handlers: any) => registered.push({ handlers }) } })
   await plugin(bb)
   assert.deepEqual(await registered[0].handlers.readAloud({ thread: "thr_unknown", on: true }),
-    { message: "the voice app didn’t confirm the request, so a reply update isn’t certain." })
+    { message: "the voice app didn’t confirm the request, so you may not get this reply." })
   const check = (value: unknown) => rpcContract.readAloud.input["~standard"].validate(value)
   assert.deepEqual(check({ thread: "thr_a", on: false }), { value: { thread: "thr_a", on: false } })
   for (const bad of [null, {}, { thread: 1, on: true }, { thread: "thr_a" }, { thread: "x".repeat(129), on: true }]) {

@@ -212,7 +212,7 @@ struct SpokenHelpTests {
 
     @Test func repeatHelpHoldsWhetherTheLastReplyWasSpokenOrShown() {
         let row = SpokenHelp.agentPhrases(name: "api", readsReplies: true).first { $0.said == VoiceCommandGrammar.repeatSummary[0] }
-        #expect(row?.effect == "Gives the last reply update again.")
+        #expect(row?.effect == "Gives the last reply or notice again.")
         let keep = SpokenHelp.agentPhrases(name: "api", readsReplies: true).first { $0.said == VoiceCommandGrammar.keepReply[0] }
         #expect(keep?.effect == "Keeps the last reply\u{2019}s audio and report in History.")
     }

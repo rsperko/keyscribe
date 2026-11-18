@@ -10,7 +10,7 @@ struct SpokenResultSection: View {
             SettingRow(
                 title: "Read Agent Replies Aloud",
                 result: model.spokenResult.enabled ? currentSummary : "Get replies to messages you dictate or ask the agent to report, and know when it needs you.",
-                reference: aboutReplyUpdates)
+                reference: aboutReadingReplies)
             {
                 Toggle("", isOn: enabled)
                     .labelsHidden().toggleStyle(.switch)
@@ -88,26 +88,26 @@ struct SpokenResultSection: View {
         return "Long replies and waiting prompts go to \(chosen.name) after best-effort redaction."
     }
 
-    private var aboutReplyUpdates: HelpTopic {
+    private var aboutReadingReplies: HelpTopic {
         let service = chosen?.name ?? "the summary service you choose"
         let app = Branding.appName
-        return HelpTopic("About reply updates", title: "Read Agent Replies Aloud", id: AccessibilityID.Mode.Agents.aboutReplyUpdates, parts: [
-            .init(heading: "When updates appear", paragraphs: [
-                "When a conversation finishes a message you dictated.",
-                "When you ask the agent to have \(app) tell you it\u{2019}s done with work you typed, or run /\(KeyScribePaths.variant.connectorSlug) in the conversation.",
-                "When the agent needs your approval, or disconnects before finishing.",
-                "A reply to dictation is skipped while you\u{2019}re viewing that conversation. When \(app) can\u{2019}t confirm the conversation is in front, it gives the update.",
+        return HelpTopic("About reading replies aloud", title: "Read Agent Replies Aloud", id: AccessibilityID.Mode.Agents.aboutReadingReplies, parts: [
+            .init(heading: "What you get", paragraphs: [
+                "The agent\u{2019}s reply when a conversation finishes a message you dictated.",
+                "The agent\u{2019}s reply to work you typed, when you ask the agent to have \(app) read it to you, or run /\(KeyScribePaths.variant.connectorSlug) in the conversation.",
+                "A short notice when a conversation needs your approval or an answer, or disconnects before it finishes.",
+                "A reply to a message you dictated is skipped while you\u{2019}re looking at that conversation. When \(app) can\u{2019}t tell whether the conversation is in front, it gives the reply.",
             ]),
-            .init(heading: "Speech and display", paragraphs: [
-                "Each update is shown, and read aloud unless Voice is \(SpokenVoiceRows.textOnlyLabel).",
+            .init(heading: "Read aloud or shown", paragraphs: [
+                "Each reply and notice is shown, and read aloud unless Voice is \(SpokenVoiceRows.textOnlyLabel).",
                 "Speech is made on this Mac. What it reads is never sent anywhere for speaking.",
             ]),
-            .init(heading: "Summaries and data sharing", paragraphs: [
-                "A short reply is given as it is, without any service.",
-                "A longer reply is sent to \(service) to be summarized. With None, nothing is sent and a longer reply is announced without a summary.",
+            .init(heading: "Summaries and what is sent", paragraphs: [
+                "A short reply is given as it is, and nothing is sent.",
+                "A longer reply is sent to \(service), and you get its summary instead. With None, nothing is sent, and you\u{2019}re told the conversation replied, so you can open it for the result.",
                 "When a conversation waits on a prompt its connector describes, such as an approval, the prompt\u{2019}s title, the tool call it seems to be about (such as a command to approve) and the agent\u{2019}s last words are sent to \(service) to say what it asks.",
                 "Both go after best-effort redaction, which can miss things in code and command output.",
-                "With History on, \(app) saves what was read aloud in History.",
+                "With History on, \(app) saves each reply as you got it. Notices aren\u{2019}t saved.",
             ]),
         ])
     }
@@ -148,7 +148,7 @@ struct SpokenVoiceRows: View {
             IssueText(error, severity: voice.status == .needsAttention ? .failure : .advisory)
         } else if voice.status == .ready, let reason = voice.fallbackReason {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                IssueText("The macOS voice read the last spoken update because \(reason).", severity: .advisory)
+                IssueText("The macOS voice read the last reply because \(reason).", severity: .advisory)
                 if let entry = voice.fallbackEntry, let show = voice.showEntry {
                     Button("Show in History") { show(entry) }
                         .buttonStyle(.link)

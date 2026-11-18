@@ -503,12 +503,12 @@ screen for a few moments after it is read, longer for a long answer, with a butt
 it keeps it open. Press Escape once to stop the voice and again to close the answer. The voice is set in the mode's **Answer** section and is the same one that reads
 agent replies.
 
-### Can I get answers and agent updates without hearing them?
+### Can I get answers and agent replies without hearing them?
 
 Yes. Set **Voice** to **Off — text only**, either in an Ask mode's **Answer** section or under **Settings ▸ Modes ▸
-Agent ▸ Replies**. It is one shared choice, so it applies to both. Answers and agent updates then appear on
+Agent ▸ Replies**. It is one shared choice, so it applies to both. Answers and agent replies then appear on
 screen with their text, a copy button and a close button, and close themselves after time to read them; hovering
-keeps one open, and Escape closes it. Nothing is spoken and other audio is left alone. Agent updates still arrive
+keeps one open, and Escape closes it. Nothing is spoken and other audio is left alone. Agent replies and notices still arrive
 one at a time, in order: the next appears when the current one closes, and they wait while you dictate.
 Choosing Off — text only while something is being read stops the voice and leaves the text on screen. Choose a voice again to hear them; your
 earlier voice is remembered.
@@ -730,7 +730,7 @@ nothing: the question it is asking when it is short, else a description (with an
 Spoken replies), else that it is waiting for approval or an answer, with “open docs” to bring it forward.
 When nothing is pending, it tells you whether the agent is working or idle. Every answer starts with
 **Status** and says **Nothing sent.** **“Check on all conversations”** (or **“who needs me?”**) names
-every conversation waiting for you. The answer is shown, and given as a reply update when Read Agent Replies Aloud is on.
+every conversation waiting for you. The answer is shown, and given like a reply when Read Agent Replies Aloud is on.
 
 Any question you say, such as “what are you waiting for?” or “do you need anything from me?”, is a message
 to the conversation you are talking to, like the rest of your dictation. “Tell docs check on the build”

@@ -159,7 +159,7 @@ struct ModeEditorView: View {
                         voice: voice,
                         selection: Binding(get: { agents.voiceChoice }, set: { agents.voiceChoice = $0 }),
                         spokenVoice: agents.chosenVoice,
-                        sharedNote: "This choice also applies to agent reply updates, so changing it here changes it there.")
+                        sharedNote: "This choice also applies to Read Agent Replies Aloud, so changing it here changes it there.")
                 }
             }
 

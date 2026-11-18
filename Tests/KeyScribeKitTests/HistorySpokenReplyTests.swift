@@ -132,7 +132,8 @@ struct HistorySpokenReplyTests {
         }
     }
 
-    @Test func theSupportReportWarningMentionsTheReplyUpdate() {
-        #expect(SupportReport.warning.contains("for an agent its reply update"))
+    @Test func theSupportReportWarningMentionsTheAgentReply() {
+        #expect(SupportReport.warning.contains("for an agent the reply it gave you"))
+        #expect(!SupportReport.warning.contains("update"))
     }
 }

@@ -655,7 +655,7 @@ final class HistoryPaneModel: ObservableObject {
     func copyReport() {
         guard let entry = selected else { return }
         copyText?(SupportReport.render(entry: entry, appName: Branding.appName, setup: supportSetup()))
-        flash("Report copied. It includes what you said, any AI request, and any reply update — check it before sending.")
+        flash("Report copied. It includes what you said, any AI request, and any agent reply — check it before sending.")
     }
 
     var voiceCommandsEnabled: () -> Bool = { true }
@@ -861,7 +861,7 @@ struct HistoryPaneView: View {
                 reference: HelpTopic("What History keeps", id: AccessibilityID.History.whatHistoryKeeps, parts: [
                     .init(heading: "Saved", paragraphs: [
                         "What you said and the final text, so you can search and correct them.",
-                        "Agent reply updates as they were given.",
+                        "Agent replies as you got them.",
                         "Generated reply audio is saved when you keep a reply for diagnosis.",
                     ]),
                     .init(heading: "Never saved", paragraphs: [
@@ -1524,7 +1524,7 @@ private struct HistoryDetailView: View {
             }
             if !entry.isSpokenReplyOnly {
                 Button { model.copyReport() } label: { Label("Copy Report", systemImage: "ladybug") }
-                    .help("Copies this dictation for a bug report: what you said, the inserted text, the app it was for, your microphone's name, any AI request and reply (which can include your dictionary words, selected text, or text from the app), an agent's reply update, and details about your setup.")
+                    .help("Copies this dictation for a bug report: what you said, the inserted text, the app it was for, your microphone's name, any AI request and reply (which can include your dictionary words, selected text, or text from the app), an agent's reply, and details about your setup.")
                     .accessibilityIdentifier(AccessibilityID.History.copyReport)
             }
         } label: {

@@ -941,13 +941,13 @@ export function connector(pi: ExtensionAPI, host: Host, settings: Settings): voi
     if (answer === true) return `${app} will report your final reply when this turn ends. Say so in one short sentence and continue.`
     if (answer === false) return `Read Agent Replies Aloud is off in ${app}. Tell the user to turn on Read Agent Replies Aloud in ${app}\u2019s Agent settings and ask again. Nothing will be reported.`
     if (answer === "quiet") return `This conversation is disconnected from ${app}. Tell the user to reconnect it in ${app}\u2019s Agent settings. Nothing will be reported.`
-    return `${app} didn\u2019t confirm the request, so a spoken reply can\u2019t be promised. Tell the user.`
+    return `${app} didn\u2019t confirm the request, so the reply may not be reported. Tell the user.`
   }
 
   function commandAnswer(cancelling: boolean, answer: ReadAloud, running: boolean): string {
     const app = appName()
     if (answer === "quiet") return `This conversation is disconnected from ${app}. Reconnect it in ${app}\u2019s Agent settings.`
-    if (answer === null) return cancelling ? `${app} didn\u2019t confirm the cancel.` : `${app} didn\u2019t confirm the request, so a reply update isn\u2019t certain.`
+    if (answer === null) return cancelling ? `${app} didn\u2019t confirm the cancel.` : `${app} didn\u2019t confirm the request, so you may not get this reply.`
     if (cancelling) return `${app} won\u2019t report this reply.`
     if (answer === false) return `Read Agent Replies Aloud is off. Turn on Read Agent Replies Aloud in ${app}\u2019s Agent settings.`
     return running ? `${app} will report the result of this work.` : `${app} will report your next reply.`

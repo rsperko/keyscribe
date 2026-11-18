@@ -134,7 +134,8 @@ it as a shared type — never a one-off inline pattern. (Anatomy, behavior, and 
 | `Off — text only` (the shared voice picker's no-speech choice) | No voice, mute, disabled |
 | `Cloud rewrite` | AI mode, remote magic |
 | `Cloud answer` (a mode that answers about selected text) | Cloud rewrite (for an answer), AI reply |
-| `Reply summary` (a reply update a service summarized, spoken or shown) | AI voice, cloud reply, spoken summary |
+| `Reply summary` (an agent reply a service summarized, spoken or shown) | AI voice, cloud reply, spoken summary |
+| `reply`, `notice` (what Read Agent Replies Aloud gives: an agent's reply or its summary, and a short notice that a conversation needs the user) | update, message, alert |
 | `No cloud rewrite` (rewrite off) | off, don't use AI |
 | `Best-effort redaction` | protected, anonymized, safe |
 | `Insert without rewriting` | local transcript (implies raw STT), bypass, raw fallback |

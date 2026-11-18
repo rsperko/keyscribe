@@ -2161,7 +2161,18 @@ test('a read-aloud request the app never answers promises nothing', async ($, on
   await h.settle()
   await h.clock.advance(5000)
   await h.settle()
-  expect(String((await call).result)).toMatch(/didn’t confirm the request/)
+  expect(String((await call).result)).toMatch(/didn’t confirm the request, so the reply may not be reported\. Tell the user\.$/)
+})
+
+test('a read-aloud command the app never answers says the reply may not come', async ($, on) => {
+  const h = harness(on)
+  await h.connect($)
+  const run = $.command.run({ command: readAloudCommand, args: '' } as any)
+  await h.settle()
+  await h.clock.advance(5000)
+  await h.settle()
+  await run
+  expect(h.logs.slice(-1)[0]).toMatch(/didn’t confirm the request, so you may not get this reply\.$/)
 })
 
 test('the command covers the running turn, the next one when idle, and cancels', async ($, on) => {

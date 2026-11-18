@@ -55,7 +55,7 @@ public struct SpokenHelp: Equatable, Sendable {
             Row(said: "check on all conversations", effect: "Names the conversations waiting for you. Nothing is sent."),
         ]
         if readsReplies {
-            rows.append(Row(said: VoiceCommandGrammar.repeatSummary[0], effect: "Gives the last reply update again."))
+            rows.append(Row(said: VoiceCommandGrammar.repeatSummary[0], effect: "Gives the last reply or notice again."))
             rows.append(Row(said: VoiceCommandGrammar.keepReply[0], effect: "Keeps the last reply\u{2019}s audio and report in History."))
         }
         rows.append(Row(said: VoiceCommandGrammar.goBack, effect: "Returns to where you were."))

@@ -738,7 +738,7 @@ test("the agent is told plainly what the app promised", () => {
   assert.match(readAloudReply("KeyScribe", true), /KeyScribe will report your final reply/)
   assert.match(readAloudReply("KeyScribe", false), /Read Agent Replies Aloud is off/)
   assert.match(readAloudReply("KeyScribe", "quiet"), /disconnected/)
-  assert.match(readAloudReply("KeyScribe", null), /didn’t confirm/)
+  assert.match(readAloudReply("KeyScribe", null), /didn’t confirm the request, so the reply may not be reported\. Tell the user\.$/)
 })
 
 const plan = approval({ kind: "plan", itemId: "x", plan: "p", planFilePath: null })
@@ -922,7 +922,7 @@ test("a command in bb's message box answers in the same words as the terminal co
   assert.equal(commandAnswer("KeyScribe", true, false, false), "KeyScribe won’t report this reply.")
   assert.equal(commandAnswer("KeyScribe", false, false, true), "Read Agent Replies Aloud is off. Turn on Read Agent Replies Aloud in KeyScribe’s Agent settings.")
   assert.equal(commandAnswer("KeyScribe", false, "quiet", true), "This conversation is disconnected from KeyScribe. Reconnect it in KeyScribe’s Agent settings.")
-  assert.equal(commandAnswer("KeyScribe", false, null, true), "KeyScribe didn’t confirm the request, so a reply update isn’t certain.")
+  assert.equal(commandAnswer("KeyScribe", false, null, true), "KeyScribe didn’t confirm the request, so you may not get this reply.")
   assert.equal(commandAnswer("KeyScribe", true, null, true), "KeyScribe didn’t confirm the cancel.")
 })
 
@@ -942,7 +942,7 @@ test("the command's answer names the app and says whether a turn was running whe
   await h.settle()
   h.open("notify")[0].answer(200, '{"ok":true,"spoken":true}')
   assert.equal(await next, "KeyScribe will report your next reply.")
-  assert.equal(await h.plugin.command("thr_c", true), "KeyScribe didn’t confirm the request, so a reply update isn’t certain.")
+  assert.equal(await h.plugin.command("thr_c", true), "KeyScribe didn’t confirm the request, so you may not get this reply.")
 })
 
 test("a message box shows only the answer to its latest request, whatever order the answers arrive in", () => {

@@ -1772,7 +1772,18 @@ test("a read-aloud request the app never answers promises nothing", async () => 
   const call = h.tools[0].execute("call", {})
   await h.settle()
   await h.advance(5_000)
-  assert.match((await call).content[0].text, /didn\u2019t confirm the request/)
+  assert.match((await call).content[0].text, /didn\u2019t confirm the request, so the reply may not be reported\. Tell the user\.$/)
+})
+
+test("a read-aloud command the app never answers says the reply may not come", async () => {
+  const h = harness()
+  await h.connect()
+  h.autoEvents = false
+  const run = h.runCommand("keyscribe-dev", "")
+  await h.settle()
+  await h.advance(5_000)
+  await run
+  assert.match(h.notes[h.notes.length - 1], /didn\u2019t confirm the request, so you may not get this reply\.$/)
 })
 
 test("the command covers the running turn, the next one when idle, and cancels", async () => {

@@ -397,7 +397,7 @@ enum AccessibilityID {
             static let advanced = "mode.agents.advanced"
             static let whatCanISay = "mode.agents.whatCanISay"
             static let whatAgentsReceive = "mode.agents.whatAgentsReceive"
-            static let aboutReplyUpdates = "mode.agents.aboutReplyUpdates"
+            static let aboutReadingReplies = "mode.agents.aboutReadingReplies"
             static let search = "mode.agents.search"
             static let conversationDetail = "mode.agents.conversationDetail"
             static let example = "mode.agents.example"
@@ -717,7 +717,7 @@ enum AccessibilityID {
         Mode.Agents.unavailableGroup, Mode.Agents.detailsDone,
         Settings.helpDone,
         Mode.Agents.advanced, Mode.Agents.whatCanISay, Mode.Agents.whatAgentsReceive,
-        Mode.Agents.aboutReplyUpdates, Mode.Agents.search,
+        Mode.Agents.aboutReadingReplies, Mode.Agents.search,
         Mode.Agents.conversationDetail, Mode.Agents.example, Mode.Agents.conversationDetails,
         Mode.List.list, Mode.List.add, Mode.List.addBlank, Mode.List.chooserCancel,
         Mode.List.deleteConfirmConfirm, Mode.List.deleteConfirmCancel,
