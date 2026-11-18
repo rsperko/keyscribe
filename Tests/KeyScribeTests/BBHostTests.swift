@@ -424,6 +424,28 @@ struct BBHostTests {
         #expect(bb.focusedWindow()?.instance == work.folder)
     }
 
+    @Test func aCopyOfBbLaunchingOrQuittingTellsTheHubItsListChanged() async {
+        final class Apps: @unchecked Sendable { var changed: (@MainActor (String) -> Void)? }
+        let apps = Apps()
+        let work = Self.work
+        let lab = "/Applications/bb Lab.app"
+        let bb = BBHost(
+            home: Self.home, enrolled: { [work.folder, "/Users/a/.bb-lab"] }, describe: { $0 == work.folder ? work : nil }, installed: { _ in true },
+            isOpen: { _ in true }, run: { _, _, _, _ in throw HostCLI.Failure.couldNotStart("") }, activate: { _ in },
+            frontmost: { _ in nil }, frontApp: { nil }, dataFolder: { $0 == lab ? "/Users/a/.bb-lab" : nil },
+            appsChanging: {
+                apps.changed = $0
+                return []
+            })
+        var changes: [AgentHostChange] = []
+        bb.watch { changes.append($0) }
+        _ = await bb.scan()
+        apps.changed?(work.app!)
+        apps.changed?(lab)
+        apps.changed?("/Applications/Safari.app")
+        #expect(changes == [.listing, .listing])
+    }
+
     @Test func aFolderNoAppIsKnownToUseSaysSoRatherThanThatBbIsNotOpen() async {
         let runner = Runner()
         let orphan = BBBuild(folder: "/Users/a/.work-bb", name: BBBuilds.fallbackName)

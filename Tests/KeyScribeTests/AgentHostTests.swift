@@ -73,6 +73,10 @@ struct AgentHostTests {
 
         func copyInFront() -> AgentHostCopy? { copy }
 
+        var changed: (@MainActor (AgentHostChange) -> Void)?
+
+        func watch(_ changed: @escaping @MainActor (AgentHostChange) -> Void) { self.changed = changed }
+
         func front(among locations: [AgentHostLocation], reported: AgentHostLocation?, in app: AgentHostApp?) async -> AgentHostFront {
             asked.append(locations)
             self.reported.append(reported)
@@ -647,6 +651,20 @@ struct AgentHostTests {
         hub.handle(.hello(hello))
         await hub.rescan()
         #expect(hub.hostCopyNotReadyInFront() == .windowUnknown("Example Work"))
+    }
+
+    @Test func aHostThatSaysItsListChangedIsScannedAgainAtOnce() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        let hub = makeHub(host)
+        await hub.rescan()
+        #expect(hub.directory.conversations.map(\.id) == [Self.id("t1")])
+        host.conversations = [Self.thread("t1"), Self.thread("t2")]
+        await hub.rescan()
+        #expect(hub.directory.conversations.count == 1)
+        host.changed?(.listing)
+        for _ in 0..<200 where hub.directory.conversations.count == 1 { await Task.yield() }
+        #expect(Set(hub.directory.conversations.map(\.id)) == [Self.id("t1"), Self.id("t2")])
     }
 
     @Test func aConnectedCopyInFrontSaysWhichStepBeforeSendingIsMissing() async {

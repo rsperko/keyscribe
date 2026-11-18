@@ -124,6 +124,17 @@ enum BBBuildFinder {
 
     @MainActor static func isOpen(_ build: BBBuild) -> Bool { runningApp(build) != nil }
 
+    @MainActor static func watchLaunches(_ changed: @escaping @MainActor (String) -> Void) -> [NSObjectProtocol] {
+        let center = NSWorkspace.shared.notificationCenter
+        return [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification].map { name in
+            center.addObserver(forName: name, object: nil, queue: .main) { note in
+                guard let url = (note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication)?.bundleURL else { return }
+                let path = canonical(url.path)
+                MainActor.assumeIsolated { changed(path) }
+            }
+        }
+    }
+
     @MainActor static func bringForward(_ build: BBBuild) {
         guard let running = runningApp(build) else { return }
         _ = AppActivation.bringForward(pid: running.processIdentifier)

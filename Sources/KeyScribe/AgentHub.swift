@@ -229,6 +229,18 @@ final class AgentHub {
         }
         placeTracker?.onChange = { [weak self] in self?.refresh() }
         silenceHostsTurnedOff()
+        for source in self.hosts { watch(source) }
+    }
+
+    private func watch(_ source: HostDiscovery) {
+        source.host.watch { [weak self, weak source] change in
+            guard let self, let source, !self.stopped else { return }
+            switch change {
+            case .listing:
+                source.expect()
+                Task { [weak self] in await self?.rescan(rereadingTitles: false) }
+            }
+        }
     }
 
     private(set) var placeTracker: AgentPlaceTracker?

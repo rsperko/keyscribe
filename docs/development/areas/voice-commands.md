@@ -675,7 +675,8 @@ every rule above applies to it, with these sharpenings:
   otherwise goes to the default port, which for a copy started on another port is a different copy's server. A record
   left behind by a crash names a port another copy may now hold, so it is ignored and bb's command finds its server as
   bb's own `bin/bb` would. A failed match for an app that names a folder is never cached, so a folder set up while
-  that app is in front is found on the next take. A build that is closed or
+  that app is in front is found on the next take. When an app that is one of bb's copies launches or quits, the host
+  says its list changed (`AgentHost.watch`), and the hub scans it again at once instead of at its next interval. A build that is closed or
   could not be read keeps the threads it last listed, as Last seen, while the others are listed fresh
   (`AgentHostScan.found`'s `carried`); only when no build could be read is the list unreadable. Delivery uses `--mode auto`, which steers a
   running turn and starts one when the thread is idle, as typing in bb does. The hub holds nothing back for an open

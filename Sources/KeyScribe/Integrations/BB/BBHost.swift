@@ -30,6 +30,8 @@ final class BBHost: AgentHost {
     private let frontmost: @MainActor (Set<String>) -> AgentHostApp?
     private let dataFolder: @Sendable (String) -> String?
     private let frontApp: @MainActor () -> AgentHostApp?
+    private let appsChanging: @MainActor (@escaping @MainActor (String) -> Void) -> [NSObjectProtocol]
+    private var watching: [NSObjectProtocol] = []
     private var known: [String: BBBuild] = [:]
     private var copies: [String: BBBuild?] = [:]
     private var listed: [String: [BBThreads.Thread]] = [:]
@@ -44,8 +46,10 @@ final class BBHost: AgentHost {
         activate: @escaping @MainActor (BBBuild) -> Void = BBBuildFinder.bringForward,
         frontmost: @escaping @MainActor (Set<String>) -> AgentHostApp? = BBBuildFinder.frontmost(among:),
         frontApp: @escaping @MainActor () -> AgentHostApp? = BBBuildFinder.frontApp,
-        dataFolder: (@Sendable (String) -> String?)? = nil
+        dataFolder: (@Sendable (String) -> String?)? = nil,
+        appsChanging: @escaping @MainActor (@escaping @MainActor (String) -> Void) -> [NSObjectProtocol] = BBBuildFinder.watchLaunches
     ) {
+        self.appsChanging = appsChanging
         self.home = home
         let usual = (home as NSString).appendingPathComponent(BBBuilds.usualFolder)
         self.enrolled = enrolled ?? { [usual] }
@@ -78,6 +82,18 @@ final class BBHost: AgentHost {
 
     private func environment(_ build: BBBuild) -> [String: String] {
         BBBuildFinder.environment(folder: build.folder, home: home)
+    }
+
+    func watch(_ changed: @escaping @MainActor (AgentHostChange) -> Void) {
+        watching = appsChanging { [weak self] app in
+            guard let self, self.isCopy(app) else { return }
+            changed(.listing)
+        }
+    }
+
+    private func isCopy(_ app: String) -> Bool {
+        if builds.contains(where: { $0.app == app }) { return true }
+        return dataFolder(app).map(folders.contains) ?? false
     }
 
     var isEnabled: Bool { folders.contains { installed((($0 as NSString).appendingPathComponent(BBBuilds.launcherPath))) } }
