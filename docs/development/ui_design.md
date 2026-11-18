@@ -1744,7 +1744,11 @@ The latest test result remains in the header and beside the test action.
 - **Connection test** — user-initiated only, disabled until the visible prerequisites are met. A passed
   test adds one secondary line naming where reasoning landed for this model (“Reasoning: Off”,
   “Reasoning: Low — the lowest this model accepts”, “Reasoning: Off — requested; the service doesn't confirm it”), so
-  a model that would not lower its reasoning is visible before the first dictation.
+  a model that would not lower its reasoning is visible before the first dictation. The test first
+  saves every field still being edited, and a field that cannot be saved stops the test and says why.
+  A model ID enables the test as it is typed; other required fields enable it once saved. When saving
+  crosses into another service and asks to confirm, the test does not run; cancelling restores the
+  saved values in every field. A failure the model could cause names the model the test used.
 
 Keep API parameters out of the first scan. Endpoint and authentication configuration live under
 **Connection options**. **Reasoning** and **Minimum output allowance** live under **Rewrite settings**;

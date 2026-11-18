@@ -18,23 +18,39 @@ struct ConnectionTester {
                 system: "You are a connection test. Reply with the single word OK.",
                 user: "ping", connection: connection)
             return reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                ? .failed("The model service returned an empty response.")
+                ? .failed(Self.naming(connection.model, in: "The model service returned an empty response."))
                 : .passed
         } catch {
-            return .failed(Self.failureMessage(for: error, connection: connection))
+            let message = Self.failureMessage(for: error, connection: connection)
+            return .failed(Self.modelMatters(error) ? Self.naming(connection.model, in: message) : message)
         }
     }
 
+    static func modelMatters(_ error: Error) -> Bool {
+        guard case let ProviderTransportError.http(status, _) = error else { return false }
+        return [400, 404, 405, 422].contains(status)
+    }
+
+    static func isMissingModel(_ error: Error, connection: Connection) -> Bool {
+        guard case let ProviderTransportError.http(status, body) = error,
+              connection.provider == .openai || connection.provider == .openaiCompatible,
+              status == 404 || status == 405 else { return false }
+        return OpenAIAPIError.parse(body: body)?.indicatesMissingModel == true
+    }
+
+    static func naming(_ model: String, in message: String) -> String {
+        guard !message.contains("“\(model)”") else { return message }
+        let sentence = message.last.map { ".!?…".contains($0) } == true ? message : message + "."
+        return "\(sentence) The test used the model “\(model)”."
+    }
+
     static func failureMessage(for error: Error, connection: Connection) -> String {
-        if case let ProviderTransportError.http(status, body) = error,
-           connection.provider == .openai || connection.provider == .openaiCompatible {
-            let apiError = OpenAIAPIError.parse(body: body)
-            if status == 404 || status == 405 {
-                if apiError?.indicatesMissingModel == true {
-                    return "The service could not find the model “\(connection.model)”. Check the Model ID — it may be misspelled or unavailable on this endpoint."
-                }
-                return "This endpoint did not respond to the model request. Check the Base URL and confirm the selected model is available."
-            }
+        if isMissingModel(error, connection: connection) {
+            return "The service could not find the model “\(connection.model)”. Check the Model ID — it may be misspelled or unavailable on this endpoint."
+        }
+        if case let ProviderTransportError.http(status, _) = error,
+           connection.provider == .openai || connection.provider == .openaiCompatible, status == 404 || status == 405 {
+            return "This endpoint did not respond to the model request. Check the Base URL and confirm the selected model is available."
         }
         return (error as? ProviderTransportError)?.description ?? error.localizedDescription
     }
@@ -600,6 +616,7 @@ private struct AIServiceEditor: View {
     let onDelete: () -> Void
     @State private var draft: AIConnectionDraft
     @State private var pendingBoundaryConnection: Connection?
+    @State private var edits = PendingEdits()
 
     init(
         connection: Connection,
@@ -657,9 +674,10 @@ private struct AIServiceEditor: View {
                 autofocusName: autofocusName,
                 onCommit: commit,
                 onFetchModels: { fetchModels(apiKey: $0) },
-                onTest: onTest,
+                onTest: testWhatIsShown,
                 onConsumeFocus: onConsumeFocus,
-                onDelete: onDelete)
+                onDelete: onDelete,
+                edits: edits)
         }
         .onChange(of: connection) { _, connection in refreshDraft(from: connection) }
         .onChange(of: modelSuggestions) { _, suggestions in
@@ -742,6 +760,11 @@ private struct AIServiceEditor: View {
             apiKey: draft.apiKey,
             modelSuggestions: modelSuggestions,
             modelDiscoveryState: modelDiscoveryState)
+    }
+
+    private func testWhatIsShown() {
+        guard edits.commitAll(), pendingBoundaryConnection == nil else { return }
+        onTest()
     }
 
     private func fetchModels(apiKey: String?) {

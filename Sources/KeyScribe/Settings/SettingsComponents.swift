@@ -282,42 +282,44 @@ struct CommittedTextField: View {
     let commit: (String) -> Void
     // Reports a problem found only when saving, shown beside the field with the draft kept for correction.
     let save: ((String) -> UserInputValidation.Issue?)?
-    let pending: PendingCommit?
+    let edits: PendingEdits?
     @State private var draft: String
     @State private var validationIssue: UserInputValidation.Issue?
+    @State private var newest = PendingEdits.Entry()
     @FocusState private var focused: Bool
 
     init(
         _ title: String, text: String, prompt: String? = nil, suffix: String? = nil,
         autofocus: Bool = false, validation: ((String) -> UserInputValidation.Issue?)? = nil,
         onIssueChange: ((UserInputValidation.Issue?) -> Void)? = nil,
+        edits: PendingEdits? = nil,
         commit: @escaping (String) -> Void
     ) {
         self.init(
             title, text: text, prompt: prompt, suffix: suffix, autofocus: autofocus, validation: validation,
-            onIssueChange: onIssueChange, pending: nil, save: nil, commit: commit)
+            onIssueChange: onIssueChange, edits: edits, save: nil, commit: commit)
     }
 
     // For a save that can fail after validation passed, such as a name taken meanwhile.
     init(
         _ title: String, text: String, prompt: String? = nil, autofocus: Bool = false,
-        validation: ((String) -> UserInputValidation.Issue?)? = nil, pending: PendingCommit,
+        validation: ((String) -> UserInputValidation.Issue?)? = nil, edits: PendingEdits,
         save: @escaping (String) -> UserInputValidation.Issue?
     ) {
         self.init(
             title, text: text, prompt: prompt, suffix: nil, autofocus: autofocus, validation: validation,
-            onIssueChange: nil, pending: pending, save: save, commit: { _ in })
+            onIssueChange: nil, edits: edits, save: save, commit: { _ in })
     }
 
     private init(
         _ title: String, text: String, prompt: String?, suffix: String?, autofocus: Bool,
         validation: ((String) -> UserInputValidation.Issue?)?,
         onIssueChange: ((UserInputValidation.Issue?) -> Void)?,
-        pending: PendingCommit?, save: ((String) -> UserInputValidation.Issue?)?,
+        edits: PendingEdits?, save: ((String) -> UserInputValidation.Issue?)?,
         commit: @escaping (String) -> Void
     ) {
         self.save = save
-        self.pending = pending
+        self.edits = edits
         self.title = title
         self.text = text
         self.prompt = prompt
@@ -330,6 +332,7 @@ struct CommittedTextField: View {
     }
 
     var body: some View {
+        let _ = newest.update { commitIfChanged() }
         VStack(alignment: .leading, spacing: 4) {
             if let suffix {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -354,15 +357,17 @@ struct CommittedTextField: View {
             .onSubmit { commitIfChanged() }
             .onExitCommand { draft = text; validationIssue = nil }
             .onChange(of: focused) { _, nowFocused in if !nowFocused { commitIfChanged() } }
-            .onChange(of: text) { _, newValue in
-                if !focused { draft = newValue; validationIssue = nil }
-                pending?.commit = { commitIfChanged() }
+            .onChange(of: text) { oldValue, newValue in
+                if !focused || draft == oldValue { draft = newValue; validationIssue = nil }
             }
             .onChange(of: validationIssue) { _, issue in onIssueChange?(issue) }
             // A container teardown (`.id` swap, pane switch) can remove the field without a focus-loss commit.
-            .onDisappear { commitIfChanged() }
+            .onDisappear {
+                edits?.remove(newest)
+                commitIfChanged()
+            }
             .onAppear {
-                pending?.commit = { commitIfChanged() }
+                edits?.register(newest)
                 onIssueChange?(validationIssue)
                 guard autofocus else { return }
                 Task { @MainActor in
@@ -392,11 +397,24 @@ struct CommittedTextField: View {
     }
 }
 
-// Lets an action next to a field save what was typed there first, such as opening a sheet that shows the name.
-@MainActor final class PendingCommit {
-    var commit: (() -> Bool)?
-    // False when the typed value could not be saved; the field then says why.
-    func commitNow() -> Bool { commit?() ?? true }
+// Saves what is typed in every field of a form before an action that reads the saved values, such as a
+// connection test: a button press does not end editing, so a field still holding the cursor is unsaved.
+// Each field refreshes its entry on every render, so a save always runs through the field's newest closure.
+@MainActor final class PendingEdits {
+    final class Entry {
+        private(set) var commit: () -> Bool = { true }
+
+        func update(_ commit: @escaping () -> Bool) { self.commit = commit }
+    }
+
+    private var entries: [ObjectIdentifier: Entry] = [:]
+
+    func register(_ entry: Entry) { entries[ObjectIdentifier(entry)] = entry }
+    func remove(_ entry: Entry) { entries[ObjectIdentifier(entry)] = nil }
+
+    func commitAll() -> Bool {
+        entries.values.map { $0.commit() }.allSatisfy { $0 }
+    }
 }
 
 // A popover's own onDisappear commit does NOT fire reliably on teardown, so the debounce alone can lose
@@ -443,6 +461,7 @@ struct PromptEditor: View {
     }
 
     var body: some View {
+        let _ = flush.map { $0.commit = { _ = commitNow() } }
         VStack(alignment: .leading, spacing: 6) {
             // TextEditor has no onSubmit (Return inserts a newline), so commit is driven by focus loss or
             // commitsOnChange instead.
@@ -457,7 +476,6 @@ struct PromptEditor: View {
                 .onChange(of: draft) { if commitsOnChange { scheduleCommit() } }
                 .onChange(of: focused) { _, nowFocused in if !nowFocused { _ = commitNow() } }
                 .onChange(of: text) { _, newValue in if !focused { draft = newValue } }
-                .onAppear { flush?.commit = { _ = commitNow() } }
                 .onDisappear { _ = commitNow() }
             Button("Open in a larger editor…") { expanded = true }
                 .font(.caption).buttonStyle(.link)

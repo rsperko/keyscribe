@@ -1031,7 +1031,7 @@ struct VocabularySettingsView: View {
     @State private var selection: VocabularyScopeDestination = .global
     // A vocabulary just added opens with its Name field focused, so it is named in place.
     @State private var namingShared: String?
-    @State private var pendingName = PendingCommit()
+    @State private var pendingName = PendingEdits()
     @State private var choosingModesFor: SharedVocabulary?
     @State private var choosingSharedFor: Mode?
     @State private var deletingShared: SharedVocabulary?
@@ -1288,7 +1288,7 @@ struct VocabularySettingsView: View {
                             UserInputValidation.nameIssue(name)
                                 ?? shared.nameProblem(name, renaming: id).map(UserInputValidation.Issue.described)
                         },
-                        pending: pendingName,
+                        edits: pendingName,
                         save: { name in
                             if let problem = shared.rename(id, to: name) { return .described(problem) }
                             if namingShared == id { namingShared = nil }
@@ -1307,7 +1307,7 @@ struct VocabularySettingsView: View {
                     .accessibilityValue("\(audience.names) \(audience.effect)")
                     .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.sharedUsedBy)
                     Button("Choose Modes\u{2026}") {
-                        guard pendingName.commitNow() else { return }
+                        guard pendingName.commitAll() else { return }
                         choosingModesFor = shared.vocabulary(id) ?? vocabulary
                     }
                         .accessibilityIdentifier(AccessibilityID.Settings.Vocabulary.sharedChooseModes)

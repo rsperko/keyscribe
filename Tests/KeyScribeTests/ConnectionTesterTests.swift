@@ -101,6 +101,30 @@ struct ConnectionTesterTests {
         #expect(!message.contains("Base URL"))
     }
 
+    @Test func aFailureTheModelCannotCauseLeavesTheModelOut() async {
+        let failures: [Error] = [
+            ProviderTransportError.http(401, body: nil), ProviderTransportError.http(403, body: nil),
+            ProviderTransportError.http(500, body: nil), ProviderTransportError.missingKey("k"), URLError(.cannotConnectToHost),
+        ]
+        for error in failures {
+            guard case .failed(let message) = await ConnectionTester(client: FakeClient(result: .failure(error))).test(connection) else {
+                Issue.record("expected \(error) to fail")
+                continue
+            }
+            #expect(!message.contains("“m”"), "\(message)")
+        }
+    }
+
+    @Test func theModelSentenceFollowsAProviderMessageWithoutClosingPunctuation() async {
+        let body = "Invalid request"
+        let tester = ConnectionTester(client: FakeClient(result: .failure(ProviderTransportError.http(400, body: body))))
+        guard case .failed(let message) = await tester.test(connection) else {
+            Issue.record("expected a 400 to fail")
+            return
+        }
+        #expect(message.hasSuffix("Invalid request. The test used the model “m”."), "\(message)")
+    }
+
     @Test func nonChatCompletionsStatusKeepsTheGenericMessage() async {
         let compat = Connection(
             id: "c", name: "C", provider: .openaiCompatible, model: "m", keyRef: "k",
@@ -111,9 +135,20 @@ struct ConnectionTesterTests {
 
     @Test func emptyReplyIsFailure() async {
         let tester = ConnectionTester(client: FakeClient(result: .success("   \n")))
-        guard case .failed = await tester.test(connection) else {
-            Issue.record("expected an empty reply to be a failure")
-            return
+        #expect(await tester.test(connection) == .failed("The model service returned an empty response. The test used the model “m”."))
+    }
+
+    @Test func aFailureTheModelCouldCauseNamesTheModelOnce() async {
+        let compat = Connection(
+            id: "c", name: "C", provider: .openaiCompatible, model: "vendor/model-x", keyRef: "k",
+            baseUrl: "http://127.0.0.1:11234/v1")
+        let missing = #"{"error":{"message":"no such model","code":"model_not_found"}}"#
+        for error in [ProviderTransportError.http(400, body: nil), .http(404, body: nil), .http(404, body: missing), .http(422, body: nil)] {
+            guard case .failed(let message) = await ConnectionTester(client: FakeClient(result: .failure(error))).test(compat) else {
+                Issue.record("expected \(error) to fail")
+                continue
+            }
+            #expect(message.components(separatedBy: "“vendor/model-x”").count == 2, "\(message)")
         }
     }
 

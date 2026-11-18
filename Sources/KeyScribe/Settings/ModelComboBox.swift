@@ -8,6 +8,8 @@ struct ModelComboBox: NSViewRepresentable {
     var prompt: String?
     var validation: ((String) -> UserInputValidation.Issue?)? = nil
     var onValidationIssue: ((UserInputValidation.Issue?) -> Void)? = nil
+    var edits: PendingEdits? = nil
+    var onTyping: ((String) -> Void)? = nil
     let onCommit: () -> Void
 
     func makeNSView(context: Context) -> NSComboBox {
@@ -24,7 +26,18 @@ struct ModelComboBox: NSViewRepresentable {
         context.coordinator.allItems = items
         combo.addItems(withObjectValues: items)
         combo.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let coordinator = context.coordinator
+        coordinator.shownText = text
+        coordinator.entry.update { [weak coordinator, weak combo] in
+            guard let coordinator, let combo else { return true }
+            return coordinator.commit(combo.currentEditor()?.string ?? combo.stringValue)
+        }
+        edits?.register(coordinator.entry)
         return combo
+    }
+
+    static func dismantleNSView(_ combo: NSComboBox, coordinator: Coordinator) {
+        coordinator.parent.edits?.remove(coordinator.entry)
     }
 
     func updateNSView(_ combo: NSComboBox, context: Context) {
@@ -34,7 +47,10 @@ struct ModelComboBox: NSViewRepresentable {
             combo.removeAllItems()
             combo.addItems(withObjectValues: items)
         }
-        if combo.currentEditor() == nil, combo.stringValue != text {
+        let previous = context.coordinator.shownText
+        context.coordinator.shownText = text
+        let unsaved = combo.currentEditor().map { $0.string != previous } ?? false
+        if !unsaved, combo.stringValue != text {
             combo.stringValue = text
         }
         combo.placeholderString = prompt
@@ -45,6 +61,8 @@ struct ModelComboBox: NSViewRepresentable {
     final class Coordinator: NSObject, NSComboBoxDelegate {
         var parent: ModelComboBox
         var allItems: [String] = []
+        let entry = PendingEdits.Entry()
+        var shownText = ""
         private var popupOpen = false
 
         init(_ parent: ModelComboBox) { self.parent = parent }
@@ -55,6 +73,7 @@ struct ModelComboBox: NSViewRepresentable {
                 let editor = notification.userInfo?["NSFieldEditor"] as? NSText
                 let query = editor?.string ?? combo.currentEditor()?.string ?? combo.stringValue
                 showItems(ModelFilter.filter(allItems, query: query), in: combo)
+                parent.onTyping?(query)
             }
         }
 
@@ -94,6 +113,7 @@ struct ModelComboBox: NSViewRepresentable {
             MainActor.assumeIsolated {
                 guard let combo = notification.object as? NSComboBox else { return }
                 commit(combo.stringValue)
+                parent.onTyping?(parent.text)
                 showItems(allItems, in: combo)
             }
         }
@@ -105,15 +125,17 @@ struct ModelComboBox: NSViewRepresentable {
             combo.addItems(withObjectValues: values)
         }
 
-        @MainActor private func commit(_ value: String) {
+        @discardableResult
+        @MainActor func commit(_ value: String) -> Bool {
             if let issue = parent.validation?(value) {
                 parent.onValidationIssue?(issue)
-                return
+                return false
             }
             parent.onValidationIssue?(nil)
-            guard parent.text != value else { return }
+            guard parent.text != value else { return true }
             parent.text = value
             parent.onCommit()
+            return true
         }
     }
 }

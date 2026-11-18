@@ -20,10 +20,12 @@ struct AIConnectionDraftEditor: View {
     var onTest: (() -> Void)?
     var onConsumeFocus: () -> Void = {}
     var onDelete: (() -> Void)?
+    var edits: PendingEdits?
     @State private var replacingAPIKey = false
     @State private var connectionOptionsExpanded = false
     @State private var rewriteSettingsExpanded = false
     @State private var modelInputIssue: UserInputValidation.Issue?
+    @State private var typedModel: String?
     @State private var outputRoomInputIssue: UserInputValidation.Issue?
 
     var body: some View {
@@ -127,6 +129,7 @@ struct AIConnectionDraftEditor: View {
             if autofocusName { onConsumeFocus() }
             normalizeAuthForProvider()
         }
+        .onChange(of: draft.model) { typedModel = nil }
     }
 
     private var connectionTest: some View {
@@ -134,7 +137,7 @@ struct AIConnectionDraftEditor: View {
             HStack(spacing: 10) {
                 if let onTest {
                     Button("Test Connection", action: onTest)
-                        .disabled(testState == .testing || !draft.canTestInSettings(hasStoredKey: hasStoredKey, permits: permits))
+                        .disabled(testState == .testing || !shownDraft.canTestInSettings(hasStoredKey: hasStoredKey, permits: permits))
                         .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.testConnection)
                 }
                 if testState == .testing { ProgressView().controlSize(.small) }
@@ -146,7 +149,7 @@ struct AIConnectionDraftEditor: View {
                 Text(reasoningSummary).font(.caption).foregroundStyle(.secondary)
                     .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.reasoningSummary)
             }
-            if let reason = draft.testDisabledReasonInSettings(hasStoredKey: hasStoredKey, permits: permits) {
+            if let reason = shownDraft.testDisabledReasonInSettings(hasStoredKey: hasStoredKey, permits: permits) {
                 Text(reason).font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -368,9 +371,9 @@ struct AIConnectionDraftEditor: View {
             modelComboRow
             if let modelInputIssue {
                 IssueText(modelInputIssue.message)
-            } else if draft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            } else if shownDraft.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 requiredLabel("Model ID is required.")
-            } else if let issue = draft.modelIssue {
+            } else if let issue = shownDraft.modelIssue {
                 IssueText(issue.message)
             }
             HStack {
@@ -395,6 +398,8 @@ struct AIConnectionDraftEditor: View {
             prompt: "Choose or type a model ID",
             validation: { UserInputValidation.identifierIssue($0, required: true) },
             onValidationIssue: { modelInputIssue = $0 },
+            edits: edits,
+            onTyping: typed,
             onCommit: { commit(nil) })
             .accessibilityIdentifier(AccessibilityID.Settings.AI.Editor.model)
         return Group {
@@ -442,7 +447,7 @@ struct AIConnectionDraftEditor: View {
                         .frame(maxWidth: 260)
                 }
             case .settings:
-                CommittedTextField(title, text: value, prompt: prompt, autofocus: title == "Service name" && autofocusName, validation: validation) { next in
+                CommittedTextField(title, text: value, prompt: prompt, autofocus: title == "Service name" && autofocusName, validation: validation, edits: edits) { next in
                     update(next)
                     commit(nil)
                 }
@@ -544,7 +549,8 @@ struct AIConnectionDraftEditor: View {
             CommittedTextField(
                 "Minimum output allowance", text: String(draft.params.maxTokens), suffix: "tokens",
                 validation: UserInputValidation.outputRoomIssue,
-                onIssueChange: { outputRoomInputIssue = $0 }
+                onIssueChange: { outputRoomInputIssue = $0 },
+                edits: edits
             ) { next in
                 guard let value = Int(next.trimmingCharacters(in: .whitespacesAndNewlines)),
                       value >= Connection.Params.minimumMaxTokens else { return }
@@ -609,6 +615,19 @@ struct AIConnectionDraftEditor: View {
         draft.authMethod = .apiKey
         draft.tokenCommand = ""
         commit(nil)
+    }
+
+    private var shownDraft: AIConnectionDraft {
+        var shown = draft
+        if let typedModel { shown.model = typedModel }
+        return shown
+    }
+
+    private func typed(_ model: String) {
+        switch presentation {
+        case .onboarding: draft.model = model
+        case .settings: typedModel = model
+        }
     }
 
     private func commit(_ apiKey: String?) {
