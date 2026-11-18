@@ -1,41 +1,66 @@
 import AppKit
 import Foundation
+import os
 import KeyScribeKit
 
 enum BBBuildFinder {
-    nonisolated static func describe(folder: String) -> BBBuild? {
+    private struct Declaration {
+        var modified: timespec?
+        var folder: String?
+    }
+
+    nonisolated static func describe(folder: String, home: String) -> BBBuild? { describe(folder: folder, apps: runningApps, home: home) }
+
+    nonisolated static func describe(folder: String, apps: [URL], home: String) -> BBBuild? {
         let files = FileManager.default
         let launcher = (folder as NSString).appendingPathComponent(BBBuilds.launcherPath)
         guard files.isExecutableFile(atPath: launcher) else { return nil }
-        let runtime = files.contents(atPath: (folder as NSString).appendingPathComponent(BBBuilds.runtimeFile))
-        let script = files.contents(atPath: launcher).map { String(decoding: $0.prefix(16_384), as: UTF8.self) }
-        let app = BBBuilds.app(runtime: runtime, launcher: script).map { ConnectorFolders.canonical(URL(fileURLWithPath: $0)).path }
+        let target = canonical(folder)
+        let running = apps.map { canonical($0.path) }
+        let recorded = {
+            let runtime = files.contents(atPath: (folder as NSString).appendingPathComponent(BBBuilds.runtimeFile))
+            let script = files.contents(atPath: launcher).map { String(decoding: $0.prefix(16_384), as: UTF8.self) }
+            return BBBuilds.app(runtime: runtime, launcher: script).map(canonical)
+        }()
+        let app = declarer(of: target, among: running.sorted(), home: home)
+            ?? recorded.flatMap { running.contains($0) ? $0 : nil }
+            ?? declarer(of: target, among: remembered(declaring: target).subtracting(running).sorted(), home: home)
+            ?? recorded
         let info = app.flatMap { NSDictionary(contentsOfFile: ($0 as NSString).appendingPathComponent("Contents/Info.plist")) as? [String: Any] }
         return BBBuild(folder: folder, app: app, bundle: info?["CFBundleIdentifier"] as? String, name: BBBuilds.name(info: info, app: app))
     }
 
+    nonisolated private static func declarer(of folder: String, among apps: [String], home: String) -> String? {
+        apps.first { declaration(of: $0, home: home).folder == folder }
+    }
+
+    nonisolated private static func remembered(declaring folder: String) -> Set<String> {
+        Set(declarations.withLock { $0.filter { $0.value.folder == folder }.map(\.key.app) })
+    }
+
+    nonisolated private static let canonicalPaths = OSAllocatedUnfairLock<[String: String]>(initialState: [:])
+
+    nonisolated private static func canonical(_ path: String) -> String {
+        if let known = canonicalPaths.withLock({ $0[path] }) { return known }
+        let resolved = ConnectorFolders.canonical(URL(fileURLWithPath: path)).path
+        canonicalPaths.withLock { $0[path] = resolved }
+        return resolved
+    }
+
     nonisolated static func find(home: String, apps: [URL], also: [String] = []) -> [BBBuild] {
         let usual = (home as NSString).appendingPathComponent(BBBuilds.usualFolder)
-        let declared = apps.compactMap { app in
-            BBBuilds.dataFolder(
-                environment: (NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) as? [String: Any])?["LSEnvironment"] as? [String: Any],
-                home: home)
-        }
+        let declared = apps.compactMap { declaredFolder(app: canonical($0.path), home: home) }
         let hidden = ((try? FileManager.default.contentsOfDirectory(atPath: home)) ?? [])
             .filter { $0.hasPrefix(".") }.sorted().map { (home as NSString).appendingPathComponent($0) }
         var seen: Set<String> = []
         return ([usual] + declared + also + hidden).compactMap { path in
             let folder = ConnectorFolders.canonical(URL(fileURLWithPath: path)).path
             guard seen.insert(folder).inserted, isDataFolder(folder) else { return nil }
-            return describe(folder: folder)
+            return describe(folder: folder, apps: apps, home: home)
         }
     }
 
-    nonisolated static func declaredFolder(app: String, home: String) -> String? {
-        let info = NSDictionary(contentsOfFile: (app as NSString).appendingPathComponent("Contents/Info.plist")) as? [String: Any]
-        return BBBuilds.dataFolder(environment: info?["LSEnvironment"] as? [String: Any], home: home)
-            .map { ConnectorFolders.canonical(URL(fileURLWithPath: $0)).path }
-    }
+    nonisolated static func declaredFolder(app: String, home: String) -> String? { declaration(of: app, home: home).folder }
 
     nonisolated static func isDataFolder(_ folder: String) -> Bool {
         let files = FileManager.default
@@ -43,20 +68,50 @@ enum BBBuildFinder {
         return [BBBuilds.runtimeFile, BBBuilds.threadStorage].contains { files.fileExists(atPath: (folder as NSString).appendingPathComponent($0)) }
     }
 
-    @MainActor static var runningApps: [URL] { NSWorkspace.shared.runningApplications.compactMap(\.bundleURL) }
+    nonisolated static var runningApps: [URL] { NSWorkspace.shared.runningApplications.compactMap(\.bundleURL) }
 
-    @MainActor private static var declared: [String: (modified: Date?, folder: String?)] = [:]
+    private struct DeclarationKey: Hashable {
+        var app: String
+        var home: String
+    }
 
-    @MainActor private static func declaredFolder(cachedFor app: String, home: String) -> String? {
+    nonisolated private static let declarations = OSAllocatedUnfairLock<[DeclarationKey: Declaration]>(initialState: [:])
+
+    nonisolated private static func declaration(of app: String, home: String) -> Declaration {
         let plist = (app as NSString).appendingPathComponent("Contents/Info.plist")
-        let modified = (try? FileManager.default.attributesOfItem(atPath: plist))?[.modificationDate] as? Date
-        if let known = declared[app], known.modified == modified { return known.folder }
-        let found = declaredFolder(app: app, home: home)
-        declared[app] = (modified, found)
+        var info = stat()
+        let modified = stat(plist, &info) == 0 ? info.st_mtimespec : nil
+        let key = DeclarationKey(app: app, home: home)
+        if let known = declarations.withLock({ $0[key] }),
+           known.modified?.tv_sec == modified?.tv_sec, known.modified?.tv_nsec == modified?.tv_nsec { return known }
+        let contents = NSDictionary(contentsOfFile: plist) as? [String: Any]
+        let found = Declaration(
+            modified: modified,
+            folder: BBBuilds.dataFolder(environment: contents?["LSEnvironment"] as? [String: Any], home: home).map(canonical))
+        declarations.withLock { $0[key] = found }
         return found
     }
 
     @MainActor static func runningApp(_ build: BBBuild) -> NSRunningApplication? {
+        sharingIdentity(build) ?? declaring(build.folder)
+    }
+
+    @MainActor private static func declaring(_ folder: String) -> NSRunningApplication? {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let target = canonical(folder)
+        return NSWorkspace.shared.runningApplications
+            .compactMap { app in app.bundleURL.map { (app, canonical($0.path)) } }
+            .sorted { $0.1 < $1.1 }
+            .first { declaredFolder(app: $0.1, home: home) == target }?.0
+    }
+
+    nonisolated static func environment(folder: String, home: String) -> [String: String] {
+        BBBuilds.environment(
+            folder: folder, home: home, runtime: FileManager.default.contents(atPath: (folder as NSString).appendingPathComponent(BBBuilds.runtimeFile)),
+            alive: { kill($0, 0) == 0 || errno == EPERM })
+    }
+
+    @MainActor private static func sharingIdentity(_ build: BBBuild) -> NSRunningApplication? {
         guard let bundle = build.bundle else { return nil }
         let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundle)
         guard let app = build.app else { return running.first }
@@ -64,7 +119,7 @@ enum BBBuildFinder {
         if let exact = paths.first(where: { $0.1 == app }) { return exact.0 }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let usual = ConnectorFolders.canonical(URL(fileURLWithPath: (home as NSString).appendingPathComponent(BBBuilds.usualFolder))).path
-        return paths.first { _, path in path.map { (declaredFolder(cachedFor: $0, home: home) ?? usual) == build.folder } ?? false }?.0
+        return paths.first { _, path in path.map { (declaredFolder(app: $0, home: home) ?? usual) == build.folder } ?? false }?.0
     }
 
     @MainActor static func isOpen(_ build: BBBuild) -> Bool { runningApp(build) != nil }

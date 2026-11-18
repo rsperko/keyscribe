@@ -747,8 +747,16 @@ bb said (“Not sent to a new bb conversation: bb said “Enter a prompt or atta
 prompt box”), or, when bb gave no reason, says to press Return there. This works in a bb with no thread yet too. With nothing in front while a copy of bb is the app
 in front, the take says which copy and why instead of “No conversation focused”: “bb Work doesn’t have the
 KeyScribe plugin. Nothing sent. Agent settings shows how to install it.” when its folder was never connected,
-and otherwise “bb Work isn’t connected. Nothing sent. Agent settings shows its status.”, each with **Open Agent
-Settings**, where the plugin's check says why. Any other bb page that shows no thread, such as its settings, has no conversation in front. Being in front also means its reply is not read aloud while you look
+“bb Work’s data folder isn’t set up yet. Nothing sent. Reopen bb Work to set it up.”, with no button, when the
+folder its app names is not a bb data folder, and “bb Work isn’t connected. Nothing sent. Agent settings shows its status.”
+when its plugin isn't connected. A connected copy says which step is missing instead: “Accessibility is off — {appName} can’t read which bb
+Work window is in front. Nothing sent.”, with **Open Accessibility Settings**; “{appName} can’t read which bb Work
+window is in front. Nothing sent. Click in bb Work’s window, then try again.”; “bb Work hasn’t shown {appName} a
+conversation. Nothing sent. Open or click in one in bb Work, then try again.”; “bb Work’s conversation in front isn’t in its list
+yet. Nothing sent. Try again in a moment.”, or “bb Work’s plugin can’t start conversations. Nothing sent. Agent
+settings can update it.” The plugin-missing, not-connected, and can't-start lines have **Open Agent
+Settings**, where the plugin's check says why; the Accessibility line has **Open Accessibility Settings**; the others
+have no button. Any other bb page that shows no thread, such as its settings, has no conversation in front. Being in front also means its reply is not read aloud while you look
 at it, as for a terminal. Unknown, no terminal in front, a different app or window, or a
 front view that could belong to another session leaves the take with nothing focused. Recording still
 starts, since the take may name a conversation or be a command that needs none. The read runs beside the
@@ -2388,7 +2396,8 @@ Each agent host (`AgentIntegrations.hosts`) has a row in Connections, named by t
 whose integration brings its own connector (`AgentHostIntegration.connector`, bb's plugin) has no switch: its
 expanded content is that connector's configuration folder list: for bb, one row per bb build
 found on the Mac (each build's data folder, found from the command and runtime record bb writes there, from a
-running app's launch environment, or from `BB_DATA_DIR` in the user's login shell), named by its app's file name,
+running app's launch environment, or from `BB_DATA_DIR` in the user's login shell), named by its app's file name
+(the app whose launch environment names the folder, when there is one, even after that app quits),
 as Finder shows it, beside its folder, so two copies of one app read apart. **Add Folder…** accepts a folder only when it holds bb's command and its runtime record or
 thread storage, and is otherwise refused as not a bb data folder. The folder a build that is
 open uses is the default, which **Connect…** offers; otherwise the usual folder. The host is on exactly while any of
@@ -2404,7 +2413,8 @@ installs the current files again; Uninstall stays offered. A host without its ow
 switch inside its expanded row instead, **Reach conversations in {host}**, off by default. Its caption says what the user says is sent to the host's conversations
 through the host's own command, and that {appName} runs nothing of the host's until the switch is on. Turning it off removes the host's conversations from the list on
 the next scan. While the host is on, a reason the host's list is missing (the tool isn't installed or isn't
-open, or its list couldn't be read) stays visible below its header as an advisory `IssueText` that says what to do next,
+open, no app is known to use one of bb's data folders — “Open the copy of bb that uses ~/.bb-work to reach its threads. If it’s
+already open, {appName} can’t tell that it uses this folder.” — or its list couldn't be read) stays visible below its header as an advisory `IssueText` that says what to do next,
 whether or not other conversations are listed.
 
 An integration's expanded row holds its setup and repair in place; ordinary management opens no sheet.

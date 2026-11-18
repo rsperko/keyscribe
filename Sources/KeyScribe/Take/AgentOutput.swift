@@ -279,12 +279,24 @@ final class AgentOutput {
 
     static let nothingSent = "Nothing sent."
 
-    static func unheardLine(_ unheard: AgentHub.UnheardHost) -> String {
-        switch unheard {
+    static func notReadyLine(_ notReady: AgentHub.HostCopyNotReady) -> String {
+        switch notReady {
         case .missing(let name):
             "\(name) doesn\u{2019}t have the \(Branding.appName) plugin. \(nothingSent) Agent settings shows how to install it."
         case .notConnected(let name):
             "\(name) isn\u{2019}t connected. \(nothingSent) Agent settings shows its status."
+        case .notSetUp(let name):
+            "\(name)\u{2019}s data folder isn\u{2019}t set up yet. \(nothingSent) Reopen \(name) to set it up."
+        case .windowUnknown(let name):
+            "\(Branding.appName) can\u{2019}t read which \(name) window is in front. \(nothingSent) Click in \(name)\u{2019}s window, then try again."
+        case .needsAccessibility(let name):
+            "Accessibility is off \u{2014} \(Branding.appName) can\u{2019}t read which \(name) window is in front. \(nothingSent)"
+        case .nothingShown(let name):
+            "\(name) hasn\u{2019}t shown \(Branding.appName) a conversation. \(nothingSent) Open or click in one in \(name), then try again."
+        case .notListed(let name):
+            "\(name)\u{2019}s conversation in front isn\u{2019}t in its list yet. \(nothingSent) Try again in a moment."
+        case .cannotStart(let name):
+            "\(name)\u{2019}s plugin can\u{2019}t start conversations. \(nothingSent) Agent settings can update it."
         }
     }
     static let keptHint = "Your words are kept for Paste last dictation."

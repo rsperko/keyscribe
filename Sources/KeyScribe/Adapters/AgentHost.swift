@@ -37,11 +37,13 @@ public struct AgentHostCopy: Equatable, Sendable {
     public var name: String
     public var instance: String
     public var enrolled: Bool
+    public var setUp: Bool
 
-    public init(name: String, instance: String, enrolled: Bool) {
+    public init(name: String, instance: String, enrolled: Bool, setUp: Bool = true) {
         self.name = name
         self.instance = instance
         self.enrolled = enrolled
+        self.setUp = setUp
     }
 }
 

@@ -85,6 +85,19 @@ struct BBPluginConnectorTests {
         #expect(await plugin.check(tool: tool, target: target(home)) == .status(.ready))
     }
 
+    @Test func pluginCommandsReachTheServerTheDataFolderRecords() async throws {
+        let (home, agents) = scratch()
+        try Data(#"{"entryPath":"/nix/store/x/bb-app.js","pid":\#(getpid()),"serverUrl":"http://127.0.0.1:4411"}"#.utf8)
+            .write(to: home.appendingPathComponent(".bb/bb-app-runtime.json"))
+        let calls = Calls()
+        calls.set("plugin list", listing(agents))
+        let plugin = connector(home, agents, calls: calls)
+        let tool = try #require(plugin.findTool(in: plugin.defaultFolder, chosen: nil).tool?.path)
+        try await plugin.update(tool: tool, target: target(home))
+        #expect(!calls.all.isEmpty)
+        for (_, environment) in calls.all { #expect(environment["BB_SERVER_URL"] == "http://127.0.0.1:4411") }
+    }
+
     @Test func updatingRewritesTheFilesAndHasBbReloadThePluginItAlreadyRuns() async throws {
         let (home, agents) = scratch()
         let calls = Calls()

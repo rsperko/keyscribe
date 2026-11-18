@@ -2062,6 +2062,53 @@ struct AgentDeliveryWiringTests {
         #expect(rig.hud.states.contains { if case .error(let message, .openAgents?, _) = $0 { message.hasPrefix(line) } else { false } })
     }
 
+    @Test(arguments: [
+        (AgentHub.HostCopyNotReady.windowUnknown("Example Work"),
+         "\(Branding.appName) can\u{2019}t read which Example Work window is in front. Nothing sent. Click in Example Work\u{2019}s window, then try again.",
+         false),
+        (.nothingShown("Example Work"),
+         "Example Work hasn\u{2019}t shown \(Branding.appName) a conversation. Nothing sent. Open or click in one in Example Work, then try again.",
+         false),
+        (.notListed("Example Work"),
+         "Example Work\u{2019}s conversation in front isn\u{2019}t in its list yet. Nothing sent. Try again in a moment.", false),
+        (.cannotStart("Example Work"),
+         "Example Work\u{2019}s plugin can\u{2019}t start conversations. Nothing sent. Agent settings can update it.", true),
+    ])
+    func eachReadinessGapOfACopyInFrontSaysWhatToDo(notReady: AgentHub.HostCopyNotReady, line: String, opensSettings: Bool) async {
+        #expect(AgentOutput.notReadyLine(notReady) == line)
+        #expect(AgentTake.action(for: notReady, mode: "agent") == (opensSettings ? .openAgents("agent") : nil))
+    }
+
+    @Test func aCopyWhoseWindowCannotBeReadWithoutAccessibilityOffersAccessibilitySettings() {
+        let notReady = AgentHub.HostCopyNotReady.needsAccessibility("Example Work")
+        #expect(AgentOutput.notReadyLine(notReady)
+            == "Accessibility is off \u{2014} \(Branding.appName) can\u{2019}t read which Example Work window is in front. Nothing sent.")
+        #expect(AgentTake.action(for: notReady, mode: "agent") == .openAccessibilitySettings)
+    }
+
+    @Test func dictationWithAConnectedCopyThatReportsNothingInFrontSaysSoInsteadOfNoConversationFocused() async {
+        let host = AgentHostTests.FakeHost()
+        host.copy = AgentHostCopy(name: "Example Work", instance: "/Users/a/.work", enrolled: true)
+        host.window = AgentHostApp(bundle: "dev.example.app", pid: 50, name: "Example", window: "cg:7", instance: "/Users/a/.work")
+        let rig = await rig("Plan the release.", front: FrontWindow(Self.hostApp), hosts: [AgentHostIntegration(kind: AgentHostTests.kind, make: { host })])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig, readingTheFront: true)
+        #expect(starts(rig).isEmpty)
+        let line = "Example Work hasn\u{2019}t shown \(Branding.appName) a conversation. Nothing sent."
+        #expect(rig.hud.states.contains { if case .error(let message, nil, _) = $0 { message.hasPrefix(line) } else { false } })
+    }
+
+    @Test func dictationWithACopyInFrontWhoseDataFolderIsNotSetUpNamesItWithoutSendingTheUserToSettings() async {
+        let host = AgentHostTests.FakeHost()
+        host.copy = AgentHostCopy(name: "Example Work", instance: "/Users/a/.work", enrolled: false, setUp: false)
+        let rig = await rig("Plan the release.", front: FrontWindow(Self.hostApp), hosts: [AgentHostIntegration(kind: AgentHostTests.kind, make: { host })])
+        defer { try? FileManager.default.removeItem(at: rig.supportDir) }
+        await take(rig, readingTheFront: true)
+        #expect(starts(rig).isEmpty)
+        let line = "Example Work\u{2019}s data folder isn\u{2019}t set up yet. Nothing sent. Reopen Example Work to set it up."
+        #expect(rig.hud.states.contains { if case .error(let message, nil, _) = $0 { message.hasPrefix(line) } else { false } })
+    }
+
     @Test func aNewConversationPageThatLeftTheFrontBeforeSendingIsNeverSentTo() async {
         let (rig, host) = await newConversationRig()
         defer { try? FileManager.default.removeItem(at: rig.supportDir) }

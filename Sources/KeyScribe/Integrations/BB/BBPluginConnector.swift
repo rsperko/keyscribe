@@ -143,10 +143,10 @@ final class BBPluginConnector: AgentConnector {
         find: (@MainActor () async -> [BBBuild])? = nil,
         isOpen: @escaping @MainActor (BBBuild) -> Bool = BBBuildFinder.isOpen,
         isDataFolder: @escaping (String) -> Bool = BBBuildFinder.isDataFolder,
-        describe: @escaping (String) -> BBBuild? = BBBuildFinder.describe(folder:)
+        describe: ((String) -> BBBuild?)? = nil
     ) {
         self.isDataFolder = isDataFolder
-        self.describe = describe
+        self.describe = describe ?? { [path = home.path] in BBBuildFinder.describe(folder: $0, home: path) }
         self.agentsDir = agentsDir
         id = pluginName
         self.home = home
@@ -336,7 +336,7 @@ final class BBPluginConnector: AgentConnector {
     }
 
     private func output(_ tool: String, _ arguments: [String], subcommand: String, target: ConnectorTarget) async throws -> HostCLI.Output {
-        let environment = ["HOME": home.path, "PATH": "/usr/bin:/bin", "BB_TELEMETRY": "false", BBBuilds.dataFolderKey: target.folder.path]
+        let environment = BBBuildFinder.environment(folder: target.folder.path, home: home.path)
         do {
             return try await run([tool] + arguments, subcommand, nil, environment)
         } catch {

@@ -1,3 +1,4 @@
+import ApplicationServices
 import Foundation
 import KeyScribeKit
 
@@ -142,6 +143,7 @@ final class AgentHub {
     private let hostDeadline: Duration
     private let processEnvironment: (_ pid: Int, _ keys: Set<String>) -> [String: String]
     private let processParent: (_ pid: Int) -> Int?
+    private let accessibilityTrusted: @MainActor () -> Bool
     private let receiptTimeout: Duration
     private let handOffLimit: Duration
     private let checkWait: Duration
@@ -199,8 +201,10 @@ final class AgentHub {
         hostDeadline: Duration = AgentHub.defaultHostDeadline,
         processEnvironment: @escaping (_ pid: Int, _ keys: Set<String>) -> [String: String] = { _, _ in [:] },
         processParent: @escaping (_ pid: Int) -> Int? = { _ in nil },
-        now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString }
+        now: @escaping () -> Date = Date.init, makeId: @escaping () -> String = { UUID().uuidString },
+        accessibilityTrusted: @escaping @MainActor () -> Bool = { AXIsProcessTrusted() }
     ) {
+        self.accessibilityTrusted = accessibilityTrusted
         self.processEnvironment = processEnvironment
         self.processParent = processParent
         self.hosts = hosts.map { host in HostDiscovery(host, allowed: { hostAllowed(host.kind.id) }, now: now) }
@@ -417,14 +421,21 @@ final class AgentHub {
         return key.firstIndex(of: "@").map { String(key[key.index(after: $0)...]) }
     }
 
-    enum UnheardHost: Equatable {
+    enum HostCopyNotReady: Equatable {
         case missing(String)
         case notConnected(String)
+        case notSetUp(String)
+        case needsAccessibility(String)
+        case windowUnknown(String)
+        case nothingShown(String)
+        case notListed(String)
+        case cannotStart(String)
     }
 
-    func hostCopyUnheardInFront() -> UnheardHost? {
+    func hostCopyNotReadyInFront() -> HostCopyNotReady? {
         for source in hosts {
             guard let copy = source.host.copyInFront() else { continue }
+            guard copy.setUp else { return .notSetUp(copy.name) }
             guard copy.enrolled else { return .missing(copy.name) }
             let carrier = AgentSessionID.make(
                 agent: source.kind.id,
@@ -432,7 +443,19 @@ final class AgentHub {
             let heard = transport.isLive(session: carrier) || directory.conversations.contains {
                 $0.connectorLive && $0.host?.host == source.kind.id && $0.host?.instance == copy.instance
             }
-            return heard ? nil : .notConnected(copy.name)
+            guard heard else { return .notConnected(copy.name) }
+            guard accessibilityTrusted() else { return .needsAccessibility(copy.name) }
+            guard let window = source.host.focusedWindow(), window.window != nil, window.instance == copy.instance else {
+                return .windowUnknown(copy.name)
+            }
+            let slot = Self.slot(source.kind.id, copy.instance)
+            if let thread = shownByHost[slot], transport.isLive(session: thread) {
+                return (directory.conversations + disconnected).contains { $0.id == thread } ? nil : .notListed(copy.name)
+            }
+            if let page = newConversationShown[slot], transport.isLive(session: page) {
+                return features[page]?.contains("start") == true ? nil : .cannotStart(copy.name)
+            }
+            return .nothingShown(copy.name)
         }
         return nil
     }

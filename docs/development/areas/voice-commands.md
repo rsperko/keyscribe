@@ -635,22 +635,47 @@ every rule above applies to it, with these sharpenings:
   from a fixed bundle id, app name or folder (`BBBuildFinder`, `BBBuilds`): a data folder holds the command bb writes
   (`bin/bb`) and its runtime record or thread storage, and is the usual folder, a hidden folder in the home folder,
   the `BB_DATA_DIR` a running app declares in its launch environment, the `BB_DATA_DIR` of the user's login shell, or
-  a folder the user adds that passes the same check (`BBBuildFinder.isDataFolder`). The app it runs from comes from the runtime
-  record's entry path, else the command's runtime path. That app's location, not its bundle id, says whether it is
-  open and which app in front is it, since copies of one app share a bundle id. When the recorded location is stale,
+  a folder the user adds that passes the same check (`BBBuildFinder.isDataFolder`). The app it runs from is, in
+  order: a running app whose launch environment's `BB_DATA_DIR` names the folder; the app the runtime record's entry
+  path or the command's runtime path names, while it runs; an app seen naming the folder since launch that still does,
+  so a copy keeps its name after it quits; else that recorded app. Ties go by path. A server bb started outside any
+  app can write both records and an app then attaches to it; no app is then guessed from what an app bundle contains,
+  since a wrapper can hand bb its folder at launch without declaring it, and a wrong guess would send words to another
+  folder's thread. A closed folder no app is known to use asks for the copy that uses it to be opened, and says that
+  an open copy that doesn't name the folder can't be matched to it; it never asks the user to edit an app's
+  `Info.plist`, which would break the app's signature. That app's location, not its bundle
+  id, says whether it is open and which app in front is it, since copies of one app share a bundle id; any running
+  app whose launch environment names the folder also counts as it being open. An app in front whose launch
+  environment names a folder is that folder's copy, even when another app also names it. When the recorded location is stale,
   the data folder the running app uses (its launch environment's `BB_DATA_DIR`, else the usual folder) decides,
   never the bundle id alone, so a copy without the plugin is never taken for another copy of the same app that has
   it. Each copy keeps its own last report of what it shows (`AgentHub` keys those by host and data folder), so
   switching between copies needs no new report. The app's file name, as Finder shows it, is what Settings and every message call it. A take with
   nothing in front while a copy of bb is the app in front says why, from that copy's own data folder
-  (`AgentHub.hostCopyUnheardInFront`), naming the copy, with **Open Agent Settings**: the plugin is missing when
+  (`AgentHub.hostCopyNotReadyInFront`), naming the copy, with **Open Agent Settings**. An app whose launch environment
+  names a bb data folder counts as a copy even when that folder is not one bb has set up; that take says the folder
+  isn't set up and offers no Settings button, since Settings lists only set-up folders. Otherwise the plugin is missing when
   the copy's folder is not enrolled; otherwise the copy is not connected, and Agent settings, which checks the
-  plugin when it opens, shows why. The take never checks the plugin itself, since enrollment outlives a failed
+  plugin when it opens, shows why. A connected copy names the first step still missing, in the order a send needs
+  them: Accessibility is off, so its window can't be read (with **Open Accessibility Settings**); its window in front
+  can't be read; it hasn't shown a conversation (a page with no thread, such as settings, or a window its plugin has
+  not reported yet: the plugin reports on load, on focus and blur, and every few seconds while visible, so this
+  passes on its own); it shows a thread its list doesn't have yet; or it shows its New thread page but its plugin can't
+  start a conversation. Only the plugin steps offer **Open Agent Settings** (`AgentTake.action(for:mode:)`). The step is
+  read once, when the take starts, and says why that take found nothing; each line says what to do before trying
+  again, since the state can change while the user speaks. The take never checks the plugin itself, since enrollment outlives a failed
   install and a removal inside bb and only that check could tell them apart. Telling which copy is in front uses
   the front app's own details, never its window. Finding the thread in front reads bb's focused window once and
-  hands that reading to `AgentHost.front`, and a send reads it again right before sending, never reusing it. Each enrolled data folder is its own instance:
+  hands that reading to `AgentHost.front`; which copy owns that window is decided from the app in front first, so a
+  copy whose app opened after its folder was last described is still found, and a send reads it again right before sending, never reusing it. Each enrolled data folder is its own instance:
   its threads are keyed by that folder, and every call for them runs that folder's own command with that folder as
-  `BB_DATA_DIR` and a fixed environment that turns bb's telemetry off, never the app's own. A build that is closed or
+  `BB_DATA_DIR` and a fixed environment that turns bb's telemetry off, never the app's own. The one value taken from
+  the folder is the server its runtime record names (`serverUrl`), as `BB_SERVER_URL`, only when that server is on this
+  Mac (http or https) and only while the process that wrote the record is alive (`BBBuilds.environment`): bb's command
+  otherwise goes to the default port, which for a copy started on another port is a different copy's server. A record
+  left behind by a crash names a port another copy may now hold, so it is ignored and bb's command finds its server as
+  bb's own `bin/bb` would. A failed match for an app that names a folder is never cached, so a folder set up while
+  that app is in front is found on the next take. A build that is closed or
   could not be read keeps the threads it last listed, as Last seen, while the others are listed fresh
   (`AgentHostScan.found`'s `carried`); only when no build could be read is the list unreadable. Delivery uses `--mode auto`, which steers a
   running turn and starts one when the thread is idle, as typing in bb does. The hub holds nothing back for an open

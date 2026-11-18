@@ -25,6 +25,29 @@ struct BBBuildsTests {
         #expect(BBBuilds.app(runtime: nil, launcher: nil) == nil)
     }
 
+    @Test func bbsCommandIsPointedAtTheServerItsDataFolderRecordsOnThisMac() {
+        let record = { (url: String) in Data(#"{"entryPath":"/x/bb.js","pid":41,"serverUrl":"\#(url)"}"#.utf8) }
+        let alive: (Int32) -> Bool = { $0 == 41 }
+        let base = ["HOME": "/Users/a", "PATH": "/usr/bin:/bin", "BB_TELEMETRY": "false", "BB_DATA_DIR": "/Users/a/.bb-work"]
+        #expect(BBBuilds.environment(folder: "/Users/a/.bb-work", home: "/Users/a", runtime: record("http://127.0.0.1:4411"), alive: alive)
+            == base.merging(["BB_SERVER_URL": "http://127.0.0.1:4411"]) { $1 })
+        for url in ["http://localhost:4411", "http://[::1]:4411", "https://127.0.0.1:4411"] {
+            #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: record(url), alive: alive)["BB_SERVER_URL"] == url)
+        }
+        #expect(BBBuilds.environment(folder: "/Users/a/.bb-work", home: "/Users/a", runtime: nil, alive: alive) == base)
+    }
+
+    @Test func aServerOffThisMacOrARecordLeftByAProcessThatIsGoneLeavesBbToFindItsOwnServer() {
+        let record = { (url: String, pid: String) in Data(#"{"pid":\#(pid),"serverUrl":"\#(url)"}"#.utf8) }
+        let alive: (Int32) -> Bool = { $0 == 41 }
+        for url in ["https://bb.example.com", "http://10.0.0.4:4411", "http://127.0.0.1.example.com:4411", "file:///tmp/x", "not a url", ""] {
+            #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: record(url, "41"), alive: alive)["BB_SERVER_URL"] == nil)
+        }
+        #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: record("http://127.0.0.1:4411", "42"), alive: alive)["BB_SERVER_URL"] == nil)
+        #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: Data(#"{"serverUrl":"http://127.0.0.1:4411"}"#.utf8), alive: alive)["BB_SERVER_URL"] == nil)
+        #expect(BBBuilds.environment(folder: "/f", home: "/h", runtime: Data("{".utf8), alive: alive)["BB_SERVER_URL"] == nil)
+    }
+
     @Test func aBuildDeclaresItsDataFolderInItsLaunchEnvironment() {
         #expect(BBBuilds.dataFolder(environment: ["BB_DATA_DIR": "~/.acme-bb"], home: "/Users/a") == "/Users/a/.acme-bb")
         #expect(BBBuilds.dataFolder(environment: ["BB_DATA_DIR": "/srv/bb"], home: "/Users/a") == "/srv/bb")

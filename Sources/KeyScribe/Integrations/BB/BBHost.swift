@@ -37,7 +37,7 @@ final class BBHost: AgentHost {
     init(
         home: String = FileManager.default.homeDirectoryForCurrentUser.path,
         enrolled: (@MainActor () -> [String])? = nil,
-        describe: @escaping @Sendable (String) -> BBBuild? = BBBuildFinder.describe(folder:),
+        describe: (@Sendable (String) -> BBBuild?)? = nil,
         installed: @escaping (String) -> Bool = { FileManager.default.isExecutableFile(atPath: $0) },
         isOpen: @escaping @MainActor (BBBuild) -> Bool = BBBuildFinder.isOpen,
         run: @escaping Run = { try await HostCLI.run($0, subcommand: $1, input: $2, environment: $3) },
@@ -49,7 +49,7 @@ final class BBHost: AgentHost {
         self.home = home
         let usual = (home as NSString).appendingPathComponent(BBBuilds.usualFolder)
         self.enrolled = enrolled ?? { [usual] }
-        self.describe = describe
+        self.describe = describe ?? { BBBuildFinder.describe(folder: $0, home: home) }
         self.installed = installed
         self.isOpen = isOpen
         self.run = run
@@ -77,7 +77,7 @@ final class BBHost: AgentHost {
     }
 
     private func environment(_ build: BBBuild) -> [String: String] {
-        ["HOME": home, "PATH": "/usr/bin:/bin", "BB_TELEMETRY": "false", BBBuilds.dataFolderKey: build.folder]
+        BBBuildFinder.environment(folder: build.folder, home: home)
     }
 
     var isEnabled: Bool { folders.contains { installed((($0 as NSString).appendingPathComponent(BBBuilds.launcherPath))) } }
@@ -127,7 +127,12 @@ final class BBHost: AgentHost {
     }
 
     private func list(_ build: BBBuild) async -> Listing {
-        guard isOpen(build) else { return .problem("\(build.name) isn\u{2019}t open. Open \(build.name) to reach its threads.") }
+        guard isOpen(build) else {
+            guard build.app == nil else { return .problem("\(build.name) isn\u{2019}t open. Open \(build.name) to reach its threads.") }
+            return .problem(
+                "Open the copy of bb that uses \(shown(build.folder)) to reach its threads. "
+                    + "If it\u{2019}s already open, \(Branding.appName) can\u{2019}t tell that it uses this folder.")
+        }
         guard let output = try? await call(build, ["thread", "list", "--json"], subcommand: "thread list"), output.status == 0, !output.truncated,
               let threads = BBThreads.parse(output.stdout)
         else { return .problem("\(build.name) could not list its threads. Try again in a moment.") }
@@ -157,8 +162,8 @@ final class BBHost: AgentHost {
 
     func focusedWindow() -> AgentHostApp? {
         let builds = describedBuilds
-        guard var front = frontmost(Set(builds.compactMap(\.bundle))), front.window != nil,
-              let build = build(runningAs: front, among: builds)
+        guard let app = frontApp(), let build = build(runningAs: app, among: builds),
+              var front = frontmost([app.bundle]), front.window != nil, front.pid == app.pid
         else { return nil }
         front.instance = build.folder
         return front
@@ -166,10 +171,13 @@ final class BBHost: AgentHost {
 
     func copyInFront() -> AgentHostCopy? {
         let builds = describedBuilds
-        guard let front = frontApp(), let path = front.path,
-              let copy = build(runningAs: front, among: builds) ?? copy(at: path, bundle: front.bundle)
-        else { return nil }
-        return AgentHostCopy(name: BBBuilds.name(info: nil, app: path), instance: copy.folder, enrolled: folders.contains(copy.folder))
+        guard let front = frontApp(), let path = front.path else { return nil }
+        let name = BBBuilds.name(info: nil, app: path)
+        if let copy = build(runningAs: front, among: builds) ?? copy(at: path, bundle: front.bundle) {
+            return AgentHostCopy(name: name, instance: copy.folder, enrolled: folders.contains(copy.folder))
+        }
+        guard let declared = dataFolder(path) else { return nil }
+        return AgentHostCopy(name: name, instance: declared, enrolled: folders.contains(declared), setUp: false)
     }
 
     private func build(runningAs front: AgentHostApp, among builds: [BBBuild]) -> BBBuild? {
@@ -178,18 +186,31 @@ final class BBHost: AgentHost {
             return sharing.count == 1 ? sharing[0] : nil
         }
         if let exact = builds.first(where: { $0.app == path }) { return exact }
-        guard let copy = copy(at: path, bundle: front.bundle) else { return nil }
-        return builds.first { $0.folder == copy.folder }
+        guard let copy = copy(at: path, bundle: front.bundle), builds.contains(where: { $0.folder == copy.folder }) else { return nil }
+        return copy
+    }
+
+    private func shown(_ folder: String) -> String {
+        let prefix = home.hasSuffix("/") ? home : home + "/"
+        return folder.hasPrefix(prefix) ? "~/" + folder.dropFirst(prefix.count) : folder
     }
 
     private func copy(at path: String, bundle: String) -> BBBuild? {
         let key = path + "\n" + bundle
         if let cached = copies[key] { return cached }
         let usual = ConnectorFolders.canonical(URL(fileURLWithPath: (home as NSString).appendingPathComponent(BBBuilds.usualFolder))).path
-        let folder = dataFolder(path) ?? usual
-        let found = (known[folder] ?? describe(folder)).flatMap { build in
-            build.app == path || (build.bundle != nil && build.bundle == bundle) ? build : nil
+        if let declared = dataFolder(path) {
+            let found = known[declared].flatMap { $0.app == nil ? nil : $0 } ?? describe(declared)
+            if let found, known[declared] != nil { known[declared] = found }
+            if found != nil { copies[key] = .some(found) }
+            return found
         }
+        let runs = { (build: BBBuild) in build.app == path || (build.bundle != nil && build.bundle == bundle) }
+        let notDescribed = known[usual] == nil
+        let describedWithoutApp = known[usual].map { $0.app == nil } ?? false
+        let found = known[usual].flatMap { runs($0) ? $0 : nil }
+            ?? (notDescribed || describedWithoutApp ? describe(usual).flatMap { runs($0) ? $0 : nil } : nil)
+        if let found, known[usual] != nil { known[usual] = found }
         copies[key] = .some(found)
         return found
     }

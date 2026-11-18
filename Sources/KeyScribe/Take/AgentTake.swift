@@ -46,7 +46,7 @@ protocol AgentTakeHost: AnyObject {
     var agentFocus: CapturedFocus? { get set }
     var agentNewConversation: CapturedFocus? { get set }
     var agentFocusUnconfirmed: Bool { get set }
-    var agentUnheardHost: AgentHub.UnheardHost? { get set }
+    var agentHostCopyNotReady: AgentHub.HostCopyNotReady? { get set }
     var takePressedAt: DispatchTime? { get }
     var agentFrontTask: Task<Void, Never>? { get set }
     var agentFrontCutoff: ContinuousClock.Instant? { get }
@@ -136,9 +136,9 @@ final class AgentTake {
                 shown = fresh
                 starts = true
             }
-            if shown == nil, !Task.isCancelled, let unheard = agents?.hostCopyUnheardInFront(),
+            if shown == nil, !Task.isCancelled, let notReady = agents?.hostCopyNotReadyInFront(),
                let host, !Task.isCancelled, host.takeIdentity === identity {
-                host.agentUnheardHost = unheard
+                host.agentHostCopyNotReady = notReady
                 return
             }
             guard let shown, let self, let host, !Task.isCancelled,
@@ -283,9 +283,10 @@ final class AgentTake {
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
             return
         }
-        if case .ask(let body, .nothingFocused) = resolution, let unheard = host.agentUnheardHost {
-            let line = AgentOutput.unheardLine(unheard)
-            finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: .openAgents(mode.id), heard: HeardExcerpt(heard: body)),
+        if case .ask(let body, .nothingFocused) = resolution, let notReady = host.agentHostCopyNotReady {
+            let line = AgentOutput.notReadyLine(notReady)
+            let action = Self.action(for: notReady, mode: mode.id)
+            finishAgent(state: .error(message: AgentOutput.kept(line, body: body), action: action, heard: HeardExcerpt(heard: body)),
                         outcome: .failed, heard: heard, body: body, transformed: nil, rewrite: nil, recorded: line, facts: facts)
             return
         }
@@ -352,6 +353,14 @@ final class AgentTake {
 
     static var unconfirmed: String {
         "Couldn\u{2019}t confirm the conversation in front, because \(Branding.appName) can\u{2019}t see key presses and clicks."
+    }
+
+    static func action(for notReady: AgentHub.HostCopyNotReady, mode: String) -> HUDErrorAction? {
+        switch notReady {
+        case .missing, .notConnected, .cannotStart: .openAgents(mode)
+        case .needsAccessibility: .openAccessibilitySettings
+        case .notSetUp, .windowUnknown, .nothingShown, .notListed: nil
+        }
     }
 
     static var unconfirmedLine: String {

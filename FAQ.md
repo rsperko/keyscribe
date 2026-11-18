@@ -574,7 +574,8 @@ yourself the first time. If Pi and omp read the same folder, each agent's connec
 finds on your Mac, by the name of its app, including one whose data folder your shell names with `BB_DATA_DIR`;
 each is connected on its own. Open a copy of bb once if it is missing, or choose **Add Folder…** and pick its data
 folder. If you dictate to a copy of bb that isn't connected, KeyScribe names that copy and tells you whether its
-plugin is missing or not connected, so you know which row to fix.
+plugin is missing or not connected, so you know which row to fix. When the copy is connected but nothing can be
+sent yet, KeyScribe says what is still missing and what to do about it.
 
 ### How do I choose which conversation hears me?
 

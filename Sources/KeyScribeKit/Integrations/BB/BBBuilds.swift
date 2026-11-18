@@ -21,6 +21,7 @@ public enum BBBuilds {
     public static let launcherPath = "bin/bb"
     public static let runtimeFile = "bb-app-runtime.json"
     public static let threadStorage = "thread-storage"
+    public static let serverKey = "BB_SERVER_URL"
     public static let dataFolderKey = "BB_DATA_DIR"
     public static let fallbackName = "bb"
 
@@ -36,6 +37,25 @@ public enum BBBuilds {
             return bundle(containing: value)
         }
         return nil
+    }
+
+    public static func environment(folder: String, home: String, runtime: Data?, alive: (Int32) -> Bool) -> [String: String] {
+        var environment = ["HOME": home, "PATH": "/usr/bin:/bin", "BB_TELEMETRY": "false", dataFolderKey: folder]
+        if let server = localServer(runtime: runtime, alive: alive) { environment[serverKey] = server }
+        return environment
+    }
+
+    private static func localServer(runtime: Data?, alive: (Int32) -> Bool) -> String? {
+        struct Runtime: Decodable {
+            var pid: Int32?
+            var serverUrl: String?
+        }
+        guard let record = runtime.flatMap({ try? JSONDecoder().decode(Runtime.self, from: $0) }),
+              let pid = record.pid, pid > 0, alive(pid), let text = record.serverUrl,
+              let url = URL(string: text), ["http", "https"].contains(url.scheme), let host = url.host(percentEncoded: false),
+              ["127.0.0.1", "localhost", "::1"].contains(host)
+        else { return nil }
+        return text
     }
 
     public static func dataFolder(environment: [String: Any]?, home: String) -> String? {
