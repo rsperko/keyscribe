@@ -661,6 +661,9 @@ final class AgentHub {
         waiter.resume(returning: .notFound)
     }
 
+    private var hostRenames: [String: String] = [:]
+    private var renamingInHost: Set<String> = []
+
     func rename(_ id: String, to name: String) throws {
         guard namesProblem == nil else { throw NamesUnavailable() }
         guard handle(of: id) != nil else { return }
@@ -673,11 +676,16 @@ final class AgentHub {
         sendLabels()
         onChange?()
         if let conversation = directory.conversations.first(where: { $0.id == id }), let (source, location) = host(of: conversation) {
-            let name = conversation.handle
+            hostRenames[id] = conversation.handle
+            guard renamingInHost.insert(id).inserted else { return }
             Task { [weak self] in
-                guard await source.host.rename(location, to: name) else { return }
-                source.expect()
-                await self?.rescan(rereadingTitles: false)
+                while let self, let name = self.hostRenames.removeValue(forKey: id) {
+                    let renamed = await source.host.rename(location, to: name)
+                    guard renamed, self.hostRenames[id] == nil else { continue }
+                    source.expect()
+                    await self.rescan(rereadingTitles: false)
+                }
+                self?.renamingInHost.remove(id)
             }
         }
     }

@@ -63,6 +63,7 @@ struct AgentHostTests {
 
         func scan() async -> AgentHostScan {
             scans += 1
+            await scanGate.pass()
             return answers
                 ? .found(conversations, titles: titles, shownInstead: shownInstead, carried: carried, problem: problem, workspaces: workspaces) : .unreadable("not running")
         }
@@ -102,9 +103,19 @@ struct AgentHostTests {
             return front
         }
 
+        let renameGate = Gate()
+        let scanGate = Gate()
+        var renames = true
+        private(set) var renaming = 0
+        private(set) var mostRenaming = 0
+
         func rename(_ location: AgentHostLocation, to name: String) async -> Bool {
+            renaming += 1
+            mostRenaming = max(mostRenaming, renaming)
+            defer { renaming -= 1 }
+            await renameGate.pass()
             retitled.append((location, name))
-            return true
+            return renames
         }
 
         var whileDelivering: (@MainActor () -> Void)?
@@ -156,6 +167,24 @@ struct AgentHostTests {
     static func thread(_ native: String, cwd: String = "/src/docs", instance: String = instance, startedAt: Int? = nil, pid: Int? = nil) -> AgentSession {
         AgentSession(
             agent: "example", id: native, pid: pid, cwd: cwd, state: .idle, startedAt: startedAt, host: location(native, instance: instance))
+    }
+
+    @MainActor final class Gate {
+        var closed = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+        var waiting: Int { waiters.count }
+
+        func pass() async {
+            guard closed else { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func open() {
+            closed = false
+            let released = waiters
+            waiters = []
+            released.forEach { $0.resume() }
+        }
     }
 
     private func makeHub(
@@ -1512,6 +1541,63 @@ struct AgentHostTests {
         let hub = makeHub(host)
         await hub.rescan()
         #expect(hub.directory.conversations.map(\.handle) == ["agent"])
+    }
+
+    enum RenameArrival: Sendable, CaseIterable { case beforeHostCall, duringHostCall, duringRescan, afterLoopEnds }
+
+    nonisolated static let renameGrid: [(RenameArrival, Bool)] = RenameArrival.allCases.flatMap { arrival in [true, false].map { (arrival, $0) } }
+
+    private func settle(_ done: () -> Bool) async {
+        for _ in 0..<2000 where !done() { try? await Task.sleep(for: .milliseconds(1)) }
+    }
+
+    @Test(arguments: renameGrid)
+    func aSecondRenameReachesTheHostAfterTheFirstWhenEverItArrives(arrival: RenameArrival, hostRenames: Bool) async throws {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        host.renames = hostRenames
+        let hub = makeHub(host, hostDeadline: .seconds(10))
+        await hub.rescan()
+        let scansBefore = host.scans
+        let expected: [String]
+        switch arrival {
+        case .beforeHostCall:
+            try hub.rename(Self.id("t1"), to: "alpha")
+            try hub.rename(Self.id("t1"), to: "beta")
+            expected = ["beta"]
+        case .duringHostCall:
+            host.renameGate.closed = true
+            try hub.rename(Self.id("t1"), to: "alpha")
+            await settle { host.renameGate.waiting == 1 }
+            try #require(host.renameGate.waiting == 1)
+            try hub.rename(Self.id("t1"), to: "beta")
+            host.renameGate.open()
+            expected = ["alpha", "beta"]
+        case .duringRescan:
+            host.scanGate.closed = hostRenames
+            try hub.rename(Self.id("t1"), to: "alpha")
+            if hostRenames {
+                await settle { host.scanGate.waiting == 1 }
+                try #require(host.scanGate.waiting == 1)
+            } else {
+                await settle { host.retitled.count == 1 && host.renaming == 0 }
+            }
+            host.renameGate.closed = true
+            try hub.rename(Self.id("t1"), to: "beta")
+            host.scanGate.open()
+            for _ in 0..<50 { await Task.yield() }
+            host.renameGate.open()
+            expected = ["alpha", "beta"]
+        case .afterLoopEnds:
+            try hub.rename(Self.id("t1"), to: "alpha")
+            await settle { host.retitled.count == 1 && host.renaming == 0 && (!hostRenames || host.scans > scansBefore) }
+            try hub.rename(Self.id("t1"), to: "beta")
+            expected = ["alpha", "beta"]
+        }
+        await settle { host.retitled.count >= expected.count && host.renaming == 0 }
+        for _ in 0..<20 { await Task.yield() }
+        #expect(host.retitled.map(\.1) == expected)
+        #expect(host.mostRenaming == 1)
     }
 
     @Test func aPromptTheConnectorReportsOutranksTheHostsState() async {
