@@ -65,15 +65,11 @@ struct CodexDeliveryTests {
         #expect(CodexDelivery.turns(data("[]")) == nil)
     }
 
-    @Test func ourMessageOpeningATurnIsOursAndJoiningAnotherIsSteered() {
+    @Test func theTurnHoldingOurMessageIsTheOneItOpenedOrJoined() {
         let turns = CodexDelivery.turns(data(turnsList))?.turns ?? []
-        #expect(CodexDelivery.confirmation(of: turns[1], clientUserMessageId: "ks-1") == .ours)
-        #expect(CodexDelivery.confirmation(of: turns[0], clientUserMessageId: "ks-2") == .steered)
-        #expect(CodexDelivery.confirmation(of: turns[0], clientUserMessageId: "ks-1") == .absent)
-        #expect(CodexDelivery.confirmation(in: turns, clientUserMessageId: "ks-1") == .ours)
-        #expect(CodexDelivery.confirmation(in: turns, clientUserMessageId: "ks-2") == .steered)
-        #expect(CodexDelivery.confirmation(in: turns, clientUserMessageId: "ks-3") == .absent)
-        #expect(CodexDelivery.confirmation(in: [], clientUserMessageId: "ks-3") == .absent)
+        #expect(CodexDelivery.turn(in: turns, clientUserMessageId: "ks-1") == "turn-1")
+        #expect(CodexDelivery.turn(in: turns, clientUserMessageId: "ks-2") == "turn-2")
+        #expect(CodexDelivery.turn(in: turns, clientUserMessageId: "ks-3") == nil)
     }
 
     @Test func theAgentsLastWordsAreItsLatestMessageInTheNewestTurn() {

@@ -17,10 +17,6 @@ public enum CodexDelivery {
         case refuse(RefuseReason)
     }
 
-    public enum Confirmation: Equatable, Sendable {
-        case ours, steered, absent
-    }
-
     public struct Turn: Equatable, Sendable {
         public var id: String
         public var status: String?
@@ -65,15 +61,8 @@ public enum CodexDelivery {
         return (turns, page["nextCursor"] as? String)
     }
 
-    public static func confirmation(of turn: Turn, clientUserMessageId: String) -> Confirmation {
-        guard let at = turn.clientIds.firstIndex(of: clientUserMessageId) else { return .absent }
-        return at == 0 ? .ours : .steered
-    }
-
-    public static func confirmation(in turns: [Turn], clientUserMessageId: String) -> Confirmation {
-        let found = turns.map { confirmation(of: $0, clientUserMessageId: clientUserMessageId) }
-        if found.contains(.ours) { return .ours }
-        return found.contains(.steered) ? .steered : .absent
+    public static func turn(in turns: [Turn], clientUserMessageId: String) -> String? {
+        turns.first { $0.clientIds.contains(clientUserMessageId) }?.id
     }
 
     public static func lastAgentWords(_ result: Data) -> String? {

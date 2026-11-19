@@ -1257,6 +1257,18 @@ struct AgentHubTests {
         #expect(results.map(\.1) == [nil])
     }
 
+    @Test func aConnectorsTurnEndIsHeardWhateverTurnIdItCarries() async {
+        let (hub, transport, registry, _) = makeHub()
+        await connected(hub, transport, registry)
+        hub.speaks = { true }
+        var answers: [String] = []
+        hub.onResult = { _, _, answer, _, _, _ in answers.append(answer) }
+        hub.handle(.turnStarted(session: "claude:s1", turn: "t1"))
+        _ = hub.notify(session: "claude:s1", turn: "t1", on: true)
+        hub.handle(.turnComplete(session: "claude:s1", reason: "answer", answer: "Done.", after: nil, turn: "another"))
+        #expect(answers == ["Done."])
+    }
+
     @Test func aTurnTheUserTypedAfterADoubtedMessageIsNotFollowed() async {
         let (hub, transport, registry, _) = makeHub(receiptTimeout: .milliseconds(20))
         await connected(hub, transport, registry)

@@ -317,6 +317,31 @@ struct CodexHostTests {
         #expect(sessions.count == 2)
     }
 
+    @Test(arguments: [false, true])
+    func aConfirmedDeliveryNamesTheTurnThatHoldsIt(working: Bool) async throws {
+        let script = Script()
+        if working {
+            script.set(Self.one, status: Self.working)
+            script.lastTurn = "inProgress"
+        }
+        let changes = Changes()
+        let (host, daemon, _) = try rig(script, changes: changes)
+        defer { daemon.stop() }
+        _ = await host.scan()
+        #expect(await host.deliver("run the tests", images: [], request: "r1", to: location(daemon)) == .accepted)
+        #expect(changes.all.contains(.delivered(request: "r1", at: location(daemon), turn: "turn-ours")))
+    }
+
+    @Test func aDeliveryConfirmedLaterStillNamesItsTurn() async throws {
+        let changes = Changes()
+        let (host, daemon, script) = try rig(changes: changes)
+        defer { daemon.stop() }
+        _ = await host.scan()
+        script.lock.withLock { script.sentClient = CodexHost.messageId("r9") }
+        #expect(await host.confirm(request: "r9", at: location(daemon)) == true)
+        #expect(changes.all.contains(.delivered(request: "r9", at: location(daemon), turn: "turn-ours")))
+    }
+
     @Test func pastedImagesTravelWithTheTextAsLocalImages() async throws {
         let (host, daemon, script) = try rig()
         defer { daemon.stop() }

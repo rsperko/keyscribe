@@ -366,6 +366,18 @@ every rule above applies to it, with these sharpenings:
   receipts, steering and checks. The hub takes the declared route and never infers it from a delivery result: a host
   that delivers and answers `.unsupported` sends nothing, rather than falling through to a connector. A conversation
   its connector delivers takes images only when that connector's hello lists `images`.
+- **A host that knows which turn took a message says so** (`AgentHostChange.delivered`: the request and the turn,
+  as Codex does from the `clientUserMessageId` it sent), and the hub follows that turn's reply by the request. A
+  message sent through such a host (`AgentHost.reportsDeliveredTurns`) is never matched by its prompt digest or by
+  the turn running when the send returns, so a joined draft or two dictations with the same text never send the
+  reply to the wrong take; the digest stays for everything else (a host that cannot tell, a new conversation started
+  from a host's page, a draft joined through its plugin). A turn named after it ended still gets its reply: while a
+  message sent there waits to be named, the hub keeps each ended turn briefly, with its reply text in memory only when
+  nothing claimed it. A turn named while another is awaited is followed once it starts or ends. In a hosted
+  conversation a turn end claims only the turn it names, and an end without a turn id counts as the turn the hub saw
+  start; a connector's turn end carries no turn id and claims the turn awaited, as before. A delivery that stays
+  uncertain because the host could not confirm it later is never matched by text and stays uncertain, without a reply
+  read aloud.
 - **A dictation for the conversation in front is typed into it, so it is the user's own prompt.** A connector's own
   prompt runs once the agent is idle (Claude Code queues a plugin's prompt behind the turn; measured on 2.1.325,
   2026-11-14), and only a prompt the user enters is recorded as theirs. So for the conversation in front,

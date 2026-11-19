@@ -105,6 +105,8 @@ final class CodexHost: AgentHost {
 
     var takesImages: Bool { true }
 
+    var reportsDeliveredTurns: Bool { true }
+
     var queuesInHub: Bool { true }
 
     func watch(_ changed: @escaping @MainActor (AgentHostChange) -> Void) {
@@ -366,7 +368,9 @@ final class CodexHost: AgentHost {
         guard let listed = try? await client.call("thread/turns/list", List(threadId: id), timeout: Self.callTimeout),
               let turns = CodexDelivery.turns(listed)?.turns
         else { return nil }
-        return CodexDelivery.confirmation(in: turns, clientUserMessageId: Self.messageId(request)) != .absent
+        guard let turn = CodexDelivery.turn(in: turns, clientUserMessageId: Self.messageId(request)) else { return false }
+        changed?(.delivered(request: request, at: location, turn: turn))
+        return true
     }
 
     nonisolated static func messageId(_ request: String) -> String { "ks-\(request)" }
@@ -422,7 +426,7 @@ final class CodexHost: AgentHost {
         case .hold:
             return .queued
         case .send:
-            return await send(text, images: images, request: request, thread: id, home: home, client: client)
+            return await send(text, images: images, request: request, to: location, thread: id, home: home, client: client)
         }
     }
 
@@ -438,11 +442,11 @@ final class CodexHost: AgentHost {
     }
 
     private func send(
-        _ text: String, images: [String], request: String, thread id: String, home: Home, client: CodexDaemonClient
+        _ text: String, images: [String], request: String, to location: AgentHostLocation, thread id: String, home: Home, client: CodexDaemonClient
     ) async -> AgentHostDelivery {
         let digest = AgentPromptDigest.of(text)
         remember(digest)
-        let delivery = await start(text, images: images, request: request, thread: id, home: home, client: client)
+        let delivery = await start(text, images: images, request: request, to: location, thread: id, home: home, client: client)
         switch delivery {
         case .refused, .queued: forget(digest)
         case .accepted, .uncertain, .unsupported: break
@@ -451,11 +455,11 @@ final class CodexHost: AgentHost {
     }
 
     private func start(
-        _ text: String, images: [String], request: String, thread id: String, home: Home, client: CodexDaemonClient
+        _ text: String, images: [String], request: String, to location: AgentHostLocation, thread id: String, home: Home, client: CodexDaemonClient
     ) async -> AgentHostDelivery {
         let messageId = Self.messageId(request)
         if case .active = home.threads[id]?.status {
-            if let steered = await steer(text, images: images, messageId: messageId, thread: id, client: client) { return steered }
+            if let steered = await steer(text, images: images, request: request, to: location, thread: id, client: client) { return steered }
             guard let fresh = await read(id, with: client), home.client === client else { return .uncertain }
             home.threads[id] = fresh
             if fresh.status == .notLoaded { return .refused("Codex no longer has this conversation open.") }
@@ -476,10 +480,13 @@ final class CodexHost: AgentHost {
             return .uncertain
         }
         guard CodexDelivery.startedTurn(result) != nil else { return .uncertain }
-        return await confirm(messageId, thread: id, client: client)
+        return await confirm(request, at: location, thread: id, client: client)
     }
 
-    private func steer(_ text: String, images: [String], messageId: String, thread id: String, client: CodexDaemonClient) async -> AgentHostDelivery? {
+    private func steer(
+        _ text: String, images: [String], request: String, to location: AgentHostLocation, thread id: String, client: CodexDaemonClient
+    ) async -> AgentHostDelivery? {
+        let messageId = Self.messageId(request)
         struct List: Encodable, Sendable {
             var threadId: String
             var limit = 1
@@ -502,10 +509,11 @@ final class CodexHost: AgentHost {
         } catch {
             return .uncertain
         }
-        return await confirm(messageId, thread: id, client: client)
+        return await confirm(request, at: location, thread: id, client: client)
     }
 
-    private func confirm(_ messageId: String, thread id: String, client: CodexDaemonClient) async -> AgentHostDelivery {
+    private func confirm(_ request: String, at location: AgentHostLocation, thread id: String, client: CodexDaemonClient) async -> AgentHostDelivery {
+        let messageId = Self.messageId(request)
         struct List: Encodable, Sendable {
             var threadId: String
             var limit = 2
@@ -516,7 +524,10 @@ final class CodexHost: AgentHost {
             guard let listed = try? await client.call("thread/turns/list", List(threadId: id), timeout: Self.callTimeout),
                   let turns = CodexDelivery.turns(listed)?.turns
             else { return .uncertain }
-            if CodexDelivery.confirmation(in: turns, clientUserMessageId: messageId) != .absent { return .accepted }
+            if let turn = CodexDelivery.turn(in: turns, clientUserMessageId: messageId) {
+                changed?(.delivered(request: request, at: location, turn: turn))
+                return .accepted
+            }
             guard now() < deadline else { return .uncertain }
             try? await Task.sleep(for: .seconds(confirmEvery))
         }

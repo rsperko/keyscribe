@@ -651,6 +651,11 @@ struct AgentBridgeCodecTests {
             == .turnComplete(session: "s1", reason: "answer", answer: ""))
     }
 
+    @Test func aConnectorsTurnEndCarriesNoTurnIdOverTheWire() throws {
+        #expect(try AgentBridgeCodec.decodeEvent(Data(#"{"op":"turnComplete","session":"s1","reason":"answer","answer":"Done.","turn":"x"}"#.utf8))
+            == .turnComplete(session: "s1", reason: "answer", answer: "Done.", turn: nil))
+    }
+
     @Test func unknownOpsAndOversizeFramesAreRejected() {
         #expect(throws: AgentBridgeCodec.CodecError.unknownOp("explode")) {
             try AgentBridgeCodec.decodeEvent(Data(#"{"op":"explode"}"#.utf8))

@@ -27,6 +27,7 @@ struct AgentHostTests {
         var identityKeys = ["EXAMPLE_THREAD"]
         var delivery = AgentHostDelivery.accepted
         var route = AgentHostDeliveryRoute.host
+        var reportsDeliveredTurns = false
         func deliveryRoute(at location: AgentHostLocation) -> AgentHostDeliveryRoute { route }
         private(set) var retitled: [(AgentHostLocation, String)] = []
         private(set) var scans = 0
@@ -502,6 +503,172 @@ struct AgentHostTests {
         announcing.route = .connector
         let withImages = await connected(announcing, FakeTransport(), features: ["promptDigest", "images"])
         #expect(withImages.takesImages(Self.id("t1")))
+    }
+
+    @Test func aReplyIsFollowedByTheRequestTheHostSaysStartedTheTurnWithoutAPrompt() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        host.reportsTurns = true
+        let hub = makeHub(host)
+        await hub.rescan()
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
+        host.whileDelivering = { host.watcher?(.delivered(request: "q1", at: Self.location("t1"), turn: "turn-1")) }
+        #expect(await hub.deliver("fix the test", to: Self.id("t1"), request: "q1") == .sent("docs"))
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "Fixed the flaky test.", after: nil, turn: "turn-1"))
+        #expect(origins == ["q1"])
+    }
+
+    @Test func aReplyIsFollowedByRequestEvenWhenTheTurnReportsDifferentText() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        host.reportsTurns = true
+        let hub = makeHub(host)
+        await hub.rescan()
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
+        host.whileDelivering = { host.watcher?(.delivered(request: "q2", at: Self.location("t1"), turn: "turn-2")) }
+        _ = await hub.deliver("and the logout too", to: Self.id("t1"), request: "q2")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-2", prompt: AgentPromptDigest.of("fix the login and the logout too")))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "Both fixed.", after: nil, turn: "turn-2"))
+        #expect(origins == ["q2"])
+    }
+
+    enum Arrival: Sendable, CaseIterable { case beforeStart, betweenStartAndEnd, afterEnd }
+    enum Digest: Sendable, CaseIterable { case right, wrong, absent }
+
+    nonisolated static let orderGrid: [(Arrival, Digest, Bool, Bool, Bool)] = Arrival.allCases.flatMap { arrival in
+        Digest.allCases.flatMap { digest in
+            [true, false].flatMap { followed in [true, false].flatMap { endId in [true, false].map { (arrival, digest, followed, endId, $0) } } }
+        }
+    }
+
+    @Test(arguments: orderGrid)
+    func aTurnTheHostNamesIsFollowedHoweverItsEventsAreOrdered(arrival: Arrival, digest: Digest, followed: Bool, endId: Bool, pending: Bool) async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        host.reportsTurns = true
+        host.reportsDeliveredTurns = true
+        host.delivery = pending ? .accepted : .uncertain
+        let hub = makeHub(host)
+        await hub.rescan()
+        var notices: [(AgentReceipt, String)] = []
+        hub.onNotice = { receipt, request, _ in notices.append((receipt, request)) }
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
+        let prompt: String? = switch digest {
+        case .right: AgentPromptDigest.of("run the tests")
+        case .wrong: AgentPromptDigest.of("something else")
+        case .absent: nil
+        }
+        let named = followed ? "q1" : "never-sent"
+        let session = Self.id("t1")
+        let turnOne: @MainActor @Sendable () -> Void = {
+            let delivered = { host.watcher?(.delivered(request: named, at: Self.location("t1"), turn: "turn-1")) }
+            let start = { hub.handle(.turnStarted(session: session, turn: "turn-1", prompt: prompt)) }
+            let end = { hub.handle(.turnComplete(session: session, reason: "complete", answer: "All pass.", after: nil, turn: endId ? "turn-1" : nil)) }
+            switch arrival {
+            case .beforeStart: delivered(); start(); end()
+            case .betweenStartAndEnd: start(); delivered(); end()
+            case .afterEnd: start(); end(); delivered()
+            }
+            hub.handle(.turnStarted(session: session, turn: "turn-2", prompt: nil))
+        }
+        if pending {
+            host.whileDelivering = turnOne
+            #expect(await hub.deliver("run the tests", to: session, request: "q1") == .sent("docs"))
+        } else {
+            #expect(await hub.deliver("run the tests", to: session, request: "q1") == .uncertain("docs"))
+            turnOne()
+        }
+        hub.handle(.turnComplete(session: session, reason: "complete", answer: "Something unrelated.", after: nil, turn: endId ? "turn-2" : nil))
+        #expect(origins == (followed ? ["q1"] : []))
+        #expect(notices.filter { $0.1 == "q1" && $0.0 == .sent("docs") }.count == (followed && !pending ? 1 : 0))
+    }
+
+    private func namingHost() async -> (FakeHost, AgentHub, Results) {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        host.reportsTurns = true
+        host.reportsDeliveredTurns = true
+        let hub = makeHub(host)
+        await hub.rescan()
+        let results = Results()
+        hub.onResult = { _, _, answer, _, origin, _ in results.all.append((origin, answer)) }
+        return (host, hub, results)
+    }
+
+    final class Results { var all: [(String?, String)] = [] }
+
+    @Test func aLateEndOfAnEarlierTurnIsNeverTheReplyToATurnTheHostNamed() async {
+        let (host, hub, results) = await namingHost()
+        host.whileDelivering = { host.watcher?(.delivered(request: "q1", at: Self.location("t1"), turn: "turn-1")) }
+        _ = await hub.deliver("run the tests", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "from the earlier turn", after: nil, turn: "turn-0"))
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "All pass.", after: nil, turn: "turn-1"))
+        #expect(results.all.map(\.0) == ["q1"])
+        #expect(results.all.map(\.1) == ["All pass."])
+    }
+
+    @Test(arguments: [false, true])
+    func aTurnNamedWhileAnEarlierOneIsAwaitedIsFollowedWhenItRuns(earlierEndsFirst: Bool) async {
+        let (host, hub, results) = await namingHost()
+        host.whileDelivering = { host.watcher?(.delivered(request: "q0", at: Self.location("t1"), turn: "turn-0")) }
+        _ = await hub.deliver("first", to: Self.id("t1"), request: "q0")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-0", prompt: nil))
+        host.whileDelivering = { host.watcher?(.delivered(request: "q1", at: Self.location("t1"), turn: "turn-1")) }
+        _ = await hub.deliver("second", to: Self.id("t1"), request: "q1")
+        if earlierEndsFirst {
+            hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "first done", after: nil, turn: "turn-0"))
+            hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        } else {
+            hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        }
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "second done", after: nil, turn: "turn-1"))
+        #expect(results.all.last.map { [$0.0, $0.1] } == ["q1", "second done"])
+        #expect(!results.all.contains { $0.0 == "q1" && $0.1 == "first done" })
+    }
+
+    @Test func aRequestNamedIntoATurnAlreadyAwaitedForAnotherLeavesTheReplyWithTheFirstRequest() async {
+        let (host, hub, results) = await namingHost()
+        host.whileDelivering = { host.watcher?(.delivered(request: "q0", at: Self.location("t1"), turn: "turn-1")) }
+        _ = await hub.deliver("first", to: Self.id("t1"), request: "q0")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        host.whileDelivering = { host.watcher?(.delivered(request: "q1", at: Self.location("t1"), turn: "turn-1")) }
+        #expect(await hub.deliver("also this", to: Self.id("t1"), request: "q1") == .sent("docs"))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "Both done.", after: nil, turn: "turn-1"))
+        #expect(results.all.map(\.0) == ["q0"])
+    }
+
+    @Test func aRequestNamedIntoAnEndedTurnAnotherRequestClaimedGetsNoReply() async {
+        let (host, hub, results) = await namingHost()
+        host.whileDelivering = { host.watcher?(.delivered(request: "q0", at: Self.location("t1"), turn: "turn-1")) }
+        _ = await hub.deliver("first", to: Self.id("t1"), request: "q0")
+        host.whileDelivering = nil
+        host.delivery = .uncertain
+        _ = await hub.deliver("second", to: Self.id("t1"), request: "q1")
+        hub.handle(.turnStarted(session: Self.id("t1"), turn: "turn-1", prompt: nil))
+        hub.handle(.turnComplete(session: Self.id("t1"), reason: "complete", answer: "First done.", after: nil, turn: "turn-1"))
+        host.watcher?(.delivered(request: "q1", at: Self.location("t1"), turn: "turn-1"))
+        #expect(results.all.map(\.0) == ["q0"])
+    }
+
+    @Test func anUncertainStartIsAnnouncedSentWhenItsTurnStartsEvenOnAHostThatNamesItsTurns() async {
+        let host = FakeHost()
+        host.reportsDeliveredTurns = true
+        let transport = FakeTransport()
+        let hub = await startReady(host, transport: transport)
+        var notices: [(AgentReceipt, String)] = []
+        hub.onNotice = { receipt, request, _ in notices.append((receipt, request)) }
+        var origins: [String?] = []
+        hub.onResult = { _, _, _, _, origin, _ in origins.append(origin) }
+        #expect(await startAnswering(hub, transport, answer: nil) == .uncertain("a new Example conversation"))
+        hub.handle(.turnStarted(session: Self.id("t2"), turn: "a", prompt: AgentPromptDigest.of("plan the release")))
+        hub.handle(.turnComplete(session: Self.id("t2"), reason: "complete", answer: "planned", after: nil, turn: "a"))
+        #expect(notices.contains { $0.1 == "q1" && $0.0 == .sent("a new Example conversation") })
+        #expect(origins == ["q1"])
     }
 
     static func claudeSession(_ native: String = "s1", pid: Int = 42) -> AgentSession {
