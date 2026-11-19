@@ -227,6 +227,41 @@ struct AgentDirectoryPlaceTests {
         #expect(directory.sharedPlaceNames["cos"] == AgentRecipient.SharedName(names: ["cos claude", "cos claude blue"], tellApartIn: "herdr"))
     }
 
+    @Test func conversationsReportingTheSameTitleAreToldApartByTheWorkspacesThatHoldThem() {
+        var directory = AgentDirectory()
+        let entries = [session("pi", "a", name: "release notes"), session("pi", "b", pid: 20, name: "release notes")]
+        directory.update(entries: entries, live: [], places: [
+            "pi:a": place(workspace: "cos", workspaceId: "w1"), "pi:b": place(paneId: "p2", workspace: "web", workspaceId: "w2"),
+        ])
+        #expect(handles(directory) == ["pi:a": "cos release notes", "pi:b": "web release notes"])
+    }
+
+    @Test func aHostsWorkspaceQualifiesAReportedTitleWithoutNamingTheConversationItself() {
+        var directory = AgentDirectory()
+        let entries = [session("ultimate", "a", name: "release notes"), session("ultimate", "b", pid: 20, name: "release notes")]
+        directory.update(entries: entries, live: [], places: [
+            "ultimate:a": AgentPlace(surface: "Ultimate", labels: [], containers: ["a"], workspace: "app"),
+            "ultimate:b": AgentPlace(surface: "Ultimate", labels: [], containers: ["b"], workspace: "web"),
+        ])
+        #expect(handles(directory) == ["ultimate:a": "app release notes", "ultimate:b": "web release notes"])
+        #expect(directory.sharedPlaceNames["app"] == nil)
+    }
+
+    @Test func aReportedTitleSharedInsideOneWorkspaceIsToldApartByColorAsBefore() {
+        var directory = AgentDirectory()
+        let entries = [session("pi", "a", name: "release notes"), session("pi", "b", pid: 20, name: "release notes")]
+        directory.update(entries: entries, live: [], places: ["pi:a": place(workspace: "cos"), "pi:b": place(paneId: "p2", workspace: "cos")])
+        #expect(Set(handles(directory).values) == ["release notes", "release notes blue"])
+    }
+
+    @Test func aSharedNameThatIsTheAgentsOwnNameIsNotQualifiedByTheAgentAgain() {
+        var directory = AgentDirectory()
+        directory.update(
+            entries: [session("ultimate", "a"), session("ultimate", "b", pid: 20)], live: [],
+            places: ["ultimate:a": titled("@ultimate", workspace: nil, id: "a"), "ultimate:b": titled("@ultimate", workspace: nil, id: "b")])
+        #expect(Set(handles(directory).values) == ["ultimate", "ultimate blue"])
+    }
+
     private func titled(_ title: String, workspace: String?, id: String) -> AgentPlace {
         var labels: [AgentPlace.Label] = [.init(text: title, level: .title, container: "\(id)#conversation")]
         var containers = ["\(id)#conversation"]

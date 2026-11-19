@@ -17,6 +17,7 @@ struct AgentHostTests {
         var takesImages = true
         var conversations: [AgentSession] = []
         var titles: [String: String] = [:]
+        var workspaces: [String: String] = [:]
         var shownInstead: [String: String] = [:]
         var carried: Set<AgentHostLocation> = []
         var problem: String?
@@ -63,7 +64,7 @@ struct AgentHostTests {
         func scan() async -> AgentHostScan {
             scans += 1
             return answers
-                ? .found(conversations, titles: titles, shownInstead: shownInstead, carried: carried, problem: problem) : .unreadable("not running")
+                ? .found(conversations, titles: titles, shownInstead: shownInstead, carried: carried, problem: problem, workspaces: workspaces) : .unreadable("not running")
         }
 
         func open(_ location: AgentHostLocation, stillWanted: @escaping @MainActor () -> Bool) async -> AgentHostOpen {
@@ -1491,6 +1492,26 @@ struct AgentHostTests {
         hub.handle(.hello(hello))
         await hub.rescan(rereadingTitles: false)
         #expect(hub.directory.conversations.first?.state == .working)
+    }
+
+    @Test func conversationsAHostTitlesAlikeAreToldApartByTheWorkspaceItNames() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1"), Self.thread("t2")]
+        host.titles = [Self.location("t1").conversationKey: "@agent", Self.location("t2").conversationKey: "@agent"]
+        host.workspaces = [Self.location("t1").conversationKey: "app", Self.location("t2").conversationKey: "web"]
+        let hub = makeHub(host)
+        await hub.rescan()
+        #expect(Set(hub.directory.conversations.map(\.handle)) == ["app agent", "web agent"])
+    }
+
+    @Test func aConversationAloneWithItsTitleKeepsThePlainNameWhateverWorkspaceHoldsIt() async {
+        let host = FakeHost()
+        host.conversations = [Self.thread("t1")]
+        host.titles = [Self.location("t1").conversationKey: "@agent"]
+        host.workspaces = [Self.location("t1").conversationKey: "app"]
+        let hub = makeHub(host)
+        await hub.rescan()
+        #expect(hub.directory.conversations.map(\.handle) == ["agent"])
     }
 
     @Test func aPromptTheConnectorReportsOutranksTheHostsState() async {

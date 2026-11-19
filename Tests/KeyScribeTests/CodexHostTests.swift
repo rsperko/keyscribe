@@ -120,7 +120,7 @@ struct CodexHostTests {
         script.threads["auto-title"] = Script.thread("auto-title", status: #"{"type":"idle"}"#, extra: #","ephemeral":true,"threadSource":"thread_title""#)
         let (host, daemon, _) = try rig(script)
         defer { daemon.stop() }
-        guard case .found(let sessions, let titles, _, _, let problem) = await host.scan() else {
+        guard case .found(let sessions, let titles, _, _, let problem, _) = await host.scan() else {
             Issue.record("unreadable")
             return
         }
@@ -263,7 +263,7 @@ struct CodexHostTests {
         _ = await host.scan()
         push(daemon, Self.working)
         try? await Task.sleep(for: .milliseconds(100))
-        guard case .found(let sessions, _, _, _, _) = await host.scan() else { Issue.record("no listing"); return }
+        guard case .found(let sessions, _, _, _, _, _) = await host.scan() else { Issue.record("no listing"); return }
         #expect(sessions.first?.state == .working)
         #expect(daemon.methods().filter { $0 == "thread/loaded/list" }.count == 1)
         script.lock.withLock {
@@ -284,7 +284,7 @@ struct CodexHostTests {
             Script.thread(Self.one, status: #"{"type":"idle"}"#))
         let (host, daemon, _) = try rig(script)
         defer { daemon.stop() }
-        guard case .found(let sessions, _, _, _, _) = await host.scan() else { Issue.record("no listing"); return }
+        guard case .found(let sessions, _, _, _, _, _) = await host.scan() else { Issue.record("no listing"); return }
         #expect(sessions.first?.state == .working)
     }
 
@@ -313,7 +313,7 @@ struct CodexHostTests {
         }
         daemon.push(#"{"method":"thread/status/changed","params":{"threadId":"\#(Self.two)","status":\#(Self.working)}}"#)
         try? await Task.sleep(for: .milliseconds(100))
-        guard case .found(let sessions, _, _, _, _) = await host.scan() else { Issue.record("no listing"); return }
+        guard case .found(let sessions, _, _, _, _, _) = await host.scan() else { Issue.record("no listing"); return }
         #expect(sessions.count == 2)
     }
 
@@ -410,7 +410,7 @@ struct CodexHostTests {
         await eventually { changes.all.contains(working) && daemon.methods().contains("thread/turns/list") }
         try? await Task.sleep(for: .milliseconds(200))
         #expect(changes.all.last { if case .state = $0 { true } else { false } } == working)
-        guard case .found(let sessions, _, _, _, _) = await host.scan() else { Issue.record("no listing"); return }
+        guard case .found(let sessions, _, _, _, _, _) = await host.scan() else { Issue.record("no listing"); return }
         #expect(sessions.first?.state == .working)
         #expect(!changes.all.contains { if case .event(.turnComplete) = $0 { true } else { false } })
     }
@@ -512,7 +512,7 @@ struct CodexHostTests {
             ])
         })
         defer { daemon.stop() }
-        guard case .found(let sessions, _, _, _, _) = await host.scan() else {
+        guard case .found(let sessions, _, _, _, _, _) = await host.scan() else {
             Issue.record("unreadable")
             return
         }
@@ -534,7 +534,7 @@ struct CodexHostTests {
         defer { daemon.stop() }
         _ = await host.scan()
         try? await Task.sleep(for: .seconds(CodexHost.paneLifetime + 0.1))
-        guard case .found(let sessions, _, _, _, _) = await host.scan() else { Issue.record("unreadable"); return }
+        guard case .found(let sessions, _, _, _, _, _) = await host.scan() else { Issue.record("unreadable"); return }
         #expect(sessions.first?.pid == 101)
         _ = await host.scan()
         #expect(reads.count == 3)

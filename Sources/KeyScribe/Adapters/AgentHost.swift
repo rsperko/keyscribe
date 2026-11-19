@@ -4,7 +4,7 @@ import KeyScribeKit
 public enum AgentHostScan: Equatable, Sendable {
     case found(
         [AgentSession], titles: [String: String] = [:], shownInstead: [String: String] = [:], carried: Set<AgentHostLocation> = [],
-        problem: String? = nil)
+        problem: String? = nil, workspaces: [String: String] = [:])
     case unreadable(String)
 }
 
@@ -271,7 +271,7 @@ final class HostDiscovery: AgentDiscovery {
 
     private func fresh() async -> AgentScan {
         switch await host.scan() {
-        case .found(let sessions, let titles, let shownInstead, let carried, let problem):
+        case .found(let sessions, let titles, let shownInstead, let carried, let problem, let workspaces):
             var seen: Set<String> = []
             var placed: [String: AgentPlace] = [:]
             let owned: [AgentSession] = sessions.compactMap { session in
@@ -288,9 +288,10 @@ final class HostDiscovery: AgentDiscovery {
                             text: $0, level: .title, container: location.conversationKey, surface: kind.displayName, term: "title", onlyAfterVerb: true)
                     },
                 ].compactMap { $0 }
-                if !labels.isEmpty {
+                let workspace = workspaces[location.conversationKey]
+                if !labels.isEmpty || workspace != nil {
                     placed[AgentSessionID.make(agent: kind.id, native: owned.id)] = AgentPlace(
-                        surface: kind.displayName, labels: labels, containers: [location.conversationKey])
+                        surface: kind.displayName, labels: labels, containers: [location.conversationKey], workspace: workspace)
                 }
                 return owned
             }

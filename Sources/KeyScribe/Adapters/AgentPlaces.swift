@@ -46,7 +46,8 @@ struct CombinedPlaceReader: AgentPlaceReading {
         guard let first = places.first else { return .absent }
         return .found(AgentPlace(
             surface: first.surface, labels: places.flatMap(\.labels),
-            containers: places.flatMap(\.containers).reduce(into: []) { if !$0.contains($1) { $0.append($1) } }))
+            containers: places.flatMap(\.containers).reduce(into: []) { if !$0.contains($1) { $0.append($1) } },
+            workspace: places.lazy.compactMap(\.workspace).first))
     }
 }
 

@@ -400,7 +400,10 @@ workspace `cos` with a pane named `pi` and one unnamed Claude pane gives `pi` an
 agent name or conversation title several conversations share is qualified first by the workspace label that
 tells them apart, and only by the agent when their workspaces don't (none, the same one, or the shared name
 itself): `marvin` in workspaces `cos` and `web` gives `cos marvin` and `web marvin`, while `marvin` twice in `cos`
-gives `marvin claude` and `marvin pi`. A name already given in one of these forms keeps it. Said bare,
+gives `marvin claude` and `marvin pi`; a shared name that is the agent's own (`@ultimate` twice) is not
+qualified by the agent again and takes a distinguishing word. A host's project (Ultimate's) counts as the
+workspace that tells conversations apart, but never names a conversation or answers to its name on its own.
+A name already given in one of these forms keeps it. Said bare,
 such a label never picks one: “tell cos to run the tests” and “cos, run the tests” are held and ask
 ““cos” could be “cos claude” or “cos pi”. Nothing sent.”, adding “Name the panes in herdr to tell them apart.”
 when only a distinguishing word separates them. This holds for messages, open, and questions alike. Two

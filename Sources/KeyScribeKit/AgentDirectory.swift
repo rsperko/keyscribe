@@ -174,13 +174,13 @@ public struct AgentDirectory: Sendable {
             group.flatMap(\.members).reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }
         }
         func workspace(_ id: String, apartFrom base: String) -> String? {
-            known[id]?.labels.first { $0.level == .workspace }.flatMap { usable($0.text) }.flatMap {
+            (known[id]?.labels.first { $0.level == .workspace }?.text ?? known[id]?.workspace).flatMap { usable($0) }.flatMap {
                 AgentHandles.matchKey($0) == AgentHandles.matchKey(base) ? nil : $0
             }
         }
         for item in labelled {
             let id = conversationId(item.entry)
-            let byAgent = usable("\(item.base) \(item.entry.agent)")
+            let byAgent = AgentHandles.matchKey(item.base) == AgentHandles.matchKey(item.entry.agent) ? nil : usable("\(item.base) \(item.entry.agent)")
             let members = membersByKey["\(item.label.level == .agent) \(item.key)"] ?? item.members
             let workspaces = members.map { workspace($0, apartFrom: item.base) }
             let apart = workspaces.allSatisfy { $0 != nil } && Set(workspaces.compactMap { $0.map(AgentHandles.matchKey) }).count == members.count
@@ -222,10 +222,21 @@ public struct AgentDirectory: Sendable {
         var preferred: [String: String] = [:]
         var sources: [String: AgentNameSource] = [:]
         var outranked: [String: String] = [:]
+        var owned: [String: String] = [:]
+        for entry in entries {
+            let id = conversationId(entry)
+            if !(placed[id].map { [.title, .pane, .agent].contains($0.place.level) } ?? false),
+               let own = (nativeNames[id] ?? entry.explicitName).flatMap(usable) { owned[id] = own }
+        }
+        for ids in Dictionary(grouping: owned.keys.sorted(), by: { AgentHandles.matchKey(owned[$0]!) }).values where ids.count > 1 {
+            let spaces = ids.map { workspace($0, apartFrom: owned[$0]!) }
+            guard spaces.allSatisfy({ $0 != nil }), Set(spaces.compactMap { $0.map(AgentHandles.matchKey) }).count == ids.count else { continue }
+            for (id, space) in zip(ids, spaces) { owned[id] = usable("\(space!) \(owned[id]!)") ?? owned[id] }
+        }
         for entry in entries {
             let id = conversationId(entry)
             let paneNamed = placed[id].map { [.title, .pane, .agent].contains($0.place.level) } ?? false
-            let own = (nativeNames[id] ?? entry.explicitName).flatMap(usable)
+            let own = paneNamed ? (nativeNames[id] ?? entry.explicitName).flatMap(usable) : owned[id]
             let reported = paneNamed ? nil : own
             if paneNamed { outranked[id] = own }
             let kept = excluded.contains(id) || unplaced.contains(id) ? nativeNameById[id] : nil

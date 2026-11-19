@@ -295,12 +295,12 @@ struct BBHostTests {
         let (bb, activated) = host(runner, builds: [Self.usual, Self.acme], open: { $0 == Self.usual || acmeOpen })
         let mine = Self.location
         let theirs = AgentHostLocation(host: "bb", instance: Self.acme.folder, native: "thr_abc1")
-        guard case .found(let sessions, _, _, let carried, let problem) = await bb.scan() else { Issue.record("expected threads"); return }
+        guard case .found(let sessions, _, _, let carried, let problem, _) = await bb.scan() else { Issue.record("expected threads"); return }
         #expect(sessions.compactMap(\.host) == [mine, theirs])
         #expect(carried.isEmpty && problem == nil)
         runner.answers["thread list"] = Self.output("[]")
         acmeOpen = false
-        guard case .found(let kept, _, _, let carriedNow, let problemNow) = await bb.scan() else { Issue.record("expected threads"); return }
+        guard case .found(let kept, _, _, let carriedNow, let problemNow, _) = await bb.scan() else { Issue.record("expected threads"); return }
         #expect(kept.compactMap(\.host) == [theirs])
         #expect(carriedNow == [theirs])
         #expect(problemNow == nil)
@@ -489,10 +489,10 @@ struct BBHostTests {
         bb.watch { _ in changes.count += 1 }
         apps.changed?(work.app!, true)
         #expect(changes.count == 1)
-        guard case .found(_, _, _, _, let problem) = await bb.scan() else { Issue.record("expected a listing"); return }
+        guard case .found(_, _, _, _, let problem, _) = await bb.scan() else { Issue.record("expected a listing"); return }
         #expect(problem == "bb Work could not list its threads. Try again in a moment.")
         #expect(await Self.within { changes.count == 2 })
-        guard case .found(_, _, _, _, nil) = await bb.scan() else { Issue.record("expected every copy listed"); return }
+        guard case .found(_, _, _, _, nil, _) = await bb.scan() else { Issue.record("expected every copy listed"); return }
         lists.failing = 1
         _ = await bb.scan()
         try? await Task.sleep(for: .milliseconds(50))
@@ -576,7 +576,7 @@ struct BBHostTests {
             installed: { _ in true }, isOpen: { $0 == Self.acme }, serving: { _ in false },
             run: { _, _, _, _ in HostCLI.Output(status: 0, stdout: Data("[]".utf8), stderr: "", truncated: false) },
             activate: { _ in }, frontmost: { _ in nil }, frontApp: { nil }, dataFolder: { _ in nil })
-        guard case .found(_, _, _, _, let problem) = await bb.scan() else { Issue.record("expected a listing"); return }
+        guard case .found(_, _, _, _, let problem, _) = await bb.scan() else { Issue.record("expected a listing"); return }
         #expect(problem == nil)
     }
 

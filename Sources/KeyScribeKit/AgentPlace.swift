@@ -26,10 +26,12 @@ public struct AgentPlace: Equatable, Sendable {
     public var surface: String
     public var labels: [Label]
     public var containers: [String]
+    public var workspace: String?
 
-    public init(surface: String, labels: [Label], containers: [String]) {
+    public init(surface: String, labels: [Label], containers: [String], workspace: String? = nil) {
         self.surface = surface
         self.labels = labels
         self.containers = containers
+        self.workspace = workspace
     }
 }
