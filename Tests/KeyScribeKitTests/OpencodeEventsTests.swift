@@ -127,21 +127,26 @@ struct OpencodeEventsTests {
         event("session.inbox.delivered", #"{"sessionID":"\#(session)","inboxID":"\#(inbox)"}"#)
     }
 
-    @Test func aPromptTheTurnTakesInNamesThatTurnByItsDigest() {
+    @Test func ourMessageTheTurnTakesInNamesThatTurnByTheMessage() {
         var turns = OpencodeTurns()
         _ = turns.apply(enqueued("msg_keyscribe_r1", "fix the build"), key: key)
         _ = turns.apply(event("session.execution.started", id: "evt_t", #"{"sessionID":"ses_a"}"#), key: key)
-        #expect(turns.apply(delivered("msg_keyscribe_r1"), key: key) == [
-            .event(.turnStarted(session: "opencode:ses_a", turn: "evt_t", prompt: AgentPromptDigest.of("fix the build"))),
-        ])
+        #expect(turns.apply(delivered("msg_keyscribe_r1"), key: key) == [.delivered(session: "ses_a", message: "msg_keyscribe_r1", turn: "evt_t")])
     }
 
-    @Test func aPromptSteeredIntoTheRunningTurnNamesThatSameTurn() {
+    @Test func ourMessageSteeredIntoTheRunningTurnNamesThatSameTurn() {
         var turns = OpencodeTurns()
         _ = turns.apply(event("session.execution.started", id: "evt_t", #"{"sessionID":"ses_a"}"#), key: key)
         _ = turns.apply(enqueued("msg_keyscribe_r2", "also add tests"), key: key)
-        #expect(turns.apply(delivered("msg_keyscribe_r2"), key: key) == [
-            .event(.turnStarted(session: "opencode:ses_a", turn: "evt_t", prompt: AgentPromptDigest.of("also add tests"))),
+        #expect(turns.apply(delivered("msg_keyscribe_r2"), key: key) == [.delivered(session: "ses_a", message: "msg_keyscribe_r2", turn: "evt_t")])
+    }
+
+    @Test func aTypedPromptTheTurnTakesInNamesThatTurnByItsDigest() {
+        var turns = OpencodeTurns()
+        _ = turns.apply(enqueued("msg_1f48typed", "fix the build"), key: key)
+        _ = turns.apply(event("session.execution.started", id: "evt_t", #"{"sessionID":"ses_a"}"#), key: key)
+        #expect(turns.apply(delivered("msg_1f48typed"), key: key) == [
+            .event(.turnStarted(session: "opencode:ses_a", turn: "evt_t", prompt: AgentPromptDigest.of("fix the build"))),
         ])
     }
 

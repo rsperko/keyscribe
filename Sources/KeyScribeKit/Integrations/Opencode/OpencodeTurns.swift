@@ -3,6 +3,7 @@ import Foundation
 public enum OpencodeChange: Equatable, Sendable {
     case event(AgentEvent)
     case listing
+    case delivered(session: String, message: String, turn: String)
 }
 
 public struct OpencodeTurns: Sendable {
@@ -96,6 +97,7 @@ public struct OpencodeTurns: Sendable {
             guard let inbox = OpencodeJSON.text(body["inboxID"]), let index = pending.firstIndex(where: { $0.inbox == inbox }) else { return [] }
             let digest = pending.remove(at: index).digest
             guard let id = turn[session] else { return [] }
+            if Self.isOurs(inbox) { return [.delivered(session: session, message: inbox, turn: id)] }
             return [.event(.turnStarted(session: key(session), turn: id, prompt: digest))]
         default:
             return []

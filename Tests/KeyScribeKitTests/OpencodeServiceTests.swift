@@ -35,6 +35,7 @@ struct OpencodeServiceTests {
         #expect(OpencodeService.parse(Data(#"{"pid":1}"#.utf8)) == nil)
         #expect(OpencodeService.parse(Data(#"{"url":"http://127.0.0.1:1"}"#.utf8)) == nil)
         #expect(OpencodeService.parse(Data(#"{"url":"file:///tmp/x","pid":1}"#.utf8)) == nil)
+        #expect(OpencodeService.parse(Data(#"{"url":"https://127.0.0.1:4096","pid":1}"#.utf8)) != nil)
     }
 
     @Test func theRegistrationLivesInTheStateFolderUnlessXDGMovesIt() {

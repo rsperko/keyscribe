@@ -37,6 +37,7 @@ struct OpencodeHostTests {
         var inbox: [String: [String]] = [:]
         var promptStatus = 200
         var promptReply: String?
+        var duringPrompt: (@MainActor (String) async -> Void)?
         var down = false
         var calls: [(method: String, path: String, body: [String: Any]?)] = []
         var streams: [FakeStream] = []
@@ -46,7 +47,11 @@ struct OpencodeHostTests {
         }
 
         func call(_ method: String, _ path: String, body: Data?, to service: OpencodeService, timeout: TimeInterval) async -> OpencodeReply? {
-            lock.withLock {
+            if path.hasSuffix("/prompt"), let during = lock.withLock({ duringPrompt }),
+               let id = body.flatMap({ (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] })?["id"] as? String {
+                await during(id)
+            }
+            return lock.withLock {
                 calls.append((method, path, body.flatMap { (try? JSONSerialization.jsonObject(with: $0)) as? [String: Any] }))
                 if down { return nil }
                 let route = path.split(separator: "?").first.map(String.init) ?? path
@@ -99,7 +104,7 @@ struct OpencodeHostTests {
     ) -> OpencodeHost {
         OpencodeHost(
             instance: Self.instance, service: { running ? Self.service : nil }, transport: fake, installed: { true },
-            panes: { panes.map { OpencodePane(pid: $0.key, title: $0.value) } }, showsWindowTitle: { showsTitle }, frontmost: { front })
+            panes: { _ in HostPanes(panes: panes.map { HostPane(pid: $0.key, title: $0.value) }) }, showsWindowTitle: { showsTitle }, frontmost: { front })
     }
 
     func location(_ id: String) -> AgentHostLocation { AgentHostLocation(host: "opencode", instance: Self.instance, native: id) }
@@ -228,7 +233,7 @@ struct OpencodeHostTests {
         #expect(await opencode.confirm(request: "R10", at: location("ses_busy")) == nil)
     }
 
-    @Test func watchingReportsTurnsRepliesAndPromptsAsTheyHappen() async {
+    @Test func watchingReportsTurnsRepliesPromptsAndStatesAsTheyHappen() async {
         let fake = FakeOpencode()
         let opencode = host(fake)
         let changes = Changes()
@@ -237,21 +242,62 @@ struct OpencodeHostTests {
         await settle()
         #expect(opencode.reportsTurns(at: location("ses_busy")))
         let stream = try! #require(fake.streams.last)
-        stream.emit("session.inbox.enqueued", #"{"sessionID":"ses_shown","inboxID":"msg_keyscribe_R1","item":{"type":"user","payload":{"text":"fix it"}}}"#)
         stream.emit("session.execution.started", id: "evt_t", #"{"sessionID":"ses_shown"}"#)
-        stream.emit("session.inbox.delivered", #"{"sessionID":"ses_shown","inboxID":"msg_keyscribe_R1"}"#)
         stream.emit("permission.asked", #"{"id":"per_1","sessionID":"ses_shown","action":"shell","resources":["make"]}"#)
+        stream.emit("permission.replied", #"{"sessionID":"ses_shown","requestID":"per_1","reply":"once"}"#)
         stream.emit("session.text.ended", #"{"sessionID":"ses_shown","text":"done"}"#)
         stream.emit("session.execution.succeeded", #"{"sessionID":"ses_shown"}"#)
         await settle()
         let key = location("ses_shown").conversationKey
         #expect(changes.events == [
             .turnStarted(session: key, turn: "evt_t"),
-            .turnStarted(session: key, turn: "evt_t", prompt: AgentPromptDigest.of("fix it")),
             .waiting(session: key, prompt: AgentPrompt(kind: "confirm", tool: "shell", detail: "make")),
+            .waiting(session: key, prompt: nil),
             .turnComplete(session: key, reason: "complete", answer: "done", turn: "evt_t"),
         ])
-        #expect(changes.all.contains(.listing))
+        let states = changes.all.compactMap { if case .state(let at, let state) = $0, at == location("ses_shown") { state } else { nil } }
+        #expect(states == [.working, .waitingApproval, .working, .idle])
+        #expect(!changes.all.dropFirst().contains(.listing))
+    }
+
+    @Test func aDictationIsFollowedByTheTurnThatTookItsMessageIn() async {
+        let fake = FakeOpencode()
+        let opencode = host(fake)
+        let changes = Changes()
+        opencode.watch { changes.all.append($0) }
+        _ = await opencode.scan()
+        await settle()
+        #expect(opencode.reportsDeliveredTurns)
+        #expect(await opencode.deliver("fix it", images: [], request: "R 1/x", to: location("ses_shown")) == .accepted)
+        let message = OpencodeMessages.messageId(request: "R 1/x")
+        let stream = try! #require(fake.streams.last)
+        stream.emit("session.inbox.enqueued", #"{"sessionID":"ses_shown","inboxID":"\#(message)","item":{"type":"user","payload":{"text":"fix it"}}}"#)
+        stream.emit("session.execution.started", id: "evt_t", #"{"sessionID":"ses_shown"}"#)
+        stream.emit("session.inbox.delivered", #"{"sessionID":"ses_shown","inboxID":"\#(message)"}"#)
+        await settle()
+        #expect(changes.all.contains(.delivered(request: "R 1/x", at: location("ses_shown"), turn: "evt_t")))
+        #expect(!changes.events.contains { if case .typed = $0 { true } else { false } })
+    }
+
+    @Test func aTurnThatTakesTheMessageInBeforeTheSendAnswersStillNamesIt() async {
+        let fake = FakeOpencode()
+        let opencode = host(fake)
+        let changes = Changes()
+        opencode.watch { changes.all.append($0) }
+        _ = await opencode.scan()
+        await settle()
+        let stream = try! #require(fake.streams.last)
+        stream.emit("session.execution.started", id: "evt_t", #"{"sessionID":"ses_busy"}"#)
+        fake.duringPrompt = { message in
+            stream.emit("session.inbox.enqueued", #"{"sessionID":"ses_busy","inboxID":"\#(message)","item":{"type":"user","payload":{"text":"go"}}}"#)
+            stream.emit("session.inbox.delivered", #"{"sessionID":"ses_busy","inboxID":"\#(message)"}"#)
+            for _ in 0..<20 { await Task.yield() }
+        }
+        let delivery = Task { await opencode.deliver("go", images: [], request: "R9", to: location("ses_busy")) }
+        await settle()
+        #expect(await delivery.value == .accepted)
+        await settle()
+        #expect(changes.all.contains(.delivered(request: "R9", at: location("ses_busy"), turn: "evt_t")))
     }
 
     @Test func aTurnThatEndedWhileTheStreamWasDownIsEndedOnReconnect() async {

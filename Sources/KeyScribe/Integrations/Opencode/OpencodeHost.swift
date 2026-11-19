@@ -2,20 +2,14 @@ import AppKit
 import Foundation
 import KeyScribeKit
 
-struct OpencodePane: Equatable, Sendable {
-    var pid: Int
-    var title: String
-}
-
 @MainActor
 final class OpencodeHost: AgentHost {
-    typealias Panes = @Sendable () async -> [OpencodePane]
 
     nonisolated static let kind = AgentKind(id: OpencodeSession.agent, displayName: "OpenCode", connectorName: "OpenCode plugin")
     nonisolated static let integration: AgentHostIntegration = {
         var integration = AgentHostIntegration(kind: kind, make: { OpencodeHost() })
         integration.processRule = .opencode
-        integration.withSurfaces = { _, surfaces in OpencodeHost(panes: OpencodeHost.panes(surfaces: surfaces)) }
+        integration.withSurfaces = { _, surfaces in OpencodeHost(panes: HostPaneReader.reading(.opencode, surfaces: surfaces)) }
         return integration
     }()
 
@@ -26,6 +20,7 @@ final class OpencodeHost: AgentHost {
     nonisolated static let listLimit = 50
     nonisolated static let recoverLimit = 4
     nonisolated static let eventBacklog = 1024
+    nonisolated static let sentMemory = 32
     nonisolated static let notRunning = "OpenCode isn\u{2019}t running. Start opencode in a terminal to reach its conversations."
     nonisolated static let unanswered = "OpenCode\u{2019}s service didn\u{2019}t answer. Try again in a moment."
 
@@ -33,7 +28,7 @@ final class OpencodeHost: AgentHost {
     private let service: @Sendable () -> OpencodeService?
     private let transport: any OpencodeTransport
     private let installed: () -> Bool
-    private let panes: Panes?
+    private let panes: HostPaneReader.Read?
     private let showsWindowTitle: @Sendable () -> Bool
     private let frontmost: @MainActor () -> (app: AgentHostApp, title: String)?
     private let now: () -> Date
@@ -41,7 +36,9 @@ final class OpencodeHost: AgentHost {
     private var turns = OpencodeTurns()
     private var sessions: [String: OpencodeSession] = [:]
     private var delivered: [String: Date] = [:]
-    private var shownPanes: (at: Date, panes: [OpencodePane])?
+    private var shownPanes: (at: Date, panes: [HostPane])?
+    private var sent: [(message: String, request: String)] = []
+    private var natives: [String: String] = [:]
     private var changed: (@MainActor (AgentHostChange) -> Void)?
     private var stream: (any OpencodeStream)?
     private var consumer: Task<Void, Never>?
@@ -56,9 +53,9 @@ final class OpencodeHost: AgentHost {
         service: (@Sendable () -> OpencodeService?)? = nil,
         transport: any OpencodeTransport = OpencodeHTTP(),
         installed: @escaping () -> Bool = { OpencodeInstall.find() != nil },
-        panes: Panes? = nil,
+        panes: HostPaneReader.Read? = nil,
         showsWindowTitle: @escaping @Sendable () -> Bool = OpencodeHost.readsWindowTitle,
-        frontmost: @escaping @MainActor () -> (app: AgentHostApp, title: String)? = OpencodeHost.frontmost,
+        frontmost: @escaping @MainActor () -> (app: AgentHostApp, title: String)? = HostFront.window,
         now: @escaping () -> Date = Date.init
     ) {
         self.instance = instance
@@ -76,7 +73,7 @@ final class OpencodeHost: AgentHost {
         guard let data = FileManager.default.contents(atPath: file.path), let service = OpencodeService.parse(data),
               let modified = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.modificationDate] as? Date,
               case .started(let started) = ProcessStart.read(pid: service.pid),
-              Double(started) / 1000 <= modified.timeIntervalSince1970 + 2,
+              LocalServiceRecord.trusts(processStarted: Date(timeIntervalSince1970: Double(started) / 1000), recordedAt: modified),
               let process = SystemTerminalFacts.arguments(of: service.pid, keeping: []), OpencodeInstall.isService(arguments: process.arguments)
         else { return nil }
         return service
@@ -87,32 +84,17 @@ final class OpencodeHost: AgentHost {
         return OpencodeInstall.showsWindowTitle(settings: FileManager.default.contents(atPath: file.path))
     }
 
-    nonisolated static func panes(surfaces: ResolvedSurfaces) -> Panes {
-        let table = AgentProcessTable(surfaces: surfaces)
-        let titles = TerminalTitleReader(surfaces: surfaces)
-        return {
-            let found = await Task.detached { table.found(.opencode).candidates }.value
-            guard !found.isEmpty else { return [] }
-            let read = await titles.titles(of: found.map(\.pid))
-            return found.compactMap { candidate in read.titles[candidate.pid].map { OpencodePane(pid: candidate.pid, title: $0) } }
-        }
-    }
-
-    static func frontmost() -> (app: AgentHostApp, title: String)? {
-        guard let app = NSWorkspace.shared.frontmostApplication, let bundle = app.bundleIdentifier,
-              let title = ContextProbe.focusedWindowTitle(pid: app.processIdentifier)
-        else { return nil }
-        let window = ContextProbe.focusedState(pid: app.processIdentifier).windowId
-        return (AgentHostApp(bundle: bundle, pid: Int(app.processIdentifier), name: app.localizedName ?? bundle, window: window), title)
-    }
-
     var isEnabled: Bool { installed() }
 
     var takesImages: Bool { true }
 
     func reportsTurns(at location: AgentHostLocation) -> Bool {
-        stream != nil && seeding == nil && owns(location)
+        following && owns(location)
     }
+
+    var reportsDeliveredTurns: Bool { following }
+
+    private var following: Bool { stream != nil && seeding == nil }
 
     func watch(_ changed: @escaping @MainActor (AgentHostChange) -> Void) {
         self.changed = changed
@@ -128,8 +110,14 @@ final class OpencodeHost: AgentHost {
         location.host == Self.kind.id && location.instance == instance && !location.native.isEmpty
     }
 
+    private func location(_ id: String) -> AgentHostLocation {
+        AgentHostLocation(host: Self.kind.id, instance: instance, native: id)
+    }
+
     private func key(_ id: String) -> String {
-        AgentHostLocation(host: Self.kind.id, instance: instance, native: id).conversationKey
+        let key = location(id).conversationKey
+        natives[key] = id
+        return key
     }
 
     private func call(_ method: String, _ path: String, _ body: [String: Any]? = nil, to service: OpencodeService) async -> OpencodeReply? {
@@ -180,12 +168,14 @@ final class OpencodeHost: AgentHost {
 
     private func processes(showing list: [OpencodeSession]) async -> [String: Int] {
         guard let panes, showsWindowTitle() else { return [:] }
-        let current: [OpencodePane]
+        let current: [HostPane]
         if let known = shownPanes, now().timeIntervalSince(known.at) < Self.paneLifetime {
             current = known.panes
         } else {
-            current = await panes()
-            shownPanes = (now(), current)
+            let fresh = await panes { _ in true }
+            let kept = (shownPanes?.panes ?? []).filter { fresh.unread.contains($0.pid) }
+            current = fresh.panes + kept
+            shownPanes = (fresh.unread.isEmpty ? now() : .distantPast, current)
         }
         var shown: [String: Set<Int>] = [:]
         for pane in current {
@@ -245,15 +235,27 @@ final class OpencodeHost: AgentHost {
             switch change {
             case .listing:
                 relist = true
+            case .delivered(let session, let message, let turn):
+                guard let index = sent.firstIndex(where: { $0.message == message }) else { continue }
+                changed?(.delivered(request: sent.remove(at: index).request, at: location(session), turn: turn))
             case .event(let event):
                 changed?(.event(event))
-                switch event {
-                case .turnStarted(_, _, nil), .turnComplete, .waiting: relist = true
-                default: break
+                if let session = event.session.flatMap({ natives[$0] }), let state = state(after: event, in: session) {
+                    changed?(.state(location(session), state))
                 }
             }
         }
         if relist { changed?(.listing) }
+    }
+
+    private func state(after event: AgentEvent, in session: String) -> AgentLiveState? {
+        switch event {
+        case .turnStarted(_, _, nil): return .working
+        case .turnComplete: return .idle
+        case .waiting(_, let prompt?): return AgentLiveState.userDialog.named(by: prompt)
+        case .waiting(_, nil): return turns.running[session] == nil ? .idle : .working
+        default: return nil
+        }
     }
 
     private func closed(generation: Int) {
@@ -279,13 +281,18 @@ final class OpencodeHost: AgentHost {
         let id = OpencodeMessages.messageId(request: request)
         var body: [String: Any] = ["id": id, "text": text, "delivery": "steer"]
         if !images.isEmpty { body["files"] = images.map { ["uri": URL(fileURLWithPath: $0).absoluteString] } }
+        sent.append((id, request))
+        if sent.count > Self.sentMemory { sent.removeFirst(sent.count - Self.sentMemory) }
         guard let reply = await call("POST", "/api/session/\(location.native)/prompt", body, to: service) else { return .uncertain }
         if reply.ok {
             guard OpencodeMessages.isMessage(reply.body, id: id) else { return .uncertain }
             delivered[location.native] = now()
             return turns.asking(location.native) == nil ? .accepted : .queued
         }
-        if (400..<500).contains(reply.status) { return .refused("OpenCode did not take the message.") }
+        if (400..<500).contains(reply.status) {
+            sent.removeAll { $0.message == id }
+            return .refused("OpenCode did not take the message.")
+        }
         return .uncertain
     }
 

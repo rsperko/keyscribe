@@ -16,8 +16,7 @@ public struct OpencodeService: Equatable, Sendable {
     }
 
     public static func parse(_ data: Data) -> OpencodeService? {
-        guard let object = OpencodeJSON.object(data), let address = object["url"] as? String, let url = URL(string: address),
-              url.scheme == "http", let host = url.host, ["127.0.0.1", "localhost", "::1"].contains(host),
+        guard let object = OpencodeJSON.object(data), let url = LocalServiceRecord.loopback(object["url"] as? String),
               let pid = OpencodeJSON.int(object["pid"])
         else { return nil }
         return OpencodeService(url: url, password: OpencodeJSON.text(object["password"]), pid: pid, version: OpencodeJSON.text(object["version"]))

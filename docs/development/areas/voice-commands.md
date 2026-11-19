@@ -993,9 +993,13 @@ every rule above applies to it, with these sharpenings:
   `queued` then, and `accepted` otherwise. A prompt from the API is stored exactly as a typed one.
 - **OpenCode turns, replies and prompts come from its event stream** (`OpencodeTurns`). While the hub watches,
   the host follows `GET /api/event` (server-sent events, a heartbeat every few seconds); it opens the stream only then
-  and closes it on `unwatch`. An execution's start begins a turn, each inbox item it takes in names that turn with
-  the item's prompt digest (so a steered dictation follows the running turn), its last `session.text.ended` is the
-  reply, and `succeeded`, `interrupted` or `failed` ends it. A user item whose id is not KeyScribe's is `typed`.
+  and closes it on `unwatch`. An execution's start begins a turn, its last `session.text.ended` is the reply, and
+  `succeeded`, `interrupted` or `failed` ends it. When the turn takes in KeyScribe's own message, the host reports
+  that request delivered into that turn (`AgentHostChange.delivered`, `reportsDeliveredTurns` while the stream is
+  followed), whether the message started the turn or was steered into a running one; the message is recorded before
+  the prompt call, since the stream can report it taken in before the call answers. A user item whose id is not
+  KeyScribe's is `typed`, and the turn it starts carries its prompt digest. Each turn start, end and opened or closed
+  prompt also reports the conversation's state (`AgentHostChange.state`), so a row changes without a new list.
   `permission.asked` and `form.created` open a prompt (an agent question's form is titled `Questions`, so its first
   field carries the question) and their replies close it. The stream never replays what was missed, so every
   (re)connect reads the pending permissions, forms and active sessions again, and ends each turn that was running
