@@ -29,11 +29,12 @@ public enum DevCLI {
                                         permissions  Remove TCC grants (Mic/Accessibility/Automation) so macOS re-prompts.
                                         all          Wipe the whole support dir + first-run flag (shared models kept).
                                         eraseAll     Like all, plus erase the variant's BYOK Keychain keys (TCC grants kept).
-              --agent-take <text>     Development build only, while it runs: make a real take of <text> in the
+              --agent-take <text>     A build with the development tools, while it runs: make a real take of <text> in the
                                       Agent mode, as if spoken (macOS speaks it into the clip; the take hears
                                       exactly <text>), print what the take did, and exit non-zero if refused.
               --agent-take-wav <file> The same with a recorded clip, which the take's speech model hears.
-                --mode <name>           Use this mode instead of the first Agent mode.
+                --mode <name>           Use this mode instead of the first Agent mode (any mode only in the
+                                        dev build; elsewhere, a mode that sends to agents).
                 --timeout <seconds>     How long to wait for the take (default 120).
               --benchmark <dir>       Run the STT benchmark over recordings in <dir> and exit.
                 --engines <a,b,...>     Limit the benchmark run to these engine ids.
@@ -285,7 +286,7 @@ public enum DevCLI {
             }
             exit(ScriptedTakeCLI.run(
                 text: takeText, wav: takeClip, mode: argument("--mode"), timeout: argument("--timeout").flatMap(Double.init) ?? 120,
-                supportDir: KeyScribePaths.supportDir, variant: KeyScribePaths.variant))
+                supportDir: KeyScribePaths.supportDir, allowed: KeyScribePaths.allowsDevelopmentTools))
         }
 
         if let i = CommandLine.arguments.firstIndex(of: "--voice-command"), i + 1 < CommandLine.arguments.count {

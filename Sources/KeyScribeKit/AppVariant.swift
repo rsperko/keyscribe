@@ -39,6 +39,16 @@ public enum AppVariant: Sendable, Equatable {
 
     public var isDev: Bool { self == .dev }
 
+    public static let developmentToolsKey = "KeyScribeDevelopmentTools"
+
+    public func allowsDevelopmentTools(declared: String?) -> Bool {
+        switch self {
+        case .production: false
+        case .dev: true
+        case .custom: declared == "YES"
+        }
+    }
+
     public var connectorSlug: String {
         switch self {
         case .production: return "keyscribe"

@@ -389,11 +389,11 @@ struct SpeakingHUDTests {
 struct SpeakingHUDPreviewTests {
     @Test func theOverflowPreviewReproducesTheShortScreenCaptionOnlyInDevelopment() throws {
         let arguments = ["KeyScribe", "--speaking-preview", "overflow", "--speaking-expanded"]
-        let preview = try #require(HUDPreview.speaking(from: arguments, isDevelopmentBuild: true))
+        let preview = try #require(HUDPreview.speaking(from: arguments, allowsDevelopmentTools: true))
         #expect(preview.screenHeight == 120)
         #expect(preview.summary == String(repeating: "A long sentence that keeps going. ", count: 12))
         #expect(preview.expanded)
-        #expect(HUDPreview.speaking(from: arguments, isDevelopmentBuild: false) == nil)
+        #expect(HUDPreview.speaking(from: arguments, allowsDevelopmentTools: false) == nil)
     }
 }
 

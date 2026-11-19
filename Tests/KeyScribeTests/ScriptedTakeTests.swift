@@ -172,10 +172,22 @@ struct ScriptedTakeTests {
     @Test func anAgentTakeThatEndedWithoutAReceiptIsNotOkButAPlainTakeIs() async throws {
         let target = Target()
         target.receipt = nil
-        let runner = ScriptedTakeRunner(target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), pause: .milliseconds(1))
+        let runner = ScriptedTakeRunner(target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), agentModesOnly: false, pause: .milliseconds(1))
         #expect(!(try await take(runner, ScriptedTakeRequest(id: "q1", wav: try wav().path, transcript: "x", mode: nil, caller: getpid(), issued: Date()))).ok)
         target.modes["plain"] = ScriptedTakeMode(id: "plain", sendsToAgents: false)
         #expect(try await take(runner, ScriptedTakeRequest(id: "q2", wav: try wav().path, transcript: "x", mode: "plain", caller: getpid(), issued: Date())).ok)
+    }
+
+    @Test func aBuildLimitedToAgentModesRefusesAPlainModeBeforePressingAndStillTakesAnAgentMode() async throws {
+        let target = Target()
+        target.modes["plain"] = ScriptedTakeMode(id: "plain", sendsToAgents: false)
+        let runner = ScriptedTakeRunner(
+            target: target, capture: ScriptedCapture(Microphone()), engines: ScriptedEngines(), agentModesOnly: true, pause: .milliseconds(1))
+        let plain = try await take(runner, ScriptedTakeRequest(id: "q1", wav: try wav().path, transcript: "x", mode: "plain", caller: getpid(), issued: Date()))
+        #expect(!plain.ok)
+        #expect(plain.problem == "This build makes scripted takes only in a mode that sends to agents, and \u{201C}plain\u{201D} doesn\u{2019}t.")
+        #expect(target.steps.isEmpty)
+        #expect(try await take(runner, ScriptedTakeRequest(id: "q2", wav: try wav().path, transcript: "x", mode: "agent-mode", caller: getpid(), issued: Date())).ok)
     }
 
     @Test func aRequestWhoseCommandHasExitedIsNeitherTakenNorAnswered() async throws {
@@ -282,9 +294,9 @@ struct ScriptedTakeTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)
     }
 
-    @Test func onlyTheDevelopmentBuildSendsScriptedTakes() {
+    @Test func aBuildWithoutTheDevelopmentToolsSendsNoScriptedTake() {
         let support = FileManager.default.temporaryDirectory.appendingPathComponent("ks-support-\(UUID().uuidString)", isDirectory: true)
-        #expect(ScriptedTakeCLI.run(text: "hi", wav: nil, mode: nil, timeout: 1, supportDir: support, variant: .production) == 2)
+        #expect(ScriptedTakeCLI.run(text: "hi", wav: nil, mode: nil, timeout: 1, supportDir: support, allowed: false) == 2)
         #expect(!FileManager.default.fileExists(atPath: support.path))
     }
 

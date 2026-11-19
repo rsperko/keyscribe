@@ -1314,7 +1314,7 @@ struct DictationPipelineWiringTests {
             insert: { _, method, paste, text, _ in await inserted.record(method, paste, text); return true },
             snapshot: { TargetSnapshot(bundleId: "test.bundle") }, micStatus: { .granted }, accessibilityGranted: { true })
         controller.engineForTake = engines.engine(for:)
-        let runner = ScriptedTakeRunner(target: controller, capture: capture, engines: engines, pause: .milliseconds(5))
+        let runner = ScriptedTakeRunner(target: controller, capture: capture, engines: engines, agentModesOnly: false, pause: .milliseconds(5))
         let clip = supportDir.appendingPathComponent("clip.wav")
         try Data("RIFF".utf8).write(to: clip)
         let first = try #require(await runner.run(ScriptedTakeRequest(id: "a", wav: clip.path, transcript: "first take", mode: "plain", caller: getpid(), issued: Date())))

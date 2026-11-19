@@ -75,7 +75,7 @@ struct HUDStateTests {
 
     @Test func previewLaunchIsUnavailableOutsideDevelopmentBuilds() {
         #expect(HUDPreview.state(
-            from: ["KeyScribe", "--hud-preview", "recording"], isDevelopmentBuild: false) == nil)
+            from: ["KeyScribe", "--hud-preview", "recording"], allowsDevelopmentTools: false) == nil)
     }
 
     @Test func completedInsertedCarriesTheResolvedModeName() {

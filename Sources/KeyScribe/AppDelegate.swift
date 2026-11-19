@@ -249,7 +249,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
         // Before the controller exists, so the first dictation already archives.
         CaptureArchive.publish(settings.audio)
         CaptureArchive.applyRetention()
-        let scriptedCapture = KeyScribePaths.variant.isDev ? ScriptedCapture(AudioCapture()) : nil
+        let scriptedCapture = KeyScribePaths.allowsDevelopmentTools ? ScriptedCapture(AudioCapture()) : nil
         controller = DictationController(
             settings: settings, provider: provider, config: config, history: history,
             replacementUsage: replacementUsage, hud: hud,
@@ -271,7 +271,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate {
             controller.engineForTake = engines.engine(for:)
             scriptedTakes = ScriptedTakeInbox(
                 folder: ScriptedTakeInbox.folder(supportDir: KeyScribePaths.supportDir),
-                runner: ScriptedTakeRunner(target: controller, capture: scriptedCapture, engines: engines))
+                runner: ScriptedTakeRunner(
+                    target: controller, capture: scriptedCapture, engines: engines, agentModesOnly: !KeyScribePaths.variant.isDev))
             scriptedTakes?.start()
         }
         hud.appearance = settings.hud.appearance

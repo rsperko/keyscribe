@@ -15,6 +15,13 @@
 #           buildPhase: resources
 #       settings: { base: { PRODUCT_NAME: MyApp, PRODUCT_BUNDLE_IDENTIFIER: com.example.myapp, … } }
 #
+# A distribution's local development target sets KEYSCRIBE_DEVELOPMENT_TOOLS: YES to take the development tools
+# (scripted takes with --agent-take, the HUD previews). Such a build makes scripted takes only in a mode that
+# sends to agents; upstream's dev build takes any mode. Leave it NO, and check it is NO, on any build that is
+# handed out: any process of the user's can ask for a scripted take, and nothing ties the request to a person.
+# A bundle identifier ending in .dev is read as upstream's dev build itself (its tools, support folder and
+# keychain service, whatever this setting says), so a distribution's dev target uses another suffix.
+#
 # A distribution commits its own Package.resolved: upstream's pins plus the pins of any package it adds.
 # Generate and seed its project with
 #   ../keyscribe/scripts/prepare-xcode-project.sh --spec project.yml --project-dir . --lockfile Package.resolved
@@ -45,6 +52,7 @@ settings:
     KEYSCRIBE_SCM_REVISION: "unknown"
     KEYSCRIBE_FLUIDAUDIO_REVISION: "unknown"
     SPARKLE_PUBLIC_ED_KEY: ""
+    KEYSCRIBE_DEVELOPMENT_TOOLS: "NO"
 
 packages:
   KeyScribe:

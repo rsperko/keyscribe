@@ -29,6 +29,7 @@ targets:
       base:
         PRODUCT_NAME: KeyScribeDev
         PRODUCT_BUNDLE_IDENTIFIER: com.keyscribe.app.dev
+        KEYSCRIBE_DEVELOPMENT_TOOLS: "YES"
         CODE_SIGN_IDENTITY: $(KEYSCRIBE_DEV_SIGN_IDENTITY)
         DEVELOPMENT_TEAM: ""
         ENABLE_HARDENED_RUNTIME: NO

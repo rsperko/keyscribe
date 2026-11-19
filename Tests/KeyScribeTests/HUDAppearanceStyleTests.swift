@@ -24,9 +24,9 @@ struct HUDAppearanceStyleTests {
 
     @Test func previewAppearanceIsReadFromItsFlag() {
         let args = ["KeyScribe", "--hud-preview", "recording", "--hud-appearance", "light"]
-        #expect(HUDPreview.appearance(from: args, isDevelopmentBuild: true) == .light)
-        #expect(HUDPreview.appearance(from: args, isDevelopmentBuild: false) == nil)
-        #expect(HUDPreview.appearance(from: ["KeyScribe"], isDevelopmentBuild: true) == nil)
+        #expect(HUDPreview.appearance(from: args, allowsDevelopmentTools: true) == .light)
+        #expect(HUDPreview.appearance(from: args, allowsDevelopmentTools: false) == nil)
+        #expect(HUDPreview.appearance(from: ["KeyScribe"], allowsDevelopmentTools: true) == nil)
     }
 }
 

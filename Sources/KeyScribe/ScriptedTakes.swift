@@ -146,19 +146,22 @@ final class ScriptedTakeRunner {
     private let target: ScriptedTakeTarget
     private let capture: ScriptedCapture
     private let engines: ScriptedEngines
+    private let agentModesOnly: Bool
     private let pause: Duration
     private let recordingWithin: Duration
 
     private let callerWaits: (Int32, Date) -> Bool
 
     init(
-        target: ScriptedTakeTarget, capture: ScriptedCapture, engines: ScriptedEngines, pause: Duration = .milliseconds(20),
+        target: ScriptedTakeTarget, capture: ScriptedCapture, engines: ScriptedEngines, agentModesOnly: Bool = true,
+        pause: Duration = .milliseconds(20),
         recordingWithin: Duration = .seconds(10), callerWaits: @escaping (Int32, Date) -> Bool = ScriptedTakeRunner.callerWaits
     ) {
         self.callerWaits = callerWaits
         self.target = target
         self.capture = capture
         self.engines = engines
+        self.agentModesOnly = agentModesOnly
         self.pause = pause
         self.recordingWithin = recordingWithin
     }
@@ -170,6 +173,9 @@ final class ScriptedTakeRunner {
         guard FileManager.default.isReadableFile(atPath: request.wav) else { return refused("The clip \(request.wav) can\u{2019}t be read.") }
         guard let mode = target.scriptedTakeMode(request.mode) else {
             return refused(request.mode.map { "No enabled mode is named \u{201C}\($0)\u{201D}." } ?? "No enabled mode sends to agents.")
+        }
+        guard mode.sendsToAgents || !agentModesOnly else {
+            return refused("This build makes scripted takes only in a mode that sends to agents, and \u{201C}\(request.mode ?? mode.id)\u{201D} doesn\u{2019}t.")
         }
         let before = target.scriptedTakeMarks
         capture.arm(URL(fileURLWithPath: request.wav))
@@ -311,9 +317,9 @@ final class ScriptedTakeInbox {
 }
 
 enum ScriptedTakeCLI {
-    static func run(text: String?, wav: String?, mode: String?, timeout: TimeInterval, supportDir: URL, variant: AppVariant) -> Int32 {
-        guard variant.isDev else {
-            print("agent-take: only the development build takes scripted takes; run this with its binary.")
+    static func run(text: String?, wav: String?, mode: String?, timeout: TimeInterval, supportDir: URL, allowed: Bool) -> Int32 {
+        guard allowed else {
+            print("agent-take: this build doesn\u{2019}t take scripted takes. Use a development build: KeyScribeDev, or a build whose target sets KEYSCRIBE_DEVELOPMENT_TOOLS to YES.")
             return 2
         }
         let folder = ScriptedTakeInbox.folder(supportDir: supportDir)

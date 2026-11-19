@@ -32,8 +32,8 @@ enum HUDPreview {
         },
         hint: choicePrompt.hint)
 
-    static func state(from arguments: [String], isDevelopmentBuild: Bool = KeyScribePaths.variant.isDev) -> HUDState? {
-        guard isDevelopmentBuild,
+    static func state(from arguments: [String], allowsDevelopmentTools: Bool = KeyScribePaths.allowsDevelopmentTools) -> HUDState? {
+        guard allowsDevelopmentTools,
               let index = arguments.firstIndex(of: "--hud-preview"), index + 1 < arguments.count else {
             return nil
         }
@@ -47,8 +47,8 @@ enum HUDPreview {
         var screenHeight: Double?
     }
 
-    static func speaking(from arguments: [String], isDevelopmentBuild: Bool = KeyScribePaths.variant.isDev) -> Speaking? {
-        guard isDevelopmentBuild,
+    static func speaking(from arguments: [String], allowsDevelopmentTools: Bool = KeyScribePaths.allowsDevelopmentTools) -> Speaking? {
+        guard allowsDevelopmentTools,
               let index = arguments.firstIndex(of: "--speaking-preview"), index + 1 < arguments.count else {
             return nil
         }
@@ -68,9 +68,9 @@ enum HUDPreview {
     }
 
     static func appearance(
-        from arguments: [String], isDevelopmentBuild: Bool = KeyScribePaths.variant.isDev
+        from arguments: [String], allowsDevelopmentTools: Bool = KeyScribePaths.allowsDevelopmentTools
     ) -> HUDAppearance? {
-        guard isDevelopmentBuild,
+        guard allowsDevelopmentTools,
               let index = arguments.firstIndex(of: "--hud-appearance"), index + 1 < arguments.count else {
             return nil
         }

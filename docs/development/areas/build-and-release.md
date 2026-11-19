@@ -68,8 +68,10 @@ a front it could not read, or needs a special start to come forward fails it). C
 open plan and places for one agent; add `--read-places` to run its place script and place sources too) and
 `--front-probe` (what reads as in front). A route's pane title read (`titleRead`, used to join a Codex conversation
 to its terminal) is checked with `--title-probe`, which lists each running agent process with the title read for it.
-Check an agent integration end to end, without speaking, with the development build's own binary while that app
-runs: `--agent-take "<text>"` makes a real take in the first Agent mode (or `--mode <name>`) that hears exactly
+Check an agent integration end to end, without speaking, with a development build's own binary while that app
+runs (the dev build, or a downstream target that sets `KEYSCRIBE_DEVELOPMENT_TOOLS: YES`, which a build handed out
+leaves `NO`, since any process of the user's can ask for a take and nothing ties the request to a person; a downstream
+build takes it only in a mode that sends to agents, the dev build in any mode): `--agent-take "<text>"` makes a real take in the first Agent mode (or `--mode <name>`) that hears exactly
 `<text>`, and `--agent-take-wav <file>` makes one from a recorded or generated clip, so the take's speech model
 runs on it (corpus clips, or accents made with `say -v` or the voices corpus). Only the microphone, and for text the
 speech model, are replaced; the press, delivery, receipts, History and the reply are the real path. It exits zero

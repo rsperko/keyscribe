@@ -62,4 +62,15 @@ final class AppVariantTests: XCTestCase {
         XCTAssertFalse(AppVariant.production.isDev)
         XCTAssertTrue(AppVariant.dev.isDev)
     }
+
+    func testDevelopmentToolsAreOnInTheDevBuildAndInACustomBuildThatDeclaresThem() {
+        XCTAssertTrue(AppVariant.dev.allowsDevelopmentTools(declared: nil))
+        XCTAssertTrue(AppVariant.dev.allowsDevelopmentTools(declared: "NO"))
+        let custom = AppVariant(bundleID: "com.acme.customvoice.local", bundleName: "CustomVoiceDev")
+        XCTAssertTrue(custom.allowsDevelopmentTools(declared: "YES"))
+        XCTAssertFalse(custom.allowsDevelopmentTools(declared: "NO"))
+        XCTAssertFalse(custom.allowsDevelopmentTools(declared: nil))
+        XCTAssertFalse(custom.allowsDevelopmentTools(declared: "$(KEYSCRIBE_DEVELOPMENT_TOOLS)"))
+        XCTAssertFalse(AppVariant.production.allowsDevelopmentTools(declared: "YES"))
+    }
 }

@@ -12,6 +12,10 @@ enum KeyScribePaths {
             bundleName: Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String)
     }
 
+    static var allowsDevelopmentTools: Bool {
+        variant.allowsDevelopmentTools(declared: Bundle.main.object(forInfoDictionaryKey: AppVariant.developmentToolsKey) as? String)
+    }
+
     private static var appSupportBase: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
     }
