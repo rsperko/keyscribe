@@ -56,7 +56,7 @@ protocol AgentConnector: AnyObject {
     var toolProgram: String? { get }
     var folderVariable: String? { get }
     var keepsConnection: Bool { get }
-    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result
+    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result?
     func checkTool(_ tool: String) async -> ToolCheck?
     func check(tool: String, target: ConnectorTarget) async -> AgentConnectorModel.State
     func install(tool: String, target: ConnectorTarget) async throws
@@ -204,7 +204,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
         let found = search ?? connector.findTool(in: folder, chosen: chosenTool)
         var check: ToolCheck?
         if case .toolNotWorking(let failed) = state { check = failed }
-        else if let tool = found.tool?.path { check = await connector.checkTool(tool) }
+        else if let tool = found?.tool?.path { check = await connector.checkTool(tool) }
         return DiscoveryReport(
             app: Branding.appName, agent: connector.kind.displayName, folder: folder.path, search: found, check: check, shell: tools.state,
             folders: folders, sightings: tools.sightings(agent: agent)
@@ -304,7 +304,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
 
     func remove(undoing: Bool = false) async {
         guard operation == nil else { return }
-        if connector.findTool(in: folder, chosen: chosenTool).tool == nil, connector.hasFiles(in: target) {
+        if let found = connector.findTool(in: folder, chosen: chosenTool), found.tool == nil, connector.hasFiles(in: target) {
             do {
                 try await connector.uninstallWithoutTool(target: target)
             } catch {
@@ -339,7 +339,7 @@ final class ConnectorSetupModel: ObservableObject, Identifiable {
             state = .unavailable
             return nil
         }
-        let found = connector.findTool(in: folder, chosen: chosenTool)
+        guard let found = connector.findTool(in: folder, chosen: chosenTool) else { return folder.path }
         if search != found { search = found }
         guard let tool = found.tool?.path else {
             state = .toolNotFound

@@ -951,6 +951,53 @@ struct AgentsSettingsModelTests {
         #expect(model.useDefaultName("a"))
         #expect(model.renameProblem == nil)
     }
+
+    final class FolderConnector: AgentConnector {
+        let kind = AgentKind(id: "folder", displayName: "Folder Agent", connectorName: "Folder Agent extension")
+        let copy = BBPluginConnector(agentsDir: URL(fileURLWithPath: "/tmp"), pluginName: "p").copy
+        let isBundled = true
+        let bundledVersion: String? = "1"
+        let defaultFolder: URL
+        var installed = false
+        private(set) var toolsSeen: [String] = []
+
+        init(defaultFolder: URL) { self.defaultFolder = defaultFolder }
+
+        func hasFiles(in target: ConnectorTarget) -> Bool { installed }
+        func manualUninstall(for target: ConnectorTarget) -> [String] { [] }
+        func recognizes(folder: URL) -> Bool { true }
+        func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result? { nil }
+        func check(tool: String, target: ConnectorTarget) async -> AgentConnectorModel.State {
+            toolsSeen.append(tool)
+            if target.removing { return installed ? .removalUnfinished(nil) : .status(.notInstalled) }
+            return installed ? .status(.ready) : .status(.notInstalled)
+        }
+        func install(tool: String, target: ConnectorTarget) async throws {
+            toolsSeen.append(tool)
+            installed = true
+        }
+        func update(tool: String, target: ConnectorTarget) async throws { installed = true }
+        func uninstall(tool: String, target: ConnectorTarget) async throws { installed = false }
+        func uninstallWithoutTool(target: ConnectorTarget) async throws { installed = false }
+    }
+
+    @Test func aConnectorThatRunsNoProgramInstallsChecksAndRemovesWithoutLookingForOne() async {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("ks-folder-connector-\(UUID().uuidString)")
+        let folder = dir.appendingPathComponent("home/.folder", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let connector = FolderConnector(defaultFolder: folder)
+        let model = AgentsSettingsModel(describeTerminal: Terminals().describe, agentsDir: dir, connectors: [connector])
+        await model.refresh()
+        #expect(setup(model).state == .status(.notInstalled))
+        #expect(!setup(model).toolMissing)
+        await setup(model).install()
+        #expect(setup(model).state == .status(.ready))
+        await setup(model).remove()
+        #expect(setup(model).state == .status(.notInstalled))
+        #expect(!connector.installed)
+        #expect(!(await setup(model).details(folders: [])).contains("not found"))
+        #expect(Set(connector.toolsSeen) == [ConnectorFolders.canonical(folder).path])
+    }
 }
 
 struct ClaudeCLITests {

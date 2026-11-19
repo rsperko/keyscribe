@@ -181,7 +181,7 @@ final class ClaudeConnector: AgentConnector {
 
     var folderVariable: String? { Self.rule.setupVariable }
 
-    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result {
+    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result? {
         tools.search(program: Self.rule.command, agent: kind.id, setup: folder.path, chosen: chosen, extra: ClaudeCLI.extraFolders(home: home))
     }
 

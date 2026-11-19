@@ -205,7 +205,7 @@ final class BBPluginConnector: AgentConnector {
 
     var folderVariable: String? { BBBuilds.dataFolderKey }
 
-    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result {
+    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result? {
         let place = ToolSearch.Place(path: folder.appendingPathComponent(BBBuilds.launcherPath).path, source: .usual)
         return ToolSearch.Result(tool: isExecutable(place.path) ? place : nil, searched: [place])
     }

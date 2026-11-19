@@ -255,7 +255,7 @@ final class ExtensionConnector: AgentConnector {
 
     var folderVariable: String? { agent.rule.setupVariable }
 
-    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result {
+    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result? {
         tools.search(program: agent.toolProgram, agent: kind.id, setup: folder.path, chosen: chosen, extra: agent.extraFolders(home))
     }
 

@@ -674,6 +674,9 @@ every rule above applies to it, with these sharpenings:
   (`AgentCandidate.tool`, through its wrapper when one sits beside it) and its runtime. A process started by an
   agent is still not a session. Processes that resemble an agent but do not match are kept, by path and name only,
   for Settings' Copy Details, after the matched ones, as program paths and argument paths of existing files only.
+- **A connector that runs no program never searches for one** (`AgentConnector.findTool` answers nil, as for Ultimate's
+  extension, which only writes files): Settings installs, checks and removes it against its setup folder alone, never
+  shows it as not found, and Copy Details leaves out the program search.
 - **A tool is chosen in one order and must answer.** `ToolEnvironment.search` (order in `ToolSearch.places`): a
   command the user chose for the folder (stored on its enrollment, and then the only place looked), a running
   conversation's command for that folder, the login shell's `PATH`, the app's `PATH`, the usual folders. The login

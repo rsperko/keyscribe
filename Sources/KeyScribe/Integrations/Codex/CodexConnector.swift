@@ -70,7 +70,7 @@ final class CodexConnector: AgentConnector {
 
     func recognizes(folder: URL) -> Bool { ConnectorFolders.contains(any: ["config.toml", "auth.json", "sessions"], in: folder) }
 
-    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result { CodexInstall.search(in: tools, home: folder.path, chosen: chosen) }
+    func findTool(in folder: URL, chosen: String?) -> ToolSearch.Result? { CodexInstall.search(in: tools, home: folder.path, chosen: chosen) }
 
     func checkTool(_ tool: String) async -> ToolCheck? { await tools.check(tool: tool, agent: kind.id) }
 
