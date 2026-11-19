@@ -9,13 +9,13 @@ private final class HistorySource: @unchecked Sendable {
     private var fingerprint = HistorySnapshot.Fingerprint(files: ["d.jsonl": 1])
     private var blocking = false
     private var sawCancellation = false
+    private let released = DispatchSemaphore(value: 0)
     let workerBlocked = Signal("HistorySource.workerBlocked")
 
     var current: HistorySnapshot {
         if lock.withLock({ blocking }) {
             workerBlocked.fire()
-            let deadline = Date().addingTimeInterval(10)
-            while !Task.isCancelled, Date() < deadline { usleep(1000) }
+            _ = released.wait(timeout: .now() + 60)
             lock.withLock { sawCancellation = Task.isCancelled }
         }
         return lock.withLock { HistorySnapshot(items: items, unreadableLines: 0, fingerprint: fingerprint) }
@@ -25,7 +25,8 @@ private final class HistorySource: @unchecked Sendable {
     var currentFingerprint: HistorySnapshot.Fingerprint { lock.withLock { override ?? fingerprint } }
     func overrideFingerprint(_ value: HistorySnapshot.Fingerprint) { lock.withLock { override = value } }
 
-    func blockUntilCancelled() { lock.withLock { blocking = true } }
+    func blockUntilReleased() { lock.withLock { blocking = true } }
+    func release() { released.signal() }
     var workerSawCancellation: Bool { lock.withLock { sawCancellation } }
 
     func append(_ entry: HistoryEntry) {
@@ -706,23 +707,25 @@ struct HistoryReplacementsModelTests {
 
     @Test func cancellingStopsTheBackgroundWork() async {
         let h = Harness()
-        h.history.blockUntilCancelled()
+        h.history.blockUntilReleased()
         let model = h.model()
         let loading = Task { await model.refresh() }
         await h.history.workerBlocked.wait()
         loading.cancel()
+        h.history.release()
         await loading.value
         #expect(h.history.workerSawCancellation)
     }
 
     @Test func closingDiscardsLateBackgroundResults() async {
         let h = Harness()
-        h.history.blockUntilCancelled()
+        h.history.blockUntilReleased()
         let model = h.model()
         let loading = Task { await model.refresh() }
         await h.history.workerBlocked.wait()
         model.close()
         loading.cancel()
+        h.history.release()
         await loading.value
         #expect(model.snapshot == nil)
         #expect(model.phrases.isEmpty)
